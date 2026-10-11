@@ -235,6 +235,37 @@ export enum LimitPolicy {
   Ask = 'ask',
 }
 
+/** A kind of request a project's rules know by what it does, whatever the command (ADR-013). */
+export enum RuleKind {
+  DefaultBranch = 'default-branch',
+  ForcePush = 'force-push',
+  /** Every branch, tags, or a pattern of branches. */
+  ManyBranches = 'many-branches',
+  /** A branch that isn't the task's own. */
+  DeleteBranch = 'delete-branch',
+  Deploy = 'deploy',
+  /** Writing outside the task's worktree. */
+  Outside = 'outside',
+}
+
+/** Where a project's rules put a kind of request or a command, in the order a request meets them. */
+export enum RulePlace {
+  /** Refused outright, whoever would answer. */
+  Never = 'never',
+  /** Held for the person, whoever would answer. */
+  Ask = 'ask',
+  /** Let through without asking, short of the two before it. */
+  Allow = 'allow',
+  /** Left to what the project says of everything else. A command is never here. */
+  Rest = 'rest',
+}
+
+/** How a command rule meets a command: by how it starts, or as the whole line. */
+export enum CommandMatch {
+  Prefix = 'prefix',
+  Exact = 'exact',
+}
+
 /** An issue's workflow state, as issue trackers name them. */
 export enum IssueStatus {
   Backlog = 'backlog',

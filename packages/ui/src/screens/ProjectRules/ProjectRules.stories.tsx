@@ -1,300 +1,342 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { useState } from 'react'
+import {
+  exampleName,
+  MERIDIAN_ACCOUNTS,
+  MERIDIAN_BRANCHES,
+  MERIDIAN_BRANCHES_APART,
+  MERIDIAN_COMMANDS,
+  MERIDIAN_KINDS,
+  MERIDIAN_TEMPLATES,
+  MERIDIAN_TITLES,
+} from '../../fixtures/rules'
+import { CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd } from '../../foundations/vocabulary'
+import { type CommandPlace, ProjectRules, type ProjectRulesProps, type RuleCommand } from './ProjectRules'
 
-import { ALWAYS_ALLOWED, ALWAYS_ASK, ALWAYS_ON, NEVER, NEVER_ON } from '../../fixtures/coordinator'
-import { FindingsReach, LimitPolicy, PermissionPolicy, TaskEnd } from '../../foundations/vocabulary'
-import { ProjectRules, projectRulesText } from './ProjectRules'
-import { States, statesOn } from '../../storybook/States'
+/** The screen with its values kept as they are changed, as the app keeps them; each change also goes to its spy. */
+function Live(args: ProjectRulesProps) {
+  const [mode, setMode] = useState(args.mode)
+  const [kinds, setKinds] = useState(args.kinds)
+  const [commands, setCommands] = useState(args.commands)
+  const [end, setEnd] = useState(args.end)
+  const [limit, setLimit] = useState(args.limit)
+  const [rotate, setRotate] = useState(args.rotate)
+  const [allowed, setAllowed] = useState(args.allowed)
+  const [branch, setBranch] = useState(args.branches.value)
+  return (
+    <ProjectRules
+      {...args}
+      mode={mode}
+      onModeChange={(next) => {
+        setMode(next)
+        args.onModeChange(next)
+      }}
+      kinds={kinds}
+      onKindChange={(kind, place) => {
+        setKinds({ ...kinds, [kind]: place })
+        args.onKindChange(kind, place)
+      }}
+      commands={commands}
+      onRemoveCommand={(id) => {
+        setCommands(commands.filter((each) => each.id !== id))
+        args.onRemoveCommand(id)
+      }}
+      onAddCommand={(place: CommandPlace, pattern: string, match: CommandMatch) => {
+        const problem = args.onAddCommand(place, pattern, match)
+        if (problem === undefined) setCommands([...commands, { id: `${place}:${match}:${pattern}`, pattern, match, place }])
+        return problem
+      }}
+      end={end}
+      onEndChange={(next) => {
+        setEnd(next)
+        args.onEndChange(next)
+      }}
+      branches={{ ...args.branches, value: branch, onChange: setBranch }}
+      limit={limit}
+      onLimitChange={(next) => {
+        setLimit(next)
+        args.onLimitChange(next)
+      }}
+      rotate={rotate}
+      onRotateChange={(next) => {
+        setRotate(next)
+        args.onRotateChange(next)
+      }}
+      allowed={allowed}
+      onAllowedChange={(agent, ids) => {
+        setAllowed({ ...allowed, [agent]: ids })
+        args.onAllowedChange(agent, ids)
+      }}
+    />
+  )
+}
 
 const meta = {
   title: 'Screens/ProjectRules',
   component: ProjectRules,
   parameters: { layout: 'padded' },
-  decorators: [(Story) => <div style={{ maxWidth: 760 }}>{Story()}</div>],
+  decorators: [(Story) => <div style={{ maxWidth: 984, minHeight: 760 }}>{Story()}</div>],
+  render: (args) => <Live {...args} />,
   args: {
     project: 'Meridian',
-    always: ALWAYS_ASK,
-    defaultAlwaysOn: ALWAYS_ON,
-    never: NEVER,
-    defaultNeverOn: NEVER_ON,
-    learned: '6 of 10 so far',
-    onAddRule: fn(),
-    onPermissionsChange: fn(),
-    onAlwaysOnChange: fn(),
-    onNeverOnChange: fn(),
-    onAddNever: fn(),
-    onReachChange: fn(),
+    mode: PermissionPolicy.Coordinator,
+    onModeChange: fn(),
+    kinds: MERIDIAN_KINDS,
+    onKindChange: fn(),
+    commands: MERIDIAN_COMMANDS,
+    onRemoveCommand: fn(),
+    onAddCommand: fn((): string | undefined => undefined),
+    end: TaskEnd.DraftPr,
+    onEndChange: fn(),
+    branches: { value: null, exampleOf: exampleName, fallback: 'althar/{key}-{slug}', repositories: MERIDIAN_BRANCHES },
+    titles: { value: '{key}: {title}', onChange: fn(), exampleOf: exampleName, fallback: '{title}', repositories: MERIDIAN_TITLES },
+    templates: MERIDIAN_TEMPLATES,
+    limit: LimitPolicy.Move,
+    onLimitChange: fn(),
+    agentAccounts: MERIDIAN_ACCOUNTS,
+    rotate: false,
+    onRotateChange: fn(),
+    allowed: {},
+    onAllowedChange: fn(),
   },
 } satisfies Meta<typeof ProjectRules>
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The defaults: the coordinator answers, the risky few always wait for you. */
-export const Default: Story = {}
+/** Meridian's rules: force pushes never, three kinds and three commands asked about, what goes ahead, and the coordinator for the rest. */
+export const AtRest: Story = {}
 
-/** Turning a rule on, then allowing everything, which sets the always-ask list aside. */
-export const ChangingRules: Story = {
+/** Adding a command where it goes ahead: typed in the sentence, Enter adds it, and focus goes back to the +. */
+export const AddingACommand: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('checkbox', { name: /Messages to people/ }))
-    await expect(args.onAlwaysOnChange).toHaveBeenCalledWith([...ALWAYS_ON, 'people'])
-    await userEvent.click(c.getByRole('radio', { name: /Allow everything/ }))
-    await expect(args.onPermissionsChange).toHaveBeenCalledWith(PermissionPolicy.AllowAll)
-    await waitFor(() => expect(c.getByRole('checkbox', { name: /Pushing to main/ })).toBeDisabled())
-  },
-}
-
-/** With everything allowed, the "always ask me" list is kept but does nothing. The "never" list still holds. */
-export const AllowEverything: Story = {
-  args: { defaultPermissions: PermissionPolicy.AllowAll },
-}
-
-/** With everything allowed, the "never" list can still be changed. */
-export const NeverStillHolds: Story = {
-  args: { defaultPermissions: PermissionPolicy.AllowAll },
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    const secrets = c.getByRole('checkbox', { name: /Reading .env files/ })
-    await expect(secrets).toBeEnabled()
-    await userEvent.click(c.getByRole('checkbox', { name: /Installing packages/ }))
-    await expect(args.onNeverOnChange).toHaveBeenCalledWith([...NEVER_ON, 'install'])
-  },
-}
-
-/** Without a "never" list, the row is not there. */
-export const WithoutNever: Story = { args: { never: undefined } }
-
-/** A careful project: everything asks, every finding waits, it pushes only and waits out limits. */
-export const Careful: Story = {
-  args: {
-    defaultPermissions: PermissionPolicy.Ask,
-    defaultAlwaysOn: ALWAYS_ASK.map((a) => a.id),
-    defaultReach: FindingsReach.All,
-    defaultEnd: TaskEnd.PushOnly,
-    defaultLimits: LimitPolicy.Wait,
-  },
-}
-
-/** A rule added by how its command starts; an empty one says what it needs. */
-export const AddingARule: Story = {
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    const [always] = c.getAllByRole('button', { name: 'Add a rule' })
-    if (always === undefined) throw new Error('No way to add a rule')
-    await userEvent.click(always)
+    await userEvent.click(c.getByRole('button', { name: 'Add a command to Go ahead' }))
     const field = c.getByRole('textbox', { name: 'A command, as it starts' })
-    await expect(field).toHaveFocus()
-    await userEvent.click(c.getByRole('button', { name: 'Add' }))
-    await expect(c.getByRole('alert')).toHaveTextContent('Type how the command starts')
-    await userEvent.type(field, '  terraform apply ')
-    await userEvent.click(c.getByRole('button', { name: 'Add' }))
-    await expect(args.onAddRule).toHaveBeenCalledWith('terraform apply')
-    await expect(c.queryByRole('textbox', { name: 'A command, as it starts' })).toBeNull()
-    // Escape steps back out of it.
-    await userEvent.click(c.getAllByRole('button', { name: 'Add a rule' })[1] ?? always)
-    await userEvent.keyboard('{Escape}')
-    await expect(args.onAddNever).not.toHaveBeenCalled()
+    await waitFor(() => expect(field).toHaveFocus())
+    await expect(field).toHaveAccessibleDescription(/How the command starts/)
+    await userEvent.type(field, 'npx playwright test')
+    await expect(field).toHaveAccessibleDescription('Holds for npx playwright test …')
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onAddCommand).toHaveBeenCalledWith(RulePlace.Allow, 'npx playwright test', CommandMatch.Prefix)
+    const goAhead = c.getByRole('listitem', { name: 'Go ahead' })
+    await expect(within(goAhead).getByText('npx playwright test')).toBeInTheDocument()
+    await waitFor(() => expect(c.getByRole('button', { name: 'Add a command to Go ahead' })).toHaveFocus())
   },
 }
 
-/**
- * As Althar has it now: the rules allow, ask or allow everything; no
- * review findings row; usage limits move or wait; the accounts of agents
- * with more than one, rotating only where the person says.
- */
-export const AsAltharHasIt: Story = {
+/** Opened and typed, before Enter: the field where the command will sit, and how it matches under the sentence. */
+export const Adding: Story = {
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Add a command to Go ahead' }))
+    await userEvent.type(c.getByRole('textbox', { name: 'A command, as it starts' }), 'npx playwright test')
+  },
+}
+
+/** Escape leaves a command half typed, adds nothing, and puts focus back on the +. */
+export const LeavingIt: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Add a command to Never' }))
+    await userEvent.type(c.getByRole('textbox', { name: 'A command, as it starts' }), 'rm -rf{Escape}')
+    await expect(c.queryByRole('textbox', { name: 'A command, as it starts' })).toBeNull()
+    await expect(args.onAddCommand).not.toHaveBeenCalled()
+    await waitFor(() => expect(c.getByRole('button', { name: 'Add a command to Never' })).toHaveFocus())
+  },
+}
+
+/** Enter with nothing typed says so; a command the rules refuse says why, and the field stays to change it. */
+export const Refused: Story = {
   args: {
-    permissionOptions: [PermissionPolicy.Rules, PermissionPolicy.Coordinator, PermissionPolicy.Ask, PermissionPolicy.AllowAll],
-    defaultPermissions: PermissionPolicy.Rules,
-    limitOptions: [LimitPolicy.Move, LimitPolicy.Wait],
-    onReachChange: undefined,
-    agentAccounts: [
-      {
-        id: 'codex',
-        name: 'Codex',
-        accounts: [
-          { id: 'acc_main', label: 'main' },
-          { id: 'acc_client', label: 'Client' },
-        ],
-      },
-    ],
-    allowed: { codex: ['acc_client'] },
-    onRotateChange: fn(),
-    onAllowedChange: fn(),
-    text: { foot: '' },
+    onAddCommand: fn((): string | undefined => '“stripe” is under Ask me, which comes first, so nothing changed. Take it out there first.'),
   },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.queryByRole('radiogroup', { name: projectRulesText.reach.label })).toBeNull()
-    await expect(c.queryByRole('radio', { name: /Ask me.*A card/ })).toBeNull()
-    await expect(c.getByRole('checkbox', { name: 'main' })).not.toBeChecked()
-    // The only account ticked stays ticked: a project keeps at least one of an agent's accounts.
-    await expect(c.getByRole('checkbox', { name: 'Client' })).toBeDisabled()
-    await userEvent.click(c.getByRole('checkbox', { name: 'main' }))
-    await expect(args.onAllowedChange).toHaveBeenCalledWith('codex', ['acc_main', 'acc_client'])
-    await userEvent.click(c.getByRole('radio', { name: /The next account/ }))
+    await userEvent.click(c.getByRole('button', { name: 'Add a command to Go ahead' }))
+    const field = c.getByRole('textbox', { name: 'A command, as it starts' })
+    await userEvent.keyboard('{Enter}')
+    await expect(c.getByRole('alert')).toHaveTextContent('Type the command first.')
+    await expect(args.onAddCommand).not.toHaveBeenCalled()
+    await userEvent.type(field, 'stripe{Enter}')
+    await expect(c.getByRole('alert')).toHaveTextContent('is under Ask me, which comes first')
+    await expect(field).toHaveAttribute('aria-invalid', 'true')
+    await expect(field).toHaveFocus()
+  },
+}
+
+/** A whole line, exactly: the match is chosen under the sentence. */
+export const AddingExactly: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'Add a command to Ask me' }))
+    await userEvent.type(c.getByRole('textbox', { name: 'A command, as it starts' }), 'git push origin main')
+    await userEvent.click(c.getByRole('combobox', { name: 'How it matches' }))
+    await userEvent.click(await page.findByRole('option', { name: 'Exactly' }))
+    await expect(c.getByText('Holds for this line alone')).toBeInTheDocument()
+    await waitFor(() => expect(c.getByRole('textbox', { name: 'A command, as it starts' })).toHaveFocus())
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onAddCommand).toHaveBeenCalledWith(RulePlace.Ask, 'git push origin main', CommandMatch.Exact)
+  },
+}
+
+/** Taking a command out: it goes at once, and focus moves to the next one's ×. */
+export const RemovingACommand: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Remove psql' }))
+    await expect(args.onRemoveCommand).toHaveBeenCalledWith('ask:prefix:psql')
+    await expect(c.queryByRole('button', { name: 'Remove psql' })).toBeNull()
+    await waitFor(() => expect(c.getByRole('button', { name: 'Remove docker push' })).toHaveFocus())
+  },
+}
+
+/** Editing a built-in: its word opens where it can sit, with what it catches, and choosing moves it to that sentence. */
+export const EditingABuiltIn: Story = {
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'deleting other branches' }))
+    await expect(await page.findByRole('menu', { name: 'Deleting branches that aren’t the task’s' })).toHaveAccessibleDescription(
+      /never the task’s own branch/,
+    )
+    await expect(page.getByRole('menuitemradio', { name: 'The rest' })).toHaveAccessibleDescription(
+      'With the rest: the coordinator decides',
+    )
+  },
+}
+
+/** Moved to Never, it reads as what agents never do, and focus goes with it. */
+export const MovingABuiltIn: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'deleting other branches' }))
+    await userEvent.click(await page.findByRole('menuitemradio', { name: 'Never' }))
+    await expect(args.onKindChange).toHaveBeenCalledWith(RuleKind.DeleteBranch, RulePlace.Never)
+    const never = c.getByRole('listitem', { name: 'Never' })
+    await waitFor(() => expect(within(never).getByRole('button', { name: 'delete other branches' })).toHaveFocus())
+  },
+}
+
+/** What happens to the rest, changed in place; Allow everything leaves the asks and the go-aheads saying they are off. */
+export const AllowingEverything: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'the coordinator decides' }))
+    await userEvent.click(await page.findByRole('menuitemradio', { name: 'Allow everything' }))
+    await expect(args.onModeChange).toHaveBeenCalledWith(PermissionPolicy.AllowAll)
+    await expect(c.getAllByText('Off while everything is allowed.')).toHaveLength(2)
+  },
+}
+
+/** A new project's rules: every kind asks, nothing is named, and what no rule keeps is allowed. */
+export const NewProject: Story = {
+  args: {
+    mode: PermissionPolicy.Rules,
+    kinds: Object.fromEntries(Object.values(RuleKind).map((kind) => [kind, RulePlace.Ask])) as Record<RuleKind, RulePlace>,
+    commands: [],
+  },
+}
+
+/** Nothing named anywhere: each sentence says so, and its + still adds. */
+export const NothingNamed: Story = {
+  args: {
+    mode: PermissionPolicy.Ask,
+    kinds: Object.fromEntries(Object.values(RuleKind).map((kind) => [kind, RulePlace.Rest])) as Record<RuleKind, RulePlace>,
+    commands: [],
+  },
+}
+
+/** Only commands are refused, and nothing asks: Agents is said where they are first named. */
+export const OnlyCommands: Story = {
+  args: {
+    kinds: { ...MERIDIAN_KINDS, [RuleKind.ForcePush]: RulePlace.Rest },
+    commands: MERIDIAN_COMMANDS.filter((command) => command.place !== RulePlace.Ask),
+  },
+}
+
+/** Kinds always allowed go ahead beside the commands. */
+export const KindsGoAhead: Story = {
+  args: { kinds: { ...MERIDIAN_KINDS, [RuleKind.Deploy]: RulePlace.Allow, [RuleKind.Outside]: RulePlace.Allow } },
+}
+
+/** The repositories name branches each their own way: the sentence says so, and the name opens where each comes from. */
+export const NamesApart: Story = {
+  args: {
+    branches: { value: null, exampleOf: exampleName, fallback: 'althar/{key}-{slug}', repositories: MERIDIAN_BRANCHES_APART },
+    templates: MERIDIAN_TEMPLATES.map((each) => ({ ...each, path: null })),
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await expect(c.getByRole('button', { name: 'Althar’s own words' })).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'as each repository says' }))
+    await expect(await page.findByText('CONTRIBUTING.md says feat/{key}-{slug}')).toBeInTheDocument()
+  },
+}
+
+/** A pattern of the person's own, typed in its popover: Enter gives it, and the sentence shows what it makes. */
+export const NamingBranches: Story = {
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'feat/MER-128-refund-banner' }))
+    const field = await page.findByRole('textbox', { name: 'Branch names' })
+    await userEvent.type(field, 'team/{{slug}{Enter}')
+    await expect(c.getByRole('button', { name: 'team/refund-banner' })).toBeInTheDocument()
+  },
+}
+
+/** Pushing the branch only: the sentence says so, and what a pull request opened from it would be titled. */
+export const PushOnly: Story = { args: { end: TaskEnd.PushOnly, limit: LimitPolicy.Wait } }
+
+/** Work goes on with an agent's next account: the limit sentence says that comes first, and the accounts read in order. */
+export const NextAccount: Story = { args: { rotate: true } }
+
+/** An agent's accounts: which this project may use, the last one kept, and whether work goes on with the next. */
+export const ChoosingAccounts: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'Personal' }))
+    await userEvent.click(await page.findByRole('menuitemcheckbox', { name: 'Personal' }))
+    await expect(args.onAllowedChange).toHaveBeenCalledWith('claude-code', ['work'])
+    await expect(page.getByRole('menuitemcheckbox', { name: 'Work' })).toHaveAttribute('aria-disabled', 'true')
+    await userEvent.click(page.getByRole('menuitemradio', { name: 'Go on with the next' }))
     await expect(args.onRotateChange).toHaveBeenCalledWith(true)
   },
 }
 
-/** How its pull requests are named and described: one repository follows its CONTRIBUTING.md, the other says nothing. */
-export const PullRequests: Story = {
-  args: {
-    branches: {
-      value: null,
-      onChange: fn(),
-      exampleOf: (pattern) => pattern.replace('{key}', 'DEV-42').replace('{slug}', 'fix-login'),
-      fallback: 'althar/{key}-{slug}',
-      repositories: [
-        { id: 'api', name: 'api', found: { pattern: 'feature/{key}-{slug}', from: 'CONTRIBUTING.md' } },
-        { id: 'web', name: 'web', found: null },
-      ],
-    },
-    titles: {
-      value: '{key}: {title}',
-      onChange: fn(),
-      exampleOf: (pattern) => pattern.replace('{key}', 'DEV-42').replace('{title}', 'Fix login'),
-      fallback: '{title}',
-      repositories: [
-        { id: 'api', name: 'api', found: null },
-        { id: 'web', name: 'web', found: null },
-      ],
-    },
-    templates: [
-      { id: 'api', name: 'api', path: '.github/pull_request_template.md' },
-      { id: 'web', name: 'web', path: null },
-    ],
-  },
+/** The one account this project named is gone: work runs on every one again, and the sentence says so. */
+export const AccountGone: Story = {
+  args: { allowed: { 'claude-code': ['removed'] } },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByRole('textbox', { name: 'Branch names' })).toHaveAttribute('placeholder', 'feature/{key}-{slug}')
-    await expect(c.getByText('CONTRIBUTING.md says feature/{key}-{slug}')).toBeInTheDocument()
-    await expect(c.getByText('Makes DEV-42: Fix login')).toBeInTheDocument()
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'Personal' }))
+    await expect(await page.findByRole('menuitemcheckbox', { name: 'Personal' })).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByRole('menuitemcheckbox', { name: 'Work' })).toHaveAttribute('aria-checked', 'true')
   },
 }
 
-/** No way to add a rule here: the list is someone else's. */
-export const FixedList: Story = { args: { onAddRule: undefined } }
+/** With no agent of several accounts, the limit sentence stands alone. */
+export const OneAccountEach: Story = { args: { agentAccounts: [] } }
 
-/** What is let through without asking, each rule with a way to take it off. */
-export const AlwaysAllowed: Story = {
-  args: { alwaysAllowed: ALWAYS_ALLOWED, onRemoveAlwaysAllowed: fn(), onAddAlwaysAllowed: fn() },
-}
-
-/** Nothing let through yet: it says how a rule gets there. */
-export const NothingAlwaysAllowed: Story = { args: { alwaysAllowed: [], onAddAlwaysAllowed: fn() } }
-
-/** With everything allowed, the list is kept but has nothing left to let through. */
-export const AlwaysAllowedWhileEverything: Story = {
-  args: { ...AlwaysAllowed.args, defaultPermissions: PermissionPolicy.AllowAll },
-}
-
-/** A long rule wraps rather than pushing its button away. */
-export const LongAllowedRule: Story = {
+/** A command too long for its box is cut short, and reads whole on hover or focus. */
+export const LongCommands: Story = {
   args: {
-    alwaysAllowed: [{ id: 'long', label: `Exactly “${'bun test src/refunds/limit.test.ts '.repeat(4).trim()}”` }],
-    onRemoveAlwaysAllowed: fn(),
-  },
-}
-
-/** Taking rules off one by one: focus moves to the next one's button, and with none left, to the line that says so. */
-export const RemovingAllowedRules: Story = {
-  args: { onRemoveAlwaysAllowed: fn() },
-  render: function Removing(args) {
-    const [rules, setRules] = useState(ALWAYS_ALLOWED.slice(0, 2))
-    return (
-      <ProjectRules
-        {...args}
-        alwaysAllowed={rules}
-        onRemoveAlwaysAllowed={(id) => {
-          args.onRemoveAlwaysAllowed?.(id)
-          setRules((now) => now.filter((rule) => rule.id !== id))
-        }}
-      />
-    )
-  },
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Remove Commands starting “bun test”' }))
-    await expect(args.onRemoveAlwaysAllowed).toHaveBeenCalledWith('command:prefix:bun test')
-    await waitFor(() => expect(c.getByRole('button', { name: 'Remove Commands starting “git status”' })).toHaveFocus())
-    await userEvent.click(c.getByRole('button', { name: 'Remove Commands starting “git status”' }))
-    await waitFor(() => expect(c.getByText(/Nothing yet/)).toHaveFocus())
-  },
-}
-
-/** A command on a list that comes first can't be always allowed: it says so beside the field, which stays open with what was typed. */
-export const AllowedRuleOnAnotherList: Story = {
-  args: {
-    alwaysAllowed: [],
-    onAddRule: undefined,
-    onAddNever: undefined,
-    onAddAlwaysAllowed: fn(() => '“bun test” is on “Never”, which comes first, so nothing changed. Take it off “Never” first.'),
-  },
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Add a rule' }))
-    const field = c.getByRole('textbox', { name: 'A command, as it starts' })
-    await userEvent.type(field, 'bun test{Enter}')
-    await expect(args.onAddAlwaysAllowed).toHaveBeenCalledWith('bun test')
-    await expect(c.getByRole('alert')).toHaveTextContent('is on “Never”, which comes first')
-    await expect(field).toHaveValue('bun test')
-    await expect(field).toHaveFocus()
-    // Typing again puts the message away.
-    await userEvent.type(field, 's')
-    await expect(c.queryByRole('alert')).toBeNull()
-  },
-}
-
-/** A command added by how it starts, as the other lists add theirs. */
-export const AddingAnAllowedRule: Story = {
-  args: { alwaysAllowed: [], onAddAlwaysAllowed: fn(), onAddRule: undefined, onAddNever: undefined },
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Add a rule' }))
-    await userEvent.type(c.getByRole('textbox', { name: 'A command, as it starts' }), 'bun test{Enter}')
-    await expect(args.onAddAlwaysAllowed).toHaveBeenCalledWith('bun test')
-  },
-}
-
-export const AllStates: Story = {
-  parameters: statesOn({ hover: '[role="radio"]', focus: '[role="radio"][aria-checked="true"]', pressed: '[role="radio"]' }),
-  render: (args) => (
-    <States
-      size="thread"
-      cells={[
-        { state: 'default', node: <ProjectRules {...args} /> },
-        { state: 'allow everything', node: <ProjectRules {...args} {...AllowEverything.args} /> },
-        { state: 'careful', node: <ProjectRules {...args} {...Careful.args} /> },
-        { state: 'pull requests', node: <ProjectRules {...args} {...PullRequests.args} /> },
-        { state: 'always allowed', node: <ProjectRules {...args} {...AlwaysAllowed.args} /> },
-        { state: 'nothing always allowed', node: <ProjectRules {...args} {...NothingAlwaysAllowed.args} /> },
-        { state: 'always allowed, everything allowed', node: <ProjectRules {...args} {...AlwaysAllowedWhileEverything.args} /> },
-        { state: 'long allowed rule', node: <ProjectRules {...args} {...LongAllowedRule.args} /> },
-        { state: 'hover', node: <ProjectRules {...args} /> },
-        { state: 'focus', node: <ProjectRules {...args} /> },
-        {
-          state: 'narrow',
-          node: (
-            <div style={{ width: 420 }}>
-              <ProjectRules {...args} />
-            </div>
-          ),
-        },
-      ]}
-    />
-  ),
-}
-
-/** The coordinator decides; explicit always-ask rules remain enabled. */
-export const CoordinatorDecides: Story = {
-  args: { defaultPermissions: PermissionPolicy.Ask },
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    await userEvent.click(c.getByRole('radio', { name: /The coordinator decides/ }))
-    await expect(args.onPermissionsChange).toHaveBeenCalledWith(PermissionPolicy.Coordinator)
-    await expect(c.getByRole('checkbox', { name: /Pushing to main/ })).toBeEnabled()
+    commands: [
+      ...MERIDIAN_COMMANDS,
+      {
+        id: 'long',
+        pattern: 'terraform -chdir=environments/production apply -auto-approve',
+        match: CommandMatch.Exact,
+        place: RulePlace.Never,
+      } satisfies RuleCommand,
+    ],
   },
 }

@@ -9,18 +9,19 @@
 .scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  padding: 18px max(40px, calc((100% - 760px) / 2)) 64px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.page {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 14px 48px 72px;
 }
 
 /* the way back, at the top of the page */
 .back {
   display: flex;
-  margin: 0 0 18px;
-}
-
-.rules {
-  max-width: 760px;
+  margin: 0 0 16px;
 }
 
 .error {

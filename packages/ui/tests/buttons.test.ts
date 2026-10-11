@@ -42,6 +42,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Inline/Inline.tsx': 'a reference or citation inside prose',
   'thread/You/You.tsx': 'an attachment’s chip',
   'thread/Steer/Steer.tsx': 'a step’s name inside a sentence',
+  'setup/Charter/Charter.tsx': 'a built-in setting, as an underlined word inside a sentence',
   'thread/Furniture/Furniture.tsx': 'the floating jump to the latest',
   'composer/Listening/Listening.tsx': 'the listening pill, and stop on its sunk bar',
   'composer/Running/Running.tsx': 'the running pill, and its actions on the sunk bar',
