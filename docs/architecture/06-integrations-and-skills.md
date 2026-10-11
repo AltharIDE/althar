@@ -328,6 +328,7 @@ service's model.
 | Text | Markdown | ADF (Cloud), wiki markup (Data Center) | Markdown | Markdown | Markdown; the Jira adapters convert |
 | Status | The team's states, typed: triage, backlog, unstarted, started, completed, canceled | Statuses in To Do, In Progress, Done; changed by a transition, which may need fields | The card's list | Open or closed with a reason; GitLab's statuses in five categories | The tracker's name, and a category: triage, backlog, to do, started, done, cancelled |
 | Linking a PR | An attachment; Linear's Git integration links branches named with the key | A remote link; the development panel needs Jira's own Git apps, by key | An attachment | A reference | A link, and the key in the branch and the PR's title |
+| Filing an issue | `issueCreate` in a team; labels by name, the team's or the workspace's | `POST /issue` in a project, as its Task type (else the first that isn't a sub-task); labels without spaces | A card on a list, with the board's labels by name | An issue on a repository; the host makes labels it lacks (GitHub only for someone who can push) | `create` in a container from `containers`; labels the tracker can't take are left off |
 
 - **Status by category.** Althar asks for a category, and the adapter
   picks the tracker's state. A Jira transition that needs fields becomes a
@@ -336,6 +337,39 @@ service's model.
 - **The key goes in the branch and the PR's title,** so the trackers' own
   Git integrations link them. Field ownership (above) decides whether
   Althar also moves a status those integrations move.
+
+### Drafting issues
+
+The coordinator can draft an issue on any connected tracker with
+`draft_issue` ([04](04-coordinator.md)): something to track rather than do
+now. Nothing reaches the tracker on its word:
+
+- **A draft is a card** in the coordinator's thread: the tracker, where it
+  goes there (a container), its title, body and labels. The person files it,
+  changes it first, or discards it. There is no countdown: a draft left
+  alone files nothing.
+- **Where it goes** is what the coordinator names, a tracker by its name and
+  a container by its id, key or name; or, without them, where the project's
+  issues already come from (the newest issue a task came from, or a draft
+  filed), then its repository's issues, then the one tracker or container
+  there is. Where none of that decides, the tool says what to name.
+- **Drafts are kept** (`issue_drafts`), so they outlast a restart. Filing
+  marks the draft as being filed before the tracker is asked, in the same
+  transaction that checks it is still open, so a second press files nothing
+  more; one Althar closed in the middle of is shown as not filed, with a word
+  to look on the tracker before filing it again, and is never filed again
+  unasked. A tracker that refuses leaves the card with its words, to file
+  again; one that needs signing in again isn't asked.
+- **The coordinator hears** what became of each draft the next time it
+  speaks, as it hears of its plans: filed (with its key and link), changed,
+  discarded, or not filed and why. A filed issue's key reads through the
+  connection that filed it, so a task drafted from it later links it as
+  any task's issue is linked.
+
+Creating an issue needs a sign-in that may write: Linear's sign-in asks to
+read and write, GitLab's for `api`, Trello's token for `read,write`; a Jira
+token files where the account has Create Issues, and Althar's GitHub App
+needs Issues: Read and write, which is set on the app itself.
 
 ### Signing in
 
@@ -389,6 +423,8 @@ Agents reach code hosts and trackers only through Althar:
 - **Althar's tools** let agents read a pull request (comments, reviews,
   checks with their logs) and an issue, and reply on a pull request. They
   reach only the task's own repository, and every call is recorded.
+- **The coordinator drafts issues,** and the person files them: no agent
+  files an issue, or anything else on a tracker, on its own word.
 - **Agents run without the person's ways into a host:** `gh` and `glab`
   signed out, git's credential helpers reset (`credential.helper` empty, in
   git's environment), git's prompts off, and no SSH agent. Althar pushes
