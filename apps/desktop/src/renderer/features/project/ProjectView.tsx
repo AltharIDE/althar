@@ -297,7 +297,7 @@ export function ProjectView({
       yours={yours}
       {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask), inProgress: lanes.running.length })}
       onYours={openYours}
-      parts={partsOf({ repositories: model.repositories, names: model.project?.repositories ?? [], host, list: connections.list, tracker })}
+      parts={partsOf({ repositories: model.repositories, names: model.project?.repositories ?? [], host, tracker })}
       {...(settings === undefined
         ? {}
         : {

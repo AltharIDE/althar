@@ -150,7 +150,7 @@ export function ProjectSettings({
                 {...(host === null && tracker === null ? {} : { place: LEFT })}
                 onClick={leave(onRepositories)}
               >
-                <ControlMarks marks={hostMarksOf(repositories, host, list)} />
+                <ControlMarks marks={hostMarksOf(repositories)} />
               </ControlModule>
               {host !== null && (
                 <ControlModule

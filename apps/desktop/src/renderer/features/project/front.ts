@@ -1,16 +1,16 @@
 import type { BoardTask, ConnectionList, CoordinatorSnapshot, Product, ProjectRepository, ProjectRulesView } from '@althar/contracts'
-import { type MarkGlance, PermissionPolicy, permissionPolicyText, type ProjectPart } from '@althar/ui'
+import { type MarkGlance, PermissionPolicy, permissionPolicyText, type ProjectPart, RuleKind } from '@althar/ui'
+import { projectRulesText } from '@althar/ui/screens'
 
 import { productBrand, productName } from '../../shared/products'
 import { ago } from '../../shared/time'
 import type { Lanes } from '../board/lanes'
-import { text as rulesText } from '../rules/RulesView'
 
 /*
  * What a project's front page says, worked out from what the window read:
  * what settled last, what the project is made of (each repository with its
- * host's mark, as its remote says, and the tracker its tasks name, where
- * they name one), and its rules in a line.
+ * host's mark, as the runtime read its remote, and the tracker its tasks
+ * name, where they name one), and its rules in a line.
  */
 
 export const text = {
@@ -42,18 +42,6 @@ export const lastSettledOf = (lanes: Lanes, now: Date = new Date()): string | un
   return last.state === 'abandoned' ? text.abandoned(last.title, at) : text.done(last.title, at)
 }
 
-/** A remote's host name, as git writes remotes: `git@host:owner/repo.git`, or an address. Null for a local path. */
-export const remoteHostOf = (remote: string | null): string | null => {
-  if (remote === null) return null
-  const text = remote.trim()
-  if (!text.includes('://')) return /^(?:[^@\s]+@)?([^:/\s]+):.+$/.exec(text)?.[1]?.toLowerCase() ?? null
-  try {
-    return new URL(text).hostname.toLowerCase() || null
-  } catch {
-    return null
-  }
-}
-
 /** An address's host name, lower case; null for one that isn't an address. */
 export const hostNameOf = (url: string | null): string | null => {
   if (url === null) return null
@@ -62,17 +50,6 @@ export const hostNameOf = (url: string | null): string | null => {
   } catch {
     return null
   }
-}
-
-/** The code host a remote is on: the project's own, one connected, or a hosted one Althar knows; null for one it doesn't. */
-export const productOfRemote = (remote: string | null, host: Host | null, list: ConnectionList | null): Product | null => {
-  const name = remoteHostOf(remote)
-  if (name === null) return null
-  if (host !== null && hostNameOf(host.webUrl) === name) return host.product
-  const hosts = new Set(list?.products.filter((product) => product.host).map((product) => product.product) ?? [])
-  const connected = list?.connections.find((connection) => hosts.has(connection.product) && hostNameOf(connection.webUrl) === name)
-  if (connected !== undefined) return connected.product
-  return list?.products.find((product) => product.host && hostNameOf(product.hostedUrl) === name)?.product ?? null
 }
 
 /** The tracker a project's tasks name, where it is, and the key most of their issues share (MER of MER-231). */
@@ -111,18 +88,17 @@ export const tasksOf = (lanes: Lanes): ReadonlyArray<BoardTask> => [...lanes.nex
 
 /** What the project is made of: its repositories, each with its host's mark, then the tracker its tasks name. */
 export const partsOf = (input: {
-  /** Its repositories as read, each with its remote; null until they are. */
-  readonly repositories: ReadonlyArray<Pick<ProjectRepository, 'id' | 'name' | 'remote'>> | null
+  /** Its repositories as read, each with where its work goes; null until they are. */
+  readonly repositories: ReadonlyArray<Pick<ProjectRepository, 'id' | 'name' | 'host'>> | null
   /** Its repositories by name, as the projects are listed: until they are read, each is on the project's host. */
   readonly names: ReadonlyArray<string>
   readonly host: Host | null
-  readonly list: ConnectionList | null
   readonly tracker: Tracker | null
 }): ProjectPart[] => [
   ...(input.repositories === null
     ? input.names.map((name) => ({ id: name, name, ...(input.host === null ? {} : { brand: productBrand(input.host.product) }) }))
     : input.repositories.map((repository) => {
-        const product = productOfRemote(repository.remote, input.host, input.list)
+        const product = repository.host?.product ?? null
         return { id: repository.id, name: repository.name, ...(product === null ? {} : { brand: productBrand(product) }) }
       })),
   ...(input.tracker === null
@@ -131,21 +107,13 @@ export const partsOf = (input: {
 ]
 
 /** The hosts a project's repositories are on, a mark each: faint where Althar isn't connected to it. */
-export const hostMarksOf = (
-  repositories: ReadonlyArray<Pick<ProjectRepository, 'remote'>>,
-  host: Host | null,
-  list: ConnectionList | null,
-): MarkGlance[] => {
+export const hostMarksOf = (repositories: ReadonlyArray<Pick<ProjectRepository, 'host'>>): MarkGlance[] => {
   const marks = new Map<string, MarkGlance>()
   for (const repository of repositories) {
-    const product = productOfRemote(repository.remote, host, list)
+    const product = repository.host?.product ?? null
     if (product === null) continue
     const brand = productBrand(product)
-    const at = remoteHostOf(repository.remote)
-    const connected =
-      list === null
-        ? host?.product === product && hostNameOf(host.webUrl) === at && host.connected
-        : connectedAs(list, product, at) !== null
+    const connected = repository.host?.account?.state === 'ready'
     // One mark a brand, as Cloud and a company's own server share one: faint only while neither is connected.
     const was = marks.get(brand)
     const faint = !connected && (was === undefined || was.faint === true)
@@ -153,6 +121,16 @@ export const hostMarksOf = (
   }
   return [...marks.values()]
 }
+
+/** The kinds of request, in the order the rules list them. */
+const KINDS: readonly RuleKind[] = [
+  RuleKind.DefaultBranch,
+  RuleKind.ForcePush,
+  RuleKind.ManyBranches,
+  RuleKind.DeleteBranch,
+  RuleKind.Deploy,
+  RuleKind.Outside,
+]
 
 const POLICY = {
   rules: PermissionPolicy.Rules,
@@ -163,8 +141,11 @@ const POLICY = {
 
 /** The project's rules in a line: who answers what agents ask, and what always asks you whoever would. */
 export const rulesLineOf = (rules: ProjectRulesView): { readonly policy: string; readonly asks: string } => {
+  // Each kind where a request meets it first: one Never also lists doesn't ask.
   const asking = [
-    ...rules.alwaysAsk.map((kind) => rulesText.kinds[kind]),
+    ...KINDS.filter((kind) => rules.alwaysAsk.includes(kind) && !rules.never.includes(kind)).map(
+      (kind) => projectRulesText.kinds[kind].name,
+    ),
     ...rules.commands.filter((rule) => rule.decision === 'ask').map((rule) => `“${rule.pattern}”`),
   ]
   return {

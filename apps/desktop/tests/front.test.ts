@@ -1,19 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import type { BoardTask, ConnectionList, ProductOption } from '@althar/contracts'
+import type { BoardTask, ConnectionList, ProductOption, ProjectRepository } from '@althar/contracts'
 import { Brand } from '@althar/ui'
 
 import { lanesOf } from '../src/renderer/features/board/lanes'
-import {
-  connectedAs,
-  hostMarksOf,
-  lastSettledOf,
-  partsOf,
-  productOfRemote,
-  remoteHostOf,
-  rulesLineOf,
-  trackerOf,
-} from '../src/renderer/features/project/front'
+import { connectedAs, hostMarksOf, lastSettledOf, partsOf, rulesLineOf, trackerOf } from '../src/renderer/features/project/front'
 import { card, change, connectionList, githubConnection, projectRules } from './fixtures'
 
 /*
@@ -38,6 +29,20 @@ const task = (overrides: Partial<BoardTask> = {}): BoardTask => ({
 const settled = (...tasks: BoardTask[]) => lanesOf({ cursor: 1, tasks, calls: [] })
 
 const github = { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } as const
+
+/** Where a repository's work goes, as the runtime read it: on a host, and connected there or not. */
+const on = (
+  product: 'github' | 'gitlab',
+  path: string,
+  state: 'ready' | 'reauth_required' | null,
+): NonNullable<ProjectRepository['host']> => ({
+  product,
+  name: product === 'github' ? 'GitHub' : 'GitLab',
+  instance: null,
+  path,
+  url: `https://${product}.com/${path}`,
+  account: state === null ? null : { login: 'me', state },
+})
 
 const GITLAB: ProductOption = {
   product: 'gitlab',
@@ -72,40 +77,15 @@ describe('a project’s front page', () => {
     ).toBe('Newer, done 30m ago')
   })
 
-  it('reads the host off a repository’s remote, however git wrote it', () => {
-    expect(remoteHostOf('git@github.com:meridian/api.git')).toBe('github.com')
-    expect(remoteHostOf('https://GitLab.com/meridian/ops')).toBe('gitlab.com')
-    expect(remoteHostOf('ssh://git@git.example.com:22/meridian/web')).toBe('git.example.com')
-    expect(remoteHostOf('/Users/me/code/meridian')).toBeNull()
-    expect(remoteHostOf('https://')).toBeNull()
-    expect(remoteHostOf(null)).toBeNull()
-  })
-
-  it('knows a remote’s host as the project’s own, one connected, or one Althar knows; not one it doesn’t', () => {
-    const own = { product: 'gitlab', name: 'GitLab', webUrl: 'https://git.example.com', connected: false } as const
-    expect(productOfRemote('git@git.example.com:a/b.git', own, connectionList)).toBe('gitlab')
-    expect(productOfRemote('git@github.com:a/b.git', null, connectionList)).toBe('github')
-    const company: ConnectionList = {
-      ...connectionList,
-      connections: [{ ...githubConnection, id: 'c2', webUrl: 'https://github.acme.dev' }],
-    }
-    expect(productOfRemote('https://github.acme.dev/a/b', null, company)).toBe('github')
-    // Linear is a tracker, never where code is.
-    expect(productOfRemote('https://linear.app/a/b', null, connectionList)).toBeNull()
-    expect(productOfRemote('git@codeberg.org:a/b.git', null, connectionList)).toBeNull()
-    expect(productOfRemote('git@github.com:a/b.git', null, null)).toBeNull()
-  })
-
   it('says what it is made of: each repository with its host’s mark, then the tracker its tasks name', () => {
     expect(
       partsOf({
         repositories: [
-          { id: 'api', name: 'meridian-api', remote: 'git@github.com:meridian/api.git' },
-          { id: 'ops', name: 'meridian-ops', remote: null },
+          { id: 'api', name: 'meridian-api', host: on('github', 'meridian/api', 'ready') },
+          { id: 'ops', name: 'meridian-ops', host: null },
         ],
         names: [],
         host: github,
-        list: connectionList,
         tracker: { product: 'linear', at: 'linear.app', key: 'MER' },
       }),
     ).toEqual([
@@ -116,11 +96,11 @@ describe('a project’s front page', () => {
   })
 
   it('says its repositories by name, on the project’s host, until they are read', () => {
-    expect(partsOf({ repositories: null, names: ['api', 'web'], host: github, list: null, tracker: null })).toEqual([
+    expect(partsOf({ repositories: null, names: ['api', 'web'], host: github, tracker: null })).toEqual([
       { id: 'api', name: 'api', brand: Brand.GitHub },
       { id: 'web', name: 'web', brand: Brand.GitHub },
     ])
-    expect(partsOf({ repositories: null, names: ['api'], host: null, list: null, tracker: null })).toEqual([{ id: 'api', name: 'api' }])
+    expect(partsOf({ repositories: null, names: ['api'], host: null, tracker: null })).toEqual([{ id: 'api', name: 'api' }])
   })
 
   it('names the tracker by the key most of its tasks’ issues share, and none for a host’s own issues', () => {
@@ -136,20 +116,21 @@ describe('a project’s front page', () => {
     expect(trackerOf([task({ issue: issue('MER-1') })], null)).toBeNull()
   })
 
-  it('marks each host its repositories are on once, faint where Althar isn’t connected to it', () => {
-    const repositories = [{ remote: 'git@github.com:a/api.git' }, { remote: 'git@github.com:a/web.git' }, { remote: null }]
-    expect(hostMarksOf(repositories, github, connectionList)).toEqual([
-      { id: Brand.GitHub, name: 'GitHub', brand: Brand.GitHub, faint: true },
-    ])
-    expect(hostMarksOf(repositories, github, { ...connectionList, connections: [githubConnection] })).toEqual([
+  it('marks each host its repositories are on once, faint while Althar isn’t connected there', () => {
+    const repositories = [{ host: on('github', 'a/api', null) }, { host: on('github', 'a/web', null) }, { host: null }]
+    expect(hostMarksOf(repositories)).toEqual([{ id: Brand.GitHub, name: 'GitHub', brand: Brand.GitHub, faint: true }])
+    // Connected on one of them, the mark is whole; a sign-in that stopped working doesn't count.
+    expect(hostMarksOf([...repositories, { host: on('github', 'a/ops', 'ready') }])).toEqual([
       { id: Brand.GitHub, name: 'GitHub', brand: Brand.GitHub },
     ])
-    // Without the list, the project's own host says whether it is connected.
-    expect(hostMarksOf(repositories, github, null)).toEqual([{ id: Brand.GitHub, name: 'GitHub', brand: Brand.GitHub }])
+    expect(hostMarksOf([{ host: on('gitlab', 'a/b', 'reauth_required') }])).toEqual([
+      { id: Brand.GitLab, name: 'GitLab', brand: Brand.GitLab, faint: true },
+    ])
+    // A host Althar doesn't know has no mark.
+    expect(hostMarksOf([{ host: { ...on('github', 'a/b', null), product: null, name: 'git.example.com' } }])).toEqual([])
   })
 
-  it('says who Althar is connected as on that very server, and marks a host faint while it isn’t', () => {
-    const company = { product: 'gitlab', name: 'GitLab', webUrl: 'https://git.acme.dev', connected: false } as const
+  it('says who Althar is connected as on that very server', () => {
     const list: ConnectionList = {
       ...connectionList,
       products: [...connectionList.products, GITLAB],
@@ -167,12 +148,6 @@ describe('a project’s front page', () => {
     expect(connectedAs(list, 'gitlab', 'gitlab.com')).toBe('me')
     // GitLab.com is connected; the company's own GitLab isn't.
     expect(connectedAs(list, 'gitlab', 'git.acme.dev')).toBeNull()
-    expect(hostMarksOf([{ remote: 'git@git.acme.dev:a/b.git' }], company, list)).toEqual([
-      { id: Brand.GitLab, name: 'GitLab', brand: Brand.GitLab, faint: true },
-    ])
-    expect(hostMarksOf([{ remote: 'git@git.acme.dev:a/b.git' }, { remote: 'git@gitlab.com:a/c.git' }], company, list)).toEqual([
-      { id: Brand.GitLab, name: 'GitLab', brand: Brand.GitLab },
-    ])
     // A signed-out connection doesn't count.
     expect(
       connectedAs(
@@ -186,7 +161,7 @@ describe('a project’s front page', () => {
   it('says its rules in a line: who answers, and what always asks you', () => {
     expect(rulesLineOf({ ...projectRules, permissions: 'coordinator', alwaysAsk: ['deploy', 'default-branch'] })).toEqual({
       policy: 'The coordinator decides',
-      asks: 'Always asks you: Deploying and publishing, pushing to the default branch.',
+      asks: 'Always asks you: Pushing to the default branch, deploying and publishing.',
     })
     expect(
       rulesLineOf({

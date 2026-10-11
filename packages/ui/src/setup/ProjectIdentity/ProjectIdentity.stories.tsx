@@ -182,10 +182,10 @@ function Settings(args: ProjectIdentityProps) {
             <ControlModule title="Name and colour" onClick={() => setOpen('name')}>
               <ControlWords mark={<ProjectMark seed={args.seed} ink={ink} size={30} />} title={name} line={projectIdentityText.inks[ink]} />
             </ControlModule>
-            <ControlModule title="Repositories" aside="3" span={2} onClick={fn()}>
+            <ControlModule title="Repositories" aside="3" place={{ column: [1, 3] }} onClick={fn()}>
               <ControlMarks marks={[{ id: 'github', name: 'GitHub', brand: Brand.GitHub }]} />
             </ControlModule>
-            <ControlModule title="GitHub" span={2} onClick={fn()}>
+            <ControlModule title="GitHub" place={{ column: [3, 5] }} onClick={fn()}>
               <ControlWords title="Connected" line="as balazs" />
             </ControlModule>
             <ControlModule title="Rules" onClick={fn()}>

@@ -25,7 +25,6 @@ import {
   type ChangeTarget,
   type ProjectInk,
   type ProjectList,
-  type ProjectInk,
   type ProjectRepository,
   type ProjectSummary,
   type RepositoryRole,
