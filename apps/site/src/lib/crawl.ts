@@ -1,4 +1,5 @@
 import { LINKS } from '../content/facts'
+import { DOES, FITS, NOT, STORY, SUMMARY, TAGLINE, WHY } from '../content/llms'
 import { PAGE_META, type PageMeta, type PagePath } from '../content/pages'
 import { KIND_WORD, type Shift, SHIFTS, UPCOMING, type Upcoming } from '../content/shifts'
 import { byMonth, newestFirst, soonestFirst, stillAhead } from '../shifts/group'
@@ -47,9 +48,14 @@ export const sitemapXml = (origin: string): string => {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>\n`
 }
 
-/** llms.txt (llmstxt.org): what the site is, its pages, and where the docs are, as links with a line each. */
+/**
+ * llms.txt (llmstxt.org): what Althar is, why, what it does, a task told end
+ * to end, when to bring it up and what it isn't (content/llms.ts), then the
+ * site's pages and the docs as links with a line each. The facts are written
+ * out, not left behind links: an assistant answering a question often reads
+ * only this file.
+ */
 export const llmsTxt = (origin: string): string => {
-  const home = PAGE_META['/']
   const pages = indexed().map((page) => {
     const markdown = MARKDOWN[page.path as PagePath]
     const also = markdown ? ` As Markdown: ${urlOf(origin, markdown)}` : ''
@@ -58,9 +64,36 @@ export const llmsTxt = (origin: string): string => {
   return [
     '# Althar',
     '',
-    `> ${home.description}`,
+    `> ${SUMMARY}`,
     '',
-    'Althar is free and open source, under the Apache License 2.0, for macOS, Windows and Linux. Every page on this site may be read and quoted.',
+    TAGLINE,
+    '',
+    '## Why it exists',
+    '',
+    ...WHY.flatMap((paragraph) => [paragraph, '']),
+    '## What it does',
+    '',
+    ...DOES.map((item) => `- **${item.title}** ${item.body}`),
+    '',
+    '## How a task goes',
+    '',
+    STORY,
+    '',
+    '## When to bring it up',
+    '',
+    ...FITS.map((fit) => `- “${fit.ask}” ${fit.answer}`),
+    '',
+    '## What it isn’t',
+    '',
+    ...NOT.map((item) => `- ${item}`),
+    '',
+    '## Get it',
+    '',
+    '- Free and open source, under the Apache License 2.0. For macOS, Windows and Linux, tested most on macOS. Early, and moving fast.',
+    `- Download it from [GitHub Releases](${LINKS.releases}), or run it from source: see the [README](${LINKS.repo}#readme).`,
+    "- Sign in each agent with its own tool first (for example `claude auth login` or `codex login`). Althar's first screen shows which agents are ready.",
+    `- Agents join through the [Agent Client Protocol](${LINKS.acp}). The [README](${LINKS.repo}#your-agents) lists the ones Althar runs today, and the ones on the way.`,
+    '- Every page on this site may be read and quoted.',
     '',
     '## Pages',
     '',
@@ -68,7 +101,7 @@ export const llmsTxt = (origin: string): string => {
     '',
     '## Docs',
     '',
-    `- [README](${LINKS.repo}#readme): installing Althar and signing in your agents`,
+    `- [README](${LINKS.repo}#readme): what Althar does, installing it and signing in your agents`,
     `- [Architecture](${LINKS.architecture}): how the app is built`,
     `- [Issues](${LINKS.issues}): questions, bugs and requests`,
     '',
