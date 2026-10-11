@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { addDisplay } from '../home/display'
+import { useHydrated, useMedia } from '../lib/browser'
 import { cx } from '../lib/cx'
 import { Glow } from './Glow'
 import s from './Lit.module.css'
@@ -27,10 +28,12 @@ export function Lit({
   children?: ReactNode
   className?: string
 }) {
+  const phone = useMedia('(max-width: 699px)')
+  const hydrated = useHydrated()
   return (
-    <header className={cx(s.lit, className)}>
+    <header className={cx(s.lit, className)} data-ready={hydrated || undefined}>
       <div className={s.light}>
-        <Glow heart={typeof window !== 'undefined' && window.innerWidth < 700 ? 0.8 : 0.56} className={s.glow} />
+        <Glow heart={phone ? 0.8 : 0.56} className={s.glow} />
       </div>
       <div className={s.words}>
         <p className={s.kicker}>

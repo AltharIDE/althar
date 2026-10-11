@@ -15,6 +15,7 @@ import {
 import { type ReactNode, useEffect, useLayoutEffect, useRef } from 'react'
 
 import { HERO } from '../content/home'
+import { useHydrated, useMedia } from '../lib/browser'
 import { cx } from '../lib/cx'
 import { Bar } from '../shared/Bar'
 import { drawColumn, heightOf, STOPS, tonesOf } from '../shared/light'
@@ -120,7 +121,8 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
   const turned = useRef(-1e9)
   const clock = useRef(0)
   /** The light's heart: wider on a phone, to hold the words, with sky and warmth still at its sides. */
-  const heart = typeof window !== 'undefined' && window.innerWidth < 700 ? 0.7 : 0.46
+  const heart = useMedia('(max-width: 699px)') ? 0.7 : 0.46
+  const hydrated = useHydrated()
 
   useLayoutEffect(() => {
     const live = (root.current && getComputedStyle(root.current).getPropertyValue('--live').trim()) || undefined
@@ -283,7 +285,7 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
   }
 
   return (
-    <div ref={root} className={s.hero}>
+    <div ref={root} className={s.hero} data-ready={hydrated || undefined}>
       <div className={s.light} aria-hidden="true">
         {COLUMNS.map((column) => {
           // The picture is wider than the column, by the blur's reach either side.
@@ -305,18 +307,19 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
 
       <div data-arrive>{nav === undefined ? <Bar tone="paper" /> : nav}</div>
       <header className={s.head}>
+        {/* The spaces between the lines don't show, as the lines are blocks; they keep the words apart for anything that reads the text alone. */}
         <h1 ref={headline} className={s.h1}>
           <span className={cx(s.line, s.pay)} data-line>
             <Words text={HERO.pay} />
-          </span>
+          </span>{' '}
           <span className={cx(s.line, s.who)} data-line>
             <span className={s.word} data-word>
               <NameSwap names={HERO.names} nameClass={s.name} onTurn={onTurn} after={OPEN + 900} />
             </span>
-          </span>
+          </span>{' '}
           <span className={s.line} data-line>
             <Words text={HERO.use[0]} />
-          </span>
+          </span>{' '}
           <span className={s.line} data-line>
             <Words text={HERO.use[1]} className={s.accent} />
           </span>
