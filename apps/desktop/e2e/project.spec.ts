@@ -23,6 +23,9 @@ const settings = async (page: Page, project: string) => {
   return page.getByRole('dialog', { name: `${project}’s settings` })
 }
 
+/** What the repositories page calls the folders on this computer, as the system it runs on is named: Linux's, as CI runs. */
+const HERE = process.platform === 'darwin' ? 'On this Mac' : process.platform === 'win32' ? 'On this PC' : 'On this computer'
+
 /** Every file under a folder with what it holds: how the person left it. */
 const asLeft = (folder: string): string =>
   readdirSync(folder, { recursive: true })
@@ -79,7 +82,7 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     await expect(page.getByRole('heading', { name: 'Repositories', level: 1 })).toBeVisible()
     await chooseFolder(electronApp, web)
     await page.getByRole('button', { name: 'Add a folder' }).click()
-    const here = page.getByRole('list', { name: 'On this Mac' })
+    const here = page.getByRole('list', { name: HERE })
     await expect(here.getByText('meridian-web', { exact: true })).toBeVisible()
     await expect(here.getByRole('combobox', { name: 'Role of meridian-web' })).toHaveText(/Frontend/)
     const github = page.getByRole('region', { name: 'GitHub' })
