@@ -268,12 +268,15 @@ export interface Tracker {
   comment(issue: Issue, body: string): Effect.Effect<void, ConnectorFailed>
   /** Attaches a link to an issue, where the tracker has links. */
   link(issue: Issue, link: { readonly url: string; readonly title: string }): Effect.Effect<void, ConnectorFailed>
-  /** Where the account can file issues, most recently active first where the tracker says. */
+  /** Where the account can file issues, most recently active first where the tracker says; page after page, to a bound. */
   containers(): Effect.Effect<ReadonlyArray<Container>, ConnectorFailed>
   /**
    * Files an issue in a container, by its `Container.id`, because the person
    * approved it: never on an agent's word. Labels the tracker can't take as
    * they are (it has none by that name, and makes none) are left off.
+   * Once the tracker has taken the issue, create succeeds: a failed read
+   * afterwards falls back to what is known. A failure before it, nothing
+   * was filed.
    */
   create(container: string, issue: NewIssue): Effect.Effect<Issue, ConnectorFailed>
 }

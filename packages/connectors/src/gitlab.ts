@@ -3,7 +3,7 @@ import { Clock, Effect, Schema } from 'effect'
 import { type Access, type AccessLine, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
-import { makeHttp } from './http'
+import { makeHttp, paged } from './http'
 import { tail } from './github'
 import type {
   Account,
@@ -617,10 +617,16 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     // The projects the account is a member of, Guest or above (a Guest may open issues), not archived, with issues on; last active first.
     containers: () =>
       Effect.map(
-        http.json(
-          Schema.Array(Schema.Struct({ path_with_namespace: Schema.String, issues_enabled: Schema.optional(Schema.Boolean) })),
-          'GET',
-          `${api}/projects?membership=true&min_access_level=10&archived=false&with_issues_enabled=true&order_by=last_activity_at&per_page=100&simple=true`,
+        // A page short of a hundred is the last.
+        paged(1, (page) =>
+          Effect.map(
+            http.json(
+              Schema.Array(Schema.Struct({ path_with_namespace: Schema.String, issues_enabled: Schema.optional(Schema.Boolean) })),
+              'GET',
+              `${api}/projects?membership=true&min_access_level=10&archived=false&with_issues_enabled=true&order_by=last_activity_at&per_page=100&simple=true&page=${page}`,
+            ),
+            (projects) => ({ items: projects, next: projects.length < 100 ? undefined : page + 1 }),
+          ),
         ),
         (projects) =>
           projects

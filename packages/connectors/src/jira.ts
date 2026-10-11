@@ -1,9 +1,9 @@
-import { Effect, Schema } from 'effect'
+import { Clock, Effect, Schema } from 'effect'
 
 import { type Access, type AccessLine, type AccessNeed, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
-import { makeHttp } from './http'
+import { makeHttp, paged } from './http'
 import { AdfNode, adfOf, markdownOfAdf, markdownOfWiki, wikiOf } from './jiraText'
 import type { Account, Container, Issue, Person, Priority, StatusCategory, Tracker } from './model'
 import { type Answer, answered, failedOf, probe, readAs, refusalOf, serverLine, stopped, UNREADABLE } from './probe'
@@ -145,6 +145,9 @@ const issueTypeOf = (types: typeof IssueTypes.Type) => {
 /** A label as Jira can hold it: one word, so its spaces become hyphens. */
 export const jiraLabelOf = (label: string): string => label.trim().replace(/\s+/g, '-')
 
+/** How many projects a page of Cloud's project search holds: its most. */
+const PROJECTS_PAGE = 100
+
 /** A JQL string, quoted. */
 const quoted = (text: string) => `"${text.replace(/["\\]/g, '\\$&')}"`
 
@@ -269,21 +272,26 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
           }),
         ),
       ),
-    // A project, by its key, is where a Jira issue is filed: on Cloud, those with the latest issue first.
+    // A project, by its key, is where a Jira issue is filed: on Cloud, those with the latest issue first, a page at a time; Data Center lists them all at once.
     containers: () =>
       Effect.map(
-        call((root) =>
-          cloud
-            ? Effect.map(
-                http.json(
-                  Schema.Struct({ values: Schema.Array(Project) }),
-                  'GET',
-                  `${root}/project/search?maxResults=100&orderBy=-lastIssueUpdatedTime`,
+        cloud
+          ? paged(0, (startAt) =>
+              Effect.map(
+                call((root) =>
+                  http.json(
+                    Schema.Struct({ values: Schema.Array(Project), isLast: Schema.optional(Schema.Boolean) }),
+                    'GET',
+                    `${root}/project/search?maxResults=${PROJECTS_PAGE}&orderBy=-lastIssueUpdatedTime&startAt=${startAt}`,
+                  ),
                 ),
-                ({ values }) => values,
-              )
-            : http.json(Schema.Array(Project), 'GET', `${root}/project`),
-        ),
+                ({ values, isLast }) => ({
+                  items: values,
+                  next: isLast === true || values.length < PROJECTS_PAGE ? undefined : startAt + values.length,
+                }),
+              ),
+            )
+          : call((root) => http.json(Schema.Array(Project), 'GET', `${root}/project`)),
         (projects) => projects.map((project): Container => ({ id: project.key, key: project.key, name: project.name })),
       ),
     create: (project, draft) =>
@@ -304,20 +312,41 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
           summary: draft.title,
           ...(draft.body === '' ? {} : { description: cloud ? adfOf(draft.body) : wikiOf(draft.body) }),
         }
-        const file = (withLabels: boolean) =>
-          call((root) =>
-            http.json(Schema.Struct({ id: Schema.String, key: Schema.String }), 'POST', `${root}/issue`, {
-              fields: withLabels && labels.length > 0 ? { ...fields, labels } : fields,
-            }),
+        // What was filed, with the labels it was filed with.
+        const file = (sent: ReadonlyArray<string>) =>
+          Effect.map(
+            call((root) =>
+              http.json(Schema.Struct({ id: Schema.String, key: Schema.String }), 'POST', `${root}/issue`, {
+                fields: sent.length > 0 ? { ...fields, labels: sent } : fields,
+              }),
+            ),
+            (filed) => ({ ...filed, labels: sent }),
           )
         // Jira makes any label it is given, but a project whose screen has no labels refuses them: the issue is filed without.
-        const filed = yield* file(true).pipe(
+        const filed = yield* file(labels).pipe(
           Effect.catchIf(
             (error) => labels.length > 0 && error.reason === 'rejected' && /\blabels\b/i.test(error.message),
-            () => file(false),
+            () => file([]),
           ),
         )
-        return yield* issue(filed.key)
+        // Filed: a failed read of it now is no reason to file it again, so it is what was sent.
+        const now = yield* Clock.currentTimeMillis
+        return yield* issue(filed.key).pipe(
+          Effect.orElseSucceed((): Issue => ({
+            id: filed.id,
+            ref: filed.key,
+            key: filed.key,
+            title: draft.title,
+            body: draft.body,
+            url: `${site}/browse/${filed.key}`,
+            status: { name: 'To Do', category: 'todo' },
+            priority: null,
+            assignees: [],
+            labels: filed.labels,
+            container: project,
+            updatedAt: new Date(now).toISOString(),
+          })),
+        )
       }),
   }
 }

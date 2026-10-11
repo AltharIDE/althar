@@ -593,7 +593,7 @@ describe('GitHub as a tracker', () => {
       const { host, sent } = github([
         [
           'GET',
-          `${API}/user/repos?per_page=100&sort=pushed`,
+          `${API}/user/repos?per_page=100&sort=pushed&page=1`,
           {
             json: [
               { id: 7, full_name: 'meridian/api', has_issues: true, archived: false },
@@ -609,6 +609,29 @@ describe('GitHub as a tracker', () => {
         { id: 'you/dotfiles', key: 'you/dotfiles', name: 'you/dotfiles' },
       ])
       assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('follows the repositories page after page until a page comes short, and stops at ten', () =>
+    Effect.gen(function* () {
+      const repositories = (page: number, count: number) =>
+        Array.from({ length: count }, (_, at) => ({ id: page * 100 + at, full_name: `meridian/repo-${page}-${at}` }))
+      const listed = `${API}/user/repos?per_page=100&sort=pushed&page=`
+      const { host, sent } = github([
+        ['GET', `${listed}1`, { json: repositories(1, 100) }],
+        ['GET', `${listed}2`, { json: repositories(2, 3) }],
+      ])
+      const found = yield* host.containers()
+      assert.lengthOf(found, 103)
+      assert.strictEqual(found.at(-1)?.id, 'meridian/repo-2-2')
+      assert.deepStrictEqual(
+        sent.map((request) => request.url),
+        [`${listed}1`, `${listed}2`],
+      )
+      // Every page full: ten are read, and no more.
+      const endless = github([['GET', /\/user\/repos\?per_page=100&sort=pushed&page=\d+$/, { json: repositories(0, 100) }]])
+      assert.lengthOf(yield* endless.host.containers(), 1000)
+      assert.lengthOf(endless.sent, 10)
     }),
   )
 

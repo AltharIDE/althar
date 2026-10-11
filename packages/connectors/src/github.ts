@@ -3,7 +3,7 @@ import { Effect, Schema } from 'effect'
 import { type Access, type AccessInput, type AccessLine, type AccessNeed, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
-import { makeHttp } from './http'
+import { makeHttp, paged } from './http'
 import type {
   Account,
   Activity,
@@ -481,10 +481,18 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     link: () => Effect.void,
     // The repositories the account is on, last pushed to first; one archived, or with its issues turned off, takes none.
     containers: () =>
-      Effect.map(http.json(Schema.Array(Listed), 'GET', `${api}/user/repos?per_page=100&sort=pushed`), (repositories) =>
-        repositories
-          .filter((repository) => repository.has_issues !== false && repository.archived !== true)
-          .map((repository): Container => ({ id: repository.full_name, key: repository.full_name, name: repository.full_name })),
+      Effect.map(
+        // A page short of a hundred is the last.
+        paged(1, (page) =>
+          Effect.map(http.json(Schema.Array(Listed), 'GET', `${api}/user/repos?per_page=100&sort=pushed&page=${page}`), (repositories) => ({
+            items: repositories,
+            next: repositories.length < 100 ? undefined : page + 1,
+          })),
+        ),
+        (repositories) =>
+          repositories
+            .filter((repository) => repository.has_issues !== false && repository.archived !== true)
+            .map((repository): Container => ({ id: repository.full_name, key: repository.full_name, name: repository.full_name })),
       ),
     create: (container, issue) =>
       Effect.gen(function* () {

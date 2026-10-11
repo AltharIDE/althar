@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect'
+import { Clock, Effect, Schema } from 'effect'
 
 import { type Access, type AccessLine, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
@@ -99,6 +99,10 @@ const cardCategory = (card: Card, list: List, board: Board): StatusCategory => {
   return named === 'todo' && card.dueComplete === true ? 'done' : named
 }
 
+/** A card's labels by name: one with only a colour has no words to show. */
+const labelsOf = (labels: Card['labels']): ReadonlyArray<string> =>
+  (labels ?? []).flatMap((label) => (label.name == null || label.name === '' ? [] : [label.name]))
+
 /** A card, on its list and board. */
 const issueOf = (card: Card, list: List, board: Board): Issue => ({
   id: card.id,
@@ -110,8 +114,7 @@ const issueOf = (card: Card, list: List, board: Board): Issue => ({
   status: { name: list.name, category: cardCategory(card, list, board) },
   priority: null,
   assignees: (card.members ?? []).map(personOf),
-  // A label with only a colour has no words to show.
-  labels: (card.labels ?? []).flatMap((label) => (label.name == null || label.name === '' ? [] : [label.name])),
+  labels: labelsOf(card.labels),
   container: board.name,
   updatedAt: card.dateLastActivity,
 })
@@ -124,6 +127,17 @@ const Mine = Schema.Struct({
 
 /** A board's labels; one with only a colour has no name to match. */
 const BoardLabels = Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.optional(Schema.NullOr(Schema.String)) }))
+
+/** What Trello answers a filing with: the card, as it was made. */
+const Created = Schema.Struct({
+  id: Schema.String,
+  shortLink: Schema.String,
+  url: Schema.String,
+  name: Schema.String,
+  desc: Schema.optional(Schema.String),
+  dateLastActivity: Schema.optional(Schema.String),
+  labels: Card.fields.labels,
+})
 
 export const makeTrello = (options: AdapterOptions): Tracker => {
   const product = 'trello' as const
@@ -198,7 +212,7 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
         if (attached.some((attachment) => attachment.url === link.url)) return
         yield* call(Schema.Unknown, 'POST', `${api}/cards/${issue.id}/attachments`, { url: link.url, name: link.title })
       }),
-    // A list is where a card is filed: every open list on the account's open boards, named with its board.
+    // A list is where a card is filed: every open list on the account's open boards, named with its board. Trello lists every board in one answer, unpaged.
     containers: () =>
       Effect.map(
         call(
@@ -218,27 +232,49 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
         const list = yield* named(container, 'list')
         // A label belongs to a board, and a card takes it by id: the list's board's are read only when some are asked for.
         const wanted = new Set(draft.labels.map((label) => label.trim().toLowerCase()).filter((label) => label !== ''))
-        const idLabels =
+        const { onList, idLabels } =
           wanted.size === 0
-            ? []
+            ? { onList: undefined, idLabels: [] }
             : yield* Effect.gen(function* () {
-                const { idBoard } = yield* call(Schema.Struct({ idBoard: Schema.String }), 'GET', `${api}/lists/${list}?fields=idBoard`)
-                const labels = yield* call(BoardLabels, 'GET', `${api}/boards/${idBoard}/labels?fields=name`)
+                const onList = yield* call(
+                  Schema.Struct({ idBoard: Schema.String, name: Schema.String }),
+                  'GET',
+                  `${api}/lists/${list}?fields=idBoard,name`,
+                )
+                // A board's labels come fifty at a time unless asked for more; a thousand is the most Trello gives.
+                const labels = yield* call(BoardLabels, 'GET', `${api}/boards/${onList.idBoard}/labels?fields=name&limit=1000`)
                 // A board may have two labels of a name, in two colours: the first is the one.
                 const byName = new Map<string, string>()
                 for (const label of labels) {
                   const name = label.name?.trim().toLowerCase() ?? ''
                   if (wanted.has(name) && !byName.has(name)) byName.set(name, label.id)
                 }
-                return [...byName.values()]
+                return { onList, idLabels: [...byName.values()] }
               })
-        const card = yield* call(Schema.Struct({ shortLink: Schema.String }), 'POST', `${api}/cards`, {
+        const card = yield* call(Created, 'POST', `${api}/cards`, {
           idList: list,
           name: draft.title,
           desc: draft.body,
           ...(idLabels.length === 0 ? {} : { idLabels: idLabels.join(',') }),
         })
-        return yield* issue(card.shortLink)
+        // Filed: a failed read of it now is no reason to file it again, so it is as Trello answered the filing.
+        const now = yield* Clock.currentTimeMillis
+        return yield* issue(card.shortLink).pipe(
+          Effect.orElseSucceed((): Issue => ({
+            id: card.id,
+            ref: card.shortLink,
+            key: card.shortLink,
+            title: card.name,
+            body: card.desc ?? draft.body,
+            url: card.url,
+            status: onList === undefined ? { name: 'To do', category: 'todo' } : { name: onList.name, category: categoryOf(onList.name) },
+            priority: null,
+            assignees: [],
+            labels: labelsOf(card.labels),
+            container: null,
+            updatedAt: card.dateLastActivity ?? new Date(now).toISOString(),
+          })),
+        )
       }),
   }
 }

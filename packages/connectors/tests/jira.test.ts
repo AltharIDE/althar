@@ -548,7 +548,7 @@ describe('Jira Cloud', () => {
       const { tracker, sent } = cloud([
         [
           'GET',
-          `${CLOUD}/project/search?maxResults=100&orderBy=-lastIssueUpdatedTime`,
+          `${CLOUD}/project/search?maxResults=100&orderBy=-lastIssueUpdatedTime&startAt=0`,
           {
             json: {
               self: `${CLOUD}/project/search?maxResults=100`,
@@ -569,6 +569,91 @@ describe('Jira Cloud', () => {
         { id: 'HSEARCH', key: 'HSEARCH', name: 'Hibernate Search' },
       ])
       assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('follows the projects page after page, until a page says it is the last or comes short', () =>
+    Effect.gen(function* () {
+      const projects = (from: number, count: number) =>
+        Array.from({ length: count }, (_, at) => ({ id: `${from + at}`, key: `P${from + at}`, name: `Project ${from + at}` }))
+      const search = `${CLOUD}/project/search?maxResults=100&orderBy=-lastIssueUpdatedTime&startAt=`
+      const { tracker, sent } = cloud([
+        ['GET', `${search}0`, { json: { startAt: 0, maxResults: 100, isLast: false, values: projects(0, 100) } }],
+        ['GET', `${search}100`, { json: { startAt: 100, maxResults: 100, isLast: true, values: projects(100, 2) } }],
+      ])
+      const found = yield* tracker.containers()
+      assert.lengthOf(found, 102)
+      assert.deepStrictEqual(found.at(-1), { id: 'P101', key: 'P101', name: 'Project 101' })
+      assert.deepStrictEqual(
+        sent.map((request) => request.url),
+        [`${search}0`, `${search}100`],
+      )
+      // A short page is the last, whatever it says.
+      const short = cloud([['GET', `${search}0`, { json: { values: projects(0, 99) } }]])
+      assert.lengthOf(yield* short.tracker.containers(), 99)
+      assert.lengthOf(short.sent, 1)
+    }),
+  )
+
+  it.effect('files an issue once Jira takes it, though reading it back fails, as it was sent', () =>
+    Effect.gen(function* () {
+      for (const failed of [
+        { status: 500, json: { errorMessages: ['Internal server error'] } },
+        { status: 429, json: { errorMessages: ['Rate limit exceeded'] } },
+      ]) {
+        const { tracker, sent } = cloud([
+          ['GET', `${CLOUD}/issue/createmeta/HHH/issuetypes`, { json: { issueTypes: [{ id: '10003', name: 'Task' }] } }],
+          ['POST', `${CLOUD}/issue`, { status: 201, json: { id: '115161', key: 'HHH-20844', self: `${CLOUD}/issue/115161` } }],
+          ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, failed],
+        ])
+        const filed = yield* tracker.create('HHH', { title: 'A summary', body: 'Fails on **bootstrap**.', labels: ['needs test'] })
+        assert.deepStrictEqual(
+          { ...filed, updatedAt: '' },
+          {
+            id: '115161',
+            ref: 'HHH-20844',
+            key: 'HHH-20844',
+            title: 'A summary',
+            body: 'Fails on **bootstrap**.',
+            url: `${SITE}/browse/HHH-20844`,
+            status: { name: 'To Do', category: 'todo' },
+            priority: null,
+            assignees: [],
+            labels: ['needs-test'],
+            container: 'HHH',
+            updatedAt: '',
+          },
+        )
+        assert.isFalse(Number.isNaN(Date.parse(filed.updatedAt)))
+        assert.lengthOf(sent, 3)
+      }
+      // Filed without its labels, it says none.
+      const { tracker } = cloud([
+        ['GET', `${CLOUD}/issue/createmeta/HHH/issuetypes`, { json: { issueTypes: [{ id: '10003', name: 'Task' }] } }],
+        [
+          'POST',
+          `${CLOUD}/issue`,
+          (request) =>
+            (request.body as { fields: Record<string, unknown> }).fields.labels === undefined
+              ? { status: 201, json: { id: '115161', key: 'HHH-20844' } }
+              : { status: 400, json: { errorMessages: [], errors: { labels: "Field 'labels' cannot be set." } } },
+        ],
+        ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { status: 200, text: 'not JSON' }],
+      ])
+      const bare = yield* tracker.create('HHH', { title: 'A summary', body: '', labels: ['triage'] })
+      assert.deepStrictEqual([bare.key, bare.labels], ['HHH-20844', []])
+    }),
+  )
+
+  it.effect('fails to file an issue when the project’s types can’t be read, before anything is filed', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([
+        ['GET', `${CLOUD}/issue/createmeta/HHH/issuetypes`, { status: 429, json: { errorMessages: ['Rate limit exceeded'] } }],
+        ['POST', `${CLOUD}/issue`, { status: 201, json: { id: '115161', key: 'HHH-20844' } }],
+      ])
+      const failed = yield* Effect.flip(tracker.create('HHH', { title: 'A summary', body: '', labels: [] }))
+      assert.strictEqual(failed.reason, 'rate_limited')
+      assert.isFalse(sent.some((request) => request.method === 'POST'))
     }),
   )
 

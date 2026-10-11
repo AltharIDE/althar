@@ -830,7 +830,7 @@ describe('GitLab as a tracker', () => {
       const { host, sent } = gitlab([
         [
           'GET',
-          `${API}/projects?membership=true&min_access_level=10&archived=false&with_issues_enabled=true&order_by=last_activity_at&per_page=100&simple=true`,
+          `${API}/projects?membership=true&min_access_level=10&archived=false&with_issues_enabled=true&order_by=last_activity_at&per_page=100&simple=true&page=1`,
           {
             json: [
               {
@@ -850,6 +850,25 @@ describe('GitLab as a tracker', () => {
         { id: 'you/notes', key: 'you/notes', name: 'you/notes' },
       ])
       assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('follows the projects page after page until a page comes short', () =>
+    Effect.gen(function* () {
+      const projects = (page: number, count: number) =>
+        Array.from({ length: count }, (_, at) => ({ id: page * 100 + at, path_with_namespace: `meridian/project-${page}-${at}` }))
+      const listed = `${API}/projects?membership=true&min_access_level=10&archived=false&with_issues_enabled=true&order_by=last_activity_at&per_page=100&simple=true&page=`
+      const { host, sent } = gitlab([
+        ['GET', `${listed}1`, { json: projects(1, 100) }],
+        ['GET', `${listed}2`, { json: projects(2, 1) }],
+      ])
+      const found = yield* host.containers()
+      assert.lengthOf(found, 101)
+      assert.strictEqual(found.at(-1)?.id, 'meridian/project-2-0')
+      assert.deepStrictEqual(
+        sent.map((request) => request.url),
+        [`${listed}1`, `${listed}2`],
+      )
     }),
   )
 

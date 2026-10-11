@@ -42,6 +42,35 @@ export interface Http {
   ): Effect.Effect<A, ConnectorFailed>
 }
 
+/**
+ * How many pages of a listing are followed, at most: ten of a hundred, a
+ * thousand places to file an issue, is more than anyone picks from, and
+ * keeps an account that sees a whole company's from asking without end.
+ */
+export const PAGES_FOLLOWED = 10
+
+/** One page of a listing: what it holds, and where the next starts, if there is one. */
+export interface Page<A, At> {
+  readonly items: ReadonlyArray<A>
+  readonly next: At | undefined
+}
+
+/** A listing, page after page from `first`, for at most `PAGES_FOLLOWED` pages. */
+export const paged = <A, At>(
+  first: At,
+  page: (at: At) => Effect.Effect<Page<A, At>, ConnectorFailed>,
+): Effect.Effect<ReadonlyArray<A>, ConnectorFailed> =>
+  Effect.gen(function* () {
+    const all: Array<A> = []
+    let at: At | undefined = first
+    for (let read = 0; read < PAGES_FOLLOWED && at !== undefined; read++) {
+      const { items, next }: Page<A, At> = yield* page(at)
+      all.push(...items)
+      at = next
+    }
+    return all
+  })
+
 /** How much of a service's own words a failure keeps. */
 const MESSAGE_KEPT = 300
 

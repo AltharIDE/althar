@@ -3,7 +3,7 @@ import { Effect, Option, Schema } from 'effect'
 import { type Access, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
-import { makeHttp } from './http'
+import { makeHttp, paged } from './http'
 import type { Account, Container, Issue, Priority, StatusCategory, Tracker } from './model'
 import { type Answer, answered, probe, readAs, refusalOf, stopped, UNREADABLE, UNSAID } from './probe'
 
@@ -83,17 +83,30 @@ const issueOf = (issue: LinearIssue): Issue => {
 
 const Success = Schema.Struct({ success: Schema.Boolean })
 
-/** A team's labels and the workspace's, which any team's issue may take; a group only holds labels, and takes none itself. */
-const Labels = Schema.Struct({
-  issueLabels: Schema.Struct({
-    nodes: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String, isGroup: Schema.optional(Schema.Boolean) })),
-  }),
+/** A page of a list, as Linear gives one: its nodes, and the cursor after them while there are more. */
+const Connection = <A>(node: Schema.Codec<A, unknown>) =>
+  Schema.Struct({
+    nodes: Schema.Array(node),
+    pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean, endCursor: Schema.optional(Schema.NullOr(Schema.String)) }),
+  })
+
+const pageOf = <A>(connection: {
+  readonly nodes: ReadonlyArray<A>
+  readonly pageInfo: { readonly hasNextPage: boolean; readonly endCursor?: string | null | undefined }
+}) => ({
+  items: connection.nodes,
+  next: connection.pageInfo.hasNextPage ? (connection.pageInfo.endCursor ?? undefined) : undefined,
 })
 
+const Team = Schema.Struct({ id: Schema.String, key: Schema.String, name: Schema.String })
+
+/** A team's label or the workspace's, which any team's issue may take; a group only holds labels, and takes none itself. */
+const Label = Schema.Struct({ id: Schema.String, name: Schema.String, isGroup: Schema.optional(Schema.Boolean) })
+
 /** The labels a name each matches, in any case, as Linear's own picker matches them: a name it has no label for is left off. */
-const labelIdsOf = (labels: typeof Labels.Type, names: ReadonlyArray<string>) => {
+const labelIdsOf = (labels: ReadonlyArray<typeof Label.Type>, names: ReadonlyArray<string>) => {
   const byName = new Map<string, string>()
-  for (const label of labels.issueLabels.nodes)
+  for (const label of labels)
     if (label.isGroup !== true && !byName.has(label.name.toLowerCase())) byName.set(label.name.toLowerCase(), label.id)
   return [...new Set(names.flatMap((name) => byName.get(name.trim().toLowerCase()) ?? []))]
 }
@@ -164,14 +177,18 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
     // A team is where a Linear issue is filed.
     containers: () =>
       Effect.map(
-        http.graphql(
-          Schema.Struct({
-            teams: Schema.Struct({ nodes: Schema.Array(Schema.Struct({ id: Schema.String, key: Schema.String, name: Schema.String })) }),
-          }),
-          url,
-          'query { teams(first: 100) { nodes { id key name } } }',
+        paged<typeof Team.Type, string | null>(null, (after) =>
+          Effect.map(
+            http.graphql(
+              Schema.Struct({ teams: Connection(Team) }),
+              url,
+              'query($after: String) { teams(first: 100, after: $after) { nodes { id key name } pageInfo { hasNextPage endCursor } } }',
+              { after },
+            ),
+            ({ teams }) => pageOf(teams),
+          ),
         ),
-        ({ teams }) => teams.nodes.map((team): Container => ({ id: team.id, key: team.key, name: team.name })),
+        (teams) => teams.map((team): Container => ({ id: team.id, key: team.key, name: team.name })),
       ),
     create: (team, issue) =>
       Effect.gen(function* () {
@@ -180,11 +197,16 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
           issue.labels.length === 0
             ? []
             : labelIdsOf(
-                yield* http.graphql(
-                  Labels,
-                  url,
-                  'query($teamId: ID!) { issueLabels(first: 250, filter: { or: [{ team: { id: { eq: $teamId } } }, { team: { null: true } }] }) { nodes { id name isGroup } } }',
-                  { teamId: team },
+                yield* paged<typeof Label.Type, string | null>(null, (after) =>
+                  Effect.map(
+                    http.graphql(
+                      Schema.Struct({ issueLabels: Connection(Label) }),
+                      url,
+                      'query($teamId: ID!, $after: String) { issueLabels(first: 250, after: $after, filter: { or: [{ team: { id: { eq: $teamId } } }, { team: { null: true } }] }) { nodes { id name isGroup } pageInfo { hasNextPage endCursor } } }',
+                      { teamId: team, after },
+                    ),
+                    ({ issueLabels }) => pageOf(issueLabels),
+                  ),
                 ),
                 issue.labels,
               )
