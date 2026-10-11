@@ -287,6 +287,29 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 - [x] **A ready task's header.** Settled on 30 September 2026 in the review of
   #15: the header reads the run, as the card does, and says Ready.
 
+## Releases and updates, 11 October
+
+Decided in ADR-024 for the first testers: Developer ID signing, notarytool,
+one stable track from GitHub Releases, restart only at the person's word and
+never under running work.
+
+- [ ] **A beta channel.** Testers and everyone else share one track for now.
+  Leaning: a `beta` channel (electron-updater's `latest`/`beta` files) once
+  there are more than friends testing, chosen in Settings.
+- [ ] **Rolling back.** An update that breaks something is fixed by the next;
+  a migration can't be undone. Keep the previous app and a copy of the store
+  before migrating, or make every migration reversible?
+- [ ] **Adapters over the air** (DEV-46). Today a new adapter means an app
+  release. Shipping adapter bundles alone needs them verified before they
+  run as Althar's identity.
+- [ ] **One entitlements file for every helper.** electron-builder gives all
+  of them the agents' entitlements (JIT, unsigned executable memory, no
+  library validation). Leaning: sign the agents' binaries apart once the
+  adapters leave Electron's binary (the runAsNode question below).
+- [ ] **A download link that stays the same.** The site and the README link
+  the Releases page. A fixed asset name (`Althar-arm64.dmg`) would let
+  `releases/latest/download/…` start the download directly.
+
 ## The desktop app, 29 September
 
 - [ ] **Running the bundled adapters once the app is signed.** They run on

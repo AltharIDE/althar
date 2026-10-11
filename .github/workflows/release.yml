@@ -1,0 +1,213 @@
+name: release
+
+# Releases come from here (ADR-024, Linear DEV-81): a tag v<version> pushed on
+# a commit on main builds, signs and notarizes every platform, and leaves ONE
+# draft GitHub Release with all their files. A person publishes it on
+# GitHub; nothing reaches anyone before that. Run by hand on main, it makes
+# the same draft without a tag, which publishing then makes.
+#
+# Every job that uses a secret runs in the `release` environment, which holds
+# them and waits for a required reviewer to approve. Set it up as
+# apps/desktop/README.md ("The packaged app") says.
+#
+# This workflow alone publishes desktop releases: a platform's packaging
+# belongs in a job here, uploading its files as an artifact named release-*,
+# never in a workflow of its own that creates or publishes a release.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per tag or branch at a time, never cancelled half way through signing or notarizing.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # What is released, checked before anyone is asked to approve: a tag that is v<apps/desktop's version>, on a commit on
+  # main, or a run by hand from main; release notes for the version; and no published release of it already.
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.what.outputs.version }}
+      tag: ${{ steps.what.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The whole history, to tell whether the commit is on main.
+          fetch-depth: 0
+      - id: what
+        name: The tag, the version and main agree
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(jq -r .version apps/desktop/package.json)"
+          tag="v$version"
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            if [ "$GITHUB_REF_NAME" != "$tag" ]; then
+              echo "::error::The tag $GITHUB_REF_NAME and apps/desktop/package.json's version ($version) disagree." \
+                "Raise the version on main, then tag that commit v$version."
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "::error::$GITHUB_REF_NAME is on a commit that isn't on main. Releases are cut from main."
+              exit 1
+            fi
+          else
+            if [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::Run this by hand from main, not $GITHUB_REF_NAME."
+              exit 1
+            fi
+            if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              echo "::error::$tag is tagged already: re-run that tag's run instead, or raise the version."
+              exit 1
+            fi
+          fi
+          if [ ! -f "apps/desktop/release-notes/$version.md" ]; then
+            echo "::error::apps/desktop/release-notes/$version.md is missing: a few plain lines for testers on what changed."
+            exit 1
+          fi
+          if [ "$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null)" = false ]; then
+            echo "::error::$tag is published already. Raise the version for a new release."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  # Althar for Apple silicon: signed with the Developer ID, notarized, stapled and checked by bun run release, which
+  # fails unless all of that holds (CI=true). On macOS 26 on Apple silicon, GitHub's standard runner, free for a public
+  # repository; named, not macos-latest, so the image changes only when this file does.
+  mac:
+    needs: check
+    runs-on: macos-26
+    timeout-minutes: 90
+    environment: release
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      # The App Store Connect key is a secret's text; notarytool takes a file, kept only for this job.
+      - name: The notary key, as a file
+        env:
+          KEY: ${{ secrets.APPLE_API_KEY }}
+          KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          if [ -z "$KEY" ] || [ -z "$KEY_ID" ] || [ -z "$ISSUER" ]; then
+            echo "::error::The release environment needs APPLE_API_KEY (the .p8's contents), APPLE_API_KEY_ID and APPLE_API_ISSUER."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/notary"
+          path="$RUNNER_TEMP/notary/AuthKey_$KEY_ID.p8"
+          printf '%s\n' "$KEY" > "$path"
+          chmod 600 "$path"
+          echo "APPLE_API_KEY=$path" >> "$GITHUB_ENV"
+      # electron-builder imports CSC_LINK into a keychain of its own, unlocked for codesign alone, and deletes it after.
+      - name: Package, sign, notarize and check
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: bun run release
+      - name: Forget the notary key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/notary"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: release-mac
+          path: |
+            apps/desktop/out/dist/Althar-*-arm64.dmg
+            apps/desktop/out/dist/Althar-*-arm64.dmg.blockmap
+            apps/desktop/out/dist/Althar-*-arm64-mac.zip
+            apps/desktop/out/dist/Althar-*-arm64-mac.zip.blockmap
+            apps/desktop/out/dist/latest-mac.yml
+          if-no-files-found: error
+          retention-days: 14
+      # Apple's log of every submission: a rejected one names each file it found wrong.
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: notary-logs
+          path: apps/desktop/out/notary
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # The slot for Linux (DEV-77): PR #78's package job moves here, uploading release-linux (the AppImage, deb, rpm and
+  # latest-linux.yml), and #78's own publish job in desktop.yml goes, since it would race this draft with a published
+  # release of its own. Then add linux to the draft job's needs.
+  #
+  # linux:
+  #   needs: check
+  #   runs-on: ubuntu-24.04
+  #   ...
+  #   - uses: actions/upload-artifact@v6
+  #     with: { name: release-linux, path: ..., if-no-files-found: error }
+
+  # The slot for Windows (DEV-78): the NSIS installer and latest.yml, signed in the release environment, uploaded as
+  # release-windows. Then add windows to the draft job's needs.
+  #
+  # windows:
+  #   needs: check
+  #   runs-on: windows-2025
+  #   environment: release
+  #   ...
+  #   - uses: actions/upload-artifact@v6
+  #     with: { name: release-windows, path: ..., if-no-files-found: error }
+
+  # ONE draft release for the version, with every platform's files: made, or brought up to date when a run is repeated.
+  # It uses only the run's own token, so it needs no approval of its own. A person publishes the draft on GitHub.
+  draft:
+    needs: [check, mac]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    # One at a time across every run, so a tag's run and a run by hand can't each make a draft.
+    concurrency:
+      group: release-draft
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.check.outputs.tag }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release
+      - name: The draft release
+        run: |
+          notes="apps/desktop/release-notes/$VERSION.md"
+          state="$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          if [ "$state" = false ]; then
+            echo "::error::$TAG was published while this ran; nothing is changed."
+            exit 1
+          fi
+          if [ "$state" = true ]; then
+            # The draft is pointed at this run's commit too: a draft from an earlier run by hand may target another one.
+            gh release edit "$TAG" --target "$GITHUB_SHA" --title "Althar $VERSION" --notes-file "$notes"
+            gh release upload "$TAG" release/* --clobber
+          elif [ "$GITHUB_EVENT_NAME" = push ]; then
+            gh release create "$TAG" release/* --draft --verify-tag --title "Althar $VERSION" --notes-file "$notes"
+          else
+            gh release create "$TAG" release/* --draft --target "$GITHUB_SHA" --title "Althar $VERSION" --notes-file "$notes"
+          fi
+          echo "### Draft release $TAG" >> "$GITHUB_STEP_SUMMARY"
+          echo "$(gh release view "$TAG" --json url --jq .url). Smoke-test its dmg, then publish it there." >> "$GITHUB_STEP_SUMMARY"

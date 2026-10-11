@@ -18,6 +18,7 @@ import { Choices, type ChoiceOption } from '../../primitives/Choices/Choices'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { States } from '../../storybook/States'
 import { Accounts } from '../Accounts/Accounts'
+import { AppVersion } from '../AppVersion/AppVersion'
 import { AgentTabs } from '../AgentTabs/AgentTabs'
 import { CoAuthor } from '../CoAuthor/CoAuthor'
 import { Connections } from '../Connections/Connections'
@@ -108,7 +109,7 @@ function Settings({ start = 'all', ...args }: Partial<ControlCenterProps> & { st
             <ControlToggle title="Dictation" line="Off" on={false} onChange={fn()} glyph={<Icon name="mic" size={16} />} />
           </ControlGrid>
           <ControlFoot>
-            <span>Althar 0.1.0</span>
+            <AppVersion version="0.1.0" notes="https://github.com/AltharIDE/althar/releases/tag/v0.1.0" />
           </ControlFoot>
         </>
       )}

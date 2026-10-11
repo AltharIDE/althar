@@ -6,6 +6,7 @@ import {
   type AgentTab,
   AgentInstall,
   AgentTabs,
+  AppVersion,
   Choices,
   CoAuthor,
   ControlAgents,
@@ -29,15 +30,18 @@ import {
   type NotifyChoices,
   OpenFilesIn,
   SettingList,
+  UpdateReady,
 } from '@althar/ui'
 
 import { agentLineOf, brandOf } from '../../shared/agents'
 import { appIcons } from '../../shared/appIcons'
 import { SYSTEM_SOUND } from '../../../main/notify'
+import { notesOf } from '../../../main/updates'
 import { device, platform } from '../../shared/device'
 import { edgePlaces } from '../../shared/edge'
 import { useEditorList, useEditorPictures } from '../../shared/OpenIn'
 import { useSounds } from '../../shared/useSounds'
+import { type UpdateModel, useUpdate } from '../../shared/useUpdate'
 import { type EdgeGlance, EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { productBrand } from '../../shared/products'
@@ -63,7 +67,9 @@ import { type CoAuthorModel, useCoAuthor } from './useCoAuthor'
  * this Mac and a word on each, the code hosts and trackers, the app's icon,
  * and, on a Mac with a notch, where Althar shows while you're in another app.
  * Any opens out in place, the agents one at a time with their accounts, and
- * steps back. It is calm: nothing in it says what is running.
+ * steps back. It is calm: nothing in it says what is running. Its foot
+ * says which Althar this is, with its release notes, and a newer one ready
+ * to install.
  */
 
 export const text = {
@@ -181,6 +187,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
       editors={useEditorList()}
       pictures={useEditorPictures()}
       sounds={useSounds()}
+      update={useUpdate()}
     />
   )
 }
@@ -196,6 +203,7 @@ export function SettingsView({
   editors,
   pictures,
   sounds,
+  update,
   glance,
   open,
   onOpenChange,
@@ -211,6 +219,8 @@ export function SettingsView({
   /** Each editor's icon by its id, as they come. */
   pictures: Readonly<Record<string, string>>
   sounds: { readonly list: ReadonlyArray<string>; readonly play: (sound: string) => void }
+  /** A newer Althar ready to install; none where left out. */
+  update?: UpdateModel
 }) {
   const [showing, setShowing] = useState<Showing>('all')
   const [agentId, setAgentId] = useState<string | null>(null)
@@ -331,7 +341,8 @@ export function SettingsView({
           {failed}
           {start.status !== null && (
             <ControlFoot>
-              <span>{text.version(start.status.appVersion)}</span>
+              <AppVersion version={start.status.appVersion} notes={notesOf(start.status.appVersion)} text={{ name: text.version }} />
+              {update !== undefined && update.ready !== null && <UpdateReady {...update.ready} />}
             </ControlFoot>
           )}
         </>

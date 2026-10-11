@@ -16,7 +16,8 @@ import { Room } from '@althar/ui'
 
 import { TabsFrame, useLastRoom, useVisit } from '../src/renderer/features/tabs/TabsFrame'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
-import { changed, fakeClient, project } from './fixtures'
+import type { Host } from '../src/renderer/data/services'
+import { changed, fakeClient, fakeHost, project } from './fixtures'
 import { withServices } from './render'
 
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', running: 0, working: 0, waiting: 0, ready: 0 }
@@ -58,13 +59,13 @@ const projectRoute = createRoute({ getParentRoute: () => rootRoute, path: '/proj
 const rulesRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects/$projectId/rules', component: Where })
 const threadRoute = createRoute({ getParentRoute: () => rootRoute, path: '/threads/$threadId', component: Thread })
 
-const windowAt = (path: string, projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera]) => {
+const windowAt = (path: string, projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera], host: Host = fakeHost()) => {
   const router = createRouter({
     routeTree: rootRoute.addChildren([homeRoute, projectRoute, rulesRoute, threadRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   const { client, emit } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects })) })
-  withServices(<RouterProvider router={router} />, client)
+  withServices(<RouterProvider router={router} />, client, host)
   const go = (to: string) => act(() => router.history.push(to))
   return { client, emit, go, router }
 }
@@ -194,6 +195,35 @@ describe('the window’s tabs', () => {
     await userEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Open a folder…' }))
     expect(router.state.location.pathname).toBe('/')
     expect(router.state.location.search).toEqual({ open: 'folder' })
+  })
+
+  it('say in the bar that a newer Althar is ready, with Restart only while no work runs', async () => {
+    let tell: (glance: unknown) => void = () => undefined
+    const restart = vi.fn(async () => true)
+    const host = fakeHost({
+      update: {
+        glance: vi.fn(async () => ({ ready: '0.1.1', working: true, restarting: false, failed: null })),
+        restart,
+        onChange: (listener) => {
+          tell = listener
+          return () => undefined
+        },
+      },
+    })
+    windowAt('/', [project], host)
+    const line = (await screen.findByText('Althar 0.1.1 is ready')).parentElement
+    if (line === null) throw new Error('The line has no parent')
+    expect(within(line).getByText('Installs when you quit')).toBeTruthy()
+    expect(within(line).queryByRole('button')).toBeNull()
+
+    act(() => tell({ ready: '0.1.1', working: false, restarting: false, failed: null }))
+    await userEvent.click(within(line).getByRole('button', { name: 'Restart' }))
+    expect(restart).toHaveBeenCalledOnce()
+    act(() => tell({ ready: '0.1.1', working: false, restarting: true, failed: null }))
+    expect(within(line).getByText('Restarting…')).toBeTruthy()
+    // Nothing ready, nothing said.
+    act(() => tell({ ready: null, working: false, restarting: false, failed: null }))
+    expect(screen.queryByText(/is ready/)).toBeNull()
   })
 })
 
