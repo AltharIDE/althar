@@ -6,7 +6,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
 import { dueForHandover, FRESH_ROOM, HANDOVER_AT, handoverRecord, openTasks, RECENT_MESSAGES, roomFor } from '../src/handover'
-import { NOTES_KEPT } from '../src/notes'
+import { keepNote, NOTES_KEPT, notesOf } from '../src/notes'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -456,6 +456,8 @@ describe('handing the coordinator to a fresh session', () => {
       const own = yield* callTool({ ...access, sessionId: fresh.id }, 'read_thread', {})
       assert.include(own, '[person] Message 1\n[you] echo: ')
       assert.include(own, '[person] Last one. [context:85]')
+      // Read back past its start, there is nothing more.
+      assert.strictEqual(yield* callTool({ ...access, sessionId: fresh.id }, 'read_thread', { before: 0 }), 'Nothing comes before that.')
     }).pipe(Effect.provide(withQueries())),
   )
 })
@@ -505,6 +507,21 @@ describe("the coordinator's notes", () => {
       yield* callTool(access, 'drop_note', { id: again })
       for (let index = 1; index <= NOTES_KEPT; index += 1) yield* callTool(access, 'keep_note', { note: `Decision ${index}.` })
       assert.match(yield* callTool(access, 'keep_note', { note: 'One too many.' }), /^The project keeps 40 notes at most\./)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('say who kept each: the coordinator, or the person', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      yield* keepNote({
+        envelope: yield* Runtime.envelope('project.note.keep', {}),
+        projectId: projectId as Parameters<typeof keepNote>[0]['projectId'],
+        body: 'Ship on Thursdays only.',
+      })
+      assert.deepStrictEqual(
+        (yield* notesOf(projectId)).map((note) => [note.body, note.keptBy]),
+        [['Ship on Thursdays only.', 'person']],
+      )
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -631,6 +648,8 @@ describe("a handover brief's open tasks", () => {
       yield* pull(1, { state: 'closed' })
       yield* pull(2, { state: 'open', draft: true, headSha: head })
       yield* pull(3, { state: 'open' })
+      // One whose head this worktree doesn't have: nothing is counted for it.
+      yield* pull(4, { state: 'open', headSha: 'f'.repeat(40) })
 
       const modelOf = (step: { readonly agentId: string; readonly model: string | null }) => step.model ?? step.agentId
       const tasks = yield* openTasks(projectId, modelOf, (thread) => thread === again.threadId)
@@ -648,7 +667,7 @@ describe("a handover brief's open tasks", () => {
       assert.include(lineOf(again.slug), ' Its lead now: large.')
       assert.include(
         lineOf(again.slug),
-        '\n  Waiting on the person: its pull request https://github.test/meridian/api/pull/12 (a draft) is open; its pull request https://github.test/meridian/api/pull/13 is open.',
+        '\n  Waiting on the person: its pull request https://github.test/meridian/api/pull/12 (a draft) is open; its pull request https://github.test/meridian/api/pull/13 is open; its pull request https://github.test/meridian/api/pull/14 is open.',
       )
 
       // With nothing said yet and no notes, the brief says so.
