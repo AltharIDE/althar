@@ -1,4 +1,4 @@
-# ADR-021: Connecting walks the person in, and says what the connection can do
+# ADR-022: Connecting walks the person in, and says what the connection can do
 
 - **Status:** Accepted
 - **Date:** 2026-10-11
