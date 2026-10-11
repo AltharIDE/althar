@@ -89,3 +89,40 @@ export const SHOT_BROKEN: ImageRef & { id: string } = {
   width: 1440,
   height: 900,
 }
+
+const svg = (width: number, height: number, label: string, fill: string) =>
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
+      `<rect width="${width}" height="${height}" fill="${fill}"/>` +
+      `<text x="24" y="48" font-family="Helvetica, Arial" font-size="24" fill="#26262b">${label}</text></svg>`,
+  )}`
+
+/** A phone-sized screenshot: taller than wide. */
+export const SHOT_PORTRAIT: ImageRef & { id: string } = {
+  id: 'portrait',
+  name: 'refunds-mobile.png',
+  label: 'Mobile',
+  meta: '390 × 1200',
+  src: svg(390, 1200, 'Refunds · mobile', '#ecebf9'),
+  width: 390,
+  height: 1200,
+}
+
+/** A small one, such as an icon or a crop: shown at its own size, not blown up. */
+export const SHOT_SMALL: ImageRef & { id: string } = {
+  id: 'small',
+  name: 'badge.png',
+  label: 'Badge',
+  meta: '240 × 120',
+  src: svg(240, 120, 'Badge', '#eef3ea'),
+  width: 240,
+  height: 120,
+}
+
+/** A picture whose size the reference doesn't give: it is measured as it loads. */
+export const SHOT_UNSIZED: ImageRef & { id: string } = {
+  id: 'unsized',
+  name: 'wide.png',
+  label: 'Wide',
+  src: svg(1600, 600, 'Size not given', '#f6e3e1'),
+}
