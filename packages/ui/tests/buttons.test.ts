@@ -51,6 +51,9 @@ const PLAIN: Readonly<Record<string, string>> = {
   'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',
   /* close to a primitive, not yet moved onto one */
   'chrome/BackCrumb/BackCrumb.tsx': 'a ChromeButton that is never pressed',
+  /* in an exploration, drawn as what it would become */
+  'explorations/AllowEverything/parts/Mark.tsx': 'a mark in the task’s bar: a ChromeButton’s shape, its words in two weights',
+  'explorations/AllowEverything/D/ForAWhile.tsx': 'a pill over the composer, as Listening’s and Running’s are',
 }
 
 const sources = import.meta.glob<string>('../src/**/*.tsx', { query: '?raw', import: 'default', eager: true })

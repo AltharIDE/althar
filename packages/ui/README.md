@@ -64,6 +64,7 @@ A new component gets a folder under its layer with the component (`Name.tsx`), i
 | `src/outputs`, `src/chrome`, `src/setup` | What a task made, the window's furniture, and what comes before a project |
 | `src/screens` | Whole screens made from the rest |
 | `src/fixtures`, `src/storybook` | The demo world and helpers that stories and tests use; not exported |
+| `src/explorations` | Design paths drawn side by side before one is chosen: stories, their sketches and a page comparing them; not exported, and outside the coverage gate |
 | `tests` | Vitest: every story, plus unit tests for what a story can't reach |
 
 ## More
