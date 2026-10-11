@@ -154,7 +154,7 @@ export function Lightbox({ images, index, defaultIndex = 0, onIndexChange, onClo
   const shown = Math.min(Math.max(at, 0), Math.max(count - 1, 0))
   const image = images[shown]
   const several = count > 1
-  /* sizes learned as pictures load, for those the reference didn't give */
+  /* sizes learned as pictures load, for those the reference didn't give: they serve actual size, but the frame stays as it was, so nothing moves on arrival */
   const [measured, setMeasured] = useState<{ src: string | undefined; width: number; height: number }>()
   /* the one at actual size, until another shows */
   const [actual, setActual] = useState<ImageRef>()
@@ -167,6 +167,12 @@ export function Lightbox({ images, index, defaultIndex = 0, onIndexChange, onClo
       : measured?.src === image?.src
         ? measured
         : undefined
+  /* actual size lasts for one showing: another image, and back, starts fitted */
+  const [seen, setSeen] = useState(image)
+  if (seen !== image) {
+    setSeen(image)
+    setActual(undefined)
+  }
   const zoomed = actual === image && known !== undefined
   const zoom = () => {
     if (known) setActual(zoomed ? undefined : image)
@@ -210,7 +216,7 @@ export function Lightbox({ images, index, defaultIndex = 0, onIndexChange, onClo
             {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Z does the same from the keyboard */}
             <div
               className={s.image}
-              style={known ? ({ '--w': known.width, '--h': known.height } as CSSProperties) : undefined}
+              style={known && (zoomed || image.width) ? ({ '--w': known.width, '--h': known.height } as CSSProperties) : undefined}
               data-sized={known ? '' : undefined}
               data-actual={zoomed ? '' : undefined}
               onClick={zoom}

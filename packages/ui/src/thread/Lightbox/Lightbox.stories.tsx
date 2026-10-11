@@ -37,8 +37,14 @@ export const Portrait: Story = { args: { images: [SHOT_PORTRAIT] } }
 /** Smaller than the screen: shown at its own size, not enlarged. */
 export const Small: Story = { args: { images: [SHOT_SMALL] } }
 
-/** No size given: the box takes the picture's shape when it has loaded. */
-export const Unsized: Story = { args: { images: [SHOT_UNSIZED] } }
+/** No size given: the frame stays as it was while the picture arrives, so nothing moves. */
+export const Unsized: Story = {
+  args: { images: [SHOT_UNSIZED] },
+  play: async ({ canvasElement }) => {
+    const box = within(canvasElement.ownerDocument.body).getByRole('img').parentElement!
+    await expect(box.style.getPropertyValue('--w')).toBe('')
+  },
+}
 
 /** A click or Z shows the picture at its actual size, and again to fit. */
 export const ActualSize: Story = {
@@ -51,6 +57,18 @@ export const ActualSize: Story = {
     await expect(box).toHaveAttribute('data-actual')
     await userEvent.click(box)
     await expect(box).not.toHaveAttribute('data-actual')
+  },
+}
+
+/** Actual size lasts for one showing: leaving and coming back starts fitted. */
+export const ActualSizeResets: Story = {
+  args: { images: [SHOT_BEFORE, SHOT_AFTER] },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body)
+    await userEvent.keyboard('z')
+    await expect(page.getByRole('img').parentElement).toHaveAttribute('data-actual')
+    await userEvent.keyboard('{ArrowRight}{ArrowLeft}')
+    await expect(page.getByRole('img').parentElement).not.toHaveAttribute('data-actual')
   },
 }
 
