@@ -71,6 +71,14 @@ describe('connecting', () => {
       assert.strictEqual(taken.id, first.id)
       const kept = JSON.parse((yield* secrets.get(first.id)) ?? '{}') as { token?: string }
       assert.strictEqual(kept.token, 'gho_from_gh')
+      // Signing a connection of another account's in again with it is refused: gh is signed in as someone else.
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE connections SET account_id = 'other', account_login = 'someone' WHERE id = ${first.id}`
+      const other = yield* Effect.flip(
+        connections.connectCli({ product: 'github', webUrl: HOST, connectionId: first.id, actorId: instance.personId }),
+      )
+      assert.instanceOf(other, OtherAccount)
+      yield* sql`UPDATE connections SET account_id = '1', account_login = 'you' WHERE id = ${first.id}`
       // glab isn't signed in anywhere here.
       const signedOut = yield* Effect.flip(
         connections.connectCli({ product: 'gitlab', webUrl: 'https://gitlab.com', actorId: instance.personId }),

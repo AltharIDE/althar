@@ -7,6 +7,7 @@ import { Brand, IssuePriority, IssueStatus } from '@althar/ui'
 
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
+import { ConnectPanel } from '../src/renderer/features/connections/ConnectPanel'
 import { connectionsOf, ConnectionsView, servicesOf } from '../src/renderer/features/connections/ConnectionsView'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
@@ -187,7 +188,7 @@ describe('connections', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Use this sign-in' }))
     expect(await screen.findByText('gh isn’t signed in to github.com on this Mac.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Use this sign-in' }))
-    expect(client.connectCli).toHaveBeenLastCalledWith('github', 'https://github.com')
+    expect(client.connectCli).toHaveBeenLastCalledWith('github', 'https://github.com', undefined)
     expect(await screen.findByRole('heading', { name: 'Connected as you' })).toBeTruthy()
     expect(screen.getByText('gh’s token; it runs out when gh’s does.')).toBeTruthy()
     // Another way goes back to the ways.
@@ -365,7 +366,7 @@ describe('connections', () => {
     await userEvent.click(
       await screen.findByRole('button', { name: /Continue with GitHub\s*Approve in your browser, then let Althar into northwind/ }),
     )
-    expect(client.startSignIn).toHaveBeenCalledWith('github', 'https://github.com')
+    expect(client.startSignIn).toHaveBeenCalledWith('github', 'https://github.com', undefined)
     expect(await screen.findByText('ABCD-1234')).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Type this code on GitHub' })).toBeTruthy()
     expect(open).toHaveBeenCalledWith('https://github.com/login/device', '_blank')
@@ -400,6 +401,103 @@ describe('connections', () => {
     expect(client.cancelSignIn).toHaveBeenCalledWith('flow1')
     open.mockRestore()
   }, 15_000)
+
+  it('drops what answers late for a way, a token or a sign-in left behind, and goes on once a server answers', async () => {
+    /** A call answered when the test says, in the order it was made. */
+    const later = <A,>() => {
+      const waiting: Array<(value: A) => void> = []
+      const call = vi.fn(() => new Promise<A>((resolve) => void waiting.push(resolve)))
+      return { call, answer: (index: number, value: A) => waiting[index]?.(value) }
+    }
+    const connected = later<typeof githubConnection>()
+    const checked = later<typeof githubCheck>()
+    const started = later<{ flowId: string; kind: 'device'; userCode: string; verificationUri: string; expiresAt: string }>()
+    const servers = later<{ product: 'github' | null; webUrl: string; reason: null; tokenPage: string | null }>()
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const { client } = fakeClient({
+      listConnections: vi.fn(async () => ({
+        ...connectionList,
+        products: connectionList.products.map((product) => (product.product === 'github' ? { ...product, browserSignIn: true } : product)),
+      })),
+      connectToken: connected.call,
+      checkConnection: checked.call,
+      startSignIn: started.call,
+      findServer: servers.call,
+    })
+    const closed = vi.fn()
+    withServices(<ConnectPanel service="github" onClose={closed} />, client)
+    const panel = await screen.findByRole('complementary', { name: 'Connect GitHub' })
+    const back = () => userEvent.click(within(panel).getByRole('button', { name: 'Back' }))
+
+    // A token sent, and the way left before GitHub answers: its answer doesn't move gh's way on.
+    await userEvent.click(await within(panel).findByRole('button', { name: /Make a token/ }))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Paste it myself' }))
+    await userEvent.type(within(panel).getByLabelText('Paste it'), 'github_pat_first{Enter}')
+    await back()
+    await back()
+    await userEvent.click(await within(panel).findByRole('button', { name: /Use gh’s sign-in/ }))
+    await act(async () => connected.answer(0, githubConnection))
+    expect(within(panel).getByRole('heading', { name: 'Use gh’s sign-in' })).toBeTruthy()
+
+    // A check left for another token: its late answer isn't the new token's.
+    await back()
+    await userEvent.click(await within(panel).findByRole('button', { name: /Make a token/ }))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Paste it myself' }))
+    await userEvent.type(within(panel).getByLabelText('Paste it'), 'github_pat_second{Enter}')
+    await act(async () => connected.answer(1, githubConnection))
+    expect(await within(panel).findByRole('heading', { name: 'Checking what it can do' })).toBeTruthy()
+    await back()
+    await userEvent.type(within(panel).getByLabelText('Paste it'), 'github_pat_third{Enter}')
+    await act(async () => connected.answer(2, githubConnection))
+    const lacking = {
+      ...githubCheck,
+      lines: githubCheck.lines.map((line) => ({ ...line, state: 'no' as const, reason: { kind: 'refused' as const } })),
+    }
+    await act(async () => checked.answer(0, lacking))
+    expect(within(panel).getByRole('heading', { name: 'Checking what it can do' })).toBeTruthy()
+    await act(async () => checked.answer(1, githubCheck))
+    expect(await within(panel).findByRole('heading', { name: 'Connected as you' })).toBeTruthy()
+
+    // A browser sign-in left while it starts, and started again: the first is cancelled, the second shown.
+    await back()
+    await back()
+    await back()
+    await userEvent.click(await within(panel).findByRole('button', { name: /Continue with GitHub/ }))
+    await back()
+    await userEvent.click(await within(panel).findByRole('button', { name: /Continue with GitHub/ }))
+    expect(client.startSignIn).toHaveBeenCalledTimes(2)
+    const device = {
+      kind: 'device' as const,
+      userCode: 'ABCD-1234',
+      verificationUri: 'https://github.com/login/device',
+      expiresAt: '2026-10-11T10:00:00.000Z',
+    }
+    await act(async () => started.answer(0, { ...device, flowId: 'first' }))
+    expect(client.cancelSignIn).toHaveBeenCalledWith('first')
+    await act(async () => started.answer(1, { ...device, flowId: 'second', userCode: 'WXYZ-0000' }))
+    expect(await within(panel).findByText('WXYZ-0000')).toBeTruthy()
+
+    // A company's server, pressed on before it answers: on, once it answers.
+    await back()
+    await userEvent.click(within(panel).getByRole('button', { name: 'On a company’s own server' }))
+    await userEvent.type(within(panel).getByLabelText('Server address'), 'git.meridian.dev')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Make a token' }))
+    await waitFor(() => expect(servers.call.mock.calls.length).toBeGreaterThanOrEqual(1))
+    const answer = {
+      product: 'github' as const,
+      webUrl: 'https://git.meridian.dev',
+      reason: null,
+      tokenPage: 'https://git.meridian.dev/settings/tokens/new',
+    }
+    await waitFor(() => expect(servers.call.mock.calls.length).toBe(2), { timeout: 2000 })
+    await act(async () => {
+      servers.answer(0, answer)
+      servers.answer(1, answer)
+    })
+    expect(await within(panel).findByRole('heading', { name: 'Make a token on git.meridian.dev' })).toBeTruthy()
+    expect(closed).not.toHaveBeenCalled()
+    open.mockRestore()
+  }, 20_000)
 
   it('lists a connection on a company’s own server with its address, and one that needs signing in again', async () => {
     const { client } = fakeClient({

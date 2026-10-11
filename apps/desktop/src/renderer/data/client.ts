@@ -168,7 +168,7 @@ export interface Client {
   /** The connections on this Mac, and the code hosts and trackers a person can connect. */
   readonly listConnections: () => Promise<ConnectionList>
   /** Starts a service's own sign-in. */
-  readonly startSignIn: (product: Product, webUrl?: string) => Promise<SignInStart>
+  readonly startSignIn: (product: Product, webUrl?: string, connectionId?: string) => Promise<SignInStart>
   readonly getSignIn: (flowId: string) => Promise<SignInState>
   readonly cancelSignIn: (flowId: string) => Promise<void>
   /** Connects with a pasted token; with a connection, signs it in again with a new one. */
@@ -185,7 +185,7 @@ export interface Client {
   /** Which of a service's products answers at an address. */
   readonly findServer: (service: Service, webUrl: string) => Promise<FoundServer>
   /** Connects with gh's or glab's sign-in on this device. */
-  readonly connectCli: (product: Product, webUrl: string) => Promise<ConnectionSummary>
+  readonly connectCli: (product: Product, webUrl: string, connectionId?: string) => Promise<ConnectionSummary>
   /** What a connection can do, as its service says. */
   readonly checkConnection: (connectionId: string) => Promise<ConnectionCheck>
   readonly disconnect: (connectionId: string) => Promise<void>
@@ -369,14 +369,22 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     changePlan: (planId, steps, end) =>
       command((commandId) => api.ChangePlan({ commandId, planId, steps, ...(end === undefined ? {} : { end }) })),
     listConnections: () => settle(api.ListConnections()),
-    startSignIn: (product, webUrl) =>
-      command((commandId) => api.StartSignIn({ commandId, product, ...(webUrl === undefined ? {} : { webUrl }) })),
+    startSignIn: (product, webUrl, connectionId) =>
+      command((commandId) =>
+        api.StartSignIn({
+          commandId,
+          product,
+          ...(webUrl === undefined ? {} : { webUrl }),
+          ...(connectionId === undefined ? {} : { connectionId }),
+        }),
+      ),
     getSignIn: (flowId) => settle(api.GetSignIn({ flowId })),
     cancelSignIn: (flowId) => command((commandId) => api.CancelSignIn({ commandId, flowId })),
     connectToken: (input) => command((commandId) => api.ConnectToken({ commandId, ...input })),
     getConnectGuide: (service) => settle(api.GetConnectGuide({ service })),
     findServer: (service, webUrl) => settle(api.FindServer({ service, webUrl })),
-    connectCli: (product, webUrl) => command((commandId) => api.ConnectCli({ commandId, product, webUrl })),
+    connectCli: (product, webUrl, connectionId) =>
+      command((commandId) => api.ConnectCli({ commandId, product, webUrl, ...(connectionId === undefined ? {} : { connectionId }) })),
     checkConnection: (connectionId) => settle(api.CheckConnection({ connectionId })),
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
     renameProject: (projectId, name) => command((commandId) => api.RenameProject({ commandId, projectId, name })),

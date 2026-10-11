@@ -206,9 +206,18 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
   /* A sign-in under way, by its flow; and the token last taken, so the clipboard doesn't offer it again. */
   const flow = useRef<string | null>(null)
   const taken = useRef<string | null>(null)
-  /* Each start of a sign-in, counted: an answer to a start since stepped away from is cancelled, not shown. */
+  /* Each way taken, counted: an answer to anything asked on a way since left is dropped. */
+  const walk = useRef(0)
+  /* Each start of a sign-in, counted, and the one a sign-in was last started at: an answer to a start since stepped away from is cancelled, not shown. */
   const starts = useRef(0)
-  const starting = useRef(false)
+  const startedAt = useRef(-1)
+  /* Each check, counted: an answer to one since replaced (a new token, Check again, a step back) is dropped. */
+  const rounds = useRef(0)
+  const [round, setRound] = useState(0)
+  const nextRound = useCallback(() => setRound((rounds.current += 1)), [])
+  /* The address's lookup counted, and whether the person pressed on before it answered. */
+  const asked = useRef(0)
+  const advance = useRef(false)
 
   // The email a token goes with: as typed, else the projects' git's, once it is known.
   const email = token.email ?? guide?.email?.address ?? ''
@@ -233,7 +242,11 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
 
   /** Starts a way afresh: nothing of another way carries over. */
   const reset = useCallback(() => {
+    walk.current += 1
     starts.current += 1
+    asked.current += 1
+    advance.current = false
+    rounds.current += 1
     cancelFlow()
     setAt(0)
     setAddressState(emptyAddress)
@@ -277,19 +290,23 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
   const typed = address.typed ?? (way?.kind === 'server' ? (way.webUrl ?? '') : '')
 
   /* ---- a server's address ---- */
-  const asked = useRef(0)
   const find = useCallback(
-    (typed: string, then?: (answered: FoundServer) => void) => {
+    (typed: string) => {
       const ask = (asked.current += 1)
       setAddressState((was) => ({ ...was, finding: true }))
       client.findServer(service, typed).then(
         (answered) => {
           if (ask !== asked.current) return
           setAddressState((was) => ({ ...was, found: answered, finding: false }))
-          then?.(answered)
+          // Pressed on while it was asked: on, where it answered.
+          if (advance.current) {
+            advance.current = false
+            if (answered.product !== null) setAt((was) => was + 1)
+          }
         },
         (failure: unknown) => {
           if (ask !== asked.current) return
+          advance.current = false
           setAddressState((was) => ({
             ...was,
             finding: false,
@@ -310,6 +327,7 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
 
   const setAddress = useCallback((next: string) => {
     asked.current += 1
+    advance.current = false
     setAddressState({ typed: next, found: null, finding: false })
   }, [])
   const confirmAddress = useCallback(() => {
@@ -317,9 +335,9 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
     if (answered !== null && answered.product !== null) return setAt((was) => was + 1)
     if (typed.trim() === '')
       return setAddressState((was) => ({ ...was, found: { product: null, webUrl: '', reason: 'invalid', tokenPage: null } }))
-    find(typed, (now) => {
-      if (now.product !== null) setAt((was) => was + 1)
-    })
+    // On as soon as the server answers: this lookup, or whichever replaces it.
+    advance.current = true
+    find(typed)
   }, [address.found, find, typed])
 
   /* ---- Trello's key ---- */
@@ -345,6 +363,7 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
       if (wantsEmail && email.trim() === '') return setTokenState((was) => ({ ...was, emailError: text.emptyEmail }))
       setTokenState((was) => ({ ...was, saving: true, error: null, emailError: null }))
       setRefused(null)
+      const mine = walk.current
       client
         .connectToken({
           product: instance.product,
@@ -355,14 +374,18 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
         })
         .then(
           (made) => {
+            if (mine !== walk.current) return
             taken.current = value
             setClip(null)
             setTokenState((was) => ({ ...was, value: '', saving: false }))
             setConnection({ id: made.id, login: made.account.login })
             setCheck(null)
+            setCheckError(null)
+            nextRound()
             goTo('check')
           },
           (failure: unknown) => {
+            if (mine !== walk.current) return
             // A token the service didn't take is said on the check, where its account would be.
             if (failure instanceof ApiError && failure.reason === 'ConnectorFailed' && failure.why === 'unauthorized') {
               setTokenState((was) => ({ ...was, saving: false }))
@@ -375,7 +398,7 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
           },
         )
     },
-    [again, client, email, goTo, instance, key.value, option, wantsEmail],
+    [again, client, email, goTo, instance, key.value, nextRound, option, wantsEmail],
   )
   const submitToken = useCallback(() => send(token.value), [send, token.value])
   const takeClip = useCallback(() => {
@@ -418,27 +441,34 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
   const takeCli = useCallback(() => {
     if (way?.cli === undefined) return
     setCli({ busy: true, error: null })
-    client.connectCli(way.cli.product, way.cli.webUrl).then(
+    const mine = walk.current
+    client.connectCli(way.cli.product, way.cli.webUrl, again?.id).then(
       (made) => {
+        if (mine !== walk.current) return
         setCli({ busy: false, error: null })
         setConnection({ id: made.id, login: made.account.login })
+        setCheck(null)
+        setCheckError(null)
+        nextRound()
         goTo('check')
       },
-      (failure: unknown) => setCli({ busy: false, error: messageOf(failure) }),
+      (failure: unknown) => {
+        if (mine === walk.current) setCli({ busy: false, error: messageOf(failure) })
+      },
     )
-  }, [client, goTo, way])
+  }, [again, client, goTo, nextRound, way])
 
   /* ---- the service's own sign-in, in the browser ---- */
   const wayUrl = way?.webUrl ?? null
   const wayProduct = way?.product ?? null
   const signingStep = step === 'code' || step === 'approve'
+  const renewing = again?.id
   useEffect(() => {
-    if (!signingStep || signIn !== null || flow.current !== null || starting.current || wayProduct === null || wayUrl === null) return
-    const start = (starts.current += 1)
-    starting.current = true
-    client.startSignIn(wayProduct, wayUrl).then(
+    if (!signingStep || signIn !== null || flow.current !== null || startedAt.current === starts.current) return
+    if (wayProduct === null || wayUrl === null) return
+    const start = (startedAt.current = starts.current)
+    client.startSignIn(wayProduct, wayUrl, renewing).then(
       (started) => {
-        starting.current = false
         if (start !== starts.current) return void client.cancelSignIn(started.flowId).catch(() => undefined)
         flow.current = started.flowId
         const url = started.kind === 'device' ? started.verificationUri : started.url
@@ -450,11 +480,10 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
         window.open(url, '_blank')
       },
       (failure: unknown) => {
-        starting.current = false
         if (start === starts.current) setSignIn({ kind: 'device', url: '', code: null, expiresAt: null, ended: messageOf(failure) })
       },
     )
-  }, [client, signingStep, signIn, wayProduct, wayUrl])
+  }, [renewing, client, signingStep, signIn, wayProduct, wayUrl])
   // A sign-in is asked how it stands until it ends.
   useEffect(() => {
     if (!signingStep || signIn === null || signIn.ended !== null) return
@@ -467,6 +496,9 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
           flow.current = null
           if (state.state === 'ended') return setSignIn((was) => (was === null ? was : { ...was, ended: state.message }))
           setConnection({ id: state.connectionId, login: '' })
+          setCheck(null)
+          setCheckError(null)
+          nextRound()
           setAt((was) => was + 1)
         },
         (failure: unknown) => {
@@ -476,7 +508,7 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
       )
     }, POLL)
     return () => clearInterval(timer)
-  }, [client, signingStep, signIn])
+  }, [client, nextRound, signingStep, signIn])
   // One left by stepping away, or by closing the walk, is cancelled; so is one still starting.
   useEffect(() => {
     if (signingStep) return
@@ -485,25 +517,34 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
   }, [signingStep, cancelFlow])
   useEffect(
     () => () => {
+      walk.current += 1
       starts.current += 1
       cancelFlow()
     },
     [cancelFlow],
   )
-  const retrySignIn = useCallback(() => setSignIn(null), [])
+  const retrySignIn = useCallback(() => {
+    starts.current += 1
+    setSignIn(null)
+  }, [])
 
   /* ---- what it can do ---- */
   const connectionId = connection?.id ?? null
   const checkStep = step === 'check' || step === 'install'
   // Asked as the check opens with a connection, and again when the person asks: until the service answers.
   const checking = checkStep && connectionId !== null && check === null && checkError === null && refused === null
-  const asking = useRef<string | null>(null)
+  /* The round last asked, and whether its answer is still to come. */
+  const askedRound = useRef(-1)
+  const pending = useRef(false)
   const ask = useCallback(
     (id: string, installing: boolean) => {
-      asking.current = id
+      const mine = rounds.current
+      askedRound.current = mine
+      pending.current = true
       client.checkConnection(id).then(
         (result) => {
-          asking.current = null
+          if (mine !== rounds.current) return
+          pending.current = false
           setCheck(result)
           const account = result.lines.find((line) => line.need === 'account')?.fact
           if (account !== null && account !== undefined) setConnection((was) => (was === null ? was : { ...was, login: account }))
@@ -513,7 +554,8 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
           else if (installing) goTo('check')
         },
         (failure: unknown) => {
-          asking.current = null
+          if (mine !== rounds.current) return
+          pending.current = false
           setCheckError(messageOf(failure))
         },
       )
@@ -523,20 +565,21 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
     [cache, client, goTo],
   )
   useEffect(() => {
-    if (checking && connectionId !== null && asking.current !== connectionId) ask(connectionId, step === 'install')
-  }, [checking, connectionId, ask, step])
+    if (checking && connectionId !== null && askedRound.current !== round) ask(connectionId, step === 'install')
+  }, [checking, connectionId, ask, round, step])
   // Waiting for GitHub's app to be let in: asked again, a little apart, until it is.
   useEffect(() => {
     if (step !== 'install' || connectionId === null) return
     const timer = setInterval(() => {
-      if (asking.current === null) ask(connectionId, true)
+      if (!pending.current) ask(connectionId, true)
     }, INSTALL_POLL)
     return () => clearInterval(timer)
   }, [step, connectionId, ask])
   const checkAgain = useCallback(() => {
     setCheck(null)
     setCheckError(null)
-  }, [])
+    nextRound()
+  }, [nextRound])
 
   /* ---- stepping back, and the end ---- */
   const back = useCallback((): boolean => {
@@ -547,6 +590,9 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
       previous === undefined || previous === 'code' || previous === 'approve' || previous === 'install' || previous === 'cli'
     if (!startOver) {
       if (step === 'check') {
+        // Whatever the service is still saying of this check is for a token being replaced.
+        rounds.current += 1
+        pending.current = false
         setCheck(null)
         setRefused(null)
         setCheckError(null)

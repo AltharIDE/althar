@@ -677,8 +677,18 @@ export const handlers = Api.toLayer(
             }
           }),
         ),
-      StartSignIn: ({ commandId, product, webUrl }) =>
-        once(commandId, api(connections.startSignIn({ product, actorId: instance.personId, ...(webUrl === undefined ? {} : { webUrl }) }))),
+      StartSignIn: ({ commandId, product, webUrl, connectionId }) =>
+        once(
+          commandId,
+          api(
+            connections.startSignIn({
+              product,
+              actorId: instance.personId,
+              ...(webUrl === undefined ? {} : { webUrl }),
+              ...(connectionId === undefined ? {} : { connectionId }),
+            }),
+          ),
+        ),
       GetSignIn: ({ flowId }) => api(connections.signIn(flowId)),
       CancelSignIn: ({ flowId }) => api(connections.cancelSignIn(flowId)),
       ConnectToken: ({ commandId, product, webUrl, user, key, token, connectionId }) =>
@@ -701,8 +711,21 @@ export const handlers = Api.toLayer(
         ),
       GetConnectGuide: ({ service }) => api(connections.guide(service)),
       FindServer: ({ service, webUrl }) => api(connections.findServer(service, webUrl)),
-      ConnectCli: ({ commandId, product, webUrl }) =>
-        once(commandId, api(Effect.map(connections.connectCli({ product, webUrl, actorId: instance.personId }), connectionOf))),
+      ConnectCli: ({ commandId, product, webUrl, connectionId }) =>
+        once(
+          commandId,
+          api(
+            Effect.map(
+              connections.connectCli({
+                product,
+                webUrl,
+                actorId: instance.personId,
+                ...(connectionId === undefined ? {} : { connectionId }),
+              }),
+              connectionOf,
+            ),
+          ),
+        ),
       CheckConnection: ({ connectionId }) => api(connections.check(connectionId)),
       Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),

@@ -1509,7 +1509,12 @@ export const Api = RpcGroup.make(
   /** The connections on this Mac, and the code hosts and trackers a person can connect. */
   Rpc.make('ListConnections', { success: ConnectionList, error: ApiError }),
   /** Starts the service's own sign-in: a code to type on its page, or a page to approve in the browser. */
-  command('StartSignIn', { product: Product, webUrl: Schema.optional(Schema.String) }, SignInStart),
+  command(
+    'StartSignIn',
+    // With a connection, the sign-in is to sign that one in again, and is taken only for its account.
+    { product: Product, webUrl: Schema.optional(Schema.String), connectionId: Schema.optional(Schema.String) },
+    SignInStart,
+  ),
   /** How a sign-in stands. */
   call('GetSignIn', { flowId: Schema.String }, SignInState),
   command('CancelSignIn', { flowId: Schema.String }, Schema.Void),
@@ -1536,7 +1541,7 @@ export const Api = RpcGroup.make(
   /** Which of a service's products answers at an address, asked without signing in. */
   call('FindServer', { service: Service, webUrl: Schema.String }, FoundServer),
   /** Connects with gh's or glab's sign-in on this device: Althar keeps its own copy of the token, which agents never see. */
-  command('ConnectCli', { product: Product, webUrl: Schema.String }, ConnectionSummary),
+  command('ConnectCli', { product: Product, webUrl: Schema.String, connectionId: Schema.optional(Schema.String) }, ConnectionSummary),
   /** Asks the service what a connection can do. */
   call('CheckConnection', { connectionId: Schema.String }, ConnectionCheck),
   command('Disconnect', { connectionId: Schema.String }, Schema.Void),

@@ -26,6 +26,7 @@
 }
 .k {
   margin: 0;
+  outline: none;
   font-size: 11.5px;
   font-weight: 600;
   color: var(--t-3);

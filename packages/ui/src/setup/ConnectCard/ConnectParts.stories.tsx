@@ -129,6 +129,8 @@ export const PermissionsFolded: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'See the permission it sets' }))
     await expect(c.getByText('Read and write')).toBeInTheDocument()
+    // The press went: focus is on what it opened.
+    await expect(c.getByText('Filled in on the page')).toHaveFocus()
   },
 }
 
@@ -140,7 +142,9 @@ export const WhatItCanDo: Story = {
     const list = c.getByRole('list', { name: 'What GitHub lets Althar do' })
     await expect(list).toHaveAttribute('aria-busy', 'true')
     await expect(c.getByText('Push a task’s branch').closest('li')).toHaveTextContent('Push a task’s branch, not checked yet')
-    await expect(c.getByText('Read issues and comment on them').closest('li')).toHaveTextContent('Read issues and comment on them, not known')
+    await expect(c.getByText('Read issues and comment on them').closest('li')).toHaveTextContent(
+      'Read issues and comment on them, not known',
+    )
   },
 }
 

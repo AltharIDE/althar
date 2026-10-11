@@ -213,9 +213,11 @@ export class Connections extends Context.Service<
     /** The connections on this device, and the products a person can connect. */
     readonly list: Effect.Effect<ReadonlyArray<ConnectionInfo>, unknown>
     readonly products: ReadonlyArray<ProductInfo & { readonly browserSignIn: boolean }>
+    /** Starts the service's own sign-in; with a connection, to sign that one in again, for its own account only. */
     startSignIn(input: {
       readonly product: Product
       readonly webUrl?: string
+      readonly connectionId?: string
       readonly actorId: ActorId
     }): Effect.Effect<SignInStart, unknown>
     signIn(flowId: string): Effect.Effect<SignInState, NotFound>
@@ -234,6 +236,7 @@ export class Connections extends Context.Service<
     connectCli(input: {
       readonly product: Product
       readonly webUrl: string
+      readonly connectionId?: string
       readonly actorId: ActorId
     }): Effect.Effect<ConnectionInfo, unknown>
     /** Where the projects' code is: on the hosted services and servers already connected, as their stored remotes say. */
@@ -547,7 +550,16 @@ export class Connections extends Context.Service<
         flow.state =
           error instanceof SignInEnded
             ? { state: 'ended', reason: error.reason, message: error.reason === 'denied' ? 'Sign-in was declined.' : 'The code expired.' }
-            : { state: 'ended', reason: 'failed', message: error instanceof ConnectorFailed ? error.message : 'Sign-in didn’t finish.' }
+            : {
+                state: 'ended',
+                reason: 'failed',
+                message:
+                  error instanceof ConnectorFailed
+                    ? error.message
+                    : error instanceof OtherAccount
+                      ? `That signed in as ${error.login}, not ${error.expected}.`
+                      : 'Sign-in didn’t finish.',
+              }
       }
 
       /** Runs a sign-in to its end in the background, recording how it went. */
@@ -600,8 +612,20 @@ export class Connections extends Context.Service<
           server.listen(port, '127.0.0.1', () => resume(Effect.succeed({ code, close: Effect.sync(() => void server.close()) })))
         })
 
-      const startSignIn = (input: { readonly product: Product; readonly webUrl?: string; readonly actorId: ActorId }) =>
+      /** The account a connection signs in as, for a sign-in that signs it in again. */
+      const sameAsOf = (connectionId: string | undefined) =>
+        connectionId === undefined
+          ? Effect.succeed(undefined)
+          : Effect.map(rowOf(connectionId), (row) => ({ id: row.accountId, login: row.accountLogin }))
+
+      const startSignIn = (input: {
+        readonly product: Product
+        readonly webUrl?: string
+        readonly connectionId?: string
+        readonly actorId: ActorId
+      }) =>
         Effect.gen(function* () {
+          const sameAs = yield* sameAsOf(input.connectionId)
           const info = infoOf(input.product)
           const clientId = connectors.clientIds[input.product]
           const webUrl = info === undefined ? '' : addressOf(info, input.webUrl ?? info.hosted?.webUrl ?? '')
@@ -627,7 +651,14 @@ export class Connections extends Context.Service<
                   clientId,
                   authorization,
                 })
-                return yield* save({ product: input.product, webUrl, auth: 'device_flow', secret: token, actorId: input.actorId })
+                return yield* save({
+                  product: input.product,
+                  webUrl,
+                  auth: 'device_flow',
+                  secret: token,
+                  actorId: input.actorId,
+                  ...(sameAs === undefined ? {} : { sameAs }),
+                })
               }),
             )
             return {
@@ -660,7 +691,14 @@ export class Connections extends Context.Service<
                 code,
                 pkce,
               })
-              return yield* save({ product: input.product, webUrl, auth: 'pkce', secret: token, actorId: input.actorId })
+              return yield* save({
+                product: input.product,
+                webUrl,
+                auth: 'pkce',
+                secret: token,
+                actorId: input.actorId,
+                ...(sameAs === undefined ? {} : { sameAs }),
+              })
             }).pipe(Effect.ensuring(listening.close)),
           )
           return {
@@ -949,8 +987,14 @@ export class Connections extends Context.Service<
           } satisfies Check
         })
 
-      const connectCli = (input: { readonly product: Product; readonly webUrl: string; readonly actorId: ActorId }) =>
+      const connectCli = (input: {
+        readonly product: Product
+        readonly webUrl: string
+        readonly connectionId?: string
+        readonly actorId: ActorId
+      }) =>
         Effect.gen(function* () {
+          const sameAs = yield* sameAsOf(input.connectionId)
           const info = infoOf(input.product)
           const tool = info === undefined ? null : toolOf(info.service)
           const host = hostnameOf(input.webUrl)
@@ -962,6 +1006,7 @@ export class Connections extends Context.Service<
             auth: 'token',
             secret: { token, user: null, key: null },
             actorId: input.actorId,
+            ...(sameAs === undefined ? {} : { sameAs }),
           })
         })
 

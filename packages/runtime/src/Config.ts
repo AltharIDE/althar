@@ -184,11 +184,18 @@ export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | nu
   Effect.callback<string | null>((resume) => {
     const args = tool === 'gh' ? ['auth', 'token', '--hostname', host] : ['config', 'get', 'token', '--host', host]
     // An app opened from the Finder has a short PATH: where Homebrew puts the tools is looked in too.
-    const path = [process.env.PATH, '/opt/homebrew/bin', '/usr/local/bin'].filter((part) => part !== undefined && part !== '').join(delimiter)
-    execFile(tool, args, { timeout: 10_000, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } }, (error, stdout) => {
-      const token = stdout.trim()
-      resume(Effect.succeed(error === null && /^\S{20,400}$/.test(token) ? token : null))
-    })
+    const path = [process.env.PATH, '/opt/homebrew/bin', '/usr/local/bin']
+      .filter((part) => part !== undefined && part !== '')
+      .join(delimiter)
+    execFile(
+      tool,
+      args,
+      { timeout: 10_000, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
+      (error, stdout) => {
+        const token = stdout.trim()
+        resume(Effect.succeed(error === null && /^\S{20,400}$/.test(token) ? token : null))
+      },
+    )
   })
 
 /**

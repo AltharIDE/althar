@@ -164,17 +164,29 @@ export function ConnectPerms({ rows, fold = false, mono = false, text }: Connect
   const t = { ...connectPermsText, ...text }
   const [open, setOpen] = useState(!fold)
   const id = useId()
+  const title = useRef<HTMLParagraphElement>(null)
+  // Opened from its press, which goes: focus goes to what it opened, so the keyboard carries on there.
+  const opened = useRef(false)
+  useEffect(() => {
+    if (open && opened.current) title.current?.focus()
+  }, [open])
   if (!open)
     return (
       <div className={s.foldRow}>
-        <LinkButton aria-expanded={false} onClick={() => setOpen(true)}>
+        <LinkButton
+          aria-expanded={false}
+          onClick={() => {
+            opened.current = true
+            setOpen(true)
+          }}
+        >
           {t.see(rows.length)}
         </LinkButton>
       </div>
     )
   return (
     <div className={s.perms}>
-      <p id={id} className={s.k}>
+      <p id={id} ref={title} tabIndex={-1} className={s.k}>
         {t.title}
       </p>
       <dl aria-labelledby={id} className={cx(s.sheet, mono && s.mono)}>
