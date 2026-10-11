@@ -278,6 +278,80 @@ describe('the images waiting in a composer', () => {
     expect(outgoing).toEqual({ sent: [], pictures: [] })
   })
 
+  it('gives back what went with a message Althar didn’t take, bytes and all, before any added since', async () => {
+    const { result } = renderHook(() => useImages(asIs))
+    const bytes = png(640, 400)
+    act(() => result.current.props(claude).onAddImages([fileOf(bytes, 'shot.png')]))
+    await waitFor(() => expect(result.current.props(claude).images[0]?.src).toBeDefined())
+    act(() =>
+      result.current.restore([
+        { digest: 'd'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'kept.png', unkept: null },
+      ]),
+    )
+    let outgoing: ReturnType<typeof result.current.take> = null
+    act(() => {
+      outgoing = result.current.take(claude)
+    })
+    act(() => result.current.clear())
+    act(() =>
+      result.current.restore([
+        { digest: 'e'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'later.png', unkept: null },
+      ]),
+    )
+    const sent = outgoing
+    if (sent !== null) act(() => result.current.giveBack(sent))
+    expect(result.current.props(claude).images.map((image) => [image.name, image.src?.slice(0, 22)])).toEqual([
+      ['shot.png', 'data:image/png;base64,'],
+      ['kept.png', 'althar-picture://shot/'],
+      ['later.png', 'althar-picture://shot/'],
+    ])
+    let again: ReturnType<typeof result.current.take> = null
+    act(() => {
+      again = result.current.take(claude)
+    })
+    expect(again).toMatchObject({
+      sent: [
+        { data: Buffer.from(bytes).toString('base64'), name: 'shot.png' },
+        { digest: 'd'.repeat(64), name: 'kept.png' },
+        { digest: 'e'.repeat(64), name: 'later.png' },
+      ],
+    })
+  })
+
+  it('says a queued message’s images don’t fit beside those waiting, and holds back more than a message carries', () => {
+    const { result } = renderHook(() => useImages(asIs))
+    const picture = (n: number) => ({
+      digest: n.toString(16).padStart(64, '0'),
+      mediaType: 'image/png',
+      bytes: 68,
+      width: 1,
+      height: 1,
+      name: `${n}.png`,
+      unkept: null,
+    })
+    const nine = Array.from({ length: 9 }, (_, n) => picture(n))
+    act(() => result.current.restore(nine))
+    let fits = true
+    act(() => {
+      fits = result.current.fits([picture(9), { ...picture(10), digest: null }])
+    })
+    expect(fits).toBe(true)
+    act(() => {
+      fits = result.current.fits([picture(9), picture(10)])
+    })
+    expect(fits).toBe(false)
+    expect(result.current.props(claude).imageNote).toBe(text.noRoom)
+    // Put back anyway, as a send given back beside others: nothing is dropped, and nothing goes until some are taken off.
+    act(() => result.current.restore([picture(9), picture(10)]))
+    let outgoing: ReturnType<typeof result.current.take> | undefined
+    act(() => {
+      outgoing = result.current.take(claude)
+    })
+    expect(outgoing).toBeNull()
+    expect(result.current.props(claude).images).toHaveLength(11)
+    expect(result.current.props(claude).imageNote).toBe(text.tooMany)
+  })
+
   it('puts back the images of a message taken back from the queue, to go again by their digests', () => {
     const { result } = renderHook(() => useImages(asIs))
     act(() =>

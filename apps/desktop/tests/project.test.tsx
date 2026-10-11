@@ -361,6 +361,22 @@ describe('the Talk room', () => {
     expect(screen.getByRole('button', { name: 'View Pasted image' })).toBeTruthy()
   })
 
+  it('puts what the person said, and its images, back in its composer when Althar didn’t take it', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.send).mockRejectedValueOnce(new Error('Althar is restarting.'))
+    withServices(<Project />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 2,
+    ])
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([png], 'bug.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'bug.png' })).toBeTruthy()
+    await userEvent.type(box, 'This is the bug{Enter}')
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('This is the bug'))
+    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+    expect(screen.getByRole('img', { name: 'bug.png' })).toBeTruthy()
+  })
+
   it("says when the agent it last ran on isn't signed in, and starts it on one that is", async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
@@ -565,12 +581,14 @@ describe('what can go wrong', () => {
 })
 
 describe('a send to the coordinator that fails', () => {
-  it('takes its copy out of the conversation again, and says why', async () => {
+  it('takes its copy out of the conversation again, says why, and puts what was said back in the composer', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     vi.mocked(client.send).mockRejectedValueOnce(new ApiError({ reason: 'NotFound', message: 'The project went away.' }))
     withServices(<Project />, client)
-    await userEvent.type(await screen.findByRole('textbox', { name: 'Tell the coordinator something' }), 'Plan it{Enter}')
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    await userEvent.type(box, 'Plan it{Enter}')
     expect(await screen.findByText('The project went away.')).toBeTruthy()
-    expect(screen.queryByText('Plan it')).toBeNull()
+    expect(screen.queryByText('Plan it', { selector: 'p' })).toBeNull()
+    expect((box as HTMLTextAreaElement).value).toBe('Plan it')
   })
 })

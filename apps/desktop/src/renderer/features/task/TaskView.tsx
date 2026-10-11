@@ -398,16 +398,28 @@ export function TaskView({
   const send = (body: string, now: boolean, outgoing?: Outgoing) => {
     setDraft('')
     if (outgoing !== undefined) images.clear()
-    if (session === null) void model.send(body, chosen ?? undefined, outgoing)
-    else if (waiting !== null) {
+    if (session === null) return model.send(body, chosen ?? undefined, outgoing)
+    if (waiting !== null) {
       setHandover(null)
-      void model.handOver(waiting, body, outgoing)
-    } else void (now ? model.sendNow(body, outgoing) : model.send(body, undefined, outgoing))
+      return model.handOver(waiting, body, outgoing)
+    }
+    return now ? model.sendNow(body, outgoing) : model.send(body, undefined, outgoing)
   }
-  /** What the composer sends: with its images, unless they can't go yet, when the composer says why and keeps it all. */
+  /**
+   * What the composer sends: with its images, unless they can't go yet, when
+   * the composer says why and keeps it all. One Althar doesn't take goes
+   * back in the composer, words, images and the agent picked to take over.
+   */
   const submit = (body: string, now: boolean) => {
     const outgoing = images.take(receiver)
-    if (outgoing !== null) send(body, now, outgoing)
+    if (outgoing === null) return
+    const picked = waiting
+    void send(body, now, outgoing).then((accepted) => {
+      if (accepted) return
+      setDraft((current) => withQueued(current, body))
+      images.giveBack(outgoing)
+      if (picked !== null) setHandover(picked)
+    })
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {
@@ -419,7 +431,9 @@ export function TaskView({
   // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
   const edit = async (id: string) => {
     const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
-    if (said !== undefined && (await model.takeBack(id))) {
+    // One whose images wouldn't fit beside those waiting stays in the queue, and the composer says why.
+    if (said === undefined || !images.fits(said.pictures)) return
+    if (await model.takeBack(id)) {
       setDraft((current) => withQueued(current, said.text))
       images.restore(said.pictures)
     }
@@ -584,7 +598,7 @@ export function TaskView({
             // So is a conflict to settle, in words the lead acts on.
             onResolve={() => {
               model.dismissConflict()
-              send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
+              void send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
             }}
           />
           {connecting && snapshot.host !== null && (

@@ -54,6 +54,10 @@ export interface Images {
   readonly take: (receiver: Receiver) => Outgoing | null
   /** Takes every image off, once its message is sent. */
   readonly clear: () => void
+  /** Puts back what went with a message Althar didn't take, before any added since, bytes and all, to send again. */
+  readonly giveBack: (outgoing: Outgoing) => void
+  /** Whether a queued message's images fit beside those waiting, to take it back to edit; saying why not where they don't. */
+  readonly fits: (pictures: ReadonlyArray<Picture>) => boolean
   /** Puts back the images of a message taken back from the queue, after any already there. */
   readonly restore: (pictures: ReadonlyArray<Picture>) => void
 }
@@ -117,6 +121,11 @@ export function useImages(shrink: Shrink = shrinkInWindow): Images {
 
   const take = (receiver: Receiver): Outgoing | null => {
     if (waiting.length > 0 && receiver.takes === false) return null
+    // More than a message carries, as after one given back beside others added meanwhile: none is dropped, and the person picks.
+    if (waiting.length > MESSAGE_IMAGES.count) {
+      setNote(text.tooMany)
+      return null
+    }
     if (waiting.some((one) => one.ready === null)) {
       setNote(text.stillReading)
       return null
@@ -139,6 +148,23 @@ export function useImages(shrink: Shrink = shrinkInWindow): Images {
     clear: () => {
       setNote(null)
       setWaiting([])
+    },
+    giveBack: (outgoing) => {
+      const given = outgoing.pictures.flatMap((picture, index): ReadonlyArray<Waiting> => {
+        const sent = outgoing.sent[index]
+        if (picture.digest === null || sent === undefined) return []
+        const data = 'data' in sent ? sent.data : null
+        const src =
+          data === null ? (previewOf(picture.digest) ?? pictureUrl(picture.digest, true)) : `data:${picture.mediaType};base64,${data}`
+        return [{ id: next(), name: picture.name ?? text.pasted, ready: { data, picture: { ...picture, digest: picture.digest }, src } }]
+      })
+      setWaiting((now) => [...given, ...now])
+    },
+    fits: (pictures) => {
+      const kept = pictures.filter((picture) => picture.digest !== null).length
+      if (waiting.length + kept <= MESSAGE_IMAGES.count) return true
+      setNote(text.noRoom)
+      return false
     },
     restore: (pictures) => {
       // Kept by the store, they go again by their digests.

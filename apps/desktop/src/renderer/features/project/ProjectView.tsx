@@ -228,10 +228,17 @@ export function ProjectView({
     if (outgoing === null) return
     setDraft('')
     images.clear()
-    if (waiting !== null) {
-      setHandover(null)
-      void model.handOver(waiting, body, outgoing)
-    } else void (now ? model.sayNow(body, outgoing) : model.say(body, chosen, outgoing))
+    const picked = waiting
+    if (picked !== null) setHandover(null)
+    const said =
+      picked !== null ? model.handOver(picked, body, outgoing) : now ? model.sayNow(body, outgoing) : model.say(body, chosen, outgoing)
+    // One Althar doesn't take goes back in the composer: its words, its images, and the agent picked to take over.
+    void said.then((accepted) => {
+      if (accepted) return
+      setDraft((current) => withQueued(current, body))
+      images.giveBack(outgoing)
+      if (picked !== null) setHandover(picked)
+    })
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {
@@ -243,7 +250,9 @@ export function ProjectView({
   // A queued message goes back in the composer to be changed, and out of the queue, unless the coordinator has it already.
   const edit = async (id: string) => {
     const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
-    if (said !== undefined && (await model.takeBack(id))) {
+    // One whose images wouldn't fit beside those waiting stays in the queue, and the composer says why.
+    if (said === undefined || !images.fits(said.pictures)) return
+    if (await model.takeBack(id)) {
       setDraft((current) => withQueued(current, said.text))
       images.restore(said.pictures)
     }

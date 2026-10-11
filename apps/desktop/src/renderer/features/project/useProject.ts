@@ -56,8 +56,8 @@ export interface ProjectModel {
   readonly loadEarlier: () => Promise<void>
   /** Says something to the coordinator, which starts it on `agentId` if it isn't running. */
   /** Tells the coordinator something, with any images; a coordinator not running starts as the person chose, when they did. */
-  readonly say: (body: string, choice: Choice | null, images?: Outgoing) => Promise<void>
-  readonly sayNow: (body: string, images?: Outgoing) => Promise<void>
+  readonly say: (body: string, choice: Choice | null, images?: Outgoing) => Promise<boolean>
+  readonly sayNow: (body: string, images?: Outgoing) => Promise<boolean>
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
@@ -69,7 +69,7 @@ export interface ProjectModel {
   /** Puts the coordinator on another model or effort, or another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
   /** Hands the conversation to another agent with what the person says, and any images: its first turn, after its brief. */
-  readonly handOver: (choice: Choice, body: string, images?: Outgoing) => Promise<void>
+  readonly handOver: (choice: Choice, body: string, images?: Outgoing) => Promise<boolean>
   /** Answers the coordinator's question: what went wrong, in words, or null when it went through. */
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   readonly startPlan: (planId: string) => Promise<void>
@@ -227,7 +227,7 @@ export const useProject = (projectId: string): ProjectModel => {
   const send = (body: string, disposition: 'after_current' | 'interrupt_and_continue', images?: Outgoing) =>
     threadId === null ? Promise.resolve() : client.send({ threadId, body, disposition, ...sentWith(images) })
 
-  /** What the person says shows at once, as the window's copy until the store's arrives; gone again if it fails. */
+  /** What the person says shows at once, as the window's copy until the store's arrives; gone again if it fails. Whether Althar has it. */
   const shown = (
     text: string,
     disposition: 'after_current' | 'interrupt_and_continue',
@@ -246,14 +246,16 @@ export const useProject = (projectId: string): ProjectModel => {
       id = next.id
       return { ...current, items: next.items }
     })
+    let accepted = true
     return act(async () => {
       try {
         await action()
       } catch (failure) {
+        accepted = false
         setCoordinator((current) => ({ ...current, items: unsent(current.items, id, text) }))
         throw failure
       }
-    })
+    }).then(() => accepted)
   }
 
   return {

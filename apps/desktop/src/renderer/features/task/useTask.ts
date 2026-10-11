@@ -67,15 +67,15 @@ export interface TaskModel {
    * in the middle of its step resumes with it, on that one; an abandoned one
    * is reopened first.
    */
-  readonly send: (body: string, start?: Choice, images?: Outgoing) => Promise<void>
-  readonly sendNow: (body: string, images?: Outgoing) => Promise<void>
+  readonly send: (body: string, start?: Choice, images?: Outgoing) => Promise<boolean>
+  readonly sendNow: (body: string, images?: Outgoing) => Promise<boolean>
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
   /** Puts the lead on another model or effort, or hands the task to another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
   /** Hands the task to another agent with what the person says, and any images: the new lead's first turn, after its brief. */
-  readonly handOver: (choice: Choice, body: string, images?: Outgoing) => Promise<void>
+  readonly handOver: (choice: Choice, body: string, images?: Outgoing) => Promise<boolean>
   /** Stops the task: every agent on it, until it is resumed. */
   readonly stop: () => Promise<void>
   /** Carries the task on from the step it stopped on, with its last lead. */
@@ -285,7 +285,11 @@ export const useTask = (threadId: string): TaskModel => {
   const onTask = (action: (taskId: string) => Promise<unknown>) =>
     act(async () => (snapshot === null ? undefined : action(snapshot.task.id)))
 
-  /** What the person sends shows at once, as the window's copy until the store's arrives; gone again if the send fails. */
+  /**
+   * What the person sends shows at once, as the window's copy until the
+   * store's arrives; gone again if the send fails. Whether Althar has it, so
+   * what was sent can go back in the composer when it doesn't.
+   */
   const shown = (
     text: string,
     disposition: 'after_current' | 'interrupt_and_continue',
@@ -305,14 +309,16 @@ export const useTask = (threadId: string): TaskModel => {
       id = next.id
       return { ...current, items: next.items }
     })
+    let accepted = true
     return act(async () => {
       try {
         await action()
       } catch (failure) {
+        accepted = false
         setSnapshot((current) => ({ ...current, items: unsent(current.items, id, text) }))
         throw failure
       }
-    })
+    }).then(() => accepted)
   }
 
   return {

@@ -622,6 +622,76 @@ describe('a task', () => {
     await waitFor(() => expect(client.send).toHaveBeenLastCalledWith({ threadId: 'th1', body: 'And this', disposition: 'after_current' }))
   })
 
+  it('puts a message Althar didn’t take back in the composer, its words and its images, to send again', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    vi.mocked(client.send).mockRejectedValueOnce(
+      new ApiError({ reason: 'ImageRefused', message: 'Althar has nowhere to keep images here.' }),
+    )
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'shot.png' })).toBeTruthy()
+    await userEvent.type(box, 'Look at this{Enter}')
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('Look at this'))
+    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'View shot.png' })).toBeNull()
+    // Sent again, it goes as it was.
+    await userEvent.type(box, '{Enter}')
+    await waitFor(() =>
+      expect(client.send).toHaveBeenLastCalledWith({
+        threadId: 'th1',
+        body: 'Look at this',
+        disposition: 'after_current',
+        images: [{ data: Buffer.from(PNG).toString('base64'), name: 'shot.png' }],
+      }),
+    )
+  })
+
+  it('keeps the agent picked to take over, and what was said, when the handover doesn’t go', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    vi.mocked(client.switchAgent).mockRejectedValueOnce(new Error('Althar is restarting.'))
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.type(box, 'Over to you{Enter}')
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('Over to you'))
+    expect(screen.getByText(/gpt-5\.2-codex takes over from Claude Opus when you send\./)).toBeTruthy()
+  })
+
+  it('leaves a queued message in the queue when its images wouldn’t fit beside those waiting', async () => {
+    const picture = (n: number) => ({
+      digest: n.toString(16).padStart(64, '0'),
+      mediaType: 'image/png',
+      bytes: 68,
+      width: 1,
+      height: 1,
+      name: `${n}.png`,
+      unkept: null,
+    })
+    const queued = items.you(
+      'All of these',
+      { state: 'queued', interrupting: false },
+      [],
+      Array.from({ length: 10 }, (_, n) => picture(n)),
+    )
+    const { client } = fakeClient({ getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })) })
+    withServices(<Task />, client)
+    const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the lead' })
+    fireEvent.drop(busy, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'shot.png' })).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    expect(
+      await screen.findByText('Its images don’t fit beside these: a message can carry at most 10 images. Remove some first.'),
+    ).toBeTruthy()
+    expect(client.takeBack).not.toHaveBeenCalled()
+    expect(screen.getByRole('region', { name: 'Queued; the lead reads it next' })).toBeTruthy()
+    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+  })
+
   it('takes no images for a lead that doesn’t take them, and holds back those added before another was picked', async () => {
     const base = thread()
     const { client } = fakeClient({
@@ -699,7 +769,7 @@ describe('a task', () => {
     expect(client.setModelBlocked).toHaveBeenLastCalledWith({ agentId: 'claude-code', model: 'sonnet', blocked: true })
   })
 
-  it('shows what the person sends at once, before Althar has it, and takes it out again if the send fails', async () => {
+  it('shows what the person sends at once, before Althar has it, and takes it out of the thread again if the send fails', async () => {
     let answer: () => void = () => undefined
     let refuse: (failure: Error) => void = () => undefined
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
@@ -714,8 +784,10 @@ describe('a task', () => {
     await userEvent.type(box, 'Never mind{Enter}')
     expect(screen.getByText('Never mind')).toBeTruthy()
     refuse(new Error('Althar is restarting.'))
-    await waitFor(() => expect(screen.queryByText('Never mind')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Never mind', { selector: 'p' })).toBeNull())
     expect(await screen.findByRole('alert')).toBeTruthy()
+    // Back in the composer, to send again.
+    expect((box as HTMLTextAreaElement).value).toBe('Never mind')
   })
 
   it('takes back a queued message, or puts it back in the composer to change', async () => {

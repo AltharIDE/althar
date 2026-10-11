@@ -25,6 +25,8 @@ export const text = {
   tooLarge: (name: string) => `${name} is too large to send, even made smaller.`,
   unreadable: (name: string) => `Althar couldn’t read ${name}.`,
   tooMany: `A message can carry at most ${MESSAGE_IMAGES.count} images.`,
+  /** A queued message taken back to edit whose images wouldn't fit beside those waiting: it stays in the queue. */
+  noRoom: `Its images don’t fit beside these: a message can carry at most ${MESSAGE_IMAGES.count} images. Remove some first.`,
   /** Images dropped for an agent that says it doesn't take them. */
   refused: (agent: string) => `${agent} doesn’t take images, so they can’t be sent to it.`,
   /** Images waiting for an agent picked since, which doesn't take them. */
