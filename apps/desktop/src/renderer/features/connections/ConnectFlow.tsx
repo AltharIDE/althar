@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import type { AccessLine, AccessReason, ConnectPlace, Product, Service } from '@althar/contracts'
+import type { AccessLine, AccessReason, ConnectionCheck, ConnectPlace, Product, Service } from '@althar/contracts'
 import {
   Button,
   CanState,
@@ -39,7 +39,7 @@ import { hostOf, hostsCode, ownerOf, placesAt, serviceBrand, serviceName, type S
 
 /** A list in words: a, a and b, a, b and c. */
 const and = (items: ReadonlyArray<string>): string =>
-  items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1) ?? ''}`
+  items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.slice(-1).join('')}`
 
 /** The repositories of some places by their paths; on GitHub, whose token is made for one owner, by name where they share it. */
 const repositoriesIn = (places: ReadonlyArray<ConnectPlace>): string => {
@@ -55,10 +55,7 @@ const changes = (product: Product) => (product === 'gitlab' ? 'merge requests' :
 
 const capital = (words: string) => words.charAt(0).toUpperCase() + words.slice(1)
 
-const longDate = (iso: string) => {
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
-}
+const longDate = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 
 const minutesLeft = (iso: string | null, now = Date.now()) =>
   iso === null ? null : Math.max(0, Math.round((new Date(iso).getTime() - now) / 60_000))
@@ -75,7 +72,6 @@ export const text = {
   trackersFor: 'Issues become tasks, and tasks move their issues',
   kept: (service: string, host: boolean) =>
     `Kept encrypted on ${device.this}. Agents never get it; they ${host ? `reach ${service}` : 'read issues'} through Althar.`,
-  keptTrello: `The key and token are kept encrypted on ${device.this}. Agents never get them.`,
   stopped: 'Its token stopped working. Tasks can’t reach it until it’s back.',
   anotherWay: 'Another way',
   ownServer: 'On a company’s own server',
@@ -93,8 +89,6 @@ export const text = {
   tokenPage: (service: string) => `On ${service}’s token page, opened filled in`,
   atlassianToken: 'An Atlassian API token',
   atlassianLine: 'Made on your Atlassian account, with your account’s email',
-  newAtlassianToken: 'A new Atlassian API token',
-  madeOnAtlassian: 'Made on your Atlassian account',
   newToken: 'A new token',
   madeOn: (host: string) => `Made on ${host}`,
   linearKey: 'A personal API key',
@@ -322,9 +316,6 @@ export const text = {
   done: 'Done',
 }
 
-/** The tool a way's sign-in is: gh or glab. */
-const toolOf = (way: Way | null) => way?.cli?.tool ?? (way?.product === 'gitlab' ? 'glab' : 'gh')
-
 /** What the header beside the card says: the service, and the projects it is for, or the connection's site. */
 export const connectHead = (model: ConnectModel): { readonly title: string; readonly aside?: string } => {
   const title = serviceName(model.service)
@@ -364,10 +355,8 @@ const wayOption = (way: Way, model: ConnectModel): ConnectWayOption => {
       return { id: way.id, title: text.continueWith(service), line, brand: serviceBrand(model.service) }
     }
     case 'cli': {
-      const cli = way.cli
-      const hosted = way.webUrl === 'https://github.com'
-      const line = cli === undefined ? '' : hosted ? text.cliHere(cli.account) : text.cliAt(host, cli.account)
-      return { id: way.id, title: text.useCli(toolOf(way)), line, icon: 'terminal' }
+      const line = way.webUrl === 'https://github.com' ? text.cliHere(way.cli.account) : text.cliAt(host, way.cli.account)
+      return { id: way.id, title: text.useCli(way.cli.tool), line, icon: 'terminal' }
     }
     case 'token':
       return { id: way.id, ...tokenWords(way, model), icon: 'lock' }
@@ -380,44 +369,41 @@ const wayOption = (way: Way, model: ConnectModel): ConnectWayOption => {
   }
 }
 
-/** A token way's words, by its product, and whether it signs a connection in again. */
+/**
+ * A token way's words, by its product. Signing a connection in again, a
+ * token is listed only beside gh's or glab's sign-in, so for GitHub or
+ * GitLab; the ways in a walk in are each hosted service's token.
+ */
 const tokenWords = (way: Way, model: ConnectModel): { readonly title: string; readonly line: string } => {
-  const again = model.again !== null
-  const host = way.webUrl === null ? '' : hostOf(way.webUrl)
+  const host = hostOf(way.webUrl ?? '')
+  if (model.again !== null) return { title: text.newToken, line: text.madeOn(host) }
   switch (way.product) {
     case 'bitbucket_cloud':
-      return { title: again ? text.newAtlassianToken : text.atlassianToken, line: again ? text.madeOnAtlassian : text.atlassianLine }
-    case 'jira_cloud':
-      return { title: again ? text.newAtlassianToken : text.atlassianToken, line: again ? text.madeOnAtlassian : text.atlassianLine }
+      return { title: text.atlassianToken, line: text.atlassianLine }
     case 'linear':
       return { title: text.linearKey, line: text.linearLine }
-    case 'github':
-      return again ? { title: text.newToken, line: text.madeOn(host) } : { title: text.makeToken, line: text.tokenPage('GitHub') }
-    case 'gitlab':
-      return again ? { title: text.newToken, line: text.madeOn(host) } : { title: text.makeToken, line: text.tokenPage(host) }
     default:
-      return { title: text.newToken, line: text.madeOn(host) }
+      return { title: text.makeToken, line: text.tokenPage(way.product === 'github' ? 'GitHub' : host) }
   }
 }
 
 /** A step's heading. */
-const stepTitle = (model: ConnectModel, step: StepKind): string => {
+const stepTitle = (model: ConnectModel, step: StepKind, way: Way): string => {
   const service = serviceName(model.service)
-  const way = model.way
-  const product = model.instance?.product ?? way?.product ?? 'github'
-  const host = model.instance === null ? (way?.webUrl === null || way === null ? '' : hostOf(way.webUrl)) : hostOf(model.instance.webUrl)
+  const product = model.instance?.product ?? way.product
+  const host = hostOf(model.instance?.webUrl ?? way.webUrl ?? '')
   const places = model.guide?.places ?? []
   switch (step) {
     case 'code':
       return text.typeCode(service)
     case 'install':
-      return text.letIn(ownerOf(placesAt(places, product, way?.webUrl ?? '')) ?? service)
+      return text.letIn(ownerOf(placesAt(places, product, way.webUrl ?? '')) ?? service)
     case 'approve':
       return text.approveOn(service)
     case 'cli':
-      return text.useCli(toolOf(way))
+      return text.useCli(way.kind === 'cli' ? way.cli.tool : 'gh')
     case 'server':
-      return way?.place === undefined ? text.ownService(service) : text.projectsService(way.place.project, service)
+      return way.place === undefined ? text.ownService(service) : text.projectsService(way.place.project, service)
     case 'site':
       return text.siteTitle
     case 'key':
@@ -446,38 +432,24 @@ const stepTitle = (model: ConnectModel, step: StepKind): string => {
             ? text.pasteToken
             : text.pasteNewToken
     case 'check':
-      return checkTitle(model)
+      return checkTitle(model, product)
   }
 }
 
-/** The lines a product's check has, in its order, before the service has said anything. */
-const needsOf = (product: Product, hosted: boolean, reaches: boolean): ReadonlyArray<AccessLine['need']> => {
-  switch (product) {
-    case 'github':
-      return ['account', ...(reaches ? (['reach'] as const) : []), 'push', 'changes', 'checks', 'issues']
-    case 'gitlab':
-      return [
-        ...(hosted ? [] : (['server'] as const)),
-        'account',
-        ...(reaches ? (['reach'] as const) : []),
-        'push',
-        'changes',
-        'checks',
-        'issues',
-      ]
-    case 'bitbucket_cloud':
-      return ['account', ...(reaches ? (['reach'] as const) : []), 'push', 'changes', 'checks']
-    case 'bitbucket_dc':
-      return ['server', 'account', ...(reaches ? (['reach'] as const) : []), 'push', 'changes']
-    case 'linear':
-      return ['account', 'read', 'comment', 'move']
-    case 'jira_cloud':
-    case 'jira_dc':
-      return ['site', 'account', 'read', 'comment', 'move']
-    case 'trello':
-      return ['key', 'account', 'read', 'comment', 'move']
-  }
+const NEEDS: Readonly<Record<Product, ReadonlyArray<AccessLine['need']>>> = {
+  github: ['account', 'reach', 'push', 'changes', 'checks', 'issues'],
+  gitlab: ['server', 'account', 'reach', 'push', 'changes', 'checks', 'issues'],
+  bitbucket_cloud: ['account', 'reach', 'push', 'changes', 'checks'],
+  bitbucket_dc: ['server', 'account', 'reach', 'push', 'changes'],
+  linear: ['account', 'read', 'comment', 'move'],
+  jira_cloud: ['site', 'account', 'read', 'comment', 'move'],
+  jira_dc: ['site', 'account', 'read', 'comment', 'move'],
+  trello: ['key', 'account', 'read', 'comment', 'move'],
 }
+
+/** The lines a product's check has, in its order, before the service has said anything: no server on a hosted service, no reach where no repositories are known. */
+const needsOf = (product: Product, hosted: boolean, reaches: boolean): ReadonlyArray<AccessLine['need']> =>
+  NEEDS[product].filter((need) => (need !== 'server' || !hosted) && (need !== 'reach' || reaches))
 
 /** A line of the check, as the walk says it. */
 const lineText = (need: AccessLine['need'], product: Product, model: ConnectModel, repositories: string): string => {
@@ -553,15 +525,14 @@ const stateOf = (state: AccessLine['state']): CanState => {
 
 /** What was found, at a line's end, as the walk says it. */
 const factOf = (line: AccessLine, product: Product): string | undefined => {
-  if (line.count !== null && (line.need === 'read' || line.need === 'reach')) return text.counted(product, line.count)
+  if (line.count !== null) return text.counted(product, line.count)
   if (line.fact === null) return undefined
   // Bitbucket's levels are lower case, as its API says them.
   return line.need === 'reach' && ['read', 'write', 'admin'].includes(line.fact) ? capital(line.fact) : line.fact
 }
 
 /** The check's lines, as they stand: being asked, as the service said, or stopped at a token it didn't take. */
-const checkLines = (model: ConnectModel): ReadonlyArray<ConnectCan> => {
-  const product = model.instance?.product ?? model.way?.product ?? 'github'
+const checkLines = (model: ConnectModel, product: Product): ReadonlyArray<ConnectCan> => {
   const service = serviceName(model.service)
   const webUrl = model.instance?.webUrl ?? ''
   const places = placesAt(model.guide?.places ?? [], product, webUrl)
@@ -598,9 +569,8 @@ const checkLines = (model: ConnectModel): ReadonlyArray<ConnectCan> => {
 /** The first line the connection can't do, if any. */
 const firstNo = (model: ConnectModel) => model.check?.lines.find((line) => line.state === 'no')
 
-const checkTitle = (model: ConnectModel): string => {
+const checkTitle = (model: ConnectModel, product: Product): string => {
   const service = serviceName(model.service)
-  const product = model.instance?.product ?? model.way?.product ?? 'github'
   if (model.refused !== null) return model.again === null ? text.didntTake(service) : text.didntWork
   if (model.checkError !== null) return text.didntAnswer(service)
   if (model.check === null) return text.checking
@@ -608,7 +578,8 @@ const checkTitle = (model: ConnectModel): string => {
   if (no === undefined) {
     if (model.again !== null && model.service === 'jira') return text.isBack(service)
     const account = model.check.lines.find((line) => line.need === 'account')?.fact ?? model.connection?.login ?? ''
-    if (product === 'linear' && account.includes(' · ')) return text.connectedTo(account.split(' · ').at(-1) ?? account)
+    // Linear's account is the person and the workspace: who you · Northwind.
+    if (product === 'linear' && account.includes(' · ')) return text.connectedTo(account.slice(account.lastIndexOf(' · ') + 3))
     return text.connectedAs(account)
   }
   const reason = no.reason
@@ -669,7 +640,7 @@ export function ConnectFlow({ model, compact = false }: ConnectFlowProps) {
         brand={brand}
         title={text.connect(service)}
         line={forLine(model.service, places)}
-        foot={model.service === 'trello' ? text.keptTrello : text.kept(service, hostsCode(model.service))}
+        foot={text.kept(service, hostsCode(model.service))}
       >
         <ConnectWays label={text.ways(service)} ways={model.ways.map((way) => wayOption(way, model))} onChoose={model.choose} />
         {model.serverWay !== null && (
@@ -690,7 +661,7 @@ export function ConnectFlow({ model, compact = false }: ConnectFlowProps) {
   return (
     <ConnectCard
       brand={brand}
-      title={stepTitle(model, step)}
+      title={stepTitle(model, step, way)}
       pager={{ steps: way.steps.length, at: model.at }}
       done={done}
       {...(line === undefined ? {} : { line })}
@@ -821,8 +792,8 @@ function StepBody({ model, step, way, compact, many }: { model: ConnectModel; st
       )
     }
     case 'cli': {
+      if (way.kind !== 'cli') return null
       const cli = way.cli
-      if (cli === undefined) return null
       const tool = cli.tool
       return (
         <>
@@ -853,7 +824,7 @@ function StepBody({ model, step, way, compact, many }: { model: ConnectModel; st
       const said =
         answered === null ? null : answered.product !== null ? (
           <ConnectFound>
-            {text.answers(productWords(answered.product), hostOf(answered.webUrl))}
+            {text.answers(ANSWERS_AS[answered.product], hostOf(answered.webUrl))}
             {place !== undefined && place.remote !== null && hostOf(place.webUrl) === hostOf(answered.webUrl)
               ? text.fromRemote(place.project, place.remote)
               : ''}
@@ -952,26 +923,16 @@ function StepBody({ model, step, way, compact, many }: { model: ConnectModel; st
   }
 }
 
-/** A product as it answers at an address: GitLab, Jira Cloud. */
-const productWords = (product: Product): string => {
-  switch (product) {
-    case 'jira_cloud':
-      return 'Jira Cloud'
-    case 'jira_dc':
-      return 'Jira Data Center'
-    case 'bitbucket_dc':
-      return 'Bitbucket Data Center'
-    case 'bitbucket_cloud':
-      return 'Bitbucket'
-    case 'github':
-      return 'GitHub Enterprise Server'
-    case 'gitlab':
-      return 'GitLab'
-    case 'linear':
-      return 'Linear'
-    case 'trello':
-      return 'Trello'
-  }
+/** A product as it answers at an address: a company's own server, or a Jira site. */
+const ANSWERS_AS: Readonly<Record<Product, string>> = {
+  github: 'GitHub Enterprise Server',
+  gitlab: 'GitLab',
+  bitbucket_cloud: 'Bitbucket',
+  bitbucket_dc: 'Bitbucket Data Center',
+  linear: 'Linear',
+  jira_cloud: 'Jira Cloud',
+  jira_dc: 'Jira Data Center',
+  trello: 'Trello',
 }
 
 const GITHUB_PERMISSIONS = [
@@ -1141,7 +1102,7 @@ function CheckBody({
   owner: string | undefined
   page: string | null
 }) {
-  const lines = checkLines(model)
+  const lines = checkLines(model, product)
   const list = <ConnectChecks label={text.canDo(service)} items={lines} />
   if (model.refused !== null)
     return (
@@ -1180,7 +1141,7 @@ function CheckBody({
     const expiry = model.check.renews
       ? text.expires.renews(service)
       : model.way?.kind === 'cli'
-        ? text.expires.cli(toolOf(model.way))
+        ? text.expires.cli(model.way.cli.tool)
         : model.check.expiresAt !== null
           ? text.expires.on(longDate(model.check.expiresAt))
           : product === 'trello'
@@ -1199,7 +1160,7 @@ function CheckBody({
   return (
     <>
       {list}
-      <Fix model={model} line={no} product={product} service={service} page={page} />
+      <Fix model={model} check={model.check} line={no} product={product} service={service} page={page} />
     </>
   )
 }
@@ -1207,27 +1168,28 @@ function CheckBody({
 /** How to put right the first thing a connection can't do: the words, and the presses. */
 function Fix({
   model,
+  check,
   line,
   product,
   service,
   page,
 }: {
   model: ConnectModel
+  check: ConnectionCheck
   line: AccessLine
   product: Product
   service: string
   page: string | null
 }) {
   const reason = line.reason
-  const settings = model.check?.settings ?? null
+  const settings = check.settings
   const checkAgain = <LinkButton onClick={model.checkAgain}>{text.fix.checkAgain}</LinkButton>
   const asItIs = <LinkButton onClick={model.done}>{text.fix.asItIs}</LinkButton>
-  const change = (url: string | null) =>
-    url === null ? null : (
-      <Button trailingIcon="external" onClick={() => model.open(url)}>
-        {text.fix.changeOn(service)}
-      </Button>
-    )
+  const change = (url: string) => (
+    <Button trailingIcon="external" onClick={() => model.open(url)}>
+      {text.fix.changeOn(service)}
+    </Button>
+  )
   const remake =
     page === null ? null : (
       <Button trailingIcon="external" onClick={() => model.openAndPaste(page)}>

@@ -148,6 +148,10 @@ describe('a connection', () => {
         sent.filter((request) => request.body.grant_type === 'refresh_token'),
         1,
       )
+      // Its check: a sign-in that renews itself, and when the token it has now runs out.
+      const check = yield* connections.check(connection?.id ?? '')
+      assert.isTrue(check.renews)
+      assert.isAbove(Date.parse(check.expiresAt ?? ''), Date.now())
       // A token gone from the keychain is no token: the connection needs signing in again, and stays so.
       yield* secrets.remove(connection?.id ?? '')
       const missing = yield* Effect.flip(host?.account ?? Effect.void)
@@ -168,6 +172,36 @@ describe('a connection', () => {
       yield* connections.cancelSignIn(started.flowId)
       assert.strictEqual((yield* Effect.flip(connections.signIn(started.flowId)))._tag, 'NotFound')
       assert.lengthOf(yield* connections.list, 0)
+    }).pipe(Effect.provide(withGitHub(fetch)))
+  })
+
+  it.live('ends a sign-in whose code ran out, that GitHub failed, or that signed in as someone else than the connection', () => {
+    let answer: Record<string, unknown> = { error: 'expired_token' }
+    const { fetch } = stub([device, ['POST', `${GITHUB}/login/oauth/access_token`, () => ({ json: answer })], user])
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const ending = (connectionId?: string) =>
+        Effect.gen(function* () {
+          const started = yield* connections.startSignIn({
+            product: 'github',
+            actorId: instance.personId,
+            ...(connectionId === undefined ? {} : { connectionId }),
+          })
+          const [ended] = yield* until(flowEnded(started.flowId), (states) => states[0]?.state !== 'waiting')
+          return ended
+        })
+      assert.deepStrictEqual(yield* ending(), { state: 'ended', reason: 'expired', message: 'The code expired.' })
+      answer = { error: 'unsupported_grant_type', error_description: 'GitHub said no.' }
+      assert.deepInclude(yield* ending(), { state: 'ended', reason: 'failed' })
+
+      // Signing a connection of someone else's in again: GitHub signs in as you, so it isn't theirs.
+      answer = { access_token: 'ghu_you', refresh_token: 'ghr_you', expires_in: 28_800 }
+      const made = yield* connections.connectToken({ product: 'github', token: 'ghp_old', actorId: instance.personId })
+      yield* sql`UPDATE connections SET account_id = 'other', account_login = 'someone' WHERE id = ${made.id}`
+      assert.deepStrictEqual(yield* ending(made.id), { state: 'ended', reason: 'failed', message: 'That signed in as you, not someone.' })
+      assert.strictEqual((yield* connections.list)[0]?.account.login, 'someone')
     }).pipe(Effect.provide(withGitHub(fetch)))
   })
 

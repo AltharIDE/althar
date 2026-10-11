@@ -30,35 +30,29 @@ export const hostsCode = (service: Service): boolean => SERVICE[service].host
 export const serviceOf = (products: ReadonlyArray<ProductOption>, product: Product): Service | undefined =>
   products.find((option) => option.product === product)?.service
 
-/** The service a product is an edition of: Bitbucket for Bitbucket Cloud and Data Center alike. */
-export const serviceOfProduct = (product: Product): Service => {
-  switch (product) {
-    case 'github':
-      return 'github'
-    case 'gitlab':
-      return 'gitlab'
-    case 'bitbucket_cloud':
-    case 'bitbucket_dc':
-      return 'bitbucket'
-    case 'linear':
-      return 'linear'
-    case 'jira_cloud':
-    case 'jira_dc':
-      return 'jira'
-    case 'trello':
-      return 'trello'
-  }
+const SERVICE_OF: Readonly<Record<Product, Service>> = {
+  github: 'github',
+  gitlab: 'gitlab',
+  bitbucket_cloud: 'bitbucket',
+  bitbucket_dc: 'bitbucket',
+  linear: 'linear',
+  jira_cloud: 'jira',
+  jira_dc: 'jira',
+  trello: 'trello',
 }
+
+/** The service a product is an edition of: Bitbucket for Bitbucket Cloud and Data Center alike. */
+export const serviceOfProduct = (product: Product): Service => SERVICE_OF[product]
 
 export type WayKind = 'browser' | 'cli' | 'token' | 'server' | 'site' | 'key'
 
 /** A step of a way: what it asks, on a screen of its own. */
 export type StepKind = 'code' | 'install' | 'approve' | 'cli' | 'server' | 'site' | 'key' | 'make' | 'allow' | 'paste' | 'check'
 
-export interface Way {
+interface WayOf<K extends WayKind> {
   /** Unique among a service's ways. */
   readonly id: string
-  readonly kind: WayKind
+  readonly kind: K
   /** The product it connects. A server's is the service's own-server product until the server answers as another. */
   readonly product: Product
   /** Where: the hosted service, a server a remote names, or null until the person types one. */
@@ -66,9 +60,10 @@ export interface Way {
   readonly steps: ReadonlyArray<StepKind>
   /** The project's remote that named its server. */
   readonly place?: ConnectPlace
-  /** The tool signed in, for gh's or glab's way. */
-  readonly cli?: CliSignIn
 }
+
+/** A way in; gh's or glab's with the tool's sign-in it takes. */
+export type Way = WayOf<Exclude<WayKind, 'cli'>> | (WayOf<'cli'> & { readonly cli: CliSignIn })
 
 /** An address's host: git.halyard.dev. */
 export const hostOf = (url: string): string => {
@@ -111,32 +106,14 @@ export const waysOf = (
   if (service === 'gitlab') for (const place of servers) ways.push(serverWay(place.product, place, serverSteps(place.product)))
   if (hosted?.browserSignIn === true && hosted.hostedUrl !== null) ways.push(browserWay(hosted, hosted.hostedUrl))
   for (const cli of clis) if (cli.webUrl === hosted?.hostedUrl) ways.push(cliWay(cli))
-  if (hosted !== undefined && hosted.hostedUrl !== null) {
-    switch (service) {
-      case 'jira':
-        break
-      case 'trello':
-        ways.push({ id: 'key', kind: 'key', product: hosted.product, webUrl: hosted.hostedUrl, steps: ['key', 'allow', 'paste', 'check'] })
-        break
-      default:
-        ways.push({
-          id: `token ${hosted.product}`,
-          kind: 'token',
-          product: hosted.product,
-          webUrl: hosted.hostedUrl,
-          steps: tokenSteps(hosted.product, products),
-        })
-    }
-  }
+  // A token made on the hosted service's page; Trello's for a Power-Up key of the person's.
+  if (hosted !== undefined && hosted.hostedUrl !== null) ways.push(tokenWay(hosted.product, hosted.hostedUrl, products))
   // gh or glab signed in to a server a remote names is a way to that server too.
   for (const cli of clis) if (cli.webUrl !== hosted?.hostedUrl) ways.push(cliWay(cli))
   if (service !== 'gitlab') for (const place of servers) ways.push(serverWay(place.product, place, serverSteps(place.product)))
-  // Jira is reached by its site, Cloud or Data Center alike, which says which it is.
-  if (service === 'jira' && mine.length > 0) {
-    const cloud = mine.find((option) => option.product === 'jira_cloud') ?? mine[0]
-    if (cloud !== undefined)
-      ways.push({ id: 'site', kind: 'site', product: cloud.product, webUrl: null, steps: ['site', 'make', 'paste', 'check'] })
-  }
+  // Jira is reached by its site, Cloud or Data Center alike, which says which it is once it answers.
+  if (service === 'jira' && mine.length > 0)
+    ways.push({ id: 'site', kind: 'site', product: 'jira_cloud', webUrl: null, steps: ['site', 'make', 'paste', 'check'] })
   const server =
     own === undefined || service === 'jira'
       ? null

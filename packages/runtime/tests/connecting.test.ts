@@ -1,6 +1,9 @@
 import { execFileSync } from 'node:child_process'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-import { type Credential, type ProductInfo, products } from '@althar/connectors'
+import { type Credential, type Fetch, type ProductInfo, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
@@ -260,6 +263,176 @@ describe('connecting', () => {
     }).pipe(Effect.provide(layer))
   })
 
+  it.live('asks a server a remote names what it is, once a launch, and takes glab’s sign-in there', () => {
+    const gitlab = makeFakeService({ product: 'gitlab' })
+    gitlab.addRepository(['team', 'api'])
+    const halyard = 'https://git.halyard.test'
+    const asked: Array<string> = []
+    const fetch: Fetch = async (url) => {
+      asked.push(url)
+      if (url === `${halyard}/api/v4/version`) return new Response(JSON.stringify({ version: '17.4.0', revision: 'abc' }))
+      if (url === 'https://git.tessera.test/rest/api/1.0/application-properties')
+        return new Response(JSON.stringify({ displayName: 'Bitbucket', version: '9.4.0' }))
+      throw new Error('No network in tests')
+    }
+    // glab is signed in to the server, and to gitlab.com with a token gitlab.com no longer takes.
+    let signedIn = true
+    const glab: Readonly<Record<string, string>> = { 'git.halyard.test': 'glpat-from-glab', 'gitlab.com': 'glpat-revoked' }
+    const access: typeof gitlab.access = (input) =>
+      input.credential.kind === 'bearer' && input.credential.token === 'glpat-revoked'
+        ? Effect.succeed({ account: null, lines: [], expiresAt: null, scopes: null })
+        : Effect.map(gitlab.access(input), (report) => ({ ...report, scopes: ['api'] }))
+    const layer = runtime(
+      ':memory:',
+      {},
+      {
+        connectors: connectorsOf([{ ...products.gitlab, make: () => ({ host: gitlab, tracker: gitlab }), access }], {
+          fetch,
+          cliToken: (tool, host) => Effect.succeed(tool === 'glab' && signedIn ? (glab[host] ?? null) : null),
+        }),
+      },
+    )
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const projects = yield* Projects
+      const { personId } = yield* Instance
+      const working = repository()
+      execFileSync('git', ['remote', 'add', 'origin', `${halyard}/team/api.git`], { cwd: working })
+      execFileSync('git', ['remote', 'add', 'backup', 'https://nowhere.test/team/api.git'], { cwd: working })
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+
+      // Nothing known there: each host is asked whether it is a GitLab, and the one that is, is where the code is.
+      const guide = yield* connections.guide('gitlab')
+      assert.deepStrictEqual(guide.places, [
+        { product: 'gitlab', webUrl: halyard, project: project.name, remote: 'origin', repositories: ['team/api'] },
+      ])
+      // glab's sign-in where it still works, with the scopes its token has.
+      assert.deepStrictEqual(guide.clis, [{ product: 'gitlab', webUrl: halyard, tool: 'glab', account: 'you', scopes: ['api'] }])
+      assert.deepStrictEqual(
+        guide.tokenPages.map((page) => page.webUrl),
+        ['https://gitlab.com', halyard],
+      )
+      assert.include(guide.tokenPages[1]?.url, `${halyard}/-/user_settings/personal_access_tokens?`)
+      // Asked once a launch: connecting again, and the list, know it without asking.
+      const before = asked.length
+      yield* connections.guide('gitlab')
+      assert.deepStrictEqual(
+        (yield* connections.places).map((place) => place.webUrl),
+        [halyard],
+      )
+      assert.strictEqual(asked.length, before)
+
+      // glab's sign-in, to the server found; once glab is signed out there, there is none to take.
+      const made = yield* connections.connectCli({ product: 'gitlab', webUrl: halyard, actorId: personId })
+      assert.strictEqual(made.webUrl, halyard)
+      signedIn = false
+      assert.instanceOf(yield* Effect.flip(connections.connectCli({ product: 'gitlab', webUrl: halyard, actorId: personId })), CliSignedOut)
+
+      // An address typed: what answers there, with its token page; and where nothing does.
+      const found = yield* connections.findServer('gitlab', 'git.halyard.test')
+      assert.deepInclude(found, { product: 'gitlab', webUrl: halyard, reason: null })
+      assert.include(found.tokenPage, `${halyard}/-/user_settings/personal_access_tokens?`)
+      assert.deepStrictEqual(yield* connections.findServer('gitlab', 'nowhere.test'), {
+        product: null,
+        webUrl: 'https://nowhere.test',
+        reason: 'unreachable',
+        tokenPage: null,
+      })
+      // A product Althar can't connect here is something else, as far as connecting goes.
+      assert.deepStrictEqual(yield* connections.findServer('bitbucket', 'git.tessera.test'), {
+        product: null,
+        webUrl: 'https://git.tessera.test',
+        reason: 'other',
+        tokenPage: null,
+      })
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.live('takes the email the projects commit with for a token that goes with one; and says when the account isn’t there', () => {
+    const jira = makeFakeService({ product: 'jira_cloud', account: { id: 'u1', login: 'you@northwind.io', name: 'You' } })
+    const layer = runtime(
+      ':memory:',
+      {},
+      { connectors: connectorsOf([{ ...products.jira_cloud, make: () => ({ tracker: jira }), access: null }]) },
+    )
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const projects = yield* Projects
+      const { personId } = yield* Instance
+      const working = repository()
+      execFileSync('git', ['config', 'user.email', 'you@northwind.io'], { cwd: working })
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const guide = yield* connections.guide('jira')
+      assert.deepStrictEqual(guide, {
+        service: 'jira',
+        places: [],
+        clis: [],
+        email: { address: 'you@northwind.io', project: project.name },
+        tokenPages: [],
+      })
+
+      const made = yield* connections.connectToken({
+        product: 'jira_cloud',
+        webUrl: 'https://northwind.atlassian.net/jira/your-work',
+        user: 'you@northwind.io',
+        token: 'ATATT1',
+        actorId: personId,
+      })
+      assert.strictEqual(made.webUrl, 'https://northwind.atlassian.net')
+      // Without a check of its own, Jira here says who it signs in as; and, once it won't, that it doesn't.
+      jira.failNext('account', 'unauthorized')
+      const check = yield* connections.check(made.id)
+      assert.deepStrictEqual(check.lines, [{ need: 'account', state: 'no', fact: null, count: null, reason: { kind: 'refused' } }])
+      assert.strictEqual(check.settings, 'https://id.atlassian.com/manage-profile/security/api-tokens')
+      // Signed in again with the email given anew.
+      const again = yield* connections.connectToken({
+        product: 'jira_cloud',
+        user: ' you@northwind.io ',
+        token: 'ATATT2',
+        connectionId: made.id,
+        actorId: personId,
+      })
+      assert.strictEqual(again.id, made.id)
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.live('takes the email from git’s own config where no project’s says one, and from the places the code is', () => {
+    const bitbucket = makeFakeService({ product: 'bitbucket_cloud' })
+    const layer = runtime(
+      ':memory:',
+      {},
+      { connectors: connectorsOf([{ ...products.bitbucket_cloud, make: () => ({ host: bitbucket }), access: null }]) },
+    )
+    const global = join(mkdtempSync(join(tmpdir(), 'althar-gitconfig-')), 'config')
+    const was = process.env.GIT_CONFIG_GLOBAL
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const projects = yield* Projects
+      process.env.GIT_CONFIG_GLOBAL = global
+      writeFileSync(global, '[user]\n\temail = me@home.test\n')
+      assert.deepStrictEqual((yield* connections.guide('bitbucket')).email, { address: 'me@home.test', project: null })
+      writeFileSync(global, '[user]\n\tname = Me\n')
+      assert.isNull((yield* connections.guide('bitbucket')).email)
+
+      // A repository on Bitbucket that commits as someone of its own.
+      const working = repository()
+      execFileSync('git', ['remote', 'add', 'origin', 'https://bitbucket.org/northwind/api.git'], { cwd: working })
+      execFileSync('git', ['config', 'user.email', 'you@northwind.io'], { cwd: working })
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const guide = yield* connections.guide('bitbucket')
+      assert.deepStrictEqual(guide.email, { address: 'you@northwind.io', project: project.name })
+      assert.deepStrictEqual(guide.places[0]?.repositories, ['northwind/api'])
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (was === undefined) delete process.env.GIT_CONFIG_GLOBAL
+          else process.env.GIT_CONFIG_GLOBAL = was
+        }),
+      ),
+      Effect.provide(layer),
+    )
+  })
+
   it.live('reads where the code is past a remote it can’t read', () => {
     const github = makeFakeService()
     const layer = runtime(':memory:', {}, { connectors: fakeConnectors({ github }) })
@@ -283,14 +456,17 @@ describe('connecting', () => {
 const connectorsWith = (product: ProductInfo) => connectorsOf([product])
 
 /** The runtime's connectors with products of a test's own, and no network. */
-const connectorsOf = (given: ReadonlyArray<ProductInfo>) =>
+const connectorsOf = (
+  given: ReadonlyArray<ProductInfo>,
+  more: { readonly fetch?: Fetch; readonly cliToken?: (tool: 'gh' | 'glab', host: string) => Effect.Effect<string | null> } = {},
+) =>
   Layer.succeed(
     Connectors,
     Connectors.of({
       products: given,
-      fetch: () => Promise.reject(new Error('No network in tests')),
+      fetch: more.fetch ?? (() => Promise.reject(new Error('No network in tests'))),
       clientIds: {},
       callbackPort: 0,
-      cliToken: () => Effect.succeed(null),
+      cliToken: more.cliToken ?? (() => Effect.succeed(null)),
     }),
   )

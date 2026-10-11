@@ -391,9 +391,9 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
           },
           (failure: unknown) => {
             if (mine !== walk.current) return
-            // A token the service didn't take is said on the check, where its account would be.
+            // A token the service didn't take is said on the check, where its account would be; the field is empty for the next.
             if (failure instanceof ApiError && failure.reason === 'ConnectorFailed' && failure.why === 'unauthorized') {
-              setTokenState((was) => ({ ...was, saving: false }))
+              setTokenState((was) => ({ ...was, value: '', saving: false }))
               setRefused(failure.message)
               setCheck(null)
               goTo('check')
@@ -458,7 +458,7 @@ export const useConnect = ({ service, again: againId = null, server = false, onC
 
   /* ---- gh's or glab's sign-in ---- */
   const takeCli = useCallback(() => {
-    if (way?.cli === undefined) return
+    if (way?.kind !== 'cli') return
     setCli({ busy: true, error: null })
     const mine = walk.current
     client.connectCli(way.cli.product, way.cli.webUrl, again?.id).then(
