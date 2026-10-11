@@ -196,6 +196,10 @@ export const words = (
         return `Althar isn't connected to ${productOf(text(error, 'product'))}. Connect it, then try again.`
       case 'NotAnIssue':
         return `That link is to a ${text(error, 'what')}, not an issue.`
+      case 'DraftClosed':
+        return draftClosed[text(error, 'state')] ?? 'That issue draft can’t change now.'
+      case 'DraftUntitled':
+        return 'An issue needs a title.'
       case 'OutwardUncertain':
         return "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again."
       case 'ConnectorFailed':
@@ -270,9 +274,18 @@ const taskRefused = {
   abandoned: 'The task is abandoned. Reopen it to carry on.',
 } as const satisfies Record<TaskRefused['why'], string>
 
+/** Why an issue draft can't change, by where it stands. */
+const draftClosed: Readonly<Record<string, string>> = {
+  filed: 'That issue is filed already. Change it on its tracker.',
+  discarded: 'That issue draft was discarded.',
+  filing: 'That issue is being filed now.',
+}
+
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
   'LaunchRefused',
+  'DraftClosed',
+  'DraftUntitled',
   'ChangedSinceSeen',
   'CantMerge',
   'NoChangeToOpen',

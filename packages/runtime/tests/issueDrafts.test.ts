@@ -1,0 +1,411 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import type { IssueDraftCard } from '@althar/contracts'
+import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import type { ProjectId } from '@althar/domain'
+import { assert, describe, it } from '@effect/vitest'
+import { Effect, Layer } from 'effect'
+import { SqlClient } from 'effect/sql'
+
+import { Connections } from '../src/Connections'
+import { Coordinator } from '../src/Coordinator'
+import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
+import { Instance } from '../src/Instance'
+import { DraftClosed, DraftUntitled, IssueDrafts } from '../src/IssueDrafts'
+import { Issues } from '../src/Issues'
+import { Projects } from '../src/Projects'
+import { Queries } from '../src/Queries'
+import * as Runtime from '../src/Runtime'
+import { transcript } from '../src/threads'
+import { type ToolAccess } from '../src/ToolServer'
+import { callTool, fakeConnectors, HOST, hosted, repository, runtime, until } from './support'
+
+/*
+ * Issues the coordinator drafts (docs/architecture/06, "Drafting issues"):
+ * a card in its thread, filed only when the person says, changed or
+ * discarded before that, and what became of it told to the coordinator.
+ */
+
+type Services = { readonly github?: FakeService; readonly linear?: FakeService; readonly trello?: FakeService }
+
+const withQueries = (services: Services, database = ':memory:') =>
+  Queries.layer.pipe(Layer.provideMerge(runtime(database, {}, { connectors: fakeConnectors(services) })))
+
+const connect = (product: 'github' | 'linear' | 'trello', webUrl?: string) =>
+  Effect.gen(function* () {
+    const connections = yield* Connections
+    const instance = yield* Instance
+    return yield* connections.connectToken({
+      product,
+      token: 't',
+      actorId: instance.personId,
+      ...(product === 'trello' ? { key: 'k'.repeat(32) } : {}),
+      ...(webUrl === undefined ? {} : { webUrl }),
+    })
+  })
+
+/** A project, at a folder of its own or one given, and the coordinator as its tools see it. */
+const project = (path = repository()) =>
+  Effect.gen(function* () {
+    const projects = yield* Projects
+    const coordinator = yield* Coordinator
+    const opened = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path })
+    const threadId = yield* coordinator.thread(opened.projectId)
+    const access: ToolAccess = {
+      role: 'coordinator',
+      projectId: opened.projectId,
+      threadId,
+      sessionId: 'coordinator-session',
+      taskId: null,
+    }
+    return { projectId: opened.projectId as ProjectId, threadId, access }
+  })
+
+/** The issue drafts' cards in a project's coordinator thread, as its screen reads them. */
+const cardsOf = (projectId: string) =>
+  Effect.gen(function* () {
+    const queries = yield* Queries
+    const snapshot = yield* Effect.orDie(queries.coordinator(projectId))
+    return snapshot.items.flatMap((item): ReadonlyArray<IssueDraftCard> => (item.kind === 'issue_draft' ? [item.content] : []))
+  })
+
+const linearWith = (...teams: ReadonlyArray<{ readonly id: string; readonly key: string; readonly name: string }>) => {
+  const linear = makeFakeService({ product: 'linear' })
+  for (const team of teams) linear.addContainer(team)
+  return linear
+}
+
+const MERIDIAN = { id: 'team-1', key: 'MER', name: 'Meridian' }
+const PLATFORM = { id: 'team-2', key: 'PLT', name: 'Platform' }
+
+describe('issue drafts', () => {
+  it.live('are a card the coordinator drafts, filed only when the person says, then told to the coordinator', () => {
+    const linear = linearWith(MERIDIAN)
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, threadId, access } = yield* project()
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+
+      const said = yield* callTool(access, 'draft_issue', {
+        title: 'Refunds skip the rate limiter',
+        description: 'Charges go through it; refunds don’t.',
+        labels: ['payments', ' payments ', ''],
+      })
+      assert.match(
+        said,
+        /^Drafted the issue “Refunds skip the rate limiter” on Linear, in Meridian\. Nothing is filed until the person files it/,
+      )
+      // Nothing reached the tracker.
+      assert.lengthOf(linear.created, 0)
+      const [card] = yield* cardsOf(projectId)
+      assert.deepStrictEqual(card && { ...card, draftId: '' }, {
+        draftId: '',
+        product: 'linear',
+        tracker: 'Linear',
+        container: 'Meridian',
+        title: 'Refunds skip the rate limiter',
+        body: 'Charges go through it; refunds don’t.',
+        labels: ['payments'],
+        state: 'pending',
+        error: null,
+        issue: null,
+      })
+      // Asked again with the same title, unsure the first worked, it is the same draft.
+      yield* callTool(access, 'draft_issue', { title: 'refunds skip the rate limiter' })
+      assert.lengthOf(yield* cardsOf(projectId), 1)
+
+      // Filed, the issue is on the tracker, and the card shows its key and link.
+      const filed = yield* drafts.file(card?.draftId ?? '', instance.personId)
+      assert.strictEqual(filed.state, 'filed')
+      assert.lengthOf(linear.created, 1)
+      assert.deepStrictEqual(
+        linear.created.map((issue) => ({ title: issue.title, body: issue.body, labels: issue.labels })),
+        [{ title: 'Refunds skip the rate limiter', body: 'Charges go through it; refunds don’t.', labels: ['payments'] }],
+      )
+      const [shown] = yield* cardsOf(projectId)
+      assert.strictEqual(shown?.state, 'filed')
+      assert.strictEqual(shown?.issue?.key, 'MER-1')
+      assert.strictEqual(shown?.issue?.url, linear.created[0]?.url)
+      // Filed once: pressing again files nothing more, and it can't change.
+      const again = yield* Effect.flip(drafts.file(card?.draftId ?? '', instance.personId))
+      assert.instanceOf(again, DraftClosed)
+      assert.lengthOf(linear.created, 1)
+      assert.instanceOf(
+        yield* Effect.flip(drafts.change(card?.draftId ?? '', { title: 'x', body: '', labels: [] }, instance.personId)),
+        DraftClosed,
+      )
+
+      // A task drafted from it later reads it by its key, through the connection that filed it.
+      const issues = yield* Issues
+      assert.strictEqual((yield* issues.read('mer-1', projectId)).title, 'Refunds skip the rate limiter')
+      assert.match(
+        yield* callTool(access, 'draft_task', { title: 'Rate-limit refunds', issue: 'MER-1' }),
+        /^Drafted rate-limit-refunds, from MER-1\./,
+      )
+
+      // Its thread, read as text, says where it stands.
+      assert.match(
+        (yield* transcript(threadId, 10_000)).text,
+        /\[issue draft\] Refunds skip the rate limiter \(filed, MER-1 https:\/\/linear\.app\//,
+      )
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('can be changed before filing, and discarded, which files nothing', () => {
+    const linear = linearWith(MERIDIAN)
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, access } = yield* project()
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+
+      yield* callTool(access, 'draft_issue', { title: 'Flaky checkout test', description: 'Fails one run in ten.' })
+      const [first] = yield* cardsOf(projectId)
+      yield* drafts.change(
+        first?.draftId ?? '',
+        { title: ' Flaky checkout e2e ', body: 'Fails on CI.', labels: ['ci', 'ci'] },
+        instance.personId,
+      )
+      const [changed] = yield* cardsOf(projectId)
+      assert.deepStrictEqual(
+        [changed?.title, changed?.body, changed?.labels, changed?.state],
+        ['Flaky checkout e2e', 'Fails on CI.', ['ci'], 'pending'],
+      )
+      assert.instanceOf(
+        yield* Effect.flip(drafts.change(first?.draftId ?? '', { title: '  ', body: '', labels: [] }, instance.personId)),
+        DraftUntitled,
+      )
+      yield* drafts.file(first?.draftId ?? '', instance.personId)
+      assert.deepStrictEqual(
+        linear.created.map((issue) => [issue.title, issue.body, issue.labels]),
+        [['Flaky checkout e2e', 'Fails on CI.', ['ci']]],
+      )
+
+      yield* callTool(access, 'draft_issue', { title: 'Rename the env var' })
+      const second = (yield* cardsOf(projectId)).find((card) => card.title === 'Rename the env var')
+      yield* drafts.discard(second?.draftId ?? '', instance.personId)
+      assert.strictEqual((yield* cardsOf(projectId)).find((card) => card.title === 'Rename the env var')?.state, 'discarded')
+      assert.lengthOf(linear.created, 1)
+      assert.instanceOf(yield* Effect.flip(drafts.file(second?.draftId ?? '', instance.personId)), DraftClosed)
+      assert.instanceOf(yield* Effect.flip(drafts.discard(second?.draftId ?? '', instance.personId)), DraftClosed)
+      assert.lengthOf(linear.created, 1)
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('say why one wasn’t filed, and file it when tried again', () => {
+    const linear = linearWith(MERIDIAN)
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const { projectId, access } = yield* project()
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+      yield* callTool(access, 'draft_issue', { title: 'Retry webhooks' })
+      const [card] = yield* cardsOf(projectId)
+
+      linear.failNext('create', 'forbidden')
+      assert.strictEqual((yield* drafts.file(card?.draftId ?? '', instance.personId)).state, 'failed')
+      const [failed] = yield* cardsOf(projectId)
+      assert.strictEqual(failed?.state, 'failed')
+      assert.match(failed?.error ?? '', /^Linear says this account may not file issues there/)
+      assert.lengthOf(linear.created, 0)
+
+      linear.failNext('create', 'unreachable')
+      yield* drafts.file(card?.draftId ?? '', instance.personId)
+      assert.match((yield* cardsOf(projectId))[0]?.error ?? '', /didn’t answer/)
+      linear.failNext('create', 'rate_limited')
+      yield* drafts.file(card?.draftId ?? '', instance.personId)
+      assert.match((yield* cardsOf(projectId))[0]?.error ?? '', /asks Althar to wait/)
+      linear.failNext('create', 'rejected')
+      yield* drafts.file(card?.draftId ?? '', instance.personId)
+      assert.match((yield* cardsOf(projectId))[0]?.error ?? '', /fake create failed/i)
+
+      // Changed while it stands failed, then tried again: filed as it now reads.
+      yield* drafts.change(card?.draftId ?? '', { title: 'Retry webhooks with backoff', body: '', labels: [] }, instance.personId)
+      assert.strictEqual((yield* drafts.file(card?.draftId ?? '', instance.personId)).state, 'filed')
+      const [filed] = yield* cardsOf(projectId)
+      assert.deepStrictEqual([filed?.state, filed?.error, filed?.issue?.key], ['filed', null, 'MER-1'])
+      assert.deepStrictEqual(
+        linear.created.map((issue) => issue.title),
+        ['Retry webhooks with backoff'],
+      )
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('fail to file while the tracker wants signing in again, or once its connection is gone', () => {
+    const linear = linearWith(MERIDIAN)
+    return Effect.gen(function* () {
+      const connection = yield* connect('linear')
+      const { projectId, access } = yield* project()
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+      yield* callTool(access, 'draft_issue', { title: 'Retry webhooks' })
+      const [card] = yield* cardsOf(projectId)
+      linear.failNext('create', 'unauthorized')
+      yield* drafts.file(card?.draftId ?? '', instance.personId)
+      assert.match((yield* cardsOf(projectId))[0]?.error ?? '', /^Linear didn’t take Althar’s sign-in\. Sign in again in Settings/)
+      // Until it is signed in again, Althar doesn't ask.
+      yield* drafts.file(card?.draftId ?? '', instance.personId)
+      assert.match((yield* cardsOf(projectId))[0]?.error ?? '', /^Linear didn’t take Althar’s sign-in/)
+      yield* (yield* Connections).remove(connection.id, instance.personId)
+      yield* drafts.file(card?.draftId ?? '', instance.personId)
+      assert.match((yield* cardsOf(projectId))[0]?.error ?? '', /^The connection to Linear is gone/)
+      assert.lengthOf(linear.created, 0)
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('go where the project’s issues come from, or where the coordinator says', () => {
+    const { working } = hosted()
+    const github = makeFakeService({ pushUrl: () => '' })
+    github.addRepository(['meridian', 'api'])
+    github.addRepository(['meridian', 'web'])
+    const linear = linearWith(MERIDIAN, PLATFORM)
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      yield* connect('linear')
+      const { projectId, access } = yield* project(working)
+      const named = (title: string) =>
+        Effect.map(cardsOf(projectId), (cards) => {
+          const card = cards.find((one) => one.title === title)
+          return `${card?.tracker ?? ''} / ${card?.container ?? ''}`
+        })
+
+      // Nothing named, and no issue yet: the project's own repository.
+      yield* callTool(access, 'draft_issue', { title: 'On the repository' })
+      assert.strictEqual(yield* named('On the repository'), 'GitHub / meridian/api')
+      // A tracker named with several places, none named: Althar says which it has.
+      assert.strictEqual(
+        yield* callTool(access, 'draft_issue', { title: 'Somewhere on Linear', tracker: 'linear' }),
+        'Say where on Linear it goes, as container: MER (Meridian), PLT (Platform).',
+      )
+      yield* callTool(access, 'draft_issue', { title: 'On Platform', tracker: 'Linear', container: 'plt' })
+      assert.strictEqual(yield* named('On Platform'), 'Linear / Platform')
+      yield* callTool(access, 'draft_issue', { title: 'On the web', tracker: 'github', container: 'meridian/web' })
+      assert.strictEqual(yield* named('On the web'), 'GitHub / meridian/web')
+      assert.strictEqual(
+        yield* callTool(access, 'draft_issue', { title: 'Nowhere', tracker: 'Linear', container: 'Payments' }),
+        'Linear has nowhere called Payments for issues. It has: MER (Meridian), PLT (Platform).',
+      )
+      assert.strictEqual(
+        yield* callTool(access, 'draft_issue', { title: 'On Jira', tracker: 'jira' }),
+        'No tracker called jira is connected. Connected: GitHub, Linear.',
+      )
+      assert.strictEqual(yield* callTool(access, 'draft_issue', { title: '  ' }), 'Give the issue a title.')
+      assert.match(yield* callTool(access, 'draft_issue', { title: 7 }), /couldn't read that/)
+      github.failNext('containers', 'unreachable')
+      assert.match(yield* callTool(access, 'draft_issue', { title: 'Unasked' }), /^Althar couldn't ask the tracker where issues go/)
+
+      // Once one is filed on Linear, that is where the project's issues come from.
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+      const platform = (yield* cardsOf(projectId)).find((card) => card.title === 'On Platform')
+      yield* drafts.file(platform?.draftId ?? '', instance.personId)
+      yield* callTool(access, 'draft_issue', { title: 'After one was filed' })
+      assert.strictEqual(yield* named('After one was filed'), 'Linear / Platform')
+    }).pipe(Effect.provide(withQueries({ github, linear })))
+  })
+
+  it.live('say so when there is nowhere to draft one, or no single place to choose', () => {
+    const linear = linearWith(MERIDIAN, PLATFORM)
+    const trello = makeFakeService({ product: 'trello' })
+    return Effect.gen(function* () {
+      const { access } = yield* project()
+      assert.match(yield* callTool(access, 'draft_issue', { title: 'Lost' }), /^The person has no tracker connected to Althar/)
+      yield* connect('linear')
+      assert.strictEqual(
+        yield* callTool(access, 'draft_issue', { title: 'Which team' }),
+        'Say where on Linear it goes, as container: MER (Meridian), PLT (Platform).',
+      )
+      yield* connect('trello')
+      assert.strictEqual(
+        yield* callTool(access, 'draft_issue', { title: 'Which tracker' }),
+        'Say which tracker it goes on, as tracker: Linear, Trello.',
+      )
+      // A tracker with nowhere this account can file.
+      assert.strictEqual(
+        yield* callTool(access, 'draft_issue', { title: 'On Trello', tracker: 'trello' }),
+        "This account can't file issues anywhere on Trello.",
+      )
+    }).pipe(Effect.provide(withQueries({ linear, trello })))
+  })
+
+  it.live('tell the coordinator what the person did with them', () => {
+    const linear = linearWith(MERIDIAN)
+    return Effect.gen(function* () {
+      yield* connect('linear')
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, threadId, access } = yield* project()
+      const drafts = yield* IssueDrafts
+      const instance = yield* Instance
+      const coordinator = yield* Coordinator
+      // It has spoken once: what it hears is what came after.
+      yield* coordinator.say({
+        envelope: yield* Runtime.envelope('thread.send', { body: 'Hello.' }),
+        threadId,
+        body: 'Hello.',
+        disposition: 'after_current',
+      })
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId}`,
+        (rows) => rows.length > 0 && rows.every((row) => row.state !== 'pending' && row.state !== 'delivered'),
+      )
+      const draftOf = (title: string) =>
+        Effect.gen(function* () {
+          yield* callTool(access, 'draft_issue', { title })
+          return (yield* cardsOf(projectId)).find((card) => card.title === title)?.draftId ?? ''
+        })
+      const filed = yield* draftOf('Refunds skip the limiter')
+      yield* drafts.change(filed, { title: 'Refunds skip the rate limiter', body: '', labels: [] }, instance.personId)
+      yield* drafts.file(filed, instance.personId)
+      yield* drafts.discard(yield* draftOf('Rename the env var'), instance.personId)
+      yield* drafts.change(yield* draftOf('Flaky test'), { title: 'Flaky checkout test', body: '', labels: [] }, instance.personId)
+      const failing = yield* draftOf('Retry webhooks')
+      linear.failNext('create', 'unreachable')
+      yield* drafts.file(failing, instance.personId)
+      // Left alone, a draft says nothing.
+      yield* draftOf('Untouched')
+
+      const news = (yield* coordinatorNews(threadId, projectId, yield* modelNamer)) ?? ''
+      assert.match(news, /^Since you last spoke, in Althar:\n/)
+      assert.match(
+        news,
+        /- The issue “Refunds skip the rate limiter” \(you drafted it as “Refunds skip the limiter”\) is filed on Linear, in Meridian, as MER-1: https:\/\/linear\.app\/\S+\. The person changed it before filing it\./,
+      )
+      assert.include(news, '- The person discarded the issue “Rename the env var”: nothing was filed.')
+      assert.include(
+        news,
+        '- The person changed the issue you drafted (you drafted it as “Flaky test”): it now reads “Flaky checkout test”, and waits on them to file it.',
+      )
+      assert.include(
+        news,
+        '- The issue “Retry webhooks” couldn’t be filed on Linear: Linear didn’t answer. Try again in a moment. The person can file it again from its card.',
+      )
+      assert.notInclude(news, 'Untouched')
+      assert.match(news, /Speak of these issues as they are now, not as you drafted them\.$/)
+    }).pipe(Effect.provide(withQueries({ linear })))
+  })
+
+  it.live('left being filed when Althar closed are said to be uncertain, not filed again', () => {
+    const linear = linearWith(MERIDIAN)
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-drafts-')), 'althar.sqlite')
+    return Effect.gen(function* () {
+      const projectId = yield* Effect.gen(function* () {
+        yield* connect('linear')
+        const { projectId, access } = yield* project()
+        yield* callTool(access, 'draft_issue', { title: 'Half filed' })
+        const sql = yield* SqlClient.SqlClient
+        // As if Althar closed while the tracker was being asked.
+        yield* sql`UPDATE issue_drafts SET state = 'filing'`
+        return projectId
+      }).pipe(Effect.provide(withQueries({ linear }, database)))
+      yield* Effect.gen(function* () {
+        const [card] = yield* cardsOf(projectId)
+        assert.strictEqual(card?.state, 'failed')
+        assert.strictEqual(card?.error, 'Althar closed while filing this. Look on Linear for it before you file it again.')
+        assert.lengthOf(linear.created, 0)
+      }).pipe(Effect.provide(withQueries({ linear }, database)))
+    })
+  })
+})

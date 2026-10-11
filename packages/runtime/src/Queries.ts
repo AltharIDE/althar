@@ -11,6 +11,7 @@ import {
   type CoordinatorSnapshot,
   type HomeEvent,
   type HomeSnapshot,
+  IssueDraftCard,
   type IssueSummary,
   LimitCall,
   PAGE,
@@ -281,6 +282,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
 }
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
+const decodeDraft = Schema.decodeUnknownOption(IssueDraftCard)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
 const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
@@ -463,6 +465,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         },
       }
     }
+    // An issue draft's card: Althar writes it whole with each change to the draft.
+    case 'issue_draft':
+      return Option.match(decodeDraft(content), {
+        onNone: () => undefined,
+        onSome: (card) => ({ ...base, kind: 'issue_draft' as const, content: card }),
+      })
     default:
       return undefined
   }
@@ -1571,6 +1579,7 @@ export class Queries extends Context.Service<
                 WHEN 'task' THEN (SELECT id FROM threads WHERE task_id = c.aggregate_id AND kind = 'task')
                 WHEN 'external_link' THEN (SELECT t.id FROM external_links x
                   JOIN threads t ON t.task_id = x.task_id AND t.kind = 'task' WHERE x.id = c.aggregate_id)
+                WHEN 'issue_draft' THEN (SELECT thread_id FROM issue_drafts WHERE id = c.aggregate_id)
               END AS thread_id
             FROM change_log c WHERE c.cursor > ${after} ORDER BY c.cursor LIMIT ${limit}`
         })
