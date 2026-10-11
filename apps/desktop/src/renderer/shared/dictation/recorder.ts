@@ -91,14 +91,23 @@ export const record: Record = async (onFrame, deviceId = null) => {
   let ended = false
   /* Each change of microphone has a number; one overtaken by a later one is let go. */
   let changes = 0
-  const use = async (next: string | null) => {
+  /* Changes still opening their microphone: one of them takes over, so a microphone pulled out meanwhile needs no fallback of its own. */
+  let opening = 0
+  /* The microphone heard was pulled out, and nothing has taken over yet. */
+  let lost = false
+  const hear = async (next: string | null) => {
     if (ended) return
     const change = ++changes
+    opening += 1
     let fresh: MediaStream
     try {
       fresh = await open(next)
     } catch {
+      // Where the one asked for can't be had, and the one heard is gone, the default takes over.
+      if (!ended && change === changes && lost) void hear(null)
       return
+    } finally {
+      opening -= 1
     }
     if (ended || change !== changes) {
       for (const track of fresh.getTracks()) track.stop()
@@ -106,18 +115,21 @@ export const record: Record = async (onFrame, deviceId = null) => {
     }
     const was = { stream, source }
     stream = fresh
+    lost = false
     source = context.createMediaStreamSource(fresh)
     source.connect(node)
     was.source.disconnect()
     for (const track of was.stream.getTracks()) track.stop()
     watch(fresh, next)
   }
-  /* A chosen microphone pulled out mid-way hands over to the default. */
+  /* A chosen microphone pulled out mid-way hands over to the default, unless another chosen meanwhile is about to. */
   const watch = (heard: MediaStream, chosen: string | null) => {
     if (chosen === null) return
     for (const track of heard.getTracks())
       track.addEventListener?.('ended', () => {
-        if (stream === heard) void use(null)
+        if (stream !== heard) return
+        lost = true
+        if (opening === 0) void hear(null)
       })
   }
   watch(stream, deviceId)
@@ -152,6 +164,6 @@ export const record: Record = async (onFrame, deviceId = null) => {
       return from(0)
     },
     cancel: end,
-    use,
+    use: hear,
   }
 }

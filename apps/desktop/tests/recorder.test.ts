@@ -31,8 +31,18 @@ const fakeTrack = () => {
 type Constraints = { audio: { deviceId?: { exact: string } } }
 
 const install = (
-  options: { rate?: number; refuse16k?: boolean; fail?: DOMException; gone?: ReadonlyArray<string>; refuse?: ReadonlyArray<string> } = {},
+  options: {
+    rate?: number
+    refuse16k?: boolean
+    fail?: DOMException
+    gone?: ReadonlyArray<string>
+    refuse?: ReadonlyArray<string>
+    /** A microphone that takes its time to open: it waits for `release`. */
+    slow?: string
+  } = {},
 ) => {
+  let release: () => void = () => {}
+  const released = new Promise<void>((resolve) => (release = resolve))
   const track = fakeTrack()
   const node = new FakeNode()
   const source = { connect: vi.fn(), disconnect: vi.fn() }
@@ -55,6 +65,7 @@ const install = (
   const getUserMedia = vi.fn(async (constraints: Constraints) => {
     if (options.fail !== undefined) throw options.fail
     const device = constraints.audio.deviceId?.exact ?? null
+    if (device !== null && device === options.slow) await released
     if (device !== null && options.gone?.includes(device)) throw new DOMException('gone', 'OverconstrainedError')
     if (device !== null && options.refuse?.includes(device)) throw new DOMException('no', 'NotAllowedError')
     if (first) {
@@ -66,7 +77,7 @@ const install = (
     return { getTracks: () => [next.track], source: next.source }
   })
   Object.defineProperty(navigator, 'mediaDevices', { value: { getUserMedia }, configurable: true })
-  return { track, node, source, close, getUserMedia, streams }
+  return { track, node, source, close, getUserMedia, streams, release }
 }
 
 afterEach(() => vi.unstubAllGlobals())
@@ -176,5 +187,29 @@ describe('the microphone it hears', () => {
     recording.cancel()
     await recording.use('usb')
     expect(fake.getUserMedia).toHaveBeenCalledTimes(1)
+  })
+
+  it('goes on to a microphone chosen while the one heard is pulled out as it opens, not to the default', async () => {
+    const fake = install({ slow: 'b' })
+    const recording = await record(() => {}, 'a')
+    const switching = recording.use('b')
+    fake.track.pullOut()
+    fake.release()
+    await switching
+    expect(asked(fake)).toEqual(['a', 'b'])
+    expect(fake.streams.map((stream) => stream.device)).toEqual(['b'])
+    expect(fake.streams[0]?.source.connect).toHaveBeenCalledWith(fake.node)
+    expect(fake.streams[0]?.track.stop).not.toHaveBeenCalled()
+  })
+
+  it('hands over to the default where the one chosen as the heard one was pulled out can’t be had', async () => {
+    const fake = install({ slow: 'b', refuse: ['b'] })
+    const recording = await record(() => {}, 'a')
+    const switching = recording.use('b')
+    fake.track.pullOut()
+    fake.release()
+    await switching
+    await vi.waitFor(() => expect(asked(fake)).toEqual(['a', 'b', null]))
+    await vi.waitFor(() => expect(fake.streams[0]?.source.connect).toHaveBeenCalledWith(fake.node))
   })
 })

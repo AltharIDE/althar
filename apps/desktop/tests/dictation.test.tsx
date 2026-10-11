@@ -536,7 +536,9 @@ const fakeDevices = (devices: Array<{ deviceId: string; label: string }>) => {
     now = next
     await act(async () => listeners.forEach((listener) => listener()))
   }
-  return { change }
+  /** The system names its microphones, as once one may be used, without saying a device changed. */
+  const name = (next: Array<{ deviceId: string; label: string }>) => (now = next)
+  return { change, name }
 }
 
 const NAMED = [
@@ -642,6 +644,34 @@ describe('choosing the microphone', () => {
     await userEvent.click(screen.getByRole('button', { name: /^Stop dictating/ }))
     await waitFor(() => expect(field()).toHaveProperty('value', 'check the retry path'))
     expect(host.dictation.transcribe).toHaveBeenCalledTimes(1)
+  })
+
+  it('hears the chosen microphone once the system names it under a new id, while listening', async () => {
+    window.localStorage.setItem('althar.dictation.microphone', JSON.stringify({ id: 'usb-old', label: 'Shure MV7' }))
+    const devices = fakeDevices([{ deviceId: 'a', label: '' }])
+    const { record, use } = fakeRecord()
+    show(ready().dictation, record)
+    // Named only once the microphone may be used: read again as it starts listening.
+    devices.name(NAMED)
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    expect(record).toHaveBeenLastCalledWith(expect.any(Function), 'usb-old')
+    await waitFor(() => expect(use).toHaveBeenLastCalledWith('usb'))
+  })
+
+  it('goes back to the chosen microphone plugged in again while listening', async () => {
+    const devices = fakeDevices(NAMED)
+    const { record, use } = fakeRecord()
+    show(ready().dictation, record)
+    await userEvent.click(within(await microphoneMenu()).getByRole('menuitemradio', { name: 'Shure MV7' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    expect(record).toHaveBeenLastCalledWith(expect.any(Function), 'usb')
+    await devices.change(NAMED.slice(0, 2))
+    expect(use).toHaveBeenLastCalledWith(null)
+    await devices.change(NAMED)
+    expect(use).toHaveBeenLastCalledWith('usb')
+    expect(use).toHaveBeenCalledTimes(2)
   })
 
   it('still says there is no microphone when none can be had', async () => {

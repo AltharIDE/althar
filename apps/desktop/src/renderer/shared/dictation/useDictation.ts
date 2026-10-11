@@ -144,6 +144,8 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
   const chosen = useChosenMicrophone()
   const { microphones, refresh: refreshMicrophones } = useMicrophones()
   const input = microphoneToUse(chosen, microphones)
+  /* The microphone the recording was last told to hear. */
+  const hearing = useRef<string | null>(null)
 
   const refresh = async () => {
     const state = await voice.state()
@@ -227,6 +229,7 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
         setLevels((bars) => [...bars.slice(1 - BARS), frame.level])
         if (recording.current !== null) now.frame(frame, recording.current)
       }, input)
+      hearing.current = input
     } catch (error) {
       setPhase('idle')
       const name = error instanceof DOMException ? error.name : ''
@@ -271,10 +274,8 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
   }
 
   /** The menu beside the microphone: kept for next time, and heard from now on where it is listening. */
-  const chooseInput = (id: string | null) => {
-    chooseMicrophone(id === null ? null : (microphones.find((m) => m.id === id) ?? null))
-    void recording.current?.use(id)
-  }
+  /** The menu beside the microphone: kept for next time, and heard from now on where it is listening. */
+  const chooseInput = (id: string | null) => chooseMicrophone(id === null ? null : (microphones.find((m) => m.id === id) ?? null))
 
   const startDownload = async (state: DictationState) => {
     setProblem(null)
@@ -347,6 +348,13 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
   useEffect(() => {
     if (listening && seconds >= LONGEST) tooLong()
   }, [listening, seconds])
+
+  // While listening, the microphone heard follows the one to hear: chosen in the menu, named once the system names them, gone, or back.
+  useEffect(() => {
+    if (!listening || recording.current === null || hearing.current === input) return
+    hearing.current = input
+    void recording.current.use(input)
+  }, [listening, input])
 
   // Escape while listening throws it away, before anything else hears it (going back from a task).
   const escape = useEffectEvent(() => cancelListening())
