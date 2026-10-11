@@ -4,13 +4,21 @@ How to work in this repository. For what Althar is, see the [README](README.md);
 
 ## Set up
 
-You need Bun 1.3.5 and Node 24. The pinned versions are in `.bun-version` and `.node-version`.
+You need git, [Bun](https://bun.sh) 1.3.5 and Node 24. The pinned versions are in `.bun-version` and `.node-version`.
+
+```bash
+git clone https://github.com/AltharIDE/althar.git && cd althar
+```
 
 ```bash
 bun install --frozen-lockfile
 ```
 
-Installing also sets up the pre-commit hook (`.vite-hooks/pre-commit`), which formats and lints the files you stage and fixes what it can.
+Installing also sets up the pre-commit hook (`.vite-hooks/pre-commit`), which formats and lints the files you stage and fixes what it can. Then build the desktop app and open it:
+
+```bash
+bun --filter @althar/desktop dev
+```
 
 ## Commands
 
@@ -24,7 +32,8 @@ From the repository root:
 | `bun run check` | Format, type-aware lint and type checks, in every package |
 | `bun run fix` | The same, fixing what can be fixed |
 | `bun run test` | Unit and component tests, in every package |
-| `bun run verify` | Everything CI runs, in every package: checks, tests with coverage, builds, and end-to-end tests where a package has them |
+| `bun run verify` | Checks, tests with coverage and builds, in every package, and the pitch site's end-to-end tests |
+| `bun run test:e2e` | The end-to-end tests: the pitch site's, and the desktop app's, which run quietly on a Mac, at most three runs at once on the computer ([apps/desktop](apps/desktop#work-on-it)) |
 
 Each app and package has its own README with its own commands.
 

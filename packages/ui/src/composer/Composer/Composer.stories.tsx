@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useEffect, useRef, useState } from 'react'
-import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { MODEL_LIST, model, useModelPrefs } from '../../fixtures/models'
 import { Brand } from '../../foundations/brands/brands'
@@ -10,7 +10,7 @@ import { DictationTray, type DictationState } from '../DictationTray/DictationTr
 import { Listening } from '../Listening/Listening'
 import { Running } from '../Running/Running'
 import { ModelPick } from '../ModelPick/ModelPick'
-import { Composer, type ComposerProps } from './Composer'
+import { Composer, type ComposerProps, type DictationInput } from './Composer'
 import { States, statesOn } from '../../storybook/States'
 
 const clock = (n: number) => `0:${String(n).padStart(2, '0')}`
@@ -43,12 +43,26 @@ function Picker() {
 /* What a voice looks like to the bars: a slow swell with some grain, the same on every run. */
 const voice = (t: number) => Array.from({ length: 12 }, (_, i) => Math.abs(Math.sin((t + i) * 0.7) * Math.cos((t - i) * 0.31)))
 const SAID = 'Also check the webhook retry path while you are in there.'.split(' ')
+/* The microphones a Mac with a headset and a USB microphone names. */
+const INPUTS: readonly DictationInput[] = [
+  { id: 'built-in', label: 'MacBook Pro Microphone' },
+  { id: 'airpods', label: 'AirPods Pro' },
+  { id: 'usb', label: 'Shure MV7' },
+]
 
 function Example(
-  props: Partial<ComposerProps> & { initial?: string; recording?: boolean; streaming?: boolean; waiting?: string[]; at?: number },
+  props: Partial<ComposerProps> & {
+    initial?: string
+    recording?: boolean
+    streaming?: boolean
+    waiting?: string[]
+    at?: number
+    inputs?: readonly DictationInput[]
+  },
 ) {
-  const { initial = '', recording = false, streaming = false, waiting = [], at, onSendNow = () => {}, ...rest } = props
+  const { initial = '', recording = false, streaming = false, waiting = [], at, inputs = INPUTS, onSendNow = () => {}, ...rest } = props
   const [value, setValue] = useState(initial)
+  const [input, setInput] = useState<string | null>(null)
   const [queue, setQueue] = useState(waiting.map((text, i) => ({ id: `q${i}`, text })))
   const [seconds, setSeconds] = useState<number | null>(recording ? 4 : null)
   const [tick, setTick] = useState(0)
@@ -83,6 +97,9 @@ function Example(
           interim: heard,
           ...(at === undefined ? {} : { at }),
           kbd: '⌘⇧D',
+          inputs,
+          input,
+          onChooseInput: setInput,
           onStart: () => setSeconds(0),
           onStop: () => {
             setSeconds(null)
@@ -219,6 +236,44 @@ export const SendingNow: Story = {
 export const Dictating: Story = { render: () => <Example recording /> }
 /** A transcriber that streams: the words arrive faint in the field as you say them. */
 export const DictatingWordByWord: Story = { render: () => <Example recording streaming initial="Keep the limiter where it is." /> }
+/** Which microphone it hears, from the menu beside it: the system's default first, then each the system names. */
+export const ChoosingTheMicrophone: Story = {
+  render: () => <Example />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Choose the microphone' }))
+    const menu = await screen.findByRole('menu', { name: 'Microphone' })
+    const items = within(menu).getAllByRole('menuitemradio')
+    await expect(items.map((item) => item.textContent)).toEqual(['System default', ...INPUTS.map((i) => i.label)])
+    await expect(within(menu).getByRole('menuitemradio', { name: 'System default' })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(within(menu).getByRole('menuitemradio', { name: 'Shure MV7' }))
+    await userEvent.click(c.getByRole('button', { name: 'Choose the microphone' }))
+    const again = await screen.findByRole('menu', { name: 'Microphone' })
+    await expect(within(again).getByRole('menuitemradio', { name: 'Shure MV7' })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.keyboard('{Escape}')
+  },
+}
+/** Before the system names its microphones, only its default can be chosen, and a note says when the others come. */
+export const ChoosingTheMicrophoneFirstTime: Story = {
+  render: () => <Example inputs={[]} />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Choose the microphone' }))
+    const menu = await screen.findByRole('menu', { name: 'Microphone' })
+    await expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(1)
+    await expect(within(menu).getByText(/Other microphones show here/)).toBeInTheDocument()
+  },
+}
+/** Another microphone, chosen while you talk: it goes on from that one, and what you said before stays. */
+export const ChoosingTheMicrophoneWhileDictating: Story = {
+  render: () => <Example recording />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Choose the microphone' }))
+    const menu = await screen.findByRole('menu', { name: 'Microphone' })
+    await userEvent.click(within(menu).getByRole('menuitemradio', { name: 'AirPods Pro' }))
+    await expect(c.getByRole('button', { name: /^Stop dictating/ })).toBeInTheDocument()
+  },
+}
 /** The first press, with no speech model yet: a tray on the composer's top offers it. */
 export const DictationOffer: Story = {
   render: () => (

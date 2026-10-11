@@ -244,23 +244,7 @@ opencode auth login
 
 Then [download Althar](https://github.com/AltharIDE/althar/releases/latest) for your system, open it, and pick the repositories your first project works in. The first screen shows which agents are ready.
 
-### From source
-
-You need git, [Bun](https://bun.sh) 1.3.5 and Node 24.
-
-```bash
-git clone https://github.com/AltharIDE/althar.git && cd althar
-```
-
-```bash
-bun install --frozen-lockfile
-```
-
-```bash
-bun --filter @althar/desktop dev
-```
-
-That builds the app and opens it. [DEVELOPMENT.md](DEVELOPMENT.md) has the rest.
+To build it from source instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## The thesis
 
