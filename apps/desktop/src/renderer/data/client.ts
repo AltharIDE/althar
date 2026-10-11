@@ -272,6 +272,12 @@ export interface Client {
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
   /** Asks a task's pull request for news now. */
   readonly refreshTask: (taskId: string) => Promise<void>
+  /** Stops listening to the task's pull request at this address. */
+  readonly stopListening: (taskId: string, url: string) => Promise<void>
+  /** Stops a command the session on a thread left running. */
+  readonly stopBackground: (threadId: string, id: string) => Promise<void>
+  /** Clears one that ended by itself from the list. */
+  readonly clearBackground: (threadId: string, id: string) => Promise<void>
   /** The person's answer to a step that needs them. */
   readonly answerStuck: (input: { readonly attentionId: string; readonly answer: StuckAnswer }) => Promise<void>
   /**
@@ -458,6 +464,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
+    stopListening: (taskId, url) => command((commandId) => api.StopListening({ commandId, taskId, url })),
+    stopBackground: (threadId, id) => command((commandId) => api.StopBackground({ commandId, threadId, id })),
+    clearBackground: (threadId, id) => command((commandId) => api.ClearBackground({ commandId, threadId, id })),
     answerStuck: (input) => command((commandId) => api.AnswerStuck({ commandId, ...input })),
     watch: (listener, since, onWatching) => {
       let cursor = since

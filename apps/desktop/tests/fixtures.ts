@@ -513,6 +513,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     models: ['opus', 'sonnet'],
     turnRunning: false,
     context: null,
+    background: [],
   },
   attention: [],
   items: [],
@@ -714,6 +715,9 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     markReady: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
+    stopListening: vi.fn(async () => {}),
+    stopBackground: vi.fn(async () => {}),
+    clearBackground: vi.fn(async () => {}),
     watch: (listener, since, onWatching) => {
       watching.push(since)
       listeners.add(listener)

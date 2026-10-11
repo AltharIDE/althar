@@ -18,6 +18,8 @@ export const printer = (threadId: string): Printer => {
   let thinking = false
   let waiting: string | undefined
   const tools = new Map<string, string>()
+  // What it left running that has been said: where it answers, and how it ended.
+  const said = new Set<string>()
 
   /** Starts a line of its own, ending a streamed message or the thinking mark first. */
   const line = (text: string) => {
@@ -41,6 +43,20 @@ export const printer = (threadId: string): Printer => {
         return ''
       case 'TurnEnded':
         return line(`— ${event.state}${event.errorClass === undefined ? '' : ` (${event.errorClass})`}`)
+      // What it left running, once each: where it answers, and how it ended by itself.
+      case 'Background':
+        return event.background
+          .flatMap((left) => {
+            const serving = left.url !== null && !said.has(`url:${left.id}`)
+            const ended = left.ended !== null && !said.has(`ended:${left.id}`)
+            if (serving) said.add(`url:${left.id}`)
+            if (ended) said.add(`ended:${left.id}`)
+            return [
+              ...(serving ? [line(`● ${left.command} answers at ${left.url}`)] : []),
+              ...(ended ? [line(`● ${left.command} ${left.ended?.code == null ? 'ended' : `exited ${left.ended.code}`}`)] : []),
+            ]
+          })
+          .join('')
       case 'AttentionNeeded':
         waiting = event.attentionId
         return line(`? ${event.title}\n  ${event.reason} Answer with /allow or /reject [reason].`)

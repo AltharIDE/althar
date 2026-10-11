@@ -281,6 +281,9 @@ describe('the API', () => {
               SignInAccount: () => Effect.succeed({ line: 'codex login', opened: false }),
               OpenChange: () => Effect.void,
               RefreshTask: () => Effect.void,
+              StopListening: () => Effect.void,
+              StopBackground: () => Effect.void,
+              ClearBackground: () => Effect.void,
               Watch: ({ since }) =>
                 Stream.make({
                   _tag: 'Changed' as const,

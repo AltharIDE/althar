@@ -265,6 +265,9 @@ export const makeStallWatch = (limits: StallLimits) => {
       case 'Output':
         if (watch.turn !== null) watch.lifeAt = now
         return []
+      // What it left running isn't the turn at work (docs/architecture/05).
+      case 'Background':
+        return []
       case 'Agent': {
         if (watch.turn === null) return []
         watch.lifeAt = now

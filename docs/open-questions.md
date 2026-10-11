@@ -36,6 +36,28 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
   answer kept but untold until the person next writes in the thread.
   Should the answer and its telling be one record that recovery picks up?
 
+## What runs behind a task, 10 October
+
+- [x] **Showing what a lead left running, and the pull requests a task
+  listens to.** Over the composer, as the kit's pills, each stoppable
+  (ADR-022).
+- [ ] **Claude Code's sandbox and dev servers.** Its sandbox refuses a
+  server's port, so a lead's `bun dev` fails unless it asks to run outside
+  the sandbox. `sandbox.network.allowLocalBinding` would let it listen on
+  this machine's ports only (macOS).
+- [ ] **Listening again.** A pull request stopped listening to stays quiet
+  until it is published again. A way to listen again, from its outputs,
+  may be wanted.
+- [ ] **Where a server answers, for sure.** Read from what it prints, for
+  two minutes; a server that holds its output back never says. Ports from
+  the process tree would say for every agent, OpenCode too.
+- [ ] **The lead, told.** Claude Code tells its model when the person stops
+  something it left running; Codex doesn't say. Whether Althar should tell
+  the lead itself.
+- [ ] **A turn of the agent's own.** Claude Code starts a turn when
+  something it left running ends, which costs usage and shows in the
+  thread. Whether to say so, or to keep it quieter.
+
 ## Dictation, 10 October
 
 - [x] **Where speech is turned into text.** On this machine only, with a

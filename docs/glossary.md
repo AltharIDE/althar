@@ -50,6 +50,8 @@ say the right. When something new needs a name on screen, add it here first.
 | Queue, "Enter queues it; the lead reads it next" | `after_current` | What you write while the lead works. It waits for the lead's current turn to end. |
 | Send now | `interrupt_and_continue` | Stops the lead's turn to read your message, then it carries on with both. |
 | Interrupt the lead | turn interrupt | The composer's square. Ends the lead's turn; the task stays open. The line in the thread reads "Interrupted by you". |
+| Listening to | `external_links.listening` | Over a task's composer: the pull requests Althar asks for news while it runs, what they last said, and, for a moment, what just came. Stop stops it: nothing said there after reaches the thread or the lead. |
+| Running, Ran | what an agent left running (`LeftRunning`, ADR-022) | Over a task's composer: commands its lead sent to the background, such as a dev server, with where each answers, which opens in your browser. Stop stops one. One that ended by itself says how ("exited 1") until you clear it. They run as long as the lead's session does. |
 | Hold | plan held | On a plan waiting to start: its countdown stops, and it starts when you say. |
 | Start now | plan accepted | Starts a plan waiting to start, from its card or the task menu. |
 | Stop the task | run suspended | From the task menu. Every agent on it stops, and the step it was on is cut short. Nothing runs, and nothing waits on you, until you resume it. Status: Stopped. |

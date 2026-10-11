@@ -1540,6 +1540,11 @@ describe('code hosts and trackers, through the API', () => {
         assert.deepInclude(ready, { phase: 'ready', changed: null })
         assert.strictEqual(ready?.change?.number, 1)
         yield* client.RefreshTask({ commandId: commandId(), taskId: started.id })
+        // The person stops listening to it.
+        const listened = thread.task.changes[0]
+        assert.isTrue(listened?.listening)
+        yield* client.StopListening({ commandId: commandId(), taskId: started.id, url: listened?.url ?? '' })
+        assert.isFalse((yield* client.GetThread({ threadId: started.threadId })).task.changes[0]?.listening)
         // It has its pull request already: there is none to open.
         const opened = yield* Effect.flip(client.OpenChange({ commandId: commandId(), taskId: started.id }))
         assert.deepStrictEqual([opened.reason, opened.message], ['NoChangeToOpen', 'The task already has its pull request.'])

@@ -14,7 +14,9 @@ import {
   Issue,
   TaskActivity,
   LinkButton,
+  Listening,
   type ModelInfo,
+  Running,
   TaskFace,
   TaskHeader,
   TaskMenu,
@@ -45,6 +47,7 @@ import { documentVersions, editorPath, wholePath } from '../../shared/handed'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
+import { behindText, listeningOf, runningOf, useHeard } from './behind'
 import { PermissionCalls } from './PermissionCall'
 import { StuckCall } from './StuckCall'
 import { ConnectPanel } from '../connections/ConnectPanel'
@@ -291,6 +294,8 @@ export function TaskView({
   }, [onBack, open])
   // A running turn says how long it has worked so far, and a task under way how long it has run.
   const now = useNow(ticking(model.snapshot))
+  // What its pull request says while the task is open shows on the pill over the composer for a moment.
+  const heard = useHeard(model.snapshot?.items ?? null)
   const snapshot = model.snapshot
   if (snapshot === null) {
     return (
@@ -327,6 +332,8 @@ export function TaskView({
   const shown: Face = face ?? 'talk'
   const busy = session?.turnRunning ?? false
   const queue = queueShown(session, model.pending)
+  const listening = listeningOf(snapshot)
+  const leftRunning = runningOf(session?.background ?? [], now)
   const blocks = [
     // What the person asked for opens the thread, in their words, before anything the lead did.
     ...(snapshot.task.request === null || snapshot.earlier
@@ -456,6 +463,26 @@ export function TaskView({
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
+        // What goes on outside the conversation floats over its end: the pull requests it listens to, and what its lead left running.
+        above={
+          (listening.length > 0 || leftRunning.length > 0) && (
+            <>
+              {listening.length > 0 && (
+                <Listening sources={listening} heard={heard} onStop={(url) => void model.stopListening(url)} note={behindText.note} />
+              )}
+              <Running
+                processes={leftRunning}
+                onStop={(id) => void model.stopBackground(id)}
+                onDismiss={(id) => void model.clearBackground(id)}
+                // Where it answers opens in the person's browser.
+                onOpenUrl={(id) => {
+                  const url = session?.background.find((command) => command.id === id)?.url
+                  if (url != null) window.open(url, '_blank')
+                }}
+              />
+            </>
+          )
+        }
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
