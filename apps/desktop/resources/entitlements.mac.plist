@@ -3,7 +3,7 @@
 <plist version="1.0">
   <dict>
     <!--
-      Althar's own binary, under the hardened runtime (ADR-023). V8 compiles
+      Althar's own binary, under the hardened runtime (ADR-024). V8 compiles
       JavaScript as it runs: the window's main process, and the agent adapters
       the runtime starts on this binary as Node.
     -->

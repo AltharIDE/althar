@@ -44,8 +44,9 @@ const find = <T extends SessionEvent['_tag']>(events: ReadonlyArray<SessionEvent
   events.filter((event): event is Extract<SessionEvent, { _tag: T }> => event._tag === tag)
 
 describe('AgentConnection', () => {
-  it.live('asks for command output, and keeps asking for structured failures', () => {
+  it.live('asks for command output, what it leaves running and notices, and keeps asking for structured failures', () => {
     let asked: unknown
+    let notices: unknown
     const listening: ContractSubject = {
       ...fake,
       transport: () => ({
@@ -53,6 +54,7 @@ describe('AgentConnection', () => {
         agent: fakeAgent({
           initialized: (capabilities) => {
             asked = capabilities?._meta
+            notices = capabilities?.session?.notices
           },
         }),
       }),
@@ -60,11 +62,68 @@ describe('AgentConnection', () => {
     return withConnection(listening, () =>
       Effect.sync(() => {
         assert.deepStrictEqual(asked, {
-          jetbrains: { air: { version: 1, capabilities: ['sessionFailure'] } },
+          jetbrains: { air: { version: 1, capabilities: ['sessionFailure', 'asyncTasks'] } },
           terminal_output_delta: true,
         })
+        assert.deepStrictEqual(notices, {})
       }),
     )
+  })
+
+  describe('what it leaves running', () => {
+    it.live('hears a command Claude Code sent to the background, and nothing else it does there, and stops it', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+          const events = yield* Stream.runCollect(session.prompt(scenarios.background))
+          // By what its tool call says it does; the call has the command.
+          assert.deepInclude(find(events, 'BackgroundStarted')[0], { id: 'bg-1', name: 'Start the dev server', toolCallId: 'serve-1' })
+          assert.match(find(events, 'BackgroundOutput')[0]?.outputPath ?? '', /bg-1\.output$/)
+          assert.lengthOf(find(events, 'BackgroundStarted'), 1, 'background work that isn’t a command isn’t heard')
+          assert.strictEqual(text(events), 'serving')
+          // Stopped, it says so between turns; there is then nothing to stop.
+          const between = yield* Effect.forkChild(Stream.runCollect(Stream.take(session.events, 1)))
+          yield* Effect.sleep('10 millis')
+          assert.isTrue(yield* session.stopBackground('bg-1'))
+          assert.deepStrictEqual(yield* Fiber.join(between), [{ _tag: 'BackgroundEnded', id: 'bg-1', end: 'stopped' }])
+          assert.isFalse(yield* session.stopBackground('bg-1'))
+        }),
+      ),
+    )
+
+    it.live('hears one Codex sends to the background after the turn, by its command, with its output on its tool call', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+          const between = yield* Effect.forkChild(Stream.runCollect(Stream.take(session.events, 2)))
+          yield* Effect.sleep('10 millis')
+          const events = yield* Stream.runCollect(session.prompt(scenarios.backgroundCodex))
+          assert.lengthOf(find(events, 'BackgroundStarted'), 0)
+          const [started, output] = yield* Fiber.join(between)
+          assert.deepStrictEqual(started, { _tag: 'BackgroundStarted', id: 'bg-1', name: 'bun dev', toolCallId: 'serve-1' })
+          assert.include(output?._tag === 'ToolCallUpdate' ? output.terminal?.output : '', 'http://localhost:')
+        }),
+      ),
+    )
+
+    it.live('stops what a session left running when the session closes', () => {
+      const stopped: Array<string> = []
+      const subject: ContractSubject = {
+        ...fake,
+        transport: () => ({ _tag: 'InProcess', agent: fakeAgent({ stoppedBackground: (id) => stopped.push(id) }) }),
+      }
+      return withConnection(subject, (connection) =>
+        Effect.gen(function* () {
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+              yield* Stream.runCollect(session.prompt(scenarios.background))
+            }),
+          )
+          assert.deepStrictEqual(stopped, ['bg-1'])
+        }),
+      )
+    })
   })
 
   it.live('hears what an agent hands back: output in chunks and whole, pictures, links and the files it writes', () =>

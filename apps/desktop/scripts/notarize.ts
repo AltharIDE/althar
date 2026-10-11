@@ -3,7 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
 /*
- * Notarizing (ADR-023): sending the signed app, and then its dmg, to Apple's
+ * Notarizing (ADR-024): sending the signed app, and then its dmg, to Apple's
  * notary service with notarytool, waiting for its verdict, and stapling the
  * ticket to what was sent, so Gatekeeper accepts it offline. The service's
  * log is kept for every submission, beside the packages: a rejected one

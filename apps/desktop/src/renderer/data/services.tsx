@@ -59,7 +59,7 @@ export interface DictationHost {
   readonly onEvent: (listener: (event: unknown) => void) => () => void
 }
 
-/** Updates, through the main process (ADR-023): an update ready to install, and restarting into it. */
+/** Updates, through the main process (ADR-024): an update ready to install, and restarting into it. */
 export interface UpdateHost {
   /** What the window shows of the update; null where the app doesn't update, as in development. */
   readonly glance: () => Promise<UpdateGlance | null>

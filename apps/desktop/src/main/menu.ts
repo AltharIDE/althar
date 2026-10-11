@@ -2,7 +2,7 @@ import { Menu, type MenuItemConstructorOptions } from 'electron'
 
 /*
  * The app's menu: Electron's own, as it was before Althar set one, with
- * Check for Updates… under About on a Mac, where the app updates (ADR-023),
+ * Check for Updates… under About on a Mac, where the app updates (ADR-024),
  * and without Electron's Help, whose links are Electron's.
  */
 

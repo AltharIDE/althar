@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type IssueSummary, type Product, type ThreadSnapshot } from '@althar/contracts'
+import { ApiError, type IssueSummary, type Product, type ThreadItem, type ThreadSnapshot } from '@althar/contracts'
 import { Brand, IssuePriority, IssueStatus } from '@althar/ui'
 
 import { useConnections } from '../src/renderer/features/connections/useConnections'
@@ -25,6 +25,7 @@ import {
   fakeClient,
   githubConnection,
   items,
+  NOW,
   project,
   projectRules,
   snapshot,
@@ -271,7 +272,154 @@ function Task() {
   return <TaskView model={useTask('th1')} onBack={vi.fn()} />
 }
 
+describe('running what a task built, with no agent', () => {
+  it('runs it from the task’s menu, shows it over the composer beside what its lead left running, and stops each its own way', async () => {
+    const thread = snapshot()
+    const serving = { id: 'bg-1', command: 'bun dev', url: 'http://localhost:5173/', startedAt: '2026-10-10T09:00:00.000Z', ended: null }
+    const { client, emit } = fakeClient({
+      getThread: vi.fn(async () => ({
+        ...thread,
+        task: { ...thread.task, runCommand: 'bun run dev' },
+        session: thread.session === null ? null : { ...thread.session, background: [serving] },
+      })),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Run bun run dev/ }))
+    expect(client.runProject).toHaveBeenCalledWith('p1', 't1', 'th1')
+    // The run comes back on the watch: one for another task, or another project, says nothing here.
+    const launch = {
+      id: 'proc_1',
+      taskId: 't1',
+      where: 'Fix the login timeout',
+      command: 'bun run dev',
+      url: 'http://localhost:4173/',
+      startedAt: '2026-10-10T09:05:00.000Z',
+      ended: null,
+    }
+    act(() =>
+      emit({ _tag: 'Launches', projectId: 'p1', launches: [launch, { ...launch, id: 'proc_2', taskId: 't9', command: 'make serve' }] }),
+    )
+    act(() => emit({ _tag: 'Launches', projectId: 'p9', launches: [{ ...launch, id: 'proc_3', command: 'cargo run' }] }))
+    const pill = await screen.findByRole('button', { name: /^Running/ })
+    await waitFor(() => expect(pill.textContent).toContain('2 processes'))
+    await userEvent.click(pill)
+    const list = within(await screen.findByRole('dialog', { name: 'Running' }))
+    expect(list.queryByText('make serve')).toBeNull()
+    expect(list.queryByText('cargo run')).toBeNull()
+    // Each stops its own way: Althar's run, and what the lead left running.
+    await userEvent.click(list.getByRole('button', { name: 'Stop bun run dev' }))
+    expect(client.stopLaunch).toHaveBeenCalledWith('proc_1')
+    await userEvent.click(list.getByRole('button', { name: 'Stop bun dev' }))
+    expect(client.stopBackground).toHaveBeenCalledWith('th1', 'bg-1')
+  })
+
+  it('leaves a card in the thread that follows the run: open where it answers, stop it, run it again once it ended', async () => {
+    const thread = snapshot()
+    const card = items.run()
+    let current = { ...thread, items: [...thread.items, card], task: { ...thread.task, runCommand: 'bun run dev' } }
+    const { client, emit } = fakeClient({
+      getThread: vi.fn(async () => current),
+      getThreadItem: vi.fn(async () => current.items.at(-1) as ThreadItem),
+    })
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => null)
+    withServices(<Task />, client)
+    const shown = within(await screen.findByRole('article', { name: 'Run of Fix the login timeout' }))
+    await userEvent.click(shown.getByRole('button', { name: 'Open localhost:4173' }))
+    expect(opened).toHaveBeenCalledWith('http://localhost:4173/', '_blank')
+    await userEvent.click(shown.getByRole('button', { name: 'Stop bun run dev' }))
+    expect(client.stopLaunch).toHaveBeenCalledWith('proc_1')
+    expect(shown.queryByRole('button', { name: 'Run bun run dev again' })).toBeNull()
+    // It ended by itself: it says how, with its last line, and runs again here.
+    const ended = {
+      ...card,
+      content: { ...card.content, ended: { at: NOW, code: 1, stopped: false, last: 'Error: Port 4173 is already in use' } },
+    } as ThreadItem
+    current = { ...current, items: [...thread.items, ended] }
+    act(() => emit(changed('thread_item', card.id)))
+    const again = await screen.findByRole('button', { name: 'Run bun run dev again' })
+    expect(screen.getByText('Error: Port 4173 is already in use')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Stop bun run dev' })).toBeNull()
+    await userEvent.click(again)
+    expect(client.runProject).toHaveBeenCalledWith('p1', 't1', 'th1')
+    opened.mockRestore()
+  })
+
+  it('offers no run where nothing says how it runs', async () => {
+    const { client } = fakeClient()
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    expect(screen.queryByRole('menuitem', { name: /^Run / })).toBeNull()
+  })
+})
+
+describe('what a task’s lead left running', () => {
+  it('shows over the composer, opens where it answers, stops it, follows it as it changes, and clears one that exited', async () => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    const serving = { id: 'bg-1', command: 'bun dev', url: 'http://localhost:5173/', startedAt: '2026-10-10T09:00:00.000Z', ended: null }
+    const thread = snapshot()
+    const { client, emit } = fakeClient({
+      getThread: vi.fn(async () => ({ ...thread, session: thread.session === null ? null : { ...thread.session, background: [serving] } })),
+    })
+    withServices(<Task />, client)
+    const pill = await screen.findByRole('button', { name: /^Running/ })
+    expect(pill.textContent).toContain('bun dev')
+    expect(pill.textContent).toContain('localhost:5173')
+    // Where it answers opens in the person's browser; Stop stops it.
+    await userEvent.click(pill)
+    const list = within(await screen.findByRole('dialog', { name: 'Running' }))
+    await userEvent.click(list.getByRole('button', { name: 'Open localhost:5173' }))
+    expect(open).toHaveBeenCalledWith('http://localhost:5173/', '_blank')
+    await userEvent.click(list.getByRole('button', { name: 'Stop bun dev' }))
+    expect(client.stopBackground).toHaveBeenCalledWith('th1', 'bg-1')
+    await userEvent.keyboard('{Escape}')
+    // It follows what the runtime says: one that exited by itself says how, and can be cleared.
+    act(() =>
+      emit({
+        _tag: 'Background',
+        threadId: 'th1',
+        background: [{ ...serving, id: 'bg-2', command: 'bun run seed', url: null, ended: { at: '2026-10-10T09:10:00.000Z', code: 1 } }],
+      }),
+    )
+    const ran = await screen.findByRole('button', { name: /^Ran/ })
+    expect(ran.textContent).toContain('exited 1')
+    await userEvent.click(ran)
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Ran' })).getByRole('button', { name: 'Clear bun run seed' }))
+    expect(client.clearBackground).toHaveBeenCalledWith('th1', 'bg-2')
+    act(() => emit({ _tag: 'Background', threadId: 'th1', background: [] }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^(Running|Ran)/ })).toBeNull())
+    // Another thread's says nothing here.
+    act(() => emit({ _tag: 'Background', threadId: 'th9', background: [serving] }))
+    expect(screen.queryByRole('button', { name: /^Running/ })).toBeNull()
+  })
+})
+
 describe('a task’s pull request', () => {
+  it('says over the composer that it listens to it, says for a moment what it hears, and stops when asked', async () => {
+    let thread = snapshot({ task: { ...snapshot().task, changes: [change()] }, items: [items.arrival()] })
+    const checks = items.arrival({ kind: 'checks', from: null, text: null, passed: 2, failed: 0 })
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => thread), getThreadItem: vi.fn(async () => checks) })
+    withServices(<Task />, client)
+    const pill = await screen.findByRole('button', { name: /^Listening to/ })
+    expect(pill.textContent).toContain('PR #12')
+    // What it heard before the task opened isn't said again.
+    expect(within(pill).queryByText(/dana/)).toBeNull()
+    // Something arrives while it is open: the pill says it, and so does a screen reader.
+    act(() => emit(changed('thread_item', checks.id)))
+    expect(await within(pill).findByText('Checks passed on PR #12')).toBeTruthy()
+    // Its list says what it listens for and when it last heard, and stops it.
+    await userEvent.click(pill)
+    const list = within(await screen.findByRole('dialog', { name: 'Listening to' }))
+    expect(list.getByText('meridian/api')).toBeTruthy()
+    expect(list.getByText(/^review comments and checks · ./)).toBeTruthy()
+    await userEvent.click(list.getByRole('button', { name: 'Stop listening to PR #12' }))
+    expect(client.stopListening).toHaveBeenCalledWith('t1', 'https://github.com/meridian/api/pull/12')
+    // Once it no longer listens, the pill goes.
+    thread = { ...thread, task: { ...thread.task, changes: [change({ listening: false })] } }
+    act(() => emit(changed('external_link', 'l1')))
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Listening to/ })).toBeNull())
+  })
+
   it('shows on its outputs, with its checks, its review and files, and is marked ready there; the issue heads the thread', async () => {
     const ready = vi.fn(async () => {})
     const { client } = fakeClient({

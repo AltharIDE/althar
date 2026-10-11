@@ -343,6 +343,22 @@ export const items = {
     kind: 'task',
     content,
   }),
+  /** A run of the project Althar started, up at its address unless told otherwise. */
+  run: (content: Partial<Extract<ThreadItem, { kind: 'run' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'run',
+    content: {
+      launchId: 'proc_1',
+      taskId: 't1',
+      where: 'Fix the login timeout',
+      command: 'bun run dev',
+      url: 'http://localhost:4173/',
+      startedAt: NOW,
+      ended: null,
+      ...content,
+    },
+  }),
 }
 
 type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
@@ -398,6 +414,8 @@ export const coordinatorSnapshot = (overrides: Partial<CoordinatorSnapshot> = {}
   items: [],
   earlier: false,
   host: null,
+  runCommand: null,
+  launches: [],
   ...overrides,
 })
 
@@ -467,6 +485,8 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     merged: [],
     actions: ['stop', 'abandon'],
     planId: null,
+    runCommand: null,
+    launches: [],
   },
   session: {
     id: 's1',
@@ -479,6 +499,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     models: ['opus', 'sonnet'],
     turnRunning: false,
     context: null,
+    background: [],
   },
   attention: [],
   items: [],
@@ -639,6 +660,20 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     markReady: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
+    stopListening: vi.fn(async () => {}),
+    stopBackground: vi.fn(async () => {}),
+    clearBackground: vi.fn(async () => {}),
+    runProject: vi.fn(async (_projectId: string, taskId: string | null, _threadId: string | null) => ({
+      id: 'proc_run',
+      taskId,
+      where: taskId === null ? 'main' : 'the task',
+      command: 'bun run dev',
+      url: null,
+      startedAt: NOW,
+      ended: null,
+    })),
+    stopLaunch: vi.fn(async () => {}),
+    clearLaunch: vi.fn(async () => {}),
     watch: (listener, since, onWatching) => {
       watching.push(since)
       listeners.add(listener)

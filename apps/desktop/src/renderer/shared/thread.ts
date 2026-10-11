@@ -56,6 +56,7 @@ export type StepResult = Extract<ThreadItem, { kind: 'step_result' }>['content']
 export type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
 export type ArrivalContent = Extract<ThreadItem, { kind: 'arrival' }>['content']
 export type QuestionContent = Extract<ThreadItem, { kind: 'question' }>['content']
+export type RunContent = Extract<ThreadItem, { kind: 'run' }>['content']
 
 export type Block =
   | {
@@ -94,6 +95,8 @@ export type Block =
   | { readonly kind: 'arrival'; readonly id: string; readonly at: string; readonly arrival: ArrivalContent }
   /** A question an agent asked the person, standing on its own, as the turn waited on it: answered where it is. */
   | { readonly kind: 'question'; readonly id: string; readonly at: string; readonly question: QuestionContent }
+  /** A run of the project Althar started, where it was asked for (ADR-023). */
+  | { readonly kind: 'run'; readonly id: string; readonly run: RunContent }
 
 /** ACP's tool kinds, as the kit's. */
 /** The notice earlier versions left in a thread when Althar restarted under its lead. */
@@ -388,6 +391,9 @@ export const blocksOf = (
         continue
       case 'question':
         blocks.push({ kind: 'question', id: item.id, at: ago(item.createdAt), question: item.content })
+        continue
+      case 'run':
+        blocks.push({ kind: 'run', id: item.id, run: item.content })
         continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.

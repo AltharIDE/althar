@@ -1,6 +1,6 @@
 name: release
 
-# Releases come from here (ADR-023, Linear DEV-81): a tag v<version> pushed on
+# Releases come from here (ADR-024, Linear DEV-81): a tag v<version> pushed on
 # a commit on main builds, signs and notarizes every platform, and leaves ONE
 # draft GitHub Release with all their files. A person publishes it on
 # GitHub; nothing reaches anyone before that. Run by hand on main, it makes

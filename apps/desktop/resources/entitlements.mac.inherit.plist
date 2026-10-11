@@ -4,7 +4,7 @@
   <dict>
     <!--
       Every other executable in Althar.app, each signed on its own with
-      Althar's Developer ID under the hardened runtime (ADR-023): Electron's
+      Althar's Developer ID under the hardened runtime (ADR-024): Electron's
       helpers, Claude Code's binary and Codex's. electron-builder gives them
       all this one file, so it holds what any of them needs, and no more.
     -->

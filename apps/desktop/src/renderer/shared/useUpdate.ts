@@ -6,7 +6,7 @@ import type { UpdateGlance } from '../../main/updates'
 import { useServices } from '../data/services'
 
 /*
- * An update ready to install, as the main process says (ADR-023), for the
+ * An update ready to install, as the main process says (ADR-024), for the
  * quiet line in the window's bar and Settings' foot: the version, whether
  * Althar may restart into it now (not while work runs), and a restart the
  * person asked for. Nothing shows while one is looked for or downloads.

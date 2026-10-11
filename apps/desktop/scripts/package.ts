@@ -13,7 +13,7 @@ import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
  * (so without the end-to-end tests' hooks): Althar.app, signed with
  * Althar's Developer ID under the hardened runtime and notarized where the
  * credentials are given, as a dmg to install from and a zip with
- * latest-mac.yml for updates, in out/dist (ADR-023). The bundles hold
+ * latest-mac.yml for updates, in out/dist (ADR-024). The bundles hold
  * everything but the agent adapters, which run as processes of their own and
  * are found in node_modules, so the app is staged with the bundles, the
  * icons, the menu bar's pictures, and a flat install of the adapters, the
@@ -50,12 +50,12 @@ const own = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
 
 /** Althar's Developer ID Application certificate, by the name electron-builder finds it by. */
 const ALTHAR_IDENTITY = 'Balazs Otakomaiya (59A9XM7G7P)'
-/** Where updates come from: the repository's GitHub Releases (ADR-023). */
+/** Where updates come from: the repository's GitHub Releases (ADR-024). */
 const RELEASES = { provider: 'github', owner: 'AltharIDE', repo: 'althar' } as const
 
 /** The packages the runtime starts as processes, at the versions the app depends on. */
 const ADAPTERS = ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp']
-/** What the bundles load from node_modules: dictation's speech engine, with its binaries for this platform (ADR-017), and the updater (ADR-023). */
+/** What the bundles load from node_modules: dictation's speech engine, with its binaries for this platform (ADR-017), and the updater (ADR-024). */
 const NATIVE = ['sherpa-onnx-node', 'electron-updater']
 
 /** The packages that carry the agents' binaries, by the adapter that brings each; their platform packages are pinned by them. */

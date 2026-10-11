@@ -1,4 +1,4 @@
-# ADR-023: Signed releases on GitHub, and an app that updates itself
+# ADR-024: Signed releases on GitHub, and an app that updates itself
 
 - **Status:** Accepted
 - **Date:** 2026-10-11

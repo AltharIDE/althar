@@ -87,6 +87,8 @@ export const ThreadItemKind = Schema.Literals([
   'arrival',
   /** A question an agent asks the person, answered where it is. */
   'question',
+  /** A run of the project Althar started, in the thread it was asked for in. Althar posts it and keeps it current. */
+  'run',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -113,7 +115,7 @@ export type AccountState = typeof AccountState.Type
 export const AccountStatusSource = Schema.Literals(['error', 'side_channel'])
 export type AccountStatusSource = typeof AccountStatusSource.Type
 
-export const ProcessPurpose = Schema.Literals(['agent', 'verify', 'setup', 'git', 'other', 'probe'])
+export const ProcessPurpose = Schema.Literals(['agent', 'verify', 'setup', 'git', 'other', 'probe', 'run'])
 export type ProcessPurpose = typeof ProcessPurpose.Type
 
 /** `launching` is written before the process is spawned, so a crash in between still leaves a trace to reconcile. */

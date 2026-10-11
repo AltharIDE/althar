@@ -3,7 +3,7 @@ import { readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 /*
- * latest-mac.yml, the feed the updater reads (ADR-023): electron-builder
+ * latest-mac.yml, the feed the updater reads (ADR-024): electron-builder
  * writes each package's size and SHA-512 into it. Stapling a ticket to the
  * dmg changes the dmg, so its entry is written again from the file as it is
  * now. Everything else in the feed stays as electron-builder wrote it.

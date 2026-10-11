@@ -10,6 +10,8 @@ import { ChromeButton } from '../ChromeButton/ChromeButton'
  */
 
 export interface ProjectMenuText {
+  /** Running the default branch, with the command it runs. */
+  run: (command: string) => string
   trigger: string
   label: string
   rename: string
@@ -22,6 +24,7 @@ export interface ProjectMenuText {
 export const projectMenuText: ProjectMenuText = {
   trigger: 'More for this project',
   label: 'This project',
+  run: (command) => `Run ${command}`,
   rename: 'Rename',
   repositories: 'Repositories',
   rules: 'Project rules',
@@ -30,6 +33,8 @@ export const projectMenuText: ProjectMenuText = {
 }
 
 interface ProjectMenuItemsProps {
+  /** Runs its default branch, with no agent: what the run command is, and running it. */
+  run?: { readonly command: string; readonly onRun: () => void }
   /** How many repositories it has, beside Repositories. */
   repositories?: number
   onRename?: () => void
@@ -44,11 +49,29 @@ interface ProjectMenuItemsProps {
 }
 
 /** The project's items. */
-function ProjectMenuItems({ repositories, onRename, onRepositories, onRules, host, onConnect, onRemove, text }: ProjectMenuItemsProps) {
+function ProjectMenuItems({
+  run,
+  repositories,
+  onRename,
+  onRepositories,
+  onRules,
+  host,
+  onConnect,
+  onRemove,
+  text,
+}: ProjectMenuItemsProps) {
   const t = { ...projectMenuText, ...text }
   const connect = host !== undefined && onConnect !== undefined
   return (
     <>
+      {run && (
+        <>
+          <MenuItem icon="terminal" onSelect={run.onRun}>
+            {t.run(run.command)}
+          </MenuItem>
+          {(onRename || onRepositories || onRules || connect || onRemove) && <MenuSeparator />}
+        </>
+      )}
       {onRename && (
         <MenuItem icon="pencil" onSelect={onRename}>
           {t.rename}
@@ -91,7 +114,7 @@ export interface ProjectMenuProps extends ProjectMenuItemsProps {
 export function ProjectMenu({ open, defaultOpen, onOpenChange, ...items }: ProjectMenuProps) {
   const t = { ...projectMenuText, ...items.text }
   const connect = items.host !== undefined && items.onConnect !== undefined
-  if (!items.onRename && !items.onRepositories && !items.onRules && !connect && !items.onRemove) return null
+  if (!items.run && !items.onRename && !items.onRepositories && !items.onRules && !connect && !items.onRemove) return null
   return (
     <Menu
       label={t.label}

@@ -36,6 +36,52 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
   answer kept but untold until the person next writes in the thread.
   Should the answer and its telling be one record that recovery picks up?
 
+## What runs behind a task, 10 October
+
+- [x] **Showing what a lead left running, and the pull requests a task
+  listens to.** Over the composer, as the kit's pills, each stoppable
+  (ADR-022).
+- [ ] **Claude Code's sandbox and dev servers.** Its sandbox refuses a
+  server's port, so a lead's `bun dev` fails unless it asks to run outside
+  the sandbox. `sandbox.network.allowLocalBinding` would let it listen on
+  this machine's ports only (macOS).
+- [ ] **Listening again.** A pull request stopped listening to stays quiet
+  until it is published again. A way to listen again, from its outputs,
+  may be wanted.
+- [ ] **Where a server answers, for sure.** Read from what it prints, for
+  two minutes; a server that holds its output back never says. Ports from
+  the process tree would say for every agent, OpenCode too.
+- [ ] **The lead, told.** Claude Code tells its model when the person stops
+  something it left running; Codex doesn't say. Whether Althar should tell
+  the lead itself.
+- [ ] **A turn of the agent's own.** Claude Code starts a turn when
+  something it left running ends, which costs usage and shows in the
+  thread. Whether to say so, or to keep it quieter.
+
+## Mini tasks, 11 October
+
+- [x] **Starting a task without the countdown.** For something small, such as
+  trying something out, the coordinator starts a mini task at once: one lead, no review, nothing outside the project when it is
+  done (docs/architecture/04, `start_task`).
+- [ ] **What a mini task looks like.** It shows as any task does, on its
+  card and on the board. Whether it should look lighter, and settle by itself
+  once nothing it started is left running.
+- [ ] **Turning one into a full task.** One that ends up changing things is
+  on its branch. Whether the person, or the coordinator, can give it a review
+  and a pull request after the fact.
+- [x] **Running the project without an agent.** Althar keeps how each
+  repository runs, works it out until then, and runs it itself (ADR-023).
+- [ ] **Several processes that run together.** A web app and its API, or a
+  server and a worker, are one command line today.
+- [ ] **Two runs on one port.** A task's run and the default branch's may
+  want the same port; the second says so in what it prints. Whether Althar
+  should give each its own port where the command takes one.
+- [ ] **A run per repository in a project of several.** The first that says
+  how it runs is run; others need naming, as the coordinator can.
+- [ ] **A picture of what a run shows.** The run card has the address, not
+  the page. Whether Althar should open it once it answers, take a picture,
+  and keep it on the card.
+
 ## Dictation, 10 October
 
 - [x] **Where speech is turned into text.** On this machine only, with a
@@ -243,7 +289,7 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 
 ## Releases and updates, 11 October
 
-Decided in ADR-023 for the first testers: Developer ID signing, notarytool,
+Decided in ADR-024 for the first testers: Developer ID signing, notarytool,
 one stable track from GitHub Releases, restart only at the person's word and
 never under running work.
 

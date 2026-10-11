@@ -7,9 +7,10 @@ import { Room } from '@althar/ui'
 
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
+import { useProjectMenu } from '../src/renderer/features/project/useProjectMenu'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
-import { agents, card, changed, coordinatorSnapshot, efforts, fakeClient, items, models, status, streamed } from './fixtures'
+import { agents, card, changed, coordinatorSnapshot, efforts, fakeClient, items, models, project, status, streamed } from './fixtures'
 import { clock } from '../src/renderer/shared/time'
 import { withServices } from './render'
 
@@ -48,6 +49,7 @@ const session = {
   models: [],
   turnRunning: false,
   context: null,
+  background: [],
 }
 
 /** The coordinator's thread with a conversation and two cards: one running, one planned. */
@@ -63,6 +65,85 @@ const talk = (overrides: Partial<CoordinatorSnapshot> = {}) =>
     ],
     ...overrides,
   })
+
+/** The project with its bar's menu, as its route gives it. */
+function WithMenu() {
+  return (
+    <ProjectView
+      model={useProject('p1')}
+      board={useBoard('p1')}
+      connections={useConnections()}
+      onTask={vi.fn()}
+      menu={{ model: useProjectMenu('p1', vi.fn()), onRepositories: vi.fn(), onRules: vi.fn() }}
+    />
+  )
+}
+
+describe('running the project, with no agent', () => {
+  it('runs its default branch from the project’s menu, shows it over the coordinator’s composer, and stops and clears it there', async () => {
+    const { client, emit } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ runCommand: 'npm run dev' })),
+    })
+    withServices(<WithMenu />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this project' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Run npm run dev' }))
+    expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc')
+    const launch = {
+      id: 'proc_1',
+      taskId: null,
+      where: 'main',
+      command: 'npm run dev',
+      url: 'http://localhost:5199/',
+      startedAt: '2026-10-10T09:00:00.000Z',
+      ended: null,
+    }
+    // Every run in the project shows here, a task's too, each saying where it runs.
+    act(() =>
+      emit({
+        _tag: 'Launches',
+        projectId: 'p1',
+        launches: [launch, { ...launch, id: 'proc_2', taskId: 't1', where: 'Fix the login timeout', command: 'bun run dev' }],
+      }),
+    )
+    const pill = await screen.findByRole('button', { name: /^Running/ })
+    await waitFor(() => expect(pill.textContent).toContain('2 processes'))
+    await userEvent.click(pill)
+    const list = within(await screen.findByRole('dialog', { name: 'Running' }))
+    expect(list.getByText(/^main/)).toBeTruthy()
+    expect(list.getByText(/^Fix the login timeout/)).toBeTruthy()
+    await userEvent.click(list.getByRole('button', { name: 'Stop npm run dev' }))
+    expect(client.stopLaunch).toHaveBeenCalledWith('proc_1')
+    await userEvent.keyboard('{Escape}')
+    // One that ended by itself says how, and clears.
+    act(() => emit({ _tag: 'Launches', projectId: 'p1', launches: [{ ...launch, ended: { at: '2026-10-10T09:01:00.000Z', code: 1 } }] }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Ran/ }))
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Ran' })).getByRole('button', { name: 'Clear npm run dev' }))
+    expect(client.clearLaunch).toHaveBeenCalledWith('proc_1')
+  })
+
+  it('leaves each run’s card in the coordinator’s thread: open the one that is up, stop it, run again a task’s that ended', async () => {
+    const up = items.run({ launchId: 'proc_1', taskId: null, where: 'main', command: 'npm run dev', url: 'http://localhost:5199/' })
+    const ended = items.run({
+      launchId: 'proc_2',
+      ended: { at: '2026-10-10T09:01:00.000Z', code: null, stopped: true, last: null },
+    })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [up, ended] })) })
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => null)
+    withServices(<WithMenu />, client)
+    const main = within(await screen.findByRole('article', { name: 'Run of main' }))
+    await userEvent.click(main.getByRole('button', { name: 'Open localhost:5199' }))
+    expect(opened).toHaveBeenCalledWith('http://localhost:5199/', '_blank')
+    await userEvent.click(main.getByRole('button', { name: 'Stop npm run dev' }))
+    expect(client.stopLaunch).toHaveBeenCalledWith('proc_1')
+    // A task's run, stopped: it runs again in the task's worktree, its card here.
+    const task = within(screen.getByRole('article', { name: 'Run of Fix the login timeout' }))
+    expect(task.queryByRole('button', { name: 'Stop bun run dev' })).toBeNull()
+    await userEvent.click(task.getByRole('button', { name: 'Run bun run dev again' }))
+    expect(client.runProject).toHaveBeenCalledWith('p1', 't1', 'thc')
+    opened.mockRestore()
+  })
+})
 
 describe('the project’s bar', () => {
   it('steps through the views by b, never while typing, and opens on the view or the new task a task’s bar asked for', async () => {

@@ -1,5 +1,5 @@
 /*
- * Updates (ADR-023, Linear DEV-47). A packaged Althar asks GitHub Releases
+ * Updates (ADR-024, Linear DEV-47). A packaged Althar asks GitHub Releases
  * for a newer version at launch and every few hours, and brings one it
  * finds down in the background, where Squirrel.Mac checks that it is signed
  * as this one is and puts it in place. Then a quiet line in the window says

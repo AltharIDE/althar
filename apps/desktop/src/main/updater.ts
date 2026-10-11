@@ -4,7 +4,7 @@ import updater from 'electron-updater'
 import { checkFor, SETTLE, type UpdateGlance, type Updates, updating } from './updates'
 
 /*
- * The updater wired to Electron (ADR-023): electron-updater reads the feed,
+ * The updater wired to Electron (ADR-024): electron-updater reads the feed,
  * latest-mac.yml on the repository's latest GitHub Release, and downloads
  * the zip it names; Squirrel.Mac checks the new app is signed as this one
  * is, and puts it in place, to install when Althar restarts or quits.

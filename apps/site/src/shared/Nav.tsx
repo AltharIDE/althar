@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 
 import { LINKS } from '../content/facts'
 import { cx } from '../lib/cx'
+import { useHere } from '../lib/pathname'
 import s from './Nav.module.css'
 
 /*
@@ -20,8 +21,6 @@ const PAGES = [
   { href: '/docs', name: 'Docs' },
 ]
 
-const here = (href: string) => typeof window !== 'undefined' && (window.location.pathname.replace(/\/+$/, '') || '/') === href
-
 /** Whether the page has scrolled past `past` px. */
 function useScrolled(past = 40) {
   const [scrolled, setScrolled] = useState(false)
@@ -36,6 +35,7 @@ function useScrolled(past = 40) {
 
 /** The phone's menu: the pages as a sheet under the island, opened by its button. */
 function PhoneMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const here = useHere()
   return (
     <div className={cx(s.sheet, open && s.sheetOpen)} aria-hidden={!open}>
       <nav aria-label="Site">
@@ -54,6 +54,7 @@ function PhoneMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
 }
 
 export function Nav() {
+  const here = useHere()
   const scrolled = useScrolled(120)
   const [pointed, setPointed] = useState(false)
   const [focused, setFocused] = useState(false)

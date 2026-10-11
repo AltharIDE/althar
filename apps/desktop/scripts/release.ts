@@ -6,7 +6,7 @@ import { basename, join } from 'node:path'
 import { mismatches } from './feed.ts'
 
 /*
- * Building a release (ADR-023, Linear DEV-62 and DEV-81). Releases are
+ * Building a release (ADR-024, Linear DEV-62 and DEV-81). Releases are
  * published from CI alone: .github/workflows/release.yml runs this on a
  * version tag, with the certificate and Apple's credentials from the release
  * environment, then makes the draft GitHub Release itself.

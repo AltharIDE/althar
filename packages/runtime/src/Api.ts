@@ -31,6 +31,7 @@ import { Folders } from './Folders'
 import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
+import { Launches } from './Launches'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
@@ -113,6 +114,7 @@ export const handlers = Api.toLayer(
     const context = yield* Effect.context<Instance | Crypto.Crypto>()
     const projects = yield* Projects
     const sessions = yield* Sessions
+    const launches = yield* Launches
     const permissions = yield* Permissions
     const questions = yield* Questions
     const queries = yield* Queries
@@ -317,7 +319,11 @@ export const handlers = Api.toLayer(
                 ? Stream.make({ _tag: 'Output', threadId: event.threadId, itemId: event.itemId, text: event.text, dropped: event.dropped })
                 : event._tag === 'Agent' && event.event._tag === 'ContextUsage'
                   ? Stream.make({ _tag: 'Context', threadId: event.threadId, used: event.event.used, size: event.event.size })
-                  : Stream.empty,
+                  : event._tag === 'Background'
+                    ? Stream.make({ _tag: 'Background', threadId: event.threadId, background: event.background })
+                    : event._tag === 'Launches'
+                      ? Stream.make({ _tag: 'Launches', projectId: event.projectId, launches: event.launches })
+                      : Stream.empty,
           ),
         ),
       ),
@@ -857,6 +863,12 @@ export const handlers = Api.toLayer(
           }),
         ),
       RefreshTask: ({ taskId }) => pullRequests.refresh(taskId),
+      StopListening: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.stopListening(taskId, url))),
+      StopBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.stopBackground(threadId, id))),
+      ClearBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.clearBackground(threadId, id))),
+      RunProject: ({ commandId, projectId, taskId, threadId }) => once(commandId, api(launches.start({ projectId, taskId, threadId }))),
+      StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
+      ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
     })
   }),

@@ -10,6 +10,7 @@ import { Connections } from './Connections'
 import { Installs } from './Installs'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
+import { Launches } from './Launches'
 import { Live } from './Live'
 import { Permissions } from './Permissions'
 import { Questions } from './Questions'
@@ -66,7 +67,7 @@ export const layer = (options: RuntimeLayerOptions) => {
     ),
   )
   const judging = PermissionJudge.layer.pipe(Layer.provideMerge(able))
-  const core = Layer.mergeAll(Projects.layer, Sessions.layer).pipe(
+  const core = Layer.mergeAll(Projects.layer, Sessions.layer, Launches.layer).pipe(
     Layer.provideMerge(Layer.mergeAll(Permissions.layer, Questions.layer).pipe(Layer.provideMerge(judging))),
   )
   // A task's pull request and issue, through the person's connections to code hosts and trackers.
