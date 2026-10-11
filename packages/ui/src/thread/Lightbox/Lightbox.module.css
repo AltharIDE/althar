@@ -147,3 +147,15 @@
   height: calc(var(--h) * 1px);
   max-width: none;
 }
+
+/* sized only as it loaded: the frame stays, and the picture sits in it no larger than it is */
+.image[data-measured]:not([data-actual]) {
+  display: grid;
+  place-items: center;
+}
+.image[data-measured]:not([data-actual]) > .img {
+  width: auto;
+  height: auto;
+  max-width: min(100%, calc(var(--nw) * 1px));
+  max-height: min(100%, calc(var(--nh) * 1px));
+}

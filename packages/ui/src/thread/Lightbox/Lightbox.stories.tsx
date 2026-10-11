@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { Dash } from '../../fixtures/meridian'
 import {
@@ -37,11 +37,46 @@ export const Portrait: Story = { args: { images: [SHOT_PORTRAIT] } }
 /** Smaller than the screen: shown at its own size, not enlarged. */
 export const Small: Story = { args: { images: [SHOT_SMALL] } }
 
+/** The browser's word that a picture has loaded, at the size it gave. */
+const loadedAt = (img: HTMLElement, width: number, height: number) => {
+  Object.defineProperty(img, 'naturalWidth', { value: width, configurable: true })
+  Object.defineProperty(img, 'naturalHeight', { value: height, configurable: true })
+  img.dispatchEvent(new Event('load'))
+}
+
 /** No size given: the frame stays as it was while the picture arrives, so nothing moves. */
 export const Unsized: Story = {
   args: { images: [SHOT_UNSIZED] },
   play: async ({ canvasElement }) => {
-    const box = within(canvasElement.ownerDocument.body).getByRole('img').parentElement!
+    const img = within(canvasElement.ownerDocument.body).getByRole('img')
+    const box = img.parentElement!
+    await expect(box.style.getPropertyValue('--w')).toBe('')
+    loadedAt(img, 1600, 600)
+    await expect(box.style.getPropertyValue('--w')).toBe('')
+  },
+}
+
+/** Unsized and small: the frame stays, and the picture is held to its own size inside it. */
+export const UnsizedSmall: Story = {
+  args: { images: [{ ...SHOT_SMALL, width: undefined, height: undefined }] },
+  play: async ({ canvasElement }) => {
+    const img = within(canvasElement.ownerDocument.body).getByRole('img')
+    const box = img.parentElement!
+    loadedAt(img, 240, 120)
+    await waitFor(() => expect(box).toHaveAttribute('data-measured'))
+    await expect(box.style.getPropertyValue('--nw')).toBe('240')
+    await expect(box.style.getPropertyValue('--w')).toBe('')
+  },
+}
+
+/** Only a width given: as good as none, so the frame stays when the height arrives. */
+export const WidthOnly: Story = {
+  args: { images: [{ ...SHOT_PORTRAIT, height: undefined }] },
+  play: async ({ canvasElement }) => {
+    const img = within(canvasElement.ownerDocument.body).getByRole('img')
+    const box = img.parentElement!
+    loadedAt(img, 390, 1200)
+    await waitFor(() => expect(box).toHaveAttribute('data-measured'))
     await expect(box.style.getPropertyValue('--w')).toBe('')
   },
 }

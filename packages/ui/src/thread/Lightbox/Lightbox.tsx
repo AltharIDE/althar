@@ -174,6 +174,12 @@ export function Lightbox({ images, index, defaultIndex = 0, onIndexChange, onClo
     setActual(undefined)
   }
   const zoomed = actual === image && known !== undefined
+  /* given both ways up front, the frame takes the picture's shape; otherwise it stays, and the picture is capped at its measured size inside it */
+  const upfront = Boolean(image?.width && image?.height)
+  const frame =
+    known === undefined
+      ? undefined
+      : ({ [upfront || zoomed ? '--w' : '--nw']: known.width, [upfront || zoomed ? '--h' : '--nh']: known.height } as CSSProperties)
   const zoom = () => {
     if (known) setActual(zoomed ? undefined : image)
   }
@@ -216,8 +222,9 @@ export function Lightbox({ images, index, defaultIndex = 0, onIndexChange, onClo
             {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Z does the same from the keyboard */}
             <div
               className={s.image}
-              style={known && (zoomed || image.width) ? ({ '--w': known.width, '--h': known.height } as CSSProperties) : undefined}
+              style={frame}
               data-sized={known ? '' : undefined}
+              data-measured={known && !upfront ? '' : undefined}
               data-actual={zoomed ? '' : undefined}
               onClick={zoom}
             >
