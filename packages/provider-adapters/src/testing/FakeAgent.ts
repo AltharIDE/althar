@@ -95,6 +95,13 @@ export const scenarios = {
   /** The same as Codex reports one: spawned after the turn, by its command, its output on its tool call. */
   backgroundCodex: 'background-codex',
   /**
+   * Commands the agent starts of its own, with no tool call: `npm run watch`
+   * keeps running, `npm test` ends well and `npm run lint` badly, neither
+   * saying an exit code, and `npm run dev`, which it stops itself. Output
+   * for a call and a command it never named, too.
+   */
+  backgroundOwn: 'background-own',
+  /**
    * Followed by a command, `run git status --short`: runs it, asking first
    * with Codex's command options, each time as a tool call of its own, and
    * says what was chosen (`chosen=allow_once`).
@@ -973,6 +980,28 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await leaveRunning(params.sessionId, session, client, scenario === scenarios.background ? 'claude' : 'codex')
           await say('serving')
           return ended()
+        case scenarios.backgroundOwn: {
+          const commands = ['npm run watch', 'npm test', 'npm run lint', 'npm run dev']
+          for (const [index, name] of commands.entries())
+            await update({
+              sessionUpdate: 'async_task_spawned',
+              asyncTaskId: `own-${index}`,
+              name,
+              taskType: 'shell',
+              canStop: true,
+            } as never)
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'never-made',
+            _meta: { terminal_output_delta: { data: 'ready\n' } },
+          })
+          await update({ sessionUpdate: 'async_task_progress', asyncTaskId: 'never-named', outputFilePath: '/tmp/none' } as never)
+          await update({ sessionUpdate: 'async_task_state_update', asyncTaskId: 'own-1', state: 'completed' } as never)
+          await update({ sessionUpdate: 'async_task_state_update', asyncTaskId: 'own-2', state: 'failed' } as never)
+          await update({ sessionUpdate: 'async_task_state_update', asyncTaskId: 'own-3', state: 'stopped' } as never)
+          await say('started')
+          return ended()
+        }
         case scenarios.afterTurn:
           await say('Done')
           setTimeout(() => void update({ sessionUpdate: 'available_commands_update', availableCommands: [] }), 20)

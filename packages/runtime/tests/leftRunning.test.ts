@@ -1,6 +1,7 @@
 import { assert, describe, it } from '@effect/vitest'
+import { Effect } from 'effect'
 
-import { commandOfCall, exitCodeIn, servingAt } from '../src/leftRunning'
+import { commandOfCall, exitCodeIn, servingAt, tailOf } from '../src/leftRunning'
 
 /*
  * What is read from a command left running: where it answers, as servers
@@ -37,5 +38,14 @@ describe('what a command left running says', () => {
     assert.strictEqual(commandOfCall({ rawInput: { command: ['/bin/zsh', '-lc', 'bun dev'] } }, 'bun dev'), 'bun dev')
     assert.strictEqual(commandOfCall(undefined, 'bun dev'), 'bun dev')
     assert.strictEqual(commandOfCall({ rawInput: { command: ['make', 'serve'] }, title: 'Serve' }, ''), 'make serve')
+    // With no line and no name, what the call says it does; else nothing.
+    assert.strictEqual(commandOfCall({ rawInput: {}, title: 'Serve the docs' }, ''), 'Serve the docs')
+    assert.strictEqual(commandOfCall({ rawInput: {} }, ''), '')
   })
+
+  it.effect('reads nothing of a file that isn’t there', () =>
+    Effect.gen(function* () {
+      assert.strictEqual(yield* tailOf('/nonexistent/althar/output'), '')
+    }),
+  )
 })

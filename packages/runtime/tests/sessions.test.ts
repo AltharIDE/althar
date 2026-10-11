@@ -495,6 +495,37 @@ describe('sessions', () => {
         }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
     )
 
+    it.live(
+      'keeps commands an agent starts of its own by their names; one that ended by itself says how, with or without a code; one it stopped goes',
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions
+          const { task: created } = yield* task()
+          yield* begin(created.threadId, 'claude-code')
+          yield* say(created.threadId, scenarios.backgroundOwn)
+          yield* ended(created.threadId, 1)
+          const all = yield* until(shown(created.threadId), (all) => all.length === 3)
+          // Output for a call or a command it never named changes nothing.
+          assert.deepStrictEqual(
+            all.map((left) => [left.command, left.url, left.ended?.code]),
+            [
+              ['npm run watch', null, undefined],
+              ['npm test', null, 0],
+              ['npm run lint', null, null],
+            ],
+          )
+          const [watch, test] = all
+          // Only one that ended is cleared; Stop on one that ended asks the agent nothing, and it goes.
+          yield* sessions.clearBackground(created.threadId, watch?.id ?? '')
+          assert.lengthOf(yield* shown(created.threadId), 3)
+          yield* sessions.stopBackground(created.threadId, test?.id ?? '')
+          assert.deepStrictEqual(
+            (yield* shown(created.threadId)).map((left) => left.command),
+            ['npm run watch', 'npm run lint'],
+          )
+        }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
     it.live('keeps one Codex left running, with where it answers from its tool call’s output after the turn', () =>
       Effect.gen(function* () {
         const { task: created } = yield* task()
