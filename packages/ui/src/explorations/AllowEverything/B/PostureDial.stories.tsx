@@ -6,18 +6,16 @@ import { TaskMenu } from '../../../chrome/TaskMenu/TaskMenu'
 import { PermissionPolicy } from '../../../foundations/vocabulary'
 import { Tooltip } from '../../../primitives/HoverCard/HoverCard'
 import { LinkButton } from '../../../primitives/LinkButton/LinkButton'
-import { projectRulesText } from '../../../screens/ProjectRules/ProjectRules'
-import { HELD_FIRST, HELD_WHY, MODE_WORDS, MODES_BY_ASKING, PROJECT, PROJECT_DEFAULT, PUBLISH, TASK } from '../fixtures'
+import { HELD_FIRST, HELD_WHY, MODE_WORDS, MODES_BY_ASKING, PROJECT, PROJECT_DEFAULT, PUBLISH } from '../fixtures'
 import { Lane } from '../parts/BoardCard'
 import { Mark } from '../parts/Mark'
 import { PromptCard } from '../parts/PromptCard'
 import { Queue } from '../parts/Queue'
-import { RulesSketch } from '../parts/RulesSketch'
 import { TaskBar } from '../parts/TaskBar'
-import { TasksClause } from '../parts/TasksClause'
 import { TaskView } from '../parts/TaskView'
 import { Pairs, schemeArgs, schemeArgTypes, schemeDecorator, type SchemeArgs } from '../Scheme'
-import { PostureDial, TaskPosture } from './PostureDial'
+import { TaskPosture } from './PostureDial'
+import { RulesWithDial, rulesWithDialText } from './RulesWithDial'
 
 /*
  * B · Posture dial. The rules page opens on the four modes as one dial,
@@ -27,53 +25,15 @@ import { PostureDial, TaskPosture } from './PostureDial'
  */
 
 const WORDS = {
-  off: 'Not in effect while everything is allowed.',
+  off: rulesWithDialText.off,
   wayOut: 'Change how much this task asks…',
   cleared: { why: 'waiting when this task was set to allow everything', rule: 'This task: allow everything' },
-  aside: 'Set on a task',
-  says: (mode: PermissionPolicy) => `: ${projectRulesText.rest.mode[mode].word}.`,
-  back: `Back to ${PROJECT}’s`,
   mark: 'Allows everything',
   markAbout: 'This task allows everything. Never still holds.',
   lane: 'Running',
 }
 
 const noop = () => {}
-
-/** Meridian's rules page with the dial over it; and task 418, where it sets its own. */
-function RulesB({ mode: initial = PROJECT_DEFAULT, own: initialOwn = null }: { mode?: PermissionPolicy; own?: PermissionPolicy | null }) {
-  const [mode, setMode] = useState(initial)
-  const [own, setOwn] = useState(initialOwn)
-  const everything = mode === PermissionPolicy.AllowAll
-  return (
-    <RulesSketch
-      project={PROJECT}
-      top={<PostureDial order={MODES_BY_ASKING} words={MODE_WORDS} value={mode} onChange={setMode} />}
-      restWord={projectRulesText.rest.mode[mode].word}
-      restAfter={projectRulesText.rest.mode[mode].after}
-      off={everything ? { ask: WORDS.off, allow: WORDS.off } : {}}
-      more={
-        <TasksClause
-          label={WORDS.aside}
-          headingLevel={2}
-          tasks={
-            own === null
-              ? []
-              : [
-                  {
-                    id: TASK.key,
-                    task: TASK.key,
-                    title: TASK.title,
-                    says: WORDS.says(own),
-                    back: { label: WORDS.back, onBack: () => setOwn(null) },
-                  },
-                ]
-          }
-        />
-      }
-    />
-  )
-}
 
 /** Task 418, its place on the dial in its bar; with its waiting requests, the held one in front. */
 function TaskB({
@@ -160,24 +120,24 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 /** The rules page opens on the dial, at Meridian's mode; what the chosen mode means under it. */
-export const RulesPage: Story = { name: 'Rules page · the dial', render: () => <RulesB /> }
+export const RulesPage: Story = { name: 'Rules page · the dial', render: () => <RulesWithDial /> }
 
 /** At its end, Allow everything: Ask me and Go ahead go quiet and say why. Never still holds; so does Always. */
 export const RulesPageAllowEverything: Story = {
   name: 'Rules page · at Allow everything',
-  render: () => <RulesB mode={PermissionPolicy.AllowAll} />,
+  render: () => <RulesWithDial mode={PermissionPolicy.AllowAll} />,
 }
 
 /** A task that sets its own is read with the rules, with the way back to the project's beside it. */
 export const RulesPageTaskSetsItsOwn: Story = {
   name: 'Rules page · a task that sets its own',
-  render: () => <RulesB own={PermissionPolicy.AllowAll} />,
+  render: () => <RulesWithDial own={PermissionPolicy.AllowAll} />,
 }
 
 /** A press, or the arrows: what the chosen mode means changes under the dial, and the lists go quiet only at its end. */
 export const TurningTheDial: Story = {
   name: 'Rules page · turning the dial',
-  render: () => <RulesB />,
+  render: () => <RulesWithDial />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     const dial = within(c.getByRole('radiogroup', { name: 'How much agents ask' }))
@@ -253,11 +213,11 @@ export const LightAndDark: Story = {
   render: () => (
     <Pairs
       pairs={[
-        { state: 'Rules page · the dial', stacked: true, node: () => <RulesB /> },
+        { state: 'Rules page · the dial', stacked: true, node: () => <RulesWithDial /> },
         {
           state: 'Rules page · at Allow everything, a task that sets its own',
           stacked: true,
-          node: () => <RulesB mode={PermissionPolicy.AllowAll} own={PermissionPolicy.Ask} />,
+          node: () => <RulesWithDial mode={PermissionPolicy.AllowAll} own={PermissionPolicy.Ask} />,
         },
         { state: 'Task · following the project', stacked: true, node: () => <TaskB height={180} /> },
         {
