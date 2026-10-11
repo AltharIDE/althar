@@ -8,7 +8,8 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
  * shows at the edge of the screen. The edge's own pages say through it where they draw, and what to
  * open in the window, and hear whether the pointer is on the island. And
  * dictation: where the speech model and the microphone stand, the model's
- * download, and what was said, sent to be written down. The page never sees or sends a
+ * download, and what was said, sent to be written down. And an update ready to install, and
+ * restarting into it. The page never sees or sends a
  * path. It gets no Node, no file system, no shell.
  */
 
@@ -40,6 +41,12 @@ ipcRenderer.on('althar:dictation', (_event, message: unknown) => {
   for (const listener of dictating) listener(message)
 })
 
+/* An update ready to install, as the main process says it changes. */
+const updating = new Set<(glance: unknown) => void>()
+ipcRenderer.on('althar:update', (_event, glance: unknown) => {
+  for (const listener of updating) listener(glance)
+})
+
 contextBridge.exposeInMainWorld('althar', {
   // Which system it is, for the words the window uses: this Mac, this PC, this computer.
   platform: process.platform,
@@ -67,6 +74,14 @@ contextBridge.exposeInMainWorld('althar', {
   },
   edgeSize: (height: number): void => ipcRenderer.send('althar:edge-size', height),
   openInWindow: (threadId?: string): void => ipcRenderer.send('althar:edge-open', threadId ?? null),
+  update: {
+    glance: (): Promise<unknown> => ipcRenderer.invoke('althar:update'),
+    restart: (): Promise<boolean> => ipcRenderer.invoke('althar:update-restart'),
+    onChange: (listener: (glance: unknown) => void): (() => void) => {
+      updating.add(listener)
+      return () => void updating.delete(listener)
+    },
+  },
   ...(SPEECH.has(`${process.platform}-${process.arch}`)
     ? {
         dictation: {

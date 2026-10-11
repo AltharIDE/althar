@@ -512,6 +512,12 @@ describe('settings', () => {
     expect(await within(panel).findByRole('button', { name: /^Code hosts and trackers/ })).toBeTruthy()
     expect(within(panel).queryByText('0 connected')).toBeNull()
     expect(within(panel).getByText('Althar 0.0.0')).toBeTruthy()
+    // What's new is its release's notes, in the browser.
+    expect(
+      within(panel)
+        .getByRole('link', { name: /What’s new/ })
+        .getAttribute('href'),
+    ).toBe('https://github.com/AltharIDE/althar/releases/tag/v0.0.0')
     // Opened, it asks the agents how they stand once, not again and again.
     await new Promise((resolve) => setTimeout(resolve, 300))
     expect(vi.mocked(client.status).mock.calls.filter(([input]) => input?.recheck === true)).toHaveLength(1)

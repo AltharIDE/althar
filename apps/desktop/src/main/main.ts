@@ -11,12 +11,15 @@ import { keepingAwake } from './awake'
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
+import { setAppMenu } from './menu'
 import { dockCount, soundOf, tells } from './notify'
 import { readAppPreferences, writeAppPreference } from './preferences'
 import { PICTURE_SCHEME } from './pictureAddress'
 import { type Resize, servePicture } from './pictures'
 import { findRepositories, forWindow, placesFor } from './repositories'
 import { alertSounds, playSound } from './sounds'
+import { checkNow, startUpdates } from './updater'
+import type { UpdateGlance, Updates } from './updates'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
 import { bundleOf } from '../runtime/editors'
 
@@ -55,6 +58,8 @@ import {
  * (awake.ts), and which notifications show, with a sound or not, and the
  * Dock's count (notify.ts).
  * Dictation's microphone, model and speech process are in dictation.ts.
+ * A packaged app updates itself (updater.ts): it never restarts into an
+ * update while work runs, and only when the person asks, or as they quit.
  */
 
 const here = import.meta.dirname
@@ -140,6 +145,9 @@ const awake = keepingAwake({
   onBattery: () => powerMonitor.isOnBatteryPower(),
 })
 
+/* Updates, in a packaged app only: its windows hear when one is ready to install. */
+let updates: Updates | undefined
+
 /* How many things wait, as the runtime last said, for the Dock's count as it is turned on and off. */
 let waiting = 0
 
@@ -186,7 +194,11 @@ const openThread = (threadId: string) => {
  * progress. And whether any work runs, to keep the Mac awake by.
  */
 const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
-  if (event._tag === 'Working' && typeof event.working === 'boolean') return awake.working(event.working)
+  if (event._tag === 'Working' && typeof event.working === 'boolean') {
+    // Nothing restarts into an update while work runs.
+    updates?.working(event.working)
+    return awake.working(event.working)
+  }
   if (event._tag === 'Waiting' && typeof event.count === 'number') {
     waiting = event.count
     edge?.waiting(event.count)
@@ -243,6 +255,7 @@ const startRuntime = () => {
     runtime = undefined
     // Nothing runs without the runtime; a new one says again.
     awake.working(false)
+    updates?.working(false)
     for (const [requestId, settle] of granting) {
       settle(null)
       granting.delete(requestId)
@@ -437,6 +450,10 @@ ipcMain.handle('althar:editor-picture', async (_event, id: unknown) => {
 ipcMain.handle('althar:sounds', () => alertSounds())
 ipcMain.handle('althar:play-sound', (_event, name: unknown) => playSound(name, undefined, () => shell.beep()))
 
+// An update ready to install, as a window shows it (null where the app doesn't update, as in development); and restarting into it, at the person's word, only while no work runs.
+ipcMain.handle('althar:update', () => updates?.glance() ?? null)
+ipcMain.handle('althar:update-restart', () => updates?.restart() ?? false)
+
 // Where Althar shows while the person is in another app, and whether this Mac has a notch to choose the island by.
 ipcMain.handle('althar:edge', () => edge?.state() ?? null)
 ipcMain.handle('althar:set-edge', async (_event, place: unknown) => {
@@ -481,6 +498,13 @@ void app.whenReady().then(() => {
   // Linux may not say when the power source changes, so there it is looked at again each minute too.
   if (process.platform === 'linux') setInterval(awake.powerChanged, 60_000).unref()
   startRuntime()
+  // A packaged app looks for updates, and tells every window as one is ready.
+  if (app.isPackaged)
+    updates = startUpdates((glance: UpdateGlance) => {
+      for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('althar:update', glance)
+    })
+  const checking = updates
+  setAppMenu({ name: app.name, ...(checking === undefined ? {} : { checkForUpdates: () => void checkNow(checking) }) })
   openWindow()
   edge = startEdge({
     profile: () => locations().profile,
