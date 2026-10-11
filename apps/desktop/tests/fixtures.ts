@@ -408,6 +408,7 @@ export const items = {
       ],
       count: 2,
       moved: false,
+      blocked: null,
       state: 'open',
       settledAt: null,
       ...content,

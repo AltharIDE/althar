@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { PushState } from '../src/foundations/vocabulary'
+import { PushBlocked, PushState } from '../src/foundations/vocabulary'
 import { PushRequest, pushRequestText } from '../src/thread/PushRequest/PushRequest'
 
 const COMMITS = [
@@ -39,6 +39,22 @@ describe('PushRequest', () => {
     render(<PushRequest where="PR #106" commits={[]} count={0} moved onPush={() => {}} />)
     expect(screen.getByText('Nothing on the branch is new to PR #106 now.')).toBeVisible()
     expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('says why what is on the branch can’t go up, and what would let it, with no Push', () => {
+    const { rerender } = render(
+      <PushRequest where="PR #106" commits={[]} count={0} moved blocked={PushBlocked.Rewritten} onPush={() => {}} />,
+    )
+    expect(screen.getByText(pushRequestText.blocked[PushBlocked.Rewritten]('PR #106'))).toBeVisible()
+    // Not that nothing is new, nor the branch shown as it is now: neither is so.
+    expect(screen.queryByText('Nothing on the branch is new to PR #106 now.')).toBeNull()
+    expect(screen.queryByText(pushRequestText.moved)).toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
+    rerender(<PushRequest where="PR #106" commits={COMMITS} moved blocked={PushBlocked.Behind} onPush={() => {}} />)
+    expect(screen.getByText(pushRequestText.blocked[PushBlocked.Behind]('PR #106'))).toBeVisible()
+    expect(screen.queryByRole('button')).toBeNull()
+    rerender(<PushRequest where="PR #106" commits={[]} moved blocked={PushBlocked.Unknown} onPush={() => {}} />)
+    expect(screen.getByText(pushRequestText.blocked[PushBlocked.Unknown]('PR #106'))).toBeVisible()
   })
 
   it('is busy while it pushes, and has no Push without one to call', () => {

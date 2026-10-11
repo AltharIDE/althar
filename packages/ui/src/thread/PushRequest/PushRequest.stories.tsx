@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
-import { PushState } from '../../foundations/vocabulary'
+import { PushBlocked, PushState } from '../../foundations/vocabulary'
 import { States } from '../../storybook/States'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { PushRequest } from './PushRequest'
@@ -37,6 +37,12 @@ export const Moved: Story = {
 }
 /** Moved so far that nothing on the branch is new to the pull request: nothing to push. */
 export const NothingNew: Story = { args: { moved: true, commits: [], count: 0 } }
+/** The branch changed under what the pull request has: why nothing can go up, and what would let it. No Push. */
+export const Rewritten: Story = { args: { moved: true, blocked: PushBlocked.Rewritten, commits: [], count: 0 } }
+/** The pull request has commits from elsewhere that the branch doesn't. */
+export const Behind: Story = { args: { moved: true, blocked: PushBlocked.Behind, commits: [], count: 0 } }
+/** Althar can't tell what the pull request has. */
+export const Unknown: Story = { args: { moved: true, blocked: PushBlocked.Unknown, commits: [], count: 0 } }
 /** Many commits: the first few, and how many more. */
 export const Many: Story = { args: { commits: COMMITS, count: 14 } }
 /** In a task of several repositories, the pull request by its repository. */
@@ -78,6 +84,15 @@ export const SettledHasNoPush: Story = {
   },
 }
 
+export const BlockedHasNoPush: Story = {
+  args: { moved: true, blocked: PushBlocked.Rewritten, commits: [], count: 0 },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.queryByRole('button', { name: /^Push/ })).toBeNull()
+    await expect(c.getByRole('article', { name: 'Push to PR #106' })).toHaveTextContent('can’t go up without a force push')
+  },
+}
+
 export const AllStates: Story = {
   render: (args) => (
     <States
@@ -86,6 +101,7 @@ export const AllStates: Story = {
         { state: 'asked', node: <PushRequest {...args} /> },
         { state: 'pushing', node: <PushRequest {...args} pushing /> },
         { state: 'moved', node: <PushRequest {...args} moved /> },
+        { state: 'rewritten', node: <PushRequest {...args} moved blocked={PushBlocked.Rewritten} commits={[]} count={0} /> },
         { state: 'pushed', node: <PushRequest {...args} state={PushState.Pushed} at="2m ago" /> },
         { state: 'replaced', node: <PushRequest {...args} state={PushState.Replaced} at="5m ago" /> },
         { state: 'closed', node: <PushRequest {...args} state={PushState.Closed} at="1h ago" /> },

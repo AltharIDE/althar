@@ -1,7 +1,16 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 
-import { type Account, ChangeRequest, Comment, ConnectorFailed, type Person, type Product, type Repository } from '@althar/connectors'
+import {
+  type Account,
+  ChangeRequest,
+  type CodeHost,
+  Comment,
+  ConnectorFailed,
+  type Person,
+  type Product,
+  type Repository,
+} from '@althar/connectors'
 import { PushRequestItem } from '@althar/contracts'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
@@ -828,32 +837,66 @@ export class Changes extends Context.Service<
       /* ---- Pushes the lead asks the person for, as items in the task's thread ---- */
 
       /**
-       * What a task's branch has that its pull request doesn't, as a push the
-       * lead asks for shows it: from the first of `known` the branch still has
-       * (the pull request's head, as its host says or as last seen, or the
-       * commit Althar last pushed) to the branch's head, the first few oldest
-       * first. `rewritten` where the branch has none of them any more, so a
-       * push would need forcing; `unknown` where the worktree knows none.
+       * Where a pull request's commits are pushed: its own repository, or, for
+       * one from a fork into the repository it was forked from, the fork.
        */
-      const aheadOf = (path: string, known: ReadonlyArray<string | null>) =>
+      const pushTargetOf = (host: CodeHost, repository: Repository, path: string) =>
+        Effect.gen(function* () {
+          const fork = yield* namedRemotes(path).pipe(
+            Effect.map(forkOf),
+            Effect.orElseSucceed(() => null),
+          )
+          const into = fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase()
+          return yield* host.pushTarget(into ? yield* host.repository(fork.fork.path) : repository)
+        })
+
+      /** A commit, and what crediting made it from (credit.ts): the branch stays on that until it moves onto what was sent. */
+      const madeFrom = (commit: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ original: string }>`SELECT original FROM credited_commits WHERE credited = ${commit}`
+          return [commit, ...rows.map((row) => row.original).filter((original) => original !== commit)]
+        }).pipe(Effect.orElseSucceed(() => [commit]))
+
+      /** The first of `commits` the branch has. */
+      const firstOnHead = (path: string, commits: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          for (const commit of commits) if (yield* onHead(path, commit)) return commit
+          return undefined
+        })
+
+      /**
+       * What a task's branch has that its pull request doesn't, as a push the
+       * lead asks for shows it: from what the pull request has to the branch's
+       * head, the first few oldest first. What it has is the latest of what
+       * is known of it that the worktree knows, never an older commit behind
+       * it: the remote's branch as the remote says now (`tip`), else, in
+       * `known`, the pull request's head as its host says, the commit Althar
+       * last pushed, and its head as last seen, in that order. `behind` where
+       * the remote's branch is on a commit the worktree doesn't know, pushed
+       * from elsewhere; `rewritten` where the branch no longer has what the
+       * pull request has, so a push would need forcing; `unknown` where the
+       * worktree knows none of them.
+       */
+      const aheadOf = (path: string, tip: string | null, known: ReadonlyArray<string | null>) =>
         Effect.gen(function* () {
           const head = yield* commitOf(path, 'HEAD')
-          const there = (yield* commitsOf(
+          const [latest] = (yield* commitsOf(
             path,
-            known.filter((commit) => commit !== null),
+            [tip, ...known].filter((commit) => commit !== null),
           )).filter((commit) => commit !== null)
-          for (const from of there) {
-            if (!(yield* onHead(path, from))) continue
-            const count = yield* commitsAhead(path, from, head)
-            const listed = count === 0 ? '' : yield* git(path, 'log', '--reverse', '--format=%h%x1f%s', `${from}..${head}`)
-            const commits = listed
-              .split('\n')
-              .filter((line) => line !== '')
-              .slice(0, COMMITS_SHOWN)
-              .map((line) => ({ sha: line.slice(0, line.indexOf('\x1f')), subject: line.slice(line.indexOf('\x1f') + 1) }))
-            return { kind: 'ahead', from, head, count, commits } as const
-          }
-          return there[0] === undefined ? ({ kind: 'unknown', head } as const) : ({ kind: 'rewritten', from: there[0], head } as const)
+          if (tip !== null && latest !== tip) return { kind: 'behind', head } as const
+          if (latest === undefined) return { kind: 'unknown', head } as const
+          const from = yield* firstOnHead(path, yield* madeFrom(latest))
+          if (from === undefined) return { kind: 'rewritten', from: latest, head } as const
+          const count = yield* commitsAhead(path, from, head)
+          const listed = count === 0 ? '' : yield* git(path, 'log', '--reverse', '--format=%h%x1f%s', `${from}..${head}`)
+          const commits = listed
+            .split('\n')
+            .filter((line) => line !== '')
+            .slice(0, COMMITS_SHOWN)
+            .map((line) => ({ sha: line.slice(0, line.indexOf('\x1f')), subject: line.slice(line.indexOf('\x1f') + 1) }))
+          return { kind: 'ahead', from, head, count, commits } as const
         })
 
       /** The pushes the lead asked for on a pull request that still wait for the person, oldest first. */
@@ -897,19 +940,20 @@ export class Changes extends Context.Service<
       /**
        * The branch moved since the person saw a push the lead asked for, so
        * what it showed isn't on it any more: it shows what is on it now, for
-       * the person to look at again, and pushes that.
+       * the person to look at again, and pushes that; or why that can't go up.
        */
-      const movedAsked = (taskId: string, url: string, path: string, known: ReadonlyArray<string | null>) =>
+      const movedAsked = (taskId: string, url: string, path: string, tip: string | null, known: ReadonlyArray<string | null>) =>
         Effect.gen(function* () {
           for (const asked of yield* askedOf(taskId, url)) {
             if (yield* behindAny(path, yield* asCredited(asked.content.head), ['HEAD'])) continue
-            const ahead = yield* aheadOf(path, known)
+            const ahead = yield* aheadOf(path, tip, known)
             yield* updateItem(asked.projectId, asked.id, {
               ...asked.content,
               moved: true,
               head: ahead.head,
               commits: ahead.kind === 'ahead' ? ahead.commits : [],
               count: ahead.kind === 'ahead' ? ahead.count : 0,
+              blocked: ahead.kind === 'ahead' ? null : ahead.kind,
             } satisfies Asked)
           }
         })
@@ -942,22 +986,14 @@ export class Changes extends Context.Service<
           if (workspace === undefined) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
           // What the person saw, and nothing the lead committed after: one rewritten away since isn't pushed.
           // A pull request from a fork into the repository it was forked from takes its commits on the fork.
-          const fork = yield* namedRemotes(workspace.path).pipe(
-            Effect.map(forkOf),
-            Effect.orElseSucceed(() => null),
-          )
-          const into = fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase()
-          const to = into ? yield* host.repository(fork.fork.path) : repository
           const sent = yield* sentTo(link.projectId, snapshot.url)
-          const pushTarget = yield* host.pushTarget(to)
-          const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [
-            snapshot.headSha,
-            sent,
-            yield* remoteTip(workspace.path, pushTarget, workspace.branch),
-          ])
+          const pushTarget = yield* pushTargetOf(host, repository, workspace.path)
+          const tip = yield* remoteTip(workspace.path, pushTarget, workspace.branch)
+          const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [snapshot.headSha, sent, tip])
           // The commit seen, or what crediting made of it, is on the branch still. A push the lead asked for that showed it shows what is.
           if (!(yield* onHead(workspace.path, seen)) && !(yield* onHead(workspace.path, head))) {
-            yield* movedAsked(taskId, snapshot.url, workspace.path, [snapshot.headSha, sent]).pipe(
+            // What Althar last pushed before what it last saw: a pull request read before that push is behind it.
+            yield* movedAsked(taskId, snapshot.url, workspace.path, tip, [sent, snapshot.headSha]).pipe(
               Effect.catchCause((cause) => Effect.logWarning('Could not show the branch as it is now', cause)),
             )
             return yield* new ChangedSinceSeen({ taskId, what: 'branch' })
@@ -1664,8 +1700,14 @@ export class Changes extends Context.Service<
             return yield* new ToolRefused({
               message: "The task's worktree isn't on this Mac, so Althar can't see what is on its branch. Tell the person.",
             })
-          const ahead = yield* aheadOf(workspace.path, [now.headSha, snapshot.headSha, yield* sentTo(link.projectId, snapshot.url)])
+          // What the pull request has: its branch as the remote says now, else as its host says, else as Althar last pushed it, else as last seen.
+          const tip = yield* remoteTip(workspace.path, yield* pushTargetOf(host, repository, workspace.path), workspace.branch)
+          const ahead = yield* aheadOf(workspace.path, tip, [now.headSha, yield* sentTo(link.projectId, snapshot.url), snapshot.headSha])
           const left = yield* uncommittedFiles(workspace.path).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
+          if (ahead.kind === 'behind')
+            return yield* new ToolRefused({
+              message: `${where} has commits your branch doesn't: someone pushed to it from elsewhere, so nothing can go up until they're in your branch. Tell the person.`,
+            })
           if (ahead.kind === 'unknown')
             return yield* new ToolRefused({
               message: `Althar can't tell which of the branch's commits ${where} has: your worktree has none of the commits it was pushed with. Tell the person.`,
@@ -1833,6 +1875,7 @@ export class Changes extends Context.Service<
                   commits: ahead.commits,
                   count: ahead.count,
                   moved: false,
+                  blocked: null,
                   state: 'open',
                   settledAt: null,
                 } satisfies Asked)

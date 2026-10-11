@@ -390,7 +390,12 @@ export const transcript = (threadId: string, budget: number) =>
             replaced: 'asked again later',
             closed: 'not pushed: the pull request closed',
           }
-          const how = states[text('state')]
+          const blocked: Readonly<Record<string, string>> = {
+            rewritten: 'not pushed yet: the branch no longer has what the pull request has',
+            behind: "not pushed yet: the pull request has commits the branch doesn't",
+            unknown: "not pushed yet: Althar can't tell what the pull request has",
+          }
+          const how = states[text('state')] ?? blocked[text('blocked')]
           return [
             `[the lead asked the person to push] ${count === 1 ? '1 commit' : `${count} commits`} to ${text('where')}: ${how ?? 'not pushed yet'}`,
           ]

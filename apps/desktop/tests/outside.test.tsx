@@ -917,14 +917,22 @@ describe('a task’s pull request', () => {
     expect(await screen.findByText('The branch changed since this was asked. This is what is on it now.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Push 1 commit to PR #12' }))
     await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'fed7654321', 'https://github.com/meridian/api/pull/12'))
+    // Changed so that it can't go up: why, and what would let it, with nothing to press.
+    current = {
+      ...current,
+      items: [...thread.items, { ...moved, content: { ...moved.content, commits: [], count: 0, blocked: 'rewritten' } } as ThreadItem],
+    }
+    act(() => emit(changed('thread_item', asked.id)))
+    expect(await screen.findByText(/no longer has what PR #12 already has/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Push \d/ })).toBeNull()
     // Pushed, it stays as a record, with nothing to press.
     current = {
       ...current,
       items: [...thread.items, { ...moved, content: { ...asked.content, state: 'pushed', settledAt: NOW } } as ThreadItem],
     }
     act(() => emit(changed('thread_item', asked.id)))
-    await waitFor(() => expect(screen.queryByRole('button', { name: /^Push \d/ })).toBeNull())
-    expect(screen.getByRole('article', { name: 'Push to PR #12' }).textContent).toContain('Pushed')
+    await waitFor(() => expect(screen.getByRole('article', { name: 'Push to PR #12' }).textContent).toContain('Pushed'))
+    expect(screen.queryByRole('button', { name: /^Push \d/ })).toBeNull()
     opened.mockRestore()
   })
 

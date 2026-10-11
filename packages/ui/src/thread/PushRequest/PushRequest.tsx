@@ -1,5 +1,5 @@
 import { Icon } from '../../foundations/Icon/Icon'
-import { PushState } from '../../foundations/vocabulary'
+import { PushBlocked, PushState } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
@@ -11,7 +11,8 @@ import s from './PushRequest.module.css'
  * request, in the thread: the commits that would go up, oldest first, and
  * Push, which pushes them and nothing newer. Nothing goes up until the
  * person presses it. Where the branch changed since the lead asked, it says
- * so, and shows what is on the branch now. Once pushed, asked again, or its
+ * so, and shows what is on the branch now, or why that can't go up and what
+ * would let it, with no Push. Once pushed, asked again, or its
  * pull request closed, it stays as a record, quiet, with no Push.
  */
 
@@ -27,6 +28,8 @@ export interface PushRequestText {
   moved: string
   /** Moved so far that nothing on the branch is new to the pull request any more. */
   nothingNew: (where: string) => string
+  /** Moved so that what is on the branch can't go up: why, and what would let it. */
+  blocked: Readonly<Record<PushBlocked, (where: string) => string>>
   /** Commits not listed. */
   more: (n: number) => string
   push: (n: number) => string
@@ -48,6 +51,14 @@ export const pushRequestText: PushRequestText = {
   closed: 'Not pushed',
   moved: 'The branch changed since this was asked. This is what is on it now.',
   nothingNew: (where) => `Nothing on the branch is new to ${where} now.`,
+  blocked: {
+    [PushBlocked.Rewritten]: (where) =>
+      `The branch changed since this was asked, and no longer has what ${where} already has, so it can’t go up without a force push. Ask the lead to put its commits back on top of ${where}’s, then to ask again.`,
+    [PushBlocked.Behind]: (where) =>
+      `${where} has commits the branch doesn’t, pushed from elsewhere, so nothing can go up until they’re in the task’s branch. Bring them in, then ask the lead again.`,
+    [PushBlocked.Unknown]: (where) =>
+      `Althar can’t tell what ${where} already has, so it can’t show what would go up. Ask the lead again, or push from a terminal.`,
+  },
   more: (n) => `and ${n} more`,
   push: (n) => `Push ${commits(n)}`,
   pushLabel: (n, where) => `Push ${commits(n)} to ${where}`,
@@ -77,6 +88,8 @@ export type PushRequestProps = RootProps<
     state?: PushState
     /** The branch changed since the lead asked: the commits are what is on it now. */
     moved?: boolean
+    /** What is on the branch now can't go up, and why: it says so, with what would let it, and offers no Push. */
+    blocked?: PushBlocked
     /** When it was asked, or settled: 2m ago. */
     at?: string
     /** Push what it shows. Without it, no Push. */
@@ -96,6 +109,7 @@ export function PushRequest({
   count,
   state = PushState.Open,
   moved = false,
+  blocked,
   at,
   onPush,
   pushing = false,
@@ -106,7 +120,8 @@ export function PushRequest({
 }: PushRequestProps) {
   const t = { ...pushRequestText, ...text }
   const open = state === PushState.Open
-  const total = Math.max(count ?? listed.length, listed.length)
+  const stopped = open && blocked !== undefined
+  const total = stopped ? 0 : Math.max(count ?? listed.length, listed.length)
   const kicker = {
     [PushState.Open]: by === undefined ? t.asked : t.asks(by),
     [PushState.Pushed]: t.pushed,
@@ -130,7 +145,8 @@ export function PushRequest({
           </span>
           {at !== undefined && <span className={s.at}>{at}</span>}
         </span>
-        {open && moved && <p className={s.moved}>{t.moved}</p>}
+        {open && moved && !stopped && <p className={s.moved}>{t.moved}</p>}
+        {stopped && <p className={s.moved}>{t.blocked[blocked](where)}</p>}
       </div>
       {listed.length > 0 ? (
         <ol className={s.commits}>
@@ -143,7 +159,7 @@ export function PushRequest({
           {total > listed.length && <li className={s.more}>{t.more(total - listed.length)}</li>}
         </ol>
       ) : (
-        open && <p className={s.note}>{t.nothingNew(where)}</p>
+        open && !stopped && <p className={s.note}>{t.nothingNew(where)}</p>
       )}
       {open && total > 0 && onPush ? (
         <div className={s.foot}>

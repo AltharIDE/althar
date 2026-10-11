@@ -1020,6 +1020,13 @@ export const PushRequestItem = Schema.Struct({
     count: Schema.Number,
     /** The branch changed since the lead asked: what this shows is what is on it now. */
     moved: Schema.Boolean,
+    /**
+     * Why what is on the branch now can't go up, where it changed so: it no
+     * longer has what the pull request has (`rewritten`), so a push would need
+     * forcing; the pull request has commits the branch doesn't (`behind`); or
+     * Althar can't tell what the pull request has (`unknown`). Null otherwise.
+     */
+    blocked: Schema.NullOr(Schema.Literals(['rewritten', 'behind', 'unknown'])),
     state: Schema.Literals(['open', 'pushed', 'replaced', 'closed']),
     /** When it was pushed, replaced or closed; null while it's open. */
     settledAt: Schema.NullOr(Schema.String),

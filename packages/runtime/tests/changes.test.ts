@@ -667,6 +667,7 @@ describe('a push the lead asks the person for', () => {
                 readonly commits: ReadonlyArray<{ readonly sha: string; readonly subject: string }>
                 readonly count: number
                 readonly moved: boolean
+                readonly blocked: string | null
                 readonly state: string
               },
             ]
@@ -855,6 +856,101 @@ describe('a push the lead asks the person for', () => {
         yield* callTool(task.lead, 'push_to_pull_request', {}),
         "PR #1 is merged, so there's nothing to push to. Tell the person what you committed.",
       )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  /** The commit a branch is on in the remote's repository. */
+  const remoteHead = (bare: string, branch: string) => git(bare, 'rev-parse', `refs/heads/${branch}`)
+
+  /** Althar's reading of the pull request, left behind: not asked again, with its head as it was at `head`. */
+  const staleReading = (taskId: string, head: string) =>
+    Effect.gen(function* () {
+      const changes = yield* Changes
+      yield* changes.stopListening(taskId, (yield* changes.ofTask(taskId))[0]?.url ?? '')
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE external_links SET snapshot = json_set(snapshot, '$.headSha', ${head}) WHERE kind = 'change' AND task_id = ${taskId}`
+    })
+
+  /** Someone pushes to the pull request's branch from elsewhere: a commit the task's worktree doesn't have. */
+  const pushFromElsewhere = (bare: string, branch: string) => {
+    const env = {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Dana',
+      GIT_AUTHOR_EMAIL: 'dana@althar.test',
+      GIT_COMMITTER_NAME: 'Dana',
+      GIT_COMMITTER_EMAIL: 'dana@althar.test',
+    }
+    const tip = remoteHead(bare, branch)
+    const made = execFileSync('git', ['commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'From elsewhere'], { cwd: bare, env })
+      .toString()
+      .trim()
+    git(bare, 'update-ref', `refs/heads/${branch}`, made)
+  }
+
+  it.live('goes by what the pull request has now, never an older commit a stale reading names', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      const task = yield* opened(working)
+      const first = remoteHead(bare, task.branch)
+      // The person pushes the lead's next commit; Althar's reading of the pull request is still from before it, with a real head.
+      commit(task.path, 'Next')
+      yield* changes.push(task.taskId, git(task.path, 'rev-parse', 'HEAD'))
+      assert.notStrictEqual(remoteHead(bare, task.branch), first)
+      yield* staleReading(task.taskId, first)
+      // The lead rewrites what went up: the stale head is still under the branch, but what the pull request has isn't, so nothing can go up.
+      commit(task.path, 'Next, again', '--amend')
+      assert.include(yield* callTool(task.lead, 'push_to_pull_request', {}), "Your branch no longer has PR #1's head")
+      assert.lengthOf(yield* asked(task.threadId), 0)
+      // Back on top of what went up, only what is new is asked for, not what the stale head would add.
+      git(task.path, 'reset', '-q', '--hard', remoteHead(bare, task.branch))
+      commit(task.path, 'Then')
+      assert.include(yield* callTool(task.lead, 'push_to_pull_request', {}), 'Asked the person to push 1 commit to PR #1.')
+      assert.deepStrictEqual(
+        (yield* asked(task.threadId))[0]?.commits.map((one) => one.subject),
+        ['Then'],
+      )
+      // Pushed to from elsewhere, the pull request has commits the branch doesn't: nothing can go up until they're in it.
+      pushFromElsewhere(bare, task.branch)
+      commit(task.path, 'After')
+      assert.include(yield* callTool(task.lead, 'push_to_pull_request', {}), "PR #1 has commits your branch doesn't")
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('shows what is on the branch now where it moved, without what already went up, or why it can’t go up', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      const task = yield* opened(working)
+      const first = remoteHead(bare, task.branch)
+      commit(task.path, 'Next')
+      yield* changes.push(task.taskId, git(task.path, 'rev-parse', 'HEAD'))
+      yield* staleReading(task.taskId, first)
+      commit(task.path, 'Then')
+      yield* callTool(task.lead, 'push_to_pull_request', {})
+      const [card] = yield* asked(task.threadId)
+      // The lead rewrites what the card showed: it shows what is on the branch now, and nothing that went up already.
+      commit(task.path, 'Then, again', '--amend')
+      yield* Effect.flip(changes.push(task.taskId, card?.head ?? '', card?.url ?? ''))
+      const [moved] = yield* asked(task.threadId)
+      assert.deepInclude(moved, { moved: true, count: 1, blocked: null, state: 'open', head: git(task.path, 'rev-parse', 'HEAD') })
+      assert.deepStrictEqual(
+        moved?.commits.map((one) => one.subject),
+        ['Then, again'],
+      )
+      // The lead drops what went up: what is on the branch can't go up without forcing, and the card says so rather than that nothing is new.
+      git(task.path, 'reset', '-q', '--hard', first)
+      commit(task.path, 'Instead')
+      const refused = yield* Effect.flip(changes.push(task.taskId, moved?.head ?? '', moved?.url ?? ''))
+      assert.strictEqual(refused instanceof Error ? refused.name : String(refused), 'ChangedSinceSeen')
+      const [blocked] = yield* asked(task.threadId)
+      assert.deepInclude(blocked, { moved: true, count: 0, blocked: 'rewritten', state: 'open' })
+      assert.lengthOf(blocked?.commits ?? [], 0)
+      assert.notInclude(git(bare, 'log', '--format=%s', task.branch), 'Instead')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
