@@ -648,6 +648,34 @@ describe('a task', () => {
     )
   })
 
+  it('keeps a message Althar queued where it is when the lead it starts or resumes doesn’t, so it is never sent twice', async () => {
+    const base = snapshot()
+    const stopped = (actions: ThreadSnapshot['task']['actions']) =>
+      thread({ task: { ...base.task, lead: { agentId: 'claude-code', model: 'claude-opus-5', account: null }, actions }, session: null })
+    for (const [actions, starting] of [
+      [[], 'startSession'],
+      [['resume'], 'resumeTask'],
+    ] as const) {
+      const { client } = fakeClient({ getThread: vi.fn(async () => stopped([...actions])) })
+      vi.mocked(client[starting]).mockRejectedValueOnce(new ApiError({ reason: 'SessionFailed', message: "Claude Code couldn't start." }))
+      const view = withServices(<Task />, client)
+      await waitFor(() => expect(client.status).toHaveBeenCalled())
+      const box = await screen.findByRole('textbox', { name: /^Tell .* something$/ })
+      fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+      expect(await screen.findByRole('img', { name: 'shot.png' })).toBeTruthy()
+      await userEvent.type(box, 'Carry on{Enter}')
+      expect(await screen.findByText("Claude Code couldn't start.")).toBeTruthy()
+      expect(client[starting]).toHaveBeenCalled()
+      // Queued, it stays in the thread, and the composer stays empty: nothing to send again.
+      expect(screen.getByText('Carry on', { selector: 'p' })).toBeTruthy()
+      expect((box as HTMLTextAreaElement).value).toBe('')
+      expect(screen.queryByRole('list', { name: /to send/ })).toBeNull()
+      await userEvent.type(box, '{Enter}')
+      expect(client.send).toHaveBeenCalledTimes(1)
+      view.unmount()
+    }
+  })
+
   it('keeps the agent picked to take over, and what was said, when the handover doesn’t go', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     vi.mocked(client.switchAgent).mockRejectedValueOnce(new Error('Althar is restarting.'))

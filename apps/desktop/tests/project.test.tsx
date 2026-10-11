@@ -299,7 +299,9 @@ describe('the Talk room', () => {
     const box = screen.getByRole('textbox', { name: 'Tell the coordinator something' })
     await userEvent.type(box, 'Add a retry{Enter}')
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Add a retry', disposition: 'after_current' }))
-    expect(client.startSession).not.toHaveBeenCalled()
+    // Started first, as it ran last, so a send that fails was never queued.
+    expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code' })
+    expect(vi.mocked(client.startSession).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.send).mock.invocationCallOrder[0] ?? 0)
 
     await userEvent.click(screen.getByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
     await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
@@ -375,6 +377,24 @@ describe('the Talk room', () => {
     await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('This is the bug'))
     expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
     expect(screen.getByRole('img', { name: 'bug.png' })).toBeTruthy()
+  })
+
+  it('puts what was said back when the coordinator didn’t start, since nothing was queued, and sends on past one already starting', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.startSession).mockRejectedValueOnce(new ApiError({ reason: 'SessionFailed', message: "Claude Code couldn't start." }))
+    withServices(<Project />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    await userEvent.type(box, 'Plan it{Enter}')
+    expect(await screen.findByText("Claude Code couldn't start.")).toBeTruthy()
+    expect(client.send).not.toHaveBeenCalled()
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('Plan it'))
+    // One already starting, as from a message just before, takes this one next.
+    vi.mocked(client.startSession).mockRejectedValueOnce(
+      new ApiError({ reason: 'SessionRunning', message: 'An agent is already working on this task.' }),
+    )
+    await userEvent.type(box, '{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Plan it', disposition: 'after_current' }))
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe(''))
   })
 
   it("says when the agent it last ran on isn't signed in, and starts it on one that is", async () => {

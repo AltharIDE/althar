@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
+  ApiError,
   type AgentStatus,
   type CoordinatorSnapshot,
   PAGE,
@@ -274,15 +275,17 @@ export const useProject = (projectId: string): ProjectModel => {
         body,
         'after_current',
         async () => {
-          // The runtime starts it as it ran last; anything else the person picked starts first.
-          const suggested = coordinator?.suggested
-          const same =
-            suggested != null &&
-            choice?.agentId === suggested.agentId &&
-            choice.model === suggested.model &&
-            choice.effort === suggested.effort
-          if (threadId !== null && coordinator?.session === null && choice !== null && !same)
-            await client.startSession(startOf(threadId, choice))
+          /*
+           * Not running, it starts first, as it ran last or as the person picked, and its brief waits
+           * for what they say. Started in the same call as the send, an agent that didn't start would
+           * fail a message the queue has already, which would then go back in the composer to be sent
+           * twice; started first, a send that fails was never queued. One already starting, as for a
+           * message just before, reads this one next.
+           */
+          if (threadId !== null && coordinator?.session === null && choice !== null)
+            await client.startSession(startOf(threadId, choice)).catch((failure: unknown) => {
+              if (!(failure instanceof ApiError && failure.reason === 'SessionRunning')) throw failure
+            })
           await send(body, 'after_current', images)
         },
         images,
