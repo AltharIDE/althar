@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { findRepositories, forWindow, placesFor, shownAt } from '../src/main/repositories'
+import { findRepositories, foundIds, forWindow, placesFor, shownAt, stillFound } from '../src/main/repositories'
 
 /* The repositories the first screen offers: found where people keep code, newest work first, and handed to the window by id. */
 
@@ -59,7 +59,7 @@ describe('repositories where people keep code', () => {
     const home = mkdtempSync(join(tmpdir(), 'althar-found-'))
     repo(join(home, 'code', 'meridian'), 'main', 1)
     const ids = new Map<string, string>()
-    const shown = forWindow(await findRepositories(placesFor(home, 'darwin')), home, (path) => {
+    const shown = forWindow(await findRepositories(placesFor(home, 'darwin')), home, ({ path }) => {
       ids.set(`id${ids.size}`, path)
       return `id${ids.size - 1}`
     })
@@ -71,5 +71,33 @@ describe('repositories where people keep code', () => {
     expect(ids.get('id0')).toBe(join(home, 'code', 'meridian'))
     expect(shownAt(home, home)).toBe('~')
     expect(shownAt('/opt/src/x', home)).toBe('/opt/src/x')
+  })
+
+  it('keeps one id a repository across looks, so a look from another window, or two at once, leaves every id good', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'althar-found-'))
+    repo(join(home, 'code', 'meridian'), 'main', 1)
+    const ids = foundIds()
+    const [first, second] = await Promise.all(
+      [0, 1].map(async () => forWindow(await findRepositories(placesFor(home, 'darwin')), home, ids.idOf)),
+    )
+    const id = first?.repositories[0]?.id ?? ''
+    expect(second?.repositories[0]?.id).toBe(id)
+    expect(ids.found(id)?.path).toBe(join(home, 'code', 'meridian'))
+    expect(ids.found('made-up')).toBeUndefined()
+  })
+
+  it('grants a repository found only while it is still the folder found, never a link put in its place', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'althar-found-'))
+    const meridian = repo(join(home, 'code', 'meridian'), 'main', 1)
+    const [found] = (await findRepositories(placesFor(home, 'darwin'))).repositories
+    if (found === undefined) throw new Error('meridian wasn’t found')
+    expect(await stillFound(found)).toBe(realpathSync(meridian))
+    // Moved away, and a link to somewhere else left where it was.
+    const elsewhere = repo(join(home, 'elsewhere'), 'main', 0)
+    renameSync(meridian, join(home, 'moved'))
+    symlinkSync(elsewhere, meridian)
+    expect(await stillFound(found)).toBeNull()
+    // Gone altogether.
+    expect(await stillFound({ path: join(home, 'gone'), real: join(home, 'gone') })).toBeNull()
   })
 })

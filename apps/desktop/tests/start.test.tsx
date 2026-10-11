@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { type AccountSignInState, type AgentStatus, ApiError, type Status } from '@althar/contracts'
+import { type AccountSignInState, type AgentStatus, ApiError, type ProjectSummary, type Status } from '@althar/contracts'
 import { RuntimeState } from '@althar/ui'
 
 import { useServices } from '../src/renderer/data/services'
@@ -15,7 +15,7 @@ import { SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
 import { runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
-import { agents, changed, fakeClient, fakeHost, streamed, usual, withoutOpenCode } from './fixtures'
+import { agents, changed, fakeClient, fakeHost, project, streamed, usual, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
@@ -590,16 +590,87 @@ describe('the start', () => {
     fireEvent.keyDown(window, { key: 'n', metaKey: true })
     await waitFor(() => expect(host.pickFolder).toHaveBeenCalledTimes(2))
     expect(within(list).getAllByRole('checkbox', { name: /api/ })).toHaveLength(1)
-    await userEvent.click(within(list).getByRole('checkbox', { name: /api/ }))
-    await userEvent.click(within(list).getByRole('checkbox', { name: /web/ }))
 
-    // A folder inside a repository, dropped: alone, it opens as the folder it is.
+    // A folder inside a repository, dropped: with others, it isn't made a part of the project (ADR-025).
     // Dropped anywhere on the screen: on the list, here.
     fireEvent.drop(list, { dataTransfer: { types: ['Files'], files: [new File([], 'docs')] } })
     expect(await within(list).findByRole('checkbox', { name: /docs.*~?\/m\/mono\/docs/ })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
+    expect(
+      await screen.findByText('docs is a folder inside mono: on its own it makes a project, but with others, add mono itself.'),
+    ).toBeTruthy()
+    expect(client.openProject).not.toHaveBeenCalled()
+    // Alone, it opens as the folder it is.
+    await userEvent.click(within(list).getByRole('checkbox', { name: /api/ }))
+    await userEvent.click(within(list).getByRole('checkbox', { name: /web/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Make the project/ }))
     await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
     expect(client.openProject).toHaveBeenCalledWith('grant_dropped', { name: 'docs' })
+  })
+
+  it('makes the first project once, however often ⌘⏎ is pressed, and leaves the keys typed into a form to the form', async () => {
+    const onProject = vi.fn()
+    let made: (made: ProjectSummary) => void = () => undefined
+    const { client } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })),
+      readFolder: vi.fn(async () => ({
+        kind: 'repository' as const,
+        name: 'meridian',
+        repositories: [{ path: '/Users/me/Projects/meridian', folder: null, name: 'meridian', branch: 'main', remote: null }],
+        project: null,
+      })),
+    })
+    const opened = client.openProject
+    vi.mocked(client.openProject).mockImplementation(() => new Promise((resolve) => (made = resolve)))
+    const host = fakeHost({
+      findRepositories: vi.fn(async () => ({
+        lookedIn: ['~/Projects'],
+        repositories: [{ id: 'r1', name: 'meridian', where: '~/Projects/meridian', branch: 'main', worked: 0 }],
+      })),
+    })
+    withServices(<Start onProject={onProject} />, client, host)
+    await screen.findByRole('heading', { name: 'Where should they work?' })
+
+    // Typed into an account's form, such as its key, ⌘⏎ and ⌘N are the form's.
+    const form = document.createElement('form')
+    const key = document.createElement('input')
+    form.append(key)
+    ;(await screen.findByRole('list', { name: 'Repositories for the project' })).append(form)
+    fireEvent.keyDown(key, { key: 'Enter', metaKey: true })
+    fireEvent.keyDown(key, { key: 'n', metaKey: true })
+    expect(screen.queryByText('Tick a repository for the project first.')).toBeNull()
+    expect(host.pickFolder).not.toHaveBeenCalled()
+    form.remove()
+
+    await userEvent.click(screen.getByRole('checkbox', { name: /meridian/ }))
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
+    await waitFor(() => expect(opened).toHaveBeenCalledTimes(1))
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true })
+    act(() => made(project))
+    await waitFor(() => expect(onProject).toHaveBeenCalledWith('p1'))
+    expect(opened).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps focus in the project as its repositories are left out, then on the last one’s tick', async () => {
+    const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+    const host = fakeHost({
+      findRepositories: vi.fn(async () => ({
+        lookedIn: ['~/Projects'],
+        repositories: [
+          { id: 'r1', name: 'meridian', where: '~/Projects/meridian', branch: 'main', worked: 0 },
+          { id: 'r2', name: 'halyard', where: '~/Projects/halyard', branch: 'main', worked: 0 },
+        ],
+      })),
+    })
+    withServices(<Start onProject={vi.fn()} />, client, host)
+    await userEvent.click(await screen.findByRole('checkbox', { name: /meridian/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: /halyard/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Leave meridian out' }))
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Leave halyard out' })))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('checkbox', { name: /halyard/ })))
+    expect(screen.getByRole('checkbox', { name: /halyard/ }).getAttribute('aria-checked')).toBe('false')
   })
 
   it('says what went wrong making the first project, and when nothing was found or the runtime can’t answer', async () => {
