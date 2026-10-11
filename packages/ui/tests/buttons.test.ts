@@ -30,6 +30,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Step/Step.tsx': 'the caret that opens a step',
   'thread/Diff/Diff.tsx': 'a folded stretch of unchanged lines, which opens in place',
   'screens/Home/Home.tsx': 'the line that folds what the loop did since you looked',
+  'explorations/triage/A/CheckpointCard.tsx': 'the line a checkpoint folds to, which opens to what it assumed',
   /* an option in a list or a rail */
   'composer/ModelPick/ModelPick.tsx': 'the picker and its options',
   'composer/ModelBrowser/ModelBrowser.tsx': 'the rail and a model’s row',

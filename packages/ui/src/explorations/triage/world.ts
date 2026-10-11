@@ -142,6 +142,19 @@ export const SCOPE = {
     { id: 'l1', says: 'Whether refunds share charges’ budget or get their own' },
     { id: 'l2', says: 'Whether refunds from the admin dashboard count' },
   ],
+  /** The same, settled while planning. */
+  settled: [
+    { id: 's1', says: 'Refunds share charges’ budget' },
+    { id: 's2', says: 'Admin refunds don’t count' },
+  ],
+  /** All of it, still open: a task handed over in a sentence. */
+  open: [
+    { id: 'o1', says: 'Which limiter refunds go behind' },
+    { id: 'o2', says: 'What a partner over the limit gets back' },
+    { id: 'o3', says: 'Whether partners hear of it' },
+    { id: 'o4', says: 'Whether refunds share charges’ budget or get their own' },
+    { id: 'o5', says: 'Whether refunds from the admin dashboard count' },
+  ],
 }
 
 /** A second task at its checkpoint at the same time, for the board. */

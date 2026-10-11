@@ -1,0 +1,154 @@
+import { Meta, Source, Unstyled } from '@storybook/addon-docs/blocks'
+
+import { PullRequestEnd, SameMoment } from './parts/Compare'
+import { PR_ASSUMED, PR_NOTHING } from './world'
+
+<Meta title="Explorations/Triage checkpoint/Compare" />
+
+# Triage checkpoint
+
+A design exploration, not a shipped feature. After a little groundwork, a task's lead has one triage moment. Usually it is a
+**checkpoint**: its approach in a line or two and what it is assuming, which carries on by itself when its time runs out unless you
+correct something, as the plan card does. Only when a wrong guess would be expensive does it **ask**, and the task waits on you. Asking
+should feel like the exception, and an empty checkpoint should feel normal, so a lead is never pushed to invent something to ask.
+
+Everything here is Storybook only: fixtures, no wiring. Each direction has a sheet of every moment in light and in dark, side by side
+with the board, and a **Try** story whose clock runs.
+
+- [A. Plan-like card](?path=/story/explorations-triage-checkpoint-a-plan-like-card--light): a card in the thread like the plan card,
+  numbered assumptions with No on each, the plan's clock with Hold and Continue now.
+- [B. Inline line](?path=/story/explorations-triage-checkpoint-b-inline-line--light): the approach in the lead's own words, then one
+  quiet line, "Assuming 3 things · continues in 1:42 · Review", which opens to the list.
+- [C. Board-first](?path=/story/explorations-triage-checkpoint-c-board-first--on-the-board): the running card opens, in place, to the
+  assumptions, so a checkpoint is settled from the board. Seen here on Meridian's board, with two at once.
+- [D. On the brief](?path=/story/explorations-triage-checkpoint-d-on-the-brief--light): most assumptions are readings of what you asked
+  for, so they are marked on your words, with the readings under the brief.
+- [Coordinator: decided and left](?path=/story/explorations-triage-checkpoint-coordinator-decided-and-left--light): the plan says what
+  was settled with you and what it leaves to the lead, so the checkpoint holds only the rest.
+
+## What every direction keeps
+
+These held up in all four, so they are not what the choice is about.
+
+- **No new lane, no new step.** The task stays in Running. Its card says what the first step is doing: _Looking around_, then
+  _Checkpoint · 3 assumptions · continues in 1:42_, then _Implement_ as usual. Triage is the start of Implement, not a pip on the track.
+- **A checkpoint is ink, not violet.** It doesn't wait on you, so it isn't a call and isn't in Needs you. Held, it still isn't: you
+  stopped it, so the card says _held by you_.
+- **A question is a call.** Violet, in Needs you as its own card, and the running card says _Waiting on you_. It says why it asks
+  rather than assumes, in one of three words the lead must pick from: a wrong guess **redoes the work**, it **reaches outside** (partners,
+  customers, production), or it **can't be undone**. Anything else becomes an assumption. What it also assumes rides along and carries
+  on with the answer.
+- **Althar keeps the clock, not the screen.** Unlike the plan card's, it runs whether or not anyone is looking; otherwise a checkpoint
+  nobody saw would block the work. The clock waits only while you write a correction, or when you hold it. It is announced once, not
+  every tick, and with reduced motion nothing ticks or drains: it says _continues at 11:06_.
+- **What it assumed is kept.** Once it carries on, the card's foot says _3 assumed · 1 corrected_ and the thread keeps a line that opens
+  to the list. No still works afterwards, as a message to the lead. The pull request ends with the list (below).
+
+## The same moment, four ways
+
+Three assumptions, counting down: the usual shape of a checkpoint that has something in it.
+
+<Unstyled>
+  <SameMoment id="three" />
+</Unstyled>
+
+And an empty one, which should be the most common of all.
+
+<Unstyled>
+  <SameMoment id="empty" />
+</Unstyled>
+
+## How they compare
+
+<table>
+  <thead>
+    <tr>
+      <th></th>
+      <th>Signal and noise</th>
+      <th>Clicks to correct one</th>
+      <th>Seen from the board</th>
+      <th>An empty checkpoint</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <th>A. Card</th>
+      <td>Loudest. A card of three rows and a clock for every task, right after the plan card. Clear, but it reads as a step to fill.</td>
+      <td>In the thread: No, then type. From the board: open the task first.</td>
+      <td>The phase line: count and time.</td>
+      <td>One quiet line, the one a checkpoint folds to. Still a mark on every task.</td>
+    </tr>
+    <tr>
+      <th>B. Line</th>
+      <td>
+        Quietest. One line under what the lead says anyway. Easy to pass by, which is mostly the point; the card and the pull request catch
+        what was missed.
+      </td>
+      <td>In the thread: Review, No, then type. From the board: open the task first.</td>
+      <td>The phase line: count and time.</td>
+      <td>Nothing at all.</td>
+    </tr>
+    <tr>
+      <th>C. Board</th>
+      <td>Quiet until opened, then a card that grows in its lane while the clock runs, and moves the cards under it.</td>
+      <td>From the board: Review, No, then type, without leaving the board. In the thread: as B.</td>
+      <td>The assumptions themselves, a click away, and several tasks’ checkpoints down one lane.</td>
+      <td>Nothing at all.</td>
+    </tr>
+    <tr>
+      <th>D. Brief</th>
+      <td>
+        Quiet on the page but heavy in meaning: your own words, marked. Best at saying why each was assumed; it needs a brief with words to
+        mark.
+      </td>
+      <td>In the thread: No, then type, at the head of the thread, which may be a long way up.</td>
+      <td>The phase line: count and time.</td>
+      <td>Nothing marked.</td>
+    </tr>
+  </tbody>
+</table>
+
+What pushes a lead to invent things is a shape that looks unfinished when it is empty. A's numbered card does that most; B and C have no
+shape when empty; D asks every assumption to point at the words or the file it is about, which makes an invented one easy to spot.
+
+## Recommendation
+
+**B, the quiet line, with two things taken from the others.**
+
+1. **Each assumption says where it comes from**, as D's readings do: the words of the brief it reads, or the file or note it rests on.
+   It is one line of text in B's list, it makes a vague assumption visible as vague, and it is what the pull request needs anyway.
+2. **The coordinator's plan says what is decided and what is left to the lead.** It shrinks the checkpoint before it exists, and makes an
+   empty one the expected result of a good plan rather than a lead that didn't try.
+
+B makes an empty checkpoint cost nothing and a full one cost one line, keeps violet for the one question that earns it, and leaves the
+board as it is: one button per card, saying where the task is and how long until it carries on. A is the clearest to read but the
+heaviest to live with, and its shape asks to be filled. C is the strongest for someone running many tasks from the board, but it breaks
+the card's single button and makes cards change height while their clocks run; worth revisiting as B's card opening into the dock's
+peek rather than in the lane. D is the best explanation of an assumption and the weakest place to put the clock, at the head of a thread
+that may be long.
+
+## Open
+
+- **Two minutes**, where the plan card has its own, shorter wait. Per project, like the other rules? Shorter for a small task?
+- **Does the lead wait during the countdown, or carry on and fold corrections in?** These prototypes wait; carrying on would make a
+  correction a steer and cost rework.
+- **A held checkpoint stays out of Needs you** here, because you held it. If held ones get forgotten, that is the first thing to change.
+- **Dark is provisional.** The kit has no dark theme yet; these sheets use one scoped to the exploration, made from the terminal's
+  sheets and the island's cobalt and violet. What opens in a portal, like a tooltip, stays light.
+- **Words.** _Checkpoint_, _Assumed_ and _Hold_ on a checkpoint need glossary entries before anything ships.
+
+## The end of the pull request
+
+What was assumed is kept where the work is reviewed. As markdown:
+
+<Source code={PR_ASSUMED} language="md" dark={false} />
+
+As the kit draws it:
+
+<Unstyled>
+  <PullRequestEnd />
+</Unstyled>
+
+When the checkpoint was empty, it says so in a line rather than leaving the heading out, so a reviewer knows it was checked:
+
+<Source code={PR_NOTHING} language="md" dark={false} />

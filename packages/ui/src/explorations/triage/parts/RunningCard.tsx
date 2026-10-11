@@ -67,11 +67,9 @@ export interface RunningCardProps {
   wait: number
   due: string
   still?: boolean
-  /** At the end of the phase line: C's way to open the checkpoint on the card. */
-  toggle?: ReactNode
   /** Under the phase line, inside the card: C's checkpoint. */
   tray?: ReactNode
-  /** In place of the foot's note on what it assumed: C opens it. */
+  /** In place of the foot's note on what it assumed: C's way to open the checkpoint on the card. */
   marker?: ReactNode
   current?: boolean
   onOpen?: () => void
@@ -90,7 +88,6 @@ export function RunningCard({
   wait,
   due,
   still,
-  toggle,
   tray,
   marker,
   current,
@@ -100,7 +97,8 @@ export function RunningCard({
   const t = { ...runningCardText, ...text }
   const status = c.phase === Phase.Asking ? TaskStatus.Yours : TaskStatus.Running
   const corrected = Object.keys(c.corrections).length
-  const after = c.phase === Phase.Continued || c.phase === Phase.Answered
+  /* it carried on having assumed something: the foot keeps how much */
+  const after = (c.phase === Phase.Continued || c.phase === Phase.Answered) && assumptions.length > 0
   /* an empty checkpoint passes straight on: the card goes from looking around to the step */
   const checking = (c.phase === Phase.Open || c.phase === Phase.Held) && assumptions.length > 0
 
@@ -134,7 +132,6 @@ export function RunningCard({
         {line.glyph}
         <span className={checking ? s.now : w.now}>{line.now}</span>
         {line.aside && <span className={w.of}>{line.aside}</span>}
-        {toggle && <span className={s.over}>{toggle}</span>}
       </div>
       {tray && <div className={s.over}>{tray}</div>}
       <div className={b.foot}>

@@ -24,8 +24,6 @@
 .head {
   display: grid;
   gap: 6px;
-  position: sticky;
-  top: 12px;
 }
 .state {
   margin: 0;
@@ -68,4 +66,20 @@
 }
 .thread {
   min-width: 0;
+}
+/* a conversation alone, with no board beside it */
+.single {
+  grid-template-columns: 180px minmax(0, var(--measure));
+}
+
+/* on a page: the moment's name above, the board beside the thread */
+.narrow .columns,
+.narrow .moment {
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+.narrow .columns > :first-child {
+  display: none;
+}
+.narrow .head {
+  grid-column: 1 / -1;
 }

@@ -1,0 +1,56 @@
+/* What you asked, at the head of the thread: your words, on the page, with the lead's readings under them. */
+.brief {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px 8px;
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.kicker {
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--t-3);
+}
+.text {
+  margin: 0;
+  font-family: var(--font-prose);
+  font-size: var(--prose-size);
+  line-height: var(--prose-lh);
+  color: var(--t-1);
+  text-wrap: pretty;
+}
+/* words a reading is of: underlined, not highlighted, so your words stay yours */
+.mark {
+  background: none;
+  color: inherit;
+  text-decoration: underline dotted var(--t-3);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
+  border-radius: 3px;
+  transition: background var(--fast) var(--ease);
+}
+.n {
+  margin-left: 1px;
+  font: 600 9.5px/1 var(--mono);
+  color: var(--t-3);
+}
+.readings {
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+/* pointing at a reading marks the words it reads */
+.brief:has([data-mark='1']:is(:hover, :focus-within)) .mark[data-mark='1'],
+.brief:has([data-mark='2']:is(:hover, :focus-within)) .mark[data-mark='2'],
+.brief:has([data-mark='3']:is(:hover, :focus-within)) .mark[data-mark='3'],
+.brief:has([data-mark='4']:is(:hover, :focus-within)) .mark[data-mark='4'] {
+  background: var(--n-4);
+  box-shadow: 0 0 0 2px var(--n-4);
+  text-decoration-color: var(--t-1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mark {
+    transition: none;
+  }
+}

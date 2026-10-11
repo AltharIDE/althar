@@ -9,15 +9,13 @@ import { SettledRow } from '../../../board/SettledRow/SettledRow'
 import { WorkCard } from '../../../board/WorkCard/WorkCard'
 import { CALLS, NEXT, READY, RUNNING, SETTLED } from '../../../fixtures/board'
 import { BoardLane } from '../../../foundations/vocabulary'
-import { Prose } from '../../../thread/Turn/Turn'
-import { CheckpointLine } from '../B/CheckpointLine'
 import { checkpoint, Phase, useCheckpoint, type Assumption, type Checkpoint } from '../model'
 import { Moments } from '../parts/Moments'
 import { Scheme } from '../parts/Scheme'
-import { liveOf, momentsOf, WAIT, type Draw } from '../parts/sheet'
-import { Asked, CarriesOn, FirstStep, Groundwork } from '../parts/Threads'
-import { APPROACH_SAID, ASKED, DUE, SECOND, TASK, THREE } from '../world'
+import { liveOf, momentsOf, WAIT } from '../parts/sheet'
+import { DUE, SECOND, TASK, THREE } from '../world'
 import { BoardCheckpoint } from './BoardCheckpoint'
+import { draw, NOTES } from './draw'
 
 /*
  * C. Board-first. The checkpoint lives mostly on the running card: its
@@ -27,53 +25,6 @@ import { BoardCheckpoint } from './BoardCheckpoint'
  */
 
 const noop = () => {}
-
-const draw: Draw =
-  ({ assumptions, still, open }) =>
-  (c, on) => {
-    const asking = c.phase === Phase.Asking || c.phase === Phase.Answered
-    const line = <CheckpointLine assumptions={assumptions} checkpoint={c} on={on} wait={WAIT} due={DUE} still={still} also={asking} />
-    const turn = (() => {
-      if (c.phase === Phase.Looking) return null
-      if (asking) return <Asked answered={c.phase === Phase.Answered} onAnswer={on.answer} also={line} />
-      return (
-        <>
-          <Prose>{APPROACH_SAID}</Prose>
-          {line}
-          {c.phase === Phase.Continued && <CarriesOn />}
-        </>
-      )
-    })()
-    return {
-      running: (
-        <BoardCheckpoint
-          {...TASK}
-          checkpoint={c}
-          assumptions={assumptions}
-          on={on}
-          wait={WAIT}
-          due={DUE}
-          still={still}
-          defaultOpen={open || c.correcting !== undefined || Object.keys(c.corrections).length > 0}
-          onOpen={noop}
-        />
-      ),
-      yours: c.phase === Phase.Asking ? <CallCard {...ASKED.call} onOpen={noop} /> : undefined,
-      thread: (
-        <>
-          <FirstStep />
-          <Groundwork busy={c.phase === Phase.Looking}>{turn}</Groundwork>
-        </>
-      ),
-    }
-  }
-
-const NOTES = {
-  three: 'Closed, the card is as tall as any running card. Review opens it in place.',
-  correcting: 'Written on the board, in the card. The card grows while you write.',
-  ranOut: 'The foot’s note opens what it assumed, on the card.',
-  asking: 'A real question is not answered on the running card: it is a call, in Needs you, like every other.',
-}
 
 /** A task's card at its checkpoint, holding its own clock. */
 function Live({ task, assumptions, start }: { task: typeof TASK; assumptions: readonly Assumption[]; start: Checkpoint }) {
@@ -117,7 +68,7 @@ function OnBoard({ dark = false }: { dark?: boolean }) {
 }
 
 const meta = {
-  title: 'Explorations/Triage checkpoint/C · Board-first',
+  title: 'Explorations/Triage checkpoint/C. Board-first',
   parameters: { layout: 'padded', controls: { disable: true } },
 } satisfies Meta
 export default meta

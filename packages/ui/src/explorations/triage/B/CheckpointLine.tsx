@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Icon } from '../../../foundations/Icon/Icon'
 import { cx } from '../../../lib/cx'
 import { Rhythm } from '../../../lib/rhythm'
+import { ActionButton } from '../../../primitives/ActionButton/ActionButton'
 import { Button } from '../../../primitives/Button/Button'
 import { Caret, Disclosure, DisclosureTrigger, Fold } from '../../../primitives/Fold/Fold'
 import { LinkButton } from '../../../primitives/LinkButton/LinkButton'
@@ -69,6 +70,8 @@ export interface CheckpointLineProps {
   still?: boolean
   /** Beside a question, with no clock of its own. */
   also?: boolean
+  /** Each shows where it applies: D's readings of the brief. */
+  anchored?: boolean
   defaultOpen?: boolean
   text?: Partial<CheckpointLineText>
 }
@@ -81,6 +84,7 @@ export function CheckpointLine({
   due,
   still,
   also = false,
+  anchored = false,
   defaultOpen = false,
   text,
 }: CheckpointLineProps) {
@@ -121,16 +125,16 @@ export function CheckpointLine({
         <span className={s.acts}>
           {held && <LinkButton onClick={on.go}>{t.continue}</LinkButton>}
           <DisclosureTrigger>
-            <button ref={trigger} type="button" className={s.toggle}>
+            <ActionButton ref={trigger} size="small" flush="end">
               {after ? t.show : t.review}
               <Caret />
-            </button>
+            </ActionButton>
           </DisclosureTrigger>
         </span>
       </div>
       <Fold>
         <div className={s.body}>
-          <Assumptions assumptions={assumptions} checkpoint={c} on={on} />
+          <Assumptions assumptions={assumptions} checkpoint={c} on={on} anchored={anchored} />
           {!after && !also && (
             <div className={s.foot}>
               {!held && (

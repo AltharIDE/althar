@@ -36,10 +36,19 @@ export interface Moment {
   show: (c: Checkpoint, on: CheckpointActions) => Shown
 }
 
-export function Moments({ moments, dark = false, live = false }: { moments: readonly Moment[]; dark?: boolean; live?: boolean }) {
+export interface MomentsProps {
+  moments: readonly Moment[]
+  dark?: boolean
+  /** Clocks run. */
+  live?: boolean
+  /** Narrower, for a page: each moment's name over its board and thread rather than beside them. */
+  narrow?: boolean
+}
+
+export function Moments({ moments, dark = false, live = false, narrow = false }: MomentsProps) {
   return (
     <Scheme dark={dark}>
-      <div className={s.sheet}>
+      <div className={cx(s.sheet, narrow && s.narrow)}>
         <div className={s.columns} aria-hidden="true">
           <span>Moment</span>
           <span>Board</span>
@@ -79,5 +88,37 @@ function Row({ moment: m, live }: { moment: Moment; live: boolean }) {
         <Thread label={`Thread · ${m.state}`}>{shown.thread}</Thread>
       </div>
     </section>
+  )
+}
+
+export interface Page {
+  id: string
+  state: string
+  note?: string
+  node: ReactNode
+}
+
+/** Moments with no board: a conversation alone, such as the coordinator's. */
+export function Pages({ pages, label, dark = false }: { pages: readonly Page[]; label: string; dark?: boolean }) {
+  return (
+    <Scheme dark={dark}>
+      <div className={s.sheet}>
+        <div className={cx(s.columns, s.single)} aria-hidden="true">
+          <span>Moment</span>
+          <span>{label}</span>
+        </div>
+        {pages.map((p) => (
+          <section key={p.id} className={cx(s.moment, s.single)} aria-label={p.state}>
+            <div className={s.head}>
+              <p className={s.state}>{p.state}</p>
+              {p.note && <p className={s.note}>{p.note}</p>}
+            </div>
+            <div className={s.thread}>
+              <Thread label={`${label} · ${p.state}`}>{p.node}</Thread>
+            </div>
+          </section>
+        ))}
+      </div>
+    </Scheme>
   )
 }
