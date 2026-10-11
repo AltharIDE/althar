@@ -11,7 +11,10 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: min(820px, calc(100vw - 80px));
+  /* the picture sets the width; the margins and the caption's line are what it leaves */
+  width: fit-content;
+  min-width: min(480px, calc(100vw - 80px));
+  max-width: calc(100vw - 80px);
   animation: in var(--base) var(--ease);
 }
 .dialog:focus {
@@ -35,7 +38,14 @@
   gap: 12px;
 }
 .image {
-  aspect-ratio: 16 / 9;
+  /*
+   * --w and --h are the picture's own size when known. It fills the screen at
+   * its own shape, but is never drawn larger than it is. Without them, a
+   * 16:9 frame of the screen's size, for a stand-in or one not yet loaded.
+   */
+  --chrome: 140px;
+  width: min(calc(var(--w, 1280) * 1px), calc(100vw - 80px), calc((100vh - var(--chrome)) * var(--w, 16) / var(--h, 9)));
+  aspect-ratio: var(--w, 16) / var(--h, 9);
   overflow: hidden;
   border-radius: 10px;
   background: var(--term);
@@ -119,4 +129,21 @@
 }
 .cover {
   object-fit: cover;
+}
+
+.image[data-sized] {
+  cursor: zoom-in;
+}
+/* actual size: the box keeps what fits the screen, and the picture scrolls inside it */
+.image[data-actual] {
+  cursor: zoom-out;
+  overflow: auto;
+  aspect-ratio: auto;
+  width: min(calc(var(--w) * 1px), calc(100vw - 80px));
+  height: min(calc(var(--h) * 1px), calc(100vh - var(--chrome)));
+}
+.image[data-actual] > .img {
+  width: calc(var(--w) * 1px);
+  height: calc(var(--h) * 1px);
+  max-width: none;
 }

@@ -2,7 +2,17 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { Dash } from '../../fixtures/meridian'
-import { SHOT_AFTER, SHOT_BEFORE, SHOT_BROKEN, SHOT_LOADING, SHOT_NOT_KEPT, SHOT_RUN } from '../../fixtures/shots'
+import {
+  SHOT_AFTER,
+  SHOT_BEFORE,
+  SHOT_BROKEN,
+  SHOT_LOADING,
+  SHOT_NOT_KEPT,
+  SHOT_PORTRAIT,
+  SHOT_RUN,
+  SHOT_SMALL,
+  SHOT_UNSIZED,
+} from '../../fixtures/shots'
 import { Lightbox } from './Lightbox'
 
 const meta = {
@@ -20,6 +30,29 @@ export const NoPreview: Story = { args: { images: [{ name: '429-response.png' }]
 
 /** A picture at its src, at full size. */
 export const Picture: Story = { args: { images: [SHOT_AFTER] } }
+
+/** Taller than wide: it keeps its shape rather than sitting in a 16:9 frame. */
+export const Portrait: Story = { args: { images: [SHOT_PORTRAIT] } }
+
+/** Smaller than the screen: shown at its own size, not enlarged. */
+export const Small: Story = { args: { images: [SHOT_SMALL] } }
+
+/** No size given: the box takes the picture's shape when it has loaded. */
+export const Unsized: Story = { args: { images: [SHOT_UNSIZED] } }
+
+/** A click or Z shows the picture at its actual size, and again to fit. */
+export const ActualSize: Story = {
+  args: { images: [SHOT_AFTER] },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement.ownerDocument.body)
+    const box = page.getByRole('img').parentElement!
+    await expect(box).not.toHaveAttribute('data-actual')
+    await userEvent.keyboard('z')
+    await expect(box).toHaveAttribute('data-actual')
+    await userEvent.click(box)
+    await expect(box).not.toHaveAttribute('data-actual')
+  },
+}
 
 /**
  * Opened from a set: the arrows and the buttons beside the name move

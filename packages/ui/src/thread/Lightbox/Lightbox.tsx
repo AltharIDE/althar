@@ -1,5 +1,5 @@
 import { Dialog } from 'radix-ui'
-import { useCallback, useState, type KeyboardEvent } from 'react'
+import { useCallback, useState, type CSSProperties, type KeyboardEvent } from 'react'
 
 import { cx } from '../../lib/cx'
 import { useControlled } from '../../lib/controlled'
@@ -22,6 +22,8 @@ export interface ImageViewProps {
   /** `thumb` draws the smaller copy where there is one, as Shots does. */
   size?: 'full' | 'thumb'
   text?: Partial<ImageViewText>
+  /** Told the picture's own size once it has loaded, for where the box wasn't given one. */
+  onSize?: (width: number, height: number) => void
 }
 
 /**
@@ -30,11 +32,12 @@ export interface ImageViewProps {
  * main thread, and only once it nears the screen; its box keeps its shape
  * until then, so nothing below it moves when it arrives.
  */
-export function ImageView({ image, className, fit = 'contain', size = 'full', text }: ImageViewProps) {
+export function ImageView({ image, className, fit = 'contain', size = 'full', text, onSize }: ImageViewProps) {
   const src = size === 'thumb' ? (image.thumb ?? image.src) : image.src
   /* keyed by the picture, so another one starts loading afresh */
   if (image.status === 'loading') return <span className={cx(s.waiting, className)} data-state="loading" aria-hidden="true" />
-  if (src && image.status !== 'failed') return <Picture key={src} src={src} image={image} fit={fit} className={className} text={text} />
+  if (src && image.status !== 'failed')
+    return <Picture key={src} src={src} image={image} fit={fit} className={className} text={text} onSize={onSize} />
   if (image.view && image.status !== 'failed') return <span className={className}>{image.view}</span>
   return <Unshown image={image} className={className} text={text} />
 }
@@ -45,18 +48,28 @@ function Picture({
   fit,
   className,
   text,
+  onSize,
 }: {
   src: string
   image: ImageRef
   fit: 'contain' | 'cover'
   className: string | undefined
   text: Partial<ImageViewText> | undefined
+  onSize: ((width: number, height: number) => void) | undefined
 }) {
   const [state, setState] = useState<'loading' | 'loaded' | 'failed'>('loading')
+  const loaded = (img: HTMLImageElement) => {
+    setState('loaded')
+    if (img.naturalWidth > 0) onSize?.(img.naturalWidth, img.naturalHeight)
+  }
   /* a picture the browser already has may be complete before React hears its load */
-  const seen = useCallback((img: HTMLImageElement | null) => {
-    if (img?.complete === true && img.naturalWidth > 0) setState('loaded')
-  }, [])
+  const seen = useCallback(
+    (img: HTMLImageElement | null) => {
+      if (img?.complete === true && img.naturalWidth > 0) loaded(img)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
   if (state === 'failed') return <Unshown image={image} className={className} text={text} />
   return (
     <img
@@ -69,7 +82,7 @@ function Picture({
       loading="lazy"
       decoding="async"
       data-state={state}
-      onLoad={() => setState('loaded')}
+      onLoad={(e) => loaded(e.currentTarget)}
       onError={() => setState('failed')}
     />
   )
@@ -128,7 +141,8 @@ export interface LightboxProps {
  * Images at full size, over everything. A modal dialog: focus stays inside
  * it while it is open, Escape or a click outside closes it, and focus goes
  * back to what opened it. With a set, the arrow keys and the buttons beside
- * the name move between them, and the position is announced. Mount it to
+ * the name move between them, and the position is announced. A click or Z
+ * shows the picture at its actual size, scrolling where it is larger than the screen. Mount it to
  * open it.
  */
 export function Lightbox({ images, index, defaultIndex = 0, onIndexChange, onClose, onOpen, text }: LightboxProps) {
@@ -140,11 +154,31 @@ export function Lightbox({ images, index, defaultIndex = 0, onIndexChange, onClo
   const shown = Math.min(Math.max(at, 0), Math.max(count - 1, 0))
   const image = images[shown]
   const several = count > 1
+  /* sizes learned as pictures load, for those the reference didn't give */
+  const [measured, setMeasured] = useState<{ src: string | undefined; width: number; height: number }>()
+  /* the one at actual size, until another shows */
+  const [actual, setActual] = useState<ImageRef>()
   const move = (by: number) => {
     if (several) setAt((shown + by + count) % count)
   }
+  const known =
+    image && image.width && image.height
+      ? { width: image.width, height: image.height }
+      : measured?.src === image?.src
+        ? measured
+        : undefined
+  const zoomed = actual === image && known !== undefined
+  const zoom = () => {
+    if (known) setActual(zoomed ? undefined : image)
+  }
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (!several || e.defaultPrevented) return
+    if (e.defaultPrevented) return
+    if ((e.key === 'z' || e.key === 'Z') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      zoom()
+      e.preventDefault()
+      return
+    }
+    if (!several) return
     if (e.key === 'ArrowRight') move(1)
     else if (e.key === 'ArrowLeft') move(-1)
     else if (e.key === 'Home') setAt(0)
@@ -173,8 +207,20 @@ export function Lightbox({ images, index, defaultIndex = 0, onIndexChange, onClo
           }}
         >
           <figure className={s.figure}>
-            <div className={s.image}>
-              <ImageView image={image} text={t.image} />
+            {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- Z does the same from the keyboard */}
+            <div
+              className={s.image}
+              style={known ? ({ '--w': known.width, '--h': known.height } as CSSProperties) : undefined}
+              data-sized={known ? '' : undefined}
+              data-actual={zoomed ? '' : undefined}
+              onClick={zoom}
+            >
+              <ImageView
+                key={image.src}
+                image={image}
+                text={t.image}
+                onSize={(width, height) => setMeasured({ src: image.src, width, height })}
+              />
             </div>
             <figcaption className={s.caption}>
               <Dialog.Title className={s.name}>{image.label ?? image.name}</Dialog.Title>
