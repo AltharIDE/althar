@@ -14,7 +14,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), `Model` (a model's mark and name, and how it is reached on hover), InkSwatches (the inks a project's mark can be drawn in), and Ask, which every part that asks a person shares. |
 | `thread` | What appears in a conversation: turns, tool calls, steps, permissions (a card, a stack with Allow all, their answers in small for a call on the home, and what a rule allowed), questions, Stuck, documents. |
 | `composer` | What writes into a conversation: Composer, DictationTray, ModelPick, ContextRing, Listening, Running. |
-| `coordinator` | What the coordinator shows about tasks: Issue, TaskLaunch, TaskCard, TaskMark, TaskHeld. |
+| `coordinator` | What the coordinator shows about tasks: Issue, IssueDraft (an issue it drafted on a tracker, filed only from the card), TaskLaunch, TaskCard, TaskMark, TaskHeld. |
 | `board` | The project's work in lanes: Board, BoardColumn, and a card or row for each lane. |
 | `dock` | What opens beside the board: Dock and a peek for each kind of card. |
 | `home` | Work across every project, as the home shows it: NeedLine, ProjectList, WorkTicks, SinceRow, HomeRest, ProjectWord; and what needs you at the edge of the screen: Island, EdgeSheet. |
@@ -154,7 +154,7 @@ A pattern that appears in two components becomes one part, so the two cannot dri
 | FileChanges, Delta, DiffStat | Files a change touched, with lines added and removed | ChangeSet, AcceptPeek, and a tool call's meta |
 | Checks | A change's checks and reviews | ChangeSet, AcceptPeek |
 | NoteForm | A one-line note sent with an action | ChangeSet, AcceptPeek, Review, Stuck |
-| Field | One line of text to type | NoteForm, SourceMap, and every other typed answer |
+| Field, FieldArea | One line of text to type, or several | NoteForm, SourceMap, IssueDraft, and every other typed answer |
 | Panel, FormRow | A sheet of settings, and its label-beside-control rows (FormRow also names the control inside it) | Welcome; Select, Choices, Segmented and CheckList take their names from FormRow |
 | KeyValues | A small definition list | External, GraphProposal |
 | StepRow | A step's row, its track and its thread link | Step, Review |

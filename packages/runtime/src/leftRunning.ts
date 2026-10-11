@@ -2,7 +2,7 @@ import { open } from 'node:fs/promises'
 
 import { Effect } from 'effect'
 
-import { commandIn } from './rules'
+import { commandIn, shortCommand } from './rules'
 
 /*
  * What an agent left running in the background, such as a dev server, as a
@@ -89,10 +89,14 @@ export const commandOfCall = (call: Readonly<Record<string, unknown>> | undefine
 }
 
 /** What a client shows of one. */
-export type ShownLeftRunning = Pick<LeftRunning, 'id' | 'command' | 'url' | 'startedAt' | 'ended'>
+export type ShownLeftRunning = Pick<LeftRunning, 'id' | 'command' | 'url' | 'startedAt' | 'ended'> & {
+  /** The command as it reads at a glance: without its `cd`, environment and output plumbing. */
+  readonly label?: string
+}
 export const shownOf = (left: LeftRunning): ShownLeftRunning => ({
   id: left.id,
   command: left.command,
+  label: shortCommand(left.command),
   url: left.url,
   startedAt: left.startedAt,
   ended: left.ended,

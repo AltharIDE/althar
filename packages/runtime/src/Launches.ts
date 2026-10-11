@@ -14,6 +14,7 @@ import { printedMore, servingAt, uncoloured } from './leftRunning'
 import { addItem, updateItem } from './threads'
 import { Live } from './Live'
 import { change, fact, timestamp } from './records'
+import { shortCommand } from './rules'
 import { lineOf, type RunCommand, runOf } from './runCommand'
 import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
@@ -35,6 +36,8 @@ export interface ShownLaunch {
   /** Where it runs, in words: the task's title, or the default branch. */
   readonly where: string
   readonly command: string
+  /** The command as it reads at a glance (rules.ts, shortCommand). */
+  readonly label: string
   readonly url: string | null
   readonly startedAt: string
   readonly ended: { readonly at: string; readonly code: number | null } | null
@@ -151,6 +154,7 @@ export class Launches extends Context.Service<
         taskId: launch.taskId,
         where: launch.where,
         command: launch.command,
+        label: shortCommand(launch.command),
         url: launch.url,
         startedAt: launch.startedAt,
         ended: launch.ended,

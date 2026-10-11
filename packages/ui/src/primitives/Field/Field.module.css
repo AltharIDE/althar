@@ -41,6 +41,13 @@
   font-weight: 600;
   letter-spacing: -0.01em;
 }
+/* several lines: as tall as its rows, pulled longer by hand */
+.area {
+  height: auto;
+  padding: 7px 10px;
+  line-height: 1.5;
+  resize: vertical;
+}
 @media (prefers-reduced-motion: reduce) {
   .field {
     transition: none;
