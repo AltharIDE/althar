@@ -449,7 +449,7 @@ ipcMain.handle('althar:editor-picture', async (_event, id: unknown) => {
 ipcMain.handle('althar:sounds', () => alertSounds())
 ipcMain.handle('althar:play-sound', (_event, name: unknown) => playSound(name, undefined, () => shell.beep()))
 
-// Where Althar shows while the person is in another app, and whether this Mac has a notch to choose the island by.
+// Where Althar shows while the person is in another app, and what this computer has room for: a notch to choose the island by, a tray.
 ipcMain.handle('althar:edge', () => edge?.state() ?? null)
 ipcMain.handle('althar:set-edge', async (_event, place: unknown) => {
   if (!isEdgePlace(place)) throw new Error(`Althar can't show at ${String(place)}.`)

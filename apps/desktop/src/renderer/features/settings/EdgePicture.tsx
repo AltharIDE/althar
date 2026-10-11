@@ -56,11 +56,12 @@ const sheetOf = (glance: EdgeGlance, tone: 'ink' | 'paper') => (
   />
 )
 
-/** Round the notch: the island open, as pointing at it opens it. */
-export function IslandPicture({ glance }: { glance: EdgeGlance }) {
+/** Round the notch: the island open, as pointing at it opens it. Drawn as tall as `height` says, before it is scaled to fit. */
+export function IslandPicture({ glance, height }: { glance: EdgeGlance; height?: number }) {
   return (
     <EdgeScene
       notch
+      {...(height === undefined ? {} : { height })}
       top={
         <Island notch={{ width: 180, height: 32 }} waiting={glance.waiting} open>
           {sheetOf(glance, 'ink')}
@@ -71,9 +72,10 @@ export function IslandPicture({ glance }: { glance: EdgeGlance }) {
 }
 
 /** In the menu bar: the mark with its count, and its sheet open under it. */
-export function MenuPicture({ glance }: { glance: EdgeGlance }) {
+export function MenuPicture({ glance, height }: { glance: EdgeGlance; height?: number }) {
   return (
     <EdgeScene
+      {...(height === undefined ? {} : { height })}
       menuItem={
         <>
           <Logo size={12} />

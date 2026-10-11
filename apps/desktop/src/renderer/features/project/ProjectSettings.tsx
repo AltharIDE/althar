@@ -9,6 +9,7 @@ import {
   ControlGrid,
   ControlMarks,
   ControlModule,
+  type ControlPlace,
   ControlSheet,
   ControlWords,
   ProjectIdentity,
@@ -46,6 +47,10 @@ export const text = {
 }
 
 /** The runtime's name for each of the kit's inks. */
+/** Where a module sits beside another, in the grid's four columns: the left half, or the right. */
+const LEFT: ControlPlace = { column: [1, 3] }
+const RIGHT: ControlPlace = { column: [3, 5] }
+
 const INK: Readonly<Record<ProjectInk, ProjectSummary['ink']>> = {
   [ProjectInk.Clay]: 'clay',
   [ProjectInk.Ochre]: 'ochre',
@@ -142,7 +147,7 @@ export function ProjectSettings({
               <ControlModule
                 title={text.repositories}
                 aside={String(repositories.length)}
-                span={host === null && tracker === null ? 4 : 2}
+                {...(host === null && tracker === null ? {} : { place: LEFT })}
                 onClick={leave(onRepositories)}
               >
                 <ControlMarks marks={hostMarksOf(repositories, host, list)} />
@@ -150,7 +155,7 @@ export function ProjectSettings({
               {host !== null && (
                 <ControlModule
                   title={host.name}
-                  span={2}
+                  place={RIGHT}
                   {...(hostLogin === null ? { aside: text.connect } : {})}
                   onClick={leave(onConnect)}
                 >
@@ -163,7 +168,7 @@ export function ProjectSettings({
               {tracker !== null && (
                 <ControlModule
                   title={productName(tracker.product)}
-                  span={host === null ? 2 : 4}
+                  {...(host === null ? { place: RIGHT } : {})}
                   {...(trackerLogin === null ? { aside: text.connect } : {})}
                   onClick={leave(onConnect)}
                 >

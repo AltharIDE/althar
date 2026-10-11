@@ -5,12 +5,13 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '@althar/contracts'
 import type { HomeCall, HomeEvent, HomeTask, ProjectSummary } from '@althar/contracts'
-import { ProjectInk } from '@althar/ui'
+import { EdgeSpot, ProjectInk } from '@althar/ui'
 
 import { DEFAULT_PREFERENCES } from '../src/main/appPreferences'
 import { HomeView, lineOf, refOf } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
-import { agentGlanceOf, marksOf, SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
+import { agentGlanceOf, hostsLineOf, marksOf, SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
+import { edgeSpotOf, edgeWords } from '../src/renderer/shared/edge'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { NewTabContext } from '../src/renderer/features/tabs/TabsFrame'
 import {
@@ -503,7 +504,8 @@ describe('settings', () => {
     const panel = await screen.findByRole('dialog', { name: 'Settings' })
     // OpenCode's only account is signed out: only the person can sign it in.
     expect(await within(panel).findByText('main signed out')).toBeTruthy()
-    expect(within(panel).getByText('3 agents · 3 accounts')).toBeTruthy()
+    // The agents large, saying how many accounts; the code hosts tall, by their marks, with nothing connected to count.
+    expect(within(panel).getByRole('button', { name: /^Agents\s*3 accounts/ }).style.gridRow).toBe('3 / 9')
     expect(await within(panel).findByRole('button', { name: /^Code hosts and trackers/ })).toBeTruthy()
     expect(within(panel).queryByText('0 connected')).toBeNull()
     expect(within(panel).getByText('Althar 0.0.0')).toBeTruthy()
@@ -513,15 +515,18 @@ describe('settings', () => {
 
     await openModule('Agents')
     expect(within(panel).getByRole('heading', { name: 'Agents', level: 2 })).toBeTruthy()
+    expect(within(panel).getByText('3 agents · 3 accounts')).toBeTruthy()
     // It opens on the agent that needs the person.
     expect(within(panel).getByRole('tab', { name: 'OpenCode, needs you' }).getAttribute('aria-selected')).toBe('true')
     expect(within(panel).getByRole('list', { name: 'OpenCode accounts' })).toBeTruthy()
     await userEvent.click(within(panel).getByRole('tab', { name: 'Codex' }))
     expect(within(panel).getByRole('list', { name: 'Codex accounts' })).toBeTruthy()
-    // Under its name, who makes it and its version.
+    // Beside its name, who makes it and its version.
+    expect(within(panel).getByRole('heading', { name: 'Codex', level: 3 })).toBeTruthy()
     expect(within(panel).getByText('OpenAI · 0.159.3')).toBeTruthy()
     await userEvent.click(within(panel).getByRole('button', { name: 'Back to all settings' }))
-    expect(within(panel).getByRole('button', { name: /^Agents/ })).toBeTruthy()
+    // Back, on the module it opened from.
+    expect(document.activeElement).toBe(within(panel).getByRole('button', { name: /^Agents/ }))
 
     // Code hosts beside trackers, each kind saying what it is for, so its services don't.
     await openModule('Code hosts and trackers')
@@ -530,6 +535,8 @@ describe('settings', () => {
     expect(within(hosts).getByText('Pull requests, their checks and review comments')).toBeTruthy()
     expect(within(within(panel).getByRole('region', { name: 'Trackers' })).getByRole('list', { name: 'Trackers' })).toBeTruthy()
     expect(within(panel).queryByText(/Not connected · /)).toBeNull()
+    // Co-author has a page of its own, not this one.
+    expect(within(panel).queryByRole('switch', { name: 'Althar as co-author' })).toBeNull()
     await userEvent.keyboard('{Escape}')
     expect(within(panel).getByRole('button', { name: /^Code hosts and trackers/ })).toBeTruthy()
     await userEvent.keyboard('{Escape}')
@@ -602,32 +609,75 @@ describe('settings', () => {
     expect(marks.find((mark) => mark.id === 'github')).toMatchObject({ yours: true })
     expect(marks.find((mark) => mark.id === 'github')?.faint).toBeUndefined()
     expect(marks.find((mark) => mark.id === 'bitbucket')).toMatchObject({ faint: true })
+    // Under the marks, one that asks to be signed in again, else how many are connected, else nothing.
+    expect(hostsLineOf({ ...connectionList, connections: [{ ...githubConnection, state: 'reauth_required' }] })).toEqual({
+      line: 'GitHub signed out',
+      tone: 'yours',
+    })
+    const out = { ...githubConnection, state: 'reauth_required' as const }
+    expect(hostsLineOf({ ...connectionList, connections: [out, { ...out, id: 'conn2' }] })?.line).toBe('2 signed out')
+    expect(hostsLineOf({ ...connectionList, connections: [githubConnection] })).toEqual({ line: '1 connected' })
+    expect(hostsLineOf(connectionList)).toBeNull()
   })
 
-  it('has Althar as co-author of what it sends until the person turns it off, and then says why it would stay', async () => {
-    const { client } = fakeClient()
+  it('shows Althar somewhere on every system: by the notch where there is one, else wherever the system has room', () => {
+    const at = (platform: string, notch: boolean, tray: boolean, place: 'island' | 'menu' = 'island') =>
+      edgeSpotOf({ platform, notch, tray }, place)
+    expect(at('darwin', true, true)).toBe(EdgeSpot.Island)
+    expect(at('darwin', true, true, 'menu')).toBe(EdgeSpot.MenuBesideNotch)
+    expect(at('darwin', false, true)).toBe(EdgeSpot.MenuBar)
+    expect(at('win32', false, true)).toBe(EdgeSpot.WindowsTray)
+    expect(at('linux', false, true)).toBe(EdgeSpot.LinuxTray)
+    expect(at('linux', false, false)).toBe(EdgeSpot.WindowOnly)
+    expect(Object.values(EdgeSpot).map((spot) => edgeWords(spot).word)).toEqual([
+      'Round the notch',
+      'Menu bar',
+      'Menu bar',
+      'System tray',
+      'System tray',
+      'No tray',
+    ])
+  })
+
+  it('has Althar as co-author of what it sends until the person turns it off, and then says once, large, why it would stay', async () => {
+    const { client } = fakeClient({ listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection] })) })
     withServices(<Settings />, client)
-    await openModule('Code hosts and trackers')
-    const credit = await screen.findByRole('switch', { name: 'Althar as co-author' })
+    // The least of the settings: a quiet link in the foot, with Althar's face.
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    const link = await within(panel).findByRole('button', { name: 'Co-author' })
+    expect(link.querySelector('img')?.getAttribute('src')).toMatch(/althar-ai|^data:image\/svg/)
+    await userEvent.click(link)
+    expect(within(panel).getByRole('heading', { name: 'Althar as co-author', level: 2 })).toBeTruthy()
+    const credit = within(panel).getByRole('switch', { name: 'Althar as co-author' })
     expect(credit.getAttribute('aria-checked')).toBe('true')
-    expect(screen.queryByText(/no marketing budget/)).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'See the line' }))
-    expect(screen.getByText('Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>')).toBeTruthy()
+    // The line on a commit as GitHub shows it, under the person's own name there.
+    const commit = within(panel).getByRole('figure', { name: 'A commit as GitHub shows it' })
+    expect(within(commit).getByText('Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>')).toBeTruthy()
+    expect(commit.textContent).toContain('you and Althar committed')
+    expect(within(panel).queryByText(/no marketing budget/)).toBeNull()
 
     await userEvent.click(credit)
     expect(client.setCoAuthor).toHaveBeenCalledWith(false)
     expect(credit.getAttribute('aria-checked')).toBe('false')
-    expect(screen.getByText(/Althar is free, and we have no marketing budget/)).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Turn it back on' }))
+    expect(within(panel).getByText('Althar is free, and we have no marketing budget.')).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Put Althar back on your commits' }))
     expect(client.setCoAuthor).toHaveBeenLastCalledWith(true)
     expect(credit.getAttribute('aria-checked')).toBe('true')
+
+    // Off, at rest it says so, and opened again it doesn't ask again.
+    await userEvent.click(credit)
+    await userEvent.click(within(panel).getByRole('button', { name: 'Back to all settings' }))
+    expect(document.activeElement).toBe(within(panel).getByRole('button', { name: 'Co-author Off' }))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Co-author Off' }))
+    expect(within(panel).queryByText(/no marketing budget/)).toBeNull()
+    expect(within(panel).getByText('Your commits and pull requests go out with only your name.')).toBeTruthy()
   })
 
   it('turns co-authoring back when the change can’t be kept, and says so', async () => {
     const { client } = fakeClient()
     vi.mocked(client.setCoAuthor).mockRejectedValue(new Error('disk full'))
     withServices(<Settings />, client)
-    await openModule('Code hosts and trackers')
+    await openModule('Co-author')
     const credit = await screen.findByRole('switch', { name: 'Althar as co-author' })
     await userEvent.click(credit)
     expect((await screen.findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
@@ -675,56 +725,123 @@ describe('settings', () => {
   it('offers where Althar shows in another app, on a Mac with a notch, and keeps a choice', async () => {
     const host = fakeHost()
     withServices(<Settings />, fakeClient().client, host)
-    await openModule(/^While you’re in another app\s*Round the notch/)
-    const places = await screen.findByRole('radiogroup', { name: 'While you’re in another app' })
-    expect(
-      within(places)
-        .getAllByRole('radio')
-        .map((radio) => radio.getAttribute('aria-checked')),
-    ).toEqual(['true', 'false'])
+    await openModule(/^In other apps\s*Round the notch/)
+    expect(screen.getByRole('heading', { name: 'In other apps', level: 2 })).toBeTruthy()
+    const places = await screen.findByRole('radiogroup', { name: 'In other apps' })
+    const radios = () => within(places).getAllByRole<HTMLInputElement>('radio')
+    expect(radios().map((radio) => radio.checked)).toEqual([true, false])
     // Each place as the screen would look; with nothing under way, a busy moment, said as such.
     expect(screen.getByText('With nothing under way yet, here is how a busy moment would look.')).toBeTruthy()
     expect(places.textContent).toContain('Publish the SDK to npm')
+    // The pictures sit beside the radios, so the island's own count is never a button inside one.
+    expect(radios().every((radio) => radio.closest('label')?.querySelector('button') === null)).toBe(true)
     await userEvent.click(within(places).getByRole('radio', { name: /In the menu bar/ }))
     expect(host.setEdge).toHaveBeenCalledWith('menu')
-    expect(
-      within(places)
-        .getByRole('radio', { name: /In the menu bar/ })
-        .getAttribute('aria-checked'),
-    ).toBe('true')
+    expect(radios().map((radio) => radio.checked)).toEqual([false, true])
+    // Back, the module says where it is now, and has the focus it went with.
+    await userEvent.click(screen.getByRole('button', { name: 'Back to all settings' }))
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /^In other apps\s*Menu bar/ }))
   })
 
-  it('says nothing of it without a notch, where it is the menu bar', async () => {
-    withServices(<Settings />, fakeClient().client, fakeHost({ edge: vi.fn(async () => ({ place: 'island', notch: false })) }))
+  it('says where it shows on a Mac without a notch, with nothing to choose', async () => {
+    const edge = vi.fn(async () => ({ place: 'island', notch: false, platform: 'darwin', tray: true }))
+    withServices(<Settings />, fakeClient().client, fakeHost({ edge }))
+    const panel = await openModule(/^In other apps\s*Menu bar/)
+    expect(within(panel).queryByRole('radiogroup')).toBeNull()
+    expect(within(panel).getByText('In the menu bar')).toBeTruthy()
+    expect(within(panel).getByText('This Mac’s screen has no notch, so Althar shows in the menu bar.')).toBeTruthy()
+  })
+
+  it('asks the main process again each time it opens, as a screen with a notch comes and goes', async () => {
+    let notch = true
+    const edge = vi.fn(async () => ({ place: 'island', notch, platform: 'darwin', tray: true }))
+    function Reopening() {
+      const [open, setOpen] = useState(true)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open again
+          </button>
+          <SettingsPanel start={useStart()} open={open} onOpenChange={setOpen} />
+        </>
+      )
+    }
+    withServices(<Reopening />, fakeClient().client, fakeHost({ edge }))
     const panel = await screen.findByRole('dialog', { name: 'Settings' })
-    await within(panel).findByRole('button', { name: /^App icon/ })
-    expect(within(panel).queryByRole('button', { name: /^While you’re in another app/ })).toBeNull()
+    expect(await within(panel).findByRole('button', { name: /^In other apps\s*Round the notch/ })).toBeTruthy()
+    notch = false
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull())
+    await userEvent.click(screen.getByRole('button', { name: 'Open again' }))
+    const again = await screen.findByRole('dialog', { name: 'Settings' })
+    expect(await within(again).findByRole('button', { name: /^In other apps\s*Menu bar/ })).toBeTruthy()
+  })
+
+  it('keeps a choice still being kept when it opens again and reads what was there before', async () => {
+    let kept = 'island'
+    let keep: () => void = () => undefined
+    const host = fakeHost({
+      edge: vi.fn(async () => ({ place: kept, notch: true, platform: 'darwin', tray: true })),
+      setEdge: vi.fn((place: string) => new Promise<void>((resolve) => (keep = () => ((kept = place), resolve())))),
+    })
+    function Reopening() {
+      const [open, setOpen] = useState(true)
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open again
+          </button>
+          <SettingsPanel start={useStart()} open={open} onOpenChange={setOpen} />
+        </>
+      )
+    }
+    withServices(<Reopening />, fakeClient().client, host)
+    await openModule(/^In other apps\s*Round the notch/)
+    await userEvent.click(
+      within(await screen.findByRole('radiogroup', { name: 'In other apps' })).getByRole('radio', { name: /In the menu bar/ }),
+    )
+    // Closed and opened again before the main process has kept it: what it reads is from before, and the choice stands.
+    await userEvent.keyboard('{Escape}')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull())
+    await userEvent.click(screen.getByRole('button', { name: 'Open again' }))
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await waitFor(() => expect(host.edge).toHaveBeenCalledTimes(2))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(within(panel).getByRole('button', { name: /^In other apps\s*Menu bar/ })).toBeTruthy()
+    act(() => keep())
+    expect(kept).toBe('menu')
+    expect(within(panel).getByRole('button', { name: /^In other apps\s*Menu bar/ })).toBeTruthy()
   })
 
   it('goes back to where it was when a choice can’t be kept', async () => {
     const host = fakeHost({
-      edge: vi.fn(async () => ({ place: 'menu', notch: true })),
+      edge: vi.fn(async () => ({ place: 'menu', notch: true, platform: 'darwin', tray: true })),
       setEdge: vi.fn(async () => {
         throw new Error('disk full')
       }),
     })
     withServices(<Settings />, fakeClient().client, host)
-    await openModule(/^While you’re in another app\s*In the menu bar/)
-    const places = await screen.findByRole('radiogroup', { name: 'While you’re in another app' })
+    await openModule(/^In other apps\s*Menu bar/)
+    const places = await screen.findByRole('radiogroup', { name: 'In other apps' })
     await userEvent.click(within(places).getByRole('radio', { name: /Round the notch/ }))
     expect((await screen.findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
-    expect(
-      within(places)
-        .getByRole('radio', { name: /In the menu bar/ })
-        .getAttribute('aria-checked'),
-    ).toBe('true')
+    expect(within(places).getByRole<HTMLInputElement>('radio', { name: /In the menu bar/ }).checked).toBe(true)
   })
 
-  it('offers no icon where there is no Dock to show one', async () => {
+  it('offers no icon where there is no Dock to show one, and gives where it shows the whole column', async () => {
     withServices(<Settings />, fakeClient().client, fakeHost({ appIcon: vi.fn(async () => null) }))
     const panel = await screen.findByRole('dialog', { name: 'Settings' })
     await within(panel).findByText('Althar 0.0.0')
     expect(within(panel).queryByRole('button', { name: /^App icon/ })).toBeNull()
+    expect((await within(panel).findByRole('button', { name: /^In other apps/ })).style.gridRow).toBe('3 / 9')
+  })
+
+  it('shows the icon under where it shows, a small square each', async () => {
+    withServices(<Settings />, fakeClient().client, fakeHost())
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    expect((await within(panel).findByRole('button', { name: /^In other apps/ })).style.gridRow).toBe('3 / 6')
+    expect((await within(panel).findByRole('button', { name: /^App icon\s*Cobalt/ })).style.gridRow).toBe('6 / 9')
   })
 
   it('lets only the latest choice go back, to the last icon kept', async () => {

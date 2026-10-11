@@ -5,6 +5,7 @@ import { ChangeTarget, HostReach, RepositoryRole, RuntimeState, SourceOrigin } f
 import type { SelectOption } from '../primitives/Select/Select'
 import type { AccountEntry, FoundFolder } from '../setup/Accounts/Accounts'
 import type { AgentTab } from '../setup/AgentTabs/AgentTabs'
+import type { CoAuthorCommit } from '../setup/CoAuthor/CoAuthor'
 import type { ServiceConnection, ServiceOption } from '../setup/Connections/Connections'
 import type { AgentGlance, MarkGlance } from '../setup/ControlCenter/ControlCenter'
 import type { SwitchedModel } from '../setup/ModelSwitches/ModelSwitches'
@@ -373,3 +374,11 @@ export const MAP_HALYARD: MapRepository[] = [
     fork: { upstream: 'halyard/api', target: ChangeTarget.Upstream },
   },
 ]
+
+/** A commit as it went to GitHub this afternoon, from Meridian's task, to show the line on. */
+export const CO_AUTHOR_COMMIT: CoAuthorCommit = {
+  subject: 'Retry the checkout call with backoff',
+  body: 'Wraps the upstream call in a jittered retry, three tries at most,\nand only for 502, 503 and timeouts.',
+  sha: '4e1c07a',
+  when: 'committed 12 minutes ago',
+}

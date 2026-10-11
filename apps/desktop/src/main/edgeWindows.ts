@@ -58,9 +58,20 @@ const shared = (preload: string) => ({
   webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false },
 })
 
+/** Where the edge is, as Settings says it: what the person chose, and what this computer has room for. */
+export interface EdgeState {
+  readonly place: EdgePlace
+  /** A screen has a notch, to choose the island by. */
+  readonly notch: boolean
+  /** The system, as Node names it: darwin, win32, linux. */
+  readonly platform: NodeJS.Platform
+  /** The system has a tray, or a menu bar, to put the mark in: not every Linux desktop has. */
+  readonly tray: boolean
+}
+
 export interface Edge {
-  /** Where the person chose, and whether this Mac has a notch to choose the island by. */
-  readonly state: () => { readonly place: EdgePlace; readonly notch: boolean }
+  /** Where it is, once the choice is read and the notch looked for the first time. */
+  readonly state: () => Promise<EdgeState>
   readonly choose: (place: EdgePlace) => Promise<void>
   /** How many calls wait on the person: the menu bar's mark gets its dot. */
   readonly waiting: (count: number) => void
@@ -91,6 +102,8 @@ export const startEdge = (host: EdgeHost): Edge => {
   let looking = 0
   /** Whether one of Althar's windows has focus, when nothing shows at the edge. */
   let inFront = false
+  /** The system said it has no tray to put the mark in, the last time it was asked for one. */
+  let trayless = false
   /** The mark leaves the menu bar while Althar is in front only on a Mac: elsewhere a tray's icon stays, as the system's own do. */
   const markSteps = process.platform === 'darwin'
 
@@ -263,8 +276,11 @@ export const startEdge = (host: EdgeHost): Edge => {
       if (inFront && markSteps) return hideMark()
       try {
         showTray()
+        trayless = false
       } catch {
-        // Where the system has no menu bar to put it in (a desktop without a tray), there is no edge.
+        // Where the system has no menu bar to put it in (a desktop without a tray), there is no edge, and Settings says so. A
+        // desktop may also take the mark without a tray to show it in, which Electron doesn't say; Settings mentions that too.
+        trayless = true
       }
     }
   }
@@ -286,13 +302,16 @@ export const startEdge = (host: EdgeHost): Edge => {
   screen.on('display-removed', changed)
   screen.on('display-metrics-changed', changed)
 
-  void readEdge(host.profile()).then((place) => {
+  const first = readEdge(host.profile()).then((place) => {
     chosen = place
     return look()
   })
 
   return {
-    state: () => ({ place: chosen, notch: notch !== null }),
+    state: async () => {
+      await first
+      return { place: chosen, notch: notch !== null, platform: process.platform, tray: !trayless }
+    },
     // Kept first, so a choice that can't be kept changes nothing, and Settings, going back, says what is so.
     choose: async (place) => {
       await writeEdge(host.profile(), place)

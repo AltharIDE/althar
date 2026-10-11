@@ -107,8 +107,16 @@ export interface Host {
   readonly playSound: (name: string) => Promise<void>
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
   readonly onOpen: (listener: (threadId: string) => void) => () => void
-  /** Where Althar shows while the person is in another app (`shared/edge`), and whether this Mac has a notch to choose the island by; null before the main process knows. */
-  readonly edge: () => Promise<{ readonly place: string; readonly notch: boolean } | null>
+  /**
+   * Where Althar shows while the person is in another app (`shared/edge`): the place chosen, whether a screen has a notch to
+   * choose the island by, the system, and whether it has a tray to put the mark in; null before the main process knows.
+   */
+  readonly edge: () => Promise<{
+    readonly place: string
+    readonly notch: boolean
+    readonly platform: string
+    readonly tray: boolean
+  } | null>
   /** Shows it there instead, and keeps the choice. */
   readonly setEdge: (place: string) => Promise<void>
   /** From the island: where it draws in its page, so the main process can tell when the pointer is on it. */

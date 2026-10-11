@@ -1,35 +1,52 @@
 import { useEffect, useRef, useState } from 'react'
 
+import type { EdgeSpot } from '@althar/ui'
+
 import { useServices } from '../../data/services'
-import { type EdgePlace, isEdgePlace } from '../../shared/edge'
+import { type EdgePlace, type EdgeRoom, edgeSpotOf, isEdgePlace } from '../../shared/edge'
 
 /*
  * Where Althar shows while the person is in another app, as Settings shows
- * and changes it. There is a choice only on a Mac whose screen has a notch:
- * elsewhere it is the menu bar, and Settings says nothing of it. A new choice
- * shows at once; if the main process can't keep it, and it is still the
- * latest, the last one kept comes back and the view says so.
+ * and changes it. It shows somewhere on every system: the main process says
+ * which system this is and whether it has a notch and a tray, once as
+ * Settings comes and again each time it opens, since a screen with a notch
+ * comes and goes. Only with a notch is there a choice. A new choice shows at
+ * once; if the main process can't keep it, and it is still the latest, the
+ * last one kept comes back and the view says so.
  */
 
 export interface EdgePlaceModel {
-  /** The place chosen, or null until the main process says, and where there is nothing to choose between. */
+  /** Where it shows on this computer, or null until the main process says. */
+  readonly spot: EdgeSpot | null
+  /** The place chosen, where a notch leaves a choice; null until the main process says, and where there is nothing to choose between. */
   readonly place: EdgePlace | null
   readonly failed: boolean
   readonly choose: (place: EdgePlace) => void
 }
 
-export const useEdgePlace = (): EdgePlaceModel => {
+export const useEdgePlace = (open = true): EdgePlaceModel => {
   const { host } = useServices()
-  const [place, setPlace] = useState<EdgePlace | null>(null)
+  const [room, setRoom] = useState<EdgeRoom | null>(null)
+  const [place, setPlace] = useState<EdgePlace>('island')
   const [failed, setFailed] = useState(false)
   const made = useRef(0)
-  const kept = useRef<EdgePlace | null>(null)
+  /** Choices not yet kept or refused: while any is, what the main process says is from before it. */
+  const pending = useRef(0)
+  const kept = useRef<EdgePlace>('island')
+  const asked = useRef(false)
 
+  // Asked as Settings comes, and again each time it opens.
   useEffect(() => {
+    if (!open && asked.current) return
+    asked.current = true
     let live = true
+    const at = made.current
     void host.edge().then(
       (answer) => {
-        if (!live || answer === null || !answer.notch) return
+        if (!live || answer === null) return
+        setRoom({ platform: answer.platform, notch: answer.notch, tray: answer.tray })
+        // A choice made while this was asked, or still being kept, stands.
+        if (at !== made.current || pending.current > 0) return
         const read = isEdgePlace(answer.place) ? answer.place : 'island'
         kept.current = read
         setPlace(read)
@@ -39,17 +56,20 @@ export const useEdgePlace = (): EdgePlaceModel => {
     return () => {
       live = false
     }
-  }, [host])
+  }, [host, open])
 
   const choose = (next: EdgePlace) => {
     const at = ++made.current
+    pending.current += 1
     setPlace(next)
     setFailed(false)
     host.setEdge(next).then(
       () => {
+        pending.current -= 1
         if (at === made.current) kept.current = next
       },
       () => {
+        pending.current -= 1
         if (at !== made.current) return
         setPlace(kept.current)
         setFailed(true)
@@ -57,5 +77,10 @@ export const useEdgePlace = (): EdgePlaceModel => {
     )
   }
 
-  return { place, failed, choose }
+  return {
+    spot: room === null ? null : edgeSpotOf(room, place),
+    place: room?.platform === 'darwin' && room.notch ? place : null,
+    failed,
+    choose,
+  }
 }
