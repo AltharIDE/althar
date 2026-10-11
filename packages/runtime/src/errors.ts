@@ -76,6 +76,12 @@ export class AttentionClosed extends Schema.TaggedError<AttentionClosed>()('Atte
   attentionId: Schema.String,
 }) {}
 
+/** An answer to a question that leaves one of its questions unanswered: no option picked and no words. */
+export class QuestionUnanswered extends Schema.TaggedError<QuestionUnanswered>()('QuestionUnanswered', {
+  attentionId: Schema.String,
+  field: Schema.String,
+}) {}
+
 /** An allow rule for words the project's rules ask about or never allow, which come first (ADR-018): it would replace them, or do nothing. */
 export class RuleOnAnotherList extends Schema.TaggedError<RuleOnAnotherList>()('RuleOnAnotherList', {
   pattern: Schema.String,

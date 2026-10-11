@@ -114,7 +114,7 @@ export function NeedLine({
       aria-labelledby={titleId}
       aria-describedby={answer === undefined ? undefined : `${kindId} ${saidId}`}
       tabIndex={focusOnMount ? -1 : undefined}
-      className={cx(s.line, answer !== undefined && s.settled, className)}
+      className={cx(s.line, command === undefined && brief === undefined && s.alone, answer !== undefined && s.settled, className)}
       {...rest}
     >
       <span className={s.kind} id={kindId}>

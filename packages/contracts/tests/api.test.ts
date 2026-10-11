@@ -234,6 +234,7 @@ describe('the API', () => {
               ReopenTask: () => Effect.void,
               Send: () => Effect.void,
               TakeBack: () => Effect.die('unused'),
+              AnswerQuestion: () => Effect.void,
               Answer: () => Effect.void,
               ListConnections: () => Effect.succeed({ cursor: 0, connections: [], products: [] }),
               StartSignIn: ({ commandId: id }) =>

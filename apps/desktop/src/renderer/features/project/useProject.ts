@@ -11,6 +11,7 @@ import {
   type TaskEnd,
   type TaskSummary,
   type ThreadItem,
+  type FieldAnswer,
 } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
@@ -81,6 +82,8 @@ export interface ProjectModel {
   readonly choose: (choice: Choice) => Promise<void>
   /** Hands the conversation to another agent with what the person says: its first turn, after its brief. */
   readonly handOver: (choice: Choice, body: string) => Promise<void>
+  /** Answers the coordinator's question: what went wrong, in words, or null when it went through. */
+  readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
@@ -354,6 +357,11 @@ export const useProject = (projectId: string): ProjectModel => {
           if (threadId !== null) await client.switchAgent({ ...startOf(threadId, choice), body })
         },
         false,
+      ),
+    answerQuestion: (attentionId, answers) =>
+      client.answerQuestion({ attentionId, answers }).then(
+        () => null,
+        (failure: unknown) => messageOf(failure),
       ),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),

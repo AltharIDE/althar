@@ -16,7 +16,8 @@ import {
 
 import { waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
-import { callKindOf, kindWords } from '../../shared/calls'
+import { callKindOf, kindWords, whereOf } from '../../shared/calls'
+import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -44,6 +45,8 @@ export const text = {
   stopped: 'No agent is working on it',
   allow: 'Allow',
   deny: 'Don’t allow',
+  /** What a question's card offers: to answer it, in its task. */
+  answer: 'Answer',
   merged: (name: string) => `${name} merged`,
   closed: (name: string) => `${name} closed`,
   abandoned: 'Abandoned',
@@ -206,6 +209,20 @@ export function BoardView({
 
 /** A call as its card on the board says it: a step that needs the person, or an approval. */
 export const callCardOf = (waiting: BoardCall, name: (id: string | null) => string) => {
+  // An agent's question, with its options where it asks one thing: answered where it was asked.
+  if (waiting.kind === 'question') {
+    const question = waiting.question ?? { fields: [] }
+    const because = waiting.question?.why ?? questionMore(question)
+    return {
+      kind: kindWords.question,
+      title: waiting.title,
+      ...(because === undefined ? {} : { because }),
+      options: (question.fields[0]?.options ?? []).map((option) => option.label),
+      from: whereOf(waiting),
+      at: ago(waiting.createdAt),
+      text: { decide: text.answer },
+    }
+  }
   if (waiting.stuck !== null) {
     const stuck = waiting.stuck
     return {
@@ -215,7 +232,7 @@ export const callCardOf = (waiting: BoardCall, name: (id: string | null) => stri
           ? stuckText.publishing(stuck)
           : stuckText.what(stuck, name(stuck.agentId) || 'The agent'),
       options: [],
-      from: waiting.taskTitle,
+      from: whereOf(waiting),
       at: ago(waiting.createdAt),
     }
   }
@@ -224,7 +241,7 @@ export const callCardOf = (waiting: BoardCall, name: (id: string | null) => stri
     title: waiting.title,
     because: waiting.reason,
     options: [text.allow, text.deny],
-    from: waiting.taskTitle,
+    from: whereOf(waiting),
     at: ago(waiting.createdAt),
   }
 }

@@ -4,6 +4,7 @@ import {
   type AgentModels,
   type AlwaysScope,
   type AppSettings,
+  type FieldAnswer,
   type FoundAccount,
   type ProjectRulesView,
   Api,
@@ -143,6 +144,11 @@ export interface Client {
     readonly decision: 'allow' | 'reject'
     readonly reason?: string
     readonly always?: AlwaysScope
+  }) => Promise<void>
+  /** The person's answer to an agent's question, field by field: the options picked, and any words of their own. */
+  readonly answerQuestion: (input: {
+    readonly attentionId: string
+    readonly answers: Readonly<Record<string, FieldAnswer>>
   }) => Promise<void>
   /** The project's coordinator thread, with the newest `limit` items before `before`. */
   readonly getCoordinator: (projectId: string, page?: { readonly before?: number; readonly limit?: number }) => Promise<CoordinatorSnapshot>
@@ -354,6 +360,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),
+    answerQuestion: (input) => command((commandId) => api.AnswerQuestion({ commandId, ...input })),
     getCoordinator: (projectId, page = {}) => settle(api.GetCoordinator({ projectId, ...page })),
     startTask: (input) => command((commandId) => api.StartTask({ commandId, ...input })),
     startPlan: (planId) => command((commandId) => api.StartPlan({ commandId, planId })),

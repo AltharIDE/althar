@@ -10,7 +10,7 @@ import { type Client, messageOf } from '../../data/client'
 import { type Feed, HOME, HOME_SHOWN } from '../../data/feed'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { kindWords } from '../../shared/calls'
+import { callKindOf, kindWords } from '../../shared/calls'
 import { refOf } from '../home/HomeView'
 import type { AnsweredCall } from '../home/needs'
 
@@ -77,7 +77,7 @@ const sayingOf = (home: HomeSnapshot, id: string, projects: ReadonlyMap<string, 
   const projectId = call?.projectId ?? task?.projectId
   const project = projectId === undefined ? undefined : projects.get(projectId)
   if (project === undefined) return null
-  const kind = call === undefined ? kindWords.ready : call.stuck === null ? kindWords.permission : kindWords.stuck
+  const kind = call === undefined ? kindWords.ready : callKindOf(call)
   return { project: refOf(project), kind }
 }
 

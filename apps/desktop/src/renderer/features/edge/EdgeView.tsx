@@ -7,6 +7,7 @@ import { refOf, text as homeText } from '../home/HomeView'
 import { needLineOf, needsOf, workOf } from '../home/needs'
 import s from './Edge.module.css'
 import type { EdgeModel } from './useEdge'
+import { useModelNames } from '../../shared/modelNames'
 
 /*
  * Althar at the edge of the screen, while the person works in another app:
@@ -44,6 +45,7 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
     if (away) onAway()
   }, [away])
   const home = model.home
+  const named = useModelNames()
   const name = (id: string | null) => model.agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   const refs = new Map((home?.projects ?? []).map((project) => [project.id, refOf(project)]))
   const tasks = home?.tasks ?? []
@@ -55,9 +57,14 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
   const waiting = calls.length + ready.length
   const openThread = (threadId: string) => host.openInWindow(threadId)
 
-  const needs: ReadonlyArray<ReactNode> = needsOf({ calls: home?.calls ?? [], answered: model.answered, ready, refs, agentName: name }).map(
-    (need) => needLineOf(need, { onOpen: openThread, onAnswer: (call, _project, decision) => model.answer(call, decision) }),
-  )
+  const needs: ReadonlyArray<ReactNode> = needsOf({
+    calls: home?.calls ?? [],
+    answered: model.answered,
+    ready,
+    refs,
+    agentName: name,
+    modelName: (agentId, model) => named(agentId, model).name,
+  }).map((need) => needLineOf(need, { onOpen: openThread, onAnswer: (call, _project, decision) => model.answer(call, decision) }))
 
   const sheet = (
     <EdgeSheet

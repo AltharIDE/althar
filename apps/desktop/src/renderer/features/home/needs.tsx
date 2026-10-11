@@ -3,8 +3,9 @@ import type { ReactNode } from 'react'
 import type { HomeCall, HomeTask } from '@althar/contracts'
 import { Button, type EdgeWork, NeedLine, type ProjectRef } from '@althar/ui'
 
-import { callKindOf, kindWords } from '../../shared/calls'
+import { callKindOf, kindWords, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
+import { briefOf as questionBrief } from '../../shared/questions'
 import { text as stuckText } from '../task/StuckCall'
 
 /*
@@ -32,6 +33,8 @@ export const needText = {
   deny: 'Deny',
   look: 'Open',
   review: 'Review',
+  /** An agent's question, opened where it was asked to answer it. */
+  answer: 'Answer',
   /** A change on its branch alone, by its size. */
   onBranch: 'On its branch',
   branchSize: (files: number, add: number, del: number) => `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
@@ -126,6 +129,7 @@ export const needsOf = ({
   ready,
   refs,
   agentName,
+  modelName,
 }: {
   /** The calls as the runtime lists them, answered here or not. */
   calls: ReadonlyArray<HomeCall>
@@ -134,6 +138,8 @@ export const needsOf = ({
   ready: ReadonlyArray<HomeTask>
   refs: ReadonlyMap<string, ProjectRef>
   agentName: (id: string | null) => string
+  /** A model by its name, for who asks a question; the agent's name without it. */
+  modelName?: (agentId: string, model: string | null) => string
 }): ReadonlyArray<Need> => [
   ...withAnswered(calls, answered).flatMap((call): ReadonlyArray<Need> => {
     const project = refs.get(call.projectId)
@@ -152,6 +158,21 @@ export const needsOf = ({
         },
       ]
     const stuck = call.stuck
+    // An agent's question is answered where it was asked: its line says what it asks, and opens it there.
+    // A question's line stays calm: what it asks first, why, and Answer takes the person to it, where its options are.
+    if (call.kind === 'question') {
+      const brief = questionBrief(call, modelName ?? agentName)
+      return [
+        {
+          id: call.id,
+          threadId: call.threadId,
+          kind: kindWords.question,
+          project,
+          title: call.title,
+          ...(brief === undefined ? {} : { brief }),
+        },
+      ]
+    }
     return [
       stuck === null
         ? {
@@ -168,7 +189,7 @@ export const needsOf = ({
             threadId: call.threadId,
             kind: callKindOf(call),
             project,
-            title: call.taskTitle,
+            title: whereOf(call),
             brief: stuckText.what(stuck, agentName(stuck.agentId) || 'The agent'),
           },
     ]
@@ -226,8 +247,8 @@ export function needLineOf(
       onOpen={open}
       actions={
         permission === undefined ? (
-          <Button size="small" onClick={open}>
-            {need.kind === kindWords.ready ? needText.review : needText.look}
+          <Button size="small" {...(need.kind === kindWords.question ? { variant: 'signal' as const } : {})} onClick={open}>
+            {need.kind === kindWords.ready ? needText.review : need.kind === kindWords.question ? needText.answer : needText.look}
           </Button>
         ) : answers !== undefined ? (
           answers(permission, need.project)

@@ -8,6 +8,7 @@ import {
   type AgentSession,
   connect,
   type ConfigOption,
+  type Question,
   type SessionEvent,
   type StopReport,
 } from '@althar/provider-adapters'
@@ -34,6 +35,7 @@ import { Instance } from './Instance'
 import { Limits } from './Limits'
 import { Live } from './Live'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
+import { Questions } from './Questions'
 import { touchCard } from './cards'
 import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
@@ -204,6 +206,7 @@ type Store =
   | Live
   | Agents
   | Permissions
+  | Questions
   | ToolServer
   | RuntimeConfig
   | Accounts
@@ -366,6 +369,7 @@ export class Sessions extends Context.Service<
       const instance = yield* Instance
       const live = yield* Live
       const permissions = yield* Permissions
+      const questions = yield* Questions
       const accounts = yield* Accounts
       const limits = yield* Limits
       const toolServer = yield* ToolServer
@@ -810,6 +814,8 @@ export class Sessions extends Context.Service<
           threads.delete(running.thread.threadId)
           yield* running.revokeTools
           yield* permissions.withdrawAll(running.sessionId)
+          // What it asked the person stays for them: the answer goes to the agent on the thread next.
+          yield* questions.release(running.sessionId)
           yield* Scope.close(running.scope, Exit.void)
           const stop: StopReport | undefined =
             running.connection.process === undefined ? undefined : yield* running.connection.process.stopped
@@ -954,6 +960,16 @@ export class Sessions extends Context.Service<
                 transport,
                 onPermission: (request) => permissions.decide(requestContext, request),
                 permissions: definition.permissions,
+                // The lead and the coordinator may ask the person; a reviewer is given no way to, and decides for itself.
+                ...(thread.role === 'reviewer'
+                  ? {}
+                  : {
+                      onQuestion: (question: Question) =>
+                        questions.ask(
+                          { projectId: thread.projectId, threadId: thread.threadId, taskId: requestContext.taskId, sessionId },
+                          question,
+                        ),
+                    }),
               })
               const agent = yield* connection.newSession({
                 cwd: cwdOf(thread),
@@ -1089,6 +1105,8 @@ export class Sessions extends Context.Service<
       const stopRunning = (running: Running, request: StopRequest) =>
         Effect.gen(function* () {
           running.stopping = true
+          // What it asked the person stays for them, though its turn ends now: the answer goes to the agent on the thread next.
+          yield* questions.release(running.sessionId)
           const ended = yield* Effect.andThen(
             Effect.ignore(running.agent.interrupt),
             running.delivering.withPermits(1)(Deferred.succeed(running.stopRequest, request)),

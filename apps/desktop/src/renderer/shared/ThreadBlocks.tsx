@@ -1,6 +1,6 @@
 import { Fragment, useState, type ReactNode } from 'react'
 
-import type { Unfurl } from '@althar/contracts'
+import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
   Arrived,
   CodeBlock,
@@ -10,6 +10,8 @@ import {
   Markdown,
   Plan,
   Prose,
+  Question,
+  type QuestionAnswer,
   Reasoning,
   Review,
   type ReviewFinding,
@@ -31,7 +33,8 @@ import { documentVersions } from './handed'
 import { useModelNames } from './modelNames'
 import { RuleReceipt } from './RuleReceipt'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
-import type { ArrivalContent, Block, Part, StepResult, TaskCardContent } from './thread'
+import { answersOf, partsOf, pickedOf, questionText } from './questions'
+import type { ArrivalContent, Block, Part, QuestionContent, StepResult, TaskCardContent } from './thread'
 import s from './ThreadBlocks.module.css'
 
 /*
@@ -308,6 +311,54 @@ function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: s
   )
 }
 
+/**
+ * An agent's question, where it asked it: answered here, it says what was said
+ * at once, and so it stays once the runtime says so; an answer that didn't go
+ * through says why, and keeps what was picked to send again.
+ */
+function QuestionView({
+  question,
+  onAnswer,
+  focus = false,
+}: {
+  question: QuestionContent
+  onAnswer?: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
+  /** The person was brought here to answer it. */
+  focus?: boolean
+}) {
+  const [sent, setSent] = useState<QuestionAnswer | null>(null)
+  const [answering, setAnswering] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const parts = partsOf(question.fields)
+  const title = question.fields.length > 1 ? { title: question.message } : {}
+  if (question.state === 'withdrawn')
+    return <Question parts={parts} {...title} withdrawn={questionText.withdrawn[question.withdrawn ?? 'turn']} />
+  const answer = question.answers === null ? sent : pickedOf(question.answers)
+  return (
+    <Question
+      parts={parts}
+      {...title}
+      focusOnMount={focus}
+      answer={question.state === 'answered' ? answer : sent}
+      answering={answering}
+      {...(error === null ? {} : { error })}
+      {...(onAnswer === undefined
+        ? {}
+        : {
+            onAnswer: (picked: QuestionAnswer) => {
+              setError(null)
+              setAnswering(true)
+              void onAnswer(question.attentionId, answersOf(picked)).then((failed) => {
+                setAnswering(false)
+                if (failed === null) setSent(picked)
+                else setError(failed)
+              })
+            },
+          })}
+    />
+  )
+}
+
 export function ThreadBlocks({
   blocks,
   threadId,
@@ -317,6 +368,8 @@ export function ThreadBlocks({
   card,
   queued,
   onPassOn,
+  onAnswerQuestion,
+  focusQuestion,
   project,
 }: {
   blocks: ReadonlyArray<Block>
@@ -332,6 +385,10 @@ export function ThreadBlocks({
   session?: { readonly agentId: string; readonly model: string | null; readonly account: string | null } | null
   /** Sends what someone outside said to the lead, in the person's name. */
   onPassOn?: (words: string) => void
+  /** Answers an agent's question; what went wrong, in words, or null. Without it, a question can't be answered here. */
+  onAnswerQuestion?: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
+  /** The question waiting as the thread opened, by its call: the person was brought here to answer it, so it takes focus. */
+  focusQuestion?: string
   /** Draws a task's card, in the coordinator's thread. */
   card?: (card: TaskCardContent) => ReactNode
   /** What a message still waiting says: who reads it next. */
@@ -378,6 +435,15 @@ export function ThreadBlocks({
         return <StepView key={block.id} id={block.id} result={block.result} of={of} />
       case 'card':
         return <Fragment key={block.id}>{card?.(block.card)}</Fragment>
+      case 'question':
+        return (
+          <QuestionView
+            key={block.id}
+            question={block.question}
+            focus={block.question.attentionId === focusQuestion}
+            {...(onAnswerQuestion === undefined ? {} : { onAnswer: onAnswerQuestion })}
+          />
+        )
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')
