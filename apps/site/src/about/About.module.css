@@ -1,0 +1,105 @@
+/* About: paper, the light where it stands, and the footer's ink for the signatures. */
+
+.page { background: var(--n-2); }
+
+/* Each section's label: a mono line with a cobalt dot. */
+.label { display: inline-flex; align-items: center; gap: 9px; margin: 0; font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3); }
+.label i { width: 6px; height: 6px; border-radius: 50%; background: var(--live); }
+
+/* Why: a line at a time, at the page's left edge, the turn largest. */
+.why { display: grid; gap: 34px; max-width: calc(var(--max) - 2 * var(--gut)); margin: 0 auto; padding: 170px var(--gut) 150px; }
+.before {
+  max-width: 960px;
+  font-family: 'Inter Display', var(--display); font-weight: 250;
+  font-size: clamp(28px, 3.3vw, 46px); line-height: 1.14; letter-spacing: -0.032em; color: var(--t-1); text-wrap: pretty;
+}
+.before + .before { color: var(--t-2); }
+.turn {
+  margin-top: 40px;
+  font-family: 'Inter Display', var(--display); font-weight: 200;
+  font-size: clamp(46px, 7vw, 112px); line-height: 0.98; letter-spacing: -0.052em; color: var(--t-1); text-wrap: balance;
+}
+.turn b { display: block; font-weight: 720; letter-spacing: -0.058em; color: var(--live); }
+.so { font-size: 20px; letter-spacing: -0.012em; color: var(--t-2); }
+
+/* What we hold to: the light standing in four columns, a principle in each, all four starting on one line. */
+.held { position: relative; overflow: hidden; padding-top: 40px; }
+.heldLabel { display: flex; max-width: calc(var(--max) - 2 * var(--gut)); margin: 0 auto; padding: 0 var(--gut); }
+.stage { position: relative; height: clamp(860px, 100svh, 1000px); margin-top: -10px; }
+.lights {
+  position: absolute; inset: 0;
+  /* The light's foot fades into the paper, so the section never ends on a line. */
+  -webkit-mask-image: linear-gradient(to top, transparent 0, #000 22%);
+  mask-image: linear-gradient(to top, transparent 0, #000 22%);
+}
+.principles { position: absolute; inset: 0; margin: 0; padding: 0; list-style: none; }
+.principle {
+  position: absolute; top: 40%; left: var(--left); width: var(--width);
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 0 clamp(18px, 2.2vw, 34px); color: #fff;
+  opacity: 0; transform: translateY(24px);
+  transition: opacity 1100ms ease var(--after), transform 1300ms cubic-bezier(0.2, 0.9, 0.25, 1) var(--after);
+}
+.heldUp .principle { opacity: 1; transform: none; }
+.num { font: 500 11px var(--mono); letter-spacing: 0.08em; color: rgba(255, 255, 255, 0.72); }
+.word {
+  margin: 4px 0 0;
+  font-family: 'Inter Display', var(--display); font-weight: 200;
+  font-size: clamp(34px, 3.3vw, 54px); line-height: 1; letter-spacing: -0.048em;
+}
+.after { font-size: 16px; font-weight: 600; letter-spacing: -0.012em; }
+.body { max-width: 32ch; margin-top: 6px; font-size: 15px; line-height: 1.56; color: rgba(255, 255, 255, 0.92); text-wrap: pretty; }
+
+/* Who we are: each of us signs, in the footer's ink, over a line, the name and what we do under it. */
+.team { display: grid; justify-items: start; gap: 26px; max-width: calc(var(--max) - 2 * var(--gut)); margin: 0 auto; padding: 170px var(--gut) 130px; }
+.teamLead { font-family: 'Inter Display', var(--display); font-weight: 250; font-size: clamp(28px, 3.3vw, 46px); line-height: 1.1; letter-spacing: -0.032em; }
+.people { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 340px)); gap: 40px 64px; width: 100%; margin: 34px 0 0; padding: 0; list-style: none; }
+.person { display: grid; gap: 6px; }
+.hand {
+  display: block; height: 100px; padding: 22px 6px 0; margin-bottom: 12px; overflow: visible;
+  border-bottom: 1px solid var(--t-4);
+  font-family: 'Mrs Saint Delafield', cursive; font-size: 68px; line-height: 1; white-space: nowrap;
+  color: #1f35c8;
+  /* Written out left to right, as a pen runs. */
+  clip-path: inset(-30px 100% -30px -30px);
+  transition: clip-path 1400ms cubic-bezier(0.45, 0.05, 0.4, 1) var(--after);
+}
+.signed .hand { clip-path: inset(-30px -60px -30px -30px); }
+.name { font-family: 'Inter Display', var(--display); font-weight: 300; font-size: clamp(26px, 2.4vw, 32px); line-height: 1.1; letter-spacing: -0.034em; color: var(--t-1); }
+.does { font: 500 11.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--t-3); }
+.talk { margin-top: 30px; font-size: 15px; font-weight: 550; color: var(--live); text-decoration: none; }
+.talk:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .principle { transition: none; }
+  .hand { transition: none; clip-path: none; }
+}
+
+@media (max-width: 1180px) {
+  /* The columns stack: each principle in a light of its own, its words at its foot, there from the start. */
+  .stage { height: auto; margin-top: 30px; }
+  .lights { display: none; }
+  .principles { position: static; display: grid; }
+  .principle {
+    position: relative; top: auto; left: auto; width: auto; isolation: isolate; overflow: hidden;
+    min-height: 600px; justify-content: flex-end; padding: 0 var(--gut) 72px;
+    opacity: 1; transform: none;
+  }
+  .principle::before {
+    content: ''; position: absolute; z-index: -1; left: 6%; right: 6%; bottom: -40px; height: 96%;
+    border-radius: 50% 50% 0 0 / 22% 22% 0 0; filter: blur(28px);
+    background: linear-gradient(to top, #2b3bff 0%, #3042ff 55%, #6372ff 86%, rgba(255, 255, 255, 0) 100%);
+  }
+  .principle > * { width: 100%; max-width: 560px; margin-left: auto; margin-right: auto; }
+  .body { max-width: 560px; }
+}
+
+@media (max-width: 700px) {
+  .why { gap: 26px; padding: 110px var(--gut) 100px; }
+  .turn { margin-top: 18px; }
+  .principle { min-height: 470px; padding: 0 22px 56px; }
+  .principle::before { left: -4%; right: -4%; }
+  .team { padding: 110px var(--gut) 100px; }
+  .people { grid-template-columns: 1fr; gap: 34px; }
+  .hand { height: 86px; font-size: 58px; }
+}

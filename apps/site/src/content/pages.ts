@@ -46,6 +46,13 @@ export const PAGE_META = {
     image: '/og/wallpaper.png',
     index: true,
   },
+  '/about': {
+    path: '/about',
+    title: 'About · Althar',
+    description: 'Why we built Althar, and what we hold to while we build it: made for people, beautiful, slotted into your tools, calm.',
+    image: '/og/about.png',
+    index: true,
+  },
   '/docs': {
     path: '/docs',
     title: 'Docs · Althar',

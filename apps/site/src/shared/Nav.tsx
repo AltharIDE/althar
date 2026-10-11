@@ -18,6 +18,7 @@ const PAGES = [
   { href: '/shifts', name: 'Shifts' },
   { href: '/thesis', name: 'Thesis' },
   { href: '/docs', name: 'Docs' },
+  { href: '/about', name: 'About' },
 ]
 
 const here = (href: string) => typeof window !== 'undefined' && (window.location.pathname.replace(/\/+$/, '') || '/') === href

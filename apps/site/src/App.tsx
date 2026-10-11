@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, type ComponentType } from 'react'
 
+import { About } from './about/About'
 import { pageMeta } from './content/pages'
 import { Docs } from './docs/Docs'
 import { Home } from './home/Home'
@@ -11,6 +12,7 @@ const Thesis = lazy(() => import('./thesis/Thesis').then((m) => ({ default: m.Th
 const EnterpriseHome = lazy(() => import('./enterprise/Home').then((m) => ({ default: m.EnterpriseHome })))
 
 const PAGES: Record<string, ComponentType> = {
+  '/about': About,
   '/shifts': Shifts,
   '/thesis': Thesis,
   '/wallpaper': Wallpaper,

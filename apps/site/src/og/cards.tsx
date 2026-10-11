@@ -7,7 +7,7 @@ import type { ReactNode } from 'react'
  * again: `bun run og`.
  */
 
-export type OgPage = 'home' | 'shifts' | 'thesis'
+export type OgPage = 'home' | 'shifts' | 'thesis' | 'about'
 
 export interface OgCard {
   title: ReactNode
@@ -49,6 +49,16 @@ export const CARDS: Record<OgPage, OgCard> = {
       </>
     ),
     lead: 'A working thesis on how software engineering changes once coding agents are abundant.',
+  },
+  about: {
+    title: (
+      <>
+        We make software
+        <br />
+        <b>for people.</b>
+      </>
+    ),
+    lead: 'Why we built Althar, and what we hold to while we build it: for people, beautiful, slotted into your tools, calm.',
   },
 }
 
