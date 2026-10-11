@@ -36,13 +36,15 @@ test('asks the person a question on the home, keeps it across a restart, and car
     await page.getByRole('button', { name: 'No review' }).click()
     await page.getByRole('button', { name: 'Start the task' }).click()
 
-    // On the home, the question waits on the person, calm: what it asks, and Answer. Its options are where it is answered.
+    // On the home, the question waits on the person, calm: what it asks, why, and Answer. Its options are where it is answered.
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
     const needs = page.getByRole('region', { name: /needs? you/ })
     const asked = needs.getByRole('article', { name: 'Which database should the cache use?' })
     await expect(asked).toBeVisible({ timeout: 20_000 })
     await expect(asked.getByText('Question', { exact: true })).toBeVisible()
     await expect(asked.getByText('Postgres')).toHaveCount(0)
+    // Under it, why it asks: what the lead said just before.
+    await expect(asked.getByText('The rates change hourly, so a cache would save most of the calls to the provider.')).toBeVisible()
     if (shots) {
       // Once the list has come in.
       await page.waitForTimeout(800)

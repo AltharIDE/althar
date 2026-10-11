@@ -350,11 +350,15 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       if (ask === undefined || params.mode !== 'form' || !('requestedSchema' in params)) return Promise.resolve({ action: 'cancel' })
       const sessionId = 'sessionId' in params && typeof params.sessionId === 'string' ? params.sessionId : undefined
       const toolCallId = 'toolCallId' in params && typeof params.toolCallId === 'string' ? params.toolCallId : undefined
+      // What it said just before: since its last tool call, or else the last it said before that, in this turn.
+      const heard = sessionId === undefined ? undefined : said.get(sessionId)
+      const before = heard?.current.trim() || heard?.last.trim() || ''
       const question: Question = {
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(toolCallId === undefined ? {} : { toolCallId }),
         message: params.message,
         fields: questionFields(params.requestedSchema, params.message),
+        ...(before === '' ? {} : { said: before }),
       }
       const dropped = new AbortController()
       const drop = () => dropped.abort()
@@ -383,6 +387,22 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
      * it asks about said both when it began, so the request takes them from it.
      */
     const calls = new Map<string, { title?: string; kind?: string; rawInput?: unknown }>()
+    /**
+     * What the agent has said in its turn, by session: its words since its
+     * last tool call, and the last it said before that. A question it asks
+     * carries them, as what it said before asking.
+     */
+    const said = new Map<string, { current: string; last: string }>()
+    const hear = (sessionId: string, update: acp.SessionUpdate) => {
+      const heard = said.get(sessionId) ?? { current: '', last: '' }
+      if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') heard.current += update.content.text
+      else if (update.sessionUpdate === 'tool_call' && heard.current.trim() !== '') {
+        heard.last = heard.current
+        heard.current = ''
+      } else if (update.sessionUpdate === 'tool_call') heard.current = ''
+      said.set(sessionId, heard)
+    }
+
     const remember = (sessionId: string, update: acp.SessionUpdate) => {
       if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return
       const key = `${sessionId}\u0000${update.toolCallId}`
@@ -414,6 +434,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       .client({ name: 'althar' })
       .onNotification(acp.methods.client.session.update, ({ params }) => {
         remember(params.sessionId, params.update)
+        hear(params.sessionId, params.update)
         receive(params.sessionId, { _tag: 'Update', update: params.update })
       })
       .onRequest(acp.methods.client.session.requestPermission, (request) => answerPermission(described(request.params), request.signal))
@@ -700,6 +721,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                 Option.isSome(running) ? [false, running] : [true, Option.some(turn)],
               )
               if (!idle) return yield* new TurnInProgress({ sessionId })
+              // A new turn: what it says before a question is of this turn only.
+              said.delete(sessionId)
               yield* send(text)
               return Stream.fromQueue(turn.queue)
             }),

@@ -70,6 +70,8 @@ export const QUESTION = {
   project: MERIDIAN,
   task: '431',
   title: 'Which database should the refund queue live in?',
+  /** What the lead said just before it asked. */
+  why: 'Partners over the limit get their refunds queued now, so the queue needs somewhere to live.',
   options: [
     {
       id: 'postgres',

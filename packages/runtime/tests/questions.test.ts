@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { scenarios } from '@althar/provider-adapters/testing'
+import { scenarios, WHY } from '@althar/provider-adapters/testing'
 import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -14,7 +14,7 @@ import { callWords } from '../src/Nudges'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
-import { Questions } from '../src/Questions'
+import { Questions, reasonOf } from '../src/Questions'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
@@ -109,8 +109,8 @@ describe('questions an agent asks the person', () => {
       )
       const snapshot = yield* Effect.orDie(queries.thread(created.threadId))
       assert.deepStrictEqual(
-        snapshot.attention.map((call) => [call.kind, call.title, call.question?.fields.length]),
-        [['question', 'Which database should the cache use?', 2]],
+        snapshot.attention.map((call) => [call.kind, call.title, call.question?.fields.length, call.question?.why, call.question?.askedBy]),
+        [['question', 'Which database should the cache use?', 2, WHY, { agentId: 'codex', model: 'small' }]],
       )
 
       // Each question needs an answer: an option, or words where the agent takes them.
@@ -403,6 +403,24 @@ describe('questions an agent asks the person', () => {
       const told = yield* answer('attn_retries', { retries: { values: [], words: '3' } })
       assert.deepStrictEqual(told.told ? null : told.body.split('\n').slice(1), ['How many retries? 3'])
     }).pipe(Effect.provide(withQueries())))
+
+  it('say why they ask in a line: what the agent said just before, plain, and short', () => {
+    const asked = ['Which database should the cache use?']
+    assert.isUndefined(reasonOf(undefined, asked))
+    assert.strictEqual(
+      reasonOf('Looking at **the rates** now.\n\nThey change `hourly`, so a [cache](https://x.test) helps.', asked),
+      'They change hourly, so a cache helps.',
+    )
+    // The question said again is asked anyway: the paragraph before it is why.
+    assert.strictEqual(reasonOf('The rates change hourly.\n\nWhich database should the cache use?', asked), 'The rates change hourly.')
+    assert.isUndefined(reasonOf('Shall I go on?', asked))
+    // Only the last sentences that fit; one alone too long is cut at a word.
+    const long = `${'First a long sentence that goes on and on. '.repeat(6)}Then why it asks.`
+    assert.strictEqual(reasonOf(long, asked)?.endsWith('Then why it asks.'), true)
+    assert.isAtMost(reasonOf(long, asked)?.length ?? 0, 200)
+    const one = reasonOf(`${'word '.repeat(80)}end`, asked) ?? ''
+    assert.isTrue(one.endsWith('…') && one.length <= 200)
+  })
 
   it('say what they ask when they nudge the person', () => {
     const fields = [{ question: 'Which database should the cache use?' }]

@@ -1,4 +1,4 @@
-import type { FieldAnswer, QuestionField } from '@althar/contracts'
+import type { AttentionRequest, FieldAnswer, QuestionField } from '@althar/contracts'
 import type { QuestionAnswer, QuestionPart } from '@althar/ui'
 
 /*
@@ -7,6 +7,8 @@ import type { QuestionAnswer, QuestionPart } from '@althar/ui'
  * runtime takes, and the question in a line for the places that list it.
  */
 
+type AskedQuestion = NonNullable<AttentionRequest['question']>
+
 export const questionText = {
   /** Why a question no longer waits. */
   withdrawn: {
@@ -14,6 +16,8 @@ export const questionText = {
     task: 'The task stopped.',
   },
   answer: 'Answer',
+  /** Under a question in a list, where the agent said nothing first: who asks, and where. */
+  asks: (model: string, where: string | null) => (where === null ? `${model} asks, as the coordinator` : `${model} asks, in ${where}`),
   /** Under a question in a list: the others asked with it. */
   more: (n: number) => (n === 1 ? 'and 1 more question' : `and ${n} more questions`),
 }
@@ -57,3 +61,18 @@ export const pickedOf = (answers: Readonly<Record<string, FieldAnswer>>): Questi
 /** Under a question's line in a list, where it asks several at once: how many more wait with the first. */
 export const moreOf = (question: { readonly fields: ReadonlyArray<QuestionField> }): string | undefined =>
   question.fields.length > 1 ? questionText.more(question.fields.length - 1) : undefined
+
+/**
+ * The line under a question in a list: why the agent asks, in what it said
+ * just before; else who asks and where; else how many more it asks with it.
+ */
+export const briefOf = (
+  call: { readonly taskTitle: string | null; readonly question?: AskedQuestion | undefined },
+  modelName: (agentId: string, model: string | null) => string,
+): string | undefined => {
+  const question = call.question
+  if (question === undefined) return undefined
+  if (question.why !== undefined) return question.why
+  if (question.askedBy !== undefined) return questionText.asks(modelName(question.askedBy.agentId, question.askedBy.model), call.taskTitle)
+  return moreOf(question)
+}

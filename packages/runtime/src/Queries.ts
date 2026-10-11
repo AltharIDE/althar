@@ -139,6 +139,16 @@ const questionOf = (payload: unknown) => ({
   fields: Option.getOrElse(decodeFields(field(payload, 'fields')), () => []),
 })
 
+/** An agent's question as a call shows it: what it asks, why, and who asks. */
+const askedOf = (payload: unknown, asker: { readonly agentId?: string | null; readonly model?: string | null }) => {
+  const why = text(payload, 'why')
+  return {
+    ...questionOf(payload),
+    ...(why === '' ? {} : { why }),
+    ...(asker.agentId == null ? {} : { askedBy: { agentId: asker.agentId, model: asker.model ?? null } }),
+  }
+}
+
 const decodeAllowedBy = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(AllowedBy)))
 const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
 
@@ -191,7 +201,15 @@ const number = (value: unknown, key: string): number | null => {
 }
 
 /** A call that waits on the person, as a screen shows it: what was asked, why it waits, and, for a step that needs them, which and why. */
-const callOf = (request: { readonly id: string; readonly kind: string; readonly payload: string; readonly createdAt: string }) => {
+const callOf = (request: {
+  readonly id: string
+  readonly kind: string
+  readonly payload: string
+  readonly createdAt: string
+  /** For a question: the agent and model of the session that asked. */
+  readonly askerAgentId?: string | null
+  readonly askerModel?: string | null
+}) => {
   const payload = parse(request.payload)
   return {
     id: request.id,
@@ -200,7 +218,9 @@ const callOf = (request: { readonly id: string; readonly kind: string; readonly 
     reason: text(payload, 'reason'),
     command: text(payload, 'command') || null,
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
-    ...(request.kind === 'question' ? { question: questionOf(payload) } : {}),
+    ...(request.kind === 'question'
+      ? { question: askedOf(payload, { agentId: request.askerAgentId ?? null, model: request.askerModel ?? null }) }
+      : {}),
     // What an "always" would keep, for a permission that says (ADR-018); earlier ones don't.
     ...Option.match(decodeAlways(field(payload, 'always')), {
       onNone: () => ({}),
@@ -560,9 +580,11 @@ export class Queries extends Context.Service<
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS rule,
               q.state AS question_state, q.payload AS question_payload,
               -- An agent's tool call that asks the person is the question it asks, which stands in its place.
-              (i.kind = 'tool_call' AND EXISTS (SELECT 1 FROM thread_items x WHERE x.thread_id = i.thread_id AND x.kind = 'question'
-                AND x.provider_session_id = i.provider_session_id AND json_extract(x.content, '$.toolCallId') = i.tool_call_id)) AS asks
+              (x.tool_call_id IS NOT NULL) AS asks
             FROM thread_items i
+            LEFT JOIN (SELECT provider_session_id, json_extract(content, '$.toolCallId') AS tool_call_id FROM thread_items
+              WHERE thread_id = ${threadId} AND kind = 'question') x
+              ON i.kind = 'tool_call' AND x.provider_session_id = i.provider_session_id AND x.tool_call_id = i.tool_call_id
             LEFT JOIN attention_requests q ON i.kind = 'question' AND q.id = json_extract(i.content, '$.attentionId')
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id
@@ -1176,8 +1198,13 @@ export class Queries extends Context.Service<
             threadId: string
             taskTitle: string | null
             taskSlug: string | null
+            askerAgentId: string | null
+            askerModel: string | null
           }>`
-            SELECT id, kind, payload, created_at, project_id, task_id, thread_id, task_title, task_slug FROM (
+            SELECT id, kind, payload, created_at, project_id, task_id, thread_id, task_title, task_slug,
+              (SELECT agent_id FROM provider_sessions WHERE id = json_extract(payload, '$.sessionId')) AS asker_agent_id,
+              (SELECT model FROM provider_sessions WHERE id = json_extract(payload, '$.sessionId')) AS asker_model
+            FROM (
               SELECT a.id, a.kind, a.payload, a.created_at, a.project_id, k.id AS task_id, t.id AS thread_id, k.title AS task_title, k.slug AS task_slug
               FROM attention_requests a JOIN tasks k ON k.id = a.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
               JOIN projects p ON p.id = a.project_id
@@ -1371,8 +1398,17 @@ export class Queries extends Context.Service<
           if (head === undefined) return yield* new NotFound({ kind: 'task thread', id: threadId })
           // What the store says comes first, together, so it is as of the cursor; git after.
           const { items, earlier } = yield* pageOf(threadId, page)
-          const attention = yield* sql<{ id: string; kind: string; payload: string; createdAt: string }>`
-            SELECT id, kind, payload, created_at FROM attention_requests WHERE task_id = ${head.taskId} AND state = 'open' ORDER BY created_at`
+          const attention = yield* sql<{
+            id: string
+            kind: string
+            payload: string
+            createdAt: string
+            askerAgentId: string | null
+            askerModel: string | null
+          }>`
+            SELECT a.id, a.kind, a.payload, a.created_at, (SELECT agent_id FROM provider_sessions WHERE id = json_extract(a.payload, '$.sessionId')) AS asker_agent_id,
+              (SELECT model FROM provider_sessions WHERE id = json_extract(a.payload, '$.sessionId')) AS asker_model
+            FROM attention_requests a WHERE a.task_id = ${head.taskId} AND a.state = 'open' ORDER BY a.created_at`
           // Since when the step it is on has run, or been held.
           const [onStep] = yield* sql<{ admittedAt: string }>`
             SELECT a.admitted_at FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id

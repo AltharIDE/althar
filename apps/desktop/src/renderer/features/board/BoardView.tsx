@@ -212,11 +212,11 @@ export const callCardOf = (waiting: BoardCall, name: (id: string | null) => stri
   // An agent's question, with its options where it asks one thing: answered where it was asked.
   if (waiting.kind === 'question') {
     const question = waiting.question ?? { fields: [] }
-    const more = questionMore(question)
+    const because = waiting.question?.why ?? questionMore(question)
     return {
       kind: kindWords.question,
       title: waiting.title,
-      ...(more === undefined ? {} : { because: more }),
+      ...(because === undefined ? {} : { because }),
       options: (question.fields[0]?.options ?? []).map((option) => option.label),
       from: whereOf(waiting),
       at: ago(waiting.createdAt),

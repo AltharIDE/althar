@@ -51,6 +51,8 @@ export interface Question {
   /** What the agent said with it. */
   readonly message: string
   readonly fields: ReadonlyArray<QuestionField>
+  /** What the agent said in its turn just before it asked, as it said it: often why it asks. */
+  readonly said?: string
 }
 
 export type QuestionContent = Readonly<Record<string, string | number | boolean | ReadonlyArray<string>>>

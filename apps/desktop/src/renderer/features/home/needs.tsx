@@ -5,7 +5,7 @@ import { Button, type EdgeWork, NeedLine, type ProjectRef } from '@althar/ui'
 
 import { kindWords, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
-import { moreOf as questionMore } from '../../shared/questions'
+import { briefOf as questionBrief } from '../../shared/questions'
 import { text as stuckText } from '../task/StuckCall'
 
 /*
@@ -129,6 +129,7 @@ export const needsOf = ({
   ready,
   refs,
   agentName,
+  modelName,
 }: {
   /** The calls as the runtime lists them, answered here or not. */
   calls: ReadonlyArray<HomeCall>
@@ -137,6 +138,8 @@ export const needsOf = ({
   ready: ReadonlyArray<HomeTask>
   refs: ReadonlyMap<string, ProjectRef>
   agentName: (id: string | null) => string
+  /** A model by its name, for who asks a question; the agent's name without it. */
+  modelName?: (agentId: string, model: string | null) => string
 }): ReadonlyArray<Need> => [
   ...withAnswered(calls, answered).flatMap((call): ReadonlyArray<Need> => {
     const project = refs.get(call.projectId)
@@ -156,9 +159,9 @@ export const needsOf = ({
       ]
     const stuck = call.stuck
     // An agent's question is answered where it was asked: its line says what it asks, and opens it there.
-    // A question's line stays calm: what it asks first, and Answer takes the person to it, where its options are.
+    // A question's line stays calm: what it asks first, why, and Answer takes the person to it, where its options are.
     if (call.kind === 'question') {
-      const more = call.question === undefined ? undefined : questionMore(call.question)
+      const brief = questionBrief(call, modelName ?? agentName)
       return [
         {
           id: call.id,
@@ -166,7 +169,7 @@ export const needsOf = ({
           kind: kindWords.question,
           project,
           title: call.title,
-          ...(more === undefined ? {} : { brief: more }),
+          ...(brief === undefined ? {} : { brief }),
         },
       ]
     }

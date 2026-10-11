@@ -898,7 +898,16 @@ export const AttentionRequest = Schema.Struct({
   /** For a step that needs the person: which, and why. */
   stuck: Schema.NullOr(StuckStep),
   /** For an agent's question: what it asks, field by field; it is answered in the thread, where it was asked. */
-  question: Schema.optional(Schema.Struct({ message: Schema.String, fields: Schema.Array(QuestionField) })),
+  question: Schema.optional(
+    Schema.Struct({
+      message: Schema.String,
+      fields: Schema.Array(QuestionField),
+      /** Why it asks, in a line: what the agent said just before. */
+      why: Schema.optional(Schema.String),
+      /** Who asks: the agent and model of the session that asked. */
+      askedBy: Schema.optional(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String) })),
+    }),
+  ),
   /**
    * For a permission: what an "always" answer would keep in the project's
    * rules (ADR-018), and the scopes Allow always and Deny always each hold

@@ -175,8 +175,39 @@ describe('an agent’s question', () => {
     const project: ProjectRef = { seed: 'p1', name: 'Meridian', ink: ProjectInk.Rose }
     const home: HomeCall = { ...call, projectId: 'p1', taskId: 't1', threadId: 'th1', taskTitle: 'Add a cache', taskSlug: 'add-a-cache' }
     const [need] = needsOf({ calls: [home], ready: [], refs: new Map([['p1', project]]), agentName: (id) => id ?? '' })
-    // Calm: what it asks, and Answer; its options are where it is answered.
+    // Calm: what it asks, and Answer; its options are where it is answered. Said nothing first, nor who asks: nothing under it.
     expect(need).toEqual({ id: 'q1', threadId: 'th1', kind: 'Question', project, title: database.question })
+    // Why it asks, where the agent said; else who asks, and where.
+    const said = (question: HomeCall['question']) =>
+      needsOf({
+        calls: [{ ...home, question }],
+        ready: [],
+        refs: new Map([['p1', project]]),
+        agentName: (id) => id ?? '',
+        modelName: (agentId, model) => `${model ?? agentId}!`,
+      })[0]?.brief
+    expect(
+      said({ message: 'Which?', fields: [database], why: 'The rates change hourly.', askedBy: { agentId: 'claude-code', model: 'opus' } }),
+    ).toBe('The rates change hourly.')
+    expect(said({ message: 'Which?', fields: [database], askedBy: { agentId: 'claude-code', model: 'opus' } })).toBe(
+      'opus! asks, in Add a cache',
+    )
+    expect(
+      needsOf({
+        calls: [
+          {
+            ...home,
+            taskId: null,
+            taskTitle: null,
+            taskSlug: null,
+            question: { message: 'Which?', fields: [database], askedBy: { agentId: 'codex', model: null } },
+          },
+        ],
+        ready: [],
+        refs: new Map([['p1', project]]),
+        agentName: (id) => `${id ?? ''}?`,
+      })[0]?.brief,
+    ).toBe('codex? asks, as the coordinator')
     const [several] = needsOf({
       calls: [{ ...home, question: { message: 'A few things.', fields: [database, checks] } }],
       ready: [],
@@ -202,5 +233,8 @@ describe('an agent’s question', () => {
       options: ['Postgres', 'SQLite'],
       because: 'and 1 more question',
     })
+    expect(
+      callCardOf({ ...board, question: { message: 'Which?', fields: [database], why: 'The rates change hourly.' } }, () => '').because,
+    ).toBe('The rates change hourly.')
   })
 })

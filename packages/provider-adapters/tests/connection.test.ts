@@ -6,7 +6,7 @@ import { type Question, type QuestionAnswer, questionContent } from '../src/ques
 import { AgentRequestFailed, OptionUnavailable, TurnInProgress } from '../src/errors'
 import type { SessionEvent } from '../src/events'
 import type { Classified } from '../src/failures'
-import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, scenarios } from '../src/testing'
+import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, scenarios, WHY } from '../src/testing'
 import { type ContractSubject, type Decide, text, withConnection } from './contract'
 
 const fake: ContractSubject = {
@@ -529,8 +529,10 @@ describe('AgentConnection', () => {
             ),
           scenarios.questions,
         )
-        assert.strictEqual(answered, 'answer={"question_0_custom":"DuckDB","question_1":["Unit tests","Lint"]}')
+        assert.strictEqual(answered, `${WHY}answer={"question_0_custom":"DuckDB","question_1":["Unit tests","Lint"]}`)
         assert.strictEqual(seen[0]?.toolCallId, 'ask-1')
+        // What it said before asking, though a tool call came between.
+        assert.strictEqual(seen[0]?.said, WHY)
         assert.deepStrictEqual(
           seen[0]?.fields.map((field) => [field.id, field.question, field.header, field.multiple, field.wordsField]),
           [
@@ -539,6 +541,24 @@ describe('AgentConnection', () => {
           ],
         )
       }),
+    )
+
+    it.live('hears what the agent said before asking in this turn only', () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const seen: Array<Question> = []
+          const connection = yield* connect({
+            transport: { _tag: 'InProcess', agent: fakeAgent() },
+            onPermission: reject,
+            onQuestion: (question) => Effect.sync(() => seen.push(question)).pipe(Effect.as({ action: 'decline' as const })),
+          })
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+          yield* Stream.runCollect(session.prompt(scenarios.hello))
+          yield* Stream.runCollect(session.prompt(scenarios.question))
+          // The plain question says nothing first: what it said a turn before isn't why.
+          assert.isUndefined(seen[0]?.said)
+        }),
+      ),
     )
 
     it.live('offers a way to ask only where someone answers', () =>

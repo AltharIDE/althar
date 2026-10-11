@@ -49,6 +49,8 @@ export interface QuestionPayload {
   readonly toolCallId: string | null
   readonly message: string
   readonly fields: ReadonlyArray<QuestionField>
+  /** Why it asks, in a line: what the agent said just before, as the home shows it under the question. */
+  readonly why?: string
   /** What the person said, by field, once answered. */
   readonly answers?: Readonly<Record<string, FieldAnswer>>
   /** Withdrawn because the agent took it back or its turn was stopped. */
@@ -80,6 +82,49 @@ interface Waiting {
  * the following questions."), so the first question names them.
  */
 export const questionTitle = (payload: Pick<QuestionPayload, 'message' | 'fields'>) => payload.fields[0]?.question ?? payload.message
+
+/** Markdown's marks taken off, as a line shows words: code, emphasis, headings, list marks, links. */
+const plain = (text: string) =>
+  text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/(\*\*|__|~~)/g, '')
+    .replace(/^\s{0,3}(#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s?)/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+/** How long a why may be: a line or two under the question. */
+const WHY_LENGTH = 200
+
+/**
+ * Why an agent asks, from what it said just before: its last paragraph that
+ * isn't a question itself (that one is asked anyway), plain, and only its
+ * last sentences, as many as fit. Nothing where it said nothing first.
+ */
+export const reasonOf = (said: string | undefined, asked: ReadonlyArray<string>): string | undefined => {
+  if (said === undefined) return undefined
+  const paragraphs = said
+    .split(/\n\s*\n/)
+    .map(plain)
+    .filter((paragraph) => paragraph !== '')
+  const why = paragraphs
+    .toReversed()
+    .slice(0, 2)
+    .find((paragraph) => !paragraph.endsWith('?') && !asked.includes(paragraph))
+  if (why === undefined) return undefined
+  // From its end, the sentences that fit; a first one that doesn't fit is cut at a word.
+  const sentences = why.split(/(?<=[.!:;])\s+/)
+  let kept = ''
+  for (const sentence of sentences.toReversed()) {
+    const next = kept === '' ? sentence : `${sentence} ${kept}`
+    if (next.length > WHY_LENGTH) break
+    kept = next
+  }
+  if (kept !== '') return kept
+  const cut = why.slice(0, WHY_LENGTH - 1)
+  return `${cut.slice(0, cut.lastIndexOf(' ') > 0 ? cut.lastIndexOf(' ') : cut.length)}…`
+}
 
 /** What the person said, question by question, for an agent told afterwards. */
 export const answerWords = (fields: ReadonlyArray<QuestionField>, answers: Readonly<Record<string, FieldAnswer>>) =>
@@ -181,6 +226,7 @@ export class Questions extends Context.Service<
                   fields: question.fields,
                 },
               )
+              const why = reasonOf(question.said, [question.message, ...question.fields.map((field) => field.question)])
               const payload: QuestionPayload = {
                 threadId: askContext.threadId,
                 sessionId: askContext.sessionId,
@@ -188,6 +234,7 @@ export class Questions extends Context.Service<
                 toolCallId,
                 message: question.message,
                 fields: question.fields,
+                ...(why === undefined ? {} : { why }),
               }
               yield* sql`INSERT INTO attention_requests ${sql.insert({
                 id: attentionId,
@@ -326,23 +373,27 @@ export class Questions extends Context.Service<
           }),
         )
 
-      /** The session goes: what it asked waits on the thread, no longer on it, so it is at work until it ends. */
+      /** The session goes: what it asked waits on the thread, no longer on it, so it is at work until it ends. Nothing where it asked nothing. */
       const release = (sessionId: string) =>
-        Effect.andThen(
-          Effect.forEach(
-            [...waiting].filter(([, waiter]) => waiter.context.sessionId === sessionId),
-            ([attentionId, waiter]) =>
-              Effect.suspend(() => {
-                waiter.released = true
-                waiting.delete(attentionId)
-                return Deferred.interrupt(waiter.deferred)
-              }),
-            { discard: true },
-          ),
-          Effect.ignore(
-            run(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.withTransaction(releaseSession(sessionId, { questions: false }))))),
-          ),
-        )
+        Effect.suspend(() => {
+          const asked = [...waiting].filter(([, waiter]) => waiter.context.sessionId === sessionId)
+          if (asked.length === 0) return Effect.void
+          return Effect.andThen(
+            Effect.forEach(
+              asked,
+              ([attentionId, waiter]) =>
+                Effect.suspend(() => {
+                  waiter.released = true
+                  waiting.delete(attentionId)
+                  return Deferred.interrupt(waiter.deferred)
+                }),
+              { discard: true },
+            ),
+            Effect.ignore(
+              run(SqlClient.SqlClient.pipe(Effect.flatMap((sql) => sql.withTransaction(releaseSession(sessionId, { questions: false }))))),
+            ),
+          )
+        })
 
       return Questions.of({
         ask: (askContext, question) =>

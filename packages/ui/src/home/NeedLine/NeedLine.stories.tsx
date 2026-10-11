@@ -78,6 +78,7 @@ const lines = (
       kind={QUESTION.kind}
       project={QUESTION.project}
       title={QUESTION.title}
+      brief={QUESTION.why}
       onOpen={fn()}
       actions={
         <Button size="small" variant="signal">
@@ -125,6 +126,7 @@ const question = (props: Partial<Parameters<typeof NeedLine>[0]> = {}) => (
     project={QUESTION.project}
     task={QUESTION.task}
     title={QUESTION.title}
+    brief={QUESTION.why}
     onOpen={fn()}
     actions={
       <Button size="small" variant="signal">
@@ -135,18 +137,24 @@ const question = (props: Partial<Parameters<typeof NeedLine>[0]> = {}) => (
   />
 )
 
-/** A question an agent asks, kept calm: what it asks, and Answer, which takes the person to it. Its options are where it is answered. */
+/** A question an agent asks, kept calm: what it asks, why in the agent's words, and Answer, which takes the person to it. Its options are where it is answered. */
 export const Question: Story = {
   render: () => <NeedList style={{ maxWidth: 760 }}>{question()}</NeedList>,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.getByRole('heading', { name: QUESTION.title })).toBeInTheDocument()
+    await expect(c.getByText(QUESTION.why)).toBeInTheDocument()
     await expect(c.queryByText(QUESTION.options[0]?.label ?? '')).not.toBeInTheDocument()
     await expect(c.getByRole('button', { name: 'Answer' })).toBeInTheDocument()
   },
 }
 
-/** Several questions at once: the first, and how many more wait with it. */
+/** The agent said nothing before it asked: who asks, and where. */
+export const QuestionWhoAsks: Story = {
+  render: () => <NeedList style={{ maxWidth: 760 }}>{question({ brief: 'Opus 5 asks, in Queue refund retries' })}</NeedList>,
+}
+
+/** Several questions at once, and nothing said first: the first, and how many more wait with it. */
 export const QuestionsSeveral: Story = {
   render: () => <NeedList style={{ maxWidth: 760 }}>{question({ brief: 'and 2 more questions' })}</NeedList>,
   play: async ({ canvasElement }) => {
