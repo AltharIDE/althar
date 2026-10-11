@@ -81,6 +81,15 @@ describe('the window’s watch', () => {
     expect(client.listConnections).toHaveBeenCalledTimes(2)
   })
 
+  it('reads the connections again when a project changes, which says where its code is', async () => {
+    const { client, cache, emit, read } = opened()
+    await cache.fetchQuery(read.connections())
+    // Repositories added or left out, a rename, a removal: each is a project's change.
+    emit(changed('project', 'p1', null, 'p1'))
+    await settle()
+    expect(client.listConnections).toHaveBeenCalledTimes(2)
+  })
+
   it('reads the home again for a permission the rules answered only while it shows; off screen, on its next visit', async () => {
     const { client, cache, emit, read } = opened()
     await cache.fetchQuery(read.home())
@@ -134,7 +143,7 @@ describe('the window’s watch', () => {
     expect(marks(changed('thread_item', 'i1', 'th9', 'p1'))).toBe(false)
   })
 
-  it('reads a project’s repositories again only while they show, and marks its threads when it is renamed', async () => {
+  it('reads a project’s repositories again only while they show, as a connection changes too, and marks its threads when it is renamed', async () => {
     const { client, cache, emit, read } = opened()
     // A task on screen reads its project's new name at once.
     const onScreen = new QueryObserver(cache, read.thread('th1'))
@@ -160,11 +169,15 @@ describe('the window’s watch', () => {
     await settle()
     expect(cache.getQueryState(keys.thread('th1'))?.isInvalidated).toBe(false)
     expect(client.getRepositories).toHaveBeenCalledTimes(2)
+    // A code host connected, which no project names, says where any project's work goes.
+    emit(changed('connection', 'c1', null, null))
+    await settle()
+    expect(client.getRepositories).toHaveBeenCalledTimes(3)
     stop()
     // Off screen, a task made in it marks them for the next visit.
     emit(changed('task', 't1', 'th1', 'p1'))
     await settle()
-    expect(client.getRepositories).toHaveBeenCalledTimes(2)
+    expect(client.getRepositories).toHaveBeenCalledTimes(3)
     expect(cache.getQueryState(keys.repositories('p1'))?.isInvalidated).toBe(true)
   })
 

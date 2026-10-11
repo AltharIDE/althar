@@ -37,7 +37,12 @@ export const parseRemote = (remote: string): RemoteRef | null => {
     }
     if (!['https:', 'http:', 'ssh:', 'git:'].includes(url.protocol) || url.hostname === '') return null
     host = url.hostname
-    path = decodeURIComponent(url.pathname)
+    // A path whose escapes don't read is kept as it was written.
+    try {
+      path = decodeURIComponent(url.pathname)
+    } catch {
+      path = url.pathname
+    }
   }
   const segments = path
     .replace(/\.git\/?$/, '')

@@ -13,8 +13,11 @@ import { DEFAULT_EDGE, type EdgePlace, edgeIn, findNotch, type Notch, pointerOn,
  * window of an app in the background that the pointer came in, so this
  * process watches the pointer itself (`POINTER`) and tells the page. The
  * menu bar's is Althar's mark, which drops a sheet under it; the mark gets a
- * dot while something waits on you. Each page is renderer/edge.html, with a
- * port to the runtime like the window's, so it reads and answers for itself.
+ * dot while something waits on you. Both are for while you work in another
+ * app: while one of Althar's windows has focus, on any screen, the island
+ * hides and, on a Mac, the mark leaves the menu bar. Each page is
+ * renderer/edge.html, with a port to the runtime like the window's, so it
+ * reads and answers for itself.
  */
 
 /** What the edge needs from the rest of the main process. */
@@ -57,9 +60,20 @@ const shared = (preload: string) => ({
   webPreferences: { preload, sandbox: true, contextIsolation: true, nodeIntegration: false },
 })
 
+/** Where the edge is, as Settings says it: what the person chose, and what this computer has room for. */
+export interface EdgeState {
+  readonly place: EdgePlace
+  /** A screen has a notch, to choose the island by. */
+  readonly notch: boolean
+  /** The system, as Node names it: darwin, win32, linux. */
+  readonly platform: NodeJS.Platform
+  /** The system has a tray, or a menu bar, to put the mark in: not every Linux desktop has. */
+  readonly tray: boolean
+}
+
 export interface Edge {
-  /** Where the person chose, and whether this Mac has a notch to choose the island by. */
-  readonly state: () => { readonly place: EdgePlace; readonly notch: boolean }
+  /** Where it is, once the choice is read and the notch looked for the first time. */
+  readonly state: () => Promise<EdgeState>
   readonly choose: (place: EdgePlace) => Promise<void>
   /** How many calls wait on the person: the menu bar's mark gets its dot. */
   readonly waiting: (count: number) => void
@@ -71,6 +85,8 @@ export interface Edge {
   readonly sized: (window: BrowserWindow, height: number) => void
   /** Closes the menu bar's sheet, as after it opened something. */
   readonly settle: () => void
+  /** Whether one of Althar's windows has focus: the edge steps aside while it has. */
+  readonly front: (front: boolean) => void
 }
 
 export const startEdge = (host: EdgeHost): Edge => {
@@ -86,6 +102,12 @@ export const startEdge = (host: EdgeHost): Edge => {
   let drawnFor: { readonly width: number; readonly height: number } | null = null
   /** Each look for the notch, counted, so one that answers late can't undo a later one. */
   let looking = 0
+  /** Whether one of Althar's windows has focus, when nothing shows at the edge. */
+  let inFront = false
+  /** The system said it has no tray to put the mark in, the last time it was asked for one. */
+  let trayless = false
+  /** The mark leaves the menu bar while Althar is in front only on a Mac: elsewhere a tray's icon stays, as the system's own do. */
+  const markSteps = process.platform === 'darwin'
 
   const load = (window: BrowserWindow, query: Record<string, string>) => {
     window.webContents.on('did-finish-load', () => host.connect(window))
@@ -127,7 +149,9 @@ export const startEdge = (host: EdgeHost): Edge => {
     if (host.quiet === true) made.setOpacity(0)
     // Over the menu bar and its items, under a menu that opens later.
     made.setAlwaysOnTop(true, 'pop-up-menu')
-    made.once('ready-to-show', () => made.showInactive())
+    made.once('ready-to-show', () => {
+      if (!inFront) made.showInactive()
+    })
     made.on('closed', () => {
       if (island === made) island = undefined
     })
@@ -144,9 +168,24 @@ export const startEdge = (host: EdgeHost): Edge => {
     pointed = false
   }
 
+  /** Shows the island, or hides it while Althar is in front: closed first, so it comes back at rest. */
+  const placeIsland = () => {
+    if (island === undefined || island.isDestroyed()) return
+    if (!inFront) {
+      if (!island.isVisible() && !island.webContents.isLoading()) island.showInactive()
+      return
+    }
+    if (pointed) {
+      pointed = false
+      island.setIgnoreMouseEvents(true, { forward: true })
+      island.webContents.send('althar:edge-pointed', false)
+    }
+    island.hide()
+  }
+
   /* Clicks land on the island while the pointer is on what it draws, and go through elsewhere; the page hears which, to open and close. */
   const watch = setInterval(() => {
-    if (island === undefined || island.isDestroyed() || drawn === null || host.quiet === true) return
+    if (island === undefined || island.isDestroyed() || drawn === null || !island.isVisible() || host.quiet === true) return
     // Against where the window is now, which a change of screens may have moved.
     const on = pointerOn(drawn, island.getBounds(), screen.getCursorScreenPoint())
     if (on === pointed) return
@@ -212,12 +251,18 @@ export const startEdge = (host: EdgeHost): Edge => {
     tray.setToolTip('Althar')
     tray.on('click', toggleSheet)
     // Made now and kept hidden, so the first click opens it at once, already read.
-    makeSheet()
+    if (sheet === undefined || sheet.isDestroyed()) makeSheet()
+  }
+
+  /** Takes the mark out of the menu bar; its sheet is kept, hidden, for when it comes back. */
+  const hideMark = () => {
+    tray?.destroy()
+    tray = undefined
+    sheet?.hide()
   }
 
   const dropTray = () => {
-    tray?.destroy()
-    tray = undefined
+    hideMark()
     sheet?.destroy()
     sheet = undefined
   }
@@ -228,12 +273,17 @@ export const startEdge = (host: EdgeHost): Edge => {
     if (edgeIn(chosen, notch) === 'island' && notch !== null) {
       dropTray()
       showIsland(notch)
+      placeIsland()
     } else {
       dropIsland()
+      if (inFront && markSteps) return hideMark()
       try {
         showTray()
+        trayless = false
       } catch {
-        // Where the system has no menu bar to put it in (a desktop without a tray), there is no edge.
+        // Where the system has no menu bar to put it in (a desktop without a tray), there is no edge, and Settings says so. A
+        // desktop may also take the mark without a tray to show it in, which Electron doesn't say; Settings mentions that too.
+        trayless = true
       }
     }
   }
@@ -255,13 +305,16 @@ export const startEdge = (host: EdgeHost): Edge => {
   screen.on('display-removed', changed)
   screen.on('display-metrics-changed', changed)
 
-  void readEdge(host.profile()).then((place) => {
+  const first = readEdge(host.profile()).then((place) => {
     chosen = place
     return look()
   })
 
   return {
-    state: () => ({ place: chosen, notch: notch !== null }),
+    state: async () => {
+      await first
+      return { place: chosen, notch: notch !== null, platform: process.platform, tray: !trayless }
+    },
     // Kept first, so a choice that can't be kept changes nothing, and Settings, going back, says what is so.
     choose: async (place) => {
       await writeEdge(host.profile(), place)
@@ -282,5 +335,10 @@ export const startEdge = (host: EdgeHost): Edge => {
       window.setBounds(window.isVisible() ? { ...window.getBounds(), height: place.height } : place)
     },
     settle: () => sheet?.hide(),
+    front: (front) => {
+      if (front === inFront) return
+      inFront = front
+      apply()
+    },
   }
 }

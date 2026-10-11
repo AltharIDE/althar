@@ -222,6 +222,8 @@ interface SessionState {
   markers: Set<string>
   /** Markers it has played once already, such as `[lead:hang-once]`. */
   played: Set<string>
+  /** It was briefed as a project's coordinator: it plans what a lead's markers say, and plays none of them itself. */
+  coordinator: boolean
   /** Commands it has run with `run`, so each is a tool call of its own. */
   runs: number
   /** What it left running, by its task's id. */
@@ -679,6 +681,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         })(),
         markers: new Set(),
         played: new Set(),
+        coordinator: false,
         runs: 0,
         background: new Map(),
         served: 0,
@@ -887,8 +890,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (after !== undefined) await say(after)
         return ended()
       }
-      // A lead that asks the person first, `[lead:ask]`, once: then it plays its part with the answer.
-      if (text.includes('[lead:ask]') && !session.played.has('[lead:ask]')) {
+      // A lead that asks the person first, `[lead:ask]`, once: then it plays its part with the answer. The coordinator that plans it only passes the marker on.
+      if (text.includes('You are the coordinator of the project')) session.coordinator = true
+      if (text.includes('[lead:ask]') && !session.played.has('[lead:ask]') && !session.coordinator) {
         session.played.add('[lead:ask]')
         await say(await askPerson('one'))
         if (session.cancelled) return { stopReason: 'cancelled' }

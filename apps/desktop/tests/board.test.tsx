@@ -185,16 +185,18 @@ describe('the board', () => {
     // Ready on its branch, with no pull request: the branch, and how big its change is.
     expect(within(work).getByText('althar/tidy-the-docs')).toBeTruthy()
     expect(within(work).getByText('PR #7 merged')).toBeTruthy()
-    // Three things that need you; what runs isn't counted in the bar.
+    // On the front page: three things that need you, two in progress, and what settled last; nothing says what runs.
     expect(screen.getByRole('button', { name: '3 need you' })).toBeTruthy()
+    const front = screen.getByRole('heading', { level: 1, name: 'meridian' }).closest('header')
+    expect(front?.textContent).toMatch(/3 need you·2 in progress·PR 7 merged \S/)
     expect(screen.queryByText(/running/)).toBeNull()
   })
 
-  it('opens the first thing that needs you in its task, from the bar, and shows the rest when pointed at', async () => {
+  it('opens the first thing that needs you in its task, from the front page, and shows the rest when pointed at', async () => {
     const onTask = vi.fn()
     const { client } = fakeClient({ getBoard: vi.fn(async () => board()) })
     withServices(<Project onTask={onTask} />, client)
-    // From the conversation, the bar opens the call's task: no view changes, and nothing opens beside the board.
+    // From the conversation, the count opens the call's task: no view changes, and nothing opens beside the board.
     await userEvent.click(await screen.findByRole('button', { name: '3 need you' }))
     expect(onTask).toHaveBeenCalledWith('th3')
     expect(screen.getByRole('radio', { name: 'Conversation', checked: true })).toBeTruthy()
@@ -552,7 +554,7 @@ describe('every state the board shows', () => {
 })
 
 describe('the bar and the dock, on the rest of the board', () => {
-  it('opens work ready to accept when no call waits, and starts a task from the board beside the conversation', async () => {
+  it('opens work ready to accept when no call waits', async () => {
     const onTask = vi.fn()
     const bare = change({ draft: false, additions: null, deletions: null, checks: null })
     const { client } = fakeClient({
@@ -565,10 +567,6 @@ describe('the bar and the dock, on the rest of the board', () => {
     expect(within(work).getByText('No checks ran')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: '1 needs you' }))
     expect(onTask).toHaveBeenCalledWith('th9')
-    // A task planned by hand opens beside the conversation, so the board makes room for it.
-    await userEvent.click(screen.getByRole('button', { name: 'New task' }))
-    expect(screen.getByRole('radio', { name: 'Both', checked: true })).toBeTruthy()
-    expect(await screen.findByLabelText('What should change')).toBeTruthy()
   })
 
   it('shows running and waiting work in the dock, each as it stands', async () => {

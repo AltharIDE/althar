@@ -5,13 +5,6 @@
   background: var(--n-2);
 }
 
-/* The bar stays; what is under it scrolls, with the scrollbar at the window's edge. */
-.scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-}
-
 /* Before there is a project the window is all page: the bar only drags it, over the page, under the system's lights. */
 .bare {
   position: relative;
@@ -22,11 +15,6 @@
   z-index: 2;
   background: transparent;
   border-bottom: 0;
-}
-
-/* The kit's new-project screen leaves the page's margins to the host. */
-.first {
-  padding: 72px 40px 64px;
 }
 
 .error {

@@ -12,8 +12,11 @@ import {
   type BoardSnapshot,
   type HomeSnapshot,
   clientProtocol,
+  type ConnectGuide,
+  type ConnectionCheck,
   type ConnectionList,
   type ConnectionSummary,
+  type FoundServer,
   type CoordinatorSnapshot,
   type DocumentText,
   type DomMessagePort,
@@ -24,11 +27,13 @@ import {
   type OutputText,
   type Product,
   type ChangeTarget,
+  type ProjectInk,
   type ProjectList,
   type ProjectRepository,
   type ProjectSummary,
   type RepositoryRole,
   type PlanStep,
+  type Service,
   type SignInStart,
   type SignInState,
   type Status,
@@ -71,10 +76,17 @@ export interface Client {
    * Opens the folder a grant names: one the person chose in the picker or
    * dropped on the window. A folder of several repositories opens with the
    * ones the person kept, each by the grant of the folder it was found in.
+   * A project made on purpose comes with the id the window made for it
+   * (`newProjectId`), and the ink the person saw.
    */
   readonly openProject: (
     grant: string,
-    options?: { readonly name?: string; readonly repositories?: ReadonlyArray<{ readonly grant: string; readonly path: string }> },
+    options?: {
+      readonly name?: string
+      readonly repositories?: ReadonlyArray<{ readonly grant: string; readonly path: string }>
+      readonly projectId?: string
+      readonly ink?: ProjectInk
+    },
   ) => Promise<ProjectSummary>
   readonly listTasks: (projectId: string) => Promise<TaskList>
   readonly createTask: (input: {
@@ -171,21 +183,32 @@ export interface Client {
   /** The connections on this Mac, and the code hosts and trackers a person can connect. */
   readonly listConnections: () => Promise<ConnectionList>
   /** Starts a service's own sign-in. */
-  readonly startSignIn: (product: Product, webUrl?: string) => Promise<SignInStart>
+  readonly startSignIn: (product: Product, webUrl?: string, connectionId?: string) => Promise<SignInStart>
   readonly getSignIn: (flowId: string) => Promise<SignInState>
   readonly cancelSignIn: (flowId: string) => Promise<void>
-  /** Connects with a pasted token. */
+  /** Connects with a pasted token; with a connection, signs it in again with a new one. */
   readonly connectToken: (input: {
     readonly product: Product
     readonly webUrl?: string
     readonly user?: string
     readonly key?: string
     readonly token: string
+    readonly connectionId?: string
   }) => Promise<ConnectionSummary>
+  /** What connecting a service starts from. */
+  readonly getConnectGuide: (service: Service) => Promise<ConnectGuide>
+  /** Which of a service's products answers at an address. */
+  readonly findServer: (service: Service, webUrl: string) => Promise<FoundServer>
+  /** Connects with gh's or glab's sign-in on this device. */
+  readonly connectCli: (product: Product, webUrl: string, connectionId?: string) => Promise<ConnectionSummary>
+  /** What a connection can do, as its service says. */
+  readonly checkConnection: (connectionId: string) => Promise<ConnectionCheck>
   readonly disconnect: (connectionId: string) => Promise<void>
   /** A project's rules. */
   /** Renames a project; its mark and its worktrees' folders stay. */
   readonly renameProject: (projectId: string, name: string) => Promise<void>
+  /** Draws a project's mark in another ink, wherever it shows. */
+  readonly setProjectInk: (projectId: string, ink: ProjectInk) => Promise<void>
   /** Removes a project from Althar: its agents stop; its folders, worktrees and branches stay. */
   readonly removeProject: (projectId: string) => Promise<void>
   readonly getRepositories: (projectId: string) => Promise<ReadonlyArray<ProjectRepository>>
@@ -298,6 +321,20 @@ export const messageOf = (error: unknown): string =>
 /** A new command id, as the contract has them. */
 export const newCommandId = (): string => `cmd_${globalThis.crypto.randomUUID().replaceAll('-', '')}`
 
+/**
+ * A new project's id, as the runtime makes them: `proj_` and a UUIDv7, so
+ * ids sort by when they were made. The window makes one for a project before
+ * it is made, to draw its mark from as it is named.
+ */
+export const newProjectId = (now: number = Date.now()): string => {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
+  // 48 bits of milliseconds, then the version and the variant over the random rest.
+  for (let i = 0; i < 6; i++) bytes[i] = Math.floor(now / 2 ** (8 * (5 - i))) % 256
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x70
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80
+  return `proj_${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
 /** Runs a call and settles its promise with the call's own failure, not Effect's wrapper around it. */
 const settle = <A>(effect: Effect.Effect<A, unknown>): Promise<A> =>
   Effect.runPromiseExit(effect).then((exit) => {
@@ -342,6 +379,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
           grant,
           ...(options.name === undefined ? {} : { name: options.name }),
           ...(options.repositories === undefined ? {} : { repositories: options.repositories }),
+          ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
+          ...(options.ink === undefined ? {} : { ink: options.ink }),
         }),
       ),
     listTasks: (projectId) => settle(api.ListTasks({ projectId })),
@@ -379,13 +418,26 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     changePlan: (planId, steps, end) =>
       command((commandId) => api.ChangePlan({ commandId, planId, steps, ...(end === undefined ? {} : { end }) })),
     listConnections: () => settle(api.ListConnections()),
-    startSignIn: (product, webUrl) =>
-      command((commandId) => api.StartSignIn({ commandId, product, ...(webUrl === undefined ? {} : { webUrl }) })),
+    startSignIn: (product, webUrl, connectionId) =>
+      command((commandId) =>
+        api.StartSignIn({
+          commandId,
+          product,
+          ...(webUrl === undefined ? {} : { webUrl }),
+          ...(connectionId === undefined ? {} : { connectionId }),
+        }),
+      ),
     getSignIn: (flowId) => settle(api.GetSignIn({ flowId })),
     cancelSignIn: (flowId) => command((commandId) => api.CancelSignIn({ commandId, flowId })),
     connectToken: (input) => command((commandId) => api.ConnectToken({ commandId, ...input })),
+    getConnectGuide: (service) => settle(api.GetConnectGuide({ service })),
+    findServer: (service, webUrl) => settle(api.FindServer({ service, webUrl })),
+    connectCli: (product, webUrl, connectionId) =>
+      command((commandId) => api.ConnectCli({ commandId, product, webUrl, ...(connectionId === undefined ? {} : { connectionId }) })),
+    checkConnection: (connectionId) => settle(api.CheckConnection({ connectionId })),
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
     renameProject: (projectId, name) => command((commandId) => api.RenameProject({ commandId, projectId, name })),
+    setProjectInk: (projectId, ink) => command((commandId) => api.SetProjectInk({ commandId, projectId, ink })),
     removeProject: (projectId) => command((commandId) => api.RemoveProject({ commandId, projectId })),
     getRepositories: (projectId) => settle(api.GetRepositories({ projectId })),
     addRepositories: (projectId, grant) => command((commandId) => api.AddRepositories({ commandId, projectId, grant })),

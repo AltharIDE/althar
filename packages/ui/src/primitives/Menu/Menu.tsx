@@ -218,6 +218,46 @@ export function MenuRadioItem({ value, lead, children, hint, description, kbd, d
   )
 }
 
+export interface MenuCheckboxItemProps extends ItemBase {
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+}
+
+/** A choice that is on or off by itself, among others that may be on too. It carries a check while on. */
+export function MenuCheckboxItem({
+  checked,
+  onCheckedChange,
+  children,
+  hint,
+  description,
+  kbd,
+  disabled,
+  keepOpen,
+}: MenuCheckboxItemProps) {
+  const { ids, aria } = useItemIds(hint, description)
+  return (
+    <M.CheckboxItem
+      checked={checked}
+      onCheckedChange={onCheckedChange}
+      className={cx(s.item, description != null && s.tall)}
+      disabled={disabled}
+      {...aria}
+      onSelect={(e) => {
+        if (keepOpen) e.preventDefault()
+      }}
+    >
+      <Parts hint={hint} description={description} kbd={kbd} ids={ids}>
+        {children}
+      </Parts>
+      <span className={s.check}>
+        <M.ItemIndicator>
+          <Icon name="check" size={12} />
+        </M.ItemIndicator>
+      </span>
+    </M.CheckboxItem>
+  )
+}
+
 /** Items that belong together, under a small heading. */
 export function MenuGroup({ label, children }: { label: string; children: ReactNode }) {
   return (

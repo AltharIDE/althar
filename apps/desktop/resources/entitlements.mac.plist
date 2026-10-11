@@ -2,6 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
   <dict>
+    <!--
+      Althar's own binary, under the hardened runtime (ADR-024). V8 compiles
+      JavaScript as it runs: the window's main process, and the agent adapters
+      the runtime starts on this binary as Node.
+    -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
     <!-- Dictation records from the microphone (ADR-017). -->
     <key>com.apple.security.device.audio-input</key>
     <true/>

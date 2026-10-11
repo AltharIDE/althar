@@ -40,7 +40,7 @@ import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
 import { Questions } from './Questions'
-import { Projects } from './Projects'
+import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
 import { Queries } from './Queries'
 import { timestamp } from './records'
@@ -185,6 +185,29 @@ export const handlers = Api.toLayer(
       auth: info.auth,
       state: info.state,
     })
+
+    /**
+     * A repository as its page shows it: where its work goes, from its
+     * remote, with the code host Althar knows there and who it is signed in
+     * as; a host it doesn't know by its address alone.
+     */
+    const repositoryOf = ({ remote, ...repository }: ProjectRepository) =>
+      Effect.gen(function* () {
+        const place = remote === null ? null : yield* Effect.orElseSucceed(connections.placeOf(remote), () => null)
+        const path = place?.path.join('/')
+        const host =
+          place === null || path === undefined
+            ? null
+            : {
+                product: place.code?.product ?? null,
+                name: place.code?.name ?? place.host,
+                instance: place.code === null || place.code.hosted ? null : place.host,
+                path,
+                url: place.url,
+                account: place.connection === null ? null : { login: place.connection.account.login, state: place.connection.state },
+              }
+        return { ...repository, host }
+      })
 
     /** The issue a task comes from, read before the task is made, so its key can go in the task's branch. */
     const issueFor = (projectId: string, issue: string | undefined) =>
@@ -347,7 +370,7 @@ export const handlers = Api.toLayer(
             return { ...reading, repositories: [...reading.repositories] }
           }),
         ),
-      OpenProject: ({ commandId, grant, name, repositories }) =>
+      OpenProject: ({ commandId, grant, name, repositories, projectId, ink }) =>
         api(
           Effect.gen(function* () {
             const path = yield* folders.path(grant)
@@ -365,10 +388,12 @@ export const handlers = Api.toLayer(
                     }),
                   )
             const opened = yield* projects.open({
-              envelope: yield* envelope('project.open', { path }, commandId),
+              envelope: yield* envelope('project.open', projectId === undefined ? { path } : { path, projectId }, commandId),
               path,
               ...(name === undefined ? {} : { name }),
               ...(roots === undefined ? {} : { repositories: roots }),
+              ...(projectId === undefined ? {} : { projectId }),
+              ...(ink === undefined ? {} : { ink }),
             })
             const { projects: all } = yield* queries.projects
             const found = all.find((project) => project.id === opened.projectId)
@@ -404,6 +429,16 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      SetProjectInk: ({ commandId, projectId, ink }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.set_ink', { projectId, ink }, commandId)
+              yield* projects.setInk(projectId, ink, said.commandId)
+            }),
+          ),
+        ),
       RemoveProject: ({ commandId, projectId }) =>
         once(
           commandId,
@@ -416,7 +451,8 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      GetRepositories: ({ projectId }) => api(Effect.map(projects.repositories(projectId), (list) => [...list])),
+      GetRepositories: ({ projectId }) =>
+        api(Effect.flatMap(projects.repositories(projectId), (list) => Effect.forEach(list, repositoryOf))),
       AddRepositories: ({ commandId, projectId, grant }) =>
         once(
           commandId,
@@ -701,6 +737,7 @@ export const handlers = Api.toLayer(
                 .filter((info) => info.make !== null)
                 .map((info) => ({
                   product: info.product,
+                  service: info.service,
                   name: info.name,
                   host: info.host,
                   tracker: info.tracker,
@@ -708,18 +745,29 @@ export const handlers = Api.toLayer(
                   selfHosted: info.selfHosted,
                   browserSignIn: info.browserSignIn,
                   tokenNeeds: info.token.needs,
-                  tokenHelp: info.token.help(info.hosted?.webUrl ?? ''),
+                  tokenPrefixes: info.token.prefixes,
                   tokenHelpForKey: info.token.helpForKey ?? null,
                   keyChecks: info.token.keyChecks ?? [],
                 })),
+              places: yield* connections.places,
             }
           }),
         ),
-      StartSignIn: ({ commandId, product, webUrl }) =>
-        once(commandId, api(connections.startSignIn({ product, actorId: instance.personId, ...(webUrl === undefined ? {} : { webUrl }) }))),
+      StartSignIn: ({ commandId, product, webUrl, connectionId }) =>
+        once(
+          commandId,
+          api(
+            connections.startSignIn({
+              product,
+              actorId: instance.personId,
+              ...(webUrl === undefined ? {} : { webUrl }),
+              ...(connectionId === undefined ? {} : { connectionId }),
+            }),
+          ),
+        ),
       GetSignIn: ({ flowId }) => api(connections.signIn(flowId)),
       CancelSignIn: ({ flowId }) => api(connections.cancelSignIn(flowId)),
-      ConnectToken: ({ commandId, product, webUrl, user, key, token }) =>
+      ConnectToken: ({ commandId, product, webUrl, user, key, token, connectionId }) =>
         once(
           commandId,
           api(
@@ -731,11 +779,30 @@ export const handlers = Api.toLayer(
                 ...(webUrl === undefined ? {} : { webUrl }),
                 ...(user === undefined ? {} : { user }),
                 ...(key === undefined ? {} : { key }),
+                ...(connectionId === undefined ? {} : { connectionId }),
               }),
               connectionOf,
             ),
           ),
         ),
+      GetConnectGuide: ({ service }) => api(connections.guide(service)),
+      FindServer: ({ service, webUrl }) => api(connections.findServer(service, webUrl)),
+      ConnectCli: ({ commandId, product, webUrl, connectionId }) =>
+        once(
+          commandId,
+          api(
+            Effect.map(
+              connections.connectCli({
+                product,
+                webUrl,
+                actorId: instance.personId,
+                ...(connectionId === undefined ? {} : { connectionId }),
+              }),
+              connectionOf,
+            ),
+          ),
+        ),
+      CheckConnection: ({ connectionId }) => api(connections.check(connectionId)),
       Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.markReady(taskId, url))),

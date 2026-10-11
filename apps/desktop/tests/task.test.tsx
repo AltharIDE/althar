@@ -256,12 +256,12 @@ describe('a task', () => {
     expect(
       screen.getByText(/Connected to GitHub, Althar would open the pull request itself, bring its checks and reviews back to the lead/),
     ).toBeTruthy()
+    // Connecting it opens GitHub's own walk in, beside the outputs.
     await userEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }))
-    expect(await screen.findByRole('complementary', { name: 'Code hosts and trackers' })).toBeTruthy()
-    await userEvent.click(
-      within(screen.getByRole('complementary', { name: 'Code hosts and trackers' })).getByRole('button', { name: /Close/ }),
-    )
-    expect(screen.queryByRole('complementary', { name: 'Code hosts and trackers' })).toBeNull()
+    const panel = await screen.findByRole('complementary', { name: 'Connect GitHub' })
+    expect(await within(panel).findByRole('group', { name: 'Ways to connect GitHub' })).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('button', { name: /Close/ }))
+    expect(screen.queryByRole('complementary', { name: 'Connect GitHub' })).toBeNull()
   })
 
   it('says why a push of its branch didn’t go, in the remote’s words', async () => {

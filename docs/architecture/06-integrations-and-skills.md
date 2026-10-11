@@ -262,7 +262,7 @@ service's model.
   something is pushed to a host Althar knows but isn't connected to, the task
   says what connecting would add: the pull request opened by Althar, its
   checks and reviews back to the lead, the merge on accept. Nothing is said
-  of connecting before then; the project's menu always has Connect.
+  of connecting before then; the project's settings always have Connect.
 - **A repository without a pull request merges here, as the person says.**
   Where a task ended on its branch (no host Althar knows, a host not
   connected, or "push the branch only"), the person can merge it into each
@@ -352,7 +352,26 @@ whether it gives a token without one:
 | Trello | Althar's Power-Up key, and a user token from Trello's authorize page | n/a |
 
 A pasted token is the fallback everywhere, including for an organisation
-that won't install the GitHub App. A connection belongs to the person on
+that won't install the GitHub App.
+
+Connecting is a walk, one step at a time (ADR-026). It offers only the ways
+that work on this device: the service's own browser sign-in where Althar's
+app is set up for it; gh's or glab's sign-in where the tool is signed in to
+that instance, whose token the runtime copies to its own keychain, out of
+agents' reach, and sends only over HTTPS to that instance (the hosted
+service at its own address, or a server connected or found from a remote);
+and a token made on the service's page, opened filled in
+where the page takes it (GitHub's fine-grained token: its name, owner, 90
+days and permissions; GitLab's name and `api` scope), noticed on the
+clipboard as the window comes back, or pasted. A company's own server is
+asked for first, filled in from the projects' remotes, each asked without
+signing in which product answers there. A remote is read as its code
+host's, under that instance's own path, whatever tracker shares its server. Every connection is then checked
+by reads alone: who it signs in as, whether it reaches the projects'
+repositories, each thing Althar does there, and when its token runs out
+where the service says. What only a write would tell is said not to be
+known. Signing a connection in again keeps its address, and the email or
+key its token went with. A connection belongs to the person on
 this device. Its token is sealed by the app with Electron's `safeStorage`,
 whose key the system keychain keeps for the signed app alone, and kept in a
 file of its own in the profile; the store keeps only a reference to it.

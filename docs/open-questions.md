@@ -169,8 +169,8 @@ Decided in [ADR-013](decisions/013-project-rules.md).
   Settled on 10 October 2026 in
   [ADR-018](decisions/018-allow-always-keeps-a-rule.md) (DEV-21): allow
   rules by kind, by how a command starts, or exactly, kept by Allow always
-  on a call and listed as "Always allowed" on the rules screen, where each
-  can be taken off. What always asks or is never allowed still wins, and
+  on a call and said in the rules screen's "Go ahead" sentence, where each
+  can be taken out. What always asks or is never allowed still wins, and
   an allow rule answers before the coordinator is asked to judge.
 - [x] **Who judges permission requests.** The coordinator, using its agent
   and model in a fresh read-only session, with task context and human fallback.
@@ -179,6 +179,13 @@ Decided in [ADR-013](decisions/013-project-rules.md).
   rules all come first (ADR-018).
 - [ ] **The network.** Rules on domains, as Codex's network proxy and Claude
   Code's `WebFetch(domain:…)` have.
+- [ ] **A kind on more than one list.** The rules screen reads the rules as
+  sentences, and each kind of request sits in one: moving it writes it on
+  one list and takes it off the others (11 October). The runtime still keeps
+  what it is given, so a kind put on two lists some other way reads as the
+  first of them a request meets, Never before Ask me before Go ahead.
+  - Leaning: the runtime keeps a kind on one list as it saves, the screen's
+    way, so the rules as kept and as read never differ.
 
 ## Several accounts, 3 October
 
@@ -286,6 +293,29 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   that led to the step's result.
 - [x] **A ready task's header.** Settled on 30 September 2026 in the review of
   #15: the header reads the run, as the card does, and says Ready.
+
+## Releases and updates, 11 October
+
+Decided in ADR-024 for the first testers: Developer ID signing, notarytool,
+one stable track from GitHub Releases, restart only at the person's word and
+never under running work.
+
+- [ ] **A beta channel.** Testers and everyone else share one track for now.
+  Leaning: a `beta` channel (electron-updater's `latest`/`beta` files) once
+  there are more than friends testing, chosen in Settings.
+- [ ] **Rolling back.** An update that breaks something is fixed by the next;
+  a migration can't be undone. Keep the previous app and a copy of the store
+  before migrating, or make every migration reversible?
+- [ ] **Adapters over the air** (DEV-46). Today a new adapter means an app
+  release. Shipping adapter bundles alone needs them verified before they
+  run as Althar's identity.
+- [ ] **One entitlements file for every helper.** electron-builder gives all
+  of them the agents' entitlements (JIT, unsigned executable memory, no
+  library validation). Leaning: sign the agents' binaries apart once the
+  adapters leave Electron's binary (the runAsNode question below).
+- [ ] **A download link that stays the same.** The site and the README link
+  the Releases page. A fixed asset name (`Althar-arm64.dmg`) would let
+  `releases/latest/download/…` start the download directly.
 
 ## The desktop app, 29 September
 
@@ -526,10 +556,10 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   explicit always-ask and never rules when its mode is selected. Its failures
   and uncertainty reach the person; readers remain read-only. See
   [ADR-019](decisions/019-coordinator-judges-permissions.md).
-- [ ] **Project rules: when and where they are set.** Leaning, as mocked in
-  the kit's NewProject: creating a project asks one thing, who answers when
-  agents need a yes (default "The agent in charge decides"), and every other rule starts
-  at its default. Can a task tighten the rules but never loosen them? Where
+- [ ] **Project rules: when and where they are set.** Leaning: creating a
+  project asks only its name, its colour and its folders, and every rule
+  starts at its default; who answers when agents need a yes is the first a
+  person changes, on the rules screen. Can a task tighten the rules but never loosen them? Where
   are they stored? (See Memory below.)
 - [ ] **Kinds of permission.** Commands, web fetches, MCP tools, writes
   outside the workspace, spending, messages to people. Should each kind have

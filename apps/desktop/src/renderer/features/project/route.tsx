@@ -10,28 +10,27 @@ import { useLastRoom } from '../tabs/TabsFrame'
 import { useConnections } from '../connections/useConnections'
 import { ProjectView } from './ProjectView'
 import { useProject } from './useProject'
-import { useProjectMenu } from './useProjectMenu'
+import { useProjectSettings } from './useProjectSettings'
 
 function Project() {
   const { projectId } = projectRoute.useParams()
-  const { room, new: planning } = projectRoute.useSearch()
+  const { room } = projectRoute.useSearch()
   const navigate = useNavigate()
   // The view it was last on, unless a task's bar asked for one.
   const [last, keepRoom] = useLastRoom(projectId)
   const opening = room ?? last
   // Removed, the project is gone: back to the home.
-  const menu = useProjectMenu(projectId, () => void navigate({ to: '/' }))
+  const settings = useProjectSettings(projectId, () => void navigate({ to: '/' }))
   return (
     <ProjectView
       {...(opening === null ? {} : { room: opening })}
       onRoomChange={keepRoom}
-      newTask={planning === 'task'}
       model={useProject(projectId)}
       board={useBoard(projectId)}
       connections={useConnections()}
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
-      menu={{
-        model: menu,
+      settings={{
+        model: settings,
         onRepositories: () => void navigate({ to: '/projects/$projectId/repositories', params: { projectId } }),
         onRules: () => void navigate({ to: '/projects/$projectId/rules', params: { projectId } }),
       }}
@@ -39,10 +38,9 @@ function Project() {
   )
 }
 
-/** What a project opens on, when a task's bar asks: a view, and planning a new task. */
+/** What a project opens on, when a task's bar asks: a view. */
 interface ProjectSearch {
   readonly room?: Room
-  readonly new?: 'task'
 }
 
 /** The view an address names, if it names one. */
@@ -63,12 +61,13 @@ export const projectRoute = createRoute({
       cache.fetchQuery(read.coordinator(projectId)),
       cache.fetchQuery(read.board(projectId)),
       cache.fetchQuery(read.rules(projectId)),
+      cache.fetchQuery(read.repositories(projectId)),
       cache.fetchQuery(read.status()),
       cache.fetchQuery(read.connections()),
     )
   },
   validateSearch: (search: Record<string, unknown>): ProjectSearch => {
     const room = roomOf(search.room)
-    return { ...(room === undefined ? {} : { room }), ...(search.new === 'task' ? { new: 'task' as const } : {}) }
+    return room === undefined ? {} : { room }
   },
 })

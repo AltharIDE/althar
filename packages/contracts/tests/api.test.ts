@@ -4,7 +4,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 
-import { Api, ApiError, CommandId, PAGE, Product, ThreadItem, WatchEvent } from '../src/Api'
+import { Api, ApiError, CommandId, NewProjectId, PAGE, Product, ThreadItem, WatchEvent } from '../src/Api'
 import { clientProtocol, emitterPort, serverProtocol } from '../src/transport'
 
 const at = '2026-09-29T12:00:00.000Z'
@@ -171,6 +171,9 @@ describe('the API', () => {
   it('takes a command id only in its own shape, and a change with its cursor', () => {
     assert.strictEqual(Schema.decodeUnknownSync(CommandId)(commandId), commandId)
     assert.throws(() => Schema.decodeUnknownSync(CommandId)('cmd_nope'))
+    // A new project's id, made by the window, is a project's id in its own shape, and nothing else's.
+    assert.strictEqual(Schema.decodeUnknownSync(NewProjectId)(`proj_${'0'.repeat(32)}`), `proj_${'0'.repeat(32)}`)
+    assert.throws(() => Schema.decodeUnknownSync(NewProjectId)(commandId))
     assert.throws(() =>
       Schema.decodeUnknownSync(WatchEvent)({ _tag: 'Changed', aggregateType: 'task', aggregateId: 't', projectId: null, threadId: null }),
     )
@@ -236,7 +239,7 @@ describe('the API', () => {
               TakeBack: () => Effect.die('unused'),
               AnswerQuestion: () => Effect.void,
               Answer: () => Effect.void,
-              ListConnections: () => Effect.succeed({ cursor: 0, connections: [], products: [] }),
+              ListConnections: () => Effect.succeed({ cursor: 0, connections: [], products: [], places: [] }),
               StartSignIn: ({ commandId: id }) =>
                 Effect.succeed({ flowId: id, kind: 'browser' as const, url: 'https://linear.app/oauth/authorize' }),
               GetSignIn: () => Effect.succeed({ state: 'waiting' as const }),
@@ -251,6 +254,10 @@ describe('the API', () => {
                   auth: 'token' as const,
                   state: 'ready' as const,
                 }),
+              GetConnectGuide: () => Effect.die('unused'),
+              FindServer: () => Effect.die('unused'),
+              ConnectCli: () => Effect.die('unused'),
+              CheckConnection: () => Effect.die('unused'),
               Disconnect: () => Effect.void,
               ListIssues: () => Effect.succeed({ issues: [] }),
               MarkReady: () => Effect.void,
@@ -258,6 +265,7 @@ describe('the API', () => {
               GetProjectRules: () => Effect.die('unused'),
               GetVocabulary: () => Effect.die('unused'),
               RenameProject: () => Effect.die('unused'),
+              SetProjectInk: () => Effect.die('unused'),
               RemoveProject: () => Effect.die('unused'),
               GetRepositories: () => Effect.die('unused'),
               AddRepositories: () => Effect.die('unused'),

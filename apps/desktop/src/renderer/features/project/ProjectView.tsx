@@ -5,9 +5,6 @@ import {
   DictationTray,
   LinkButton,
   ResizeHandle,
-  SidePanel,
-  SidePanelBody,
-  SidePanelTitle,
   Room,
   TaskFace,
   Thread,
@@ -15,13 +12,13 @@ import {
   ThreadMeasure,
   ThreadShellProvider,
   ThreadSkeleton,
-  ProjectHead,
+  ProjectFront,
+  type ProjectFrontProps,
   Running,
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
 import { useDictation } from '../../shared/dictation/useDictation'
-import { shortFolder } from '../../shared/folders'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
@@ -34,33 +31,36 @@ import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
 import { BoardView } from '../board/BoardView'
-import { lanesOf, yoursOf } from '../board/lanes'
+import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
 import type { BoardModel } from '../board/useBoard'
-import { ConnectionsView, text as connectionsText } from '../connections/ConnectionsView'
+import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectDialog'
 import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
-import { NewTask } from './NewTask'
-import { ProjectDialogs, ProjectMenu, type ProjectMenuActions } from './ProjectMenu'
+import { lastSettledOf, partsOf, tasksOf, trackerOf } from './front'
 import { nextRoom, ProjectBar } from './ProjectBar'
+import { inkOf, ProjectSettings } from './ProjectSettings'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
+import type { ProjectSettingsModel } from './useProjectSettings'
 
 /*
- * A project: the conversation with its coordinator, the board of its work,
- * or both side by side, the conversation as wide as the person drags it (b
- * steps through them). The coordinator answers questions itself and turns
- * changes into tasks; a task you plan yourself opens beside the conversation.
- * What you open from the board opens its task. The bar says how much is
- * running and how much needs you: pointed at, what it is; clicked, the
- * first of it.
+ * A project: its front page across the top, then the conversation with its
+ * coordinator, the board of its work, or both side by side, the conversation
+ * as wide as the person drags it (b steps through them). The front page says
+ * how the project stands (what needs you: pointed at, what it is; clicked,
+ * the first of it), what it is made of, and opens its settings. The
+ * coordinator answers questions itself and turns changes into tasks: there
+ * is no task to start without it. Connecting the code host, from the
+ * settings, opens over whichever view is shown. What you open from the board
+ * opens its task.
  */
 
 export const text = {
   project: 'Project',
   conversation: 'Conversation',
   coordinator: 'Coordinator',
-  empty: 'Ask the coordinator about the project, or say what should change.',
+  empty: (project: string) => `Ask the coordinator about ${project}, or say what should change.`,
   placeholder: 'Tell the coordinator something',
   handsOver: (agent: string) => `hands the conversation to ${agent}`,
   /** Another agent's model, picked: nothing happens until the person says something. */
@@ -77,17 +77,7 @@ export const text = {
   dismiss: 'Dismiss',
   boardFailed: 'Althar couldn’t read the board.',
   boardReading: 'Reading the board',
-  newTask: 'New task',
   width: 'Width of the conversation',
-  /** Where a project of several repositories is: how many, and their names. */
-  repositories: (names: ReadonlyArray<string>) => `${names.length} repositories · ${names.join(', ')}`,
-}
-
-/** Where a project is, as its head says: its folder, with the home folder as ~, or its repositories where it has several. */
-export const whereOf = (project: { readonly repository: string | null; readonly repositories: ReadonlyArray<string> } | null) => {
-  if (project === null) return undefined
-  if (project.repositories.length > 1) return text.repositories(project.repositories)
-  return project.repository === null ? undefined : shortFolder(project.repository)
 }
 
 /** How wide the conversation is beside the board, as the person last dragged it: this window's own, kept across launches. */
@@ -123,30 +113,41 @@ const useBothWidth = () => {
   return { width: Math.min(width, max), min: WIDTH.min, max, set: setWidth, keep, reset: () => keep(WIDTH.start) }
 }
 
+/** The front page, with a clock of its own: what settled last says how long ago, a minute at a time, whatever else runs or doesn't. */
+function Front({ lanes, ...front }: Omit<ProjectFrontProps, 'last'> & { lanes: Lanes | null }) {
+  const now = useNow(true, 60_000)
+  const last = lanes === null ? undefined : lastSettledOf(lanes, new Date(now))
+  return <ProjectFront {...front} {...(last === undefined ? {} : { last })} />
+}
+
+/** The project's settings, and where they open. */
+export interface ProjectSettingsActions {
+  readonly model: ProjectSettingsModel
+  readonly onRepositories: () => void
+  readonly onRules: () => void
+}
+
 export function ProjectView({
   model,
   board,
   connections,
   onTask,
-  menu,
+  settings,
   room: opening = Room.Talk,
   onRoomChange,
-  newTask = false,
 }: {
   model: ProjectModel
   board: BoardModel
   connections: ConnectionsModel
   onTask: (threadId: string) => void
-  /** The project's menu: rename, its repositories, its rules, remove; without it, none. */
-  menu?: ProjectMenuActions
+  /** The project's settings: its name and colour, its repositories, its rules, removing it; without them, no way to them. */
+  settings?: ProjectSettingsActions
   /** The view it opens on: the one a task's bar chose, or the one the person was last on. */
   room?: Room
   /** The view it is on, each time it changes, to be opened on again. */
   onRoomChange?: (room: Room) => void
-  /** It opens planning a new task, as a task's bar asked. */
-  newTask?: boolean
 }) {
-  const [room, setRoom] = useState<Room>(newTask && opening === Room.Board ? Room.Both : opening)
+  const [room, setRoom] = useState<Room>(opening)
   useEffect(() => onRoomChange?.(room), [room, onRoomChange])
   // A picture the coordinator handed back opens in the lightbox; it writes no documents, so none opens beside it.
   const shown = useThreadHost(false)
@@ -174,8 +175,8 @@ export function ProjectView({
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
-  // What opens beside the conversation: a task you plan, or the connections.
-  const [panel, setPanel] = useState<'task' | 'connections' | null>(newTask ? 'task' : null)
+  // Connecting, opened from the settings: the walk in to the project's host or tracker, or all of them where it is connected.
+  const [connecting, setConnecting] = useState<Opening | null>(null)
   const coordinator = model.coordinator
   // Every run in the project, the tasks' too, each saying where, over the composer.
   const launches = coordinator?.launches ?? []
@@ -306,39 +307,49 @@ export function ProjectView({
     if (first !== null) onTask(first)
   }
 
+  // The front page: its name and ink as the person last chose them, how it stands, and what it is made of.
+  const projectId = model.project?.id ?? coordinator?.project.id ?? ''
+  const kept = settings?.model
+  const tracker = lanes === null ? null : trackerOf(tasksOf(lanes), connections.list)
+  const front = (
+    <Front
+      lanes={lanes}
+      name={kept?.name ?? name}
+      seed={projectId}
+      ink={inkOf(kept?.ink ?? model.project?.ink ?? 'clay')}
+      yours={yours}
+      {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask), inProgress: lanes.running.length })}
+      onYours={openYours}
+      parts={partsOf({ repositories: model.repositories, names: model.project?.repositories ?? [], host, tracker })}
+      // The default branch runs with no agent, where its repository says how.
+      {...(coordinator?.runCommand == null ? {} : { run: { command: coordinator.runCommand, onRun: () => void model.runProject() } })}
+      {...(settings === undefined
+        ? {}
+        : {
+            settings: (
+              <ProjectSettings
+                model={settings.model}
+                seed={projectId}
+                repositories={model.repositories ?? []}
+                connections={connections.list}
+                host={host}
+                tracker={tracker}
+                onRepositories={settings.onRepositories}
+                onRules={settings.onRules}
+                onConnect={(product, at) => setConnecting(openingFor(connections.list, product, at))}
+              />
+            ),
+          })}
+    />
+  )
+
   return (
     <div className={s.window}>
-      <ProjectBar
-        room={room}
-        onRoom={setRoom}
-        yours={lanes === null ? null : yours}
-        {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask) })}
-        onYours={openYours}
-        {...(menu === undefined
-          ? {}
-          : {
-              menu: (
-                <ProjectMenu
-                  {...menu}
-                  // The default branch runs with no agent, where its repository says how.
-                  {...(coordinator?.runCommand == null
-                    ? {}
-                    : { run: { command: coordinator.runCommand, onRun: () => void model.runProject() } })}
-                  // Pushing needs no connection, so connecting the host waits in the menu until it's wanted.
-                  {...(host === null || host.connected ? {} : { connect: { host: host.name, onConnect: () => setPanel('connections') } })}
-                />
-              ),
-            })}
-        newTask={panel === 'task'}
-        onNewTask={() => {
-          if (room === Room.Board) setRoom(Room.Both)
-          setPanel('task')
-        }}
-      />
+      <ProjectBar room={room} onRoom={setRoom} />
+      {front}
       <div className={room === Room.Both ? `${s.rooms} ${s.both}` : s.rooms}>
         {talking && (
           <div className={s.talk} style={room === Room.Both ? ({ '--talk-width': `${both.width}px` } as CSSProperties) : undefined}>
-            <ProjectHead title={name} meta={whereOf(model.project)} side={room === Room.Both} />
             {coordinator === null ? (
               model.error === null ? (
                 <div className={s.reading}>
@@ -352,38 +363,7 @@ export function ProjectView({
                 </div>
               )
             ) : (
-              <TaskFace
-                className={s.face}
-                composer={composer}
-                panel={
-                  panel === 'task' ? (
-                    <NewTask
-                      agents={model.agents}
-                      starting={model.starting}
-                      connected={coordinator.host?.connected === true}
-                      defaultEnd={model.end}
-                      repositories={model.project?.repositories ?? []}
-                      listIssues={model.listIssues}
-                      onClose={() => setPanel(null)}
-                      onStart={(task) =>
-                        void model.startTask(task).then((started) => {
-                          if (started !== null) setPanel(null)
-                        })
-                      }
-                    />
-                  ) : panel === 'connections' ? (
-                    <SidePanel
-                      label={connectionsText.label}
-                      head={<SidePanelTitle>{connectionsText.label}</SidePanelTitle>}
-                      onClose={() => setPanel(null)}
-                    >
-                      <SidePanelBody>
-                        <ConnectionsView model={connections} />
-                      </SidePanelBody>
-                    </SidePanel>
-                  ) : undefined
-                }
-              >
+              <TaskFace className={s.face} composer={composer}>
                 <Thread label={text.conversation} busy={busy}>
                   {coordinator.earlier && (
                     <ThreadDivider
@@ -394,7 +374,7 @@ export function ProjectView({
                       {text.earlier}
                     </ThreadDivider>
                   )}
-                  {coordinator.items.length === 0 && model.streaming.size === 0 && <p className={s.quiet}>{text.empty}</p>}
+                  {coordinator.items.length === 0 && model.streaming.size === 0 && <p className={s.quiet}>{text.empty(name)}</p>}
                   {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}
                   <ThreadShellProvider value={shown.shell}>
                     <ThreadBlocks
@@ -450,7 +430,7 @@ export function ProjectView({
           </div>
         )}
       </div>
-      {menu && <ProjectDialogs model={menu.model} />}
+      {connecting !== null && <ConnectDialog model={connections} opening={connecting} onClose={() => setConnecting(null)} />}
     </div>
   )
 }

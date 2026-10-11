@@ -1,9 +1,11 @@
-import { Effect, Schema } from 'effect'
+import { Effect, Option, Schema } from 'effect'
 
+import { type Access, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import type { ConnectorFailed } from './errors'
 import { makeHttp } from './http'
 import type { Account, Issue, Priority, StatusCategory, Tracker } from './model'
+import { type Answer, answered, probe, readAs, refusalOf, stopped, UNREADABLE, UNSAID } from './probe'
 
 /*
  * Linear, a tracker, over its GraphQL API. An issue goes by its identifier
@@ -146,3 +148,62 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
       ),
   }
 }
+
+/*
+ * What a Linear connection can do. Its sign-in asks to read and write, so a
+ * token from it may comment and move issues; what a personal API key may do
+ * isn't said, as keys can be limited where they are made.
+ */
+
+const Envelope = Schema.Struct({
+  data: Schema.optional(Schema.NullOr(Schema.Unknown)),
+  errors: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        message: Schema.String,
+        extensions: Schema.optional(Schema.Struct({ code: Schema.optional(Schema.String), type: Schema.optional(Schema.String) })),
+      }),
+    ),
+  ),
+})
+
+const Viewer = Schema.Struct({
+  viewer: Schema.Struct({ id: Schema.String, name: Schema.String, displayName: Schema.optional(Schema.String) }),
+  organization: Schema.Struct({ name: Schema.String }),
+})
+
+const Teams = Schema.Struct({ teams: Schema.Struct({ nodes: Schema.Array(Schema.Struct({ key: Schema.String })) }) })
+
+/** A query's data, read by a schema, or why there is none: Linear says a credential it didn't take in a 400 as often as a 401. */
+const dataOf = <A>(schema: Schema.Codec<A, unknown>, answer: Answer): { readonly data: A } | { readonly reason: AccessReason } => {
+  const envelope = readAs(Envelope, answer)
+  const [error] = envelope?.errors ?? []
+  if (error !== undefined)
+    return /AUTHENTICATION|UNAUTHENTICATED/i.test(`${error.extensions?.code ?? ''} ${error.extensions?.type ?? ''}`)
+      ? { reason: { kind: 'refused' } }
+      : { reason: { kind: 'failed', message: error.message.slice(0, 300) } }
+  if (!answered(answer)) return { reason: refusalOf(answer) }
+  const data = Option.getOrUndefined(Schema.decodeUnknownOption(schema)(envelope?.data))
+  return data === undefined ? { reason: UNREADABLE } : { data }
+}
+
+export const accessLinear: Access = (input) =>
+  Effect.gen(function* () {
+    const url = `${input.apiUrl.replace(/\/+$/, '')}/graphql`
+    const me = dataOf(Viewer, yield* probe(input, url, { query: 'query { viewer { id name displayName } organization { name } }' }))
+    if ('reason' in me) return stopped([line('account', 'no', { reason: me.reason })])
+    const { viewer, organization } = me.data
+    const teams = dataOf(Teams, yield* probe(input, url, { query: 'query { teams(first: 100) { nodes { key } } }' }))
+    const signedIn = input.auth === 'pkce'
+    return {
+      account: { id: viewer.id, login: viewer.displayName ?? viewer.name, name: viewer.name },
+      lines: [
+        line('account', 'ok', { fact: `${viewer.name} · ${organization.name}` }),
+        'reason' in teams ? line('read', 'no', { reason: teams.reason }) : line('read', 'ok', { count: teams.data.teams.nodes.length }),
+        signedIn ? line('comment', 'ok') : line('comment', 'unknown', { reason: UNSAID }),
+        signedIn ? line('move', 'ok') : line('move', 'unknown', { reason: UNSAID }),
+      ],
+      expiresAt: null,
+      scopes: null,
+    }
+  })

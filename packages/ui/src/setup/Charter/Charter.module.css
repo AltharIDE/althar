@@ -1,0 +1,248 @@
+/* The sentences between hairlines, each with its word in the margin. */
+.charter {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line-2);
+}
+.clause {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  column-gap: 24px;
+  padding: 18px 0 19px;
+  border-bottom: 1px solid var(--line);
+}
+/* a part of its own: a gap, then a stronger line over it */
+.apart {
+  margin-top: 26px;
+  border-top: 1px solid var(--line-2);
+}
+.clause:has(+ .apart) {
+  border-bottom: 0;
+}
+
+.label {
+  grid-column: 1;
+  margin: 0;
+  padding-top: 7px;
+  font: 600 10.5px/1 var(--font-label);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.text {
+  grid-column: 2;
+  margin: 0;
+  font-size: 18.5px;
+  line-height: 1.75;
+  letter-spacing: -0.008em;
+  color: var(--t-1);
+  text-wrap: pretty;
+}
+
+/* what no project can change: smaller, quieter, behind a lock */
+.fixed .text {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--t-3);
+}
+.fixed .label {
+  padding-top: 5px;
+}
+.lock {
+  margin: 0 8px -1px 0;
+  color: var(--t-4);
+}
+
+/* a sentence that holds for nothing just now: quieter, with why under it */
+.off .text {
+  color: var(--t-3);
+}
+.offNote {
+  grid-column: 2;
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.below {
+  grid-column: 2;
+}
+
+/* ---- how to read it ---- */
+.key {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.keyRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.keyRow dd {
+  margin: 0;
+}
+.keyWord,
+.keyRow dt {
+  width: 72px;
+  flex: none;
+}
+.keyWord {
+  font-size: 12.5px;
+  color: var(--t-1);
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
+}
+.keyCode {
+  font: 500 12px/1 var(--mono);
+  color: var(--t-1);
+}
+
+/* ---- a built-in word ---- */
+.word {
+  display: inline;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: var(--line-3);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 5px;
+  border-radius: 3px;
+  transition:
+    text-decoration-color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+.word:hover,
+.word[data-state='open'] {
+  text-decoration-color: var(--t-1);
+}
+.word[data-state='open'] {
+  background: var(--paper);
+  box-shadow:
+    0 0 0 3px var(--paper),
+    0 0 0 4px var(--line-2);
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  font-weight: 500;
+}
+
+/* ---- a command ---- */
+.token {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
+  margin: 0 1px;
+  padding: 1px 7px 2px;
+  border-radius: 5px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+  vertical-align: 1px;
+  line-height: 1.35;
+}
+.code {
+  overflow: hidden;
+  max-width: 330px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 500 15px/1.35 var(--mono);
+  color: var(--t-1);
+}
+.exact {
+  flex: none;
+  margin-right: 6px;
+  font-size: 13.5px;
+  white-space: nowrap;
+  color: var(--t-3);
+}
+/* its ×, at its corner: shown while it is pointed at or has focus */
+.token .remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-3);
+  color: var(--t-2);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.token:hover .remove,
+.token:focus-within .remove {
+  opacity: 1;
+}
+.token .remove:hover {
+  background: var(--n-2);
+  color: var(--t-1);
+}
+
+/* the command being added, where it will sit */
+.newCommand {
+  margin: 0 1px;
+  padding: 1px 6px 2px;
+  border-radius: 5px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1.5px var(--t-1);
+  font: 500 15px/1.35 var(--mono);
+  color: var(--t-1);
+  vertical-align: 1px;
+  outline: none;
+}
+.newCommand.invalid {
+  box-shadow: inset 0 0 0 1.5px var(--danger);
+}
+
+/* the + at a sentence's end */
+.text .add {
+  width: 22px;
+  height: 22px;
+  margin-left: 10px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.text .add:hover {
+  background: var(--paper);
+}
+
+/* ---- under a command being added ---- */
+.hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 16px;
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.holds code {
+  font-family: var(--mono);
+  color: var(--t-2);
+}
+.keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.error {
+  flex-basis: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .word,
+  .token .remove {
+    transition: none;
+  }
+}

@@ -8,7 +8,8 @@ import { defineConfig } from 'vite-plus'
  * is inlined but Electron and Node's own modules, since Node can't run the
  * workspace's TypeScript as it is. The agent adapters stay packages: they run
  * as processes of their own. So does sherpa-onnx, a native addon that finds
- * its binaries beside it in node_modules.
+ * its binaries beside it in node_modules, and electron-updater, whose
+ * CommonJS would otherwise share a chunk with the runtime's process.
  */
 export default defineConfig(({ mode }) => ({
   // A packaged build leaves out the end-to-end tests' hooks, such as the fake agents.
@@ -21,7 +22,7 @@ export default defineConfig(({ mode }) => ({
     sourcemap: true,
     rollupOptions: {
       input: { 'main/main': 'src/main/main.ts', 'runtime/runtime': 'src/runtime/runtime.ts', 'speech/speech': 'src/speech/speech.ts' },
-      external: ['electron', 'sherpa-onnx-node', ...builtinModules, ...builtinModules.map((name) => `node:${name}`)],
+      external: ['electron', 'sherpa-onnx-node', 'electron-updater', ...builtinModules, ...builtinModules.map((name) => `node:${name}`)],
       output: { format: 'es', entryFileNames: '[name].js' },
     },
   },
