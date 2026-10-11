@@ -290,8 +290,6 @@ export function ProjectView({
   // The front page: its name and ink as the person last chose them, how it stands, and what it is made of.
   const projectId = model.project?.id ?? coordinator?.project.id ?? ''
   const kept = settings?.model
-  const repositories =
-    model.repositories ?? model.project?.repositories.map((repository) => ({ id: repository, name: repository, remote: null })) ?? []
   const tracker = lanes === null ? null : trackerOf(tasksOf(lanes), connections.list)
   const front = (
     <Front
@@ -302,7 +300,7 @@ export function ProjectView({
       yours={yours}
       {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask), inProgress: lanes.running.length })}
       onYours={openYours}
-      parts={partsOf({ repositories, host, list: connections.list, tracker })}
+      parts={partsOf({ repositories: model.repositories, names: model.project?.repositories ?? [], host, list: connections.list, tracker })}
       {...(settings === undefined
         ? {}
         : {

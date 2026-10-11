@@ -103,6 +103,7 @@ describe('a project’s front page', () => {
           { id: 'api', name: 'meridian-api', remote: 'git@github.com:meridian/api.git' },
           { id: 'ops', name: 'meridian-ops', remote: null },
         ],
+        names: [],
         host: github,
         list: connectionList,
         tracker: { product: 'linear', at: 'linear.app', key: 'MER' },
@@ -112,6 +113,14 @@ describe('a project’s front page', () => {
       { id: 'ops', name: 'meridian-ops' },
       { id: 'tracker:MER', name: 'MER issues', brand: Brand.Linear },
     ])
+  })
+
+  it('says its repositories by name, on the project’s host, until they are read', () => {
+    expect(partsOf({ repositories: null, names: ['api', 'web'], host: github, list: null, tracker: null })).toEqual([
+      { id: 'api', name: 'api', brand: Brand.GitHub },
+      { id: 'web', name: 'web', brand: Brand.GitHub },
+    ])
+    expect(partsOf({ repositories: null, names: ['api'], host: null, list: null, tracker: null })).toEqual([{ id: 'api', name: 'api' }])
   })
 
   it('names the tracker by the key most of its tasks’ issues share, and none for a host’s own issues', () => {

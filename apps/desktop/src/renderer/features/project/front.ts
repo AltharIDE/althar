@@ -111,15 +111,20 @@ export const tasksOf = (lanes: Lanes): ReadonlyArray<BoardTask> => [...lanes.nex
 
 /** What the project is made of: its repositories, each with its host's mark, then the tracker its tasks name. */
 export const partsOf = (input: {
-  readonly repositories: ReadonlyArray<Pick<ProjectRepository, 'id' | 'name' | 'remote'>>
+  /** Its repositories as read, each with its remote; null until they are. */
+  readonly repositories: ReadonlyArray<Pick<ProjectRepository, 'id' | 'name' | 'remote'>> | null
+  /** Its repositories by name, as the projects are listed: until they are read, each is on the project's host. */
+  readonly names: ReadonlyArray<string>
   readonly host: Host | null
   readonly list: ConnectionList | null
   readonly tracker: Tracker | null
 }): ProjectPart[] => [
-  ...input.repositories.map((repository) => {
-    const product = productOfRemote(repository.remote, input.host, input.list)
-    return { id: repository.id, name: repository.name, ...(product === null ? {} : { brand: productBrand(product) }) }
-  }),
+  ...(input.repositories === null
+    ? input.names.map((name) => ({ id: name, name, ...(input.host === null ? {} : { brand: productBrand(input.host.product) }) }))
+    : input.repositories.map((repository) => {
+        const product = productOfRemote(repository.remote, input.host, input.list)
+        return { id: repository.id, name: repository.name, ...(product === null ? {} : { brand: productBrand(product) }) }
+      })),
   ...(input.tracker === null
     ? []
     : [{ id: `tracker:${input.tracker.key}`, name: text.issues(input.tracker.key), brand: productBrand(input.tracker.product) }]),
