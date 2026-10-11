@@ -219,13 +219,13 @@ export const LightAndDark: Story = {
           stacked: true,
           node: () => <RulesWithDial mode={PermissionPolicy.AllowAll} own={PermissionPolicy.Ask} />,
         },
-        { state: 'Task · following the project', stacked: true, node: () => <TaskB height={180} /> },
+        { state: 'Task · following the project', stacked: true, node: () => <TaskB height={340} /> },
         {
           state: 'Task · set to allow everything, what waited let through',
           stacked: true,
           node: () => <TaskB own={PermissionPolicy.AllowAll} queue height={460} />,
         },
-        { state: 'Task · set to ask me', stacked: true, node: () => <TaskB own={PermissionPolicy.Ask} height={180} /> },
+        { state: 'Task · set to ask me', stacked: true, node: () => <TaskB own={PermissionPolicy.Ask} height={340} /> },
         { state: 'Prompt · held by Always ask me', stacked: true, node: () => <TaskB queue /> },
         { state: 'Board', node: () => <BoardB /> },
       ]}

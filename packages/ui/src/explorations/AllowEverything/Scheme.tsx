@@ -63,7 +63,7 @@ export function Pairs({ pairs, light = 'Light', dark = 'Dark' }: { pairs: readon
   return (
     <div className={s.pairs}>
       {pairs.map((pair) => (
-        <section key={pair.state} className={cx(s.pair, pair.stacked && s.stacked)} aria-label={pair.state}>
+        <div key={pair.state} className={cx(s.pair, pair.stacked && s.stacked)}>
           <span className={s.pairLabel}>{pair.state}</span>
           <div className={s.pairCells}>
             <InScheme scheme="light" className={s.cell}>
@@ -75,7 +75,7 @@ export function Pairs({ pairs, light = 'Light', dark = 'Dark' }: { pairs: readon
               {pair.node()}
             </InScheme>
           </div>
-        </section>
+        </div>
       ))}
     </div>
   )

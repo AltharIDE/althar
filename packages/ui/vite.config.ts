@@ -19,8 +19,9 @@ export default defineConfig(({ mode }) => ({
     css: { modules: { classNameStrategy: 'non-scoped' } },
     coverage: {
       // Stories and the workbench are examples, exercised by rendering every story; the components carry the gate.
+      // Explorations are designs to look at before one is chosen: stories and their sketches, never shipped.
       include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/**/*.stories.tsx', 'src/fixtures/**', 'src/storybook/**', 'src/index.ts'],
+      exclude: ['src/**/*.stories.tsx', 'src/fixtures/**', 'src/storybook/**', 'src/explorations/**', 'src/index.ts'],
       reporter: ['text', 'html'],
       thresholds: { lines: 90, branches: 90 },
     },

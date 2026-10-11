@@ -20,7 +20,7 @@ button.pill {
 .ended {
   composes: pill from '../../../composer/Listening/Listening.module.css';
 }
-span.ended {
+output.ended {
   color: var(--t-2);
   cursor: default;
 }

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { AllowedBy, Decision } from '../../../foundations/vocabulary'
 import { AskAnswered, AskNote } from '../../../primitives/Ask/Ask'
@@ -57,6 +57,13 @@ export interface QueueProps {
    */
   onAskAgain?: () => void
   text?: Partial<QueueText>
+}
+
+type CardProps = Pick<PromptCardProps, 'pos' | 'total' | 'onAnswer' | 'onAll' | 'phase'>
+
+/** The card in front, drawn by the path's own function, as an element so its answer is only reached when it is given. */
+function CardSlot({ card, request, ...props }: CardProps & { card: QueueProps['card']; request: PermissionRequest }) {
+  return card(request, props)
 }
 
 const BEAT = 420
@@ -137,17 +144,18 @@ export function Queue({ items, project, card, clearedBy = null, defaultEscalated
       {current !== undefined && (
         <StackFrame behind={waiting.length - 1}>
           {/* a card of its own for each request, so what was picked on one isn't carried to the next */}
-          <Fragment key={current.id}>
-            {card(current, {
-              pos: items.length - waiting.length + 1,
-              total: items.length,
-              phase,
-              onAnswer: (a) => {
-                if (!phase) answer(current, a)
-              },
-              onAll: allowAll,
-            })}
-          </Fragment>
+          <CardSlot
+            key={current.id}
+            card={card}
+            request={current}
+            pos={items.length - waiting.length + 1}
+            total={items.length}
+            phase={phase}
+            onAnswer={(a) => {
+              if (!phase) answer(current, a)
+            }}
+            onAll={allowAll}
+          />
         </StackFrame>
       )}
     </>

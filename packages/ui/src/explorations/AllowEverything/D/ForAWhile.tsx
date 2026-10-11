@@ -222,9 +222,9 @@ export function WhilePill({ bypass, project = null, onStop, onLonger, open, defa
 export function WhileEnded({ at, text }: { at: string; text?: Partial<ForAWhileText> }) {
   const t = { ...forAWhileText, ...text }
   return (
-    <span role="status" className={s.ended}>
+    <output className={s.ended}>
       <span className={l.text}>{t.ended(at)}</span>
-    </span>
+    </output>
   )
 }
 

@@ -1,0 +1,157 @@
+import { Meta } from '@storybook/addon-docs/blocks'
+
+<Meta title="Explorations/Allow everything/Compare" />
+
+# Allow everything: four paths
+
+How should someone tell Althar to stop asking, for a whole project and for a single task? These are four ways to do it, A to D, plus B and C together. They are drawn with the kit’s own parts and fixtures only. Nothing is wired to the app.
+
+One thing is the same in every path: **Never still holds, and no agent reads your credentials or reaches the code host except through Althar.** Each path says so where you turn allowing everything on.
+
+Every group has its states as stories, each with a `scheme` control (light, or a dark stand-in), and a **Light and dark** story that lays the states side by side. The kit has no dark theme yet, so the dark one is a palette kept inside this exploration (`Scheme.module.css`). It shows how each mark holds up on dark. It isn’t a proposal for the kit’s dark theme.
+
+## Side by side
+
+Presses are counted from where the control already is: the rules page for a project, the task’s own view for a task.
+
+<table>
+  <thead>
+    <tr>
+      <th>Path</th>
+      <th>Good at</th>
+      <th>Risks</th>
+      <th>Presses to allow everything</th>
+      <th>How visible it is</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
+        <a href="./?path=/story/explorations-allow-everything-a-one-big-switch--rules-page-on" target="_top">
+          A – One big switch
+        </a>
+      </td>
+      <td>
+        The simplest model: on or off, with nothing to read. It’s strong at the project level. Never is kept unless you turn off its own
+        switch as well.
+      </td>
+      <td>
+        Two places decide the same thing: the switch, and the mode in “The rest”. “Ignore Never too” takes away the last guard in one more
+        press. The task’s switch is hidden in its menu. “Unrestricted” is a new word for what the rest of the app calls “Allow everything”.
+      </td>
+      <td>Project: 1. Task: 2, through the ⋯ menu.</td>
+      <td>
+        The task’s bar says “Unrestricted” only while it’s on, and so does its card on the board. On the rules page, the sheet is ringed in
+        ink and the sentences it sets aside go quiet. Nothing shows by the composer.
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <a href="./?path=/story/explorations-allow-everything-b-posture-dial--rules-page" target="_top">
+          B – Posture dial
+        </a>
+      </td>
+      <td>
+        One model with the same four words for the project and for a task. A task always says where it stands, so any change shows. A task
+        can be set to ask more as well as less. The rules page lists every task that differs from the project, with the way back.
+      </td>
+      <td>
+        Because the bar always shows its words, they can become wallpaper. Four long labels take room, so the task’s title is cut sooner.
+        Allow everything reads like one ordinary step along a scale.
+      </td>
+      <td>Project: 1. Task: 2, from its words in the bar.</td>
+      <td>
+        The bar always says the mode. When everything is allowed it’s in ink, with the glyph. The board says it only for allowing
+        everything. The rules page has the dial and a “Set on a task” sentence.
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <a href="./?path=/story/explorations-allow-everything-c-escalate-from-the-prompt--stop-asking-picked" target="_top">
+          C – Escalate from the prompt
+        </a>
+      </td>
+      <td>
+        It meets the moment, with no setting to find first. What it does, including to the requests waiting, is said before you press. One
+        press clears the queue, and the thread keeps when it happened and why.
+      </td>
+      <td>
+        It’s easiest to do when you are least careful: when prompts pile up. It’s only reachable while something is waiting. On a task, it
+        sets aside the “Always ask me” list you kept on purpose. A fifth answer makes the card longer.
+      </td>
+      <td>Project: 2, as today. Task: 2 (the answer, then Allow), or the keys 4 then ↵. Only while a request waits.</td>
+      <td>
+        After you stop asking, the bar says “Allows everything · since 11:52”, and the thread keeps a line where it happened. The board says
+        it, and the rules page lists the task under “Not asking”.
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <a href="./?path=/story/explorations-allow-everything-d-for-a-while--for-an-hour" target="_top">
+          D – For a while
+        </a>
+      </td>
+      <td>
+        Nothing is allowed for good by accident. It always ends somewhere you can see, and it says so when it does. The pill sits by the
+        composer, where your attention is, and the thread keeps what went ahead meanwhile.
+      </td>
+      <td>
+        A clock is something to watch. An hour can end in the middle of a step, so requests wait again, maybe while you’re away. You make
+        three choices every time. It adds another pill over the composer. “Until this task finishes” works out the same as B’s setting for a
+        task.
+      </td>
+      <td>Project: 1, a length. Task: 2 (⋯, then a length), or 2 from the held card’s foot.</td>
+      <td>
+        It’s the most visible while you work: a pill with the time left, the bar’s mark with the time left, the card on the board with the
+        time left. On the rules page the sheet is ringed in ink. When it ends, the thread gets a line.
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <a href="./?path=/story/explorations-allow-everything-b-c-together--stop-asking-picked" target="_top">
+          B + C – Together
+        </a>
+      </td>
+      <td>
+        B’s model with C’s moment. The card’s last answer sets this task to Allow everything, so there is one place that says it (the bar)
+        and one way back (Back to project default).
+      </td>
+      <td>It has C’s prompt-fatigue risk, softened because the result is shown and undone in the same place as a deliberate change.</td>
+      <td>Task: 2 from the bar, or 2 (or 4 then ↵) from a waiting card.</td>
+      <td>The same as B. The thread’s line also says the bar has it.</td>
+    </tr>
+  </tbody>
+</table>
+
+## The card that has no “always allow”
+
+A request on the project’s “Always ask me” list arrives with Never offered but not “Always allow”. Today the card doesn’t say why. Every path adds a line under the command: _Always allow isn’t offered: deploying or publishing is on Meridian’s “Always ask me” list, which comes before anything allowed._ The way out depends on the path:
+
+- **A**: a link that opens the task’s menu at the switch.
+- **B**: a link that opens the task’s words in the bar, at the dial.
+- **C**: the card’s own last answer, “Yes, and stop asking on this task”, which gets past the list for this task only.
+- **D**: a small menu in the card’s foot, “Allow everything for…”, with the three lengths.
+
+In every path, once the task allows everything, whatever was waiting goes in one quiet line that opens to each command. It doesn’t come back if the task asks again, since it has already run.
+
+## Recommendation
+
+**B and C together**, as you leaned, with these choices:
+
+1. **B is the model.** One dial, the same four words for the project and for a task, and the task’s bar as the one place that says where it stands and changes it, in both directions. The rules page lists the tasks that differ.
+2. **C is a way into B, not a mode of its own.** The card’s last answer sets _this task_ to Allow everything and says so before you press. It never touches the project. Undo is B’s “Back to project default”, from the bar or from the line in the thread.
+3. **From A, keep the quiet sentences.** On the rules page, what allowing everything sets aside dims and says why, as the kit already does. Leave out “Ignore Never too”: emptying the Never list is that switch, and it’s one you choose sentence by sentence.
+4. **From D, keep “until this task finishes”** as what a task’s setting means: it ends with the task, and a reopened task asks again. Leave the timers out for now. If a timed one is wanted later, it belongs in the bar’s popover, not in a new pill.
+5. **On the board and the home, say it only when a task allows everything.** The other modes aren’t worth a word on a card.
+
+## Open questions
+
+- Should a task set to Allow everything also set aside “Always ask me”? The project’s mode does today, and C depends on it for held cards. The other option is that held requests still ask, and the card says so.
+- Is the word “Allows everything” right, or “Unrestricted”? The paths use both so you can compare them.
+- When the project itself allows everything, every task’s bar says so in ink. Should the project’s own head say it once instead?
+
+## Not in this exploration
+
+- Nothing is wired to the runtime. The stories use fixtures only, under `src/explorations/AllowEverything`, which nothing imports and which is left out of the coverage gate.
+- Two glyphs, a struck lock and an hourglass, aren’t in the kit’s icon table yet. They’re drawn locally (`ExploreIcon.tsx`).
+- The permission card, the board card, and A’s and D’s task menus are drawn from the real components' markup, styles and words, with each path’s additions. The real components are unchanged.
