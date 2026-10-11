@@ -201,8 +201,9 @@ jobs:
             exit 1
           fi
           if [ "$state" = true ]; then
+            # The draft is pointed at this run's commit too: a draft from an earlier run by hand may target another one.
+            gh release edit "$TAG" --target "$GITHUB_SHA" --title "Althar $VERSION" --notes-file "$notes"
             gh release upload "$TAG" release/* --clobber
-            gh release edit "$TAG" --title "Althar $VERSION" --notes-file "$notes"
           elif [ "$GITHUB_EVENT_NAME" = push ]; then
             gh release create "$TAG" release/* --draft --verify-tag --title "Althar $VERSION" --notes-file "$notes"
           else

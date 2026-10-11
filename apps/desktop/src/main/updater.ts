@@ -1,7 +1,7 @@
 import { app, autoUpdater as squirrel, BrowserWindow, dialog } from 'electron'
 import updater from 'electron-updater'
 
-import { type UpdateGlance, type Updates, updating } from './updates'
+import { checkFor, SETTLE, type UpdateGlance, type Updates, updating } from './updates'
 
 /*
  * The updater wired to Electron (ADR-023): electron-updater reads the feed,
@@ -40,7 +40,14 @@ export const startUpdates = (changed: (glance: UpdateGlance) => void): Updates =
   const feed = testFeed(process.env.ALTHAR_UPDATE_FEED)
   if (feed !== null) autoUpdater.setFeedURL({ provider: 'generic', url: feed })
 
-  const updates = updating({ check: () => autoUpdater.checkForUpdates(), install: () => autoUpdater.quitAndInstall() }, changed)
+  const updates = updating(
+    {
+      check: () => checkFor(autoUpdater),
+      install: () => autoUpdater.quitAndInstall(),
+      settle: () => new Promise((resolve) => setTimeout(resolve, SETTLE)),
+    },
+    changed,
+  )
   autoUpdater.on('checking-for-update', updates.checking)
   autoUpdater.on('update-available', (info) => updates.available(info.version))
   autoUpdater.on('update-not-available', updates.none)
@@ -103,7 +110,7 @@ export const checkNow = async (updates: Updates) => {
         defaultId: 0,
         cancelId: 1,
       })
-      if (response === 0) updates.restart()
+      if (response === 0) void updates.restart()
     }
   }
 }

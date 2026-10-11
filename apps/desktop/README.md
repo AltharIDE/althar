@@ -78,6 +78,8 @@ In the repository's Settings → Environments, make an environment named `releas
 | `APPLE_API_KEY_ID` | That key's ID | Beside the key in Team Keys |
 | `APPLE_API_ISSUER` | The team's issuer ID | Above the keys in Team Keys |
 
+Also turn on **release immutability** (Settings → General → Releases): once a release is published, its files and tag can't be changed. A run brings only a draft up to date, but it can't stop someone publishing the draft while that run is uploading to it; with immutability on, such an upload fails rather than replacing files people already download.
+
 With `gh`, each is one command, for example `base64 -i cert.p12 | gh secret set CSC_LINK --env release --repo AltharIDE/althar`, or `gh secret set APPLE_API_KEY --env release --repo AltharIDE/althar < AuthKey_<id>.p8`.
 
 #### From a Mac, when CI can't

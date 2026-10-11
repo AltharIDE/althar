@@ -1,6 +1,9 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join } from 'node:path'
+
+import { mismatches } from './feed.ts'
 
 /*
  * Cutting a release (ADR-023, Linear DEV-62 and DEV-81). Releases come from
@@ -42,6 +45,7 @@ const dmg = join(dist, `${productName}-${version}-arm64.dmg`)
 const zip = join(dist, `${productName}-${version}-arm64-mac.zip`)
 const feed = join(dist, 'latest-mac.yml')
 const notes = join(desktop, 'release-notes', `${version}.md`)
+const built = join(dist, 'build.json')
 const assets = [dmg, `${dmg}.blockmap`, zip, `${zip}.blockmap`, feed]
 
 const args = new Set(process.argv.slice(2))
@@ -63,11 +67,37 @@ const signer = () => /^Authority=(.+)$/m.exec(run('codesign', ['-dvv', app]).sai
 /** Whether a ticket is stapled to the dmg. */
 const stapled = () => run('xcrun', ['stapler', 'validate', dmg]).ok
 
+/**
+ * The app inside the zip, which is what the updater installs: unpacked, it
+ * must hold its signature, be Althar at this version, and, where the release
+ * is notarized, carry its ticket.
+ */
+const checkZipped = (notarized: boolean) => {
+  const into = mkdtempSync(join(tmpdir(), 'althar-zip-'))
+  try {
+    execFileSync('ditto', ['-x', '-k', zip, into])
+    const inside = join(into, `${productName}.app`)
+    if (!existsSync(inside)) fail(`${basename(zip)} holds no ${productName}.app.`)
+    const verified = run('codesign', ['--verify', '--deep', '--strict', inside])
+    if (!verified.ok) fail(`The app in ${basename(zip)} doesn't hold its signature:\n${verified.said}`)
+    const plist = join(inside, 'Contents', 'Info.plist')
+    const read = (key: string) => run('/usr/libexec/PlistBuddy', ['-c', `Print :${key}`, plist]).said
+    if (read('CFBundleIdentifier') !== 'dev.althar.app') fail(`The app in ${basename(zip)} isn't dev.althar.app.`)
+    if (read('CFBundleShortVersionString') !== version) fail(`The app in ${basename(zip)} isn't ${version}.`)
+    if (notarized && !run('xcrun', ['stapler', 'validate', inside]).ok) fail(`The app in ${basename(zip)} has no notarization ticket.`)
+  } finally {
+    rmSync(into, { recursive: true, force: true })
+  }
+}
+
 /** Checks what was made, and says how it stands. */
 const check = () => {
   for (const path of [app, ...assets]) if (!existsSync(path)) fail(`${path} is missing. Run \`bun run release\` first.`)
   const fed = readFileSync(feed, 'utf8')
   if (!fed.startsWith(`version: ${version}\n`)) fail(`latest-mac.yml isn't for ${version}:\n${fed}`)
+  const wrong = mismatches(fed, dist, [basename(zip), basename(dmg)])
+  if (wrong.length > 0) fail(`latest-mac.yml doesn't match the packages:\n${wrong.join('\n')}`)
+  checkZipped(stapled())
   const verified = run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app])
   if (!verified.ok) fail(`The app's signature doesn't hold:\n${verified.said}`)
   say(`\nSigned by ${signer()}; codesign --verify --deep --strict passes.`)
@@ -113,6 +143,13 @@ if (!stapled() && !args.has('--unnotarized'))
 if (!existsSync(notes)) fail(`Write the release notes first, a few plain lines for testers: ${notes}`)
 if (git('status', '--porcelain') !== '') fail('The tree has changes not committed: publish what a commit holds.')
 const commit = git('rev-parse', 'HEAD')
+// What was built, from where: the packages in out/dist outlive a checkout, so they must be this commit's, made clean.
+if (!existsSync(built)) fail(`${built} is missing: package again with \`bun run release\`.`)
+const from = JSON.parse(readFileSync(built, 'utf8')) as { readonly version?: string; readonly commit?: string; readonly dirty?: boolean }
+if (from.version !== version || from.commit !== commit || from.dirty !== false)
+  fail(
+    `The packages were made from ${from.commit?.slice(0, 7) ?? 'an unknown commit'}${from.dirty === false ? '' : ' with changes not committed'}, not from ${commit.slice(0, 7)} as it is: package again here.`,
+  )
 if (!run('git', ['merge-base', '--is-ancestor', commit, 'origin/main']).ok)
   fail(`${commit.slice(0, 7)} isn't on main as GitHub has it: publish from main, pushed.`)
 if (!run('gh', ['auth', 'status']).ok) fail('gh is not signed in: `gh auth login`.')

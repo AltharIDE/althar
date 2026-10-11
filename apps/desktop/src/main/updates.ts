@@ -43,18 +43,42 @@ export interface UpdaterPort {
   readonly check: () => Promise<unknown>
   /** Quits, installs the update that is in place, and opens the new version. */
   readonly install: () => void
+  /**
+   * Waits out the runtime's gathering of changes (Nudges, 250 ms) and a
+   * little more, so work that began just before the person pressed Restart
+   * has said so before Althar quits.
+   */
+  readonly settle: () => Promise<void>
+}
+
+/** How long a restart waits for word of work that began just before it was asked for. */
+export const SETTLE = 1000
+
+/**
+ * Asks the feed, as electron-updater does it: a version found starts
+ * downloading, and the promise of that download fails as the `error` event
+ * says it did. The event is what this listens to, so the promise's failure is
+ * caught here rather than left unhandled.
+ */
+export const checkFor = async (updater: {
+  readonly checkForUpdates: () => Promise<{ readonly downloadPromise?: Promise<unknown> | null } | null>
+}) => {
+  const result = await updater.checkForUpdates()
+  void result?.downloadPromise?.catch(() => undefined)
+  return result
 }
 
 /** The update's course, as the updater's events tell it, and the person's restart. */
 export const updating = (port: UpdaterPort, changed: (glance: UpdateGlance) => void) => {
   let update: Update = { kind: 'none' }
-  let working = false
+  // Unknown until the runtime first says: then nothing restarts, as if work ran.
+  let working: boolean | null = null
   let restarting = false
   let restartFailed: string | null = null
 
   const glance = (): UpdateGlance => ({
     ready: update.kind === 'ready' ? update.version : null,
-    working,
+    working: working !== false,
     restarting,
     failed: restartFailed,
   })
@@ -117,12 +141,24 @@ export const updating = (port: UpdaterPort, changed: (glance: UpdateGlance) => v
       }
       return update
     },
-    /** Restarts into the update the person asked for: only one in place, and never while work runs. Whether it began. */
-    restart: (): boolean => {
-      if (update.kind !== 'ready' || working || restarting) return false
+    /**
+     * Restarts into the update the person asked for: only one in place, and
+     * never while work runs, or while the runtime hasn't said whether any
+     * does. Asked again after a pause, so a turn that began a moment before
+     * the press is seen. Whether it began.
+     */
+    restart: async (): Promise<boolean> => {
+      if (update.kind !== 'ready' || working !== false || restarting) return false
       restarting = true
       restartFailed = null
       tell()
+      await port.settle()
+      if (!restarting) return false
+      if (update.kind !== 'ready' || working !== false) {
+        restarting = false
+        tell()
+        return false
+      }
       try {
         port.install()
       } catch (error) {

@@ -200,6 +200,8 @@ await build({
       // What macOS shows as it asks for the microphone, the first time someone dictates.
       extendInfo: {
         NSMicrophoneUsageDescription: 'Althar listens only while you dictate into a message, and turns what you say into text on this Mac.',
+        // Squirrel refuses an update whose app is older than this one, whatever version the feed claims for it.
+        ElectronSquirrelPreventDowngrades: true,
       },
     },
     dmg: { sign: !adHoc },
@@ -222,4 +224,10 @@ if (auth !== null) {
 const app = join(dist, process.arch === 'arm64' ? 'mac-arm64' : 'mac', `${own.productName}.app`)
 for (const path of [app, dmg, made('-mac.zip'), join(dist, 'latest-mac.yml')])
   if (!existsSync(path)) throw new Error(`The package is missing ${path}`)
+// What this was built from, for publishing to check against what it would publish.
+const git = (...list: ReadonlyArray<string>) => execFileSync('git', list, { cwd: desktop, encoding: 'utf8' }).trim()
+writeFileSync(
+  join(dist, 'build.json'),
+  `${JSON.stringify({ version: own.version, commit: git('rev-parse', 'HEAD'), dirty: git('status', '--porcelain') !== '' }, null, 2)}\n`,
+)
 process.stdout.write(`\n${app}\n${dmg}\n${made('-mac.zip')}\n${join(dist, 'latest-mac.yml')}\n`)
