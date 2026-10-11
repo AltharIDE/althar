@@ -249,8 +249,12 @@ service's model.
   commits after, answering the person, a review or failed checks, waits on the
   task's branch until the person has looked at it and pushes it: the task
   says how many commits aren't on the pull request yet, and Push pushes up to
-  the commit they saw, never one the lead made since. The lead has no tool to
-  push.
+  the commit they saw, never one the lead made since. The lead never pushes:
+  when the person asks it to, or what it committed should go up, it asks them
+  to (`push_to_pull_request`), which puts the commits that would go up in the
+  thread, with Push. Pressing it pushes up to the head shown; the request
+  then says it was pushed and the lead hears so. Where the branch changed
+  since, nothing is pushed, and the request shows the branch as it is now.
 - **Without a connection, the person pushes the task's branch with their own
   git** (ADR-016): to the remote that repository's work goes to (the one its
   default branch follows, else `origin`, else its only remote), under the
@@ -308,7 +312,7 @@ service's model.
 - **Everything arrives in the task's thread,** once: comments, reviews,
   checks finishing, merged, closed, marked ready. Bots aside.
 - **Only some of it reaches the lead.** Failed checks do, with the end of
-  their logs: the lead fixes and commits, and the person pushes. So do comments and reviews from the person and from people who
+  their logs: the lead fixes and commits, and asks the person to push. So do comments and reviews from the person and from people who
   can write to the repository (GitHub's owners, members and collaborators).
   On a public repository anyone can comment, so what anyone else says stays in
   the thread, marked as not passed on, for the person to pass on in their own
