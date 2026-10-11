@@ -267,6 +267,7 @@ export function Outputs({
         onReviewDiff={() => onOpenFile()}
         diffKey={text.diffKey}
         onOpenFile={onOpenFile}
+        locked={pending}
         {...(task.merged.some((one) => one.ahead > 0 && one.remote !== null) && onPushHere !== undefined
           ? { onPush: onPushHere, pushing: acting === doing.pushHere }
           : {})}

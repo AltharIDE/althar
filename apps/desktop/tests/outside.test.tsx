@@ -1258,6 +1258,29 @@ describe('a project, reaching outside', () => {
     await waitFor(() => expect((screen.getByRole('button', { name: 'Accept and merge' }) as HTMLButtonElement).disabled).toBe(false))
   })
 
+  it('holds the push of what merged here while a pull request’s push is on its way', async () => {
+    let done = () => {}
+    const push = vi.fn(() => new Promise<void>((resolve) => (done = resolve)))
+    const merged = [{ repository: 'web', name: 'web', branch: 'main', remote: 'origin/main', ahead: 2 }]
+    const { client } = fakeClient({
+      push,
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: { ...snapshot().task, phase: 'ready', changes: [change({ unpushed: 1, localHead: 'def456' })], merged, commits: 4 },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Push 1 commit' }))
+    await waitFor(() => expect(push).toHaveBeenCalled())
+    const here = screen.getByRole('button', { name: 'Push main to origin' }) as HTMLButtonElement
+    expect(here.disabled).toBe(true)
+    expect(here.getAttribute('aria-busy')).toBeNull()
+    done()
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Push main to origin' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+
   it('shows a task’s issue and pull request on its card, and its ending on its plan, which can change', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
