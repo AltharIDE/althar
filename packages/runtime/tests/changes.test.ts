@@ -102,7 +102,7 @@ describe('a task that ends in a pull request', () => {
       // What it pushed is what the lead committed; Althar commits nothing of its own, and is its co-author.
       assert.strictEqual(git(bare, 'log', '-1', '--format=%an %s', 'althar/add-a-retry'), 'Fake Change it')
       assert.strictEqual(git(bare, 'log', '-1', '--format=%B', 'althar/add-a-retry'), `Change it\n\n${coAuthorLine}`)
-      assert.include(opened?.body, 'Opened by Althar.')
+      assert.include(opened?.body, 'Opened by [Althar](https://github.com/AltharIDE/althar).')
       assert.include(git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry'), 'change.txt')
 
       const threadId = ready?.threadId ?? ''
@@ -201,7 +201,7 @@ describe('a task that ends in a pull request', () => {
       // The lead's description, in the template: its headings and checklist kept, the box it ticked unticked, Althar's own below.
       assert.strictEqual(
         opened?.body,
-        '## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\n### Review\n\nPassed after one round of review.\n\n<sub>Opened by Althar.</sub>',
+        '## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\n### Review\n\nPassed after one round of review.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
       )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
