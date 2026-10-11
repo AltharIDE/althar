@@ -236,6 +236,8 @@ export function Question({
       first.focus({ preventScroll: true })
       const card = first.closest('form')
       if (card != null) revealInScroller(card, 'center')
+      /* whatever the card's size, the focused choice stays in view */
+      revealInScroller(first)
     })
     return () => {
       live = false

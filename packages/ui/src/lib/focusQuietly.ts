@@ -16,7 +16,9 @@ export function revealInScroller(el: HTMLElement, block: 'nearest' | 'center' = 
   const a = el.getBoundingClientRect()
   const b = box.getBoundingClientRect()
   if (block === 'center') {
-    box.scrollTop += a.top + a.height / 2 - (b.top + b.height / 2)
+    if (a.top >= b.top && a.bottom <= b.bottom) return
+    /* a target taller than the scroller is shown from its top, not its middle */
+    box.scrollTop += a.height > b.height ? a.top - b.top : a.top + a.height / 2 - (b.top + b.height / 2)
   } else if (a.top < b.top) {
     box.scrollTop -= b.top - a.top
   } else if (a.bottom > b.bottom) {
