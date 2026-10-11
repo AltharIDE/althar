@@ -774,11 +774,17 @@ What keeps each agent asking, whatever its own settings say:
 command carries only its text, and no rule can tell what a script will write.
 So where an agent has a sandbox, it keeps commands inside the worktree:
 
-- Codex's, in `workspace-write`, with the network off.
+- Codex's, in `workspace-write`, with the network off. Its only network
+  setting (`network_access`) is all or nothing, with no localhost-only form, so
+  it stays off.
 - Claude Code's, switched on for every session. A command that stays inside
   runs without asking. One that needs the network asks per host. A write
   outside is blocked, and Claude reports it instead of retrying outside the
-  sandbox unless asked to.
+  sandbox unless asked to. A lead's sandbox also lets commands bind and
+  listen on localhost (`sandbox.network.allowLocalBinding`), so tests that
+  start a server, and a prototype's throwaway showcase server that the person
+  opens from the Running pill, don't have to leave it. This widens nothing
+  else: no further egress and no further writable paths. Readers don't get it.
 - OpenCode has none yet. Wrapping it in the same sandbox-runtime Claude uses
   is next.
 

@@ -43,6 +43,15 @@ describe('the agent registry', () => {
     assert.includeMembers(meta.claudeCode.options.settings.permissions.ask, ['Bash', 'Edit', 'Write'])
   })
 
+  it('lets a Claude Code lead listen on localhost in its sandbox, and a reader not', () => {
+    type Sandbox = { network?: { allowLocalBinding?: boolean } }
+    const sandboxOf = (role?: 'reader') =>
+      (agents['claude-code'].sessionMeta?.(role) as { claudeCode: { options: { settings: { sandbox: Sandbox } } } }).claudeCode
+        .options.settings.sandbox
+    assert.deepStrictEqual(sandboxOf().network, { allowLocalBinding: true })
+    assert.isUndefined(sandboxOf('reader').network)
+  })
+
   it('makes Claude Code a reader: its edits denied, and every command asking', () => {
     const meta = agents['claude-code'].sessionMeta?.('reader') as {
       claudeCode: {
