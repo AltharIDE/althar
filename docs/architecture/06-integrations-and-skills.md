@@ -262,7 +262,7 @@ service's model.
   something is pushed to a host Althar knows but isn't connected to, the task
   says what connecting would add: the pull request opened by Althar, its
   checks and reviews back to the lead, the merge on accept. Nothing is said
-  of connecting before then; the project's menu always has Connect.
+  of connecting before then; the project's settings always have Connect.
 - **A repository without a pull request merges here, as the person says.**
   Where a task ended on its branch (no host Althar knows, a host not
   connected, or "push the branch only"), the person can merge it into each

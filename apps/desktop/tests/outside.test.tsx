@@ -10,7 +10,7 @@ import { useBoard } from '../src/renderer/features/board/useBoard'
 import { connectionsOf, ConnectionsView, servicesOf } from '../src/renderer/features/connections/ConnectionsView'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
-import { useProjectMenu } from '../src/renderer/features/project/useProjectMenu'
+import { useProjectSettings } from '../src/renderer/features/project/useProjectSettings'
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
@@ -455,14 +455,14 @@ function Project() {
       model={useProject('p1')}
       board={useBoard('p1')}
       connections={useConnections()}
-      menu={{ model: useProjectMenu('p1', vi.fn()), onRepositories: vi.fn(), onRules: vi.fn() }}
+      settings={{ model: useProjectSettings('p1', vi.fn()), onRepositories: vi.fn(), onRules: vi.fn() }}
       onTask={vi.fn()}
     />
   )
 }
 
 describe('a project, reaching outside', () => {
-  it('says nothing of an unconnected host up front, and connects it from the project’s menu in the bar, on any view', async () => {
+  it('says nothing of an unconnected host up front, and connects it from the project’s settings, on any view', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
         coordinatorSnapshot({ host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: false } }),
@@ -472,16 +472,26 @@ describe('a project, reaching outside', () => {
     await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
     // Pushing needs no connection, so nothing stands in the way of the conversation.
     expect(screen.queryByText(/isn't connected to GitHub/)).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'More for this project' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Connect GitHub' }))
+    /** The host's module in the project's settings, which says it isn't connected. */
+    const connectFromSettings = async () => {
+      await userEvent.click(screen.getByRole('button', { name: 'Settings' }))
+      const panel = within(await screen.findByRole('dialog', { name: 'meridian’s settings' }))
+      const github = panel.getByRole('button', { name: /^GitHub/ })
+      expect(github.textContent).toContain('Not connected')
+      await userEvent.click(github)
+    }
+    await connectFromSettings()
     const dialog = await screen.findByRole('dialog', { name: 'Code hosts and trackers' })
     expect(within(dialog).getByText('GitHub')).toBeTruthy()
+    // The settings closed as it opened; only the code hosts are over the project.
+    expect(screen.queryByRole('dialog', { name: 'meridian’s settings' })).toBeNull()
     await userEvent.click(within(dialog).getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // Focus goes back to the button the settings opened from.
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Settings' })))
     // On the board too, where nothing of the conversation shows.
     await userEvent.click(screen.getByRole('radio', { name: 'Board' }))
-    await userEvent.click(screen.getByRole('button', { name: 'More for this project' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Connect GitHub' }))
+    await connectFromSettings()
     expect(await screen.findByRole('dialog', { name: 'Code hosts and trackers' })).toBeTruthy()
   })
 

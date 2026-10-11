@@ -1,46 +1,26 @@
-import type { ReactNode } from 'react'
-
-import { Room, RoomSwitch, type WorkNeed, WorkStatus } from '@althar/ui'
+import { Room, RoomSwitch } from '@althar/ui'
 
 import { BarEnd } from '../tabs/TabsFrame'
 
 /*
- * A project's end of the window's bar, beside the tabs: its views, what
- * waits on the person when anything does (pointed at, what it is; clicked,
- * the first of it), and its menu (rename, repositories, rules, remove).
- * Tasks start from the conversation, never from a button. The project's own screen has it; a task has its own header in
- * the bar under the tabs. What runs isn't counted here: running stays
- * still, and the tab's mark says it. The views have no shortcut of their
- * own: ⌘ and a number belongs to the tabs, and b steps through the views.
+ * A project's end of the window's bar, beside the tabs: its views, and
+ * nothing else. What needs the person, and the project's settings, are on
+ * its front page under the bar. Tasks start from the conversation, never
+ * from a button. The views have no shortcut of their own: ⌘ and a number
+ * belongs to the tabs, and b steps through the views.
  */
 
 export function ProjectBar({
   room,
   onRoom,
-  yours,
-  needs,
-  onYours,
-  menu,
 }: {
   /** The project's view, which the bar starts with. */
   room: Room
   onRoom: (room: Room) => void
-  /** How many wait on the person; null until the board is read, when nothing is said. */
-  yours: number | null
-  /** What waits on the person, each opening its task, for the count's preview. */
-  needs?: ReadonlyArray<WorkNeed>
-  /** Opens the first thing that needs the person; without it, the count only says how many. */
-  onYours?: () => void
-  /** The project's menu (`ProjectMenu`); without it, none. */
-  menu?: ReactNode
 }) {
   return (
     <BarEnd>
       <RoomSwitch value={room} onChange={onRoom} text={{ key: () => '' }} />
-      {yours !== null && yours > 0 && (
-        <WorkStatus yours={yours} {...(onYours === undefined ? {} : { onYours })} {...(needs === undefined ? {} : { needs })} />
-      )}
-      {menu}
     </BarEnd>
   )
 }

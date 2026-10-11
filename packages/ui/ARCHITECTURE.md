@@ -19,8 +19,8 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `dock` | What opens beside the board: Dock and a peek for each kind of card. |
 | `home` | Work across every project, as the home shows it: NeedLine, ProjectList, WorkTicks, SinceRow, HomeRest, ProjectWord; and what needs you at the edge of the screen: Island, EdgeSheet. |
 | `outputs` | What a task made: ChangeSet, ArtifactCard, ChangeView, and NoOutputs (where its lead has looked, before it has made anything). |
-| `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu, and the questions they ask first: RenameProject, RemoveProject, AbandonTask. |
-| `setup` | What comes before a project, what sets one up, and Settings: Runtimes, AgentInstall (an agent not on this device, and downloading it), SourceMap, RepositoryMap (a project's folders wired to where their work goes), Accounts and AccountSignIn, Connections, AgentTabs, ModelSwitches, ControlCenter, Preferences (the app's own: KeepAwake, OpenFilesIn, NotificationSettings, as rows of a SettingList that sit in any frame), and Conventions (NamingRule, TemplateSources). |
+| `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, ProjectFront (the top of a project's screen), TaskHeader, TaskMenu, and the questions they ask first: RemoveProject, AbandonTask. |
+| `setup` | What comes before a project, what sets one up, and Settings: Runtimes, AgentInstall (an agent not on this device, and downloading it), SourceMap, RepositoryMap (a project's folders wired to where their work goes), Accounts and AccountSignIn, Connections, AgentTabs, ModelSwitches, ControlCenter, ProjectIdentity (a project's name and ink, changed in place in its settings), Preferences (the app's own: KeepAwake, OpenFilesIn, NotificationSettings, as rows of a SettingList that sit in any frame), and Conventions (NamingRule, TemplateSources). |
 | `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), Start (the first screen: the agents answering round the mark, and picking the first project's repositories), Home, NewProject (a project before it is made, in a tab of its own: its name and mark, its colour, its folders as read, what this computer has named like it, and what reading them found), ProjectRules, ProjectRepositories. |
 
 The rules between them:
@@ -117,12 +117,12 @@ Widgets with real behaviour are built on Radix primitives (`radix-ui`), styled t
 | Radix primitive | Ours |
 | --- | --- |
 | Popover | Popover, ControlCenter |
-| DropdownMenu | Menu, TaskMenu, ProjectMenu |
+| DropdownMenu | Menu, TaskMenu |
 | Tooltip | HoverCard, and Tooltip for a name or a shortcut that only shows on hover. Both open for keyboard focus too. |
-| Dialog | Dialog (a short question: RenameProject, RemoveProject, AbandonTask), ModelBrowser, Lightbox. The title sits in `VisuallyHidden` when it isn't shown. |
+| Dialog | Dialog (a short question: RemoveProject, AbandonTask), ModelBrowser, Lightbox. The title sits in `VisuallyHidden` when it isn't shown. |
 | (none) | SidePanel, which is ours: see below. |
 | Select | Select (`position="popper"`) |
-| RadioGroup | Segmented, Choices, ModelPick's list, ModelBrowser's filters |
+| RadioGroup | Segmented, Choices, ModelPick's list, ModelBrowser's filters, ProjectIdentity's inks |
 | Checkbox | CheckList |
 | Tabs | StepPanel, AgentTabs |
 | Collapsible | Disclosure / Fold. Content is force-mounted so it can animate, and `inert` while closed. |

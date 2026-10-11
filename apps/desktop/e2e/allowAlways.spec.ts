@@ -19,8 +19,11 @@ import { launch, openFirstProject, say, startTask, toConversation } from './supp
  */
 
 const openRules = async (page: Page) => {
-  await page.getByRole('button', { name: 'More for this project' }).click()
-  await page.getByRole('menuitem', { name: 'Project rules' }).click()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page
+    .getByRole('dialog', { name: /’s settings$/ })
+    .getByRole('button', { name: /^Rules/ })
+    .click()
 }
 
 /** Starts a task by telling the coordinator, and opens its conversation once it is ready. */

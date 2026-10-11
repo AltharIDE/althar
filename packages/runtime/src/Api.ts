@@ -421,6 +421,16 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      SetProjectInk: ({ commandId, projectId, ink }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.set_ink', { projectId, ink }, commandId)
+              yield* projects.setInk(projectId, ink, said.commandId)
+            }),
+          ),
+        ),
       RemoveProject: ({ commandId, projectId }) =>
         once(
           commandId,

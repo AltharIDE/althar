@@ -15,6 +15,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Role | `RepositoryBinding.role` | What a repository is to its project: Service, Frontend, Infrastructure, Library, Docs or Other. Suggested from its name, changed on the Repositories screen; tasks and the coordinator are told it. |
 | Leave out | `RepositoryBinding.detached_at` | Taking a repository out of a project: new tasks can't change it and the coordinator stops reading it. Tasks made with it keep it. Nothing in its folder changes. Not "remove" or "detach". |
 | Where tasks open pull requests | `RepositoryBinding.change_target` | For a fork (an `upstream` remote beside `origin`): on the repository it was forked from, or on the fork. The branch is pushed to the fork either way. |
+| Colour | `Project.ink` | The ink a project's mark is drawn in: one of eight, picked for it when it is made, changed under "Name and colour" in its settings. Never "ink" on screen. |
 | Remove from Althar | `Project.archived_at` | Taking a project out of the window and the home. Its agents stop and nothing it planned starts. Its folders, its tasks' worktrees and their branches stay. Opening its folder again makes a new project. Not "delete" or "archive". |
 | Agent | runtime, adapter | Claude Code, Codex, OpenCode and the like, as installed on this machine. |
 | Account | `AgentAccount`, its home | One sign-in of an agent, kept in a folder of its own. The agent's usual sign-in is its first account; the person can add more, or bring in folders a switcher made. Named by the person ("work"), it shows after the agent's name: "Codex (work)". |
@@ -38,7 +39,7 @@ say the right. When something new needs a name on screen, add it here first.
 | On screen | In the model | What it is |
 |---|---|---|
 | Call | attention request | Something only a person can decide. Violet. |
-| Needs you | attention requests addressed to you, and tasks ready to accept | The board lane, the count in the title bar, and the violet number on a project's tab (the home's tab counts every project). |
+| Needs you | attention requests addressed to you, and tasks ready to accept | The board lane, the count at the top of a project's screen, and the violet number on a project's tab (the home's tab counts every project). |
 | Tab | a project the window keeps open | One per project the person keeps open, at the top of the window, after the home's. It goes back to where in the project they last were. ⌘1 is the home, ⌘2 onwards the projects. |
 | Round the notch, In the menu bar | the edge (`main/edge.ts`) | Where Althar shows what needs you while you're in another app: an island round the notch on a Mac that has one, which is the notch alone until something needs you, or Althar's mark in the menu bar, with a dot while something needs you. Either opens to what needs you, where a permission is answered in place, with the work in progress counted in one line under it. Settings calls the choice "While you're in another app", and offers it only with a notch. |
 | Permission | permission attention request | A call asking whether an agent may do something, such as run a command or change a file. Allow it once or always, or don't: with what to do instead, or never (on the edge, once or not). Several at once stack, with Allow all. |

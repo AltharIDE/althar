@@ -337,6 +337,31 @@ export function ControlMarks({ marks, text }: { marks: readonly MarkGlance[]; te
   )
 }
 
+export interface ControlWordsProps {
+  /** Where it stands, in a few words: Connected as balazs. */
+  title: ReactNode
+  /** A quieter line under it, which wraps: what always asks you. */
+  line?: ReactNode
+  /** The mark of the product it is about, before the words. */
+  brand?: Brand
+  /** Any other picture before the words, 30px square: a project's mark. */
+  mark?: ReactNode
+}
+
+/** Where something stands in words, with a quieter line under them: inside a module with nothing to count. */
+export function ControlWords({ title, line, brand, mark }: ControlWordsProps) {
+  return (
+    <span className={s.words}>
+      {brand !== undefined && <BrandChip brand={brand} size={30} className={s.flatChip} />}
+      {mark}
+      <span className={s.agentWords}>
+        <span className={s.wordsTitle}>{title}</span>
+        {line !== undefined && <span className={s.wordsLine}>{line}</span>}
+      </span>
+    </span>
+  )
+}
+
 export type ControlPictureProps = RootProps<
   'button',
   {

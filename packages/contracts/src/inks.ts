@@ -9,8 +9,8 @@ import { ProjectInk } from './Api'
 /**
  * The first ink, from where the seed (the project's id) points, that no
  * other project has, while one is free. It is chosen once, when the project
- * is made, and kept: worked out again, it would change as other projects
- * come and go.
+ * is made, and kept until the person picks another: worked out again, it
+ * would change as other projects come and go.
  */
 export const inkFor = (seed: string, taken: ReadonlyArray<string>): ProjectInk => {
   const inks = ProjectInk.literals

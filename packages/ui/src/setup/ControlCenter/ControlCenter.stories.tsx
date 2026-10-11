@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
 import { Logo } from '../../foundations/Logo/Logo'
 import {
@@ -33,6 +34,7 @@ import {
   ControlPicture,
   ControlSheet,
   ControlToggle,
+  ControlWords,
   type ControlCenterProps,
   DockPreview,
 } from './ControlCenter'
@@ -263,6 +265,18 @@ export const AllStates: Story = {
                 </ControlModule>
                 <ControlToggle title="Keep awake" on onChange={fn()} glyph={<Icon name="cup" size={16} />} />
                 <ControlPicture title="App icon" name="Cobalt" picture={COBALT.picture} onClick={fn()} />
+                <ControlModule title="GitHub" span={2} onClick={fn()}>
+                  <ControlWords brand={Brand.GitHub} title="Connected" line="as balazs" />
+                </ControlModule>
+                <ControlModule title="Linear" span={2} aside="Connect" onClick={fn()}>
+                  <ControlWords brand={Brand.Linear} title="Not connected" />
+                </ControlModule>
+                <ControlModule title="Rules" onClick={fn()}>
+                  <ControlWords
+                    title="The coordinator decides"
+                    line="Always asks you: deploying and publishing, pushing to the default branch, force pushes and writing outside the task’s worktree."
+                  />
+                </ControlModule>
               </ControlGrid>
             </div>
           ),

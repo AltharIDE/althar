@@ -1,11 +1,12 @@
+import { act, renderHook } from '@testing-library/react'
 import { Brand } from '@althar/ui'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { agentLineOf, brandOf } from '../src/renderer/shared/agents'
 import { knownModelName, standsFor } from '@althar/contracts'
 import { isSending, mergeItems, newestReads, queueShown, sending, unsent, waiting } from '../src/renderer/shared/items'
 import { items } from './fixtures'
-import { ago, clock, took } from '../src/renderer/shared/time'
+import { ago, clock, took, useNow } from '../src/renderer/shared/time'
 
 describe('agents', () => {
   it('draws each agent with its maker’s mark, when it has one', () => {
@@ -114,6 +115,29 @@ describe('a clock', () => {
     )
     const november = new Date('2026-11-20T09:00:00')
     expect(clock(november.toISOString(), now)).toContain(november.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }))
+  })
+})
+
+describe('the time now', () => {
+  it('moves on each second while it ticks, or as slowly as asked', () => {
+    vi.useFakeTimers({ now: new Date('2026-10-03T12:00:00.000Z') })
+    try {
+      const seconds = renderHook(() => useNow(true))
+      const minutes = renderHook(() => useNow(true, 60_000))
+      const still = renderHook(() => useNow(false))
+      act(() => {
+        vi.advanceTimersByTime(30_000)
+      })
+      expect(seconds.result.current).toBe('2026-10-03T12:00:30.000Z')
+      expect(minutes.result.current).toBe('2026-10-03T12:00:00.000Z')
+      act(() => {
+        vi.advanceTimersByTime(30_000)
+      })
+      expect(minutes.result.current).toBe('2026-10-03T12:01:00.000Z')
+      expect(still.result.current).toBe('2026-10-03T12:00:00.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

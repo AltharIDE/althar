@@ -25,6 +25,7 @@ import {
   type ChangeTarget,
   type ProjectInk,
   type ProjectList,
+  type ProjectInk,
   type ProjectRepository,
   type ProjectSummary,
   type RepositoryRole,
@@ -187,6 +188,8 @@ export interface Client {
   /** A project's rules. */
   /** Renames a project; its mark and its worktrees' folders stay. */
   readonly renameProject: (projectId: string, name: string) => Promise<void>
+  /** Draws a project's mark in another ink, wherever it shows. */
+  readonly setProjectInk: (projectId: string, ink: ProjectInk) => Promise<void>
   /** Removes a project from Althar: its agents stop; its folders, worktrees and branches stay. */
   readonly removeProject: (projectId: string) => Promise<void>
   readonly getRepositories: (projectId: string) => Promise<ReadonlyArray<ProjectRepository>>
@@ -387,6 +390,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     connectToken: (input) => command((commandId) => api.ConnectToken({ commandId, ...input })),
     disconnect: (connectionId) => command((commandId) => api.Disconnect({ commandId, connectionId })),
     renameProject: (projectId, name) => command((commandId) => api.RenameProject({ commandId, projectId, name })),
+    setProjectInk: (projectId, ink) => command((commandId) => api.SetProjectInk({ commandId, projectId, ink })),
     removeProject: (projectId) => command((commandId) => api.RemoveProject({ commandId, projectId })),
     getRepositories: (projectId) => settle(api.GetRepositories({ projectId })),
     addRepositories: (projectId, grant) => command((commandId) => api.AddRepositories({ commandId, projectId, grant })),
