@@ -1,7 +1,9 @@
 import { createServer, type Server } from 'node:http'
+import { homedir } from 'node:os'
 
 import {
   type Account,
+  type AccessLine,
   addressOf,
   authorizeUrl,
   awaitDeviceFlow,
@@ -10,6 +12,7 @@ import {
   type Credential,
   exchangeCode,
   hostedOf,
+  identify,
   type KnownHosts,
   type LinkRef,
   makePkce,
@@ -18,6 +21,7 @@ import {
   type Product,
   type ProductInfo,
   refreshToken,
+  type Service,
   SignInEnded,
   startDeviceFlow,
   type TokenSet,
@@ -28,8 +32,9 @@ import { Cause, Clock, Context, type Crypto, Deferred, Duration, Effect, Exit, F
 import { SqlClient, type SqlError } from 'effect/sql'
 import type { Ledger } from '@althar/persistence-sqlite'
 
-import { Connectors } from './Config'
+import { type CliTool, Connectors } from './Config'
 import { NotFound } from './errors'
+import { git, namedRemotes } from './git'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
 import { Secrets, SecretsUnavailable } from './Secrets'
@@ -58,6 +63,67 @@ export class NotConnected extends Schema.TaggedError<NotConnected>()('NotConnect
 export class SignInUnavailable extends Schema.TaggedError<SignInUnavailable>()('SignInUnavailable', {
   product: Schema.String,
 }) {}
+
+/** A command-line tool isn't signed in to the host here, so there is no sign-in of its to take. */
+export class CliSignedOut extends Schema.TaggedError<CliSignedOut>()('CliSignedOut', {
+  tool: Schema.String,
+  host: Schema.String,
+}) {}
+
+/** A token for another account than the connection it was to sign in again. */
+export class OtherAccount extends Schema.TaggedError<OtherAccount>()('OtherAccount', {
+  product: Schema.String,
+  /** Who the token is for. */
+  login: Schema.String,
+  /** Who the connection signs in as. */
+  expected: Schema.String,
+}) {}
+
+/** A project's repositories on an instance of a service, as their remotes name them. */
+export interface Place {
+  readonly product: Product
+  readonly webUrl: string
+  readonly project: string
+  /** The remote that names it, where git was asked: origin. */
+  readonly remote: string | null
+  /** The repositories' paths there: northwind/meridian-api. */
+  readonly repositories: ReadonlyArray<string>
+}
+
+/** A command-line tool's sign-in on this device, for an instance. */
+export interface CliSignIn {
+  readonly product: Product
+  readonly webUrl: string
+  readonly tool: CliTool
+  readonly account: string
+  readonly scopes: ReadonlyArray<string> | null
+}
+
+/** What connecting a service starts from. */
+export interface Guide {
+  readonly service: Service
+  readonly places: ReadonlyArray<Place>
+  readonly clis: ReadonlyArray<CliSignIn>
+  readonly email: { readonly address: string; readonly project: string | null } | null
+  readonly tokenPages: ReadonlyArray<{ readonly product: Product; readonly webUrl: string; readonly url: string }>
+}
+
+/** What answered at an address, and where a token is made there. */
+export interface Found {
+  readonly product: Product | null
+  readonly webUrl: string
+  readonly reason: 'invalid' | 'unreachable' | 'other' | null
+  readonly tokenPage: string | null
+}
+
+/** What a connection can do, as its service says. */
+export interface Check {
+  readonly connectionId: string
+  readonly lines: ReadonlyArray<AccessLine>
+  readonly expiresAt: string | null
+  readonly renews: boolean
+  readonly settings: string
+}
 
 export interface ConnectionInfo {
   readonly id: string
@@ -154,14 +220,30 @@ export class Connections extends Context.Service<
     }): Effect.Effect<SignInStart, unknown>
     signIn(flowId: string): Effect.Effect<SignInState, NotFound>
     cancelSignIn(flowId: string): Effect.Effect<void>
+    /** Connects with a pasted token; with a connection, signs it in again, keeping its address, email and key, for its own account. */
     connectToken(input: {
       readonly product: Product
       readonly webUrl?: string
       readonly user?: string
       readonly key?: string
       readonly token: string
+      readonly connectionId?: string
       readonly actorId: ActorId
     }): Effect.Effect<ConnectionInfo, unknown>
+    /** Connects with gh's or glab's sign-in on this device, taking a copy of its token. */
+    connectCli(input: {
+      readonly product: Product
+      readonly webUrl: string
+      readonly actorId: ActorId
+    }): Effect.Effect<ConnectionInfo, unknown>
+    /** Where the projects' code is: on the hosted services and servers already connected, as their stored remotes say. */
+    readonly places: Effect.Effect<ReadonlyArray<Place>, unknown>
+    /** What connecting a service starts from, each server the projects' remotes name asked what it is. */
+    guide(service: Service): Effect.Effect<Guide, unknown>
+    /** Which of a service's products answers at an address. */
+    findServer(service: Service, typed: string): Effect.Effect<Found, unknown>
+    /** Asks the service what a connection can do. */
+    check(connectionId: string): Effect.Effect<Check, unknown>
     remove(connectionId: string, actorId: ActorId): Effect.Effect<void, unknown>
     /** A connection's adapters, signed in through it. */
     adapters(connectionId: string): Effect.Effect<Adapters & { readonly info: ConnectionInfo }, unknown>
@@ -364,13 +446,18 @@ export class Connections extends Context.Service<
         return adapters
       }
 
-      /** Adds a connection, or renews one for the same account, once its credential has said who it signs in as. */
+      /**
+       * Adds a connection, or renews one for the same account, once its
+       * credential has said who it signs in as; to sign one in again, only
+       * for the account it was.
+       */
       const save = (input: {
         readonly product: Product
         readonly webUrl: string
         readonly auth: ConnectionInfo['auth']
         readonly secret: TokenSet | { readonly token: string; readonly user: string | null; readonly key: string | null }
         readonly actorId: ActorId
+        readonly sameAs?: { readonly id: string; readonly login: string }
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -388,6 +475,8 @@ export class Connections extends Context.Service<
           const account: Account = yield* (
             (made.host ?? made.tracker)?.account ?? Effect.fail(new NotConnected({ product: input.product, what: 'an account' }))
           )
+          if (input.sameAs !== undefined && account.id !== input.sameAs.id)
+            return yield* new OtherAccount({ product: input.product, login: account.login, expected: input.sameAs.login })
           const at = yield* timestamp
           const [existing] = yield* sql<Row>`
             SELECT id, product, web_url, api_url, account_login, account_name, account_id, auth, credential_ref, state FROM connections
@@ -588,6 +677,331 @@ export class Connections extends Context.Service<
           } satisfies SignInStart
         })
 
+      /* ---- connecting: where the code is, the ways in, and what a connection can do ---- */
+
+      const hostnameOf = (url: string) => {
+        try {
+          return new URL(url).hostname.toLowerCase()
+        } catch {
+          return ''
+        }
+      }
+
+      /** Each repository of every project, with its stored remotes, and where it is on this device. */
+      const bindings = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        return yield* sql<{ project: string; remotes: string; path: string | null }>`
+          SELECT p.name AS project, b.remote_fingerprints AS remotes, l.path
+          FROM repository_bindings b JOIN projects p ON p.id = b.project_id
+          LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+          WHERE b.detached_at IS NULL AND p.archived_at IS NULL
+          ORDER BY p.created_at, b.created_at, b.rowid`
+      })
+
+      const Remotes = Schema.fromJsonString(Schema.Array(Schema.String))
+
+      /* What answered on the servers the remotes name, by service and host: asked once a launch. */
+      const servers = new Map<string, { readonly product: Product; readonly webUrl: string } | null>()
+      const serverAt = (service: Service, host: string) =>
+        Effect.gen(function* () {
+          const key = `${service} ${host}`
+          if (servers.has(key)) return servers.get(key) ?? null
+          const found = yield* identify(connectors.fetch, service, `https://${host}`)
+          const known =
+            found.product !== null && infoOf(found.product) !== undefined ? { product: found.product, webUrl: found.webUrl } : null
+          servers.set(key, known)
+          return known
+        })
+
+      /** What a server answered as, when connecting asked it this launch, for whichever service. */
+      const answeredAt = (host: string) => {
+        for (const [key, found] of servers) if (found !== null && key.endsWith(` ${host}`)) return found
+        return undefined
+      }
+
+      /**
+       * Where the projects' code is, by project and instance: on a hosted
+       * service, a server already connected, or one connecting found. With
+       * `named`, each remote is read from the repository here, for its name;
+       * with a service, only its places, and each other host the remotes
+       * name is asked whether it is one of that service's servers.
+       */
+      const placesOf = (named: boolean, service?: Service) =>
+        Effect.gen(function* () {
+          const known = new Map<string, { readonly product: Product; readonly webUrl: string }>()
+          for (const info of connectors.products)
+            if (info.hosted !== null) known.set(hostnameOf(info.hosted.webUrl), { product: info.product, webUrl: info.hosted.webUrl })
+          for (const row of yield* rows) known.set(hostnameOf(row.webUrl), { product: row.product, webUrl: row.webUrl })
+          const read = yield* Effect.forEach(
+            yield* bindings,
+            (binding) =>
+              Effect.gen(function* () {
+                const stored = Option.getOrElse(Schema.decodeUnknownOption(Remotes)(binding.remotes), () => [] as ReadonlyArray<string>)
+                const remotes =
+                  named && binding.path !== null
+                    ? yield* namedRemotes(binding.path).pipe(
+                        Effect.map((found) => found.map((remote) => ({ name: remote.name as string | null, url: remote.url }))),
+                        Effect.orElseSucceed(() => stored.map((url) => ({ name: null, url }))),
+                      )
+                    : stored.map((url) => ({ name: null as string | null, url }))
+                return { project: binding.project, path: binding.path, remotes }
+              }),
+            { concurrency: 4 },
+          )
+          // The hosts no product is known on, asked what they are, a few at a time.
+          if (service !== undefined) {
+            const unknown = new Set<string>()
+            for (const binding of read)
+              for (const remote of binding.remotes) {
+                const ref = parseRemote(remote.url)
+                if (ref !== null && !known.has(ref.host) && ref.host.includes('.')) unknown.add(ref.host)
+              }
+            yield* Effect.forEach(
+              [...unknown],
+              (host) =>
+                Effect.map(serverAt(service, host), (found) => {
+                  if (found !== null) known.set(host, found)
+                }),
+              { concurrency: 4 },
+            )
+          }
+          const places = new Map<string, { place: Place & { repositories: Array<string> }; paths: Array<string> }>()
+          for (const binding of read)
+            for (const remote of binding.remotes) {
+              const ref = parseRemote(remote.url)
+              const at = ref === null ? undefined : (known.get(ref.host) ?? answeredAt(ref.host))
+              if (ref === null || at === undefined) continue
+              if (service !== undefined && infoOf(at.product)?.service !== service) continue
+              const key = `${binding.project} ${at.product} ${at.webUrl}`
+              const entry = places.get(key) ?? {
+                place: { product: at.product, webUrl: at.webUrl, project: binding.project, remote: remote.name, repositories: [] },
+                paths: [],
+              }
+              const path = ref.path.join('/')
+              if (!entry.place.repositories.includes(path)) entry.place.repositories.push(path)
+              if (binding.path !== null && !entry.paths.includes(binding.path)) entry.paths.push(binding.path)
+              places.set(key, entry)
+            }
+          return [...places.values()]
+        })
+
+      /** The token's name on a service's page: Althar, for the one project it is for, and the day, since GitHub wants each name once. */
+      const tokenName = (projects: ReadonlyArray<string>, today: string) => {
+        const [only] = projects
+        const day = ` (${today})`
+        return projects.length === 1 && only !== undefined ? `Althar for ${only.slice(0, 40 - 11 - day.length)}${day}` : `Althar${day}`
+      }
+
+      /** Where a token is made on an instance, filled in for its places: the projects it is for, and their repositories' one owner. */
+      const tokenPageOf = (product: Product, webUrl: string, places: ReadonlyArray<Place>, today: string) => {
+        const info = infoOf(product)
+        if (info === undefined) return null
+        const here = places.filter((place) => place.product === product && place.webUrl === webUrl)
+        const owners = [...new Set(here.flatMap((place) => place.repositories.map((path) => path.split('/')[0] ?? '')))]
+        const [owner] = owners
+        return info.token.page(webUrl, {
+          name: tokenName([...new Set(here.map((place) => place.project))], today),
+          ...(owners.length === 1 && owner !== undefined && owner !== '' ? { owner } : {}),
+        })
+      }
+
+      /** The product's check, as a token or an app's sign-in it is given would be asked. */
+      const accessOf = (
+        product: Product,
+        webUrl: string,
+        apiUrl: string,
+        credential: Credential,
+        auth: ConnectionInfo['auth'],
+        repositories: ReadonlyArray<ReadonlyArray<string>>,
+      ) =>
+        Effect.gen(function* () {
+          const info = infoOf(product)
+          const access = info?.access
+          if (info === undefined || access == null) {
+            // Without a check of its own, the product says who it signs in as, and no more.
+            const made = info?.make?.({ fetch: connectors.fetch, apiUrl, webUrl, credential: Effect.succeed(credential) })
+            const account = yield* ((made?.host ?? made?.tracker)?.account ?? Effect.fail(null)).pipe(Effect.option)
+            return {
+              account: Option.getOrNull(account),
+              lines: [
+                {
+                  need: 'account' as const,
+                  state: Option.isSome(account) ? ('ok' as const) : ('no' as const),
+                  fact: Option.match(account, { onNone: () => null, onSome: (found) => found.login }),
+                  count: null,
+                  reason: Option.isSome(account) ? null : { kind: 'refused' as const },
+                },
+              ],
+              expiresAt: null,
+              scopes: null,
+            }
+          }
+          return yield* access({
+            fetch: connectors.fetch,
+            apiUrl,
+            webUrl,
+            hosted: info.hosted !== null && hostnameOf(info.hosted.webUrl) === hostnameOf(webUrl),
+            credential,
+            auth,
+            repositories,
+            ...(connectors.appSlug === undefined ? {} : { appSlug: connectors.appSlug }),
+          })
+        })
+
+      /** gh's or glab's sign-in to an instance here, and who it is: null where the tool isn't signed in there, or its token no longer works. */
+      const cliSignIn = (tool: CliTool, product: Product, webUrl: string) =>
+        Effect.gen(function* () {
+          const info = infoOf(product)
+          const token = yield* connectors.cliToken(tool, hostnameOf(webUrl))
+          if (info === undefined || token === null) return null
+          const report = yield* accessOf(product, webUrl, info.apiFor(webUrl), { kind: 'bearer', token }, 'token', [])
+          return report.account === null
+            ? null
+            : { product, webUrl, tool, account: report.account.login, scopes: report.scopes === null ? null : [...report.scopes] }
+        })
+
+      const toolOf = (service: Service): CliTool | null => (service === 'github' ? 'gh' : service === 'gitlab' ? 'glab' : null)
+
+      /** The email the projects commit with: a place's repository's git config, else git's own. */
+      const emailOf = (paths: ReadonlyArray<{ readonly project: string; readonly path: string }>) =>
+        Effect.gen(function* () {
+          for (const { project, path } of paths) {
+            const address = yield* git(path, 'config', 'user.email').pipe(Effect.orElseSucceed(() => ''))
+            if (address.includes('@')) return { address, project }
+          }
+          const address = yield* git(homedir(), 'config', '--global', 'user.email').pipe(Effect.orElseSucceed(() => ''))
+          return address.includes('@') ? { address, project: null } : null
+        })
+
+      const today = Effect.map(Clock.currentTimeMillis, (now) => new Date(now).toISOString().slice(0, 10))
+
+      const guide = (service: Service) =>
+        Effect.gen(function* () {
+          const found = yield* placesOf(true, service)
+          const places = found.map((entry) => entry.place)
+          const instances = new Map<string, { readonly product: Product; readonly webUrl: string }>()
+          for (const info of connectors.products)
+            if (info.service === service && info.hosted !== null)
+              instances.set(`${info.product} ${info.hosted.webUrl}`, { product: info.product, webUrl: info.hosted.webUrl })
+          for (const place of places) instances.set(`${place.product} ${place.webUrl}`, { product: place.product, webUrl: place.webUrl })
+          // Each connection's own instance too, for its token to be made again there.
+          for (const row of yield* rows)
+            if (infoOf(row.product)?.service === service)
+              instances.set(`${row.product} ${row.webUrl}`, { product: row.product, webUrl: row.webUrl })
+          const tool = toolOf(service)
+          const clis =
+            tool === null
+              ? []
+              : (yield* Effect.forEach([...instances.values()], ({ product, webUrl }) => cliSignIn(tool, product, webUrl), {
+                  concurrency: 2,
+                })).filter((cli) => cli !== null)
+          // Bitbucket Cloud and Jira Cloud take the Atlassian account's email with a token.
+          const wantsEmail = connectors.products.some((info) => info.service === service && info.token.needs === 'email')
+          const email = wantsEmail
+            ? yield* emailOf(
+                found.length > 0
+                  ? found.flatMap((entry) => entry.paths.map((path) => ({ project: entry.place.project, path })))
+                  : (yield* bindings).flatMap((binding) =>
+                      binding.path === null ? [] : [{ project: binding.project, path: binding.path }],
+                    ),
+              )
+            : null
+          const day = yield* today
+          const tokenPages = [...instances.values()].flatMap(({ product, webUrl }) => {
+            const url = tokenPageOf(product, webUrl, places, day)
+            return url === null ? [] : [{ product, webUrl, url }]
+          })
+          return { service, places, clis, email, tokenPages } satisfies Guide
+        })
+
+      const findServer = (service: Service, typed: string) =>
+        Effect.gen(function* () {
+          const found = yield* identify(connectors.fetch, service, typed)
+          // A product this runtime has no adapter for is something else, as far as connecting goes.
+          const product = found.product !== null && infoOf(found.product) !== undefined ? found.product : null
+          const places = (yield* placesOf(false, service)).map((entry) => entry.place)
+          return {
+            product,
+            webUrl: found.webUrl,
+            reason: product === null ? (found.reason ?? 'other') : null,
+            tokenPage: product === null ? null : tokenPageOf(product, found.webUrl, places, yield* today),
+          } satisfies Found
+        })
+
+      const check = (connectionId: string) =>
+        Effect.gen(function* () {
+          const row = yield* rowOf(connectionId)
+          const info = infoOf(row.product)
+          const kept = yield* stored(row)
+          const now = yield* credential(connectionId)
+          const places = (yield* placesOf(false)).map((entry) => entry.place)
+          const repositories = places
+            .filter((place) => place.product === row.product && hostnameOf(place.webUrl) === hostnameOf(row.webUrl))
+            .flatMap((place) => place.repositories.map((path) => path.split('/')))
+          const unique = [...new Map(repositories.map((path) => [path.join('/'), path])).values()]
+          const report = yield* accessOf(row.product, row.webUrl, row.apiUrl, now, row.auth, unique)
+          return {
+            connectionId,
+            lines: report.lines,
+            expiresAt: report.expiresAt ?? (kept.kind === 'oauth' ? kept.expiresAt : null),
+            renews: kept.kind === 'oauth' && kept.refreshToken !== null,
+            settings: info?.token.settings(row.webUrl) ?? row.webUrl,
+          } satisfies Check
+        })
+
+      const connectCli = (input: { readonly product: Product; readonly webUrl: string; readonly actorId: ActorId }) =>
+        Effect.gen(function* () {
+          const info = infoOf(input.product)
+          const tool = info === undefined ? null : toolOf(info.service)
+          const host = hostnameOf(input.webUrl)
+          const token = tool === null ? null : yield* connectors.cliToken(tool, host)
+          if (tool === null || token === null) return yield* new CliSignedOut({ tool: tool ?? 'gh', host })
+          return yield* save({
+            product: input.product,
+            webUrl: input.webUrl,
+            auth: 'token',
+            secret: { token, user: null, key: null },
+            actorId: input.actorId,
+          })
+        })
+
+      const connectToken = (input: {
+        readonly product: Product
+        readonly webUrl?: string
+        readonly user?: string
+        readonly key?: string
+        readonly token: string
+        readonly connectionId?: string
+        readonly actorId: ActorId
+      }) =>
+        Effect.gen(function* () {
+          const token = input.token.trim()
+          if (input.connectionId === undefined)
+            return yield* save({
+              product: input.product,
+              webUrl: input.webUrl ?? infoOf(input.product)?.hosted?.webUrl ?? '',
+              auth: 'token',
+              secret: { token, user: input.user?.trim() ?? null, key: input.key?.trim() ?? null },
+              actorId: input.actorId,
+            })
+          // Signing a connection in again: its address, and the email or key that went with its token, stay as they were.
+          const row = yield* rowOf(input.connectionId)
+          const kept = yield* stored(row).pipe(Effect.option)
+          const was = Option.getOrUndefined(kept)
+          return yield* save({
+            product: row.product,
+            webUrl: row.webUrl,
+            auth: 'token',
+            secret: {
+              token,
+              user: input.user?.trim() ?? (was?.kind === 'token' ? was.user : null),
+              key: input.key?.trim() ?? (was?.kind === 'token' ? (was.key ?? null) : null),
+            },
+            actorId: input.actorId,
+            sameAs: { id: row.accountId, login: row.accountLogin },
+          })
+        })
+
       const knownHosts = Effect.map(rows, (all): KnownHosts => {
         const hosts = new Map(hostedOf(connectors.products))
         for (const row of all) {
@@ -645,16 +1059,12 @@ export class Connections extends Context.Service<
             if (flow?.fiber !== undefined) yield* Fiber.interrupt(flow.fiber)
             flows.delete(flowId)
           }),
-        connectToken: (input) =>
-          provide(
-            save({
-              product: input.product,
-              webUrl: input.webUrl ?? infoOf(input.product)?.hosted?.webUrl ?? '',
-              auth: 'token',
-              secret: { token: input.token.trim(), user: input.user?.trim() ?? null, key: input.key?.trim() ?? null },
-              actorId: input.actorId,
-            }),
-          ),
+        connectToken: (input) => provide(connectToken(input)),
+        connectCli: (input) => provide(connectCli(input)),
+        places: provide(Effect.map(placesOf(false), (found) => found.map((entry) => entry.place))),
+        guide: (service) => provide(guide(service)),
+        findServer: (service, typed) => provide(findServer(service, typed)),
+        check: (connectionId) => provide(check(connectionId)),
         remove: (connectionId, actorId) =>
           provide(
             Effect.gen(function* () {

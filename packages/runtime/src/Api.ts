@@ -661,6 +661,7 @@ export const handlers = Api.toLayer(
                 .filter((info) => info.make !== null)
                 .map((info) => ({
                   product: info.product,
+                  service: info.service,
                   name: info.name,
                   host: info.host,
                   tracker: info.tracker,
@@ -668,10 +669,11 @@ export const handlers = Api.toLayer(
                   selfHosted: info.selfHosted,
                   browserSignIn: info.browserSignIn,
                   tokenNeeds: info.token.needs,
-                  tokenHelp: info.token.help(info.hosted?.webUrl ?? ''),
+                  tokenPrefixes: info.token.prefixes,
                   tokenHelpForKey: info.token.helpForKey ?? null,
                   keyChecks: info.token.keyChecks ?? [],
                 })),
+              places: yield* connections.places,
             }
           }),
         ),
@@ -679,7 +681,7 @@ export const handlers = Api.toLayer(
         once(commandId, api(connections.startSignIn({ product, actorId: instance.personId, ...(webUrl === undefined ? {} : { webUrl }) }))),
       GetSignIn: ({ flowId }) => api(connections.signIn(flowId)),
       CancelSignIn: ({ flowId }) => api(connections.cancelSignIn(flowId)),
-      ConnectToken: ({ commandId, product, webUrl, user, key, token }) =>
+      ConnectToken: ({ commandId, product, webUrl, user, key, token, connectionId }) =>
         once(
           commandId,
           api(
@@ -691,11 +693,17 @@ export const handlers = Api.toLayer(
                 ...(webUrl === undefined ? {} : { webUrl }),
                 ...(user === undefined ? {} : { user }),
                 ...(key === undefined ? {} : { key }),
+                ...(connectionId === undefined ? {} : { connectionId }),
               }),
               connectionOf,
             ),
           ),
         ),
+      GetConnectGuide: ({ service }) => api(connections.guide(service)),
+      FindServer: ({ service, webUrl }) => api(connections.findServer(service, webUrl)),
+      ConnectCli: ({ commandId, product, webUrl }) =>
+        once(commandId, api(Effect.map(connections.connectCli({ product, webUrl, actorId: instance.personId }), connectionOf))),
+      CheckConnection: ({ connectionId }) => api(connections.check(connectionId)),
       Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.markReady(taskId, url))),

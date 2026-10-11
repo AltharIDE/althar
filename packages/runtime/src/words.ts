@@ -194,12 +194,18 @@ export const words = (
         return "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again."
       case 'ConnectorFailed':
         return hostSaid(productOf(text(error, 'product')), text(error, 'reason'), text(error, 'message'))
+      case 'CliSignedOut':
+        return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this Mac.`
+      case 'OtherAccount':
+        return `This token is ${text(error, 'login')}'s. Make one as ${text(error, 'expected')}, or connect ${text(error, 'login')} as well from the list.`
       default:
         return agentSaid(error) ?? "Althar's runtime couldn't do that. Its log has the details."
     }
   })()
   // A merge that conflicts says in which files, for the window to have the lead settle them.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
+  // A service's refusal says which, for the window to say it where it happened: a token it didn't take, as against one it took and limits.
+  if (reason === 'ConnectorFailed') return { reason, message, why: text(error, 'reason') }
   return { reason, message }
 }
 
@@ -263,6 +269,8 @@ export const expected = new Set([
   'NoChangeToOpen',
   'TaskRefused',
   'NotConnected',
+  'CliSignedOut',
+  'OtherAccount',
   'NotAnIssue',
   'NotARepository',
   'RepositoriesNeeded',

@@ -1373,14 +1373,22 @@ describe('code hosts and trackers, through the API', () => {
 
         const offered = yield* client.ListConnections()
         assert.deepStrictEqual(
-          offered.products.map((product) => [product.product, product.browserSignIn, product.selfHosted, product.hostedUrl]),
+          offered.products.map((product) => [
+            product.product,
+            product.service,
+            product.browserSignIn,
+            product.selfHosted,
+            product.hostedUrl,
+          ]),
           [
-            ['github', false, true, 'https://github.com'],
-            ['linear', false, false, 'https://linear.app'],
-            ['trello', false, false, 'https://trello.com'],
-            ['jira_dc', false, true, null],
+            ['github', 'github', false, true, 'https://github.com'],
+            ['linear', 'linear', false, false, 'https://linear.app'],
+            ['trello', 'trello', false, false, 'https://trello.com'],
+            ['jira_dc', 'jira', false, true, null],
           ],
         )
+        assert.deepStrictEqual(offered.products[0]?.tokenPrefixes, ['github_pat_', 'ghp_'])
+        assert.deepStrictEqual(offered.places, [])
         // Trello's token goes with an API key: where a token is made for one, and what a key is checked against.
         assert.deepInclude(offered.products[0], { tokenNeeds: null, tokenHelpForKey: null, keyChecks: [] })
         const trello = offered.products.find((product) => product.product === 'trello')
@@ -1413,6 +1421,42 @@ describe('code hosts and trackers, through the API', () => {
         assert.lengthOf((yield* client.ListConnections()).connections, 3)
 
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(working) })
+        // Where its code is, as the list and connecting say it: on the GitHub its remote names.
+        assert.deepStrictEqual((yield* client.ListConnections()).places, [
+          { product: 'github', webUrl: HOST, project: project.name, remote: null, repositories: ['meridian/api'] },
+        ])
+        const guide = yield* client.GetConnectGuide({ service: 'github' })
+        assert.deepStrictEqual(guide.places, [
+          { product: 'github', webUrl: HOST, project: project.name, remote: 'origin', repositories: ['meridian/api'] },
+        ])
+        assert.deepStrictEqual(guide.clis, [])
+        // A token is made on each instance it knows, filled in for its places: a classic one on a company's own server.
+        assert.deepStrictEqual(
+          guide.tokenPages.map((page) => page.webUrl),
+          ['https://github.com', HOST],
+        )
+        assert.strictEqual(
+          guide.tokenPages.find((page) => page.webUrl === HOST)?.url,
+          `${HOST}/settings/tokens/new?description=Althar&scopes=repo%2Cworkflow`,
+        )
+        // What the connection can do there, as the service says.
+        const can = yield* client.CheckConnection({ connectionId: signedIn.id })
+        assert.deepStrictEqual(
+          can.lines.map((line) => [line.need, line.state]),
+          [
+            ['account', 'ok'],
+            ['reach', 'ok'],
+            ['push', 'ok'],
+            ['changes', 'ok'],
+            ['checks', 'ok'],
+            ['issues', 'ok'],
+          ],
+        )
+        // gh isn't signed in here; and a server that doesn't answer is said to be one.
+        const noCli = yield* Effect.flip(client.ConnectCli({ commandId: commandId(), product: 'github', webUrl: HOST }))
+        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', "gh isn't signed in to github.test on this Mac."])
+        const server = yield* client.FindServer({ service: 'jira', webUrl: 'jira.meridian.dev' })
+        assert.deepStrictEqual(server, { product: null, webUrl: 'https://jira.meridian.dev', reason: 'unreachable', tokenPage: null })
         const { issues } = yield* client.ListIssues({ projectId: project.id })
         assert.sameMembers(
           issues.map((issue) => issue.key),
