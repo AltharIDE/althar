@@ -60,6 +60,9 @@ export const PROJECTS = new Set(['project', 'task', 'run', 'provider_session', '
 /** What changes a project's repositories as listed: the project itself, and its tasks, which count the ones they change; and, for every project, a connection. */
 export const REPOSITORIES = new Set(['project', 'task'])
 
+/** What changes the connections as listed: a connection, and a project, by whose repositories and name they say where its code is. */
+export const CONNECTIONS = new Set(['connection', 'project'])
+
 /** Changes elsewhere in a project that move what a card in its coordinator's thread shows. */
 export const CARDS = new Set(['provider_session', 'attention_request', 'task_plan', 'run', 'task', 'workspace'])
 
@@ -88,7 +91,8 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
   ...(PROJECTS.has(event.aggregateType) ? [{ key: keys.projects, offScreen: true }] : []),
   ...(HOME.has(event.aggregateType) ? [{ key: keys.home, offScreen: !HOME_SHOWN.has(event.aggregateType) }] : []),
   ...(event.projectId !== null && BOARD.has(event.aggregateType) ? [{ key: keys.board(event.projectId), offScreen: true }] : []),
-  ...(event.aggregateType === 'connection' ? [{ key: keys.connections, offScreen: true }] : []),
+  // The connections, which say where each project's code is: a connection, or a project's repositories, name or removal.
+  ...(CONNECTIONS.has(event.aggregateType) ? [{ key: keys.connections, offScreen: true }] : []),
   // Its repositories, and how many tasks under way change each, only while they show.
   ...(event.projectId !== null && REPOSITORIES.has(event.aggregateType)
     ? [{ key: keys.repositories(event.projectId), offScreen: false }]

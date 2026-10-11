@@ -81,6 +81,15 @@ describe('the window’s watch', () => {
     expect(client.listConnections).toHaveBeenCalledTimes(2)
   })
 
+  it('reads the connections again when a project changes, which says where its code is', async () => {
+    const { client, cache, emit, read } = opened()
+    await cache.fetchQuery(read.connections())
+    // Repositories added or left out, a rename, a removal: each is a project's change.
+    emit(changed('project', 'p1', null, 'p1'))
+    await settle()
+    expect(client.listConnections).toHaveBeenCalledTimes(2)
+  })
+
   it('reads the home again for a permission the rules answered only while it shows; off screen, on its next visit', async () => {
     const { client, cache, emit, read } = opened()
     await cache.fetchQuery(read.home())
