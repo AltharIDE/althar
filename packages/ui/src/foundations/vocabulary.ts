@@ -294,6 +294,15 @@ export enum IssuePriority {
   Low = 'low',
 }
 
+/** Where an issue the coordinator drafted stands. */
+export enum IssueDraftState {
+  Pending = 'pending',
+  Filing = 'filing',
+  Filed = 'filed',
+  Failed = 'failed',
+  Discarded = 'discarded',
+}
+
 /** An entry of the agent's plan. */
 export enum PlanState {
   Done = 'done',
