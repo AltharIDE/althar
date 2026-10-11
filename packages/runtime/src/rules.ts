@@ -331,7 +331,10 @@ export const parseCommandLine = (text: string): Parsed => {
 const splitCommandLine = (text: string) => {
   const commands: Array<Array<string>> = []
   const ends: Array<string> = []
+  /** For each command, which of its words are redirect operators, not arguments that look like them (`echo '>'`). */
+  const operators: Array<ReadonlySet<number>> = []
   let words: Array<string> = []
+  let operating = new Set<number>()
   let word = ''
   let inWord = false
   let opaque = false
@@ -345,8 +348,10 @@ const splitCommandLine = (text: string) => {
     if (words.length > 0) {
       commands.push(words)
       ends.push(separator)
+      operators.push(operating)
     }
     words = []
+    operating = new Set()
   }
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index] ?? ''
@@ -388,12 +393,19 @@ const splitCommandLine = (text: string) => {
     }
     const redirect = REDIRECTS.find((candidate) => rest.startsWith(candidate))
     if (redirect !== undefined) {
+      // `1>file`: the descriptor belongs to the redirect, not to the arguments.
+      if (inWord && /^\d+$/.test(word) && redirect.startsWith('>')) {
+        word = ''
+        inWord = false
+      }
       endWord()
+      operating.add(words.length)
       words.push(redirect)
       index += redirect.length - 1
       // `2>&1`, `>&2`: a redirect to another stream, not to a file.
       const stream = /^&[0-9-]+/.exec(text.slice(index + 1))
       if (stream !== null) {
+        operating.add(words.length)
         words.push(stream[0])
         index += stream[0].length
       }
@@ -407,7 +419,7 @@ const splitCommandLine = (text: string) => {
     inWord = true
   }
   endCommand()
-  return { commands, ends, opaque }
+  return { commands, ends, operators, opaque }
 }
 
 /** Commands as the shell runs them: a script handed to a shell is read as commands of its own. */
@@ -479,10 +491,11 @@ const KEPT_BETWEEN: Readonly<Record<string, string>> = { '&&': ' && ', '||': ' |
 const sayWord = (word: string) => (word === '' ? "''" : /^[^\s'"\\;&|<>()`]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`)
 
 /** A command's words without where its output goes: `2>&1`, `> out.log`. */
-const withoutRedirects = (words: ReadonlyArray<string>): ReadonlyArray<string> =>
+const withoutRedirects = (words: ReadonlyArray<string>, operators: ReadonlySet<number>): ReadonlyArray<string> =>
   words.flatMap((word, index) => {
-    if (OUTPUT_REDIRECTS.includes(word)) return []
-    return OUTPUT_REDIRECTS.includes(words[index - 1] ?? '') ? [] : [word]
+    if (operators.has(index) && (OUTPUT_REDIRECTS.includes(word) || word.startsWith('&'))) return []
+    // The word a redirect writes to.
+    return operators.has(index - 1) && OUTPUT_REDIRECTS.includes(words[index - 1] ?? '') ? [] : [word]
   })
 
 /**
@@ -495,9 +508,9 @@ const withoutRedirects = (words: ReadonlyArray<string>): ReadonlyArray<string> =
  */
 export const shortCommand = (text: string): string => {
   const whole = text.trim()
-  const { commands, ends, opaque } = splitCommandLine(whole)
+  const { commands, ends, operators, opaque } = splitCommandLine(whole)
   if (opaque || whole.includes('<<')) return whole
-  const parts = commands.map((words, index) => ({ words, end: ends[index] ?? '' }))
+  const parts = commands.map((words, index) => ({ words, end: ends[index] ?? '', operators: operators[index] ?? new Set<number>() }))
   // Leading `cd dir &&`, however many.
   let first = 0
   while (first < parts.length - 1) {
@@ -510,8 +523,11 @@ export const shortCommand = (text: string): string => {
   while (kept.length > 1 && kept.at(-2)?.end === '|' && PLUMBING.includes(unwrap(kept.at(-1)?.words ?? [])[0] ?? ''))
     kept = kept.slice(0, -1)
   const said = kept
-    .map(({ words, end }, index) => {
-      const shown = withoutRedirects(unwrap(words))
+    .map(({ words, end, operators }, index) => {
+      // Words dropped from the front by unwrap shift where the operators are.
+      const unwrapped = unwrap(words)
+      const dropped = words.length - unwrapped.length
+      const shown = withoutRedirects(unwrapped, new Set([...operators].map((at) => at - dropped)))
       return shown.length === 0 ? '' : `${shown.map(sayWord).join(' ')}${index === kept.length - 1 ? '' : (KEPT_BETWEEN[end] ?? '; ')}`
     })
     .join('')

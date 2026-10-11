@@ -1006,6 +1006,14 @@ describe('how a command reads at a glance', () => {
     assert.strictEqual(shortCommand('cd /x && bun build && bun test 2>&1 | tail -30'), 'bun build && bun test')
   })
 
+  it('drops descriptor-prefixed redirects whole, and keeps quoted words that only look like redirects', () => {
+    assert.strictEqual(shortCommand('cd /x && bun dev 1>/tmp/log'), 'bun dev')
+    assert.strictEqual(shortCommand('bun dev 1>/tmp/log 2>/tmp/err'), 'bun dev')
+    assert.strictEqual(shortCommand('cd /x && echo ">" important'), "echo '>' important")
+    assert.strictEqual(shortCommand('printf "2>" file'), "printf '2>' file")
+    assert.strictEqual(shortCommand('echo \\> x'), "echo '>' x")
+  })
+
   it('keeps a grep or tail that is the command itself', () => {
     assert.strictEqual(shortCommand('cd /x && grep -rn todo src'), 'grep -rn todo src')
     assert.strictEqual(shortCommand('tail -f server.log'), 'tail -f server.log')
