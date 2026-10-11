@@ -29,6 +29,12 @@ export interface Migration {
   readonly statements: ReadonlyArray<string>
 }
 
+/** Where the migrator records each migration it ran, by number. */
+export const MIGRATIONS_TABLE = 'schema_migrations'
+
+/** A migration's number, as the migrator records it: 18 for `0018_questions`. */
+export const idOf = (migration: Migration) => Number.parseInt(migration.key, 10)
+
 /**
  * Every migration, in order. Migrations are append-only: once released, a
  * migration never changes. `checksums.ts` records each one, and a test fails

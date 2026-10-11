@@ -66,6 +66,13 @@ say the right. When something new needs a name on screen, add it here first.
 
 A call's kind reads the same everywhere it shows: on the board, in the bar's preview and on the home.
 
+## Updates
+
+| On screen | In the model | What it is |
+|---|---|---|
+| This update couldn’t move your data | a migration that didn't finish (`MigrationFailed`, `ForeignKeyViolations`), or the copy before it (`BackupFailed`) | What the window shows instead of opening when an update couldn't bring the person's data to its new shape. It says the data is safe, where the copy from before the update is, and what stopped it. Nothing of Althar runs behind it. |
+| Copy from before the update | a backup, in the profile's `backups` folder | The copy of the person's data Althar makes before an update moves it, kept as a file they can find. The newest three are kept. |
+
 ## What comes back
 
 | On screen | In the model | What it is |

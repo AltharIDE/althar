@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
-import { connection, databaseIn, Folders, Nudges, Secrets, SecretsUnavailable, services } from '@althar/runtime'
+import { backupsIn, connection, databaseIn, Folders, Nudges, Secrets, SecretsUnavailable, services } from '@althar/runtime'
 import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Queue, Stream } from 'effect'
 import { net } from 'electron'
 import { editorsHere, openInEditor } from './editors'
@@ -17,7 +17,10 @@ import { openInBrowser, openInTerminal } from './terminal'
  * over the port the main process hands it. What comes to need the person, it
  * tells the main process, which notifies them. Asked to shut down, it stops
  * every session, records it, and exits. Its secrets are kept sealed in the
- * profile; the main process seals and opens them.
+ * profile; the main process seals and opens them. If an update couldn't move
+ * the store (it couldn't be copied first, or a migration didn't finish), it
+ * tells the main process what stopped it and where the copy is, serves
+ * nothing, and waits to be shut down: a restart would only stop the same way.
  */
 
 type Port = Parameters<typeof emitterPort>[0]
@@ -100,8 +103,21 @@ const appFetch: Fetch = (input, init) => net.fetch(input, init)
 /** OpenRouter's public list of models, with each one's scores and prices (ADR-015). */
 const MODEL_LIST = 'https://openrouter.ai/api/v1/models'
 
+/*
+ * The end-to-end tests' update that can't move the store: a migration after
+ * every real one that always fails, so it is never recorded. Packaged builds
+ * leave this out.
+ */
+const failingUpdate =
+  __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAIL_MIGRATION === '1'
+    ? { extraMigrations: [{ key: '9999_fails_on_purpose', statements: ['INSERT INTO no_such_table VALUES (1)'] }] }
+    : {}
+
 const options = {
   database: databaseIn(profile),
+  // A copy of the store before an update migrates it, the newest three.
+  backups: backupsIn(profile),
+  ...failingUpdate,
   worktreeRoot: required('ALTHAR_WORKTREES'),
   accountsRoot: join(profile, 'accounts'),
   // Pictures agents hand back and what commands print, by digest; the main process serves the pictures from here.
@@ -122,6 +138,13 @@ let isReady: (context: Context.Context<Folders>) => void = () => {}
 const ready = new Promise<Context.Context<Folders>>((resolve) => {
   isReady = resolve
 })
+
+/** The store an update couldn't move: what stopped, the copy from before (if one was made), and what was said. */
+const storeStopped = (stopped: 'moving' | 'copying', backup: string | null, reason: string) =>
+  Effect.andThen(
+    Effect.sync(() => parent.postMessage({ type: 'store-failed', stopped, backup, reason })),
+    Effect.never,
+  )
 
 const program = Effect.gen(function* () {
   // The end-to-end tests drive the app against a scripted agent and a fake code host, keeping tokens in memory. Packaged builds leave this out.
@@ -155,6 +178,13 @@ const program = Effect.gen(function* () {
           }
         : { ...options, ...fake },
     ),
+  ).pipe(
+    Effect.catchTags({
+      MigrationFailed: (failure) => storeStopped('moving', failure.backup, failure.reason),
+      ForeignKeyViolations: (failure) =>
+        storeStopped('moving', failure.backup, `Rows in ${failure.tables.join(', ')} point at rows that aren’t there.`),
+      BackupFailed: (failure) => storeStopped('copying', null, failure.reason),
+    }),
   )
   isReady(context)
   // What needs the person goes to the main process, which notifies them and keeps the Dock's count.
