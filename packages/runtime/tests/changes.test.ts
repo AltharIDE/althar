@@ -23,7 +23,7 @@ import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
-import { fakeConnectors, HOST, hosted, items, repository, runtime, until } from './support'
+import { fakeConnectors, HOST, hosted, items, repository, runtime, turns, until } from './support'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -693,6 +693,31 @@ describe('a pull request, by the person and the lead', () => {
 })
 
 describe('a branch that parted from its pull request', () => {
+  it.live('is said in a new lead’s brief to be published, by its pull request', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null, Duration.seconds(20))
+      const threadId = ready?.threadId ?? ''
+      const [workspace] = yield* (yield* SqlClient.SqlClient)<{
+        branch: string
+      }>`SELECT branch FROM workspaces WHERE task_id = ${ready?.taskId ?? ''}`
+      const before = (yield* turns(threadId)).length
+      yield* (yield* Sessions).switchAgent({ threadId, agentId: 'opencode' })
+      const briefed = yield* until(
+        turns(threadId),
+        (rows) => rows.length > before && rows.every((row) => !['pending', 'delivered'].includes(row.state)),
+      )
+      assert.include(
+        briefed.at(before)?.prompt ?? '',
+        `The branch ${workspace?.branch ?? ''} is published: its pull request, ${ready?.change?.url ?? ''}, has it at ${(ready?.change?.head ?? '').slice(0, 12)}.`,
+      )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('is told apart from one that only adds to it, replaced only under a lease, or brought back by merging', () => {
     const { working, bare } = hosted()
     const tip = tipOf(bare)
@@ -742,12 +767,13 @@ describe('a branch that parted from its pull request', () => {
 
       // Asking the lead to merge instead: the note has it start again from what was pushed, and merge, never rebase;
       // what it hasn't committed is committed, and the backup checked, before any reset.
+      assert.notInclude((yield* changes.mergeNote(taskId)).note, 'not committed now')
       writeFileSync(join(here, 'half-done.ts'), 'export {}\n')
       const asked = yield* changes.mergeNote(taskId)
       rmSync(join(here, 'half-done.ts'))
       assert.strictEqual(asked.head, published)
       assert.include(asked.note, 'was rewritten after it was pushed')
-      assert.include(asked.note, 'this file has changes not committed: half-done.ts')
+      assert.include(asked.note, '(not committed now: half-done.ts)')
       const order = ['Commit everything not committed yet', `git rev-parse ${branch}-rewritten HEAD`, `git reset --hard ${published}`]
       assert.deepStrictEqual(
         order.map((step) => asked.note.indexOf(step)),
@@ -762,6 +788,8 @@ describe('a branch that parted from its pull request', () => {
 
       // Someone pushed meanwhile: replacing under the lease of the head seen refuses, and nothing on the host moves.
       at(bare, 'update-ref', `refs/heads/${branch}`, `${published}~1`)
+      // Only from a head seen, as a commit: anything else replaces nothing.
+      assert.instanceOf(yield* Effect.flip(changes.replace(taskId, local, 'not-a-commit')), ChangedSinceSeen)
       const stale = yield* Effect.flip(changes.replace(taskId, local, published))
       assert.strictEqual(refused(stale), 'PushRefused:moved')
       assert.strictEqual(tip(), at(bare, 'rev-parse', `${published}~1`))
@@ -810,6 +838,15 @@ describe('a branch that parted from its pull request', () => {
       const [merged] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged === null && all[0]?.change?.unpushed === 2)
       yield* changes.push(taskId, merged?.change?.localHead ?? '')
       assert.strictEqual(tip(), merged?.change?.localHead)
+
+      // A host that takes no forced push says so in its own words, and nothing moves there.
+      at(bare, 'config', 'receive.denyNonFastForwards', 'true')
+      const kept = tip() ?? ''
+      at(here, 'commit', '-q', '--amend', '--allow-empty', '-m', 'Merged, reworded first')
+      const denied = yield* Effect.flip(changes.replace(taskId, at(here, 'rev-parse', 'HEAD'), kept))
+      assert.strictEqual(refused(denied), 'PushRefused:refused')
+      assert.strictEqual(tip(), kept)
+      at(bare, 'config', 'receive.denyNonFastForwards', 'false')
 
       // Where the project never allows a force push, nothing is replaced.
       const policies = yield* Policies

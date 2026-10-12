@@ -42,7 +42,7 @@ import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
-import { commitsAhead, commitsOf, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
+import { commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
 import { commandIn, shortCommand } from './rules'
 import { Sessions } from './Sessions'
 import { actionsOf, standingOf } from './Tasks'
@@ -936,12 +936,8 @@ export class Queries extends Context.Service<
         })
 
       /** How many commits `from` has that none of `not` has; failing, so it isn't kept, where git can't tell. */
-      const countOnly = (cwd: string, from: string, not: ReadonlyArray<string>) => {
-        const args = ['rev-list', '--count', from, '--not', ...not]
-        return Effect.flatMap(gitOutcome(cwd, ...args), ({ code, stdout }) =>
-          code === 0 ? Effect.succeed(Number(stdout) || 0) : unclear(cwd, args, code),
-        )
-      }
+      const countOnly = (cwd: string, from: string, not: ReadonlyArray<string>) =>
+        Effect.map(git(cwd, 'rev-list', '--count', from, '--not', ...not), Number)
 
       /**
        * A worktree's head against its pull request: how many commits on it the
@@ -957,11 +953,10 @@ export class Queries extends Context.Service<
        */
       const againstPullRequest = (owner: Owner, pullRequestHead: string | null, sent: string | null, base: string | null) =>
         Effect.gen(function* () {
+          // One not known, as an empty revision, is null.
           const [localHead = null, there = null, ours = null, tip = null] = yield* commitsOf(owner.path, [
             'HEAD',
-            pullRequestHead ?? '',
-            sent ?? '',
-            base ?? '',
+            ...[pullRequestHead, sent, base].map((commit) => commit ?? ''),
           ])
           const none = { localHead, unpushed: 0, diverged: null }
           if (localHead === null) return none
@@ -978,7 +973,7 @@ export class Queries extends Context.Service<
               Effect.gen(function* () {
                 if (yield* inHistory(owner.path, from, localHead))
                   return { localHead, unpushed: yield* commitsAhead(owner.path, from, localHead), diverged: null }
-                const others = tip === null ? [] : [tip]
+                const others = [tip].filter((commit): commit is string => commit !== null)
                 return {
                   localHead,
                   unpushed: 0,

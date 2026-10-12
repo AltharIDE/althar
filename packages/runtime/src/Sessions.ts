@@ -1646,35 +1646,34 @@ export class Sessions extends Context.Service<
           // Althar pushed of it or a remote's copy of it here. None of these says it was never pushed, so nothing here allows rewriting it.
           const published = yield* Effect.forEach(thread.repositories, (repository) =>
             Effect.gen(function* () {
-              const [change] = yield* sql<{ url: string; head: string | null; seen: string | null }>`
-                SELECT c.pull_request_url AS url, c.head_commit AS head,
+              // Where the host last saw its head, else what Althar pushed.
+              const [change] = yield* sql<{ url: string; at: string | null }>`
+                SELECT c.pull_request_url AS url, coalesce(
                   (SELECT json_extract(l.snapshot, '$.headSha') FROM external_links l
-                    WHERE l.task_id = ${thread.taskId} AND l.kind = 'change' AND l.url = c.pull_request_url) AS seen
+                    WHERE l.task_id = ${thread.taskId} AND l.kind = 'change' AND l.url = c.pull_request_url),
+                  c.head_commit) AS at
                 FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id
                 WHERE w.task_id = ${thread.taskId} AND w.path = ${repository.worktree} AND c.pull_request_url IS NOT NULL
                 ORDER BY c.updated_at DESC LIMIT 1`
               const named = several ? `${repository.name}'s branch ${repository.branch}` : `the branch ${repository.branch}`
               const Named = named.charAt(0).toUpperCase() + named.slice(1)
-              const at = change?.seen ?? change?.head ?? null
               if (change !== undefined)
-                return `${Named} is published: its pull request, ${change.url}, has it${at === null ? '' : ` at ${at.slice(0, 12)}`}.`
-              const listed = yield* git(
-                repository.worktree,
-                'for-each-ref',
-                '--format=%(refname) %(objectname)',
-                'refs/remotes',
-                PUSHED,
-              ).pipe(Effect.orElseSucceed(() => null))
-              if (listed === null) return `Althar can't tell whether ${named} is published: take it that it is.`
-              const refs = listed.split('\n').map((line) => line.split(' '))
-              const pushed = refs.find(([ref]) => ref === `${PUSHED}${repository.branch}`)
-              if (pushed !== undefined) return `${Named} is published: Althar pushed it, at ${(pushed[1] ?? '').slice(0, 12)}.`
-              const copy = refs.find(
-                ([ref = '']) => /^refs\/remotes\/[^/]+\//.test(ref) && ref.replace(/^refs\/remotes\/[^/]+\//, '') === repository.branch,
+                return `${Named} is published: its pull request, ${change.url}, has it${change.at === null ? '' : ` at ${change.at.slice(0, 12)}`}.`
+              return yield* git(repository.worktree, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/remotes', PUSHED).pipe(
+                Effect.map((listed) => {
+                  const refs = listed.split('\n').map((line) => line.split(' '))
+                  const pushed = refs.find(([ref]) => ref === `${PUSHED}${repository.branch}`)
+                  if (pushed !== undefined) return `${Named} is published: Althar pushed it, at ${String(pushed[1]).slice(0, 12)}.`
+                  const copy = refs.find(
+                    ([ref = '']) => /^refs\/remotes\/[^/]+\//.test(ref) && ref.replace(/^refs\/remotes\/[^/]+\//, '') === repository.branch,
+                  )
+                  return copy === undefined
+                    ? `${Named} isn't on any remote Althar knows of, but it may still have been pushed some other way.`
+                    : `${Named} is published: ${String(copy[0]).replace(/^refs\/remotes\//, '')} has it at ${String(copy[1]).slice(0, 12)}.`
+                }),
+                // Git couldn't say: unknown is taken as published, so nothing here allows rewriting it.
+                Effect.orElseSucceed(() => `Althar can't tell whether ${named} is published: take it that it is.`),
               )
-              return copy === undefined
-                ? `${Named} isn't on any remote Althar knows of, but it may still have been pushed some other way.`
-                : `${Named} is published: ${(copy[0] ?? '').replace(/^refs\/remotes\//, '')} has it at ${(copy[1] ?? '').slice(0, 12)}.`
             }),
           )
           const changed = states.flatMap((state) => (state.changed === '' ? [] : [state.changed])).join('\n')

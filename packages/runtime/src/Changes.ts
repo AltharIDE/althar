@@ -940,7 +940,7 @@ export class Changes extends Context.Service<
           const note = rewritten
             ? [
                 `Your branch ${workspace.branch} was rewritten after it was pushed, so ${where} won't take a plain push of it: its commits are no longer under yours. ${where} is at ${short}. Put your work back on top of it, keeping your fixes, in this order:`,
-                `1. Commit everything not committed yet, so the reset below can't lose it${left.length === 0 ? '' : ` (${left.length === 1 ? 'this file has' : 'these files have'} changes not committed: ${left.slice(0, 10).join(', ')}${left.length > 10 ? `, and ${left.length - 10} more` : ''})`}. \`git status --short\` must then print nothing.`,
+                `1. Commit everything not committed yet, so the reset below can't lose it${left.length === 0 ? '' : ` (not committed now: ${left.join(', ')})`}. \`git status --short\` must then print nothing.`,
                 `2. Save where you are with \`git branch ${saved}\` (another name, if that one is taken, used below in its place), and check \`git rev-parse ${saved} HEAD\` prints the same commit twice.`,
                 `3. Only once both hold: reset to the pull request's head with \`git reset --hard ${head}\`, and merge ${workspace.base} into it with \`git merge ${workspace.base}\`.`,
                 `4. Bring in each change of ${saved} that isn't there yet as new commits: \`git diff HEAD ${saved}\` shows what differs.`,
