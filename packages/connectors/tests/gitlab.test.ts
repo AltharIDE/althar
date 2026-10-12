@@ -820,8 +820,11 @@ describe('GitLab as a tracker', () => {
       yield* host.comment(found, 'Picked up')
       assert.deepStrictEqual(sent[0]?.body, { body: 'Picked up' })
       yield* host.link(found, { url: 'https://gitlab.com/meridian/payments/api/-/merge_requests/12', title: 'MR !12' })
+      // An issue has no In Progress of its own: it is left open, as it is.
+      assert.deepStrictEqual(yield* host.start(found), { moved: false, status: { name: 'Open', category: 'todo' } })
       assert.strictEqual(sent.length, 1)
       assert.isFalse(host.capabilities.links)
+      assert.isFalse(host.capabilities.starts)
       assert.strictEqual((yield* Effect.flip(host.comment({ ...found, ref: 'MER-1' }, 'x'))).reason, 'not_found')
     }),
   )

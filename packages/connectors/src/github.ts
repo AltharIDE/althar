@@ -20,6 +20,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
+import { leftAsItIs } from './model'
 import {
   type Answer,
   answered,
@@ -305,7 +306,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, links: false },
+    capabilities: { drafts: true, checkLogs: true, threads: true, links: false, starts: false },
     account,
     repository: (path) =>
       Effect.map(http.json(RepositoryAnswer, 'GET', repo(path)), (answer) => ({
@@ -479,6 +480,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       }),
     // GitHub's issues have no links: the pull request's mention of the issue links the two.
     link: () => Effect.void,
+    // An issue is open or closed: a project board's Status is that board's own, so a started one is left as it is.
+    start: (issue) => Effect.succeed(leftAsItIs(issue)),
     // The repositories the account is on, last pushed to first; one archived, or with its issues turned off, takes none.
     containers: () =>
       Effect.map(

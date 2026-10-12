@@ -22,6 +22,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
+import { leftAsItIs } from './model'
 import { answered, failedOf, probe, type Reached, reachLine, readAs, refusalOf, seenOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
@@ -406,7 +407,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
   return {
     product,
     words: { noun: 'merge request', short: 'MR', prefix: '!' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, links: false },
+    capabilities: { drafts: true, checkLogs: true, threads: true, links: false, starts: false },
     account,
     repository: (path) =>
       Effect.map(http.json(ProjectAnswer, 'GET', project(path)), (answer) => ({
@@ -614,6 +615,8 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       }),
     // GitLab's issues link only to issues: the merge request's "Closes #12" links the two.
     link: () => Effect.void,
+    // An issue is open or closed: a board's In progress is a label each project names as it likes, so a started one is left as it is.
+    start: (issue) => Effect.succeed(leftAsItIs(issue)),
     // The projects the account is a member of, Guest or above (a Guest may open issues), not archived, with issues on; last active first.
     containers: () =>
       Effect.map(
