@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest'
 
 import { Effect } from 'effect'
 
-import { deviceHere, envFound, HOST_COMMANDS, portalPath, relayOut, whereFound, whereScript, worktreeEnvironment } from '../src/runtime/onDevice'
+import {
+  deviceHere,
+  envFound,
+  HOST_COMMANDS,
+  portalPath,
+  relayOut,
+  whereFound,
+  whereScript,
+  worktreeEnvironment,
+} from '../src/runtime/onDevice'
 
 /*
  * The device outside a Flatpak (onDevice.ts): the person's own commands are
@@ -26,17 +35,13 @@ describe('the device outside a Flatpak', () => {
   })
 
   it('translates the .git file and worktree paths for host git', () => {
-    expect(
-      worktreeEnvironment(
-        '/run/flatpak/doc/abc123/repo',
-        'gitdir: /run/flatpak/doc/abc123/repo/.git/worktrees/task\n',
-        1000,
-      ),
-    ).toEqual({
-      GIT_DIR: '/run/user/1000/doc/abc123/repo/.git/worktrees/task',
-      GIT_WORK_TREE: '/run/user/1000/doc/abc123/repo',
-    })
-    expect(HOST_COMMANDS).toEqual(['opencode', 'codex'])
+    expect(worktreeEnvironment('/run/flatpak/doc/abc123/repo', 'gitdir: /run/flatpak/doc/abc123/repo/.git/worktrees/task\n', 1000)).toEqual(
+      {
+        GIT_DIR: '/run/user/1000/doc/abc123/repo/.git/worktrees/task',
+        GIT_WORK_TREE: '/run/user/1000/doc/abc123/repo',
+      },
+    )
+    expect(HOST_COMMANDS).toEqual(['opencode', 'claude', 'codex'])
   })
 
   it('takes a launch out to the device with the names it needs and what the agent was given, and nothing else', () => {
@@ -80,7 +85,7 @@ describe('the device outside a Flatpak', () => {
     const script = whereScript(HOST_COMMANDS)
     expect(script).toContain('command -v "$name"')
     expect(script).toContain('$HOME/.local/bin')
-    expect(script).toContain('opencode codex')
+    expect(script).toContain('opencode claude codex')
     expect([...whereFound('opencode\t/home/me/.local/bin/opencode\ncodex\t/usr/bin/codex\n')]).toEqual([
       ['opencode', '/home/me/.local/bin/opencode'],
       ['codex', '/usr/bin/codex'],

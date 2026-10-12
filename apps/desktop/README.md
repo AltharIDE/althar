@@ -86,10 +86,11 @@ GPU and the keyring. What the Flatpak reaches and what it does not is in
 
 - The person's own OpenCode and Codex, and editors, are found and run on the
   device through `flatpak-spawn`, with the environment an agent should have
-  and no ssh agent or signed-in tool in it. Claude Code uses the bundled
-  adapter and its Flatpak profile, so sign-in status matches its sessions.
-  Everything is gated on `FLATPAK_ID`; dev, macOS,
-  AppImage, deb and rpm are unchanged.
+  and no ssh agent or signed-in tool in it. Claude Code's sessions use the
+  bundled adapter, and its usual account keeps one persistent home under the
+  profile, so a host `claude`'s status and sign-in inspect what its sessions
+  use. Everything is gated on `FLATPAK_ID`; dev, macOS, AppImage, deb and rpm
+  are unchanged.
 - Codex's own sandbox cannot run inside the Flatpak (no user namespaces); its
   adapter drives the person's own Codex on the device instead
   (`flatpak/codex-host.sh`). Without one installed there, a session says so.

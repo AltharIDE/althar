@@ -109,11 +109,13 @@ export const relayOut = (
 }
 
 /**
- * The commands whose places are looked up on the device. Claude's ACP
- * adapter and CLI are bundled in the Flatpak and use its persistent profile;
- * host `claude` sign-in would report a different home from its sessions.
+ * The commands whose places are looked up on the device: the agents the
+ * person may have installed themselves. Claude's status and sign-in run the
+ * host's own CLI where there is one; its usual account keeps a home under the
+ * app's profile (`Accounts.ts`), so the host CLI and its bundled sessions
+ * read the same sign-in.
  */
-export const HOST_COMMANDS = ['opencode', 'codex'] as const
+export const HOST_COMMANDS = ['opencode', 'claude', 'codex'] as const
 
 /** A shell script for the device that prints each name it finds, and where: one line, a tab apart. */
 export const whereScript = (names: ReadonlyArray<string>, dirs: ReadonlyArray<string> = usualDirs('linux', '$HOME', {})): string =>

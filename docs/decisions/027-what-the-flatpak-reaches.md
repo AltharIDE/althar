@@ -44,11 +44,13 @@
     both drops the sandbox and keeps approval requests with Althar (its
     `agent-full-access` mode drops the requests too), so running the person's
     own is the only way that keeps every step asking.
-  - **Claude Code uses its bundled adapter and Flatpak profile.** Its status
-    and sign-in use the bundled CLI too, so they inspect the same home its
-    sessions use; the host's `claude` install is not used for sign-in in this
-    environment. In a reader role, commands reach Althar's reader rules, which
-    refuse direct `flatpak-spawn` commands.
+  - **Claude Code's sessions use its bundled adapter, and its usual account
+    gets one home both sides see.** The usual account keeps a persistent
+    `claude-usual` home under the app's profile, with the person's settings
+    linked in; its status and sign-in run the host's own `claude` where there
+    is one, and the bundled CLI otherwise, so they inspect the same home its
+    sessions use. In a reader role, commands reach Althar's reader rules,
+    which refuse direct and wrapped `flatpak-spawn` commands.
   - **git has no ssh-agent socket.** Althar's own pushes use the code-host
     connections it keeps. The manifest does not expose the person's ssh
     agent to the sandbox.
@@ -66,9 +68,9 @@
 - **Trade-off:** `--talk-name=org.freedesktop.Flatpak` is a broad permission:
   it lets the app run commands on the device, which is exactly what reaching
   the person's own tools needs. It is not a security boundary against a
-  compromised app or agent. Reader rules refuse direct `flatpak-spawn` shell
-  commands, but cannot make the permission itself narrow. The CLI's and the
-  Flatpak's profiles stay separate.
+  compromised app or agent. Reader rules refuse direct and wrapped
+  `flatpak-spawn` shell commands, but cannot make the permission itself
+  narrow. The CLI's and the Flatpak's profiles stay separate.
 - **Revisit when:** codex-acp offers a mode that drops its sandbox and still
   asks the client; Codex itself speaks ACP, so the person's own install could
   be the ACP endpoint and the bridge would carry ACP alone; Flatpak permits
