@@ -204,8 +204,8 @@ export type ConnectionProduct = typeof ConnectionProduct.Type
 export const ConnectionAuth = Schema.Literals(['device_flow', 'pkce', 'token'])
 export type ConnectionAuth = typeof ConnectionAuth.Type
 
-/** The command-line tool whose sign-in a connection's token was copied from, where it was. */
-export const ConnectionCli = Schema.Literals(['gh', 'glab'])
+/** The command-line tool whose sign-in a connection's token was copied from, or none, where it was signed in otherwise. */
+export const ConnectionCli = Schema.Literals(['gh', 'glab', 'none'])
 export type ConnectionCli = typeof ConnectionCli.Type
 
 /** Whether a connection works: ready, needing its person to sign in again, or removed. */

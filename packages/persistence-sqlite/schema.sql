@@ -51,7 +51,7 @@
 -- repository_role: service, frontend, infrastructure, library, docs, other
 -- change_target: upstream, fork
 -- issue_draft_state: pending, filing, filed, failed, uncertain, discarded
--- connection_cli: gh, glab
+-- connection_cli: gh, glab, none
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,

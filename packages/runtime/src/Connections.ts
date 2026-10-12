@@ -99,15 +99,19 @@ export class OtherAccount extends Schema.TaggedError<OtherAccount>()('OtherAccou
 /** The keychain keeps no token for a connection, or none Althar can read. */
 class NoToken extends Schema.TaggedError<NoToken>()('NoToken', { message: Schema.String }) {}
 
+/** A connection signed in again or removed while Althar looked at its sign-in: what the look found is no longer its to write. */
+class MovedOn extends Schema.TaggedError<MovedOn>()('MovedOn', {}) {}
+
 /**
  * What a second look at a refused sign-in found: it works (a tool's sign-in
- * taking over, where the token was a copy of it), it is no good and the
- * connection is out, or Althar couldn't tell.
+ * taking over, where the token was a copy of it, or the connection signed in
+ * again meanwhile), it is no good and the connection is out, or Althar
+ * couldn't tell.
  */
 type Look = 'works' | 'out' | 'unsure'
 
 /** What gh or glab had for a connection whose copy of its sign-in stopped working. */
-type CliSaid = 'taken' | 'signed_out' | 'same_token' | 'other_account' | 'refused' | 'unsure'
+type CliSaid = 'taken' | 'signed_out' | 'same_token' | 'other_account' | 'refused' | 'moved' | 'unsure'
 
 /** A project's repositories on an instance of a service, as their remotes name them. */
 export interface Place {
@@ -221,14 +225,18 @@ interface Row {
   readonly accountName: string | null
   readonly accountId: string
   readonly auth: ConnectionInfo['auth']
-  /** The tool whose sign-in the token is a copy of, where it is one. */
-  readonly cli: CliTool | null
+  /** The tool whose sign-in the token is a copy of; `none` where it was signed in otherwise; null where it was made before Althar noted it. */
+  readonly cli: CliTool | 'none' | null
   readonly credentialRef: string
   readonly state: 'ready' | 'reauth_required' | 'removed'
+  readonly revision: number
 }
 
 /** A token is renewed this long before it expires. */
 const RENEW_BEFORE = Duration.minutes(5)
+
+/** How long after gh or glab says it has no sign-in it is asked once more. */
+const CLI_AGAIN = Duration.seconds(1)
 /** A browser sign-in waits this long for the person. */
 const BROWSER_WAIT = Duration.minutes(10)
 
@@ -359,7 +367,7 @@ export class Connections extends Context.Service<
       const rows = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         return yield* sql<Row>`
-          SELECT id, product, web_url, api_url, account_login, account_name, account_id, auth, cli, credential_ref, state
+          SELECT id, product, web_url, api_url, account_login, account_name, account_id, auth, cli, credential_ref, state, revision
           FROM connections WHERE device_id = ${instance.deviceId} AND state <> 'removed' ORDER BY created_at`
       })
 
@@ -377,9 +385,17 @@ export class Connections extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [row] = yield* sql<Row>`
-            SELECT id, product, web_url, api_url, account_login, account_name, account_id, auth, cli, credential_ref, state
+            SELECT id, product, web_url, api_url, account_login, account_name, account_id, auth, cli, credential_ref, state, revision
             FROM connections WHERE id = ${connectionId}`
           return row === undefined || row.state === 'removed' ? yield* new NotFound({ kind: 'connection', id: connectionId }) : row
+        })
+
+      /** Whether a connection has changed since it was read as `row`: signed in again, needing it, or removed. */
+      const movedOn = (row: Row) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [now] = yield* sql<Pick<Row, 'state' | 'revision'>>`SELECT state, revision FROM connections WHERE id = ${row.id}`
+          return now === undefined || now.state === 'removed' || now.revision !== row.revision
         })
 
       /** A connection's state moves on, with a fact the window hears, and what more there is to say of why. */
@@ -497,24 +513,43 @@ export class Connections extends Context.Service<
        * A connection made with gh's or glab's sign-in takes the tool's again,
        * its own copy having stopped working: the tool may have replaced its
        * token since, signed in again or refreshed, or the service may have let
-       * an older one go. Only a token other than the one kept, asked for only
-       * where the tool's sign-in may go, and only for the connection's own
-       * account. A GitHub connection made with gh before Althar noted where
-       * its token came from is known by the token, an OAuth app's (`gho_`),
-       * which no other way in gives it. Null for a connection signed in
-       * otherwise.
+       * an older one go. Asked for only where the tool's sign-in may go, and
+       * taken only for the connection's own account, and only while the
+       * connection is as Althar read it. A ready one takes only a token other
+       * than the one just refused; one already needing its person takes even
+       * the same, where it works, as one signed out by a refusal the service
+       * no longer makes. A GitHub connection made with gh before Althar noted
+       * where its token came from is known by the token, an OAuth app's
+       * (`gho_`), which no other way in gives it; one noted as signed in
+       * otherwise, a pasted token among them, never is. Null for a connection
+       * signed in otherwise.
        */
       const fromCli = (row: Row) =>
         Effect.gen(function* () {
           const kept = yield* stored(row).pipe(Effect.orElseSucceed(() => null))
           const tool: CliTool | null =
-            row.cli ?? (row.product === 'github' && kept?.kind === 'token' && kept.token.startsWith('gho_') ? 'gh' : null)
+            row.cli === 'none'
+              ? null
+              : (row.cli ?? (row.product === 'github' && kept?.kind === 'token' && kept.token.startsWith('gho_') ? 'gh' : null))
           if (tool === null) return null
           const said = (what: CliSaid) => ({ tool, said: what })
           const webUrl = yield* cliDestination(row.product, row.webUrl)
-          const token = webUrl === null ? null : yield* connectors.cliToken(tool, hostnameOf(webUrl))
-          if (webUrl === null || token === null) return said('signed_out')
-          if (kept?.kind === 'token' && kept.token === token) return said('same_token')
+          if (webUrl === null) return said('signed_out')
+          const ask = connectors.cliToken(tool, hostnameOf(webUrl))
+          // gh says it has no sign-in when it couldn't read its own keychain in time, as on a busy machine: it is asked once more, a moment later.
+          const asked = yield* Effect.result(
+            Effect.flatMap(ask, (token) => (token === null ? Effect.delay(ask, CLI_AGAIN) : Effect.succeed(token))),
+          )
+          if (asked._tag === 'Failure') {
+            yield* Effect.logWarning(`Althar couldn’t ask ${tool} for its sign-in`, {
+              connectionId: row.id,
+              message: asked.failure.message,
+            })
+            return said('unsure')
+          }
+          const token = asked.success
+          if (token === null) return said('signed_out')
+          if (row.state === 'ready' && kept?.kind === 'token' && kept.token === token) return said('same_token')
           const taken = yield* Effect.result(
             save({
               product: row.product,
@@ -524,6 +559,7 @@ export class Connections extends Context.Service<
               secret: { token, user: null, key: null },
               actorId: instance.systemId,
               sameAs: { id: row.accountId, login: row.accountLogin },
+              still: row,
             }),
           )
           if (taken._tag === 'Success') {
@@ -532,11 +568,13 @@ export class Connections extends Context.Service<
           }
           const error = taken.failure
           return said(
-            error instanceof OtherAccount
-              ? 'other_account'
-              : error instanceof ConnectorFailed && error.reason === 'unauthorized'
-                ? 'refused'
-                : 'unsure',
+            error instanceof MovedOn
+              ? 'moved'
+              : error instanceof OtherAccount
+                ? 'other_account'
+                : error instanceof ConnectorFailed && error.reason === 'unauthorized'
+                  ? 'refused'
+                  : 'unsure',
           )
         })
 
@@ -544,6 +582,8 @@ export class Connections extends Context.Service<
        * A connection's sign-in is no good: it needs its person to sign in
        * again. Its fact says why: the call that was refused, the second look
        * that bore it out, and what gh or glab had, where the token was theirs.
+       * Only as Althar found it: one signed in again or removed meanwhile is
+       * left as it is now. Whether it was moved.
        */
       const signedOut = (
         row: Row,
@@ -552,10 +592,19 @@ export class Connections extends Context.Service<
         cli: { readonly tool: CliTool; readonly said: CliSaid } | null,
       ) =>
         Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
           const why = { refused: saidOf(refused), again: saidOf(again), cli }
-          yield* moveTo(row, 'reauth_required', 'connection.reauth_required', instance.systemId, why)
+          const moved = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              if (yield* movedOn(row)) return false
+              yield* moveTo(row, 'reauth_required', 'connection.reauth_required', instance.systemId, why)
+              return true
+            }),
+          )
+          if (!moved) return false
           adapterCache.delete(row.id)
           yield* Effect.logWarning(`${infoOf(row.product)?.name ?? row.product} needs signing in again`, { connectionId: row.id, ...why })
+          return true
         })
 
       /**
@@ -564,8 +613,9 @@ export class Connections extends Context.Service<
        * as. Refused again, or gone from the keychain, the token is no good,
        * and a tool's sign-in takes over where the token was its copy;
        * otherwise the connection needs its person to sign in again. What keeps
-       * Althar from telling, its keychain or the service not answering, leaves
-       * the connection as it is.
+       * Althar from telling, its keychain, the service or the tool not
+       * answering, leaves the connection as it is; so does its person signing
+       * it in again, or removing it, while Althar looked.
        */
       const look = (connectionId: string, refused: ConnectorFailed): Effect.Effect<Look, unknown, Store> =>
         Effect.gen(function* () {
@@ -591,29 +641,32 @@ export class Connections extends Context.Service<
             return 'unsure' as const
           }
           const cli = yield* fromCli(row)
-          if (cli?.said === 'taken') return 'works' as const
+          if (cli?.said === 'taken' || cli?.said === 'moved') return 'works' as const
           if (cli?.said === 'unsure') return 'unsure' as const
-          yield* signedOut(row, refused, again, cli)
-          return 'out' as const
+          return (yield* signedOut(row, refused, again, cli)) ? ('out' as const) : ('works' as const)
         })
 
-      /** The last look at each connection's sign-in: when it began, and what it found, once it has. */
-      const looks = new Map<string, { readonly at: number; readonly found: Deferred.Deferred<Look> }>()
+      /** The last look at each connection's sign-in: how many there have been, and what it found, once it has. */
+      const looks = new Map<string, { readonly n: number; readonly found: Deferred.Deferred<Look> }>()
+
+      /** How many looks at a connection's sign-in have begun: a call notes it as it is made. */
+      const looksBegun = (connectionId: string) => Effect.sync(() => looks.get(connectionId)?.n ?? 0)
 
       /**
-       * A service refused a connection's sign-in, on a call made at `since`:
-       * what one look finds. A refusal while a look is under way, or of a call
-       * made before the last look began, takes that look's answer, so calls
-       * refused together are looked at once. The look runs on its own, so a
-       * call given up on doesn't cut it short for the others.
+       * A service refused a connection's sign-in, on a call made after `seen`
+       * looks had begun: what one look finds. A refusal while a look is under
+       * way, or of a call made before the last look began, takes that look's
+       * answer, so calls refused together are looked at once. Looks are
+       * counted rather than timed, as a call and a look can begin in the same
+       * millisecond. The look runs on its own, so a call given up on doesn't
+       * cut it short for the others.
        */
-      const confirm = (connectionId: string, refused: ConnectorFailed, since: number) =>
+      const confirm = (connectionId: string, refused: ConnectorFailed, seen: number) =>
         Effect.gen(function* () {
-          const now = yield* Clock.currentTimeMillis
           const last = looks.get(connectionId)
-          if (last !== undefined && (last.at >= since || !Deferred.isDoneUnsafe(last.found))) return yield* Deferred.await(last.found)
+          if (last !== undefined && (last.n > seen || !Deferred.isDoneUnsafe(last.found))) return yield* Deferred.await(last.found)
           const found = Deferred.makeUnsafe<Look>()
-          looks.set(connectionId, { at: now, found })
+          looks.set(connectionId, { n: (last?.n ?? 0) + 1, found })
           const settle = (answer: Look) => Deferred.succeed(found, answer)
           yield* Effect.forkIn(
             provide(look(connectionId, refused)).pipe(
@@ -645,10 +698,10 @@ export class Connections extends Context.Service<
        */
       const guarded = <T extends object>(adapter: T, connectionId: string): T => {
         const watch = <A, E, R>(effect: Effect.Effect<A, E, R>, again: boolean): Effect.Effect<A, E | ConnectorFailed, R> =>
-          Effect.flatMap(Clock.currentTimeMillis, (since) =>
+          Effect.flatMap(looksBegun(connectionId), (seen) =>
             Effect.catch(effect, (error) =>
               error instanceof ConnectorFailed && error.reason === 'unauthorized'
-                ? Effect.flatMap(confirm(connectionId, error, since), (found) =>
+                ? Effect.flatMap(confirm(connectionId, error, seen), (found) =>
                     found === 'out'
                       ? Effect.fail(error)
                       : found === 'works' && again
@@ -710,6 +763,8 @@ export class Connections extends Context.Service<
        * credential has said who it signs in as; to sign one in again, only
        * for the account it was. It notes the tool whose sign-in the token is
        * a copy of, where it is one, and none where it was signed in otherwise.
+       * Taking a tool's sign-in over for a connection read as `still`, it
+       * keeps nothing once that has moved on (`MovedOn`).
        */
       const save = (input: {
         readonly product: Product
@@ -719,6 +774,7 @@ export class Connections extends Context.Service<
         readonly secret: TokenSet | { readonly token: string; readonly user: string | null; readonly key: string | null }
         readonly actorId: ActorId
         readonly sameAs?: { readonly id: string; readonly login: string }
+        readonly still?: Row
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -740,16 +796,19 @@ export class Connections extends Context.Service<
             return yield* new OtherAccount({ product: input.product, login: account.login, expected: input.sameAs.login })
           const at = yield* timestamp
           const [existing] = yield* sql<Row>`
-            SELECT id, product, web_url, api_url, account_login, account_name, account_id, auth, cli, credential_ref, state FROM connections
+            SELECT id, product, web_url, api_url, account_login, account_name, account_id, auth, cli, credential_ref, state, revision FROM connections
             WHERE device_id = ${instance.deviceId} AND product = ${input.product} AND web_url = ${webUrl} AND account_id = ${account.id}
               AND state <> 'removed'`
           const id = existing?.id ?? (yield* newId(Ids.connection))
           const credentialRef = existing?.credentialRef ?? id
+          const movedOnFrom = input.still === undefined ? Effect.succeed(false) : movedOn(input.still)
+          if (yield* movedOnFrom) return yield* new MovedOn()
           yield* keep(credentialRef, input.secret)
           const expiresAt = 'accessToken' in input.secret ? input.secret.expiresAt : null
           const from = input.cli === null ? {} : { cli: input.cli }
           yield* sql.withTransaction(
             Effect.gen(function* () {
+              if (yield* movedOnFrom) return yield* new MovedOn()
               if (existing === undefined) {
                 yield* sql`INSERT INTO connections ${sql.insert({
                   id,
@@ -761,7 +820,7 @@ export class Connections extends Context.Service<
                   accountLogin: account.login,
                   accountName: account.name,
                   auth: input.auth,
-                  cli: input.cli,
+                  cli: input.cli ?? 'none',
                   credentialRef,
                   expiresAt,
                   state: 'ready',
@@ -780,7 +839,7 @@ export class Connections extends Context.Service<
                 const revision = yield* change('connections', id, {
                   state: 'ready',
                   auth: input.auth,
-                  cli: input.cli,
+                  cli: input.cli ?? 'none',
                   accountLogin: account.login,
                   accountName: account.name,
                   expiresAt,
@@ -1417,8 +1476,10 @@ export class Connections extends Context.Service<
             for (const ref of refs)
               for (const row of all) {
                 if (row.state !== 'reauth_required' || hostAt(row, ref) === undefined) continue
-                const cli = yield* fromCli(row).pipe(Effect.orElseSucceed(() => null))
-                const host = cli?.said === 'taken' ? hostAt(yield* rowOf(row.id), ref) : undefined
+                yield* fromCli(row).pipe(Effect.orElseSucceed(() => null))
+                // Ready now: its tool's sign-in took over, or another call's did meanwhile.
+                const now = yield* rowOf(row.id).pipe(Effect.orElseSucceed(() => null))
+                const host = now?.state === 'ready' ? hostAt(now, ref) : undefined
                 if (host !== undefined) return { connectionId: row.id, host, path: ref.path }
               }
           return null

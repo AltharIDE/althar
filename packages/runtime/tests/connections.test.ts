@@ -6,12 +6,12 @@ import { join } from 'node:path'
 import { type Fetch, type ProductInfo, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents, Connectors, withoutSignIns } from '../src/Config'
 import { Connections, NotConnected, pageOf, SignInUnavailable } from '../src/Connections'
-import { NotFound } from '../src/errors'
+import { CliUnanswered, NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
 import * as Runtime from '../src/Runtime'
 import { type Sealer, Secrets, SecretsUnavailable } from '../src/Secrets'
@@ -65,7 +65,7 @@ const withGitHub = (
     /** Real adapters for other products, offered with GitHub's. */
     readonly more?: ReadonlyArray<ProductInfo>
     /** A command-line tool's sign-in, by tool and host. */
-    readonly cliToken?: (tool: 'gh' | 'glab', host: string) => Effect.Effect<string | null>
+    readonly cliToken?: (tool: 'gh' | 'glab', host: string) => Effect.Effect<string | null, CliUnanswered>
   } = {},
 ) =>
   Runtime.layer({
@@ -481,6 +481,31 @@ describe('a sign-in a service refuses', () => {
       return (JSON.parse(raw ?? '{}') as { token?: string }).token
     })
 
+  /** GitHub over `fetch`, its `nth` answer to who `token` is for kept back until the test lets it go: a second look under way. */
+  const held = (fetch: Fetch, token: string, nth: number) => {
+    let seen = 0
+    let arrived = false
+    let go = () => {}
+    const holding: Fetch = async (url, init = {}) => {
+      const { authorization } = (init.headers ?? {}) as Record<string, string>
+      if (url === USER && authorization?.endsWith(token) === true && ++seen === nth) {
+        arrived = true
+        await new Promise<void>((resolve) => {
+          go = resolve
+        })
+      }
+      return fetch(url, init)
+    }
+    return {
+      fetch: holding,
+      arrived: until(
+        Effect.sync(() => [arrived]),
+        ([now]) => now === true,
+      ),
+      release: () => go(),
+    }
+  }
+
   it.live('stays ready when it is refused once and taken on a second look, and the call is made again', () => {
     let refusals = 0
     const { fetch, sent } = stub([['GET', USER, () => (refusals-- > 0 ? refusal : user[2])]])
@@ -601,7 +626,7 @@ describe('a sign-in a service refuses', () => {
   })
 
   it.live('knows a connection made with gh before Althar noted it by its token, and never puts gh’s in place of a pasted one', () => {
-    const valid = new Set(['github_pat_pasted', 'gho_before', 'gho_now'])
+    const valid = new Set(['gho_pasted', 'gho_before', 'gho_now'])
     const asked: Array<string> = []
     const { fetch } = stub([takes(valid)])
     const cliToken = (tool: 'gh' | 'glab', host: string) =>
@@ -616,23 +641,142 @@ describe('a sign-in a service refuses', () => {
       const cliOf = (id: string) =>
         Effect.map(sql<{ cli: string | null }>`SELECT cli FROM connections WHERE id = ${id}`, ([row]) => row?.cli)
 
-      // A token the person made and pasted, let go: gh isn't asked, and its token doesn't take the pasted one's place.
-      const pasted = yield* connections.connectToken({ product: 'github', token: 'github_pat_pasted', actorId: instance.personId })
-      valid.delete('github_pat_pasted')
+      // A token the person pasted, gh's own among them, let go: gh isn't asked, and its token doesn't take the pasted one's place.
+      const pasted = yield* connections.connectToken({ product: 'github', token: 'gho_pasted', actorId: instance.personId })
+      assert.strictEqual(yield* cliOf(pasted.id), 'none')
+      valid.delete('gho_pasted')
       assert.strictEqual((yield* Effect.flip((yield* codeHost(pasted.id)).account)).reason, 'unauthorized')
       assert.deepStrictEqual(asked, [])
-      assert.strictEqual(yield* tokenOf(pasted.id), 'github_pat_pasted')
+      assert.strictEqual(yield* tokenOf(pasted.id), 'gho_pasted')
       assert.strictEqual((yield* connections.list)[0]?.state, 'reauth_required')
 
-      // gh's token, copied before Althar noted where it came from: gh's new one takes its place, and Althar notes it now.
+      // gh's token, copied before Althar noted where its connections' tokens came from: gh's new one takes its place, and Althar notes it now.
       const before = yield* connections.connectToken({ product: 'github', token: 'gho_before', actorId: instance.personId })
-      assert.isNull(yield* cliOf(before.id))
+      yield* sql`UPDATE connections SET cli = NULL WHERE id = ${before.id}`
       valid.delete('gho_before')
       assert.strictEqual((yield* (yield* codeHost(before.id)).account).login, 'you')
       assert.deepStrictEqual(asked, ['gh github.com'])
       assert.strictEqual(yield* tokenOf(before.id), 'gho_now')
       assert.strictEqual(yield* cliOf(before.id), 'gh')
     }).pipe(Effect.provide(withGitHub(fetch, { cliToken })))
+  })
+
+  it.live('is ready again on publishing with gh’s token, the same one, once GitHub takes it again', () => {
+    const valid = new Set(['gho_same'])
+    const { fetch } = stub([takes(valid)])
+    const cliToken = () => Effect.succeed('gho_same')
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const connection = yield* connections.connectCli({ product: 'github', webUrl: GITHUB, actorId: instance.personId })
+
+      // GitHub refused gh's token for a while, on the second look too: the connection needs signing in again, though gh has the same.
+      valid.clear()
+      assert.strictEqual((yield* Effect.flip((yield* codeHost(connection.id)).account)).reason, 'unauthorized')
+      const out = (yield* factsOf(connection.id)).at(-1)
+      assert.deepInclude(JSON.parse(out?.payload ?? '{}'), { cli: { tool: 'gh', said: 'same_token' } })
+
+      // GitHub takes it again: trying the publish again finds the connection ready, with the token it had.
+      valid.add('gho_same')
+      const found = yield* connections.hostOf(['git@github.com:meridian/api.git'], { fromCli: true })
+      assert.strictEqual(found?.connectionId, connection.id)
+      assert.strictEqual((yield* connections.list)[0]?.state, 'ready')
+      assert.strictEqual(yield* tokenOf(connection.id), 'gho_same')
+      assert.strictEqual((yield* factsOf(connection.id)).at(-1)?.type, 'connection.renewed')
+    }).pipe(Effect.provide(withGitHub(fetch, { cliToken })))
+  })
+
+  it.live('stays as it is while gh doesn’t answer, and asks gh again before taking it as signed out', () => {
+    const valid = new Set(['gho_first'])
+    const { fetch } = stub([takes(valid)])
+    const answers: Array<Effect.Effect<string | null, CliUnanswered>> = [Effect.succeed('gho_first')]
+    let asked = 0
+    const cliToken = () =>
+      Effect.suspend(() => {
+        asked += 1
+        return answers.shift() ?? Effect.succeed(null)
+      })
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const connection = yield* connections.connectCli({ product: 'github', webUrl: GITHUB, actorId: instance.personId })
+      const host = yield* codeHost(connection.id)
+
+      // GitHub lets the token go, and gh times out: Althar can't tell, and the call is one to try again.
+      valid.clear()
+      answers.push(Effect.fail(new CliUnanswered({ tool: 'gh', message: 'gh didn’t answer (SIGTERM)' })))
+      assert.strictEqual((yield* Effect.flip(host.account)).reason, 'unreachable')
+      assert.strictEqual((yield* connections.list)[0]?.state, 'ready')
+      assert.notInclude(
+        (yield* factsOf(connection.id)).map((fact) => fact.type),
+        'connection.reauth_required',
+      )
+
+      // gh says it has none, as it does when its keychain is slow, and has a new one a moment later: taken, without the person.
+      valid.add('gho_second')
+      asked = 0
+      answers.push(Effect.succeed(null), Effect.succeed('gho_second'))
+      assert.strictEqual((yield* host.account).login, 'you')
+      assert.strictEqual(asked, 2)
+      assert.strictEqual(yield* tokenOf(connection.id), 'gho_second')
+      assert.strictEqual((yield* connections.list)[0]?.state, 'ready')
+    }).pipe(Effect.provide(withGitHub(fetch, { cliToken })))
+  })
+
+  it.live('leaves a connection signed in again while Althar looked at it ready, and makes the call with the new token', () => {
+    const valid = new Set(['ghp_new'])
+    const base = stub([takes(valid)])
+    // Connecting, the call GitHub refuses, and the second look, which waits.
+    const github = held(base.fetch, 'ghp_old', 3)
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      valid.add('ghp_old')
+      const connection = yield* connections.connectToken({ product: 'github', token: 'ghp_old', actorId: instance.personId })
+      valid.delete('ghp_old')
+      const call = yield* Effect.forkChild((yield* codeHost(connection.id)).account)
+      yield* github.arrived
+
+      // The person signs it in again meanwhile; then GitHub refuses the old token on the second look too.
+      yield* connections.connectToken({ product: 'github', token: 'ghp_new', connectionId: connection.id, actorId: instance.personId })
+      github.release()
+      assert.strictEqual((yield* Fiber.join(call)).login, 'you')
+      assert.strictEqual((yield* connections.list)[0]?.state, 'ready')
+      assert.strictEqual(yield* tokenOf(connection.id), 'ghp_new')
+      assert.deepStrictEqual(
+        (yield* factsOf(connection.id)).map((fact) => fact.type),
+        ['connection.added', 'connection.renewed'],
+      )
+    }).pipe(Effect.provide(withGitHub(github.fetch)))
+  })
+
+  it.live('leaves a connection removed while Althar looked at it removed, gh’s sign-in taking nothing over', () => {
+    const valid = new Set(['gho_first', 'gho_second'])
+    let gh = 'gho_first'
+    const base = stub([takes(valid)])
+    const github = held(base.fetch, 'gho_first', 3)
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const connection = yield* connections.connectCli({ product: 'github', webUrl: GITHUB, actorId: instance.personId })
+      valid.delete('gho_first')
+      gh = 'gho_second'
+      const call = yield* Effect.forkChild((yield* codeHost(connection.id)).account)
+      yield* github.arrived
+
+      // The person removes it meanwhile; then GitHub refuses the old token, and gh has a new one, which goes nowhere.
+      yield* connections.remove(connection.id, instance.personId)
+      github.release()
+      yield* Effect.flip(Fiber.join(call))
+      assert.deepStrictEqual(yield* connections.list, [])
+      assert.deepStrictEqual(yield* sql<{ state: string }>`SELECT state FROM connections`, [{ state: 'removed' }])
+      assert.isUndefined(yield* tokenOf(connection.id))
+      assert.deepStrictEqual(
+        (yield* factsOf(connection.id)).map((fact) => fact.type),
+        ['connection.added', 'connection.removed'],
+      )
+    }).pipe(Effect.provide(withGitHub(github.fetch, { cliToken: () => Effect.sync(() => gh) })))
   })
 })
 

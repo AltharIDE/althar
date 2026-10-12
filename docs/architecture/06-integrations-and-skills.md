@@ -442,13 +442,20 @@ look finds the sign-in working is made again. Only a token refused again,
 or gone from the keychain, is no good. A connection made with gh's or
 glab's sign-in notes which tool's it is, since the tool may replace the
 token Althar copied: signed in or refreshed again, or GitHub letting an
-older token go once an app has too many. Its token no good, Althar asks the
-tool for the one it has now, and takes it where it works for the same
-account. Only when that fails too does the connection need its person to
-sign in again, and its fact says why: the call refused, the second look,
-and what the tool had, in the service's words and never with a token.
-Publishing a task, and trying its pull request again, asks the tool again
-for a connection already waiting to be signed in again. Althar's own
+older token go once an app has too many. One signed in any other way, a
+pasted token among them, is noted as that, and no tool's sign-in takes it
+over. Its token no good, Althar asks the tool for the one it has now, and
+takes it where it works for the same account. A tool that says it has no
+sign-in is asked once more a moment later, as gh says so when its own
+keychain is slow; one that doesn't answer at all leaves the connection as
+it is. Only when the tool is signed out too does the connection need its
+person to sign in again, and its fact says why: the call refused, the
+second look, and what the tool had, in the service's words and never with
+a token. A connection its person signs in again, or removes, while Althar
+looks is left as they made it. Publishing a task, and trying its pull
+request again, asks the tool again for a connection already waiting to be
+signed in again, and takes even the token it had, where the service now
+takes it. Althar's own
 keychain or store failing it, such as the main process too busy to answer
 under load, is no refusal: the call can be tried again, and the connection
 stays as it is. A sealed secret is read or kept again, a moment apart,
