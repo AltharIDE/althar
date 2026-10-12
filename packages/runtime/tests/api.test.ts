@@ -720,6 +720,22 @@ describe('settings, through the API', () => {
   )
 })
 
+describe('this computer’s load, through the API', () => {
+  it.live('says how hard this computer works, read as it is, checked on the way', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        const load = yield* client.GetLoad({})
+        assert.isAbove(load.memoryTotal, 0)
+        assert.isAtMost(load.memoryUsed, load.memoryTotal)
+        assert.lengthOf(load.history, 1)
+        // Nothing of Althar's runs, so its part is none; or unknown, where processes can't be listed.
+        if (load.shares !== null) assert.lengthOf(load.shares, 0)
+      }),
+    ),
+  )
+})
+
 describe('project rules, through the API', () => {
   it.live('reads a project’s rules, and changes them in part as the person', () =>
     Effect.scoped(
@@ -1280,7 +1296,7 @@ describe('the coordinator, through the API', () => {
           (thread) => thread.session?.turnRunning === true,
         )
         assert.deepStrictEqual([working.task.actions, working.task.planId], [['stop', 'abandon'], null])
-        // A conflict whose checks Althar waits for, as one its lead resolved leaves it: stopping hands it to the person (ADR-027).
+        // A conflict whose checks Althar waits for, as one its lead resolved leaves it: stopping hands it to the person (ADR-030).
         const waiting = () =>
           store(
             Effect.gen(function* () {
@@ -1635,6 +1651,23 @@ describe('words', () => {
     )
     assert.strictEqual(said(new NotFound({ kind: 'something new', id: 'a' })), "That thing isn't there any more.")
     assert.strictEqual(said({ _tag: 'UnknownAgent', agentId: 'cursor' }), 'Althar has no agent called cursor.')
+    assert.strictEqual(
+      said({
+        _tag: 'SecretsUnavailable',
+        reason: 'Althar has nowhere safe to keep sign-ins: install and start a keyring (gnome-keyring or KWallet), then try again.',
+        keyring: true,
+      }),
+      'Althar has nowhere safe to keep sign-ins: install and start a keyring (gnome-keyring or KWallet), then try again.',
+    )
+    // Anything else that couldn't be kept — a file that won't write, a bad name, an empty reason — gets the generic sentence.
+    assert.strictEqual(
+      said({ _tag: 'SecretsUnavailable', reason: "Couldn't write: Error: EACCES: permission denied" }),
+      "Althar's runtime couldn't do that. Its log has the details.",
+    )
+    assert.strictEqual(
+      said({ _tag: 'SecretsUnavailable', reason: '', keyring: true }),
+      "Althar's runtime couldn't do that. Its log has the details.",
+    )
     assert.strictEqual(said({ _tag: 'SessionRunning' }), 'An agent is already working on this task.')
     assert.strictEqual(said(new SessionFailed({ agentId: 'codex', reason: 'stack', summary: '' })), "Codex couldn't start.")
     assert.strictEqual(
@@ -1780,6 +1813,29 @@ describe('words', () => {
     assert.strictEqual(summarize(Cause.fail(new AgentExited({ code: 1, signal: null, stderr: '' }))), 'The agent stopped.')
     assert.strictEqual(summarize(Cause.die(new Error('It broke'))), 'It broke.')
     assert.strictEqual(summarize(Cause.empty), '')
+    // A command the sandbox could not take out to the device says what to put right, not that it is missing.
+    assert.include(
+      agentSaid(
+        new AgentStartFailed({ command: 'flatpak-spawn', reason: 'Portal call failed: org.freedesktop.DBus.Error.ServiceUnknown' }),
+      ) ?? '',
+      'org.freedesktop.Flatpak',
+    )
+    assert.include(
+      agentSaid(new AgentStartFailed({ command: 'opencode', reason: 'spawn flatpak-spawn ENOENT' })) ?? '',
+      'org.freedesktop.Flatpak',
+    )
+    // The same where it started and then could not reach the device: the bridge's sentence, not "the agent stopped".
+    assert.include(
+      agentSaid(
+        new AgentExited({
+          code: 1,
+          signal: null,
+          stderr:
+            'Portal call failed: org.freedesktop.DBus.Error.ServiceUnknown\nHint: --host only works when the Flatpak is allowed to talk to org.freedesktop.Flatpak',
+        }),
+      ) ?? '',
+      'org.freedesktop.Flatpak',
+    )
   })
 })
 
@@ -1824,7 +1880,7 @@ describe('thread items', () => {
       agentId: 'codex',
       createdAt: '2026-09-29T12:00:00.000Z',
       kind: 'user_message',
-      content: { text: 'Now', links: [] },
+      content: { text: 'Now', links: [], pictures: [] },
       input: { state: 'queued', interrupting: true },
     })
     const tool = itemOf(

@@ -190,6 +190,12 @@ const credentialReason = (words: ReadonlyArray<string>): string | undefined => {
   return (words[index] ?? '').startsWith('credential') ? CREDENTIALS_REFUSED : undefined
 }
 
+/** The Flatpak grants the app a broad host bridge; agents must not invoke it directly. */
+const deviceBridgeReason = (words: ReadonlyArray<string>): string | undefined =>
+  (words[0] ?? '').split('/').at(-1) === 'flatpak-spawn'
+    ? 'Agents do not run commands on the device through Flatpak; Althar uses that bridge only for commands it prepares.'
+    : undefined
+
 /** What `gh` and `glab` may do: their read-only commands, by command and subcommand. */
 const HOST_LOOKS: Readonly<Record<string, ReadonlySet<string>>> = {
   pr: new Set(['view', 'list', 'diff', 'checks', 'status']),
@@ -1044,7 +1050,7 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   if (request.kind === 'execute' || request.kind === 'other') {
     // A code host is reached through Althar: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
     const refused = parseCommandLine(commandOf(request))
-      .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)))
+      .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
       .find((reason) => reason !== undefined)
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
     if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
@@ -1682,7 +1688,7 @@ export const decideReader = (request: PermissionRequest): ReaderVerdict => {
       if (command === undefined || command === '') return deny("Althar can't tell what this does, and this role only reads.")
       const reason =
         parseCommandLine(command)
-          .commands.map((words) => credentialReason(unwrap(words)))
+          .commands.map((words) => credentialReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
           .find((found) => found !== undefined) ?? readerCommandReason(command)
       return reason === undefined ? ALLOW : deny(reason)
     }

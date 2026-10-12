@@ -2,6 +2,7 @@ export { Agents, type AgentEntry, RuntimeConfig, type RuntimeOptions, type Stall
 export * from './errors'
 export { Instance, type InstanceInfo } from './Instance'
 export { Live, type LiveEvent } from './Live'
+export { type LoadOptions, MachineLoad } from './MachineLoad'
 export { Permissions } from './Permissions'
 export { Questions } from './Questions'
 export { CreatedTask, OpenedProject, Projects, slugify } from './Projects'
@@ -25,4 +26,4 @@ export { factFor, factsIn, type ModelFact, ModelFacts, type ModelFactsOptions } 
 export { Limits, type Out } from './Limits'
 export { Policies, type ProjectRules, type UsageLimit } from './Policies'
 export { backupsIn, databaseIn, defaultProfile, defaultWorktrees } from './locations'
-export { InstallFailed, Installs } from './Installs'
+export { InstallFailed, Installs, type OnDevice } from './Installs'

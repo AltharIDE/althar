@@ -70,6 +70,8 @@ export type Block =
       readonly delivery: Delivery
       /** The links in it Althar could unfurl: issues and pull requests. */
       readonly links: ReadonlyArray<Unfurl>
+      /** The images the person sent with it. */
+      readonly pictures: ReadonlyArray<Picture>
     }
   | {
       readonly kind: 'turn'
@@ -378,7 +380,15 @@ export const blocksOf = (
         if (item.input?.state === 'withdrawn' || (queue && item.input?.state === 'queued' && !item.input.interrupting)) continue
         const delivery =
           item.input?.state === 'queued' ? (item.input.interrupting ? Delivery.Interrupting : Delivery.Queued) : Delivery.Delivered
-        blocks.push({ kind: 'you', id: item.id, text: item.content.text, at: ago(item.createdAt), delivery, links: item.content.links })
+        blocks.push({
+          kind: 'you',
+          id: item.id,
+          text: item.content.text,
+          at: ago(item.createdAt),
+          delivery,
+          links: item.content.links,
+          pictures: item.content.pictures,
+        })
         continue
       }
       case 'arrival':

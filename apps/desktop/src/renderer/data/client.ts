@@ -24,6 +24,7 @@ import {
   type FileDiff,
   type FolderReading,
   type IssueList,
+  type Load,
   type OutputText,
   type Product,
   type ChangeTarget,
@@ -37,6 +38,7 @@ import {
   type SignInStart,
   type SignInState,
   type Status,
+  type SentImage,
   type TaskEnd,
   type TaskList,
   type TaskSummary,
@@ -115,8 +117,8 @@ export interface Client {
   /** The person left the home: what the loop does from now on is new to them. */
   readonly leftHome: () => Promise<void>
   readonly startSession: (input: Start) => Promise<string>
-  /** Hands the thread to another agent; with `body`, what the person said, its first turn after the brief. */
-  readonly switchAgent: (input: Start & { readonly body?: string }) => Promise<string>
+  /** Hands the thread to another agent; with `body`, what the person said, and any images, its first turn after the brief. */
+  readonly switchAgent: (input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage> }) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
   /** How hard the thread's agent thinks, as the agent names it. */
   readonly setEffort: (input: { readonly threadId: string; readonly effort: string }) => Promise<void>
@@ -148,6 +150,8 @@ export interface Client {
     readonly threadId: string
     readonly body: string
     readonly disposition: 'after_current' | 'interrupt_and_continue'
+    /** Images sent with it, in order. */
+    readonly images?: ReadonlyArray<SentImage>
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
@@ -268,6 +272,8 @@ export interface Client {
   readonly pushBranch: (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) => Promise<void>
   /** The editors on this Mac a task's files open in. */
   readonly listEditors: () => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>
+  /** How hard this computer works now, and Althar's work's part, for the bar while it shows it. */
+  readonly getLoad: () => Promise<Load>
   /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
   readonly installAgent: (agentId: string) => Promise<void>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
@@ -476,6 +482,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     pushHere: (taskId) => command((commandId) => api.PushHere({ commandId, taskId })),
     pushBranch: (taskId, heads) => command((commandId) => api.PushBranch({ commandId, taskId, heads })),
     listEditors: () => settle(api.ListEditors({})),
+    getLoad: () => settle(api.GetLoad({})),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),

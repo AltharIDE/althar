@@ -1,6 +1,8 @@
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
+import { MESSAGE_IMAGES } from './pictures'
+
 /*
  * What a client can ask the runtime (docs/architecture/02): commands that
  * change state, queries that return what a screen shows, and one stream of
@@ -138,6 +140,8 @@ export const AgentModels = Schema.Struct({
   blocked: Schema.Array(Schema.String),
   /** Being asked now, for an agent not seen before: read again shortly. */
   probing: Schema.Boolean,
+  /** It takes images in a message, as it said when last asked or started (ACP's `promptCapabilities.image`); null until it has said. */
+  images: Schema.NullOr(Schema.Boolean),
 })
 export type AgentModels = typeof AgentModels.Type
 
@@ -663,21 +667,10 @@ const itemFields = {
   createdAt: Schema.String,
 }
 
-/** What the person said, and where it stands with the lead. */
-export const UserMessageItem = Schema.Struct({
-  ...itemFields,
-  kind: Schema.Literal('user_message'),
-  /** What they said, and the links in it Althar could unfurl. */
-  content: Schema.Struct({ text: Schema.String, links: Schema.Array(Unfurl) }),
-  input: Schema.NullOr(
-    Schema.Struct({ state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']), interrupting: Schema.Boolean }),
-  ),
-})
-
 /**
- * A picture an agent handed back, in a message or a tool's result: kept in
- * the artifact store by its digest, by which the window asks for its bytes,
- * or not kept, saying why.
+ * A picture an agent handed back, in a message or a tool's result, or one
+ * the person sent with a message: kept in the artifact store by its digest,
+ * by which the window asks for its bytes, or not kept, saying why.
  */
 export const Picture = Schema.Struct({
   /** Its SHA-256; null for one that wasn't kept. */
@@ -692,6 +685,34 @@ export const Picture = Schema.Struct({
   unkept: Schema.NullOr(Schema.Literals(['too_large', 'unsupported', 'unkept'])),
 })
 export type Picture = typeof Picture.Type
+
+/**
+ * An image the person sends with a message: its bytes, in base64, as the
+ * window read them; or one Althar keeps already, by its digest, as when a
+ * message waiting its turn is taken back to change and sent again. Its name
+ * is its file's, where it had one. The runtime believes the bytes, not the
+ * name: only PNG, JPEG, GIF and WebP are sent, each of at most
+ * `MESSAGE_IMAGES.bytes`.
+ */
+export const SentImage = Schema.Union([
+  Schema.Struct({ data: Schema.String, name: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ digest: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)), name: Schema.NullOr(Schema.String) }),
+])
+export type SentImage = typeof SentImage.Type
+
+/** The images sent with one message, in the order they show: at most `MESSAGE_IMAGES.count`. */
+export const SentImages = Schema.Array(SentImage).check(Schema.isMaxLength(MESSAGE_IMAGES.count))
+
+/** What the person said, and where it stands with the lead. */
+export const UserMessageItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('user_message'),
+  /** What they said, the links in it Althar could unfurl, and the images they sent with it. */
+  content: Schema.Struct({ text: Schema.String, links: Schema.Array(Unfurl), pictures: Schema.Array(Picture) }),
+  input: Schema.NullOr(
+    Schema.Struct({ state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']), interrupting: Schema.Boolean }),
+  ),
+})
 
 /** A file an agent wrote whole, or pointed at: by its path as it named it, never its contents. */
 export const FileMention = Schema.Struct({
@@ -1531,6 +1552,63 @@ export type OutputText = typeof OutputText.Type
 export const DocumentText = Schema.Struct({ path: Schema.String, body: Schema.String, bytes: Schema.Number, lines: Schema.Number })
 export type DocumentText = typeof DocumentText.Type
 
+/** A part of the whole, 0 to 1. */
+const Part = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
+/** A number of bytes. */
+const Bytes = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))
+
+/** How hard macOS works to find memory, in its own three levels: the honest sign memory is short, as a Mac keeps it full of cache on purpose. */
+export const MemoryPressure = Schema.Literals(['normal', 'warning', 'critical'])
+export type MemoryPressure = typeof MemoryPressure.Type
+
+/**
+ * Work Althar runs, and its part of this computer, with everything it
+ * started: a task's (its lead's agent, its steps' agents and its runs), a
+ * project's coordinator, or the project run on its default branch.
+ */
+export const LoadShare = Schema.Struct({
+  kind: Schema.Literals(['task', 'coordinator', 'run']),
+  projectId: Schema.String,
+  /** The project's name. */
+  project: Schema.String,
+  /** The task's id, its own thread, which opens it, and its title; null for a coordinator or the default branch. */
+  taskId: Schema.NullOr(Schema.String),
+  threadId: Schema.NullOr(Schema.String),
+  title: Schema.NullOr(Schema.String),
+  /** The agent leading it; null for a run of the default branch, which has none. */
+  agent: Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  /** Its part of all the CPU since the reading before. */
+  cpu: Part,
+  /** The memory its processes hold: what each has resident, added up. */
+  memory: Bytes,
+  processes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+})
+export type LoadShare = typeof LoadShare.Type
+
+/** A reading of how hard this computer works: the whole of it, and Althar's work's part. */
+export const LoadPoint = Schema.Struct({ cpu: Part, work: Part })
+export type LoadPoint = typeof LoadPoint.Type
+
+/**
+ * How hard this computer works, as the runtime read it a moment ago, for the
+ * window's bar: read only while a window asks, at most every few seconds,
+ * however many windows ask.
+ */
+export const Load = Schema.Struct({
+  /** All the CPU in use since the reading before, across every core. */
+  cpu: Part,
+  /** Memory in use and all of it. In use is as Activity Monitor counts it on a Mac: without what the system keeps as cache. */
+  memoryUsed: Bytes,
+  memoryTotal: Bytes,
+  /** Null where the system doesn't say: anywhere but a Mac. */
+  pressure: Schema.NullOr(MemoryPressure),
+  /** Althar's work, most CPU first; null where its processes can't be read, as on Windows. */
+  shares: Schema.NullOr(Schema.Array(LoadShare)),
+  /** The readings of the last two minutes, oldest first, the last of them this one's. A gap of more than a few readings starts them afresh. */
+  history: Schema.Array(LoadPoint),
+})
+export type Load = typeof Load.Type
+
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
 
 const call = <const Tag extends string, P extends Schema.Struct.Fields, S extends Schema.Top>(tag: Tag, payload: P, success: S) =>
@@ -1690,6 +1768,8 @@ export const Api = RpcGroup.make(
       model: Schema.optional(Schema.String),
       effort: Schema.optional(Schema.String),
       body: Schema.optional(Schema.String),
+      /** Images sent with what the person said. */
+      images: Schema.optional(SentImages),
     },
     Schema.String,
   ),
@@ -1729,7 +1809,12 @@ export const Api = RpcGroup.make(
   command('AbandonTask', { taskId: Schema.String }, Schema.Void),
   /** Opens an abandoned task again, on the same worktree and branch; nothing runs until the person says so. Never a merged one. */
   command('ReopenTask', { taskId: Schema.String }, Schema.Void),
-  command('Send', { threadId: Schema.String, body: Schema.String, disposition: Disposition }, Schema.Void),
+  /** Says something to a thread's agent, with any images: empty words with images are a message too. */
+  command(
+    'Send',
+    { threadId: Schema.String, body: Schema.String, disposition: Disposition, images: Schema.optional(SentImages) },
+    Schema.Void,
+  ),
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
   command('TakeBack', { itemId: Schema.String }, Schema.Void),
   /**
@@ -1914,6 +1999,8 @@ export const Api = RpcGroup.make(
   ),
   /** The editors on this device a task's files open in, by the name people know them. */
   call('ListEditors', {}, Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
+  /** How hard this computer works now, and Althar's work's part, for the window's bar while it shows it. */
+  call('GetLoad', {}, Load),
   /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */
   command('InstallAgent', { agentId: Schema.String }, Schema.Void),
   /** Opens a task's folder in an editor, at one of its files and a line where given; whether it could. The path is the task's, as its changes list it. */

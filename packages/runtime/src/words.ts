@@ -2,7 +2,8 @@ import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
 import type { AccountRefused } from './Accounts'
-import type { CantMerge, DocumentRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
+import type { CantMerge, DocumentRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
+import { MESSAGE_IMAGES } from './pictures'
 
 /*
  * What went wrong, in words a person reads in the window. The runtime's
@@ -31,6 +32,14 @@ const lastLine = (output: string): string =>
     .filter((line) => line !== '')
     .at(-1) ?? ''
 
+/**
+ * What to do when the sandbox cannot reach the device (a Flatpak's host):
+ * the permission, and how it is given. The same sentence the Codex bridge
+ * prints, so it reaches the person either way.
+ */
+const hostDenied =
+  'Althar can’t reach this computer from inside its Flatpak sandbox. Give the Flatpak permission to talk to org.freedesktop.Flatpak (flatpak override --user --talk-name=org.freedesktop.Flatpak dev.althar.app), then try again.'
+
 /** A sentence, with its full stop. */
 const sentence = (words: string): string => (/[.!?]$/.test(words) ? words : `${words}.`)
 
@@ -39,12 +48,17 @@ export const agentSaid = (error: unknown): string | undefined => {
   switch (tagOf(error)) {
     case 'AgentStartFailed': {
       const command = text(error, 'command')
-      return /ENOENT/.test(text(error, 'reason'))
+      const reason = text(error, 'reason')
+      // The person's own command, where the sandbox cannot reach the device: say what to put right, never "isn't installed".
+      if (command === 'flatpak-spawn' || /flatpak|org\.freedesktop\.Flatpak/i.test(reason)) return hostDenied
+      return /ENOENT/.test(reason)
         ? `${command} isn't installed, or isn't on this Mac's PATH.`
-        : sentence(`${command} wouldn't start: ${text(error, 'reason')}`)
+        : sentence(`${command} wouldn't start: ${reason}`)
     }
     case 'AgentExited': {
       const said = lastLine(text(error, 'stderr'))
+      // A bridge that started and then could not take the command out to the device says so; keep its sentence, not "the agent stopped".
+      if (/flatpak-spawn|org\.freedesktop\.Flatpak/i.test(said)) return hostDenied
       return said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`)
     }
     case 'AgentRequestFailed':
@@ -122,6 +136,13 @@ export const words = (
         return `Althar has no agent called ${text(error, 'agentId')}.`
       case 'DocumentRefused':
         return documentRefused[text(error, 'reason') as DocumentRefused['reason']] ?? 'Althar can’t show that file here.'
+      case 'ImageRefused': {
+        const name = text(error, 'name')
+        return (
+          imageRefused[text(error, 'reason') as ImageRefused['reason']]?.(name === '' ? 'An image' : name) ??
+          "Althar can't send that image."
+        )
+      }
       case 'SessionRunning':
         return 'An agent is already working on this task.'
       case 'NoSession':
@@ -204,8 +225,15 @@ export const words = (
         return "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again."
       case 'ConnectorFailed':
         return hostSaid(productOf(text(error, 'product')), text(error, 'reason'), text(error, 'message'))
+      // The keychain's own words, where main marked its refusal; anything else of its own — a file that won't write, a bad name, an empty reason — gets the generic sentence.
+      case 'SecretsUnavailable': {
+        const reason = text(error, 'reason')
+        return fieldOf(error, 'keyring') === true && reason !== '' ? reason : "Althar's runtime couldn't do that. Its log has the details."
+      }
       case 'CliSignedOut':
         return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this Mac.`
+      case 'CliUnanswered':
+        return `${text(error, 'tool')} didn't answer in time. Try again in a moment.`
       case 'CliElsewhere':
         return `Althar only gives ${text(error, 'tool')}'s sign-in to a server it knows, over HTTPS. ${text(error, 'address')} isn't one.`
       case 'OtherAccount':
@@ -294,6 +322,7 @@ export const expected = new Set([
   'TaskRefused',
   'NotConnected',
   'CliSignedOut',
+  'CliUnanswered',
   'CliElsewhere',
   'OtherAccount',
   'NotAnIssue',
@@ -301,6 +330,7 @@ export const expected = new Set([
   'RepositoriesNeeded',
   'ProjectRefused',
   'DocumentRefused',
+  'ImageRefused',
   'NotFound',
   'UnknownAgent',
   'SessionRunning',
@@ -321,6 +351,15 @@ const documentRefused: Readonly<Record<DocumentRefused['reason'], string>> = {
   outside: 'This file isn’t in the task’s worktree, so Althar doesn’t show it.',
   too_large: 'This document is too large to show here. Open it in your editor.',
 }
+
+/** Why an image sent with a message isn't sent, by reason, of the image by its name. */
+const imageRefused = {
+  unsupported: (name) => `${name} isn't a PNG, JPEG, GIF or WebP image, so it can't be sent.`,
+  too_large: (name) => `${name} is larger than ${MESSAGE_IMAGES.bytes / (1024 * 1024)} MB, so it can't be sent.`,
+  too_many: () => `A message can carry at most ${MESSAGE_IMAGES.count} images.`,
+  missing: (name) => `${name} isn't kept any more. Add it again.`,
+  unkept: () => 'Althar has nowhere to keep images here, so none can be sent.',
+} as const satisfies Record<ImageRefused['reason'], (name: string) => string>
 
 /** Why a project can't be changed so, by reason. */
 const projectRefused = {

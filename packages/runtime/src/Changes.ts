@@ -603,7 +603,9 @@ export class Changes extends Context.Service<
           )
           const remotes =
             fork === null ? Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(task.remotes) : [fork.fork.url]
-          const found = yield* connections.hostOf(remotes)
+          // A connection there that needs signing in again, made with gh's or glab's sign-in, takes the tool's again where it can:
+          // publishing, and trying again after it couldn't, need no more of the person than that.
+          const found = yield* connections.hostOf(remotes, { fromCli: true })
           // In a project of several, one on no host Althar knows ends on its branch. A project of one needs its host, which may be
           // one Althar can't tell by its address until it's connected; so does one on a host it knows but isn't connected to.
           if (found === null) {
@@ -1849,7 +1851,7 @@ export class Changes extends Context.Service<
       /**
        * A conflict resolved. Merging here, the person merges again. On a pull
        * request, Althar pushes the merge itself: the one push of a lead's
-       * commits that isn't the person's (ADR-027). Only where the pull request
+       * commits that isn't the person's (ADR-030). Only where the pull request
        * had the branch as it was when the lead was asked, the commits since are
        * the merge alone, up to the head it settled at, and nothing else asked
        * the lead meanwhile; otherwise the merge waits for the person to push

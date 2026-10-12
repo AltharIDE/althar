@@ -1,17 +1,18 @@
 import { type ReactNode, useEffect } from 'react'
 
 import type { AgentStatus } from '@althar/contracts'
-import { Button, type RuntimeEntry, RuntimeState, TitleBar } from '@althar/ui'
+import { Button, type RuntimeEntry, RuntimeState } from '@althar/ui'
 import { Start } from '@althar/ui/screens'
 
 import { brandOf } from '../../shared/agents'
+import { device, platform } from '../../shared/device'
 import { HomePending } from '../../shared/Pending'
 import { AgentAccounts } from '../accounts/AgentAccounts'
 import type { AccountSignInModel } from '../accounts/useAccountSignIn'
+import { BareBar } from '../tabs/TabsFrame'
 import s from './Start.module.css'
 import { useFirstProject } from './useFirstProject'
 import type { StartModel } from './useStart'
-import { device, platform } from '../../shared/device'
 
 /*
  * Where the window starts. With no project yet, the kit's Start screen: the
@@ -158,9 +159,7 @@ function First({
   const error = project.error ?? model.error
   return (
     <div className={`${s.window} ${s.bare}`}>
-      <TitleBar lights="none" className={s.over}>
-        {null}
-      </TitleBar>
+      <BareBar className={s.over} />
       <Start
         // Still asking until the runtime answers, or says it can't.
         runtimes={model.status === null && model.error === null ? null : runtimesOf(model, accounts)}

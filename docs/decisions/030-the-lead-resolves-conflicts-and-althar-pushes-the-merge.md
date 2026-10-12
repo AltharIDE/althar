@@ -1,4 +1,4 @@
-# ADR-027: Where the project says so, the lead resolves a conflict unasked, and Althar pushes the merge
+# ADR-030: Where the project says so, the lead resolves a conflict unasked, and Althar pushes the merge
 
 - **Status:** Accepted
 - **Date:** 2026-10-12

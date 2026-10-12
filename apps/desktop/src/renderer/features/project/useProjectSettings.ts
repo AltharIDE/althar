@@ -30,7 +30,7 @@ export interface ProjectSettingsModel {
   /** Why the last new name or ink didn't hold. */
   readonly failed: string | null
   readonly rules: ProjectRulesView | null
-  /** Turns on or off the project's leads resolving conflicts on their own (ADR-027). */
+  /** Turns on or off the project's leads resolving conflicts on their own (ADR-030). */
   readonly setResolveConflicts: (on: boolean) => void
   /** Why the switch didn't hold. */
   readonly ruleFailed: string | null

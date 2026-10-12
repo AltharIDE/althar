@@ -33,7 +33,7 @@ import type { ProjectSettingsModel } from './useProjectSettings'
  * change them in place; the others say where each thing stands and open
  * where it is changed: its repositories, its rules, and connecting the code
  * host and tracker it is on. Beside its rules, a switch has its leads
- * resolve a conflict with the default branch unasked (ADR-027). Removing it
+ * resolve a conflict with the default branch unasked (ADR-030). Removing it
  * from Althar is at the foot, and asks first. Nothing in it says what is
  * running.
  */

@@ -1,7 +1,7 @@
 import { type ChildProcessWithoutNullStreams, execFile, spawn } from 'node:child_process'
 
 import { asNode } from './process'
-import type { AgentDefinition } from './registry'
+import type { AgentDefinition, LaunchSpec } from './registry'
 
 /*
  * An agent's own sign-in, run by Althar rather than in a terminal (ADR-012:
@@ -27,12 +27,12 @@ export type InAppSignIn =
   | {
       readonly kind: 'claude-login'
       readonly ways: ReadonlyArray<SignInWay>
-      readonly run: (node: string) => { command: string; args: ReadonlyArray<string> }
+      readonly run: (node: string) => LaunchSpec
     }
   | {
       readonly kind: 'codex-app-server'
       readonly ways: ReadonlyArray<SignInWay>
-      readonly run: (node: string) => { command: string; args: ReadonlyArray<string> }
+      readonly run: (node: string) => LaunchSpec
     }
 
 /** What a sign-in under way says. */
@@ -109,7 +109,9 @@ export const startSignInFlow = (
   const node = options.node ?? process.execPath
   const spec = inApp.run(node)
   const env = { ...process.env, ...asNode({ command: spec.command, args: spec.args }), ...options.home }
-  const child = spawn(spec.command, [...spec.args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+  // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled.
+  const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
+  const child = spawn(launched.command, [...launched.args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
   let over = false
   const end = (event?: SignInFlowEvent) => {
     if (over) return
@@ -170,7 +172,8 @@ const claude = (
     if (code !== 0) return end({ kind: 'failed', message: lastLine(stderr) ?? lastLine(said) ?? 'Claude Code stopped signing in.' })
     // Signed in: its status says who as.
     const status = agent.signIn.status(process.execPath)
-    execFile(status.command, [...status.args], { env, timeout: 15_000 }, (_error, stdout) => end({ kind: 'done', ...claudeWho(stdout) }))
+    const ran = status.onDevice === undefined ? status : status.onDevice({ env })
+    execFile(ran.command, [...ran.args], { env, timeout: 15_000 }, (_error, stdout) => end({ kind: 'done', ...claudeWho(stdout) }))
   })
   return {
     paste: (code: string) => void child.stdin.write(`${code.trim()}\n`),

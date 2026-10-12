@@ -15,10 +15,12 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
 import { Agents, type AgentEntry, Connectors, type RuntimeOptions, type StallOptions } from '../src/Config'
+import type { CliUnanswered } from '../src/errors'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { Secrets } from '../src/Secrets'
+import type { LoadOptions } from '../src/MachineLoad'
 import type { ModelFactsOptions } from '../src/ModelFacts'
 
 /** A git repository with one commit on `main`. */
@@ -131,7 +133,7 @@ export const fakeConnectors = (
     readonly fetch?: Fetch
     readonly clientIds?: Readonly<Record<string, string>>
     readonly callbackPort?: number
-    readonly cliToken?: (tool: 'gh' | 'glab', host: string) => Effect.Effect<string | null>
+    readonly cliToken?: (tool: 'gh' | 'glab', host: string) => Effect.Effect<string | null, CliUnanswered>
   } = {},
 ) =>
   Layer.succeed(
@@ -183,6 +185,10 @@ export const runtime = (
     readonly editors?: RuntimeOptions['editors']
     /** Where the artifact store keeps bytes; a folder of its own unless a test says (null: nowhere). */
     readonly artifactsRoot?: string | null
+    /** How this computer's load is read. */
+    readonly load?: LoadOptions
+    /** The device outside a sandbox, as for a Flatpak. */
+    readonly onDevice?: RuntimeOptions['onDevice']
   } = {},
 ) =>
   Runtime.layer({
@@ -204,6 +210,8 @@ export const runtime = (
     ...(more.permissionJudgeTimeout === undefined ? {} : { permissionJudgeTimeout: more.permissionJudgeTimeout }),
     ...(more.modelFacts === undefined ? {} : { modelFacts: more.modelFacts }),
     ...(more.editors === undefined ? {} : { editors: more.editors }),
+    ...(more.load === undefined ? {} : { load: more.load }),
+    ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
   })
 
 /** A GitHub instance that never answers: `.test` names nothing, so git's fetches fail at once, and the fake service stands in for its API. */

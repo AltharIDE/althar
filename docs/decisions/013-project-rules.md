@@ -7,7 +7,7 @@
   waits for the person, with each account that could take it over and when
   the agent is back.
   2026-10-12: the rules keep whether the project's leads resolve merge
-  conflicts on their own ([ADR-027](027-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md)),
+  conflicts on their own ([ADR-030](030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md)),
   switched in the project's settings. Off unless the person turns it on.
 - **Owner:** Repository maintainers
 - **Context:** Every permission request reaches Althar

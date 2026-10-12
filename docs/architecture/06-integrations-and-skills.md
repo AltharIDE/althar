@@ -250,7 +250,7 @@ service's model.
   task's branch until the person has looked at it and pushes it: the task
   says how many commits aren't on the pull request yet, and Push pushes up to
   the commit they saw, never one the lead made since. The lead has no tool to
-  push. One exception (ADR-027): where the project has its leads resolve
+  push. One exception (ADR-030): where the project has its leads resolve
   conflicts, Althar pushes the merge that resolves one, and a fix for checks
   that fail on it, and nothing with them (Resolving a conflict, below).
 - **Without a connection, the person pushes the task's branch with their own
@@ -326,7 +326,7 @@ service's model.
   once it has worked it out: GitHub's mergeable state, GitLab's merge
   status, Bitbucket Data Center's merge result. Bitbucket Cloud doesn't say.
 
-**Resolving a conflict, where the project says so** (ADR-027). A project's
+**Resolving a conflict, where the project says so** (ADR-030). A project's
 rules can have its leads resolve a conflict with the default branch on their
 own, switched by "Resolve conflicts" in its settings. Off, a conflict waits
 for the person, as above.
@@ -501,6 +501,34 @@ Another process, an agent's shell among them, can read the file but not
 open it: asking the keychain for the key prompts the person. The runtime
 asks the app's main process to seal and open, and never holds the key. The
 command-line client has no key, so connections stay the app's.
+
+One refusal doesn't drop a connection. A call the service refuses as
+unauthorized gets a second look: the token read afresh from the keychain,
+and the service asked who it is for, by its cheapest call (GitHub's
+`GET /user`). Calls refused together share the one look, and a call whose
+look finds the sign-in working is made again. Only a token refused again,
+or gone from the keychain, is no good. A connection made with gh's or
+glab's sign-in notes which tool's it is, since the tool may replace the
+token Althar copied: signed in or refreshed again, or GitHub letting an
+older token go once an app has too many. One signed in any other way, a
+pasted token among them, is noted as that, and no tool's sign-in takes it
+over. Its token no good, Althar asks the tool for the one it has now, and
+takes it where it works for the same account. A tool that says it has no
+sign-in is asked once more a moment later, as gh says so when its own
+keychain is slow; one that doesn't answer at all leaves the connection as
+it is. Only when the tool is signed out too does the connection need its
+person to sign in again, and its fact says why: the call refused, the
+second look, and what the tool had, in the service's words and never with
+a token. A connection its person signs in again, or removes, while Althar
+looks is left as they made it. Publishing a task, and trying its pull
+request again, asks the tool again for a connection already waiting to be
+signed in again, and takes even the token it had, where the service now
+takes it. Althar's own
+keychain or store failing it, such as the main process too busy to answer
+under load, is no refusal: the call can be tried again, and the connection
+stays as it is. A sealed secret is read or kept again, a moment apart,
+before Althar gives up on it. A caller hears that a connection's sign-in
+stopped working only once the connection needs its person.
 
 ### Agents and the hosts
 
