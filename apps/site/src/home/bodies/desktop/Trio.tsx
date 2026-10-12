@@ -4,6 +4,7 @@ import { type CSSProperties, type ReactNode, useEffect, useLayoutEffect, useRef,
 import { cx } from '../../../lib/cx'
 import { TwoLabReview } from '../kit/app'
 import { useNarrow } from '../kit/Narrow'
+import { useRestAway } from '../kit/seen'
 import { Shot } from '../kit/Shot'
 import t from '../kit/type.module.css'
 import { Handoff } from './Handoff'
@@ -124,6 +125,9 @@ export function Trio() {
   const narrow = useNarrow(900)
   const section = useRef<HTMLElement>(null)
   const stage = useRef<HTMLDivElement>(null)
+  // The light and the floating pieces rest while the section is out of sight.
+  const moving = useRef<HTMLDivElement>(null)
+  useRestAway(moving, narrow)
   const [at, setAt] = useState(0)
   const [inView, setInView] = useState(false)
 
@@ -187,7 +191,7 @@ export function Trio() {
   if (narrow)
     return (
       <section className={cx(s.trio, s.stacked)} aria-label="Your plans, limits and review">
-        <div className={s.foot} aria-hidden="true">
+        <div ref={moving} className={s.foot} aria-hidden="true">
           <Light height={1} />
         </div>
         {STEPS.map((step) => (
@@ -215,7 +219,7 @@ export function Trio() {
       {STEPS.map((step, i) => (
         <span key={step.id} id={step.id} className={s.anchor} style={{ top: `${(i / STEPS.length) * 100}%` }} />
       ))}
-      <div className={s.sticky}>
+      <div ref={moving} className={s.sticky}>
         <div className={s.panel}>
           <div className={s.light} aria-hidden="true">
             <Light height={0.95} />
@@ -233,7 +237,9 @@ export function Trio() {
                 </div>
                 <div className={s.stage}>
                   <Fit width={step.width}>
-                    <div className={s.tilt}>{step.piece(i === at && inView)}</div>
+                    <div className={s.float}>
+                      <div className={s.tilt}>{step.piece(i === at && inView)}</div>
+                    </div>
                   </Fit>
                 </div>
               </div>

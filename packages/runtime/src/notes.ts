@@ -7,7 +7,7 @@ import { NotFound } from './errors'
 import { change, fact, timestamp } from './records'
 
 /*
- * A project's notes (ADR-027): short decisions the person made in
+ * A project's notes (ADR-029): short decisions the person made in
  * conversation with the coordinator that the code doesn't show, such as
  * "issue drafts need an approval card, on every tracker". The coordinator
  * keeps them as the person makes them, and every session of it starts with

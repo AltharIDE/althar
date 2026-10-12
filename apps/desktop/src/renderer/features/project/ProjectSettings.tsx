@@ -32,7 +32,7 @@ import type { ProjectSettingsModel } from './useProjectSettings'
  * change them in place; the others say where each thing stands and open
  * where it is changed: its repositories, its rules, and connecting the code
  * host and tracker it is on. The notes its coordinator keeps open out too,
- * to read and drop one that no longer holds (ADR-027). Removing it from
+ * to read and drop one that no longer holds (ADR-029). Removing it from
  * Althar is at the foot, and asks first. Nothing in it says what is running.
  */
 

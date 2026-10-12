@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 
@@ -10,10 +10,11 @@ import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
 
 /*
  * Packages the desktop app from a build made with `bun run build:package`
- * (so without the end-to-end tests' hooks): Althar.app, signed with
+ * (so without the end-to-end tests' hooks): on macOS, Althar.app, signed with
  * Althar's Developer ID under the hardened runtime and notarized where the
- * credentials are given, as a dmg to install from and a zip with
- * latest-mac.yml for updates, in out/dist (ADR-024). The bundles hold
+ * credentials are given, as a dmg and a zip with latest-mac.yml; on Linux,
+ * an AppImage, deb and rpm, with latest-linux.yml for AppImage updates. All
+ * artifacts go to out/dist (ADR-024). The bundles hold
  * everything but the agent adapters, which run as processes of their own and
  * are found in node_modules, so the app is staged with the bundles, the
  * icons, the menu bar's pictures, and a flat install of the adapters, the
@@ -34,12 +35,18 @@ import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
  * (CSC_KEYCHAIN). Without any, or
  * with ALTHAR_MAC_IDENTITY=-, the app is signed ad hoc, still hardened, and
  * opens only on the Mac that built it; in CI that, or a release without
- * Apple's notary credentials, fails instead.
+ * Apple's notary credentials, fails instead. On Linux it makes an AppImage,
+ * deb and rpm on the platform it runs on. The staged app includes the agent
+ * adapters, speech engine and updater at the versions the workspace runs,
+ * so the packages carry what dev and CI tested.
  */
 
 const desktop = join(import.meta.dirname, '..')
 const out = join(desktop, 'out')
 const stage = join(out, 'stage')
+const mac = process.platform === 'darwin'
+// The Linux packages are built on Linux: electron-builder has no deb, rpm or AppImage elsewhere, and left to it the three-package check below would fail without saying why.
+if (!mac && process.platform !== 'linux') throw new Error(`The Linux packages are built on Linux, not on ${process.platform}.`)
 const dist = join(out, 'dist')
 const resources = join(desktop, 'resources')
 const own = JSON.parse(readFileSync(join(desktop, 'package.json'), 'utf8')) as {
@@ -85,12 +92,12 @@ const signer = (): string | undefined => {
   process.stdout.write(`This Mac's keychain has no Developer ID Application: ${ALTHAR_IDENTITY}, so the app is signed ad hoc.\n`)
   return '-'
 }
-const identity = signer()
-const adHoc = identity === '-'
-if (ci && adHoc) throw new Error('A release from CI is signed with a Developer ID, not ad hoc.')
-const auth = adHoc ? null : notaryAuth(process.env)
-if (ci && auth === null) throw new Error(NOT_NOTARIZING)
-if (!adHoc && auth === null) process.stdout.write(`${NOT_NOTARIZING}\n`)
+const identity = mac ? signer() : undefined
+const adHoc = mac && identity === '-'
+if (mac && ci && adHoc) throw new Error('A release from CI is signed with a Developer ID, not ad hoc.')
+const auth = mac && !adHoc ? notaryAuth(process.env) : null
+if (mac && ci && auth === null) throw new Error(NOT_NOTARIZING)
+if (mac && !adHoc && auth === null) process.stdout.write(`${NOT_NOTARIZING}\n`)
 
 const require = createRequire(import.meta.url)
 const versionAt = (path: string) => (JSON.parse(readFileSync(path, 'utf8')) as { readonly version: string }).version
@@ -121,6 +128,9 @@ writeFileSync(
       productName: own.productName,
       version: own.version,
       description: own.description,
+      homepage: 'https://althar.ai',
+      // Electron uses this as the window's app_id/WM_CLASS on Linux; kept the .desktop file's name, so windows associate with the entry.
+      desktopName: 'althar.desktop',
       type: 'module',
       main: 'dist/main/main.js',
       dependencies: Object.fromEntries([...ADAPTERS, ...NATIVE].map((name) => [name, own.dependencies[name]])),
@@ -180,49 +190,67 @@ await build({
      */
     electronFuses: { enableNodeOptionsEnvironmentVariable: false, enableNodeCliInspectArguments: false },
     files: ['**/*'],
-    // The feed the app's updater reads (app-update.yml in the app), and what latest-mac.yml is written for.
+    // The provider written into app-update.yml and the platform's latest*.yml feed; publication itself stays in the release workflow.
     publish: [RELEASES],
-    mac: {
-      // Apple silicon only, for now.
-      target: [
-        { target: 'dmg', arch: ['arm64'] },
-        { target: 'zip', arch: ['arm64'] },
-      ],
-      icon: join(resources, 'icon.icns'),
-      category: 'public.app-category.developer-tools',
-      // Left out, electron-builder finds the Developer ID in the keychain it made of CSC_LINK.
-      ...(identity === undefined ? {} : { identity }),
-      hardenedRuntime: true,
-      gatekeeperAssess: false,
-      entitlements: mainEntitlements,
-      entitlementsInherit: join(resources, 'entitlements.mac.inherit.plist'),
-      // Notarized here, by notarytool, so its log is kept (afterSign below).
-      notarize: false,
-      // What macOS shows as it asks for the microphone, the first time someone dictates.
-      extendInfo: {
-        NSMicrophoneUsageDescription: 'Althar listens only while you dictate into a message, and turns what you say into text on this Mac.',
-        // Squirrel refuses an update whose app is older than this one, whatever version the feed claims for it.
-        ElectronSquirrelPreventDowngrades: true,
-      },
-    },
-    dmg: { sign: !adHoc },
-    // The signed app is notarized and stapled before the dmg and the zip are made of it, so both carry the ticket.
-    afterSign: (context) => {
-      if (auth === null) return
-      notarize(join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`), auth, join(out, 'notary'))
-    },
+    ...(mac
+      ? {
+          mac: {
+            target: [
+              { target: 'dmg', arch: ['arm64'] },
+              { target: 'zip', arch: ['arm64'] },
+            ],
+            icon: join(resources, 'icon.icns'),
+            category: 'public.app-category.developer-tools',
+            ...(identity === undefined ? {} : { identity }),
+            hardenedRuntime: true,
+            gatekeeperAssess: false,
+            entitlements: mainEntitlements,
+            entitlementsInherit: join(resources, 'entitlements.mac.inherit.plist'),
+            notarize: false,
+            extendInfo: {
+              NSMicrophoneUsageDescription:
+                'Althar listens only while you dictate into a message, and turns what you say into text on this Mac.',
+              ElectronSquirrelPreventDowngrades: true,
+            },
+          },
+          dmg: { sign: !adHoc },
+          afterSign: (context) => {
+            if (auth !== null)
+              notarize(join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`), auth, join(out, 'notary'))
+          },
+        }
+      : {
+          linux: {
+            target: ['AppImage', 'deb', 'rpm'],
+            icon: join(resources, 'icons', 'cobalt.png'),
+            category: 'Development',
+            maintainer: 'Althar <hello@althar.ai>',
+            synopsis: 'Run software projects with AI coding agents',
+            description: 'Althar is an environment for running software projects with AI coding agents.',
+            syncDesktopName: true,
+          },
+          deb: { recommends: ['libappindicator3-1', 'gnome-keyring | kwallet6 | kwallet'] },
+          rpm: { fpm: ['--rpm-tag', 'Recommends: gnome-keyring'] },
+        }),
   },
 })
 
-// The dmg is notarized too, so Gatekeeper accepts it as it is opened, and its size and digest in latest-mac.yml are written again.
-const made = (suffix: string) => join(dist, `${own.productName}-${own.version}-arm64${suffix}`)
-const dmg = made('.dmg')
-if (auth !== null) {
-  notarize(dmg, auth, join(out, 'notary'))
-  refresh(join(dist, 'latest-mac.yml'), dmg)
+if (mac) {
+  const made = (suffix: string) => join(dist, `${own.productName}-${own.version}-arm64${suffix}`)
+  const dmg = made('.dmg')
+  if (auth !== null) {
+    notarize(dmg, auth, join(out, 'notary'))
+    refresh(join(dist, 'latest-mac.yml'), dmg)
+  }
+  const app = join(dist, process.arch === 'arm64' ? 'mac-arm64' : 'mac', `${own.productName}.app`)
+  for (const path of [app, dmg, made('-mac.zip'), join(dist, 'latest-mac.yml')])
+    if (!existsSync(path)) throw new Error(`The package is missing ${path}`)
+  process.stdout.write(`\n${app}\n${dmg}\n${made('-mac.zip')}\n${join(dist, 'latest-mac.yml')}\n`)
+} else {
+  const made = readdirSync(dist).filter((name) => /\.(AppImage|deb|rpm)$/.test(name))
+  if (made.length < 3) throw new Error(`The packages are missing: only ${made.length} were made (${made.join(', ')})`)
+  const feed = join(dist, 'latest-linux.yml')
+  if (!existsSync(feed)) throw new Error(`The package is missing ${feed}`)
+  for (const name of made) process.stdout.write(`${join(dist, name)}\n`)
+  process.stdout.write(`${feed}\n`)
 }
-
-const app = join(dist, process.arch === 'arm64' ? 'mac-arm64' : 'mac', `${own.productName}.app`)
-for (const path of [app, dmg, made('-mac.zip'), join(dist, 'latest-mac.yml')])
-  if (!existsSync(path)) throw new Error(`The package is missing ${path}`)
-process.stdout.write(`\n${app}\n${dmg}\n${made('-mac.zip')}\n${join(dist, 'latest-mac.yml')}\n`)

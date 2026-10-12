@@ -34,4 +34,6 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [024](024-signed-releases-and-updates.md) | Signed releases on GitHub, and an app that updates itself |
 | [025](025-new-project-in-its-own-tab.md) | A new project is made in a tab of its own, under the id the window gave it |
 | [026](026-connecting-walks-the-person-in.md) | Connecting walks the person in, and says what the connection can do |
-| [027](027-coordinator-handed-over-before-it-fills.md) | Althar hands the coordinator to a fresh session before its context fills, and keeps the project's notes |
+| [027](027-what-the-flatpak-reaches.md) | What the Flatpak reaches, and what it does not |
+| [028](028-linux-windows-packages-and-the-keyring.md) | Linux windows, packages and the keyring |
+| [029](029-coordinator-handed-over-before-it-fills.md) | Althar hands the coordinator to a fresh session before its context fills, and keeps the project's notes |

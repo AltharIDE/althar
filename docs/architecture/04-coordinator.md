@@ -33,7 +33,7 @@ See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
 - follows the work, and passes messages to a task's lead;
 - keeps the project's notes: decisions the person makes in conversation that
   the code doesn't show, which every session of it starts with
-  ([ADR-027](../decisions/027-coordinator-handed-over-before-it-fills.md));
+  ([ADR-029](../decisions/029-coordinator-handed-over-before-it-fills.md));
 - judges task permission requests when the project selects that mode, in a
   fresh read-only session using its agent and model, without delaying the
   conversation ([ADR-019](../decisions/019-coordinator-judges-permissions.md)).
@@ -101,6 +101,8 @@ provisional.
 | `read_thread` | A task's thread, or, without a task, its own conversation: the latest part, then further back a part at a time | Read |
 | `read_change` | A task's diff and checks | Read |
 | `draft_task` | Creates a task in draft, with its repositories and intent: a title of a few words (at most 60 characters), and what the person last said to it kept as what they asked for, which the task's thread opens with and its lead reads | Command |
+| `read_issue`, `find_issues` | An issue on a connected tracker or in the project's repository, and the person's open ones | Read |
+| `draft_issue` | Drafts an issue on a connected tracker, as a card the person files, changes or discards; nothing is filed on its word ([06](06-integrations-and-skills.md#drafting-issues)) | Command |
 | `list_models` | The models it can use now, by maker, with their scores | Query |
 | `propose_plan` | Steps, a model per step, optional steps | Command |
 | `start_task` | Drafts a mini task and starts it at once: one lead, no review, nothing outside the project when it is done | Command |
@@ -108,7 +110,7 @@ provisional.
 | `set_run_command` | Keeps how the project runs, for Althar to run it; leads have it too (ADR-023) | Command |
 | `order_tasks` | Orders a batch | Command |
 | `message_lead` | Sends a message to a task's lead, queued or as an interrupt | Command |
-| `keep_note`, `list_notes`, `drop_note` | The project's notes: a decision the person made, in a sentence; at most 40 (ADR-027) | Command |
+| `keep_note`, `list_notes`, `drop_note` | The project's notes: a decision the person made, in a sentence; at most 40 (ADR-029) | Command |
 | `recommend_lead` | Records a lead recommendation and its reasons | Command |
 
 The same server serves every session. The read tools are how a lead, a step,
@@ -136,7 +138,7 @@ through its tools.
 An agent left to fill its context compacts it by itself, at a moment of its
 choosing, into a summary of its own, and a decision made only in
 conversation may not survive it. So Althar hands the coordinator over first
-([ADR-027](../decisions/027-coordinator-handed-over-before-it-fills.md)):
+([ADR-029](../decisions/029-coordinator-handed-over-before-it-fills.md)):
 
 - **When.** Once the agent says its context is 80% full (`HANDOVER_AT`, from
   ACP's usage updates, as the composer's context ring shows it), between

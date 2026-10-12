@@ -43,6 +43,7 @@ export class SignIns extends Context.Service<
           if (!recheck && last !== undefined && Date.now() - last.at < Duration.toMillis(TTL)) return last.check
           const entry = agents.list.find((candidate) => candidate.definition.id === of.agentId)
           if (entry === undefined) return UNKNOWN
+          yield* accounts.prepare(of)
           const checked = yield* signInCheck(entry.definition, process.execPath, accounts.env(of))
           known.set(of.id, { check: checked, at: Date.now() })
           return checked

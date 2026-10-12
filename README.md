@@ -1,11 +1,11 @@
 <img src="brand/export/banner/readme-header.png" width="100%" alt="Althar. The project should persist. The agents should not have to." />
 
-<h1 align="center">Every coding agent. One crew. No babysitting.</h1>
+<h1 align="center">Every coding agent. One crew. Become your 10x self.</h1>
 
 <p align="center">
   Althar runs Claude Code, Codex and OpenCode as one team, on the plans you already pay for.<br />
   A coordinator plans the work, one agent builds it, another reviews it, and when one runs out the next takes over.<br />
-  <b>You come back to pull requests, not prompts.</b>
+  <b>Never has software engineering felt so good.</b>
 </p>
 
 <p align="center">

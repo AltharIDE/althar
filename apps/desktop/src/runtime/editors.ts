@@ -56,6 +56,19 @@ export const fileManagerOf = (platform: NodeJS.Platform) =>
 
 const MANAGERS = new Set(['finder', 'explorer', 'files'])
 
+/**
+ * A device outside this sandbox (a Flatpak's host, where the person's own
+ * editors live): where one is, and how it is started there (`onDevice.ts`).
+ */
+export interface OutToDevice {
+  /** Where an editor's command is out there, by name: its full path, or null. */
+  readonly find: (name: string) => string | null
+  /** Starts a command out there, with the device's own environment, and leaves it running; whether it started. */
+  readonly start: (command: string, args: ReadonlyArray<string>) => Effect.Effect<boolean>
+  /** A path as the device sees it: document-portal paths differ, everything else is the same on both sides. */
+  readonly path: (path: string) => string
+}
+
 /** Where Finder is, for its picture. */
 const FINDER_APP = '/System/Library/CoreServices/Finder.app'
 
@@ -152,7 +165,9 @@ const reveal = (platform: NodeJS.Platform, folder: string, file: string | null) 
 
 /**
  * Opens the task's folder in the editor, then the file, at its line where
- * the editor takes one; the file manager shows the file, or the folder.
+ * the editor takes one; the file manager shows the file, or the folder. With
+ * an `out` device, the editor is one of the person's own out there: found
+ * there, started there, and given the folder and file as the device sees them.
  */
 export const openInEditor = (
   editor: string,
@@ -160,9 +175,13 @@ export const openInEditor = (
   file: string | null,
   line: number | null,
   platform: NodeJS.Platform = process.platform,
+  out?: OutToDevice,
 ): Effect.Effect<boolean> =>
   Effect.gen(function* () {
-    if (MANAGERS.has(editor)) return yield* reveal(platform, folder, file)
+    if (MANAGERS.has(editor))
+      return yield* out === undefined
+        ? reveal(platform, folder, file)
+        : out.start('xdg-open', [out.path(file === null ? folder : dirname(file))])
     const known = KNOWN.find((candidate) => candidate.id === editor)
     if (known === undefined) return false
     if (platform === 'darwin') {
@@ -172,9 +191,16 @@ export const openInEditor = (
       if (!opened || file === null) return opened
       return yield* known.at === undefined ? run('open', ['-a', app, file]) : run('open', [known.at(file, line ?? 1)])
     }
-    const command = commandOf(known, platform)
+    const command = out === undefined ? commandOf(known, platform) : out.find(known.cli?.name ?? '')
     if (command === null || known.cli === undefined) return false
-    const opened = yield* start(command, [folder], platform)
+    const starts = (args: ReadonlyArray<string>) =>
+      out === undefined
+        ? start(command, args, platform)
+        : out.start(
+            command,
+            args.map((arg) => out.path(arg)),
+          )
+    const opened = yield* starts([folder])
     if (!opened || file === null) return opened
-    return yield* start(command, argsAt(known.cli.line, file, line ?? 1), platform)
+    return yield* starts(argsAt(known.cli.line, file, line ?? 1))
   })

@@ -21,6 +21,21 @@ export function Field({ size = 'default', invalid = false, className, type = 'te
   )
 }
 
+export interface FieldAreaProps extends ComponentProps<'textarea'> {
+  /** What is in it will not do. Point aria-describedby at the words that say why. */
+  invalid?: boolean
+}
+
+/**
+ * Several lines of text to type: a description, a body. A Field that runs
+ * down the page, and can be pulled longer. It needs a name, as a Field does.
+ */
+export function FieldArea({ invalid = false, rows = 5, className, ...rest }: FieldAreaProps) {
+  return (
+    <textarea rows={rows} aria-invalid={invalid || undefined} className={cx(s.field, s.area, invalid && s.invalid, className)} {...rest} />
+  )
+}
+
 /** Why a Field's value will not do, under it. Give it an id and point the field's aria-describedby at it. */
 export function FieldError({ id, children }: { id: string; children: ComponentProps<'span'>['children'] }) {
   return (

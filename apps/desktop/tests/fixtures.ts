@@ -379,6 +379,24 @@ export const items = {
     content,
   }),
   /** A run of the project Althar started, up at its address unless told otherwise. */
+  draft: (content: Partial<Extract<ThreadItem, { kind: 'issue_draft' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'issue_draft',
+    content: {
+      draftId: 'idr_1',
+      product: 'linear',
+      tracker: 'Linear',
+      container: 'Meridian',
+      title: 'Refunds skip the rate limiter',
+      body: 'Charges go through it; **refunds** don’t.',
+      labels: ['payments'],
+      state: 'pending',
+      error: null,
+      issue: null,
+      ...content,
+    },
+  }),
   run: (content: Partial<Extract<ThreadItem, { kind: 'run' }>['content']> = {}): ThreadItem => ({
     ...next(),
     agentId: null,
@@ -691,6 +709,9 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     startPlan: vi.fn(async () => {}),
     holdPlan: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
+    changeIssueDraft: vi.fn(async () => {}),
+    fileIssueDraft: vi.fn(async () => {}),
+    discardIssueDraft: vi.fn(async () => {}),
     answerStuck: vi.fn(async () => {}),
     listConnections: vi.fn(async () => connectionList),
     startSignIn: vi.fn(async () => ({
@@ -793,6 +814,9 @@ const keptPreferences = (): Pick<Host, 'preferences' | 'setPreference'> => {
 export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   ...keptPreferences(),
   platform: 'darwin',
+  window: vi.fn(),
+  maximized: vi.fn(async () => false),
+  onMaximized: vi.fn(() => () => {}),
   sounds: vi.fn(async () => ['Basso', 'Glass', 'Ping', 'Purr']),
   editorPicture: vi.fn(async (id: string) => `data:image/png;base64,${id}`),
   playSound: vi.fn(async () => {}),
@@ -802,6 +826,8 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
   grantFound: vi.fn(async (id: string) => `grant_${id}`),
   onOpen: vi.fn(() => () => {}),
+  onStoreFailed: vi.fn(() => () => {}),
+  showBackup: vi.fn(async () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),
   edge: vi.fn(async () => ({ place: 'island', notch: true, platform: 'darwin', tray: true })),

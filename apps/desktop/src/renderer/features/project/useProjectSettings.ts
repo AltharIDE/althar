@@ -29,7 +29,7 @@ export interface ProjectSettingsModel {
   /** Why the last new name or ink didn't hold. */
   readonly failed: string | null
   readonly rules: ProjectRulesView | null
-  /** The decisions its coordinator keeps, oldest first (ADR-027). */
+  /** The decisions its coordinator keeps, oldest first (ADR-029). */
   readonly notes: ReadonlyArray<ProjectNote> | null
   readonly dropNote: (noteId: string) => Promise<void>
   /** Why the last note dropped is still there. */

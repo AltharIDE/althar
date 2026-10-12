@@ -1,4 +1,4 @@
-# ADR-027: Althar hands the coordinator to a fresh session before its context fills, and keeps the project's notes
+# ADR-029: Althar hands the coordinator to a fresh session before its context fills, and keeps the project's notes
 
 - **Status:** Accepted
 - **Date:** 2026-10-11

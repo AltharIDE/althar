@@ -10,10 +10,12 @@ import { PlanParameters, type PlanStep, type TaskEnd } from './Runs'
 /*
  * What became of the coordinator's plans while it wasn't speaking: the
  * person changed who does a task's steps or how it ends, held it, started
- * or declined it, or its time came and it started. The coordinator proposed
- * each plan and moved on; the card is the person's to change, and nothing
- * else tells it. Read before what the person says next, it speaks of each
- * plan as it now is, not as it proposed it.
+ * or declined it, or its time came and it started. And of the issues it
+ * drafted: the person changed one, filed it or discarded it, or filing it
+ * failed. The coordinator proposed each plan and drafted each issue and moved
+ * on; the cards are the person's, and nothing else tells it. Read before
+ * what the person says next, it speaks of each as it now is, not as it
+ * proposed or drafted it.
  *
  * What it has been told is counted by the ledger's order, not by the clock:
  * the news is everything after the record of the turn before, read in the
@@ -83,7 +85,8 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       SELECT aggregate_id AS plan_id, type, actor_id FROM record_events
       WHERE project_id = ${projectId} AND aggregate_type = 'task_plan' AND sequence > ${last.sequence} AND type IN ${sql.in(HEARD)}
       ORDER BY sequence`
-    if (events.length === 0) return null
+    const drafts = yield* draftNews(projectId, last.sequence)
+    if (events.length === 0 && drafts.length === 0) return null
 
     const team = (parameters: PlanParameters) => teamOf(parameters, modelOf)
     const decode = Schema.decodeUnknownSync(Schema.fromJsonString(PlanParameters))
@@ -128,6 +131,79 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       else if (plan.state === 'proposed' && plan.startsAt === null) said.push('The person is holding it: it waits until they start it.')
       if (said.length > 0) lines.push(`- ${plan.slug} (${plan.title}): ${said.join(' ')}`)
     }
-    if (lines.length === 0) return null
-    return `Since you last spoke, in Althar:\n${lines.join('\n')}\nSpeak of these plans as they are now, not as they were proposed.`
+    if (lines.length === 0 && drafts.length === 0) return null
+    const close =
+      drafts.length === 0
+        ? 'Speak of these plans as they are now, not as they were proposed.'
+        : lines.length === 0
+          ? 'Speak of these issues as they are now, not as you drafted them.'
+          : 'Speak of these plans and issues as they are now, not as you proposed or drafted them.'
+    return `Since you last spoke, in Althar:\n${[...lines, ...drafts].join('\n')}\n${close}`
+  })
+
+/** The issue draft events the coordinator hears of: the person changed one, filed it, or discarded it; or filing it failed, or may have. */
+const DRAFTED = [
+  'issue_draft.changed',
+  'issue_draft.filed',
+  'issue_draft.failed',
+  'issue_draft.uncertain',
+  'issue_draft.discarded',
+] as const
+
+/** What became of the issues the coordinator drafted, since a place in the ledger: a line for each, as it now stands. */
+const draftNews = (projectId: string, since: number) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const instance = yield* Instance
+    const events = yield* sql<{ draftId: string; type: (typeof DRAFTED)[number]; actorId: string }>`
+      SELECT aggregate_id AS draft_id, type, actor_id FROM record_events
+      WHERE project_id = ${projectId} AND aggregate_type = 'issue_draft' AND sequence > ${since} AND type IN ${sql.in(DRAFTED)}
+      ORDER BY sequence`
+    const lines: Array<string> = []
+    for (const draftId of new Set(events.map((event) => event.draftId))) {
+      const mine = events.filter((event) => event.draftId === draftId)
+      const [draft] = yield* sql<{
+        title: string
+        state: string
+        containerName: string
+        trackerName: string
+        issueKey: string | null
+        issueUrl: string | null
+        error: string | null
+        drafted: string | null
+        doubted: number
+      }>`
+        SELECT d.title, d.state, d.container_name, d.tracker_name, d.issue_key, d.issue_url, d.error,
+          (SELECT json_extract(payload, '$.title') FROM record_events WHERE aggregate_id = d.id AND type = 'issue_draft.drafted') AS drafted,
+          -- Whether a try to file it ever ended unsure: that issue may be on the tracker, whatever became of the draft since.
+          EXISTS (SELECT 1 FROM record_events WHERE aggregate_id = d.id AND type = 'issue_draft.uncertain') AS doubted
+        FROM issue_drafts d WHERE d.id = ${draftId}`
+      if (draft === undefined) continue
+      const tracker = draft.trackerName
+      // Changed by the person, it is told by what it says now, and what it said when drafted.
+      const changed = mine.some((event) => event.type === 'issue_draft.changed' && event.actorId !== instance.coordinatorId)
+      const was = changed && draft.drafted !== null && draft.drafted !== draft.title ? ` (you drafted it as “${draft.drafted}”)` : ''
+      const edited = changed ? ' The person changed it before filing it.' : ''
+      if (draft.state === 'filed')
+        lines.push(
+          `- The issue “${draft.title}”${was} is filed on ${tracker}, in ${draft.containerName}, as ${draft.issueKey ?? ''}: ${draft.issueUrl ?? ''}.${edited}`,
+        )
+      else if (draft.state === 'discarded')
+        lines.push(
+          draft.doubted === 1
+            ? `- The person discarded the issue “${draft.title}”${was} without filing it again. An earlier try may have reached ${tracker} before its answer was lost, so it may be there; Althar doesn’t know.`
+            : `- The person discarded the issue “${draft.title}”${was}: nothing was filed.`,
+        )
+      else if (draft.state === 'failed')
+        lines.push(
+          `- The issue “${draft.title}”${was} couldn’t be filed on ${tracker}: ${draft.error ?? ''} The person can file it again from its card.`,
+        )
+      else if (draft.state === 'uncertain')
+        lines.push(
+          `- The issue “${draft.title}”${was} may or may not be on ${tracker}: ${draft.error ?? ''} The person decides once they have looked.`,
+        )
+      else if (changed)
+        lines.push(`- The person changed the issue you drafted${was}: it now reads “${draft.title}”, and waits on them to file it.`)
+    }
+    return lines
   })

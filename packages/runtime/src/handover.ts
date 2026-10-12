@@ -14,7 +14,7 @@ import { transcript } from './threads'
 
 /*
  * Handing the coordinator to a fresh session before its context fills
- * (ADR-027). An agent left to fill its context compacts it on its own, at a
+ * (ADR-029). An agent left to fill its context compacts it on its own, at a
  * moment of its choosing, mid-reply even, and what was decided only in
  * conversation may not survive its summary. So Althar watches how full the
  * coordinator's context is, as the agent says, and once it reaches

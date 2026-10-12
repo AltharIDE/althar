@@ -57,6 +57,7 @@ export const Ids = {
   command: kind('cmd', 'CommandId'),
   connection: kind('conn', 'ConnectionId'),
   externalLink: kind('xlink', 'ExternalLinkId'),
+  issueDraft: kind('idr', 'IssueDraftId'),
 } as const
 
 export type IdKind = keyof typeof Ids
@@ -145,6 +146,8 @@ export const ConnectionId = Ids.connection.schema
 export type ConnectionId = typeof ConnectionId.Type
 export const ExternalLinkId = Ids.externalLink.schema
 export type ExternalLinkId = typeof ExternalLinkId.Type
+export const IssueDraftId = Ids.issueDraft.schema
+export type IssueDraftId = typeof IssueDraftId.Type
 
 interface IdDefinition<S> {
   readonly prefix: string

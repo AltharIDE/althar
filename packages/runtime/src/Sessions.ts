@@ -196,7 +196,7 @@ interface Running {
   /** What it left running in the background, in the order it started them (leftRunning.ts). */
   readonly background: Map<string, LeftRunning>
   /**
-   * A coordinator's handover to a fresh session (ADR-027): under way, it
+   * A coordinator's handover to a fresh session (ADR-029): under way, it
    * takes no more turns; left, it carries on as it is, its agent compacting
    * by itself, as one that couldn't start or that its brief would fill
    * leaves it.
@@ -614,7 +614,7 @@ export class Sessions extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const { thread } = running
           // A coordinator handing its conversation over takes no more turns. One whose context is filling up hands it over now,
-          // between turns, never in one: what waits goes to the fresh session (ADR-027).
+          // between turns, never in one: what waits goes to the fresh session (ADR-029).
           if (running.handover === 'under_way') return false
           if (thread.role === 'coordinator' && running.handover === 'none' && dueForHandover(running.context)) {
             running.handover = 'under_way'
@@ -1629,6 +1629,7 @@ export class Sessions extends Context.Service<
             "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
             '- list_tasks, read_task and read_thread, to see what is under way and how it went. read_thread without a task reads your conversation with the person, back to its start.',
             "- read_issue and find_issues, for the issues on the person's connected trackers and in the project's repository. When the person points at an issue, read it, and draft the task from it with its link or key as draft_task's issue.",
+            "- draft_issue, when the person wants something tracked rather than done now, such as a bug you found or follow-up work, as an issue on one of their connected trackers. It files nothing: the person sees it as a card, and files it, changes it or discards it there. Once they file it, you hear its key and link, and a task drafted from it later takes that as draft_task's issue.",
             "- message_lead, to pass something to a task's lead.",
             "- keep_note, list_notes and drop_note, for the project's notes: decisions the person makes in conversation that the code doesn't show, such as \"issue drafts need an approval card, on every tracker\" or \"dependency setup runs outside the sandbox; don't widen the lead's sandbox\". When the person decides something like that, keep it in a sentence, without asking; drop a note they take back. Every session of yours starts with the notes, and the person sees them in the project's settings.",
           ].join('\n'),
@@ -1659,7 +1660,7 @@ export class Sessions extends Context.Service<
 
       /**
        * A fresh coordinator session's brief, when Althar hands the
-       * conversation over (ADR-027): its role, then what it takes over, from
+       * conversation over (ADR-029): its role, then what it takes over, from
        * the records rather than the raw thread. And how many tasks are open.
        */
       const handoverBrief = (thread: CoordinatorThread) =>
@@ -1730,7 +1731,7 @@ export class Sessions extends Context.Service<
 
       /**
        * Hands the coordinator's conversation to a fresh session once its
-       * context is filling up (ADR-027): the same agent, account, model and
+       * context is filling up (ADR-029): the same agent, account, model and
        * effort, briefed from Althar's records. It starts between turns: the
        * old session takes no more, and what the person says meanwhile waits
        * for the new one. The new session is started before the old one stops,

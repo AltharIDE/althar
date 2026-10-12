@@ -56,13 +56,22 @@ say the right. When something new needs a name on screen, add it here first.
 | Run `bun run dev` | `RunProject`, ADR-023 | In a task's menu, what it built, in its worktree; on the project's front, its default branch, in a copy of Althar's. Althar runs it, with no agent, with the command the repository says or that's kept for it. |
 | Hold | plan held | On a plan waiting to start: its countdown stops, and it starts when you say. |
 | Start now | plan accepted | Starts a plan waiting to start, from its card or the task menu. |
+| Issue draft | an `issue_draft` thread item, `issue_drafts` | An issue the coordinator drafted on a connected tracker, as a card in the Talk room: the tracker, where it goes there, its title, description and labels. Nothing is filed until you file it. |
+| File issue, File again, Edit, Discard | issue draft filed, changed, discarded | On an issue draft: File puts it on the tracker, and the card then shows its key as a link; Edit changes it first; Discard drops it, filing nothing. Not filed, the card says why, and File again tries again. Perhaps filed (its answer was lost), the card says it may be on the tracker already, to look there before File again. Never "create", "submit" or "approve" on screen. |
 | Stop the task | run suspended | From the task menu. Every agent on it stops, and the step it was on is cut short. Nothing runs, and nothing waits on you, until you resume it. Status: Stopped. |
 | Resume | run resumed | From the task menu, or by writing to a stopped task: the lead carries on the step it was on, with what you wrote first. |
 | Abandon | task abandoned, its run suspended | From the task menu, asked first. Ends the task without its change. It moves to Settled. Its worktree and branch stay. |
 | Reopen | an abandoned task open again | Only for an abandoned task, never a merged one. It opens on the same worktree and branch, where it was: a step cut short resumes, work that had passed is ready again. Writing to an abandoned task reopens it too. |
-| Althar restarted | reconciliation after process loss | Not said in threads: a lead that stopped with Althar starts again when the person next writes to it, and nothing it was doing runs twice. A step that was running asks the person to carry it on. |
+| Althar restarted | reconciliation after process loss | Not said in threads: a lead that stopped with Althar starts again when the person next writes to it, and nothing it was doing runs twice. A step that was running carries on by itself, with a line in its thread; it asks the person only if its lead can't start, or a restart stops it again soon after the last one carried it on. |
 
 A call's kind reads the same everywhere it shows: on the board, in the bar's preview and on the home.
+
+## Updates
+
+| On screen | In the model | What it is |
+|---|---|---|
+| This update couldn’t move your data | a migration that didn't finish (`MigrationFailed`, `ForeignKeyViolations`), or the copy before it (`BackupFailed`) | What the window shows instead of opening when an update couldn't bring the person's data to its new shape. It says the data is safe, where the copy from before the update is, and what stopped it. Nothing of Althar runs behind it. |
+| Copy from before the update | a backup, in the profile's `backups` folder | The copy of the person's data Althar makes before an update moves it, kept as a file they can find. The newest three are kept. |
 
 ## What comes back
 
@@ -77,7 +86,7 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Document | a markdown file an agent wrote or pointed at | Its card stands under what it said; "Read in the panel" opens it beside the thread, as it is now in the worktree. |
 | Output | artifact of kind `log` | What a command printed, in its tool call: its last lines, "N earlier lines" a click away. |
 | Knowledge | knowledge claims | Everything the project holds. It has two parts: |
-| Notes | project notes, `project_notes`; later, canonical claims | Decisions the person made in conversation that the code doesn't show, a sentence each, which the coordinator keeps and every session of it starts with (ADR-027). Shown in the project's settings, where one that no longer holds is removed. Later, what every task starts with too: decisions, conventions, architecture. |
+| Notes | project notes, `project_notes`; later, canonical claims | Decisions the person made in conversation that the code doesn't show, a sentence each, which the coordinator keeps and every session of it starts with (ADR-029). Shown in the project's settings, where one that no longer holds is removed. Later, what every task starts with too: decisions, conventions, architecture. |
 | Seen in tasks | episodic claims | What one task observed. It can be proposed as a note. |
 | Project rules | execution policy, `ProjectRules` | When agents need a yes, what always asks, what is never allowed, how a task ends, how its branches and pull requests are named, what a usage limit does, and which accounts work runs on (ADR-013). |
 | Always ask me, Ask me | `alwaysAsk` kinds, `ask` command rules | What waits for the person whoever would answer: kinds of request, and commands they named by how they start or exactly. The rules screen's sentence for it is "Ask me". |

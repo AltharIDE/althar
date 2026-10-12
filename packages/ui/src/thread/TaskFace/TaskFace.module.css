@@ -1,6 +1,7 @@
 .face {
   height: 100%;
   min-height: 0;
+  overflow: clip;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
 }
@@ -11,6 +12,7 @@
 .main {
   min-width: 0;
   min-height: 0;
+  overflow: clip;
   display: flex;
   flex-direction: column;
   background: var(--face-surface, var(--n-2));
@@ -20,6 +22,7 @@
   position: relative;
   flex: 1;
   min-height: 0;
+  overflow: clip;
   display: flex;
   flex-direction: column;
 }
