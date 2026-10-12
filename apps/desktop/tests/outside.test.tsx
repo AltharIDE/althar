@@ -946,6 +946,7 @@ describe('a task’s pull request', () => {
       ),
     ).toBeTruthy()
     expect(screen.queryByText(/fast-forwards/)).toBeNull()
+    expect(screen.queryByText(/didn’t take the push/)).toBeNull()
     expect(screen.queryByRole('button', { name: /Replace/ })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Bring in the pull request’s commits' }))
     await waitFor(() => expect(client.mergeNote).toHaveBeenCalledWith('t1', url))

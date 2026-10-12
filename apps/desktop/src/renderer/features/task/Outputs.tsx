@@ -245,7 +245,8 @@ export function Outputs({
               onOpenFile={onOpenFile}
               accepting={acting === doing.accept}
               locked={pending}
-              {...(error === null ? {} : { error })}
+              // A push refused for commits on it is said once, below, with what puts it right.
+              {...(error === null || refused !== null ? {} : { error })}
               text={{
                 number: (n) => `${first.prefix}${n}`,
                 onHostLabel: (repo, n, on) => `Open ${repo} ${first.prefix}${n} on ${on}`,
