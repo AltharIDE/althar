@@ -21,6 +21,7 @@ import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
+import { addItem } from '../src/threads'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { callTool, notices, repository, runtime, task as newTask, turns, until } from './support'
 
@@ -790,6 +791,59 @@ describe('what the coordinator hears of its plans', () => {
       const { projectId, threadId } = yield* opened
       const named = yield* modelNamer
       assert.isNull(yield* coordinatorNews(threadId, projectId, named))
+    }).pipe(Effect.provide(withQueries())),
+  )
+})
+
+describe('the coordinator’s edges', () => {
+  it.live('has no thread for a project that isn’t there', () =>
+    Effect.gen(function* () {
+      const coordinator = yield* Coordinator
+      assert.instanceOf(yield* Effect.flip(coordinator.thread('prj_none')), NotFound)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('says so where it can’t read how a task’s pull request stands, and reads a step that reported little', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const coordinator = yield* Coordinator
+      const { projectId, threadId } = yield* opened
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      yield* coordinator.reading(() => Effect.succeed(undefined))
+      yield* callTool(access, 'draft_task', { title: 'Add a retry' })
+      assert.strictEqual(yield* callTool(access, 'list_tasks', {}), '- add-a-retry: Add a retry (planned)')
+      const [thread] = yield* sql<{ id: string }>`
+        SELECT t.id FROM threads t JOIN tasks k ON k.id = t.task_id WHERE k.slug = 'add-a-retry' AND t.kind = 'task'`
+      yield* addItem({ projectId: projectId as Parameters<typeof addItem>[0]['projectId'], threadId: thread?.id ?? '' }, 'step_result', {})
+      const read = yield* callTool(access, 'read_task', { task: 'add-a-retry' })
+      assert.include(read, '\n\nstep: \n\n')
+      assert.match(read, /Pull request: Althar could not read its state just now\.$/)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('keeps what Althar tells it quietly while its agent can’t start', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const coordinator = yield* Coordinator
+      const { threadId } = yield* opened
+      const body = 'The person answered: yes.'
+      const envelope = yield* Runtime.envelope('thread.send', { body })
+      const refused = yield* Effect.flip(coordinator.say({ envelope, threadId, body, disposition: 'after_current', quiet: true }))
+      assert.instanceOf(refused, CoordinatorUnavailable)
+      assert.lengthOf(yield* sql`SELECT id FROM user_inputs WHERE thread_id = ${threadId} AND body = ${body}`, 1)
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { signedOut: ['claude-code'] }))),
+  )
+
+  it.live('starts on what Althar tells it quietly, once', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const coordinator = yield* Coordinator
+      const { threadId } = yield* opened
+      const body = 'The person answered: yes.'
+      const envelope = yield* Runtime.envelope('thread.send', { body })
+      yield* coordinator.say({ envelope, threadId, body, disposition: 'after_current', quiet: true })
+      yield* until(sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${threadId}`, (rows) => rows.length === 1)
+      assert.lengthOf(yield* sql`SELECT id FROM user_inputs WHERE thread_id = ${threadId} AND body = ${body}`, 1)
     }).pipe(Effect.provide(withQueries())),
   )
 })
