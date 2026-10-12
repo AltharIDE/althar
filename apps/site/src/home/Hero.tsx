@@ -7,6 +7,7 @@ import { cx } from '../lib/cx'
 import { Bar } from '../shared/Bar'
 import { drawColumn, heightOf, STOPS, tonesOf } from '../shared/light'
 import { Get } from '../shared/Close'
+import { LightUnder } from '../shared/lightUnder'
 import { addDisplay } from './display'
 import s from './Hero.module.css'
 import { NameSwap } from './NameSwap'
@@ -423,6 +424,7 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
       <header className={s.head}>
         {/* The spaces between the lines don't show, as the lines are blocks; they keep the words apart for anything that reads the text alone. */}
         <h1 ref={headline} className={s.h1}>
+          <LightUnder className={s.under} />
           <span className={cx(s.line, s.pay)} data-line>
             <Words text={HERO.pay} />
           </span>{' '}
