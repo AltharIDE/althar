@@ -20,7 +20,7 @@
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
 -- hold_reason: usage_limit, agent_unavailable
 -- thread_kind: coordinator, task, step
--- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft
+-- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
 -- user_input_state: queued, delivered, superseded, withdrawn
 -- turn_delivery_state: pending, delivered, completed, interrupted, interruption_uncertain, failed
@@ -308,7 +308,7 @@ CREATE TABLE workspaces (
   state TEXT NOT NULL REFERENCES vocab_workspace_state (word),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   cleaned_at TEXT CHECK (cleaned_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), setup TEXT CHECK (json_valid(setup)),
   UNIQUE (task_id, binding_id, device_id),
   FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
   FOREIGN KEY (binding_id, project_id) REFERENCES repository_bindings (id, project_id),

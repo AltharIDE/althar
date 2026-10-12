@@ -25,6 +25,7 @@ import { Runs } from './Runs'
 import { Tasks } from './Tasks'
 import { Secrets } from './Secrets'
 import { Sessions } from './Sessions'
+import { Setups } from './Setups'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
@@ -81,8 +82,9 @@ export const layer = (options: RuntimeLayerOptions) => {
     ),
   )
   const judging = PermissionJudge.layer.pipe(Layer.provideMerge(able))
+  // A task's worktrees are set up as they are made, and its lead's first turn waits for them.
   const core = Layer.mergeAll(Projects.layer, Sessions.layer, Launches.layer).pipe(
-    Layer.provideMerge(Layer.mergeAll(Permissions.layer, Questions.layer).pipe(Layer.provideMerge(judging))),
+    Layer.provideMerge(Layer.mergeAll(Permissions.layer, Questions.layer, Setups.layer).pipe(Layer.provideMerge(judging))),
   )
   // A task's pull request and issue, and the issues the coordinator drafts, through the person's connections to code hosts and trackers.
   const linked = Layer.mergeAll(Changes.layer, Issues.layer, IssueDrafts.layer).pipe(
