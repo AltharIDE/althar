@@ -442,6 +442,14 @@ describe('a role that only reads', () => {
       assert.strictEqual(verdict({ kind: 'execute', title: command, rawInput: { command } }), 'allow', command)
   })
 
+  it('does not let a reader call Flatpak’s broad host bridge directly', () => {
+    assert.deepStrictEqual(decideReader(request({ kind: 'execute', title: 'flatpak-spawn --host sh' })), {
+      verdict: 'deny',
+      reason: 'Agents do not run commands on the device through Flatpak; Althar uses that bridge only for commands it prepares.',
+    })
+    assert.strictEqual(decideReader(request({ kind: 'execute', title: '/usr/bin/flatpak-spawn --host sh' })).verdict, 'deny')
+  })
+
   it('refuses every write, and what it cannot tell, with a reason', () => {
     for (const kind of ['edit', 'delete', 'move'] as const) assert.strictEqual(verdict({ kind, title: 'Change it' }), 'deny', kind)
     const reasons = [
@@ -493,6 +501,17 @@ describe('a role that only reads', () => {
     )
     assert.strictEqual(verdict({ kind: 'other', title: 'api.github.com' }), 'deny')
     assert.strictEqual(verdict({ kind: 'execute', title: '' }), 'deny')
+  })
+
+  it('refuses wrapped attempts to leave the Flatpak through flatpak-spawn, not only the bare one', () => {
+    for (const command of [
+      'flatpak-spawn --host cat ~/.ssh/id_ed25519',
+      'env flatpak-spawn --host ls /',
+      "sh -c 'flatpak-spawn --host ls /'",
+    ]) {
+      const decided = decideReader(request({ kind: 'execute', title: command, rawInput: { command } }))
+      assert.include(decided.verdict === 'deny' ? decided.reason : '', 'Agents do not run commands on the device through Flatpak', command)
+    }
   })
 
   it('never reads credentials either, and says so', () => {

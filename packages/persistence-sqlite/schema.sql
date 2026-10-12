@@ -1023,3 +1023,13 @@ CREATE TABLE issue_drafts (
 ) STRICT;
 
 CREATE INDEX issue_drafts_by_project ON issue_drafts (project_id);
+
+CREATE TABLE user_input_images (
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  user_input_id TEXT NOT NULL,
+  position INTEGER NOT NULL CHECK (position >= 1),
+  artifact_id TEXT NOT NULL,
+  PRIMARY KEY (user_input_id, position),
+  FOREIGN KEY (user_input_id, project_id) REFERENCES user_inputs (id, project_id),
+  FOREIGN KEY (artifact_id, project_id) REFERENCES artifacts (id, project_id)
+) STRICT;

@@ -22,13 +22,20 @@ import { statements as artifactImages } from './0017_artifact_images'
 import { statements as questions } from './0018_questions'
 import { statements as runCommands } from './0019_run_commands'
 import { statements as issueDrafts } from './0020_issue_drafts'
-import { statements as connectionCli } from './0021_connection_cli'
+import { statements as inputImages } from './0021_input_images'
+import { statements as connectionCli } from './0022_connection_cli'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
   readonly key: string
   readonly statements: ReadonlyArray<string>
 }
+
+/** Where the migrator records each migration it ran, by number. */
+export const MIGRATIONS_TABLE = 'schema_migrations'
+
+/** A migration's number, as the migrator records it: 18 for `0018_questions`. */
+export const idOf = (migration: Migration) => Number.parseInt(migration.key, 10)
 
 /**
  * Every migration, in order. Migrations are append-only: once released, a
@@ -56,7 +63,8 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0018_questions', statements: questions },
   { key: '0019_run_commands', statements: runCommands },
   { key: '0020_issue_drafts', statements: issueDrafts },
-  { key: '0021_connection_cli', statements: connectionCli },
+  { key: '0021_input_images', statements: inputImages },
+  { key: '0022_connection_cli', statements: connectionCli },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

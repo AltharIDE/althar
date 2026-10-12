@@ -25,6 +25,8 @@ import { Context, Duration, Effect, Layer, Schedule, Schema } from 'effect'
 /** Secrets couldn't be kept or given back. */
 export class SecretsUnavailable extends Schema.TaggedError<SecretsUnavailable>()('SecretsUnavailable', {
   reason: Schema.String,
+  /** The main process's own keyring refusal: its words are the person's, and only these are shown verbatim (words.ts). */
+  keyring: Schema.optional(Schema.Boolean),
 }) {}
 
 /** A secret that couldn't be kept or opened is tried this many times more, a moment apart, then twice that. */

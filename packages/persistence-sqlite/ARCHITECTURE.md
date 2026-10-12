@@ -9,7 +9,8 @@ The profile's SQLite store, as described in [docs/architecture/07](../../docs/ar
 ## The schema
 
 - **[schema.sql](schema.sql)** is the readable copy of the whole schema, generated from the migrations by `tests/schema.test.ts`, with each vocabulary's words at the top. Review schema changes there.
-- **Migrations are append-only.** Each one is a list of SQL statements. `src/migrations/checksums.ts` records every released migration's SHA-256, and a test fails if one changes. A change to the schema is a new migration.
+- **Migrations are append-only.** Each one is a list of SQL statements. A change to the schema is a new migration.
+- **Once a version has shipped, its migrations are frozen.** No renumbering and no edits, not even to fix one: a fix is a new migration after it. A profile records the migrations it ran by number and never runs one again, so a shipped migration that changed would leave profiles that ran the old one apart from new ones, and one renumbered would run twice or never. `src/migrations/checksums.ts` records every migration's SHA-256, and a test fails if one changes; a migration no release has carried yet may change only with its checksum, in the same pull request.
 - **Migrations run with foreign keys off,** then `PRAGMA foreign_key_check`, and only then are foreign keys turned on; the database refuses to open with rows pointing at nothing. This is SQLite's procedure for rebuilding a table others reference, which a test performs.
 - **Every table is `STRICT`,** so SQLite enforces column types.
 - **Vocabularies are lookup tables,** `vocab_<name> (word)`, and columns reference them. A new word is an `INSERT` in a later migration. A test compares every lookup table with `@althar/domain`'s lists, both ways.
@@ -32,6 +33,15 @@ The profile's SQLite store, as described in [docs/architecture/07](../../docs/ar
 - **`Commands.execute`** runs a command and stores its receipt in one transaction. Receipts are kept per actor. A retry of the same command by the same actor gets the first result back without running again; the same id with a different command fails with `CommandIdReused`; another actor's id reveals nothing. A command an agent issues for a person records both. A failed command leaves nothing behind.
 - **`Ledger.record`** adds a fact to the operational record and a change to the client feed, inside the caller's transaction. `Ledger.notify` adds only the change, for what isn't a fact a person would look up, such as a thread item growing as an agent streams. `Ledger.changesSince` pages through the feed from a cursor, and `Ledger.listen` wakes a reader when the feed grows. A reader woken by a write inside a transaction reads after the commit, since the store's one connection is the transaction's until then.
 
+## Updates
+
+An update that brings migrations changes the person's store on its first launch. It never leaves them without a way back.
+
+- **A copy first.** Before any pending migration runs, `Database.layer` copies the store into the folder it is given, the profile's `backups`, as `althar-<migration it was at>-<UTC date and time>.sqlite` (`backups.ts`). The copy is made with SQLite's backup API on the store's own connection, so it is consistent with anything in the WAL, and written aside and renamed into place, so a copy that stopped half way is never taken for one. The newest three are kept; anything else in the folder is left alone. Nothing is copied when nothing is pending, or for a store no migration has touched yet, a new profile's.
+- **No copy, no migration.** A copy that can't be made fails the layer with `BackupFailed`, and the store stays as it was.
+- **A failed migration changes nothing.** The migrator runs every pending migration in one transaction, so one that fails undoes them all. The layer fails with `MigrationFailed`, with the copy and what went wrong. Migrations that leave rows pointing at nothing fail it with `ForeignKeyViolations`, with the newest copy, on that launch and every one after. Either way the database isn't opened, so nothing runs on a store that isn't up to date: the runtime doesn't start, and the desktop app says what happened and where the copy is.
+- **The copy opens in the build before.** It is at the migration the store was at, so the version that was installed before the update opens it as it is.
+
 ## Checks
 
 `bun run check` runs format, type-aware lint and type checks. `bun run test:coverage` runs Vitest with `@effect/vitest` against in-memory and temporary databases, gated at 90% of lines and branches.
@@ -40,5 +50,7 @@ The profile's SQLite store, as described in [docs/architecture/07](../../docs/ar
 
 - **Fencing by controller generation** is in the schema (the columns exist) but not yet enforced on writes.
 - **The artifact store** for bytes, content-addressed on disk, is not built; only artifact metadata is.
-- **WAL checkpoints, integrity checks, backup and restore,** which 07 requires, are not built.
+- **WAL checkpoints, integrity checks, and backups other than before a migration,** which 07 requires, are not built.
+- **Restoring a copy is by hand:** quit Althar and put the copy in place of the profile's database. Nothing in the app does it yet.
+- **A store newer than the build** (an update's migrations ran, then an older version was installed again) opens as if it were current: the migrator runs nothing, and the older build reads a schema it doesn't know. Nothing refuses it yet.
 - **Raw protocol capture** is not in this database. The agent adapter hands it over frame by frame; writing it to a separate bounded file (docs/architecture/07) is not built yet.
