@@ -1,0 +1,103 @@
+/*
+ * The pane: a full-width bar of frosted paper across the top. The light
+ * passes under it blurred, brightened and a little more saturated, so the
+ * bar takes its colour; a white highlight and an ink hairline make its
+ * lower edge. Paper enough under the words that ink reads over the cobalt.
+ */
+
+.wrap { --move: 420ms cubic-bezier(0.22, 1, 0.36, 1); position: fixed; inset: 0 0 auto; z-index: 40; color: var(--t-1); }
+
+.bar { position: relative; height: 60px; }
+.glass {
+  position: absolute; inset: 0;
+  background: linear-gradient(to bottom, rgba(252, 251, 248, 0.62), rgba(248, 246, 240, 0.48));
+  -webkit-backdrop-filter: blur(24px) saturate(2) brightness(1.08);
+  backdrop-filter: blur(24px) saturate(2) brightness(1.08);
+  /* The edge: light catching the glass's foot, over an ink hairline. */
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.85), 0 0.5px 0 rgba(20, 20, 28, 0.14);
+}
+/* Once the page moves under it, a short shadow lifts it off what passes. */
+.tint {
+  position: absolute; inset: 0; pointer-events: none;
+  box-shadow: 0 10px 28px -16px rgba(40, 32, 20, 0.32);
+  opacity: 0; transition: opacity var(--move);
+}
+.scrolled .tint { opacity: 1; }
+
+.row {
+  position: relative; display: flex; align-items: center; gap: 20px; height: 100%;
+  max-width: var(--max); margin: 0 auto; padding: 0 var(--gut); white-space: nowrap;
+}
+.mark { flex: none; display: inline-flex; align-items: center; gap: 9px; color: var(--t-1); font-weight: 650; font-size: 15.5px; letter-spacing: -0.01em; text-decoration: none; }
+
+/* The pages sit in the middle of the window, whatever the ends weigh. */
+.links { position: absolute; left: 50%; display: flex; gap: 4px; transform: translateX(-50%); font-size: 14px; }
+.links a {
+  padding: 7px 14px; border-radius: 999px;
+  color: var(--t-2); text-decoration: none;
+}
+.links a:hover { color: var(--t-1); background: rgba(255, 255, 255, 0.5); }
+/* The page being read: a lighter sheet of the same glass. */
+.links a[aria-current='page'] {
+  color: var(--t-1); font-weight: 550;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 0 0 0.5px rgba(20, 20, 28, 0.1), 0 1px 2px rgba(60, 50, 30, 0.08), inset 0 1px 0 #fff;
+}
+
+.end { flex: none; display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.github { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; color: var(--t-2); }
+.github:hover { color: var(--t-1); background: rgba(255, 255, 255, 0.55); }
+.download {
+  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 18px;
+  background: var(--t-1); color: var(--on-ink); font: 600 13.5px var(--font); text-decoration: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 1px 2px rgba(20, 20, 28, 0.2);
+}
+.download:hover { background: var(--ink-hover); }
+.download i { width: 6px; height: 6px; border-radius: 50%; background: var(--live-on-ink); }
+.menu {
+  display: none; height: 36px; padding: 0 14px; border: 0; border-radius: 18px;
+  background: rgba(255, 255, 255, 0.6); box-shadow: 0 0 0 0.5px rgba(20, 20, 28, 0.16), inset 0 1px 0 #fff;
+  font: 600 13.5px var(--font); color: var(--t-1); cursor: pointer;
+}
+
+/* The phone's menu: the same frost over the whole page under the bar, the pages large on it. */
+.sheet {
+  position: fixed; inset: 60px 0 0; display: none;
+  visibility: hidden; transform: translateY(-10px);
+  transition: transform var(--move), visibility 0s linear 420ms;
+}
+.sheet .glass {
+  background: linear-gradient(to bottom, rgba(248, 246, 240, 0.72), rgba(244, 242, 236, 0.86));
+  -webkit-backdrop-filter: blur(32px) saturate(1.6) brightness(1.06);
+  backdrop-filter: blur(32px) saturate(1.6) brightness(1.06);
+  box-shadow: none;
+}
+.sheet nav { position: relative; display: grid; padding: 8px var(--gut) 24px; }
+.sheet a {
+  display: flex; align-items: center; gap: 12px; padding: 16px 0;
+  border-bottom: 0.5px solid rgba(20, 20, 28, 0.12);
+  font-family: 'Inter Display', var(--display); font-size: 30px; font-weight: 300; letter-spacing: -0.03em;
+  color: var(--t-1); text-decoration: none;
+}
+.sheet a[aria-current='page'] { font-weight: 550; }
+.sheet a[aria-current='page']::after { content: ''; width: 7px; height: 7px; margin-left: 4px; border-radius: 50%; background: var(--live); }
+.open .sheet { visibility: visible; transform: none; transition: transform var(--move); }
+/* What's in it fades, not the sheet: a box fading is a backdrop of its own, and its glass would lose the page while it did. */
+.sheet > * { opacity: 0; transition: opacity 240ms ease; }
+.open .sheet > * { opacity: 1; }
+/* While the menu is open the bar is part of the sheet: no shadow between. */
+.open .tint { opacity: 0; }
+
+@media (max-width: 900px) {
+  .links, .github { display: none; }
+  .menu { display: inline-flex; align-items: center; }
+  .sheet { display: block; }
+}
+@media (max-width: 360px) {
+  .download { padding: 0 13px; }
+  .row { gap: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tint, .sheet, .open .sheet, .sheet > * { transition: none; }
+  .sheet { transform: none; }
+}
