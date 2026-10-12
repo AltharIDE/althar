@@ -16,9 +16,11 @@ import { Room } from '@althar/ui'
 
 import { draftsOf } from '../src/renderer/features/newProject/draft'
 import { TabsFrame, useLastRoom, useNewTab, useVisit } from '../src/renderer/features/tabs/TabsFrame'
+import { glanceOf, memoryOf } from '../src/renderer/features/tabs/useLoad'
+import { brandOf } from '../src/renderer/shared/agents'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
 import type { Host } from '../src/renderer/data/services'
-import { changed, fakeClient, fakeHost, project } from './fixtures'
+import { changed, fakeClient, fakeHost, load, project } from './fixtures'
 import { withServices } from './render'
 
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', running: 0, working: 0, waiting: 0, ready: 0 }
@@ -298,6 +300,81 @@ describe('the window’s tabs', () => {
     // Nothing ready, nothing said.
     act(() => tell({ ready: null, working: false, restarting: false, failed: null }))
     expect(screen.queryByText(/is ready/)).toBeNull()
+  })
+})
+
+describe('how hard the Mac works, in the bar', () => {
+  const meter = () => screen.findByRole('button', { name: 'CPU 42%, MEM 39%' })
+  const peek = async () => {
+    await userEvent.click(await meter())
+    return within(await screen.findByRole('dialog', { name: 'This Mac’s load' }))
+  }
+
+  it('shows on every screen, and a piece of work’s row opens it: a task’s thread, its project’s conversation, its front', async () => {
+    const { client, router } = windowAt('/projects/p2')
+    await userEvent.click((await peek()).getByRole('button', { name: /^Add a retry/ }))
+    await waitFor(() => expect(where()).toBe('/threads/th1'))
+    expect(client.getLoad).toHaveBeenCalled()
+
+    await userEvent.click((await peek()).getByRole('button', { name: /^Coordinator\s*meridian · Codex · 1 process/ }))
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    expect(router.state.location.search).toEqual({ room: Room.Talk })
+
+    await act(() => router.navigate({ to: '/projects/$projectId', params: { projectId: 'p2' } }))
+    await userEvent.click((await peek()).getByRole('button', { name: /^Default branch\s*meridian · 3 processes/ }))
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    expect(router.state.location.search).toEqual({})
+  })
+
+  it('goes from the bar when turned off in its peek, and isn’t read again', async () => {
+    const host = fakeHost()
+    const { client } = windowAt('/', [project], host)
+    await userEvent.click((await peek()).getByRole('switch', { name: 'Show in the bar' }))
+    expect(host.setPreference).toHaveBeenCalledWith('showLoad', false)
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^CPU/ })).toBeNull())
+    const reads = vi.mocked(client.getLoad).mock.calls.length
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(client.getLoad).toHaveBeenCalledTimes(reads)
+  })
+
+  it('isn’t read before there is a project, when the first screen has the window and no bar', async () => {
+    const { client } = windowAt('/', [])
+    await waitFor(() => expect(client.listProjects).toHaveBeenCalled())
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(client.getLoad).not.toHaveBeenCalled()
+  })
+
+  it('is never read while it is off', async () => {
+    const host = fakeHost()
+    await host.setPreference('showLoad', false)
+    const { client } = windowAt('/', [project], host)
+    await screen.findByRole('navigation', { name: 'Projects' })
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(client.getLoad).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /^CPU/ })).toBeNull()
+  })
+
+  it('draws the runtime’s reading: memory as macOS counts it, Althar’s part of each, and its work by name', () => {
+    expect([memoryOf(32 * 1024 ** 3), memoryOf(19.54 * 1024 ** 3), memoryOf(300 * 1024 ** 2), memoryOf(10)]).toEqual([
+      '32 GB',
+      '19.5 GB',
+      '300 MB',
+      '1 MB',
+    ])
+    const glance = glanceOf(load)
+    expect(glance).toMatchObject({ cpu: 0.42, memory: 12.5 / 32, memoryUsed: '12.5 GB', memoryTotal: '32 GB', pressure: 'normal' })
+    expect(glance.work).toBeCloseTo(0.33)
+    expect(glance.workMemory).toBeCloseTo((1.5 * 1024 + 520) / (32 * 1024))
+    expect(glance.rows?.map((row) => [row.id, row.title, row.agent, row.mark, row.memory])).toEqual([
+      ['task t1', 'Add a retry', 'Claude Code', brandOf('claude-code'), '1.5 GB'],
+      ['coordinator p1', 'Coordinator', 'Codex', brandOf('codex'), '300 MB'],
+      ['run p1', 'Default branch', undefined, undefined, '220 MB'],
+    ])
+    // Where Althar's processes can't be read, its part is unknown, not none; and a computer that says no memory has none in use.
+    const unknown = glanceOf({ ...load, shares: null, pressure: null, memoryTotal: 0 })
+    expect(unknown).toMatchObject({ work: null, workMemory: null, rows: null, pressure: null, memory: 0 })
+    expect(glanceOf({ ...load, pressure: 'critical' }).pressure).toBe('critical')
+    expect(glanceOf({ ...load, pressure: 'warning' }).pressure).toBe('warning')
   })
 })
 

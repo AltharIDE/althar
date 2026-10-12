@@ -9,6 +9,7 @@ import type {
   ConnectionSummary,
   CoordinatorSnapshot,
   HomeSnapshot,
+  Load,
   Picture,
   ProjectRulesView,
   ProjectRepository,
@@ -236,6 +237,59 @@ export const task: TaskSummary = {
   agentId: 'claude-code',
   waiting: 0,
   createdAt: NOW,
+}
+
+const GiB = 1024 ** 3
+const MiB = 1024 ** 2
+
+/** This Mac a moment ago, 32 GB of it: the task's lead running its suite, meridian's coordinator, and its default branch running. */
+export const load: Load = {
+  cpu: 0.42,
+  memoryUsed: 12.5 * GiB,
+  memoryTotal: 32 * GiB,
+  pressure: 'normal',
+  shares: [
+    {
+      kind: 'task',
+      projectId: 'p1',
+      project: 'meridian',
+      taskId: 't1',
+      threadId: 'th1',
+      title: 'Add a retry',
+      agent: { id: 'claude-code', name: 'Claude Code' },
+      cpu: 0.3,
+      memory: 1.5 * GiB,
+      processes: 12,
+    },
+    {
+      kind: 'coordinator',
+      projectId: 'p1',
+      project: 'meridian',
+      taskId: null,
+      threadId: null,
+      title: null,
+      agent: { id: 'codex', name: 'Codex' },
+      cpu: 0.02,
+      memory: 300 * MiB,
+      processes: 1,
+    },
+    {
+      kind: 'run',
+      projectId: 'p1',
+      project: 'meridian',
+      taskId: null,
+      threadId: null,
+      title: null,
+      agent: null,
+      cpu: 0.01,
+      memory: 220 * MiB,
+      processes: 3,
+    },
+  ],
+  history: [
+    { cpu: 0.2, work: 0.1 },
+    { cpu: 0.42, work: 0.33 },
+  ],
 }
 
 let sequence = 0
@@ -676,6 +730,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'zed', name: 'Zed' },
       { id: 'finder', name: 'Finder' },
     ]),
+    getLoad: vi.fn(async () => load),
     openInEditor: vi.fn(async () => true),
     installAgent: vi.fn(async () => {}),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
