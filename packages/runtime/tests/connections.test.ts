@@ -461,6 +461,39 @@ describe('a sign-in a service refuses', () => {
     (_, authorization) => (valid.has(authorization?.replace(/^Bearer /, '') ?? '') ? user[2] : refusal),
   ]
 
+  /** Secrets kept in memory, the keeping of `token` held until the test lets it go: gh's token on its way to the keychain. */
+  const heldWrite = (token: string) => {
+    const kept = new Map<string, string>()
+    let arrived = false
+    let go = () => {}
+    const waiting = new Promise<void>((resolve) => {
+      go = resolve
+    })
+    const secrets = Layer.succeed(
+      Secrets,
+      Secrets.of({
+        set: (name, value) =>
+          Effect.gen(function* () {
+            if ((JSON.parse(value) as { token?: string }).token === token) {
+              arrived = true
+              yield* Effect.promise(() => waiting)
+            }
+            kept.set(name, value)
+          }),
+        get: (name) => Effect.sync(() => kept.get(name) ?? null),
+        remove: (name) => Effect.sync(() => void kept.delete(name)),
+      }),
+    )
+    return {
+      secrets,
+      arrived: until(
+        Effect.sync(() => [arrived]),
+        ([now]) => now === true,
+      ),
+      release: () => go(),
+    }
+  }
+
   /** A connection's code host, as a caller has it. */
   const codeHost = (connectionId: string) =>
     Effect.gen(function* () {
@@ -777,6 +810,67 @@ describe('a sign-in a service refuses', () => {
         ['connection.added', 'connection.removed'],
       )
     }).pipe(Effect.provide(withGitHub(github.fetch, { cliToken: () => Effect.sync(() => gh) })))
+  })
+
+  it.live('keeps the token its person signs in with while gh’s was on its way to the keychain, not gh’s over it', () => {
+    const valid = new Set(['gho_first', 'gho_second', 'ghp_person'])
+    let gh = 'gho_first'
+    const { fetch } = stub([takes(valid)])
+    const write = heldWrite('gho_second')
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const connection = yield* connections.connectCli({ product: 'github', webUrl: GITHUB, actorId: instance.personId })
+      valid.delete('gho_first')
+      gh = 'gho_second'
+      const call = yield* Effect.forkChild((yield* codeHost(connection.id)).account)
+      yield* write.arrived
+
+      // The person signs it in again while gh's new token is being kept: time enough to finish, were it not to wait for that.
+      const again = yield* Effect.forkChild(
+        connections.connectToken({ product: 'github', token: 'ghp_person', connectionId: connection.id, actorId: instance.personId }),
+      )
+      yield* Effect.sleep('200 millis')
+      write.release()
+      yield* Fiber.join(again)
+      assert.strictEqual((yield* Fiber.join(call)).login, 'you')
+      assert.strictEqual(yield* tokenOf(connection.id), 'ghp_person')
+      assert.strictEqual((yield* connections.list)[0]?.state, 'ready')
+      assert.deepStrictEqual(yield* sql<{ cli: string }>`SELECT cli FROM connections`, [{ cli: 'none' }])
+      assert.deepStrictEqual(
+        (yield* factsOf(connection.id)).map((fact) => fact.type),
+        ['connection.added', 'connection.renewed', 'connection.renewed'],
+      )
+    }).pipe(Effect.provide(withGitHub(fetch, { cliToken: () => Effect.sync(() => gh), secrets: write.secrets })))
+  })
+
+  it.live('leaves a connection removed while gh’s token was on its way to the keychain removed, with no token kept', () => {
+    const valid = new Set(['gho_first', 'gho_second'])
+    let gh = 'gho_first'
+    const { fetch } = stub([takes(valid)])
+    const write = heldWrite('gho_second')
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const connection = yield* connections.connectCli({ product: 'github', webUrl: GITHUB, actorId: instance.personId })
+      valid.delete('gho_first')
+      gh = 'gho_second'
+      const call = yield* Effect.forkChild((yield* codeHost(connection.id)).account)
+      yield* write.arrived
+
+      // The person removes it while gh's new token is being kept: time enough to finish, were it not to wait for that.
+      const removing = yield* Effect.forkChild(connections.remove(connection.id, instance.personId))
+      yield* Effect.sleep('200 millis')
+      write.release()
+      yield* Fiber.join(removing)
+      yield* Fiber.await(call)
+      assert.deepStrictEqual(yield* connections.list, [])
+      assert.deepStrictEqual(yield* sql<{ state: string }>`SELECT state FROM connections`, [{ state: 'removed' }])
+      assert.isUndefined(yield* tokenOf(connection.id))
+      assert.strictEqual((yield* factsOf(connection.id)).at(-1)?.type, 'connection.removed')
+    }).pipe(Effect.provide(withGitHub(fetch, { cliToken: () => Effect.sync(() => gh), secrets: write.secrets })))
   })
 })
 

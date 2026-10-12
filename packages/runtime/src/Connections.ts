@@ -435,13 +435,18 @@ export class Connections extends Context.Service<
 
       const credentialFrom = (product: Product, kept: Stored): Credential => credentialFor(infoOf(product)?.token.kind ?? 'bearer', kept)
 
-      /** Renewals, one at a time per connection, so a rotated refresh token is never used twice. */
-      const renewing = new Map<string, Semaphore.Semaphore>()
-      const renewLock = (connectionId: string) => {
-        const known = renewing.get(connectionId)
+      /**
+       * What writes a connection's credential, one at a time per connection:
+       * a renewal, so a rotated refresh token is never used twice; a sign-in,
+       * a tool's sign-in taking over, and a removal, so none puts back a
+       * token another has just replaced or removed.
+       */
+      const writing = new Map<string, Semaphore.Semaphore>()
+      const writeLock = (connectionId: string) => {
+        const known = writing.get(connectionId)
         if (known !== undefined) return known
         const made = Semaphore.makeUnsafe(1)
-        renewing.set(connectionId, made)
+        writing.set(connectionId, made)
         return made
       }
 
@@ -461,7 +466,7 @@ export class Connections extends Context.Service<
           if (kept.kind === 'token' || kept.expiresAt === null || kept.refreshToken === null) return credentialFrom(row.product, kept)
           const now = yield* Clock.currentTimeMillis
           if (Date.parse(kept.expiresAt) - now > Duration.toMillis(RENEW_BEFORE)) return credentialFrom(row.product, kept)
-          return yield* renewLock(connectionId).withPermits(1)(
+          return yield* writeLock(connectionId).withPermits(1)(
             Effect.gen(function* () {
               // Another call may have renewed it while this one waited.
               const again = yield* stored(row)
@@ -764,7 +769,8 @@ export class Connections extends Context.Service<
        * for the account it was. It notes the tool whose sign-in the token is
        * a copy of, where it is one, and none where it was signed in otherwise.
        * Taking a tool's sign-in over for a connection read as `still`, it
-       * keeps nothing once that has moved on (`MovedOn`).
+       * keeps nothing once that has moved on (`MovedOn`): looked at, and the
+       * token kept, while nothing else writes the connection's credential.
        */
       const save = (input: {
         readonly product: Product
@@ -802,58 +808,62 @@ export class Connections extends Context.Service<
           const id = existing?.id ?? (yield* newId(Ids.connection))
           const credentialRef = existing?.credentialRef ?? id
           const movedOnFrom = input.still === undefined ? Effect.succeed(false) : movedOn(input.still)
-          if (yield* movedOnFrom) return yield* new MovedOn()
-          yield* keep(credentialRef, input.secret)
           const expiresAt = 'accessToken' in input.secret ? input.secret.expiresAt : null
           const from = input.cli === null ? {} : { cli: input.cli }
-          yield* sql.withTransaction(
+          yield* writeLock(id).withPermits(1)(
             Effect.gen(function* () {
               if (yield* movedOnFrom) return yield* new MovedOn()
-              if (existing === undefined) {
-                yield* sql`INSERT INTO connections ${sql.insert({
-                  id,
-                  deviceId: instance.deviceId,
-                  product: input.product,
-                  webUrl,
-                  apiUrl,
-                  accountId: account.id,
-                  accountLogin: account.login,
-                  accountName: account.name,
-                  auth: input.auth,
-                  cli: input.cli ?? 'none',
-                  credentialRef,
-                  expiresAt,
-                  state: 'ready',
-                  createdAt: at,
-                  updatedAt: at,
-                })}`
-                yield* fact({
-                  aggregateType: 'connection',
-                  aggregateId: id,
-                  revision: 1,
-                  type: 'connection.added',
-                  payload: { product: input.product, webUrl, account: account.login, auth: input.auth, ...from },
-                  actorId: input.actorId,
-                })
-              } else {
-                const revision = yield* change('connections', id, {
-                  state: 'ready',
-                  auth: input.auth,
-                  cli: input.cli ?? 'none',
-                  accountLogin: account.login,
-                  accountName: account.name,
-                  expiresAt,
-                  updatedAt: at,
-                })
-                yield* fact({
-                  aggregateType: 'connection',
-                  aggregateId: id,
-                  revision,
-                  type: 'connection.renewed',
-                  payload: { product: input.product, auth: input.auth, ...from },
-                  actorId: input.actorId,
-                })
-              }
+              yield* keep(credentialRef, input.secret)
+              yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  if (yield* movedOnFrom) return yield* new MovedOn()
+                  if (existing === undefined) {
+                    yield* sql`INSERT INTO connections ${sql.insert({
+                      id,
+                      deviceId: instance.deviceId,
+                      product: input.product,
+                      webUrl,
+                      apiUrl,
+                      accountId: account.id,
+                      accountLogin: account.login,
+                      accountName: account.name,
+                      auth: input.auth,
+                      cli: input.cli ?? 'none',
+                      credentialRef,
+                      expiresAt,
+                      state: 'ready',
+                      createdAt: at,
+                      updatedAt: at,
+                    })}`
+                    yield* fact({
+                      aggregateType: 'connection',
+                      aggregateId: id,
+                      revision: 1,
+                      type: 'connection.added',
+                      payload: { product: input.product, webUrl, account: account.login, auth: input.auth, ...from },
+                      actorId: input.actorId,
+                    })
+                  } else {
+                    const revision = yield* change('connections', id, {
+                      state: 'ready',
+                      auth: input.auth,
+                      cli: input.cli ?? 'none',
+                      accountLogin: account.login,
+                      accountName: account.name,
+                      expiresAt,
+                      updatedAt: at,
+                    })
+                    yield* fact({
+                      aggregateType: 'connection',
+                      aggregateId: id,
+                      revision,
+                      type: 'connection.renewed',
+                      payload: { product: input.product, auth: input.auth, ...from },
+                      actorId: input.actorId,
+                    })
+                  }
+                }),
+              )
             }),
           )
           adapterCache.delete(id)
@@ -1549,12 +1559,14 @@ export class Connections extends Context.Service<
         check: (connectionId) => provide(check(connectionId)),
         remove: (connectionId, actorId) =>
           provide(
-            Effect.gen(function* () {
-              const row = yield* rowOf(connectionId)
-              yield* moveTo(row, 'removed', 'connection.removed', actorId)
-              yield* secrets.remove(row.credentialRef)
-              adapterCache.delete(connectionId)
-            }),
+            writeLock(connectionId).withPermits(1)(
+              Effect.gen(function* () {
+                const row = yield* rowOf(connectionId)
+                yield* moveTo(row, 'removed', 'connection.removed', actorId)
+                yield* secrets.remove(row.credentialRef)
+                adapterCache.delete(connectionId)
+              }),
+            ),
           ),
         adapters: (connectionId) => provide(Effect.map(rowOf(connectionId), (row) => ({ ...adaptersOf(row), info: toInfo(row) }))),
         hostOf: (remotes, options) => provide(hostOf(remotes, options)),
