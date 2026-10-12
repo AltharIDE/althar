@@ -15,6 +15,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
 import { Agents, type AgentEntry, Connectors, type RuntimeOptions, type StallOptions } from '../src/Config'
+import type { CliUnanswered } from '../src/errors'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
@@ -131,7 +132,7 @@ export const fakeConnectors = (
     readonly fetch?: Fetch
     readonly clientIds?: Readonly<Record<string, string>>
     readonly callbackPort?: number
-    readonly cliToken?: (tool: 'gh' | 'glab', host: string) => Effect.Effect<string | null>
+    readonly cliToken?: (tool: 'gh' | 'glab', host: string) => Effect.Effect<string | null, CliUnanswered>
   } = {},
 ) =>
   Layer.succeed(

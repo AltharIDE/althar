@@ -232,6 +232,8 @@ export const words = (
       }
       case 'CliSignedOut':
         return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this Mac.`
+      case 'CliUnanswered':
+        return `${text(error, 'tool')} didn't answer in time. Try again in a moment.`
       case 'CliElsewhere':
         return `Althar only gives ${text(error, 'tool')}'s sign-in to a server it knows, over HTTPS. ${text(error, 'address')} isn't one.`
       case 'OtherAccount':
@@ -318,6 +320,7 @@ export const expected = new Set([
   'TaskRefused',
   'NotConnected',
   'CliSignedOut',
+  'CliUnanswered',
   'CliElsewhere',
   'OtherAccount',
   'NotAnIssue',
