@@ -131,6 +131,24 @@ const member = {
   ],
 }
 
+/** What POST /cards answers, as Trello's API reference shows it: the card as it was made. */
+const posted = (overrides: Record<string, unknown> = {}) => ({
+  id: '5c4a1edbee21d48246c126b2',
+  badges: { votes: 0, comments: 0 },
+  closed: false,
+  dateLastActivity: '2026-10-11T09:00:00.000Z',
+  desc: 'Siri, **securely**.',
+  idBoard: '4d5ea62fd76aa1136000000c',
+  idList: '5c4a1ec10405013c8a2fc48e',
+  idLabels: ['label-mobile'],
+  labels: [{ id: 'label-mobile', idBoard: '4d5ea62fd76aa1136000000c', name: 'Mobile', color: 'pink' }],
+  name: 'iOS 12',
+  shortLink: 'dRlAmgAi',
+  shortUrl: 'https://trello.com/c/dRlAmgAi',
+  url: 'https://trello.com/c/dRlAmgAi/1632-ios-12',
+  ...overrides,
+})
+
 const found: Issue = {
   id: '5c4a1edbee21d48246c126b2',
   ref: 'dRlAmgAi',
@@ -415,6 +433,175 @@ describe('Trello', () => {
       assert.isTrue(sent.every((request) => request.headers.authorization === AUTHORIZATION))
       assert.isTrue(tracker.capabilities.links)
       assert.strictEqual(tracker.product, 'trello')
+    }),
+  )
+  it.effect('lists the open lists on the account’s open boards, each named with its board', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = trello([
+        [
+          'GET',
+          `${API}/members/me/boards?filter=open&fields=name&lists=open`,
+          {
+            json: [
+              {
+                id: '4d5ea62fd76aa1136000000c',
+                name: 'Trello Development Roadmap',
+                lists: [
+                  { id: '5c4a1ec10405013c8a2fc48e', name: 'Live (Oct-Dec 2018)', closed: false },
+                  { id: '5c4a1ec10405013c8a2fc48f', name: 'Old', closed: true },
+                ],
+              },
+              { id: '4e6a8095efa69909ba007382', name: 'Welcome Board', lists: [{ id: '4e6a8095efa69909ba007387', name: 'Basics' }] },
+            ],
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* tracker.containers(), [
+        { id: '5c4a1ec10405013c8a2fc48e', key: null, name: 'Trello Development Roadmap / Live (Oct-Dec 2018)' },
+        { id: '4e6a8095efa69909ba007387', key: null, name: 'Welcome Board / Basics' },
+      ])
+      assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('files a card on a list, with its board’s labels by those names, in any case, and reads it back', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = trello([
+        [
+          'GET',
+          `${API}/lists/5c4a1ec10405013c8a2fc48e?fields=idBoard,name`,
+          { json: { id: '5c4a1ec10405013c8a2fc48e', idBoard: '4d5ea62fd76aa1136000000c', name: 'Live (Oct-Dec 2018)' } },
+        ],
+        [
+          'GET',
+          `${API}/boards/4d5ea62fd76aa1136000000c/labels?fields=name&limit=1000`,
+          {
+            json: [
+              { id: 'label-mobile', name: 'Mobile' },
+              { id: 'label-mobile-again', name: 'mobile' },
+              { id: 'label-green', name: '' },
+              { id: 'label-blue', name: null },
+              { id: 'label-web', name: 'Web' },
+            ],
+          },
+        ],
+        ['POST', `${API}/cards`, { json: posted() }],
+        ['GET', /\/cards\/dRlAmgAi\?/, { json: card() }],
+      ])
+      const filed = yield* tracker.create('5c4a1ec10405013c8a2fc48e', {
+        title: 'iOS 12',
+        body: 'Siri, **securely**.',
+        labels: ['MOBILE', 'Nonesuch', ' '],
+      })
+      assert.deepStrictEqual([filed.key, filed.labels], ['dRlAmgAi', ['Mobile']])
+      assert.deepStrictEqual(sent[2]?.body, {
+        idList: '5c4a1ec10405013c8a2fc48e',
+        name: 'iOS 12',
+        desc: 'Siri, **securely**.',
+        idLabels: 'label-mobile',
+      })
+      assert.lengthOf(sent, 4)
+    }),
+  )
+
+  it.effect('files a card without asking for labels when it has none, and says what it was given isn’t a list', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = trello([
+        [
+          'GET',
+          `${API}/lists/5c4a1ec10405013c8a2fc48e?fields=idBoard,name`,
+          { json: { idBoard: '4d5ea62fd76aa1136000000c', name: 'Live (Oct-Dec 2018)' } },
+        ],
+        ['GET', `${API}/boards/4d5ea62fd76aa1136000000c/labels?fields=name&limit=1000`, { json: [{ id: 'label-web', name: 'Web' }] }],
+        ['POST', `${API}/cards`, { json: posted({ labels: [] }) }],
+        ['GET', /\/cards\/dRlAmgAi\?/, { json: card() }],
+      ])
+      yield* tracker.create('5c4a1ec10405013c8a2fc48e', { title: 'iOS 12', body: '', labels: [] })
+      assert.deepStrictEqual(
+        sent.map((request) => request.method),
+        ['POST', 'GET'],
+      )
+      assert.deepStrictEqual(sent[0]?.body, { idList: '5c4a1ec10405013c8a2fc48e', name: 'iOS 12', desc: '' })
+      // Labels the board has none of: no idLabels.
+      yield* tracker.create('5c4a1ec10405013c8a2fc48e', { title: 'iOS 12', body: '', labels: ['Mobile'] })
+      assert.deepStrictEqual(sent[4]?.body, { idList: '5c4a1ec10405013c8a2fc48e', name: 'iOS 12', desc: '' })
+      const notAList = yield* Effect.flip(tracker.create('../boards', { title: 'iOS 12', body: '', labels: [] }))
+      assert.deepStrictEqual([notAList.reason, notAList.message], ['not_found', 'Not a Trello list: ../boards'])
+      assert.lengthOf(sent, 6)
+    }),
+  )
+
+  it.effect('files a card once Trello takes it, though reading it back fails, as Trello answered the filing', () =>
+    Effect.gen(function* () {
+      for (const failed of [
+        { status: 500, json: { message: 'Internal Server Error' } },
+        { status: 429, json: { message: 'API_TOKEN_LIMIT_EXCEEDED' } },
+      ]) {
+        const { tracker, sent } = trello([
+          [
+            'GET',
+            `${API}/lists/5c4a1ec10405013c8a2fc48e?fields=idBoard,name`,
+            { json: { idBoard: '4d5ea62fd76aa1136000000c', name: 'Doing' } },
+          ],
+          [
+            'GET',
+            `${API}/boards/4d5ea62fd76aa1136000000c/labels?fields=name&limit=1000`,
+            { json: [{ id: 'label-mobile', name: 'Mobile' }] },
+          ],
+          ['POST', `${API}/cards`, { json: posted() }],
+          ['GET', /\/cards\/dRlAmgAi\?/, failed],
+        ])
+        const filed = yield* tracker.create('5c4a1ec10405013c8a2fc48e', {
+          title: 'iOS 12',
+          body: 'Siri, **securely**.',
+          labels: ['Mobile'],
+        })
+        assert.deepStrictEqual(filed, {
+          id: '5c4a1edbee21d48246c126b2',
+          ref: 'dRlAmgAi',
+          key: 'dRlAmgAi',
+          title: 'iOS 12',
+          body: 'Siri, **securely**.',
+          url: 'https://trello.com/c/dRlAmgAi/1632-ios-12',
+          // Its list as read for its labels.
+          status: { name: 'Doing', category: 'started' },
+          priority: null,
+          assignees: [],
+          labels: ['Mobile'],
+          container: null,
+          updatedAt: '2026-10-11T09:00:00.000Z',
+        })
+        assert.lengthOf(sent, 4)
+      }
+      // Without labels its list isn't read: it is to do, and its time is now where Trello didn't say.
+      const { tracker } = trello([
+        ['POST', `${API}/cards`, { json: posted({ labels: undefined, desc: undefined, dateLastActivity: undefined }) }],
+        ['GET', /\/cards\/dRlAmgAi\?/, { status: 500 }],
+      ])
+      const bare = yield* tracker.create('5c4a1ec10405013c8a2fc48e', { title: 'iOS 12', body: 'A body', labels: [] })
+      assert.deepStrictEqual([bare.status, bare.body, bare.labels], [{ name: 'To do', category: 'todo' }, 'A body', []])
+      assert.isFalse(Number.isNaN(Date.parse(bare.updatedAt)))
+    }),
+  )
+
+  it.effect('fails to file a card when its board’s labels can’t be read, before anything is filed', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = trello([
+        [
+          'GET',
+          `${API}/lists/5c4a1ec10405013c8a2fc48e?fields=idBoard,name`,
+          { json: { idBoard: '4d5ea62fd76aa1136000000c', name: 'Doing' } },
+        ],
+        [
+          'GET',
+          `${API}/boards/4d5ea62fd76aa1136000000c/labels?fields=name&limit=1000`,
+          { status: 429, json: { message: 'API_TOKEN_LIMIT_EXCEEDED' } },
+        ],
+        ['POST', `${API}/cards`, { json: posted() }],
+      ])
+      const failed = yield* Effect.flip(tracker.create('5c4a1ec10405013c8a2fc48e', { title: 'iOS 12', body: '', labels: ['Mobile'] }))
+      assert.strictEqual(failed.reason, 'rate_limited')
+      assert.isFalse(sent.some((request) => request.method === 'POST'))
     }),
   )
 })

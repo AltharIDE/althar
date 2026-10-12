@@ -3,6 +3,8 @@ import type {
   AgentModels,
   AgentStatus,
   ChangeSummary,
+  ConnectGuide,
+  ConnectionCheck,
   ConnectionList,
   ConnectionSummary,
   CoordinatorSnapshot,
@@ -143,7 +145,7 @@ export const models: ReadonlyArray<AgentModels> = [
   { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], blocked: [], probing: true },
 ]
 
-/** A project's repositories as this Mac has them: one plain, one a fork. */
+/** A project's repositories as this Mac has them: one plain and one a fork, on GitHub as you, and one on GitLab, not connected. */
 export const repositories: ReadonlyArray<ProjectRepository> = [
   {
     id: 'repo_api',
@@ -151,7 +153,14 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     path: '/Users/me/code/meridian-api',
     folder: null,
     branch: 'main',
-    remote: 'git@github.com:meridian/api.git',
+    host: {
+      product: 'github',
+      name: 'GitHub',
+      instance: null,
+      path: 'meridian/api',
+      url: 'https://github.com/meridian/api',
+      account: { login: 'you', state: 'ready' },
+    },
     role: 'service',
     fork: null,
     tasks: 1,
@@ -162,9 +171,34 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     path: '/Users/me/code/meridian-web',
     folder: null,
     branch: 'main',
-    remote: 'git@github.com:you/meridian-web.git',
+    host: {
+      product: 'github',
+      name: 'GitHub',
+      instance: null,
+      path: 'you/meridian-web',
+      url: 'https://github.com/you/meridian-web',
+      account: { login: 'you', state: 'ready' },
+    },
     role: 'frontend',
     fork: { fork: 'you/meridian-web', upstream: 'meridian/web', target: 'fork' },
+    tasks: 0,
+  },
+  {
+    id: 'repo_infra',
+    name: 'meridian-infra',
+    path: '/Users/me/code/meridian-infra',
+    folder: null,
+    branch: 'trunk',
+    host: {
+      product: 'gitlab',
+      name: 'GitLab',
+      instance: null,
+      path: 'meridian-ops/infra',
+      url: 'https://gitlab.com/meridian-ops/infra',
+      account: null,
+    },
+    role: 'infrastructure',
+    fork: null,
     tasks: 0,
   },
 ]
@@ -225,9 +259,25 @@ export const items = {
     ...(id === undefined ? {} : { id }),
     agentId,
     kind: 'agent_message',
-    content: { text },
+    content: { text, pictures: [], files: [] },
   }),
-  thinks: (text: string, agentId = 'claude-code'): ThreadItem => ({ ...next(), agentId, kind: 'agent_thought', content: { text } }),
+  thinks: (text: string, agentId = 'claude-code'): ThreadItem => ({
+    ...next(),
+    agentId,
+    kind: 'agent_thought',
+    content: { text, pictures: [], files: [] },
+  }),
+  /** A message that hands back pictures or files beside its words. */
+  hands: (
+    text: string,
+    handed: Partial<Pick<Extract<ThreadItem, { kind: 'agent_message' | 'agent_thought' }>['content'], 'pictures' | 'files'>>,
+    agentId = 'claude-code',
+  ): ThreadItem => ({
+    ...next(),
+    agentId,
+    kind: 'agent_message',
+    content: { text, pictures: [], files: [], ...handed },
+  }),
   tool: (content: Partial<Extract<ThreadItem, { kind: 'tool_call' }>['content']> = {}, agentId = 'claude-code'): ThreadItem => ({
     ...next(),
     agentId,
@@ -239,6 +289,10 @@ export const items = {
       command: null,
       locations: [],
       declined: false,
+      pictures: [],
+      files: [],
+      output: null,
+      exit: null,
       ...content,
     },
   }),
@@ -288,12 +342,74 @@ export const items = {
       ...content,
     },
   }),
+  question: (content: Partial<Extract<ThreadItem, { kind: 'question' }>['content']> = {}, agentId = 'claude-code'): ThreadItem => ({
+    ...next(),
+    agentId,
+    kind: 'question',
+    content: {
+      attentionId: 'q1',
+      message: 'Which database?',
+      toolCallId: null,
+      fields: [
+        {
+          id: 'database',
+          question: 'Which database should the cache use?',
+          type: 'choice',
+          options: [
+            { value: 'postgres', label: 'Postgres', note: 'what production runs' },
+            { value: 'sqlite', label: 'SQLite' },
+          ],
+          multiple: false,
+          wordsField: 'database_custom',
+          required: false,
+        },
+      ],
+      state: 'open',
+      answers: null,
+      withdrawn: null,
+      ...content,
+    },
+  }),
   card: (content: TaskCardContent, id?: string): ThreadItem => ({
     ...next(),
     ...(id === undefined ? {} : { id }),
     agentId: null,
     kind: 'task',
     content,
+  }),
+  /** A run of the project Althar started, up at its address unless told otherwise. */
+  draft: (content: Partial<Extract<ThreadItem, { kind: 'issue_draft' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'issue_draft',
+    content: {
+      draftId: 'idr_1',
+      product: 'linear',
+      tracker: 'Linear',
+      container: 'Meridian',
+      title: 'Refunds skip the rate limiter',
+      body: 'Charges go through it; **refunds** don’t.',
+      labels: ['payments'],
+      state: 'pending',
+      error: null,
+      issue: null,
+      ...content,
+    },
+  }),
+  run: (content: Partial<Extract<ThreadItem, { kind: 'run' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'run',
+    content: {
+      launchId: 'proc_1',
+      taskId: 't1',
+      where: 'Fix the login timeout',
+      command: 'bun run dev',
+      url: 'http://localhost:4173/',
+      startedAt: NOW,
+      ended: null,
+      ...content,
+    },
   }),
 }
 
@@ -350,6 +466,8 @@ export const coordinatorSnapshot = (overrides: Partial<CoordinatorSnapshot> = {}
   items: [],
   earlier: false,
   host: null,
+  runCommand: null,
+  launches: [],
   ...overrides,
 })
 
@@ -417,6 +535,10 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     commits: 0,
     here: [],
     merged: [],
+    actions: ['stop', 'abandon'],
+    planId: null,
+    runCommand: null,
+    launches: [],
   },
   session: {
     id: 's1',
@@ -429,6 +551,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     models: ['opus', 'sonnet'],
     turnRunning: false,
     context: null,
+    background: [],
   },
   attention: [],
   items: [],
@@ -446,26 +569,28 @@ export const githubConnection: ConnectionSummary = {
   state: 'ready',
 }
 
-/** What can be connected here, and what is: GitHub signs in in the browser, Linear takes a token; nothing connected yet. */
+/** What can be connected here, and what is: GitHub and Linear take a token; nothing connected yet; meridian's code is on GitHub. */
 export const connectionList: ConnectionList = {
   cursor: 2,
   connections: [],
   products: [
     {
       product: 'github',
+      service: 'github',
       name: 'GitHub',
       host: true,
       tracker: true,
       hostedUrl: 'https://github.com',
       selfHosted: true,
-      browserSignIn: true,
+      browserSignIn: false,
       tokenNeeds: null,
-      tokenHelp: 'https://github.com/settings/personal-access-tokens/new',
+      tokenPrefixes: ['github_pat_', 'ghp_'],
       tokenHelpForKey: null,
       keyChecks: [],
     },
     {
       product: 'linear',
+      service: 'linear',
       name: 'Linear',
       host: false,
       tracker: true,
@@ -473,17 +598,52 @@ export const connectionList: ConnectionList = {
       selfHosted: false,
       browserSignIn: false,
       tokenNeeds: null,
-      tokenHelp: 'https://linear.app/settings/account/security',
+      tokenPrefixes: ['lin_api_'],
       tokenHelpForKey: null,
       keyChecks: [],
     },
   ],
+  places: [
+    { product: 'github', webUrl: 'https://github.com', project: 'meridian', remote: null, repositories: ['northwind/meridian-api'] },
+  ],
+}
+
+/** Where a GitHub token is made for meridian, filled in. */
+export const GITHUB_TOKEN_PAGE =
+  'https://github.com/settings/personal-access-tokens/new?name=Althar+for+meridian&target_name=northwind&expires_in=90&contents=write'
+
+/** What connecting GitHub starts from: meridian's repository on it, and gh signed in to it as you. */
+export const githubGuide: ConnectGuide = {
+  service: 'github',
+  places: [
+    { product: 'github', webUrl: 'https://github.com', project: 'meridian', remote: 'origin', repositories: ['northwind/meridian-api'] },
+  ],
+  clis: [{ product: 'github', webUrl: 'https://github.com', tool: 'gh', account: 'you', scopes: ['repo', 'workflow', 'read:org'] }],
+  email: null,
+  tokenPages: [{ product: 'github', webUrl: 'https://github.com', url: GITHUB_TOKEN_PAGE }],
+}
+
+/** Everything a GitHub connection needs, which it can do; its token runs out on 8 January 2027. */
+export const githubCheck: ConnectionCheck = {
+  connectionId: 'conn1',
+  lines: [
+    { need: 'account', state: 'ok', fact: 'you', count: null, reason: null },
+    { need: 'reach', state: 'ok', fact: 'northwind', count: null, reason: null },
+    { need: 'push', state: 'ok', fact: null, count: null, reason: null },
+    { need: 'changes', state: 'ok', fact: null, count: null, reason: null },
+    { need: 'checks', state: 'ok', fact: null, count: null, reason: null },
+    { need: 'issues', state: 'ok', fact: null, count: null, reason: null },
+  ],
+  expiresAt: '2027-01-08T00:00:00.000Z',
+  renews: false,
+  settings: 'https://github.com/settings/personal-access-tokens',
 }
 
 /** A client whose every call resolves with the fixtures, and whose watch the test drives with `emit`. */
 export const fakeClient = (overrides: Partial<Client> = {}) => {
   const listeners = new Set<(event: WatchEvent) => void>()
   const watching: Array<number | undefined> = []
+  const starts = new Set<() => void>()
   const client: Client = {
     status: vi.fn(async () => status),
     listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
@@ -493,6 +653,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
+    readOutput: vi.fn(async () => ({ text: ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n', dropped: 0 })),
+    readDocument: vi.fn(async (_threadId: string, path: string) => ({
+      path,
+      body: '# Notes\n\nRefunds share the partner budget.\n',
+      bytes: 42,
+      lines: 3,
+    })),
     getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [] })),
     getHome: vi.fn(async () => home()),
     leftHome: vi.fn(async () => {}),
@@ -528,15 +695,22 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     setCoAuthor: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
-    stopSession: vi.fn(async () => {}),
+    stopTask: vi.fn(async () => {}),
+    resumeTask: vi.fn(async () => {}),
+    abandonTask: vi.fn(async () => {}),
+    reopenTask: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
     takeBack: vi.fn(async () => {}),
     answer: vi.fn(async () => {}),
+    answerQuestion: vi.fn(async () => {}),
     getCoordinator: vi.fn(async () => coordinatorSnapshot()),
     startTask: vi.fn(async () => task),
     startPlan: vi.fn(async () => {}),
     holdPlan: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
+    changeIssueDraft: vi.fn(async () => {}),
+    fileIssueDraft: vi.fn(async () => {}),
+    discardIssueDraft: vi.fn(async () => {}),
     answerStuck: vi.fn(async () => {}),
     listConnections: vi.fn(async () => connectionList),
     startSignIn: vi.fn(async () => ({
@@ -549,8 +723,13 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getSignIn: vi.fn(async () => ({ state: 'waiting' as const })),
     cancelSignIn: vi.fn(async () => {}),
     connectToken: vi.fn(async () => connectionList.connections[0] ?? githubConnection),
+    getConnectGuide: vi.fn(async () => githubGuide),
+    findServer: vi.fn(async (_service, webUrl: string) => ({ product: null, webUrl, reason: 'unreachable' as const, tokenPage: null })),
+    connectCli: vi.fn(async () => githubConnection),
+    checkConnection: vi.fn(async () => githubCheck),
     disconnect: vi.fn(async () => {}),
     renameProject: vi.fn(async () => {}),
+    setProjectInk: vi.fn(async () => {}),
     removeProject: vi.fn(async () => {}),
     getRepositories: vi.fn(async () => repositories),
     addRepositories: vi.fn(async () => {}),
@@ -577,15 +756,44 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     markReady: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
-    watch: (listener, since) => {
+    stopListening: vi.fn(async () => {}),
+    stopBackground: vi.fn(async () => {}),
+    clearBackground: vi.fn(async () => {}),
+    runProject: vi.fn(async (_projectId: string, taskId: string | null, _threadId: string | null) => ({
+      id: 'proc_run',
+      taskId,
+      where: taskId === null ? 'main' : 'the task',
+      command: 'bun run dev',
+      url: null,
+      startedAt: NOW,
+      ended: null,
+    })),
+    stopLaunch: vi.fn(async () => {}),
+    clearLaunch: vi.fn(async () => {}),
+    watch: (listener, since, onWatching) => {
       watching.push(since)
       listeners.add(listener)
-      return () => void listeners.delete(listener)
+      // A watch is listening from the moment it starts, as the runtime's stream does once it is open.
+      if (onWatching !== undefined) {
+        starts.add(onWatching)
+        onWatching()
+      }
+      return () => {
+        listeners.delete(listener)
+        if (onWatching !== undefined) starts.delete(onWatching)
+      }
     },
     close: vi.fn(async () => {}),
     ...overrides,
   }
-  return { client, emit: (event: WatchEvent) => listeners.forEach((listener) => listener(event)), listeners, watching }
+  return {
+    client,
+    emit: (event: WatchEvent) => listeners.forEach((listener) => listener(event)),
+    /** The watch broke and started again, as after the runtime restarted: it listens again from now. */
+    rewatch: () => starts.forEach((start) => start()),
+    listeners,
+    watching,
+  }
 }
 
 /** The app's preferences as a main process would keep them: where each starts, then each change. */
@@ -610,18 +818,22 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   editorPicture: vi.fn(async (id: string) => `data:image/png;base64,${id}`),
   playSound: vi.fn(async () => {}),
   pickFolder: vi.fn(async () => 'grant_picked'),
+  pickFolders: vi.fn(async (): Promise<ReadonlyArray<string>> => ['grant_picked']),
   grantDropped: vi.fn(async () => 'grant_dropped'),
   findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
   grantFound: vi.fn(async (id: string) => `grant_${id}`),
   onOpen: vi.fn(() => () => {}),
+  onStoreFailed: vi.fn(() => () => {}),
+  showBackup: vi.fn(async () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),
-  edge: vi.fn(async () => ({ place: 'island', notch: true })),
+  edge: vi.fn(async () => ({ place: 'island', notch: true, platform: 'darwin', tray: true })),
   setEdge: vi.fn(async () => {}),
   edgeDrawn: vi.fn(),
   onEdgePointed: vi.fn(() => () => {}),
   edgeSize: vi.fn(),
   openInWindow: vi.fn(),
+  clipboardToken: vi.fn(async () => null),
   ...overrides,
 })
 

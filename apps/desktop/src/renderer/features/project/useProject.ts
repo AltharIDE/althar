@@ -5,18 +5,20 @@ import {
   type AgentStatus,
   type CoordinatorSnapshot,
   PAGE,
-  type IssueSummary,
   type PlanStep,
+  type ProjectRepository,
   type ProjectSummary,
   type TaskEnd,
-  type TaskSummary,
   type ThreadItem,
+  type FieldAnswer,
 } from '@althar/contracts'
 
 import { messageOf } from '../../data/client'
 import { CARDS } from '../../data/feed'
 import { keys, reads } from '../../data/reads'
 import { useServices, useWatch } from '../../data/services'
+import type { OutputSoFar } from '../../shared/handed'
+import { useOutputs } from '../../shared/useOutputs'
 import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsent, waiting } from '../../shared/items'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { Streamed } from '../../shared/thread'
@@ -24,8 +26,8 @@ import type { Streamed } from '../../shared/thread'
 /*
  * A project's Talk room: the coordinator's thread, with each task's card in
  * it, and what the person can do there: talk to the coordinator, pick the
- * agent it runs on, change, hold or start a plan before it starts on its own,
- * and start a task themselves. Like a task's thread, it reads the newest page
+ * agent it runs on, and change, hold or start a plan before it starts on its
+ * own. Like a task's thread, it reads the newest page
  * once, then what changes: an item alone, or the thread's head. A card shows
  * a task that moves in threads of its own, so a change to any task of the
  * project reads the cards again.
@@ -34,35 +36,21 @@ import type { Streamed } from '../../shared/thread'
 /** How long changes are gathered before they are read. */
 const GATHER = 25
 
-export interface NewTask {
-  readonly title: string
-  readonly description: string
-  readonly lead: Choice
-  /** Who reviews it, or null for no review. */
-  readonly reviewer: Choice | null
-  /** The issue it comes from, by its ref, if any. */
-  readonly issue: string | null
-  /** What happens when the work is done; null where the repository's host isn't connected. */
-  readonly end: TaskEnd | null
-  /** The project's repositories it changes, by name; null where the project has one. */
-  readonly repositories: ReadonlyArray<string> | null
-}
-
 export interface ProjectModel {
   readonly project: ProjectSummary | null
+  /** Its repositories as this Mac has them, each with its remote: what its front page says it is made of. */
+  readonly repositories: ReadonlyArray<ProjectRepository> | null
   /** The coordinator's thread: its head and the items read so far, oldest first. */
   readonly coordinator: CoordinatorSnapshot | null
   /** Text still streaming, by thread item. */
   readonly streaming: ReadonlyMap<string, Streamed>
+  /** Commands' output as far as it has come, by their tool call's item, while they run. */
+  readonly outputs: ReadonlyMap<string, OutputSoFar>
   /** Agents that could work: signed in, or that don't say. */
   readonly agents: ReadonlyArray<AgentStatus>
-  /** How the project's tasks end where a plan doesn't say; null where its host decides. */
-  readonly end: TaskEnd | null
   readonly error: string | null
   /** An action is on its way to the runtime. */
   readonly pending: boolean
-  /** A task the person planned is starting. */
-  readonly starting: boolean
   readonly loadingEarlier: boolean
   readonly loadEarlier: () => Promise<void>
   /** Says something to the coordinator, which starts it on `agentId` if it isn't running. */
@@ -72,43 +60,54 @@ export interface ProjectModel {
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
+  /** Runs the project with no agent: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
+  readonly runProject: (taskId?: string | null) => Promise<void>
+  readonly stopLaunch: (id: string) => Promise<void>
+  readonly clearLaunch: (id: string) => Promise<void>
   /** Moves the running coordinator to another agent. */
   /** Puts the coordinator on another model or effort, or another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
   /** Hands the conversation to another agent with what the person says: its first turn, after its brief. */
   readonly handOver: (choice: Choice, body: string) => Promise<void>
+  /** Answers the coordinator's question: what went wrong, in words, or null when it went through. */
+  readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
-  /** Plans and starts a task; the task, or null when it couldn't. */
-  readonly startTask: (input: NewTask) => Promise<TaskSummary | null>
-  /** The person's open issues, for a task to come from. */
-  readonly listIssues: () => Promise<ReadonlyArray<IssueSummary>>
+  readonly fileIssueDraft: (draftId: string) => Promise<void>
+  readonly changeIssueDraft: (
+    draftId: string,
+    edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
+  ) => Promise<void>
+  readonly discardIssueDraft: (draftId: string) => Promise<void>
   readonly dismissError: () => void
 }
+
+/** A thread not yet read has no items. */
+const NO_ITEMS: ReadonlyArray<ThreadItem> = []
 
 export const useProject = (projectId: string): ProjectModel => {
   const { client, cache } = useServices()
   const read = reads(client)
   const listed = useQuery(read.projects())
   const project = listed.data?.projects.find((candidate) => candidate.id === projectId) ?? null
+  const repositories = useQuery(read.repositories(projectId)).data ?? null
   const thread = useQuery(read.coordinator(projectId))
   const coordinator = thread.data ?? null
   const status = useQuery(read.status()).data
   const agents = useMemo(() => status?.agents.filter((agent) => agent.signIn !== 'signed_out') ?? [], [status])
-  // The project's ending, which a task the person plans starts from.
-  const end = useQuery(read.rules(projectId)).data?.end ?? null
   const [streaming, setStreaming] = useState<ReadonlyMap<string, Streamed>>(new Map())
   const [failed, setError] = useState<string | null>(null)
   const readFailure = thread.error ?? listed.error
   const error = failed ?? (readFailure === null ? null : messageOf(readFailure))
   const [pending, setPending] = useState(false)
-  const [starting, setStarting] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [newest] = useState(newestReads)
   const changed = useRef({ head: false, cards: false, items: new Set<string>() })
   const threadId = coordinator?.threadId ?? null
+  // What the coordinator's commands have printed so far, while they run.
+  const outputs = useOutputs(threadId, coordinator?.items ?? NO_ITEMS, coordinator?.session?.turnRunning ?? false)
 
   /** Changes the coordinator's thread as the window keeps it; nothing before it is first read. */
   const setCoordinator = useCallback(
@@ -159,6 +158,13 @@ export const useProject = (projectId: string): ProjectModel => {
   }, [client, threadId, coordinator, readHead, newest, arrived, fail])
 
   useWatch((event) => {
+    // A command's output as far as it has come is useOutputs'; the coordinator leaves nothing running.
+    if (event._tag === 'Output' || event._tag === 'Background') return
+    // Every run in the project, the tasks' too, whole each time, which the pill over the composer shows.
+    if (event._tag === 'Launches') {
+      if (event.projectId === projectId) setCoordinator((current) => ({ ...current, launches: event.launches }))
+      return
+    }
     if (event._tag === 'Streaming') {
       if (event.threadId !== threadId) return
       setStreaming((current) =>
@@ -223,46 +229,6 @@ export const useProject = (projectId: string): ProjectModel => {
     [readHead, fail],
   )
 
-  const startTask = useCallback(
-    async (input: NewTask) => {
-      setError(null)
-      setStarting(true)
-      try {
-        return await client.startTask({
-          projectId,
-          title: input.title.trim(),
-          ...(input.description.trim() === '' ? {} : { description: input.description.trim() }),
-          steps: [
-            { key: 'implement', ...input.lead, skipped: false },
-            ...(input.reviewer === null ? [] : [{ key: 'review' as const, ...input.reviewer, skipped: false }]),
-          ],
-          ...(input.issue === null ? {} : { issue: input.issue }),
-          end: input.end,
-          ...(input.repositories === null ? {} : { repositories: input.repositories }),
-        })
-      } catch (failure) {
-        fail(failure)
-        return null
-      } finally {
-        setStarting(false)
-      }
-    },
-    [client, projectId, fail],
-  )
-
-  // Kept the same across renders: the new-task panel reads the issues once, when it opens.
-  const listIssues = useCallback(
-    () =>
-      client.listIssues(projectId).then(
-        (list) => list.issues,
-        (failure: unknown) => {
-          fail(failure)
-          return []
-        },
-      ),
-    [client, projectId, fail],
-  )
-
   const send = (body: string, disposition: 'after_current' | 'interrupt_and_continue') =>
     threadId === null ? Promise.resolve() : client.send({ threadId, body, disposition })
 
@@ -291,13 +257,13 @@ export const useProject = (projectId: string): ProjectModel => {
 
   return {
     project,
+    repositories,
     coordinator,
     streaming,
+    outputs,
     agents,
-    end,
     error,
     pending,
-    starting,
     loadingEarlier,
     loadEarlier,
     say: (body, choice) =>
@@ -329,6 +295,9 @@ export const useProject = (projectId: string): ProjectModel => {
       }
     },
     interrupt: () => act(async () => (threadId === null ? undefined : client.interrupt(threadId))),
+    runProject: (taskId = null) => act(() => client.runProject(projectId, taskId, threadId)),
+    stopLaunch: (id) => act(() => client.stopLaunch(id)),
+    clearLaunch: (id) => act(() => client.clearLaunch(id)),
     choose: (choice) =>
       act(async () => {
         const session = coordinator?.session
@@ -343,11 +312,17 @@ export const useProject = (projectId: string): ProjectModel => {
         },
         false,
       ),
+    answerQuestion: (attentionId, answers) =>
+      client.answerQuestion({ attentionId, answers }).then(
+        () => null,
+        (failure: unknown) => messageOf(failure),
+      ),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     changePlan: (planId, steps, end) => act(() => client.changePlan(planId, steps, end)),
-    startTask,
-    listIssues,
+    fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
+    changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
+    discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
     dismissError: () => setError(null),
   }
 }

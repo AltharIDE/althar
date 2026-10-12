@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, within } from 'storybook/test'
 
 import { States, statesOn } from '../../storybook/States'
-import { Field } from './Field'
+import { Field, FieldArea } from './Field'
 
 const meta = {
   title: 'Primitives/Field',
@@ -26,6 +26,17 @@ export const Typing: Story = {
   },
 }
 
+/** Several lines: a description. As tall as its rows, and pulled longer by hand. */
+export const Area: Story = {
+  render: () => (
+    <FieldArea
+      aria-label="Description"
+      placeholder="What it is about"
+      defaultValue={'Refunds created before PR 1184\nhave no idempotency key.'}
+    />
+  ),
+}
+
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'input', focus: 'input', pressed: 'input' }),
   render: (args) => (
@@ -37,6 +48,8 @@ export const AllStates: Story = {
         { state: 'focus', node: <Field {...args} /> },
         { state: 'disabled', node: <Field {...args} disabled defaultValue="github.com/meridian/infra" /> },
         { state: 'large', node: <Field {...args} size="large" defaultValue="Refunds v2" /> },
+        { state: 'several lines', node: <FieldArea aria-label="Description" rows={3} defaultValue="Refunds created before PR 1184" /> },
+        { state: 'several lines, invalid', node: <FieldArea aria-label="Description" rows={3} invalid /> },
       ]}
     />
   ),

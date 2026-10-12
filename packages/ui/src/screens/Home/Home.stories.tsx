@@ -43,7 +43,7 @@ const meta = {
     onOpenEvent: fn(),
     onOpenProject: fn(),
     onTalk: fn(),
-    onOpenFolder: fn(),
+    onNewProject: fn(),
   },
 } satisfies Meta<typeof Home>
 export default meta
@@ -314,9 +314,9 @@ export const HeavyDay: Story = {
   render: (args) => <Day {...args} troubled />,
 }
 
-/** Without a way to open a folder, the projects' head has no button. */
+/** Without a way to start a project, the projects' head has no button. */
 export const WithoutOpeningAFolder: Story = {
-  args: { onOpenFolder: undefined, waiting: 0, running: RUNNING_QUIET, since: SINCE_QUIET, projects: PROJECTS_QUIET },
+  args: { onNewProject: undefined, waiting: 0, running: RUNNING_QUIET, since: SINCE_QUIET, projects: PROJECTS_QUIET },
 }
 
 /* ---- at rest: nothing waits on you and nothing is in progress ---- */

@@ -31,6 +31,7 @@ import { Folders } from './Folders'
 import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
+import { Launches } from './Launches'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
@@ -38,14 +39,17 @@ import { accountsOf, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
-import { Projects } from './Projects'
+import { Questions } from './Questions'
+import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
 import { Queries } from './Queries'
 import { timestamp } from './records'
 import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
+import { IssueDrafts } from './IssueDrafts'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
+import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
 import { anyOf, SignIns } from './SignIns'
 import { expected, words } from './words'
@@ -111,7 +115,9 @@ export const handlers = Api.toLayer(
     const context = yield* Effect.context<Instance | Crypto.Crypto>()
     const projects = yield* Projects
     const sessions = yield* Sessions
+    const launches = yield* Launches
     const permissions = yield* Permissions
+    const questions = yield* Questions
     const queries = yield* Queries
     const folders = yield* Folders
     const live = yield* Live
@@ -123,7 +129,9 @@ export const handlers = Api.toLayer(
     const accountSignIns = yield* AccountSignIns
     const policies = yield* Policies
     const plans = yield* Plans
+    const issueDrafts = yield* IssueDrafts
     const runs = yield* Runs
+    const tasks = yield* Tasks
     const coordinator = yield* Coordinator
     const instance = yield* Instance
     const sql = yield* SqlClient.SqlClient
@@ -179,6 +187,29 @@ export const handlers = Api.toLayer(
       auth: info.auth,
       state: info.state,
     })
+
+    /**
+     * A repository as its page shows it: where its work goes, from its
+     * remote, with the code host Althar knows there and who it is signed in
+     * as; a host it doesn't know by its address alone.
+     */
+    const repositoryOf = ({ remote, ...repository }: ProjectRepository) =>
+      Effect.gen(function* () {
+        const place = remote === null ? null : yield* Effect.orElseSucceed(connections.placeOf(remote), () => null)
+        const path = place?.path.join('/')
+        const host =
+          place === null || path === undefined
+            ? null
+            : {
+                product: place.code?.product ?? null,
+                name: place.code?.name ?? place.host,
+                instance: place.code === null || place.code.hosted ? null : place.host,
+                path,
+                url: place.url,
+                account: place.connection === null ? null : { login: place.connection.account.login, state: place.connection.state },
+              }
+        return { ...repository, host }
+      })
 
     /** The issue a task comes from, read before the task is made, so its key can go in the task's branch. */
     const issueFor = (projectId: string, issue: string | undefined) =>
@@ -309,9 +340,15 @@ export const handlers = Api.toLayer(
                   agentId: event.agentId,
                   text: event.text,
                 })
-              : event._tag === 'Agent' && event.event._tag === 'ContextUsage'
-                ? Stream.make({ _tag: 'Context', threadId: event.threadId, used: event.event.used, size: event.event.size })
-                : Stream.empty,
+              : event._tag === 'Output'
+                ? Stream.make({ _tag: 'Output', threadId: event.threadId, itemId: event.itemId, text: event.text, dropped: event.dropped })
+                : event._tag === 'Agent' && event.event._tag === 'ContextUsage'
+                  ? Stream.make({ _tag: 'Context', threadId: event.threadId, used: event.event.used, size: event.event.size })
+                  : event._tag === 'Background'
+                    ? Stream.make({ _tag: 'Background', threadId: event.threadId, background: event.background })
+                    : event._tag === 'Launches'
+                      ? Stream.make({ _tag: 'Launches', projectId: event.projectId, launches: event.launches })
+                      : Stream.empty,
           ),
         ),
       ),
@@ -335,7 +372,7 @@ export const handlers = Api.toLayer(
             return { ...reading, repositories: [...reading.repositories] }
           }),
         ),
-      OpenProject: ({ commandId, grant, name, repositories }) =>
+      OpenProject: ({ commandId, grant, name, repositories, projectId, ink }) =>
         api(
           Effect.gen(function* () {
             const path = yield* folders.path(grant)
@@ -353,10 +390,12 @@ export const handlers = Api.toLayer(
                     }),
                   )
             const opened = yield* projects.open({
-              envelope: yield* envelope('project.open', { path }, commandId),
+              envelope: yield* envelope('project.open', projectId === undefined ? { path } : { path, projectId }, commandId),
               path,
               ...(name === undefined ? {} : { name }),
               ...(roots === undefined ? {} : { repositories: roots }),
+              ...(projectId === undefined ? {} : { projectId }),
+              ...(ink === undefined ? {} : { ink }),
             })
             const { projects: all } = yield* queries.projects
             const found = all.find((project) => project.id === opened.projectId)
@@ -392,6 +431,16 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      SetProjectInk: ({ commandId, projectId, ink }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.set_ink', { projectId, ink }, commandId)
+              yield* projects.setInk(projectId, ink, said.commandId)
+            }),
+          ),
+        ),
       RemoveProject: ({ commandId, projectId }) =>
         once(
           commandId,
@@ -404,7 +453,8 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      GetRepositories: ({ projectId }) => api(Effect.map(projects.repositories(projectId), (list) => [...list])),
+      GetRepositories: ({ projectId }) =>
+        api(Effect.flatMap(projects.repositories(projectId), (list) => Effect.forEach(list, repositoryOf))),
       AddRepositories: ({ commandId, projectId, grant }) =>
         once(
           commandId,
@@ -468,6 +518,8 @@ export const handlers = Api.toLayer(
           }),
         ),
       GetThreadItem: ({ threadId, itemId }) => api(queries.item(threadId, itemId)),
+      ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
+      ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       GetFileDiff: ({ taskId, path }) => api(queries.fileDiff(taskId, path)),
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
       GetHome: ({ since }) => api(queries.home(since)),
@@ -529,6 +581,35 @@ export const handlers = Api.toLayer(
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       Interrupt: ({ commandId, threadId }) => once(commandId, api(sessions.interrupt(threadId))),
       StopSession: ({ commandId, threadId }) => once(commandId, api(sessions.stop(threadId))),
+      StopTask: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.stop', { taskId }, commandId), (said) => tasks.stop({ envelope: said, taskId }))),
+        ),
+      ResumeTask: ({ commandId, taskId, agentId, model, effort }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.resume', { taskId, agentId }, commandId), (said) =>
+              tasks.resume({
+                envelope: said,
+                taskId,
+                // The agent the person picked, else its last lead.
+                ...(agentId === undefined ? {} : { lead: { agentId, model: model ?? null, effort: effort ?? null } }),
+              }),
+            ),
+          ),
+        ),
+      AbandonTask: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.abandon', { taskId }, commandId), (said) => tasks.abandon({ envelope: said, taskId }))),
+        ),
+      ReopenTask: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
+        ),
       Send: ({ commandId, threadId, body, disposition }) =>
         api(
           Effect.gen(function* () {
@@ -589,6 +670,10 @@ export const handlers = Api.toLayer(
       StartPlan: ({ commandId, planId }) => once(commandId, api(plans.start(planId, instance.personId))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
+      ChangeIssueDraft: ({ commandId, draftId, title, body, labels }) =>
+        once(commandId, api(issueDrafts.change(draftId, { title, body, labels }, instance.personId))),
+      FileIssueDraft: ({ commandId, draftId }) => once(commandId, api(Effect.asVoid(issueDrafts.file(draftId, instance.personId)))),
+      DiscardIssueDraft: ({ commandId, draftId }) => once(commandId, api(issueDrafts.discard(draftId, instance.personId))),
       AnswerStuck: ({ commandId, attentionId, answer }) =>
         once(
           commandId,
@@ -599,6 +684,38 @@ export const handlers = Api.toLayer(
                 attentionId,
                 answer,
               })
+            }),
+          ),
+        ),
+      AnswerQuestion: ({ commandId, attentionId, answers }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const answer = Effect.gen(function* () {
+                const answered = yield* questions.answer({
+                  envelope: yield* envelope('attention.answer_question', { attentionId, answers }, commandId),
+                  attentionId,
+                  answers,
+                })
+                if (answered.told) return
+                // The agent that asked has gone: the answer is told to the one on its thread next, started for it.
+                const tell = {
+                  envelope: yield* Effect.provideContext(
+                    Runtime.envelope('thread.send', { threadId: answered.threadId, answered: attentionId }),
+                    context,
+                  ),
+                  threadId: answered.threadId,
+                  body: answered.body,
+                }
+                const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${answered.threadId}`
+                if (thread?.kind === 'coordinator') yield* coordinator.say({ ...tell, disposition: 'after_current', quiet: true })
+                else yield* runs.answered(tell)
+              })
+              // A task's question is answered in the task's turn: stopping it comes first, and the question is withdrawn, or
+              // after, and the agent the answer started stops.
+              const [asked] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM attention_requests WHERE id = ${attentionId}`
+              yield* asked === undefined || asked.taskId === null ? answer : tasks.inTurn(asked.taskId, answer)
             }),
           ),
         ),
@@ -626,6 +743,7 @@ export const handlers = Api.toLayer(
                 .filter((info) => info.make !== null)
                 .map((info) => ({
                   product: info.product,
+                  service: info.service,
                   name: info.name,
                   host: info.host,
                   tracker: info.tracker,
@@ -633,18 +751,29 @@ export const handlers = Api.toLayer(
                   selfHosted: info.selfHosted,
                   browserSignIn: info.browserSignIn,
                   tokenNeeds: info.token.needs,
-                  tokenHelp: info.token.help(info.hosted?.webUrl ?? ''),
+                  tokenPrefixes: info.token.prefixes,
                   tokenHelpForKey: info.token.helpForKey ?? null,
                   keyChecks: info.token.keyChecks ?? [],
                 })),
+              places: yield* connections.places,
             }
           }),
         ),
-      StartSignIn: ({ commandId, product, webUrl }) =>
-        once(commandId, api(connections.startSignIn({ product, actorId: instance.personId, ...(webUrl === undefined ? {} : { webUrl }) }))),
+      StartSignIn: ({ commandId, product, webUrl, connectionId }) =>
+        once(
+          commandId,
+          api(
+            connections.startSignIn({
+              product,
+              actorId: instance.personId,
+              ...(webUrl === undefined ? {} : { webUrl }),
+              ...(connectionId === undefined ? {} : { connectionId }),
+            }),
+          ),
+        ),
       GetSignIn: ({ flowId }) => api(connections.signIn(flowId)),
       CancelSignIn: ({ flowId }) => api(connections.cancelSignIn(flowId)),
-      ConnectToken: ({ commandId, product, webUrl, user, key, token }) =>
+      ConnectToken: ({ commandId, product, webUrl, user, key, token, connectionId }) =>
         once(
           commandId,
           api(
@@ -656,11 +785,30 @@ export const handlers = Api.toLayer(
                 ...(webUrl === undefined ? {} : { webUrl }),
                 ...(user === undefined ? {} : { user }),
                 ...(key === undefined ? {} : { key }),
+                ...(connectionId === undefined ? {} : { connectionId }),
               }),
               connectionOf,
             ),
           ),
         ),
+      GetConnectGuide: ({ service }) => api(connections.guide(service)),
+      FindServer: ({ service, webUrl }) => api(connections.findServer(service, webUrl)),
+      ConnectCli: ({ commandId, product, webUrl, connectionId }) =>
+        once(
+          commandId,
+          api(
+            Effect.map(
+              connections.connectCli({
+                product,
+                webUrl,
+                actorId: instance.personId,
+                ...(connectionId === undefined ? {} : { connectionId }),
+              }),
+              connectionOf,
+            ),
+          ),
+        ),
+      CheckConnection: ({ connectionId }) => api(connections.check(connectionId)),
       Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.markReady(taskId, url))),
@@ -788,6 +936,12 @@ export const handlers = Api.toLayer(
           }),
         ),
       RefreshTask: ({ taskId }) => pullRequests.refresh(taskId),
+      StopListening: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.stopListening(taskId, url))),
+      StopBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.stopBackground(threadId, id))),
+      ClearBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.clearBackground(threadId, id))),
+      RunProject: ({ commandId, projectId, taskId, threadId }) => once(commandId, api(launches.start({ projectId, taskId, threadId }))),
+      StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
+      ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
     })
   }),

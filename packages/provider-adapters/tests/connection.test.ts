@@ -1,11 +1,12 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Fiber, Ref, Stream } from 'effect'
+import { Deferred, Effect, Fiber, Ref, Stream } from 'effect'
 
-import { answerFor, connect, type PermissionOption, type QuestionAnswer } from '../src/AgentConnection'
+import { answerFor, connect, type PermissionOption } from '../src/AgentConnection'
+import { type Question, type QuestionAnswer, questionContent } from '../src/questions'
 import { AgentRequestFailed, OptionUnavailable, TurnInProgress } from '../src/errors'
 import type { SessionEvent } from '../src/events'
 import type { Classified } from '../src/failures'
-import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, scenarios } from '../src/testing'
+import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, scenarios, WHY } from '../src/testing'
 import { type ContractSubject, type Decide, text, withConnection } from './contract'
 
 const fake: ContractSubject = {
@@ -15,7 +16,8 @@ const fake: ContractSubject = {
   modes: { ask: 'ask', readOnly: 'read-only' },
   permissions: codexLikeMeanings,
   model: { optionId: 'model', switchTo: 'large' },
-  prompts: { short: scenarios.hello, long: scenarios.slow, command: scenarios.commandChoices },
+  prompts: { short: scenarios.hello, long: scenarios.slow, command: scenarios.commandChoices, question: scenarios.questions },
+  asks: 'form',
 }
 
 const allow: Decide = () => Effect.succeed({ decision: 'allow' })
@@ -42,6 +44,108 @@ const find = <T extends SessionEvent['_tag']>(events: ReadonlyArray<SessionEvent
   events.filter((event): event is Extract<SessionEvent, { _tag: T }> => event._tag === tag)
 
 describe('AgentConnection', () => {
+  it.live('asks for command output, what it leaves running and notices, and keeps asking for structured failures', () => {
+    let asked: unknown
+    let notices: unknown
+    const listening: ContractSubject = {
+      ...fake,
+      transport: () => ({
+        _tag: 'InProcess',
+        agent: fakeAgent({
+          initialized: (capabilities) => {
+            asked = capabilities?._meta
+            notices = capabilities?.session?.notices
+          },
+        }),
+      }),
+    }
+    return withConnection(listening, () =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(asked, {
+          jetbrains: { air: { version: 1, capabilities: ['sessionFailure', 'asyncTasks'] } },
+          terminal_output_delta: true,
+        })
+        assert.deepStrictEqual(notices, {})
+      }),
+    )
+  })
+
+  describe('what it leaves running', () => {
+    it.live('hears a command Claude Code sent to the background, and nothing else it does there, and stops it', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+          const events = yield* Stream.runCollect(session.prompt(scenarios.background))
+          // By what its tool call says it does; the call has the command.
+          assert.deepInclude(find(events, 'BackgroundStarted')[0], { id: 'bg-1', name: 'Start the dev server', toolCallId: 'serve-1' })
+          assert.match(find(events, 'BackgroundOutput')[0]?.outputPath ?? '', /bg-1\.output$/)
+          assert.lengthOf(find(events, 'BackgroundStarted'), 1, 'background work that isn’t a command isn’t heard')
+          assert.strictEqual(text(events), 'serving')
+          // Stopped, it says so between turns; there is then nothing to stop.
+          const between = yield* Effect.forkChild(Stream.runCollect(Stream.take(session.events, 1)))
+          yield* Effect.sleep('10 millis')
+          assert.isTrue(yield* session.stopBackground('bg-1'))
+          assert.deepStrictEqual(yield* Fiber.join(between), [{ _tag: 'BackgroundEnded', id: 'bg-1', end: 'stopped' }])
+          assert.isFalse(yield* session.stopBackground('bg-1'))
+        }),
+      ),
+    )
+
+    it.live('hears one Codex sends to the background after the turn, by its command, with its output on its tool call', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+          const between = yield* Effect.forkChild(Stream.runCollect(Stream.take(session.events, 2)))
+          yield* Effect.sleep('10 millis')
+          const events = yield* Stream.runCollect(session.prompt(scenarios.backgroundCodex))
+          assert.lengthOf(find(events, 'BackgroundStarted'), 0)
+          const [started, output] = yield* Fiber.join(between)
+          assert.deepStrictEqual(started, { _tag: 'BackgroundStarted', id: 'bg-1', name: 'bun dev', toolCallId: 'serve-1' })
+          assert.include(output?._tag === 'ToolCallUpdate' ? output.terminal?.output : '', 'http://localhost:')
+        }),
+      ),
+    )
+
+    it.live('stops what a session left running when the session closes', () => {
+      const stopped: Array<string> = []
+      const subject: ContractSubject = {
+        ...fake,
+        transport: () => ({ _tag: 'InProcess', agent: fakeAgent({ stoppedBackground: (id) => stopped.push(id) }) }),
+      }
+      return withConnection(subject, (connection) =>
+        Effect.gen(function* () {
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+              yield* Stream.runCollect(session.prompt(scenarios.background))
+            }),
+          )
+          assert.deepStrictEqual(stopped, ['bg-1'])
+        }),
+      )
+    })
+  })
+
+  it.live('hears what an agent hands back: output in chunks and whole, pictures, links and the files it writes', () =>
+    Effect.gen(function* () {
+      const { events } = yield* turn(scenarios.handsBack)
+      const updates = find(events, 'ToolCallUpdate')
+      const chunks = updates.filter((event) => event.toolCallId === 'run-chunks').flatMap((event) => event.terminal?.output ?? [])
+      assert.deepStrictEqual(chunks, [' ✓ charges/limit (14)\n', ' ✓ refunds/router (38)\n', ' 52 passed\n'])
+      assert.deepStrictEqual(updates.find((event) => event.toolCallId === 'run-whole' && event.status === 'failed')?.terminal, {
+        exit: { code: 1, signal: null },
+      })
+      const words = updates.filter((event) => event.toolCallId === 'run-words').map((event) => event.content)
+      assert.deepStrictEqual(words.at(-1), [{ _tag: 'Text', text: ' M src/a.ts\n?? docs/notes.md\n' }])
+      const shot = updates.find((event) => event.toolCallId === 'shot')
+      assert.strictEqual(shot?.content?.[1]?._tag, 'Image')
+      const wrote = find(events, 'ToolCall').find((event) => event.toolCallId === 'write-doc')
+      assert.deepStrictEqual(wrote?.content, [{ _tag: 'Diff', path: '/tmp/docs/notes.md', created: true }])
+      const handed = find(events, 'AgentContent').map((event) => event.content._tag)
+      assert.deepStrictEqual(handed, ['Link', 'Image'])
+    }),
+  )
+
   it.live('reports the agent and what it advertises', () =>
     withConnection(fake, (connection) =>
       Effect.sync(() => {
@@ -426,7 +530,7 @@ describe('AgentConnection', () => {
   })
 
   describe('questions', () => {
-    const ask = (onQuestion?: () => Effect.Effect<QuestionAnswer>) =>
+    const ask = (onQuestion?: (question: Question) => Effect.Effect<QuestionAnswer>, scenario: string = scenarios.question) =>
       Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* connect({
@@ -435,34 +539,104 @@ describe('AgentConnection', () => {
             ...(onQuestion === undefined ? {} : { onQuestion }),
           })
           const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
-          return text(yield* Stream.runCollect(session.prompt(scenarios.question)))
+          return text(yield* Stream.runCollect(session.prompt(scenario)))
         }),
       )
 
     it.live('passes a question to the person, and their answer back', () =>
       Effect.gen(function* () {
-        const seen: Array<unknown> = []
+        const seen: Array<Question> = []
         const answered = yield* ask(() => Effect.succeed({ action: 'accept', content: { database: 'sqlite' } }))
         assert.strictEqual(answered, 'answer={"database":"sqlite"}')
-        yield* Effect.scoped(
-          Effect.gen(function* () {
-            const connection = yield* connect({
-              transport: { _tag: 'InProcess', agent: fakeAgent() },
-              onPermission: reject,
-              onQuestion: (question) => Effect.sync(() => seen.push(question)).pipe(Effect.as({ action: 'decline' as const })),
-            })
-            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
-            assert.strictEqual(text(yield* Stream.runCollect(session.prompt(scenarios.question))), 'answer=decline')
-          }),
-        )
+        const declined = yield* ask((question) => Effect.sync(() => seen.push(question)).pipe(Effect.as({ action: 'decline' as const })))
+        assert.strictEqual(declined, 'answer=decline')
         assert.deepStrictEqual(seen, [
           {
             sessionId: 'fake-1',
             message: 'Which database?',
-            fields: { database: { type: 'string', enum: ['postgres', 'sqlite'] } },
-            required: ['database'],
+            fields: [
+              {
+                id: 'database',
+                question: 'Which database?',
+                type: 'choice',
+                options: [
+                  { value: 'postgres', label: 'postgres' },
+                  { value: 'sqlite', label: 'sqlite' },
+                ],
+                multiple: false,
+                required: true,
+              },
+            ],
           },
         ])
+      }),
+    )
+
+    it.live("reads Claude Code's questions, with the tool call they stand for, and answers them in its fields", () =>
+      Effect.gen(function* () {
+        const seen: Array<Question> = []
+        const answered = yield* ask(
+          (question) =>
+            Effect.sync(() => seen.push(question)).pipe(
+              Effect.as({
+                action: 'accept' as const,
+                content: questionContent(question, {
+                  question_0: { values: [], words: 'DuckDB' },
+                  question_1: { values: ['Unit tests', 'Lint'] },
+                }),
+              }),
+            ),
+          scenarios.questions,
+        )
+        assert.strictEqual(answered, `${WHY}answer={"question_0_custom":"DuckDB","question_1":["Unit tests","Lint"]}`)
+        assert.strictEqual(seen[0]?.toolCallId, 'ask-1')
+        // What it said before asking, though a tool call came between.
+        assert.strictEqual(seen[0]?.said, WHY)
+        assert.deepStrictEqual(
+          seen[0]?.fields.map((field) => [field.id, field.question, field.header, field.multiple, field.wordsField]),
+          [
+            ['question_0', 'Which database should the cache use?', 'Database', false, 'question_0_custom'],
+            ['question_1', 'Which checks should run before it lands?', 'Checks', true, 'question_1_custom'],
+          ],
+        )
+      }),
+    )
+
+    it.live('hears what the agent said before asking in this turn only', () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const seen: Array<Question> = []
+          const connection = yield* connect({
+            transport: { _tag: 'InProcess', agent: fakeAgent() },
+            onPermission: reject,
+            onQuestion: (question) => Effect.sync(() => seen.push(question)).pipe(Effect.as({ action: 'decline' as const })),
+          })
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+          yield* Stream.runCollect(session.prompt(scenarios.hello))
+          yield* Stream.runCollect(session.prompt(scenarios.question))
+          // The plain question says nothing first: what it said a turn before isn't why.
+          assert.isUndefined(seen[0]?.said)
+        }),
+      ),
+    )
+
+    it.live('offers a way to ask only where someone answers', () =>
+      Effect.gen(function* () {
+        const offered: Array<unknown> = []
+        const listen = (onQuestion?: () => Effect.Effect<QuestionAnswer>) =>
+          Effect.scoped(
+            connect({
+              transport: {
+                _tag: 'InProcess',
+                agent: fakeAgent({ initialized: (capabilities) => offered.push(capabilities?.elicitation ?? null) }),
+              },
+              onPermission: reject,
+              ...(onQuestion === undefined ? {} : { onQuestion }),
+            }),
+          )
+        yield* listen(() => Effect.succeed({ action: 'decline' }))
+        yield* listen()
+        assert.deepStrictEqual(offered, [{ form: {} }, null])
       }),
     )
 
@@ -472,6 +646,35 @@ describe('AgentConnection', () => {
         assert.strictEqual(yield* ask(() => Effect.die('no one is there')), 'answer=cancel')
       }),
     )
+
+    for (const [how, keepsRequests] of [
+      ['the agent withdraws it', false],
+      ['the agent keeps it, so Althar drops it', true],
+    ] as const)
+      it.live(`drops a question still waiting when the turn is cancelled: ${how}`, () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const asked = yield* Deferred.make<void>()
+            const ended = yield* Deferred.make<boolean>()
+            const connection = yield* connect({
+              transport: { _tag: 'InProcess', agent: fakeAgent({ keepsRequests }) },
+              onPermission: reject,
+              onQuestion: () =>
+                Deferred.succeed(asked, undefined).pipe(
+                  Effect.andThen(Effect.never),
+                  Effect.onInterrupt(() => Deferred.succeed(ended, true)),
+                ),
+            })
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+            const turn = yield* Effect.forkChild(Stream.runCollect(session.prompt(scenarios.question)))
+            yield* Deferred.await(asked)
+            yield* session.cancel
+            const events = yield* Fiber.join(turn)
+            assert.strictEqual(text(events), 'answer=cancel')
+            assert.isTrue(yield* Deferred.await(ended))
+          }),
+        ),
+      )
   })
 
   describe('failures the agent reports', () => {

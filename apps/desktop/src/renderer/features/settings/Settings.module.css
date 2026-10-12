@@ -4,6 +4,20 @@
   color: var(--t-3);
 }
 
+/* the agents' module, before they have answered: a line in the middle of it */
+.waiting {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: var(--t-3);
+  text-align: center;
+}
+
+.coAuthor {
+  padding: 16px 18px 14px;
+}
+
 .failed {
   margin: 0;
   font-size: 12.5px;

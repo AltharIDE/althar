@@ -1,6 +1,6 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 
-import type { Unfurl } from '@althar/contracts'
+import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
   Arrived,
   CodeBlock,
@@ -10,6 +10,8 @@ import {
   Markdown,
   Plan,
   Prose,
+  Question,
+  type QuestionAnswer,
   Reasoning,
   Review,
   type ReviewFinding,
@@ -18,16 +20,21 @@ import {
   StepState,
   ThreadDivider,
   Tool,
+  ToolState,
   Turn,
   Verdict,
   WorkedFor,
   You,
 } from '@althar/ui'
 
+import { CommandOutput } from './CommandOutput'
+import { HandedBack } from './HandedBack'
+import { documentVersions } from './handed'
 import { useModelNames } from './modelNames'
 import { RuleReceipt } from './RuleReceipt'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
-import type { ArrivalContent, Block, Part, StepResult, TaskCardContent } from './thread'
+import { answersOf, partsOf, pickedOf, questionText } from './questions'
+import type { ArrivalContent, Block, IssueDraftContent, Part, QuestionContent, RunContent, StepResult, TaskCardContent } from './thread'
 import s from './ThreadBlocks.module.css'
 
 /*
@@ -85,7 +92,53 @@ const SEVERITY: Readonly<Record<StepResult['findings'][number]['severity'], Seve
   nit: Severity.Low,
 }
 
-function PartView({ part }: { part: Part }) {
+/**
+ * A tool call. A command opens to what it printed, as the kit's Terminal:
+ * open while it runs, so its output streams in view, and read from what was
+ * kept only once opened. One from before Althar kept output, too long for
+ * its row, opens to the whole command.
+ */
+function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; threadId: string }) {
+  const [open, setOpen] = useState(part.state === ToolState.Running && part.ran !== null)
+  /* once opened, what it printed stays, so it doesn't vanish as the call folds */
+  const [seen, setSeen] = useState(open)
+  const long = part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND || part.label !== undefined)
+  const body =
+    part.ran !== null ? (
+      seen ? (
+        <CommandOutput
+          threadId={threadId}
+          itemId={part.id}
+          ran={part.ran}
+          exit={part.exit}
+          {...(long && part.command !== null ? { command: part.command } : {})}
+        />
+      ) : (
+        <></>
+      )
+    ) : long && part.command !== null ? (
+      <CodeBlock code={part.command} lang={text.shell} />
+    ) : undefined
+  return (
+    <Tool
+      kind={part.toolKind}
+      verb={part.verb}
+      target={part.target}
+      state={part.state}
+      {...(part.command === null ? {} : { copy: part.command })}
+      {...(part.state === ToolState.Failed && part.exit !== null ? { exit: part.exit } : {})}
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (next) setSeen(true)
+      }}
+    >
+      {body}
+    </Tool>
+  )
+}
+
+function PartView({ part, threadId }: { part: Part; threadId: string }) {
   switch (part.kind) {
     case 'message':
       return <Markdown source={part.text} />
@@ -96,20 +149,7 @@ function PartView({ part }: { part: Part }) {
         </Reasoning>
       )
     case 'tool':
-      return (
-        <Tool
-          kind={part.toolKind}
-          verb={part.verb}
-          target={part.target}
-          state={part.state}
-          {...(part.command === null ? {} : { copy: part.command })}
-        >
-          {/* A command too long for its row, or over several lines, opens to show all of it. */}
-          {part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND) ? (
-            <CodeBlock code={part.command} lang={text.shell} />
-          ) : undefined}
-        </Tool>
-      )
+      return <ToolView part={part} threadId={threadId} />
     case 'plan':
       return <Plan steps={part.steps} />
     case 'notice':
@@ -220,33 +260,36 @@ function LinkView({ link }: { link: Unfurl }) {
   )
 }
 
-/** Something heard from outside, as a quoted note: who, what they did, where, and what they said. */
+/** What happened, in the words between who and where: commented on, Checks passed on. */
+export const heardVerb = (arrival: ArrivalContent): string => {
+  switch (arrival.kind) {
+    case 'comment':
+      return text.heard.comment
+    case 'review':
+      return arrival.verdict === null ? text.heard.commented : text.heard[arrival.verdict]
+    case 'checks': {
+      const failed = arrival.failed ?? 0
+      return failed === 0 ? text.heard.checksPassed : text.heard.checksFailed(failed, failed + (arrival.passed ?? 0))
+    }
+    case 'merged':
+      return text.heard.merged
+    case 'closed':
+      return text.heard.closed
+    case 'ready':
+      return text.heard.ready
+  }
+}
+
 /**
- * Something heard from outside. What someone who can't write to the
- * repository said wasn't passed to the lead, as anyone can comment on a
- * public one; the person reads it, and can pass it on.
+ * Something heard from outside, as a quoted note: who, what they did, where,
+ * and what they said. What someone who can't write to the repository said
+ * wasn't passed to the lead, as anyone can comment on a public one; the
+ * person reads it, and can pass it on.
  */
 function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: string; onPassOn?: (words: string) => void }) {
   const where =
     arrival.path === null ? arrival.where : `${arrival.where} · ${arrival.path}${arrival.line === null ? '' : `:${arrival.line}`}`
-  const verb = ((): string => {
-    switch (arrival.kind) {
-      case 'comment':
-        return text.heard.comment
-      case 'review':
-        return arrival.verdict === null ? text.heard.commented : text.heard[arrival.verdict]
-      case 'checks': {
-        const failed = arrival.failed ?? 0
-        return failed === 0 ? text.heard.checksPassed : text.heard.checksFailed(failed, failed + (arrival.passed ?? 0))
-      }
-      case 'merged':
-        return text.heard.merged
-      case 'closed':
-        return text.heard.closed
-      case 'ready':
-        return text.heard.ready
-    }
-  })()
+  const verb = heardVerb(arrival)
   const body = arrival.kind === 'checks' ? (arrival.failing.length > 0 ? text.failing(arrival.failing) : null) : arrival.text
   const from = arrival.from ?? ''
   const foot = arrival.outsider && (
@@ -271,23 +314,92 @@ function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: s
   )
 }
 
+/**
+ * An agent's question, where it asked it: answered here, it says what was said
+ * at once, and so it stays once the runtime says so; an answer that didn't go
+ * through says why, and keeps what was picked to send again.
+ */
+function QuestionView({
+  question,
+  onAnswer,
+  focus = false,
+}: {
+  question: QuestionContent
+  onAnswer?: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
+  /** The person was brought here to answer it. */
+  focus?: boolean
+}) {
+  const [sent, setSent] = useState<QuestionAnswer | null>(null)
+  const [answering, setAnswering] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const parts = partsOf(question.fields)
+  const title = question.fields.length > 1 ? { title: question.message } : {}
+  if (question.state === 'withdrawn')
+    return <Question parts={parts} {...title} withdrawn={questionText.withdrawn[question.withdrawn ?? 'turn']} />
+  const answer = question.answers === null ? sent : pickedOf(question.answers)
+  return (
+    <Question
+      parts={parts}
+      {...title}
+      focusOnMount={focus}
+      answer={question.state === 'answered' ? answer : sent}
+      answering={answering}
+      {...(error === null ? {} : { error })}
+      {...(onAnswer === undefined
+        ? {}
+        : {
+            onAnswer: (picked: QuestionAnswer) => {
+              setError(null)
+              setAnswering(true)
+              void onAnswer(question.attentionId, answersOf(picked)).then((failed) => {
+                setAnswering(false)
+                if (failed === null) setSent(picked)
+                else setError(failed)
+              })
+            },
+          })}
+    />
+  )
+}
+
 export function ThreadBlocks({
   blocks,
+  threadId,
+  worktree = null,
+  openFile,
   session,
   card,
+  run,
+  draft,
   queued,
   onPassOn,
+  onAnswerQuestion,
+  focusQuestion,
   project,
 }: {
   blocks: ReadonlyArray<Block>
+  /** The thread they are of: what a command printed and the documents an agent wrote are read by it. */
+  threadId: string
+  /** The worktree its paths are under, for the files a turn hands back. */
+  worktree?: string | null
+  /** Opens a file of the task's in the person's editor; without it, a file has no such button. */
+  openFile?: (path: string) => void
   /** The project whose rules let requests through, for the line that says so. */
   project?: string
   /** The thread's session, whose model and account name its turns. */
   session?: { readonly agentId: string; readonly model: string | null; readonly account: string | null } | null
   /** Sends what someone outside said to the lead, in the person's name. */
   onPassOn?: (words: string) => void
+  /** Answers an agent's question; what went wrong, in words, or null. Without it, a question can't be answered here. */
+  onAnswerQuestion?: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
+  /** The question waiting as the thread opened, by its call: the person was brought here to answer it, so it takes focus. */
+  focusQuestion?: string
   /** Draws a task's card, in the coordinator's thread. */
   card?: (card: TaskCardContent) => ReactNode
+  /** Draws a run's card, in the thread it was asked for in. */
+  run?: (run: RunContent) => ReactNode
+  /** Draws an issue the coordinator drafted, in its thread. */
+  draft?: (draft: IssueDraftContent) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
 }) {
@@ -295,6 +407,11 @@ export function ThreadBlocks({
   const done = new Set(blocks.flatMap((block) => (block.kind === 'step' ? [block.result.step] : [])))
   const of = 1 + (done.has('review') || done.has('settle') ? 1 : 0) + (done.has('publish') ? 1 : 0)
   const named = useModelNames()
+  // What each document was last changed by, so it is read again after an edit.
+  const versionOf = documentVersions(
+    blocks.flatMap((block) => (block.kind === 'turn' ? block.parts : [])),
+    worktree,
+  )
   // A turn of the thread's own agent, on its session's model and account; another's, on its own model.
   const turnModel = (agentId: string | null) =>
     session != null && agentId === session.agentId ? named(agentId, session.model, session.account) : named(agentId)
@@ -327,22 +444,39 @@ export function ThreadBlocks({
         return <StepView key={block.id} id={block.id} result={block.result} of={of} />
       case 'card':
         return <Fragment key={block.id}>{card?.(block.card)}</Fragment>
-      case 'turn':
+      case 'question':
         return (
-          <Turn key={block.id} model={turnModel(block.agentId)} at={block.at}>
+          <QuestionView
+            key={block.id}
+            question={block.question}
+            focus={block.question.attentionId === focusQuestion}
+            {...(onAnswerQuestion === undefined ? {} : { onAnswer: onAnswerQuestion })}
+          />
+        )
+      case 'run':
+        return <Fragment key={block.id}>{run?.(block.run)}</Fragment>
+      case 'draft':
+        return <Fragment key={block.id}>{draft?.(block.draft)}</Fragment>
+      case 'turn': {
+        // What Copy takes: what it said, open under its work.
+        const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')
+        return (
+          <Turn key={block.id} model={turnModel(block.agentId)} at={block.at} {...(said === '' || block.live ? {} : { copy: said })}>
             {block.work.length > 0 && (
               <WorkedFor took={block.took} live={block.live} {...(block.doing === null ? {} : { summary: block.doing })}>
                 {block.work.map((part) => (
-                  <PartView key={part.id} part={part} />
+                  <PartView key={part.id} part={part} threadId={threadId} />
                 ))}
               </WorkedFor>
             )}
             <RuleReceipt parts={block.parts} {...(project === undefined ? {} : { project })} />
             {block.said.map((part) => (
-              <PartView key={part.id} part={part} />
+              <PartView key={part.id} part={part} threadId={threadId} />
             ))}
+            <HandedBack handed={block.handed} threadId={threadId} versionOf={versionOf} {...(openFile === undefined ? {} : { openFile })} />
           </Turn>
         )
+      }
     }
   })
 }

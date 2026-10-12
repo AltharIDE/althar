@@ -8,19 +8,27 @@ import { locations as locationsOf } from './locations'
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, isPreferenceKey } from './appPreferences'
 import { keepingAwake } from './awake'
+import { tokenIn } from './clipboard'
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
+import { setAppMenu } from './menu'
 import { dockCount, soundOf, tells } from './notify'
 import { readAppPreferences, writeAppPreference } from './preferences'
-import { findRepositories, forWindow, placesFor } from './repositories'
+import { PICTURE_SCHEME } from './pictureAddress'
+import { type Resize, servePicture } from './pictures'
+import { findRepositories, foundIds, forWindow, placesFor, stillFound } from './repositories'
 import { alertSounds, playSound } from './sounds'
+import { failureForWindow, type StoreFailure, storeFailureOf } from './storeFailure'
+import { checkNow, startUpdates } from './updater'
+import type { UpdateGlance, Updates } from './updates'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
 import { bundleOf } from '../runtime/editors'
 
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -29,6 +37,7 @@ import {
   Notification,
   powerMonitor,
   powerSaveBlocker,
+  protocol,
   safeStorage,
   shell,
   type UtilityProcess,
@@ -46,7 +55,7 @@ import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
  * runtime to stop its sessions before the app goes. Folders reach the runtime
  * from here, never from the window, which gets a grant for each: one the
  * person picked or dropped, or one of the repositories it found where people
- * keep code (repositories.ts), for the first screen to offer. It seals and
+ * keep code (repositories.ts), for the first screen and a new project to offer. It seals and
  * opens the runtime's secrets, such as a code host's token, with Electron's
  * safeStorage, whose key the keychain keeps for this app alone: the runtime
  * keeps them sealed and never holds the key. It gives the Dock the icon the
@@ -56,11 +65,15 @@ import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
  * (awake.ts), and which notifications show, with a sound or not, and the
  * Dock's count (notify.ts).
  * Dictation's microphone, model and speech process are in dictation.ts.
+ * A packaged app updates itself (updater.ts): it never restarts into an
+ * update while work runs, and only when the person asks, or as they quit.
  */
 
 const here = import.meta.dirname
 
 const SHUTDOWN_GRACE = 20_000
+/** How long focus settles, moving between Althar's windows, before the edge hears whether Althar is in front. */
+const FOCUS_SETTLE = 120
 /** Restarts allowed within a minute before a crashing runtime ends the app instead. */
 const RESTARTS_PER_MINUTE = 3
 
@@ -81,7 +94,19 @@ if (fakeMicrophone) {
   app.commandLine.appendSwitch('use-fake-device-for-media-stream')
   app.commandLine.appendSwitch('use-fake-ui-for-media-stream')
 }
+/*
+ * The end-to-end tests run quietly (ALTHAR_QUIET), so a person can carry on
+ * at their desk while agents run them: no Dock icon, and nothing becomes the
+ * active app or takes focus. The window and the island are there but drawn
+ * clear and let the pointer through; the tests drive the pages directly,
+ * which need neither. No notification reaches the system; a test that wants
+ * them puts its own catcher in.
+ */
+const quiet = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_QUIET === '1'
+if (quiet) Notification.isSupported = () => false
 const restarts: Array<number> = []
+/* The store an update couldn't move, once the runtime says so: every window shows it, and no runtime starts again. */
+let storeFailure: StoreFailure | undefined
 
 /** The profile and worktrees, as the command-line client has them: a Flatpak's home is a fresh empty one each run, so it keeps worktrees beside its profile (locations.ts). */
 const locations = () => locationsOf(process.env, process.platform, homedir())
@@ -108,6 +133,21 @@ app.setPath(
   'userData',
   ownProfile !== undefined && ownProfile !== '' ? join(ownProfile, 'window') : join(app.getPath('appData'), '@althar', 'desktop'),
 )
+
+/*
+ * Pictures agents hand back reach the window at an address of Althar's own,
+ * answered from the artifact store (pictures.ts): a standard, secure scheme,
+ * registered before the app is ready, as Electron asks.
+ */
+protocol.registerSchemesAsPrivileged([{ scheme: PICTURE_SCHEME, privileges: { standard: true, secure: true } }])
+
+/** A smaller copy of a picture, drawn by Chromium's own decoder: a JPEG stays one, anything else becomes a PNG, keeping its transparency. */
+const resize: Resize = (bytes, type, width) => {
+  const picture = nativeImage.createFromBuffer(bytes)
+  if (picture.isEmpty() || picture.getSize().width <= width) return null
+  const smaller = picture.resize({ width, quality: 'good' })
+  return type === 'image/jpeg' ? { bytes: smaller.toJPEG(85), type } : { bytes: smaller.toPNG(), type: 'image/png' }
+}
 
 /** Grants the runtime has yet to confirm, by request. */
 const granting = new Map<string, (grant: string | null) => void>()
@@ -138,6 +178,9 @@ const awake = keepingAwake({
   onBattery: () => powerMonitor.isOnBatteryPower(),
 })
 
+/* Updates, in a packaged app only: its windows hear when one is ready to install. */
+let updates: Updates | undefined
+
 /* How many things wait, as the runtime last said, for the Dock's count as it is turned on and off. */
 let waiting = 0
 
@@ -162,6 +205,10 @@ const bringForward = () => {
   const existing = [...windows][0]
   const window = existing ?? openWindow()
   if (window.isMinimized()) window.restore()
+  if (quiet) {
+    window.showInactive()
+    return { window, fresh: existing === undefined }
+  }
   // Asked from the edge, Althar isn't the active app: it becomes it.
   app.focus({ steal: true })
   window.show()
@@ -184,7 +231,11 @@ const openThread = (threadId: string) => {
  * progress. And whether any work runs, to keep the Mac awake by.
  */
 const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
-  if (event._tag === 'Working' && typeof event.working === 'boolean') return awake.working(event.working)
+  if (event._tag === 'Working' && typeof event.working === 'boolean') {
+    // Nothing restarts into an update while work runs.
+    updates?.working(event.working)
+    return awake.working(event.working)
+  }
   if (event._tag === 'Waiting' && typeof event.count === 'number') {
     waiting = event.count
     edge?.waiting(event.count)
@@ -238,6 +289,11 @@ const startRuntime = () => {
   child.on('message', (message: RuntimeMessage) => {
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
     if (message.type === 'nudge' && message.event !== undefined) return nudged(message.event)
+    if (message.type === 'store-failed') {
+      storeFailure = storeFailureOf(message)
+      for (const window of BrowserWindow.getAllWindows()) connect(window)
+      return
+    }
     if (message.type !== 'folder-allowed' || message.requestId === undefined) return
     granting.get(message.requestId)?.(message.grant ?? null)
     granting.delete(message.requestId)
@@ -246,11 +302,12 @@ const startRuntime = () => {
     runtime = undefined
     // Nothing runs without the runtime; a new one says again.
     awake.working(false)
+    updates?.working(false)
     for (const [requestId, settle] of granting) {
       settle(null)
       granting.delete(requestId)
     }
-    if (quitting) return
+    if (quitting || storeFailure !== undefined) return
     // A crash is survivable: reconciliation makes a restart safe, and each window reconnects when it reloads.
     const now = Date.now()
     restarts.push(now)
@@ -277,6 +334,7 @@ const allowFolder = (path: string): Promise<string | null> =>
 
 /** Gives a window a port to the runtime: once per page load, so a reload gets a fresh connection. */
 const connect = (window: BrowserWindow) => {
+  if (storeFailure !== undefined) return window.webContents.send('althar:store-failed', failureForWindow(storeFailure, homedir()))
   if (runtime === undefined) return
   const { port1, port2 } = new MessageChannelMain()
   runtime.postMessage({ type: 'connect' }, [port1])
@@ -334,8 +392,14 @@ const openWindow = () => {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
+      // Drawn clear, it would otherwise count as hidden and be slowed down.
+      backgroundThrottling: !quiet,
     },
   })
+  if (quiet) {
+    window.setOpacity(0)
+    window.setIgnoreMouseEvents(true)
+  }
   windows.add(window)
   // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).
   window.on('maximize', () => window.webContents.send('althar:maximized', true))
@@ -346,7 +410,7 @@ const openWindow = () => {
     if (windows.size === 0 && process.platform !== 'darwin') app.quit()
   })
   window.webContents.on('did-finish-load', () => connect(window))
-  window.once('ready-to-show', () => window.show())
+  window.once('ready-to-show', () => (quiet ? window.showInactive() : window.show()))
   // The window shows Althar and nothing else: links open in the browser, and the window never goes anywhere.
   window.webContents.setWindowOpenHandler(({ url }) => {
     openOutside(url)
@@ -391,6 +455,16 @@ ipcMain.on('althar:window', (event, action: unknown) => {
   }
 })
 
+// Folders for a new project, several at once: a grant for each, in the order chosen.
+ipcMain.handle('althar:pick-folders', async (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  const options = { properties: ['openDirectory' as const, 'multiSelections' as const], message: 'Choose the project’s folders' }
+  const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
+  if (result.canceled) return []
+  const grants = await Promise.all(result.filePaths.map(allowFolder))
+  return grants.filter((grant) => grant !== null)
+})
+
 // A folder dropped on the window, by the path the preload read from the drop: only a folder on disk gets a grant.
 ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   if (typeof path !== 'string' || path === '') return null
@@ -398,26 +472,28 @@ ipcMain.handle('althar:grant-dropped', async (_event, path: unknown) => {
   return found?.isDirectory() === true ? allowFolder(path) : null
 })
 
-/* The repositories the first screen offers, by the id the window has for each: only these are granted by id. */
-const foundHere = new Map<string, string>()
+/* The repositories the first screen and a new project offer, by the id the window has for each: only these are granted by id. */
+const foundHere = foundIds()
 
-// The repositories where people keep code on this computer, for the first screen: each by an id, never by its path.
+// The repositories where people keep code on this computer, for the first screen and a new project: each by an id, never by its path.
 ipcMain.handle('althar:find-repositories', async () => {
   // The end-to-end tests give a home of their own, so what the tester keeps isn't offered.
   const home = process.env.ALTHAR_CODE_HOME || homedir()
   const found = await findRepositories(placesFor(home, process.platform))
-  foundHere.clear()
-  return forWindow(found, home, (path) => {
-    const id = randomUUID()
-    foundHere.set(id, path)
-    return id
-  })
+  return forWindow(found, home, foundHere.idOf)
 })
 
-// A grant for one of them, once the person ticks it and makes the project: one main found, and nothing else.
+// A grant for one of them, once the person ticks or adds it: one main found, still where it was found, and nothing else.
 ipcMain.handle('althar:grant-found', async (_event, id: unknown) => {
-  const path = typeof id === 'string' ? foundHere.get(id) : undefined
-  return path === undefined ? null : allowFolder(path)
+  const repository = typeof id === 'string' ? foundHere.found(id) : undefined
+  const path = repository === undefined ? null : await stillFound(repository)
+  return path === null ? null : allowFolder(path)
+})
+
+// Shows the copy of the store from before an update that couldn't move it, in the system's file manager.
+ipcMain.handle('althar:show-backup', () => {
+  const backup = storeFailure?.backup
+  if (typeof backup === 'string') shell.showItemInFolder(backup)
 })
 
 // The icon the person chose, or null where there is no Dock to show one; and a new one, shown on the Dock, then kept. Anything else fails, and the window says so.
@@ -458,7 +534,14 @@ ipcMain.handle('althar:editor-picture', async (_event, id: unknown) => {
 ipcMain.handle('althar:sounds', () => alertSounds())
 ipcMain.handle('althar:play-sound', (_event, name: unknown) => playSound(name, undefined, () => shell.beep()))
 
-// Where Althar shows while the person is in another app, and whether this Mac has a notch to choose the island by.
+// A token on the clipboard, while connecting a service waits for one; anything else stays on the clipboard alone.
+ipcMain.handle('althar:clipboard-token', async () => tokenIn(await clipboard.readText()))
+
+// An update ready to install, as a window shows it (null where the app doesn't update, as in development); and restarting into it, at the person's word, only while no work runs.
+ipcMain.handle('althar:update', () => updates?.glance() ?? null)
+ipcMain.handle('althar:update-restart', () => updates?.restart() ?? false)
+
+// Where Althar shows while the person is in another app, and what this computer has room for: a notch to choose the island by, a tray.
 ipcMain.handle('althar:edge', () => edge?.state() ?? null)
 ipcMain.handle('althar:set-edge', async (_event, place: unknown) => {
   if (!isEdgePlace(place)) throw new Error(`Althar can't show at ${String(place)}.`)
@@ -483,11 +566,9 @@ ipcMain.on('althar:edge-open', (_event, threadId: unknown) => {
 })
 
 void app.whenReady().then(() => {
-  // Off a Mac the trimmed menu is kept for its accelerators and its bar is hidden on every window (windowOptions.ts, the browser-window-created listener above), with reload and devtools while developing.
-  const menu = appMenu(process.platform, !app.isPackaged)
-  if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
-  // The window asks for nothing but the microphone, to dictate (dictation.ts): no notifications, camera or anything else a page can ask for.
-  // Althar's own notifications come from here, as the runtime says something needs the person.
+  // Quiet, Althar is never the active app and has no place on the Dock or in the app switcher.
+  if (quiet) app.setActivationPolicy?.('accessory')
+  // The window asks for nothing but dictation's microphone and the clipboard token it requests while connecting; its notifications come from main.
   dictation = startDictation({
     script: join(here, '../speech/speech.js'),
     models: () => join(locations().profile, 'speech'),
@@ -495,6 +576,8 @@ void app.whenReady().then(() => {
     fakeModel: fakeSpeech,
     fakeMicrophone,
   })
+  // The pictures agents handed back, from the artifact store the runtime keeps in the profile, by digest.
+  protocol.handle(PICTURE_SCHEME, servePicture(join(locations().profile, 'artifacts'), resize))
   void showChosenIcon()
   // Plugged in or on battery changes whether the Mac is held awake.
   powerMonitor.on('on-battery', awake.powerChanged)
@@ -502,6 +585,20 @@ void app.whenReady().then(() => {
   // Linux may not say when the power source changes, so there it is looked at again each minute too.
   if (process.platform === 'linux') setInterval(awake.powerChanged, 60_000).unref()
   if (!noRuntime) startRuntime()
+  // A packaged app looks for updates, and tells every window as one is ready.
+  // electron-updater supports the Linux AppImage feed; deb/rpm use their package managers.
+  if (app.isPackaged && (process.platform === 'darwin' || (process.platform === 'linux' && process.env.APPIMAGE !== undefined)))
+    updates = startUpdates((glance: UpdateGlance) => {
+      for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('althar:update', glance)
+    })
+  // macOS keeps its system menu with the updater command; elsewhere the hidden app menu keeps zoom, full screen, quit and dev tools' accelerators.
+  if (process.platform === 'darwin') {
+    const checking = updates
+    setAppMenu({ name: app.name, ...(checking === undefined ? {} : { checkForUpdates: () => void checkNow(checking) }) })
+  } else {
+    const menu = appMenu(process.platform, !app.isPackaged)
+    if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
+  }
   openWindow()
   edge = startEdge({
     profile: () => locations().profile,
@@ -509,7 +606,21 @@ void app.whenReady().then(() => {
     preload: join(here, '../preload/preload.cjs'),
     page: join(here, '../renderer/edge.html'),
     pictures: join(here, '../../resources/tray'),
+    quiet,
   })
+  // The edge is for while the person is in another app: it steps aside while one of Althar's windows has focus, on any screen.
+  // Moving between Althar's windows blurs one before the other has focus, so it settles first.
+  let focusing: ReturnType<typeof setTimeout> | undefined
+  const focusChanged = () => {
+    clearTimeout(focusing)
+    focusing = setTimeout(() => {
+      const focused = BrowserWindow.getFocusedWindow()
+      edge?.front(focused !== null && windows.has(focused))
+    }, FOCUS_SETTLE)
+  }
+  app.on('browser-window-focus', focusChanged)
+  app.on('browser-window-blur', focusChanged)
+  focusChanged()
   app.on('activate', () => {
     if (windows.size === 0) openWindow()
   })

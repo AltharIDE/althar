@@ -31,8 +31,16 @@ export class ApiError extends Schema.TaggedError<ApiError>()('ApiError', {
 export const CommandId = Schema.String.check(Schema.isPattern(/^cmd_[0-9a-f]{32}$/))
 export type CommandId = typeof CommandId.Type
 
+/** A new project's id, made by the window before the project is, so its mark is drawn from it while it is named: `proj_` and 32 hex digits. */
+export const NewProjectId = Schema.String.check(Schema.isPattern(/^proj_[0-9a-f]{32}$/))
+export type NewProjectId = typeof NewProjectId.Type
+
 /** A position in the store's change feed. Events after it are the ones a client hasn't seen. */
 export const Cursor = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+
+/** What a project does when an agent reaches its usage limit: moves the work on to the next free agent, waits for the reset, or asks the person. */
+export const UsageLimit = Schema.Literals(['move', 'wait', 'ask'])
+export type UsageLimit = typeof UsageLimit.Type
 
 export const SignIn = Schema.Literals(['signed_in', 'signed_out', 'unknown'])
 export type SignIn = typeof SignIn.Type
@@ -147,7 +155,7 @@ export const Status = Schema.Struct({
 })
 export type Status = typeof Status.Type
 
-/** A project's ink: the colour its mark is drawn in, chosen when it was made and kept. */
+/** A project's ink: the colour its mark is drawn in, chosen when it was made and kept until the person picks another. */
 export const ProjectInk = Schema.Literals(['clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber'])
 export type ProjectInk = typeof ProjectInk.Type
 
@@ -172,12 +180,14 @@ export const ProjectSummary = Schema.Struct({
   working: Schema.Number,
   /** Tasks ready for the person: their run passed, and nothing of theirs waits or starts. */
   ready: Schema.Number,
-  /** When an agent reaches its usage limit: its work moves on to the next free agent, or waits for the reset. */
-  usageLimit: Schema.Literals(['move', 'wait']),
+  /** When an agent reaches its usage limit: its work moves on to the next free agent, waits for the reset, or asks the person. */
+  usageLimit: UsageLimit,
   /** Whether work moves on to an agent's next account here when one runs out (ADR-012): off unless the person turned it on. */
   rotateAccounts: Schema.Boolean,
   /** The accounts each agent may use here, by agent; null for every one. */
   onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+  /** The thread of its conversation with the coordinator: what opens a call of the coordinator's there. */
+  coordinatorThreadId: Schema.optional(Schema.NullOr(Schema.String)),
 })
 export type ProjectSummary = typeof ProjectSummary.Type
 
@@ -191,6 +201,31 @@ export type RepositoryRole = typeof RepositoryRole.Type
 export const ChangeTarget = Schema.Literals(['upstream', 'fork'])
 export type ChangeTarget = typeof ChangeTarget.Type
 
+/** A code host or tracker Althar connects to. Cloud and Data Center are separate products. */
+export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
+export type Product = typeof Product.Type
+
+/**
+ * Where a repository's work goes: the code host its remote is on, its path
+ * there, and who Althar reaches it as. A host Althar doesn't know is named
+ * by its address alone.
+ */
+export const RepositoryHost = Schema.Struct({
+  /** The code host, where Althar knows it; null for one it doesn't. */
+  product: Schema.NullOr(Product),
+  /** As the page says it: GitHub; or, for a host Althar doesn't know, its address, git.example.com. */
+  name: Schema.String,
+  /** A company's own server, by its address, where the host isn't the hosted service: gitlab.example.com. */
+  instance: Schema.NullOr(Schema.String),
+  /** Its path there: meridian/app. A fork's is the fork's. */
+  path: Schema.String,
+  /** Its page there; null on a host Althar doesn't know. */
+  url: Schema.NullOr(Schema.String),
+  /** Who Althar is signed in as there, and whether that sign-in still works; null where it isn't connected. */
+  account: Schema.NullOr(Schema.Struct({ login: Schema.String, state: Schema.Literals(['ready', 'reauth_required']) })),
+})
+export type RepositoryHost = typeof RepositoryHost.Type
+
 /** One of a project's repositories, as this Mac has it. */
 export const ProjectRepository = Schema.Struct({
   id: Schema.String,
@@ -199,9 +234,10 @@ export const ProjectRepository = Schema.Struct({
   path: Schema.NullOr(Schema.String),
   /** The folder inside it the project is about, such as one package of a monorepo; null for all of it. */
   folder: Schema.NullOr(Schema.String),
+  /** The branch checked out there. */
   branch: Schema.NullOr(Schema.String),
-  /** Its first remote, without any password in it. */
-  remote: Schema.NullOr(Schema.String),
+  /** Where its work goes, from its `origin` (else its first remote); null with no remote, or one that is a folder. */
+  host: Schema.NullOr(RepositoryHost),
   role: RepositoryRole,
   /** The fork its remotes make it (an `upstream` beside `origin`), by each one's path on its host, and where its pull requests open. */
   fork: Schema.NullOr(Schema.Struct({ fork: Schema.String, upstream: Schema.String, target: ChangeTarget })),
@@ -298,7 +334,7 @@ export const ProjectRulesView = Schema.Struct({
   commands: Schema.Array(CommandRule),
   /** How a task ends when its plan doesn't say; null: a draft pull request where Althar is connected to the host, else its branch. */
   end: Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
-  usageLimit: Schema.Literals(['move', 'wait']),
+  usageLimit: UsageLimit,
   rotateAccounts: Schema.Boolean,
   onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
   /** The person's patterns for branches and titles (`names.ts`), over what each repository says; null without one. */
@@ -330,10 +366,6 @@ export type TaskList = typeof TaskList.Type
 
 /* ---- Code hosts and trackers (docs/architecture/06) ---- */
 
-/** A code host or tracker Althar connects to. Cloud and Data Center are separate products. */
-export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
-export type Product = typeof Product.Type
-
 /** A person's sign-in to a code host or tracker, on this Mac. */
 export const ConnectionSummary = Schema.Struct({
   id: Schema.String,
@@ -349,9 +381,15 @@ export const ConnectionSummary = Schema.Struct({
 })
 export type ConnectionSummary = typeof ConnectionSummary.Type
 
+/** A service as a person connects it: a product's Cloud and Data Center editions are one service. */
+export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello'])
+export type Service = typeof Service.Type
+
 /** A product a person can connect, and how they sign in to it. */
 export const ProductOption = Schema.Struct({
   product: Product,
+  /** The service it is an edition of. */
+  service: Service,
   name: Schema.String,
   host: Schema.Boolean,
   tracker: Schema.Boolean,
@@ -363,8 +401,8 @@ export const ProductOption = Schema.Struct({
   browserSignIn: Schema.Boolean,
   /** What a pasted token goes with: the account's email, or the API key it was made for. */
   tokenNeeds: Schema.NullOr(Schema.Literals(['email', 'key'])),
-  /** Where the person makes a token, on the hosted service. */
-  tokenHelp: Schema.String,
+  /** What its tokens start with, to notice one on the clipboard; none where they have no mark of their own. */
+  tokenPrefixes: Schema.Array(Schema.String),
   /** Where a token is made for the API key the person typed, with `{key}` where it goes. */
   tokenHelpForKey: Schema.NullOr(Schema.String),
   /** What a typed API key is checked against before it is sent: the first pattern it matches says what is wrong with it. */
@@ -372,12 +410,123 @@ export const ProductOption = Schema.Struct({
 })
 export type ProductOption = typeof ProductOption.Type
 
+/** A project's repositories on an instance of a service, as their remotes name them. */
+export const ConnectPlace = Schema.Struct({
+  product: Product,
+  /** The instance: https://github.com, or a company's own server. */
+  webUrl: Schema.String,
+  project: Schema.String,
+  /** The remote that names it, as git calls it, where git was asked: origin. */
+  remote: Schema.NullOr(Schema.String),
+  /** The repositories' paths there: northwind/meridian-api. */
+  repositories: Schema.Array(Schema.String),
+})
+export type ConnectPlace = typeof ConnectPlace.Type
+
 export const ConnectionList = Schema.Struct({
   cursor: Cursor,
   connections: Schema.Array(ConnectionSummary),
   products: Schema.Array(ProductOption),
+  /** Where the projects' code is, on the hosted services and on servers already connected. */
+  places: Schema.Array(ConnectPlace),
 })
 export type ConnectionList = typeof ConnectionList.Type
+
+/** A command-line tool's sign-in on this device, which Althar can take a copy of: gh's or glab's. */
+export const CliSignIn = Schema.Struct({
+  product: Product,
+  webUrl: Schema.String,
+  tool: Schema.Literals(['gh', 'glab']),
+  /** Who it is signed in as there. */
+  account: Schema.String,
+  /** Its token's scopes, where the service says them. */
+  scopes: Schema.NullOr(Schema.Array(Schema.String)),
+})
+export type CliSignIn = typeof CliSignIn.Type
+
+/**
+ * What connecting a service starts from: where its code is in the person's
+ * projects (each server their remotes name asked what it is), the
+ * command-line sign-ins on this device, the email the projects commit with,
+ * and where a token is made on each instance, filled in for its places.
+ */
+export const ConnectGuide = Schema.Struct({
+  service: Service,
+  places: Schema.Array(ConnectPlace),
+  clis: Schema.Array(CliSignIn),
+  /** The email the projects' commits are made with, and the project whose git says it; null for git's own setting. */
+  email: Schema.NullOr(Schema.Struct({ address: Schema.String, project: Schema.NullOr(Schema.String) })),
+  tokenPages: Schema.Array(Schema.Struct({ product: Product, webUrl: Schema.String, url: Schema.String })),
+})
+export type ConnectGuide = typeof ConnectGuide.Type
+
+/** What answered at an address the person typed, and where a token is made there. */
+export const FoundServer = Schema.Struct({
+  product: Schema.NullOr(Product),
+  /** The address as a connection keeps it. */
+  webUrl: Schema.String,
+  /** Why nothing of the service's did: not an address, nothing answered, or something else did. */
+  reason: Schema.NullOr(Schema.Literals(['invalid', 'unreachable', 'other'])),
+  tokenPage: Schema.NullOr(Schema.String),
+})
+export type FoundServer = typeof FoundServer.Type
+
+/** What Althar needs of a connection, each a line of its check. */
+export const AccessNeed = Schema.Literals([
+  'server',
+  'site',
+  'key',
+  'account',
+  'reach',
+  'push',
+  'changes',
+  'checks',
+  'issues',
+  'read',
+  'comment',
+  'move',
+])
+export type AccessNeed = typeof AccessNeed.Type
+
+/** Why a line of a check isn't ok, with what it names and the page that puts it right, where there is one. */
+export const AccessReason = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('refused') }),
+  Schema.Struct({ kind: Schema.Literal('scope'), scope: Schema.String, url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('permission'), permission: Schema.String, url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('role'), role: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('unseen'), names: Schema.Array(Schema.String), url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('not_installed'), owner: Schema.String, url: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ kind: Schema.Literal('restricted'), owner: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('sso'), owner: Schema.String, url: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('no_check_runs'), url: Schema.String }),
+  Schema.Struct({ kind: Schema.Literal('unreadable') }),
+  Schema.Struct({ kind: Schema.Literal('failed'), message: Schema.String }),
+])
+export type AccessReason = typeof AccessReason.Type
+
+export const AccessLine = Schema.Struct({
+  need: AccessNeed,
+  state: Schema.Literals(['ok', 'no', 'unknown']),
+  /** What was found, in the service's words: a login, an owner, a role, a host. */
+  fact: Schema.NullOr(Schema.String),
+  /** How many, where the fact is a count: boards, teams, projects. */
+  count: Schema.NullOr(Schema.Number),
+  reason: Schema.NullOr(AccessReason),
+})
+export type AccessLine = typeof AccessLine.Type
+
+/** What a connection can do, as its service says, asked when it is made and whenever the person asks again. */
+export const ConnectionCheck = Schema.Struct({
+  connectionId: Schema.String,
+  lines: Schema.Array(AccessLine),
+  /** When its token runs out, where the service says. */
+  expiresAt: Schema.NullOr(Schema.String),
+  /** An app's sign-in that renews itself. */
+  renews: Schema.Boolean,
+  /** Where the person's tokens for it are listed, to change one. */
+  settings: Schema.String,
+})
+export type ConnectionCheck = typeof ConnectionCheck.Type
 
 /** A sign-in under way: a code to type on the service's page, or a page to approve in the browser. */
 export const SignInStart = Schema.Union([
@@ -523,14 +672,66 @@ export const UserMessageItem = Schema.Struct({
   ),
 })
 
-/** What an agent said or thought, as far as the store has it. */
+/**
+ * A picture an agent handed back, in a message or a tool's result: kept in
+ * the artifact store by its digest, by which the window asks for its bytes,
+ * or not kept, saying why.
+ */
+export const Picture = Schema.Struct({
+  /** Its SHA-256; null for one that wasn't kept. */
+  digest: Schema.NullOr(Schema.String),
+  mediaType: Schema.String,
+  bytes: Schema.Number,
+  width: Schema.NullOr(Schema.Number),
+  height: Schema.NullOr(Schema.Number),
+  /** What it is called, where the agent said. */
+  name: Schema.NullOr(Schema.String),
+  /** Why it wasn't kept: too large, a kind the window doesn't draw, or nowhere to keep it. */
+  unkept: Schema.NullOr(Schema.Literals(['too_large', 'unsupported', 'unkept'])),
+})
+export type Picture = typeof Picture.Type
+
+/** A file an agent wrote whole, or pointed at: by its path as it named it, never its contents. */
+export const FileMention = Schema.Struct({
+  path: Schema.String,
+  how: Schema.Literals(['wrote', 'linked']),
+  mediaType: Schema.NullOr(Schema.String),
+  bytes: Schema.NullOr(Schema.Number),
+  title: Schema.NullOr(Schema.String),
+})
+export type FileMention = typeof FileMention.Type
+
+/** What a command printed, once it ended: whether it was kept (ReadOutput reads it), how much, and how many of its first lines weren't kept. */
+export const CommandOutput = Schema.Struct({
+  /** False when it printed nothing, or there was nowhere to keep it. */
+  kept: Schema.Boolean,
+  lines: Schema.Number,
+  bytes: Schema.Number,
+  dropped: Schema.Number,
+  /** What the tool said of how it ended, where it failed or was stopped: its error, apart from what it printed. */
+  error: Schema.NullOr(Schema.String),
+})
+export type CommandOutput = typeof CommandOutput.Type
+
+/** What a message or a tool call handed back beside its words. */
+const handedFields = {
+  pictures: Schema.Array(Picture),
+  files: Schema.Array(FileMention),
+}
+
+/** What an agent said or thought, as far as the store has it, and the pictures and files it handed back as it spoke. */
 export const AgentTextItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literals(['agent_message', 'agent_thought']),
-  content: Schema.Struct({ text: Schema.String }),
+  content: Schema.Struct({ text: Schema.String, ...handedFields }),
 })
 
-/** A tool call: what it is, how it stands, the command it runs and the files it touches, without its raw input and output. */
+/**
+ * A tool call: what it is, how it stands, the command it runs and the files
+ * it touches, without its raw input and output; and what it handed back:
+ * pictures, files it wrote whole or pointed at, and, for a command that
+ * ended, what it printed and its exit code.
+ */
 export const ToolCallItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('tool_call'),
@@ -541,11 +742,18 @@ export const ToolCallItem = Schema.Struct({
     /** ACP's status: pending, in_progress, completed or failed. */
     status: Schema.String,
     command: Schema.NullOr(Schema.String),
+    /** A command as it reads at a glance (see BackgroundCommand); absent where it is not shortened or there is no command. */
+    label: Schema.optional(Schema.String),
     locations: Schema.Array(ToolLocation),
     /** Refused when it asked: by the rules, the lead or the person. */
     declined: Schema.Boolean,
+    /** The agent asking the person something: its question stands in the thread in its place. */
+    asks: Schema.optional(Schema.Boolean),
     /** Let through without asking by the project's allow rules, the first that did (ADR-018); absent otherwise. */
     allowedBy: Schema.optional(AllowedBy),
+    ...handedFields,
+    output: Schema.NullOr(CommandOutput),
+    exit: Schema.NullOr(Schema.Number),
   }),
 })
 
@@ -554,6 +762,60 @@ export const PlanItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('plan'),
   content: Schema.Struct({ entries: Schema.Array(Schema.Struct({ content: Schema.String, status: Schema.String })) }),
+})
+
+/** One option of something an agent asks, by the value it wants back. */
+export const QuestionChoice = Schema.Struct({
+  value: Schema.String,
+  label: Schema.String,
+  /** What the agent says it implies. */
+  note: Schema.optional(Schema.String),
+})
+export type QuestionChoice = typeof QuestionChoice.Type
+
+/** One thing an agent asks the person, as a field of its form. */
+export const QuestionField = Schema.Struct({
+  id: Schema.String,
+  question: Schema.String,
+  /** A short name the agent gave it: "Database". */
+  header: Schema.optional(Schema.String),
+  /** A choice of the agent's options, words, a number, or yes or no. */
+  type: Schema.Literals(['choice', 'text', 'number', 'boolean']),
+  options: Schema.Array(QuestionChoice),
+  /** Several options may be picked. */
+  multiple: Schema.Boolean,
+  /** Where the agent takes an answer in the person's own words beside a choice. */
+  wordsField: Schema.optional(Schema.String),
+  required: Schema.Boolean,
+})
+export type QuestionField = typeof QuestionField.Type
+
+/** What the person said to one field: the options picked, by value, and any words of their own. */
+export const FieldAnswer = Schema.Struct({
+  values: Schema.Array(Schema.String),
+  words: Schema.optional(Schema.String),
+})
+export type FieldAnswer = typeof FieldAnswer.Type
+
+/**
+ * A question an agent asked the person, where it was asked: open until they
+ * answer it in place; then what they said. Withdrawn when the agent took it
+ * back or its turn was stopped (`turn`), or its task was stopped (`task`).
+ */
+export const QuestionItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('question'),
+  content: Schema.Struct({
+    attentionId: Schema.String,
+    /** What the agent said with it. */
+    message: Schema.String,
+    /** The agent's own tool call the question stands for; the thread shows the question in its place. */
+    toolCallId: Schema.NullOr(Schema.String),
+    fields: Schema.Array(QuestionField),
+    state: Schema.Literals(['open', 'answered', 'withdrawn']),
+    answers: Schema.NullOr(Schema.Record(Schema.String, FieldAnswer)),
+    withdrawn: Schema.NullOr(Schema.Literals(['turn', 'task'])),
+  }),
 })
 
 /** Something the agent or Althar notes: a warning from the agent, or a change of scene, such as another agent taking over. */
@@ -644,6 +906,15 @@ export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting
 export type TaskPhase = typeof TaskPhase.Type
 
 /**
+ * What the person can do to a task as a whole, where it stands now, as its
+ * menu offers it (docs/architecture/05, "Task and run lifecycle"): start its
+ * plan now, stop it, resume what stopping cut short, abandon it, or reopen
+ * it once abandoned. A merged task has none.
+ */
+export const TaskAction = Schema.Literals(['start', 'stop', 'resume', 'abandon', 'reopen'])
+export type TaskAction = typeof TaskAction.Type
+
+/**
  * A task as its card shows it, in the coordinator's thread and on the board:
  * where it stands, its plan, the issue it came from, its pull request, the
  * step it is on, what its lead last reported, who leads it.
@@ -696,6 +967,66 @@ export const TaskItem = Schema.Struct({
   content: TaskCard,
 })
 
+/**
+ * A run of the project Althar started itself (docs/decisions/022), in the
+ * thread it was asked for in: where it runs, the command, where it answers
+ * once it says, and how it ended. Althar posts it and keeps it current; it
+ * stays as a record once the run is over.
+ */
+export const RunItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('run'),
+  content: Schema.Struct({
+    launchId: Schema.String,
+    /** What it runs: the task's, or null for a copy of the default branch. */
+    taskId: Schema.NullOr(Schema.String),
+    /** Where it runs, in words: the task's title, or the default branch. */
+    where: Schema.String,
+    command: Schema.String,
+    url: Schema.NullOr(Schema.String),
+    startedAt: Schema.String,
+    /** It ended: by itself, with its exit code where known and its last line; or stopped. Null while it runs. */
+    ended: Schema.NullOr(
+      Schema.Struct({ at: Schema.String, code: Schema.NullOr(Schema.Number), stopped: Schema.Boolean, last: Schema.NullOr(Schema.String) }),
+    ),
+  }),
+})
+
+/** Where an issue the coordinator drafted stands: waiting on you, being filed, filed, not filed and why, perhaps filed (its answer was lost), or discarded. */
+export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
+export type IssueDraftState = typeof IssueDraftState.Type
+
+/**
+ * An issue the coordinator drafted on a connected tracker, in its thread
+ * (docs/architecture/06, "Drafting issues"): where it goes, what it says,
+ * and where it stands. Nothing is filed until the person files it here; they
+ * can change it first, or discard it. Althar posts it and keeps it current.
+ */
+export const IssueDraftCard = Schema.Struct({
+  draftId: Schema.String,
+  product: Product,
+  /** The tracker, by its product's name, and its site or account where another connection of the product would leave it unclear: Jira (acme.atlassian.net). */
+  tracker: Schema.String,
+  /** Where it goes there, by the tracker's name for it: a team, a project, a list on a board, a repository. */
+  container: Schema.String,
+  title: Schema.String,
+  /** Markdown. */
+  body: Schema.String,
+  labels: Schema.Array(Schema.String),
+  state: IssueDraftState,
+  /** Why it wasn't filed, while it stands failed, or why it may have been, while uncertain: in the tracker's words, or Althar's. */
+  error: Schema.NullOr(Schema.String),
+  /** The issue, once filed: its key as the tracker shows it, and its link. */
+  issue: Schema.NullOr(Schema.Struct({ key: Schema.String, url: Schema.String })),
+})
+export type IssueDraftCard = typeof IssueDraftCard.Type
+
+export const IssueDraftItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('issue_draft'),
+  content: IssueDraftCard,
+})
+
 export const ThreadItem = Schema.Union([
   UserMessageItem,
   AgentTextItem,
@@ -705,12 +1036,46 @@ export const ThreadItem = Schema.Union([
   StepResultItem,
   TaskItem,
   ArrivalItem,
+  QuestionItem,
+  RunItem,
+  IssueDraftItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
 /** How full an agent's context is: the tokens in it, and how many it holds. */
 export const ContextUse = Schema.Struct({ used: Schema.Number, size: Schema.Number })
 export type ContextUse = typeof ContextUse.Type
+
+/**
+ * A command the agent left running in the background, such as a dev server
+ * (docs/decisions/021): what it runs, where it answers once its output says,
+ * and how it ended if it did by itself. It runs as long as its session does.
+ */
+export const BackgroundCommand = Schema.Struct({
+  id: Schema.String,
+  command: Schema.String,
+  /** The command as it reads at a glance, without a leading `cd`, variables, `timeout` or output plumbing; the command is the whole of it. */
+  label: Schema.optional(Schema.String),
+  /** Where it answers, as its output said, as a browser opens it: http://localhost:5173/. Null until it says, or where it never does. */
+  url: Schema.NullOr(Schema.String),
+  startedAt: Schema.String,
+  /** It ended by itself: when, and its exit code where its output says. Null while it runs. */
+  ended: Schema.NullOr(Schema.Struct({ at: Schema.String, code: Schema.NullOr(Schema.Number) })),
+})
+export type BackgroundCommand = typeof BackgroundCommand.Type
+
+/**
+ * The project as Althar runs it itself, with no agent (docs/decisions/022):
+ * in a task's worktree, to see what it built, or, `taskId` null, in a copy of
+ * the default branch. It runs until the person stops it, or Althar quits.
+ */
+export const Launch = Schema.Struct({
+  ...BackgroundCommand.fields,
+  taskId: Schema.NullOr(Schema.String),
+  /** Where it runs, in words: the task's title, or the default branch. */
+  where: Schema.String,
+})
+export type Launch = typeof Launch.Type
 
 export const SessionSummary = Schema.Struct({
   id: Schema.String,
@@ -727,8 +1092,28 @@ export const SessionSummary = Schema.Struct({
   turnRunning: Schema.Boolean,
   /** How full its context is, in tokens, as the agent last said while it runs; null until it says, or where it doesn't. */
   context: Schema.NullOr(ContextUse),
+  /** What it left running in the background, while it runs, in the order it started them. */
+  background: Schema.Array(BackgroundCommand),
 })
 export type SessionSummary = typeof SessionSummary.Type
+
+/**
+ * An account that could take over a step a usage limit stopped: the agent,
+ * the account, and the model it would run, by the agent's id for it (null
+ * for the agent's own). Each of the project's accounts but the one out,
+ * whether out of usage or signed in, as they stood: the window reads which
+ * are free now.
+ */
+export const LimitChoice = Schema.Struct({ agentId: Schema.String, accountId: Schema.String, model: Schema.NullOr(Schema.String) })
+export type LimitChoice = typeof LimitChoice.Type
+
+/** What a step a usage limit stopped asks with: whose account, when it resets (null where it didn't say), and who could take it over. */
+export const LimitCall = Schema.Struct({
+  accountId: Schema.NullOr(Schema.String),
+  resetsAt: Schema.NullOr(Schema.String),
+  choices: Schema.Array(LimitChoice),
+})
+export type LimitCall = typeof LimitCall.Type
 
 /**
  * A step of a task's plan that needs the person (docs/architecture/05): its
@@ -760,13 +1145,15 @@ export const StuckStep = Schema.Struct({
   open: Schema.Number,
   /** What Althar did before asking: told the agent to carry on, started it afresh, or told it to try another way. */
   tried: Schema.optional(Schema.Array(Schema.Literals(['carried_on', 'restarted', 'redirected']))),
+  /** For a usage limit: the account that reached it, and when it resets, where it said, and who could take the step over. */
+  limit: Schema.optional(LimitCall),
 })
 export type StuckStep = typeof StuckStep.Type
 
-/** A call waiting on the person: a permission the rules keep for them, or a step that needs them. */
+/** A call waiting on the person: a permission the rules keep for them, a step that needs them, or an agent's question. */
 export const AttentionRequest = Schema.Struct({
   id: Schema.String,
-  kind: Schema.Literals(['permission', 'stuck']),
+  kind: Schema.Literals(['permission', 'stuck', 'question']),
   /** What the agent wants to do, as it put it. */
   title: Schema.String,
   /** Why it waits for the person: the rule that keeps it for them. */
@@ -774,6 +1161,17 @@ export const AttentionRequest = Schema.Struct({
   command: Schema.NullOr(Schema.String),
   /** For a step that needs the person: which, and why. */
   stuck: Schema.NullOr(StuckStep),
+  /** For an agent's question: what it asks, field by field; it is answered in the thread, where it was asked. */
+  question: Schema.optional(
+    Schema.Struct({
+      message: Schema.String,
+      fields: Schema.Array(QuestionField),
+      /** Why it asks, in a line: what the agent said just before. */
+      why: Schema.optional(Schema.String),
+      /** Who asks: the agent and model of the session that asked. */
+      askedBy: Schema.optional(Schema.Struct({ agentId: Schema.String, model: Schema.NullOr(Schema.String) })),
+    }),
+  ),
   /**
    * For a permission: what an "always" answer would keep in the project's
    * rules (ADR-018), and the scopes Allow always and Deny always each hold
@@ -925,6 +1323,14 @@ export const ThreadSnapshot = Schema.Struct({
     here: Schema.Array(TaskRepositoryHere),
     /** Those it merged here: into which branch, the remote that branch follows (none for a repository without one), and how many commits that remote doesn't have yet. */
     merged: Schema.Array(TaskRepositoryMerged),
+    /** What the person can do to it as a whole now, in its menu's order. */
+    actions: Schema.Array(TaskAction),
+    /** Its plan still waiting to start, by id, for starting it now; null once started, or where it has none. */
+    planId: Schema.NullOr(Schema.String),
+    /** What running what it built would run, as its repository says or keeps: `bun run dev`; null where nothing says. */
+    runCommand: Schema.NullOr(Schema.String),
+    /** What Althar runs of it, in its worktree. */
+    launches: Schema.Array(Launch),
   }),
   session: Schema.NullOr(SessionSummary),
   attention: Schema.Array(AttentionRequest),
@@ -951,10 +1357,11 @@ export type BoardTask = typeof BoardTask.Type
 /** A call that waits on the person, with the task it holds. */
 export const BoardCall = Schema.Struct({
   ...AttentionRequest.fields,
-  taskId: Schema.String,
+  /** The task it waits in; null for a question the coordinator asks, which waits in its conversation. */
+  taskId: Schema.NullOr(Schema.String),
   threadId: Schema.String,
-  taskTitle: Schema.String,
-  taskSlug: Schema.String,
+  taskTitle: Schema.NullOr(Schema.String),
+  taskSlug: Schema.NullOr(Schema.String),
 })
 export type BoardCall = typeof BoardCall.Type
 
@@ -1061,6 +1468,10 @@ export const CoordinatorSnapshot = Schema.Struct({
   earlier: Schema.Boolean,
   /** Where the project's repository is hosted, when its remote says, and whether Althar is connected to it there. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
+  /** What running the project would run, as its repository says or keeps; null where nothing says. */
+  runCommand: Schema.NullOr(Schema.String),
+  /** What Althar runs of the project's default branch. */
+  launches: Schema.Array(Launch),
 })
 export type CoordinatorSnapshot = typeof CoordinatorSnapshot.Type
 
@@ -1095,8 +1506,28 @@ export const WatchEvent = Schema.Union([
     text: Schema.String,
   }),
   Schema.Struct({ _tag: Schema.Literal('Context'), threadId: Schema.String, ...ContextUse.fields }),
+  /** What the session on a thread has left running, whole each time it changes. */
+  Schema.Struct({ _tag: Schema.Literal('Background'), threadId: Schema.String, background: Schema.Array(BackgroundCommand) }),
+  /** What Althar runs of a project itself, whole each time it changes. */
+  Schema.Struct({ _tag: Schema.Literal('Launches'), projectId: Schema.String, launches: Schema.Array(Launch) }),
+  /** A command's output as far as it has come, while it runs: its last lines, whole each time, and how many came before them. */
+  Schema.Struct({
+    _tag: Schema.Literal('Output'),
+    threadId: Schema.String,
+    itemId: Schema.String,
+    text: Schema.String,
+    dropped: Schema.Number,
+  }),
 ])
 export type WatchEvent = typeof WatchEvent.Type
+
+/** What a command printed, as kept: its end, and how many lines before it weren't kept. */
+export const OutputText = Schema.Struct({ text: Schema.String, dropped: Schema.Number })
+export type OutputText = typeof OutputText.Type
+
+/** A markdown document an agent wrote, read from where it is now: its path as asked, its text, and how big. */
+export const DocumentText = Schema.Struct({ path: Schema.String, body: Schema.String, bytes: Schema.Number, lines: Schema.Number })
+export type DocumentText = typeof DocumentText.Type
 
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
 
@@ -1120,6 +1551,10 @@ export const Api = RpcGroup.make(
    * window never names a path. A folder holding several repositories opens
    * with `repositories`, the ones the person kept, each by the grant of the
    * folder it was found in and its root as read; without it, every one found.
+   * A project made on purpose comes with the id the window made for it
+   * (`projectId`, refused where it is taken), and is made even where its
+   * folder is another project's already; with `ink`, in the ink the person
+   * chose, otherwise the runtime's pick (`inkFor`).
    */
   command(
     'OpenProject',
@@ -1127,11 +1562,15 @@ export const Api = RpcGroup.make(
       grant: Schema.String,
       name: Schema.optional(Schema.String),
       repositories: Schema.optional(Schema.Array(Schema.Struct({ grant: Schema.String, path: Schema.String }))),
+      projectId: Schema.optional(NewProjectId),
+      ink: Schema.optional(ProjectInk),
     },
     ProjectSummary,
   ),
   /** Renames a project. Its mark, and the folders its tasks' worktrees are in, stay as they are. */
   command('RenameProject', { projectId: Schema.String, name: Schema.String }, Schema.Void),
+  /** Draws a project's mark in another ink, wherever it shows. The drawing, which comes from its id, stays. */
+  command('SetProjectInk', { projectId: Schema.String, ink: ProjectInk }, Schema.Void),
   /**
    * Removes a project from Althar: its agents stop, its plans don't start and
    * its runs end. Its folders, its tasks' worktrees and their branches stay.
@@ -1188,6 +1627,14 @@ export const Api = RpcGroup.make(
   /** The person left the home: what the loop does from now on is new to them. */
   command('LeftHome', {}, Schema.Void),
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
+  /** What a command in a thread printed, as kept once it ended. */
+  call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
+  /**
+   * A markdown document an agent in a thread wrote, as it is now in the
+   * task's worktree: by the path the thread names it by. Only a markdown
+   * file inside one of the task's worktrees, and not too large to read.
+   */
+  call('ReadDocument', { threadId: Schema.String, path: Schema.String }, DocumentText),
   /** The project's coordinator thread, made the first time it is asked for. */
   call('GetCoordinator', { projectId: Schema.String, before: Schema.optional(Schema.Int), limit }, CoordinatorSnapshot),
   /** Starts a task you planned yourself: it shows in the coordinator's thread like one it planned, and starts at once. */
@@ -1217,6 +1664,16 @@ export const Api = RpcGroup.make(
     { planId: Schema.String, steps: Schema.Array(PlanStep), end: Schema.optional(Schema.NullOr(TaskEnd)) },
     Schema.Void,
   ),
+  /** Changes what an issue the coordinator drafted says, before it is filed. */
+  command(
+    'ChangeIssueDraft',
+    { draftId: Schema.String, title: Schema.String, body: Schema.String, labels: Schema.Array(Schema.String) },
+    Schema.Void,
+  ),
+  /** Files an issue the coordinator drafted, on its tracker; or one that wasn't filed, again. Its card says how it went. */
+  command('FileIssueDraft', { draftId: Schema.String }, Schema.Void),
+  /** Discards an issue the coordinator drafted: nothing is filed. */
+  command('DiscardIssueDraft', { draftId: Schema.String }, Schema.Void),
   command(
     'StartSession',
     { threadId: Schema.String, agentId: Schema.String, model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) },
@@ -1248,22 +1705,57 @@ export const Api = RpcGroup.make(
   command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
+  /** Stops a task: every agent on it stops, and the step it was on waits until the person resumes it. */
+  command('StopTask', { taskId: Schema.String }, Schema.Void),
+  /**
+   * Carries a stopped task on from the step it was on: with its last lead,
+   * or the agent and model given. What the person said before it waits in
+   * its thread and is the lead's first word.
+   */
+  command(
+    'ResumeTask',
+    {
+      taskId: Schema.String,
+      agentId: Schema.optional(Schema.String),
+      /** Its model and effort: the agent's own where null or left out. */
+      model: Schema.optional(Schema.NullOr(Schema.String)),
+      effort: Schema.optional(Schema.NullOr(Schema.String)),
+    },
+    Schema.Void,
+  ),
+  /** Settles a task without its change: its agents stop and its plan doesn't start; its worktree and branch stay as they are. */
+  command('AbandonTask', { taskId: Schema.String }, Schema.Void),
+  /** Opens an abandoned task again, on the same worktree and branch; nothing runs until the person says so. Never a merged one. */
+  command('ReopenTask', { taskId: Schema.String }, Schema.Void),
   command('Send', { threadId: Schema.String, body: Schema.String, disposition: Disposition }, Schema.Void),
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
   command('TakeBack', { itemId: Schema.String }, Schema.Void),
-  /** The person's answer to a step that needs them: tell its agent what to do, hand it to an agent, or abandon it (a review is gone on without). */
+  /**
+   * The person's answer to a step that needs them: tell its agent what to do,
+   * hand it to an agent (on an account and model, where they picked one), or
+   * abandon it (a review is gone on without). A step a usage limit stopped
+   * can also wait for the reset, where it is known.
+   */
   command(
     'AnswerStuck',
     {
       attentionId: Schema.String,
       answer: Schema.Union([
         Schema.Struct({ kind: Schema.Literal('tell'), note: Schema.String }),
-        Schema.Struct({ kind: Schema.Literal('retry'), agentId: Schema.String }),
+        Schema.Struct({
+          kind: Schema.Literal('retry'),
+          agentId: Schema.String,
+          accountId: Schema.optional(Schema.String),
+          model: Schema.optional(Schema.String),
+        }),
+        Schema.Struct({ kind: Schema.Literal('wait') }),
         Schema.Struct({ kind: Schema.Literal('abandon') }),
       ]),
     },
     Schema.Void,
   ),
+  /** The person's answer to an agent's question, field by field: the options picked, and any words of their own. */
+  command('AnswerQuestion', { attentionId: Schema.String, answers: Schema.Record(Schema.String, FieldAnswer) }, Schema.Void),
   /** The person's answer to a permission; with `always`, it is also kept in the project's rules by that scope, one of those offered. */
   command(
     'Answer',
@@ -1278,11 +1770,21 @@ export const Api = RpcGroup.make(
   /** The connections on this Mac, and the code hosts and trackers a person can connect. */
   Rpc.make('ListConnections', { success: ConnectionList, error: ApiError }),
   /** Starts the service's own sign-in: a code to type on its page, or a page to approve in the browser. */
-  command('StartSignIn', { product: Product, webUrl: Schema.optional(Schema.String) }, SignInStart),
+  command(
+    'StartSignIn',
+    // With a connection, the sign-in is to sign that one in again, and is taken only for its account.
+    { product: Product, webUrl: Schema.optional(Schema.String), connectionId: Schema.optional(Schema.String) },
+    SignInStart,
+  ),
   /** How a sign-in stands. */
   call('GetSignIn', { flowId: Schema.String }, SignInState),
   command('CancelSignIn', { flowId: Schema.String }, Schema.Void),
-  /** Connects with a token the person pasted, and what goes with it, all of which goes to the keychain. */
+  /**
+   * Connects with a token the person pasted, and what goes with it, all of
+   * which goes to the keychain. With a connection, it signs that one in again
+   * with a new token, keeping its address, email and key, for the account it
+   * was.
+   */
   command(
     'ConnectToken',
     {
@@ -1291,9 +1793,18 @@ export const Api = RpcGroup.make(
       user: Schema.optional(Schema.String),
       key: Schema.optional(Schema.String),
       token: Schema.String,
+      connectionId: Schema.optional(Schema.String),
     },
     ConnectionSummary,
   ),
+  /** What connecting a service starts from: where its code is, gh's or glab's sign-in, the email to go with a token, and the token pages. */
+  call('GetConnectGuide', { service: Service }, ConnectGuide),
+  /** Which of a service's products answers at an address, asked without signing in. */
+  call('FindServer', { service: Service, webUrl: Schema.String }, FoundServer),
+  /** Connects with gh's or glab's sign-in on this device: Althar keeps its own copy of the token, which agents never see. */
+  command('ConnectCli', { product: Product, webUrl: Schema.String, connectionId: Schema.optional(Schema.String) }, ConnectionSummary),
+  /** Asks the service what a connection can do. */
+  call('CheckConnection', { connectionId: Schema.String }, ConnectionCheck),
   command('Disconnect', { connectionId: Schema.String }, Schema.Void),
   /** The person's open issues on the connected trackers, and in the project's repository. */
   call('ListIssues', { projectId: Schema.String }, IssueList),
@@ -1345,7 +1856,7 @@ export const Api = RpcGroup.make(
       alwaysAllow: Schema.optional(Schema.Array(RuleKind)),
       commands: Schema.optional(Schema.Array(CommandRule)),
       end: Schema.optional(Schema.NullOr(Schema.Literals(['draft', 'ready', 'none']))),
-      usageLimit: Schema.optional(Schema.Literals(['move', 'wait'])),
+      usageLimit: Schema.optional(UsageLimit),
       rotateAccounts: Schema.optional(Schema.Boolean),
       onlyAccounts: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String)))),
       /** Null goes back to what each repository says. */
@@ -1367,7 +1878,7 @@ export const Api = RpcGroup.make(
     Schema.Void,
   ),
   /** What the project does when an agent reaches its usage limit. */
-  command('SetUsageLimit', { projectId: Schema.String, policy: Schema.Literals(['move', 'wait']) }, Schema.Void),
+  command('SetUsageLimit', { projectId: Schema.String, policy: UsageLimit }, Schema.Void),
   /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */
   command('OpenChange', { taskId: Schema.String }, Schema.Void),
   /**
@@ -1412,6 +1923,27 @@ export const Api = RpcGroup.make(
   command('Push', { taskId: Schema.String, head: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
   /** Asks the task's pull request for news now. */
   command('RefreshTask', { taskId: Schema.String }, Schema.Void),
+  /** Stops listening to the task's pull request at this address: nothing said there after arrives, and the lead hears none of it. */
+  command('StopListening', { taskId: Schema.String, url: Schema.String }, Schema.Void),
+  /** Stops a command the session on a thread left running; it goes from the list. */
+  command('StopBackground', { threadId: Schema.String, id: Schema.String }, Schema.Void),
+  /** Clears one that ended by itself from the list. */
+  command('ClearBackground', { threadId: Schema.String, id: Schema.String }, Schema.Void),
+  /** Runs the project with no agent: what the task built, in its worktree, or, with no task, a copy of the default branch. One already running there is the one returned. */
+  command(
+    'RunProject',
+    {
+      projectId: Schema.String,
+      taskId: Schema.NullOr(Schema.String),
+      /** The thread it was asked for in, where its card goes; null for none. */
+      threadId: Schema.NullOr(Schema.String),
+    },
+    Launch,
+  ),
+  /** Stops a run of the project; it goes from the list. */
+  command('StopLaunch', { id: Schema.String }, Schema.Void),
+  /** Clears a run that ended by itself from the list. */
+  command('ClearLaunch', { id: Schema.String }, Schema.Void),
   /** What changes after `since`, or from now without it. */
   Rpc.make('Watch', { payload: { since: Schema.optional(Cursor) }, success: WatchEvent, error: ApiError, stream: true }),
 )

@@ -108,6 +108,16 @@ export const CALLS: Data<CallCardProps>[] = [
   },
 ]
 
+/* An agent's question, on the board: its options, and the task it holds. */
+export const QUESTION_CALL: Data<CallCardProps> = {
+  kind: 'Question',
+  title: 'Which database should the refund queue live in?',
+  because: 'The lead asks before it builds the queue.',
+  options: ['Postgres, beside refunds', 'Redis streams', 'SQS, as payouts use'],
+  holds: ['431'],
+  at: '2m ago',
+}
+
 /* A task that couldn't finish, on the board: no choices here; they are in the task. */
 export const STUCK_CALL: Data<CallCardProps> = {
   kind: 'Stuck',

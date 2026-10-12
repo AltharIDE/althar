@@ -147,8 +147,8 @@ export interface HomeProps {
   onOpenProject?: (id: string) => void
   /** Open a project's conversation with its coordinator, by the project's id. Without it, the home at rest offers no way to one. */
   onTalk?: (id: string) => void
-  /** Open a folder as a new project. Without it, no way to from here. */
-  onOpenFolder?: () => void
+  /** Start a new project, in a tab of its own. Without it, no way to from here. */
+  onNewProject?: () => void
   className?: string
   text?: Partial<HomeText>
 }
@@ -180,7 +180,7 @@ export function Home({
   onOpenEvent,
   onOpenProject,
   onTalk,
-  onOpenFolder,
+  onNewProject,
   className,
   text,
 }: HomeProps) {
@@ -267,7 +267,7 @@ export function Home({
         className={s.projects}
         text={t.projects}
         {...(onOpenProject ? { onOpenProject } : {})}
-        {...(onOpenFolder ? { onOpenFolder } : {})}
+        {...(onNewProject ? { onNewProject } : {})}
       />
     </div>
   )

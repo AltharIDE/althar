@@ -1,9 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { CONNECTED, SERVICES } from '../../fixtures/setup'
-import { Connections, type ServiceSignIn } from './Connections'
+import { States } from '../../storybook/States'
+import { Connections } from './Connections'
 
 const meta = {
   title: 'Setup/Connections',
@@ -14,221 +14,79 @@ const meta = {
     label: 'Code hosts and trackers',
     services: SERVICES,
     connections: [],
-    onSignIn: fn(),
-    onCancelSignIn: fn(),
-    onToken: fn(),
+    onConnect: fn(),
+    onSignInAgain: fn(),
+    onAddServer: fn(),
     onDisconnect: fn(),
   },
 } satisfies Meta<typeof Connections>
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Nothing connected: each service says what it is for, and offers its way in. */
-export const NothingConnected: Story = {}
-
-/** Signed in on github.com and a company's own server; Linear's sign-in stopped working and asks to be done again. */
-export const Connected: Story = { args: { connections: CONNECTED } }
-
-/** GitHub's own sign-in: a code to type on its page, while Althar waits. */
-export const TypingACode: Story = {
-  args: { signingIn: { service: 'github', kind: 'device', code: 'ABCD-1234', url: 'https://github.com/login/device' } },
+/** Nothing connected: each service says where the projects' code on it is, and has one Connect, which opens its walk in. */
+export const NothingConnected: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await expect(c.getByText('ABCD-1234')).toBeInTheDocument()
-    await expect(c.getByRole('link', { name: /Open github.com/ })).toHaveAttribute('href', 'https://github.com/login/device')
-    await userEvent.click(c.getByRole('button', { name: 'Cancel' }))
-    await expect(args.onCancelSignIn).toHaveBeenCalled()
+    await expect(c.getByText('Not connected · Meridian’s code is here')).toBeInTheDocument()
+    const [github] = c.getAllByRole('button', { name: 'Connect' })
+    if (!github) throw new Error('no Connect')
+    await userEvent.click(github)
+    await expect(args.onConnect).toHaveBeenCalledWith('github')
   },
 }
-
-/** A sign-in approved in the browser, which comes back to Althar. */
-export const ApprovingInTheBrowser: Story = {
-  args: { signingIn: { service: 'github', kind: 'browser', url: 'https://github.com/login/oauth/authorize?client_id=x' } },
-}
-
-/** A sign-in that ended without a token: said, with a way to try again. */
-export const SignInEnded: Story = {
-  args: { signingIn: { service: 'github', kind: 'ended', message: 'The code expired.' } },
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Try again' }))
-    await expect(args.onSignIn).toHaveBeenCalledWith('github')
-  },
-}
-
-/** A token is pasted once, hidden, and kept encrypted; Jira's goes with the account's email. */
-export const PastingAToken: Story = {
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    const [linear] = c.getAllByRole('button', { name: 'Add a token' })
-    if (!linear) throw new Error('no token rows')
-    await userEvent.click(linear)
-    const field = c.getByLabelText('Linear token')
-    await expect(field).toHaveFocus()
-    await expect(field).toHaveAttribute('type', 'password')
-    await userEvent.click(c.getByRole('button', { name: 'Save' }))
-    await expect(c.getByText('Paste the token first')).toBeInTheDocument()
-    await userEvent.type(field, 'lin_api_0000')
-    await userEvent.click(c.getByRole('button', { name: 'Save' }))
-    await expect(args.onToken).toHaveBeenCalledWith('linear', { token: 'lin_api_0000' })
-    await expect(c.queryByLabelText('Linear token')).not.toBeInTheDocument()
-  },
-}
-
-/** Jira, which has no one address, asks for its site's, and the email the token belongs to. */
-export const ATokenWithItsEmail: Story = {
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    const jira = c.getAllByRole('button', { name: 'Add a token' }).at(-1)
-    if (!jira) throw new Error('no Jira row')
-    await userEvent.click(jira)
-    await expect(c.getByLabelText('Server address')).toHaveAttribute('placeholder', 'https://your-site.atlassian.net')
-    await userEvent.type(c.getByLabelText('Server address'), 'https://meridian.atlassian.net')
-    await userEvent.type(c.getByLabelText('Jira token'), 'atl_0000{Enter}')
-    await expect(c.getByText('Type the email the token belongs to')).toBeInTheDocument()
-    await userEvent.type(c.getByLabelText('Email'), 'you@meridian.dev')
-    await userEvent.type(c.getByLabelText('Jira token'), '{Enter}')
-    await expect(args.onToken).toHaveBeenCalledWith('jira_cloud', {
-      instance: 'https://meridian.atlassian.net',
-      user: 'you@meridian.dev',
-      token: 'atl_0000',
-    })
-  },
-}
-
-const KEY = 'a1b2c3d4e5f60718293a4b5c6d7e8f90'
 
 /**
- * Trello's token is made for an API key, which goes with it: the key first,
- * then the token. Once the key looks right, the link makes a token for it.
+ * Signed in on github.com and a company's own server, which can take
+ * another; Jira's sign-in stopped working and asks to be done again.
  */
-export const ATokenWithItsKey: Story = {
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    const [, trello] = c.getAllByRole('button', { name: 'Add a token' })
-    if (!trello) throw new Error('no Trello row')
-    await userEvent.click(trello)
-    const key = c.getByLabelText('API key')
-    await expect(key).toHaveFocus()
-    await expect(key).toHaveAttribute('type', 'text')
-    await expect(c.queryByLabelText('Email')).not.toBeInTheDocument()
-    await expect(c.getByRole('link', { name: /Make one on Trello/ })).toHaveAttribute('href', 'https://trello.com/power-ups/admin')
-    await userEvent.type(c.getByLabelText('Trello token'), 'ATTA0000{Enter}')
-    await expect(c.getByText('Paste the API key the token was made for')).toBeInTheDocument()
-    await userEvent.type(key, KEY)
-    await expect(c.getByRole('link', { name: /Make a token for this key/ })).toHaveAttribute(
-      'href',
-      `https://trello.com/1/authorize?expiration=never&name=Althar&scope=read,write&response_type=token&key=${KEY}`,
-    )
-    await userEvent.type(c.getByLabelText('Trello token'), '{Enter}')
-    await expect(args.onToken).toHaveBeenCalledWith('trello', { key: KEY, token: 'ATTA0000' })
-  },
-}
-
-/** A key that isn't one says so, by the service's own checks: a Power-Up's secret pasted as its key, or a key cut short. No token link is offered for it. */
-export const AKeyThatIsntOne: Story = {
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    const [, trello] = c.getAllByRole('button', { name: 'Add a token' })
-    if (!trello) throw new Error('no Trello row')
-    await userEvent.click(trello)
-    const key = c.getByLabelText('API key')
-    await userEvent.type(key, `${KEY}${KEY}`)
-    await expect(c.queryByRole('link', { name: /Make a token for this key/ })).not.toBeInTheDocument()
-    await userEvent.type(c.getByLabelText('Trello token'), 'ATTA0000{Enter}')
-    await expect(c.getByText('That’s the Power-Up’s secret; paste its API key')).toBeInTheDocument()
-    await expect(key).toHaveAttribute('aria-invalid', 'true')
-    // The key is wrong, not the token: only the key's field is marked.
-    await expect(c.getByLabelText('Trello token')).not.toHaveAttribute('aria-invalid', 'true')
-    await userEvent.clear(key)
-    await userEvent.type(key, KEY.slice(0, 31))
-    await userEvent.type(c.getByLabelText('Trello token'), '{Enter}')
-    await expect(c.getByText('An API key is 32 characters')).toBeInTheDocument()
-    await expect(args.onToken).not.toHaveBeenCalled()
-  },
-}
-
-/** A company's own server, by its address, with a token for it. */
-export const AddingAServer: Story = {
-  args: { connections: [CONNECTED[0]!] },
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Add a server' }))
-    await userEvent.click(c.getByRole('button', { name: 'Save' }))
-    await expect(c.getByText('Type the server’s address')).toBeInTheDocument()
-    await userEvent.type(c.getByLabelText('Server address'), 'https://git.meridian.dev')
-    await userEvent.type(c.getByLabelText('GitHub token'), 'ghp_0000')
-    await userEvent.click(c.getByRole('button', { name: 'Save' }))
-    await expect(args.onToken).toHaveBeenCalledWith('github', { instance: 'https://git.meridian.dev', token: 'ghp_0000' })
-  },
-}
-
-/** A token the service refused: said under the field, which stays open. */
-function Refused(props: Parameters<typeof Connections>[0]) {
-  const [saving, setSaving] = useState<string | null>(null)
-  const [error, setError] = useState<{ service: string; message: string } | null>(null)
-  return (
-    <Connections
-      {...props}
-      saving={saving}
-      tokenError={error}
-      onToken={(service) => {
-        setSaving(service)
-        window.setTimeout(() => {
-          setError({ service, message: 'Linear says that key isn’t valid.' })
-          setSaving(null)
-        }, 50)
-      }}
-    />
-  )
-}
-export const ATokenRefused: Story = {
-  render: (args) => <Refused {...args} />,
-  play: async ({ canvasElement }) => {
-    const c = within(canvasElement)
-    const [linear] = c.getAllByRole('button', { name: 'Add a token' })
-    if (!linear) throw new Error('no Linear row')
-    await userEvent.click(linear)
-    await userEvent.type(c.getByLabelText('Linear token'), 'wrong{Enter}')
-    await expect(await c.findByText('Linear says that key isn’t valid.')).toBeInTheDocument()
-    await expect(c.getByLabelText('Linear token')).toBeInTheDocument()
-  },
-}
-
-/** Signing in again, for a connection whose token stopped working; disconnecting one. */
-export const SigningInAgain: Story = {
+export const Connected: Story = {
   args: { connections: CONNECTED },
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
+    await expect(c.getByText('git.meridian.dev', { exact: false })).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Sign in again' }))
-    await expect(c.getByLabelText('Linear token')).toBeInTheDocument()
-    await userEvent.click(c.getAllByRole('button', { name: 'Disconnect' })[0]!)
+    await expect(args.onSignInAgain).toHaveBeenCalledWith('conn_3')
+    const [server] = c.getAllByRole('button', { name: 'Add a server' })
+    if (!server) throw new Error('no Add a server')
+    await userEvent.click(server)
+    await expect(args.onAddServer).toHaveBeenCalledWith('github')
+    const [first] = c.getAllByRole('button', { name: 'Disconnect' })
+    if (!first) throw new Error('no Disconnect')
+    await userEvent.click(first)
     await expect(args.onDisconnect).toHaveBeenCalledWith('conn_1')
   },
 }
 
-/** Signing in on GitHub starts its own sign-in; a token is the other way in. */
-export const SigningIn: Story = {
-  play: async ({ args, canvasElement }) => {
-    const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Sign in' }))
-    await expect(args.onSignIn).toHaveBeenCalledWith('github')
-    await userEvent.click(c.getByRole('button', { name: 'Use a token' }))
-    await expect(c.getByLabelText('GitHub token')).toHaveFocus()
-    await userEvent.keyboard('{Escape}')
-    await expect(c.queryByLabelText('GitHub token')).not.toBeInTheDocument()
+/** Without a way to add a server, a connected service offers none. */
+export const NoServers: Story = {
+  args: { connections: CONNECTED, onAddServer: undefined },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).queryByRole('button', { name: 'Add a server' })).toBeNull()
   },
 }
 
-const signing: ServiceSignIn = { service: 'github', kind: 'device', code: 'WDJB-MJHT', url: 'https://github.com/login/device' }
-/** In a narrow column, as the side panel is: a service’s name and what connects it share a line, and how it stands runs under both. */
+/** Narrow, as a column of Settings has it: how each stands runs under its name. */
 export const Narrow: Story = {
-  decorators: [(Story) => <div style={{ width: 340 }}>{Story()}</div>],
-  args: { connections: CONNECTED, signingIn: signing },
+  args: { connections: CONNECTED },
+  decorators: [(Story) => <div style={{ width: 300 }}>{Story()}</div>],
 }
 
-/** Connected, in the side panel’s width. */
-export const InThePanel: Story = {
-  decorators: [(Story) => <div style={{ width: 420 }}>{Story()}</div>],
-  args: { connections: CONNECTED },
+export const AllStates: Story = {
+  render: (args) => (
+    <States
+      size="wide"
+      cells={[
+        { state: 'not connected', node: <Connections {...args} /> },
+        { state: 'connected, and one to sign in again', node: <Connections {...args} connections={CONNECTED} /> },
+        {
+          state: 'narrow',
+          node: (
+            <div style={{ width: 300 }}>
+              <Connections {...args} connections={CONNECTED} />
+            </div>
+          ),
+        },
+      ]}
+    />
+  ),
 }

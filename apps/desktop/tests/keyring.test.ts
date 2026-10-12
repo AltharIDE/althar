@@ -28,14 +28,15 @@ describe('sealing secrets by keyring', () => {
 
 describe('the password store Electron is asked for', () => {
   it('asks for libsecret where Electron would pick plain text, and leaves a choice of the person’s alone', () => {
-    expect(passwordStore([], undefined, false)).toBe('gnome-libsecret')
-    expect(passwordStore([], 'Hyprland', false)).toBe('gnome-libsecret')
-    expect(passwordStore([], 'sway', false)).toBe('gnome-libsecret')
-    expect(passwordStore([], 'GNOME', false)).toBeNull()
-    expect(passwordStore([], 'KDE', false)).toBeNull()
-    expect(passwordStore(['--password-store=basic'], undefined, false)).toBeNull()
+    expect(passwordStore([], undefined, false, 'linux')).toBe('gnome-libsecret')
+    expect(passwordStore([], 'Hyprland', false, 'linux')).toBe('gnome-libsecret')
+    expect(passwordStore([], 'sway', false, 'linux')).toBe('gnome-libsecret')
+    expect(passwordStore([], 'GNOME', false, 'linux')).toBeNull()
+    expect(passwordStore([], 'KDE', false, 'linux')).toBe('gnome-libsecret')
+    expect(passwordStore(['--password-store=basic'], undefined, false, 'linux')).toBeNull()
+    expect(passwordStore(['--password-store', 'basic'], undefined, false, 'linux')).toBeNull()
     // In a Flatpak the host's secret service is what is reachable; KWallet's own socket is not, so KDE needs it there too.
-    expect(passwordStore([], 'KDE', true)).toBe('gnome-libsecret')
+    expect(passwordStore([], 'KDE', true, 'linux')).toBe('gnome-libsecret')
     // A Linux switch: macOS and Windows keep their own keychain.
     expect(passwordStore([], undefined, false, 'darwin')).toBeNull()
     expect(passwordStore([], 'Hyprland', false, 'win32')).toBeNull()

@@ -58,11 +58,13 @@ export interface WorkStatusProps {
   ring?: boolean
   /** What waits on you, shown while the count is pointed at; without them, no preview. */
   needs?: ReadonlyArray<WorkNeed>
+  /** Which end of the count the preview lines up with: its end, at the end of a bar; its start, where the count starts a line. */
+  align?: 'start' | 'end'
   className?: string
   text?: Partial<WorkStatusText>
 }
 
-export function WorkStatus({ running = 0, yours, onYours, needs, ring = false, className, text }: WorkStatusProps) {
+export function WorkStatus({ running = 0, yours, onYours, needs, ring = false, align = 'end', className, text }: WorkStatusProps) {
   const t = { ...workStatusText, ...text }
   return (
     <span className={cx(s.status, className)}>
@@ -72,7 +74,7 @@ export function WorkStatus({ running = 0, yours, onYours, needs, ring = false, c
           {t.running(running)}
         </span>
       )}
-      <Yours yours={yours} onYours={onYours} needs={needs} ring={ring} t={t} />
+      <Yours yours={yours} onYours={onYours} needs={needs} ring={ring} align={align} t={t} />
     </span>
   )
 }
@@ -82,12 +84,14 @@ function Yours({
   onYours,
   needs,
   ring,
+  align,
   t,
 }: {
   yours: number
   onYours?: () => void
   needs?: ReadonlyArray<WorkNeed>
   ring: boolean
+  align: 'start' | 'end'
   t: WorkStatusText
 }) {
   if (yours === 0) return <span className={s.none}>{t.none}</span>
@@ -104,7 +108,7 @@ function Yours({
         {said}
       </ActionButton>
     )
-  return <Preview said={said} onYours={onYours} needs={needs} t={t} />
+  return <Preview said={said} onYours={onYours} needs={needs} align={align} t={t} />
 }
 
 /** How long the pointer rests before the preview opens, and lingers after it leaves. */
@@ -116,7 +120,19 @@ const CLOSE_DELAY = 160
  * (focus stays where it was) or by ArrowDown on it (focus goes to the first
  * row). The arrow keys move between the rows, Escape goes back to the count.
  */
-function Preview({ said, onYours, needs, t }: { said: ReactNode; onYours: () => void; needs: ReadonlyArray<WorkNeed>; t: WorkStatusText }) {
+function Preview({
+  said,
+  onYours,
+  needs,
+  align,
+  t,
+}: {
+  said: ReactNode
+  onYours: () => void
+  needs: ReadonlyArray<WorkNeed>
+  align: 'start' | 'end'
+  t: WorkStatusText
+}) {
   const [open, setOpen] = useState(false)
   const byKeyboard = useRef(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -180,7 +196,7 @@ function Preview({ said, onYours, needs, t }: { said: ReactNode; onYours: () => 
         <P.Content
           id={id}
           side="bottom"
-          align="end"
+          align={align}
           sideOffset={6}
           collisionPadding={8}
           className={cx('ch-root', s.preview)}

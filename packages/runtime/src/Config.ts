@@ -1,6 +1,7 @@
+import { execFile } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 
 import { available, type Fetch, type Product, type ProductInfo } from '@althar/connectors'
 import { agents, type AgentDefinition, type Transport, usingLocated } from '@althar/provider-adapters'
@@ -15,6 +16,12 @@ export interface RuntimeOptions {
   readonly worktreeRoot: string
   /** Where the homes of accounts Althar makes go (ADR-012): `<root>/<account>`. Without it, it makes none. */
   readonly accountsRoot?: string
+  /**
+   * Where the artifact store keeps its bytes (`Artifacts.ts`): pictures
+   * agents hand back and what commands print, `<root>/<digest>`. Without it,
+   * nothing is kept, and the thread says so.
+   */
+  readonly artifactsRoot?: string
   /** Where agents Althar downloads at the person's asking are kept (`Installs.ts`): `<root>/<agent>`. Without it, it downloads none. */
   readonly agentsRoot?: string
   /**
@@ -47,6 +54,8 @@ export interface RuntimeOptions {
   readonly listenEvery?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
+  /** Althar's GitHub App, by its slug, for where it is installed on an owner. */
+  readonly githubApp?: string
   /**
    * How code hosts and trackers are called. The app gives its own network,
    * which trusts the certificates and proxies the Mac does, as a company's
@@ -174,12 +183,40 @@ export const WebCrypto: Layer.Layer<Crypto.Crypto> = Layer.succeed(
   }),
 )
 
+/** A command-line tool for a code host, whose sign-in on this device Althar can take a copy of. */
+export type CliTool = 'gh' | 'glab'
+
+/**
+ * The token a tool is signed in to a host with, read the way the tool itself
+ * hands it out (from its config or the keychain it keeps it in), or null
+ * where it isn't there or isn't signed in. Only the runtime reads it; it goes
+ * to Althar's own keychain and never to an agent.
+ */
+export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | null> =>
+  Effect.callback<string | null>((resume) => {
+    const args = tool === 'gh' ? ['auth', 'token', '--hostname', host] : ['config', 'get', 'token', '--host', host]
+    // An app opened from the Finder has a short PATH: where Homebrew puts the tools is looked in too.
+    const path = [process.env.PATH, '/opt/homebrew/bin', '/usr/local/bin']
+      .filter((part) => part !== undefined && part !== '')
+      .join(delimiter)
+    execFile(
+      tool,
+      args,
+      { timeout: 10_000, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
+      (error, stdout) => {
+        const token = stdout.trim()
+        resume(Effect.succeed(error === null && /^\S{20,400}$/.test(token) ? token : null))
+      },
+    )
+  })
+
 /**
  * The code hosts and trackers the runtime connects to (docs/architecture/06):
  * each product it has an adapter for, how it calls their APIs, the public ids
  * of Althar's own apps registered with them (a product without one takes
- * a pasted token), and the loopback port a browser sign-in comes back to.
- * Tests put fakes here.
+ * a pasted token), its GitHub App's slug, for where it is installed, the
+ * loopback port a browser sign-in comes back to, and how a command-line
+ * tool's sign-in is read. Tests put fakes here.
  */
 export class Connectors extends Context.Service<
   Connectors,
@@ -188,9 +225,25 @@ export class Connectors extends Context.Service<
     readonly fetch: Fetch
     readonly clientIds: Partial<Record<Product, string>>
     readonly callbackPort: number
+    readonly appSlug?: string
+    readonly cliToken: (tool: CliTool, host: string) => Effect.Effect<string | null>
   }
 >()('@althar/runtime/Connectors') {
   /** The products with adapters, over the network. */
-  static readonly live = (clientIds: Partial<Record<Product, string>> = {}, fetch: Fetch = globalThis.fetch): Layer.Layer<Connectors> =>
-    Layer.succeed(Connectors, Connectors.of({ products: available(), fetch, clientIds, callbackPort: 47821 }))
+  static readonly live = (
+    clientIds: Partial<Record<Product, string>> = {},
+    fetch: Fetch = globalThis.fetch,
+    appSlug?: string,
+  ): Layer.Layer<Connectors> =>
+    Layer.succeed(
+      Connectors,
+      Connectors.of({
+        products: available(),
+        fetch,
+        clientIds,
+        callbackPort: 47821,
+        cliToken,
+        ...(appSlug === undefined ? {} : { appSlug }),
+      }),
+    )
 }

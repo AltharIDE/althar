@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { type CommandEnvelope, type ProjectId } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
+import { ConnectorFailed } from '@althar/connectors'
 import { knownModelName } from '@althar/contracts'
 import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -12,6 +13,7 @@ import { Accounts } from './Accounts'
 import { Agents } from './Config'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
+import { DraftUntitled, IssueDrafts, IssueTargetNeeded } from './IssueDrafts'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
@@ -69,6 +71,7 @@ type Store =
   | Crypto.Crypto
   | Changes
   | Issues
+  | IssueDrafts
   | Policies
   | Models
   | ModelFacts
@@ -82,12 +85,26 @@ const Drafted = Schema.Struct({
   repositories: Schema.optional(Schema.Array(Schema.String)),
 })
 const Asked = Schema.Struct({ issue: Schema.String })
+const DraftedIssue = Schema.Struct({
+  title: Schema.String,
+  description: Schema.optional(Schema.String),
+  tracker: Schema.optional(Schema.String),
+  container: Schema.optional(Schema.String),
+  labels: Schema.optional(Schema.Array(Schema.String)),
+})
 /* A step's model, as list_models names it; or, as plans once did, an agent and its own id for the model. */
 const StepPick = Schema.Struct({ model: Schema.optional(Schema.String), agent: Schema.optional(Schema.String) })
 const Proposed = Schema.Struct({
   task: Schema.String,
   lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
   review: Schema.optional(Schema.NullOr(StepPick)),
+})
+/* A mini task: what to do, and the one model that does it. */
+const Started = Schema.Struct({
+  title: Schema.String,
+  description: Schema.optional(Schema.String),
+  lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
+  repositories: Schema.optional(Schema.Array(Schema.String)),
 })
 const Named = Schema.Struct({ task: Schema.String })
 const Passed = Schema.Struct({ task: Schema.String, message: Schema.String, now: Schema.optional(Schema.Boolean) })
@@ -110,6 +127,8 @@ export class Coordinator extends Context.Service<
       readonly threadId: string
       readonly body: string
       readonly disposition: Disposition
+      /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */
+      readonly quiet?: boolean
     }): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Coordinator') {
@@ -125,6 +144,7 @@ export class Coordinator extends Context.Service<
       const toolServer = yield* ToolServer
       const changes = yield* Changes
       const issues = yield* Issues
+      const issueDrafts = yield* IssueDrafts
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const nameOf = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
 
@@ -150,6 +170,7 @@ export class Coordinator extends Context.Service<
         readonly threadId: string
         readonly body: string
         readonly disposition: Disposition
+        readonly quiet?: boolean
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -160,10 +181,12 @@ export class Coordinator extends Context.Service<
           const running = yield* sessions.running(input.threadId)
           if (Option.isNone(running)) {
             const pick = yield* suggested(row.projectId)
+            // What Althar tells it quietly (an answer to its question) waits for it, whether or not it can start now.
+            if (input.quiet === true) yield* sessions.send(input)
             if (pick === null || !pick.available)
               return yield* new CoordinatorUnavailable({ agentId: pick?.agentId ?? '', agentName: pick?.agentName ?? 'The agent' })
             // Queued first, so the coordinator's first turn is its brief with what the person said.
-            yield* sessions.send({ envelope: input.envelope, threadId: input.threadId, body: input.body, disposition: input.disposition })
+            if (input.quiet !== true) yield* sessions.send(input)
             yield* sessions.start({
               threadId: input.threadId,
               agentId: pick.agentId,
@@ -172,7 +195,7 @@ export class Coordinator extends Context.Service<
             })
             return
           }
-          yield* sessions.send({ envelope: input.envelope, threadId: input.threadId, body: input.body, disposition: input.disposition })
+          yield* sessions.send(input)
         })
 
       /* ---- The coordinator's tools ---- */
@@ -276,9 +299,9 @@ export class Coordinator extends Context.Service<
             : record.text || 'The thread is empty.'
         })
 
-      const draft = (access: ToolAccess, input: unknown) =>
+      /** Drafts a task, from an issue where one is named: the task made, or the one this session made under that title before. */
+      const drafting = (access: ToolAccess, { title, description, issue: from, repositories }: typeof Drafted.Type) =>
         Effect.gen(function* () {
-          const { title, description, issue: from, repositories } = yield* read(Drafted, input)
           // A title is read at a glance, in a line on every screen: the rest of what was asked goes in the description.
           if (title.trim().length > TITLE_LENGTH)
             return yield* new ToolRefused({
@@ -331,7 +354,40 @@ export class Coordinator extends Context.Service<
             )
           if (issue !== undefined && from !== undefined)
             yield* issues.attach({ projectId: access.projectId as ProjectId, taskId: created.taskId, issue: from })
+          return { created, issue }
+        })
+
+      const draft = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const { created, issue } = yield* drafting(access, yield* read(Drafted, input))
           return `Drafted ${created.slug}${issue === undefined ? '' : `, from ${issue.key}`}. Now propose its plan with propose_plan.`
+        })
+
+      /**
+       * A mini task: drafted and started in one go, with no plan for the
+       * person to look over. One lead, no review, and nothing outside the
+       * project when it is done; the person sees it as a card, already
+       * running.
+       */
+      const startNow = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const { lead: pick, ...drafted } = yield* read(Started, input)
+          // The lead is found first, so a model that can't be used drafts nothing.
+          const lead = yield* stepOf(access.projectId, pick)
+          const { created } = yield* drafting(access, drafted)
+          // Called again, unsure the first worked, it doesn't start the same task twice.
+          if ((yield* taskOf(access, created.taskId)).state !== 'draft') return `${created.slug} has started already.`
+          const planId = yield* plans.propose({
+            projectId: access.projectId as ProjectId,
+            taskId: created.taskId,
+            steps: [{ key: 'implement', ...lead, skipped: false }],
+            reason: pick.reason ?? null,
+            actorId: instance.coordinatorId,
+            end: null,
+            held: true,
+          })
+          yield* plans.start(planId, instance.coordinatorId)
+          return `Started ${created.slug}: its lead is on it now, with no review, and nothing goes outside the project when it is done. The person sees it as a card; say in a sentence what it does.`
         })
 
       /** The models the coordinator can give work to in the project, as it reads them. */
@@ -436,6 +492,65 @@ export class Coordinator extends Context.Service<
           return found.map((issue) => `- ${issue.key}: ${issue.title} (${issue.status.name}) ${issue.url}`).join('\n')
         })
 
+      /**
+       * Drafts an issue on a connected tracker, and files nothing: the person
+       * sees it as a card and files it, changes it or discards it there.
+       */
+      const draftIssue = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(DraftedIssue, input)
+          const card = yield* issueDrafts
+            .draft({
+              projectId: access.projectId as ProjectId,
+              threadId: access.threadId,
+              ...(asked.tracker === undefined ? {} : { tracker: asked.tracker }),
+              ...(asked.container === undefined ? {} : { container: asked.container }),
+              title: asked.title,
+              body: asked.description ?? '',
+              labels: asked.labels ?? [],
+              actorId: instance.coordinatorId,
+            })
+            .pipe(
+              Effect.catch((error) => {
+                if (error instanceof DraftUntitled) return Effect.fail(new ToolRefused({ message: 'Give the issue a title.' }))
+                if (error instanceof ConnectorFailed)
+                  return Effect.fail(new ToolRefused({ message: `Althar couldn't ask the tracker where issues go: ${error.message}` }))
+                if (!(error instanceof IssueTargetNeeded)) return Effect.fail(error)
+                const choices = error.choices.join(', ')
+                const where = error.tracker ?? 'that tracker'
+                switch (error.reason) {
+                  case 'no_tracker':
+                    return Effect.fail(
+                      new ToolRefused({
+                        message:
+                          'The person has no tracker connected to Althar, so there is nowhere to draft an issue. They connect one in Settings.',
+                      }),
+                    )
+                  case 'tracker_needed':
+                    return Effect.fail(new ToolRefused({ message: `Say which tracker it goes on, as tracker: ${choices}.` }))
+                  case 'unknown_tracker':
+                    return Effect.fail(
+                      new ToolRefused({ message: `No tracker called ${error.named ?? ''} is connected. Connected: ${choices}.` }),
+                    )
+                  case 'container_needed':
+                    return Effect.fail(new ToolRefused({ message: `Say where on ${where} it goes, as container: ${choices}.` }))
+                  case 'unknown_container':
+                    return Effect.fail(
+                      new ToolRefused({
+                        message:
+                          error.tracker === null
+                            ? `No connected tracker has anywhere called ${error.named ?? ''} for issues. They have: ${choices}.`
+                            : error.choices.length === 0
+                              ? `This account can't file issues anywhere on ${where}.`
+                              : `${where} has nowhere called ${error.named ?? ''} for issues. It has: ${choices}.`,
+                      }),
+                    )
+                }
+              }),
+            )
+          return `Drafted the issue “${card.title}” on ${card.tracker}, in ${card.container}. Nothing is filed until the person files it from its card, where they can change it or discard it; they see it there, so there's no need to repeat it. You'll hear what they decide.`
+        })
+
       const tool = (
         name: string,
         description: string,
@@ -506,6 +621,30 @@ export class Coordinator extends Context.Service<
           (access) => findIssues(access),
         ),
         tool(
+          'draft_issue',
+          "Drafts an issue on one of the person's connected trackers, for something to track rather than do now: a bug found, follow-up work, an idea. It files nothing: the person sees it as a card, and files it, changes it or discards it. Give it a title and a description in Markdown with what whoever picks it up needs. Without tracker and container, it goes where the project's issues come from, or its repository's issues; when that isn't clear, Althar says what to name.",
+          {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              description: { type: 'string', description: 'Markdown.' },
+              tracker: {
+                type: 'string',
+                description:
+                  'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab; where two connections share a name, as Althar names them, or by site.',
+              },
+              container: {
+                type: 'string',
+                description:
+                  "Where on the tracker: a Linear team's key, a Jira project's key, a Trello list as Board / List, a repository as owner/name.",
+              },
+              labels: { type: 'array', items: { type: 'string' }, description: 'Labels the tracker has; others are left off.' },
+            },
+            required: ['title'],
+          },
+          draftIssue,
+        ),
+        tool(
           'list_models',
           'The models you can give work to now, by who makes them, with how each scores and whether a plan pays for it.',
           nothing,
@@ -534,6 +673,29 @@ export class Coordinator extends Context.Service<
             required: ['task', 'lead'],
           },
           propose,
+        ),
+        tool(
+          'start_task',
+          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. A change worth reviewing, or that should end in a pull request, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
+          {
+            type: 'object',
+            properties: {
+              title: { type: 'string', maxLength: TITLE_LENGTH },
+              description: { type: 'string' },
+              lead: {
+                type: 'object',
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, reason: { type: 'string' } },
+                required: ['model'],
+              },
+              repositories: {
+                type: 'array',
+                items: { type: 'string' },
+                description: "The project's repositories it works in, by name. Needed only in a project of several.",
+              },
+            },
+            required: ['title', 'lead'],
+          },
+          startNow,
         ),
         tool(
           'message_lead',

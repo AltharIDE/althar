@@ -35,6 +35,8 @@ export interface SelectProps<V extends string> {
   className?: string
   /** A long list: it opens with a field to find a value by what it is called. */
   searchable?: boolean
+  /** Whether closing gives focus back to the trigger: not where choosing takes it on, such as back to a field being typed in. A list without search only. */
+  returnFocus?: () => boolean
   text?: Partial<SelectText>
 }
 
@@ -67,6 +69,7 @@ export function Select<V extends string>({
   id,
   className,
   searchable = false,
+  returnFocus,
   text,
 }: SelectProps<V>) {
   const name = useControlName(label)
@@ -109,7 +112,15 @@ export function Select<V extends string>({
         </S.Icon>
       </S.Trigger>
       <S.Portal>
-        <S.Content className={cx('ch-root', s.content)} position="popper" sideOffset={4} collisionPadding={8}>
+        <S.Content
+          className={cx('ch-root', s.content)}
+          position="popper"
+          sideOffset={4}
+          collisionPadding={8}
+          onCloseAutoFocus={(event) => {
+            if (returnFocus !== undefined && !returnFocus()) event.preventDefault()
+          }}
+        >
           <S.Viewport>
             {options.map((o) => (
               <S.Item key={o.value} value={o.value} disabled={o.disabled} className={s.item}>

@@ -48,7 +48,7 @@ const meta = {
   component: ProjectList,
   parameters: { layout: 'padded' },
   decorators: [(Story) => <div style={{ width: 320, height: 560, display: 'flex' }}>{Story()}</div>],
-  args: { projects: FEW, onOpenProject: fn(), onOpenFolder: fn() },
+  args: { projects: FEW, onOpenProject: fn(), onNewProject: fn() },
 } satisfies Meta<typeof ProjectList>
 export default meta
 type Story = StoryObj<typeof meta>

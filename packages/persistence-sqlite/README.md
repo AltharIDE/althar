@@ -12,7 +12,7 @@ import { Commands, Database, Ledger } from '@althar/persistence-sqlite'
 const Store = Layer.mergeAll(Ledger.layer, Commands.layer).pipe(Layer.provideMerge(Database.layer({ filename })))
 ```
 
-`Database.layer` opens the file with foreign keys on and WAL, holds it so no second runtime can open it, and runs every migration before anything else can use it. `Ledger.layer` needs Effect's `Crypto` service for event ids.
+`Database.layer` opens the file with foreign keys on and WAL, holds it so no second runtime can open it, and runs every migration before anything else can use it. Given a `backups` folder, it copies the store there first whenever a migration is pending, keeping the newest three; a migration that fails leaves the store as it was and fails the layer with `MigrationFailed`, naming the copy. `Ledger.layer` needs Effect's `Crypto` service for event ids.
 
 ## Work on it
 
@@ -25,6 +25,6 @@ From `packages/persistence-sqlite`:
 | `bun run test:coverage` | The tests with the coverage gate: 90% of lines and branches |
 | `bun run verify` | Check and coverage, as CI runs them |
 
-To change the schema, add a migration in `src/migrations`, add its checksum to `src/migrations/checksums.ts` (the test prints the value it expects), and let the tests regenerate `schema.sql` (`bunx vitest run -u`). Never edit a released migration.
+To change the schema, add a migration in `src/migrations`, add its checksum to `src/migrations/checksums.ts` (the test prints the value it expects), and let the tests regenerate `schema.sql` (`bunx vitest run -u`). Once a version has shipped, its migrations are frozen: never renumber or edit one, and fix it with a new migration (see [ARCHITECTURE.md](ARCHITECTURE.md#the-schema)).
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the rules this package follows.

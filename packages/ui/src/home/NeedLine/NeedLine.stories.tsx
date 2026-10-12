@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
-import { DECISION, PUBLISH, READY, STATUS, STUCK } from '../../fixtures/home'
+import { DECISION, PUBLISH, QUESTION, READY, STATUS, STUCK } from '../../fixtures/home'
 import { Button } from '../../primitives/Button/Button'
 import { States } from '../../storybook/States'
 import { NeedLine, NeedList } from './NeedLine'
@@ -75,6 +75,18 @@ const lines = (
       actions={<Button size="small">Decide</Button>}
     />
     <NeedLine
+      kind={QUESTION.kind}
+      project={QUESTION.project}
+      title={QUESTION.title}
+      brief={QUESTION.why}
+      onOpen={fn()}
+      actions={
+        <Button size="small" variant="signal">
+          Answer
+        </Button>
+      }
+    />
+    <NeedLine
       kind={STUCK.kind}
       project={STUCK.project}
       title={STUCK.title}
@@ -105,6 +117,71 @@ export const EveryKind: Story = { render: () => <NeedList style={{ maxWidth: 820
 
 /** Narrow, whose it is goes under the title. */
 export const Narrow: Story = { render: () => <NeedList style={{ maxWidth: 480 }}>{lines}</NeedList> }
+
+/* ---- an agent's question: what it asks, and Answer opens the task to answer it there ---- */
+
+const question = (props: Partial<Parameters<typeof NeedLine>[0]> = {}) => (
+  <NeedLine
+    kind={QUESTION.kind}
+    project={QUESTION.project}
+    task={QUESTION.task}
+    title={QUESTION.title}
+    brief={QUESTION.why}
+    onOpen={fn()}
+    actions={
+      <Button size="small" variant="signal">
+        Answer
+      </Button>
+    }
+    {...props}
+  />
+)
+
+/** A question an agent asks, kept calm: what it asks, why in the agent's words, and Answer, which takes the person to it. Its options are where it is answered. */
+export const Question: Story = {
+  render: () => <NeedList style={{ maxWidth: 760 }}>{question()}</NeedList>,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('heading', { name: QUESTION.title })).toBeInTheDocument()
+    await expect(c.getByText(QUESTION.why)).toBeInTheDocument()
+    await expect(c.queryByText(QUESTION.options[0]?.label ?? '')).not.toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Answer' })).toBeInTheDocument()
+  },
+}
+
+/** The agent said nothing before it asked: who asks, and where. */
+export const QuestionWhoAsks: Story = {
+  render: () => <NeedList style={{ maxWidth: 760 }}>{question({ brief: 'Opus 5 asks, in Queue refund retries' })}</NeedList>,
+}
+
+/** Several questions at once, and nothing said first: the first, and how many more wait with it. */
+export const QuestionsSeveral: Story = {
+  render: () => <NeedList style={{ maxWidth: 760 }}>{question({ brief: 'and 2 more questions' })}</NeedList>,
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('and 2 more questions')).toBeInTheDocument()
+  },
+}
+
+/** Answered: its kind grey, and what was said where Answer was. */
+export const QuestionAnswered: Story = {
+  render: () => (
+    <NeedList style={{ maxWidth: 760 }}>{question({ kind: 'Answered', answer: { said: 'Postgres, beside refunds' } })}</NeedList>
+  ),
+  play: async ({ canvasElement }) => {
+    const line = within(canvasElement).getByRole('article')
+    await expect(line).toHaveAccessibleDescription('Answered Postgres, beside refunds')
+  },
+}
+
+/** At the edge's width, asking and answered: the title the whole width, Answer beside it. */
+export const QuestionAtTheEdge: Story = {
+  render: () => (
+    <NeedList style={{ width: 360 }} bare>
+      {question()}
+      {question({ kind: 'Answered', answer: { said: 'Postgres, beside refunds' } })}
+    </NeedList>
+  ),
+}
 
 /* ---- answered where it is: the line stays, at its height, quiet ---- */
 
@@ -213,6 +290,21 @@ export const AllStates: Story = {
           state: 'denied, with a note',
           node: (
             <NeedList style={{ width: 760 }}>{settled({ said: 'Once', note: 'Publish from CI instead', denied: true }, 'Denied')}</NeedList>
+          ),
+        },
+        { state: 'question', node: <NeedList style={{ width: 760 }}>{question()}</NeedList> },
+        { state: 'questions, several', node: <NeedList style={{ width: 760 }}>{question({ brief: 'and 2 more questions' })}</NeedList> },
+        {
+          state: 'question, answered',
+          node: <NeedList style={{ width: 760 }}>{question({ kind: 'Answered', answer: { said: 'Postgres, beside refunds' } })}</NeedList>,
+        },
+        {
+          state: 'question, edge width',
+          node: (
+            <NeedList style={{ width: 360 }} bare>
+              {question()}
+              {question({ kind: 'Answered', answer: { said: 'Postgres, beside refunds' } })}
+            </NeedList>
           ),
         },
         {

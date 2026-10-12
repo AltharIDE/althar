@@ -24,13 +24,23 @@ See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
   steps, and a short countdown after which the plan starts on its own. In the
   MVP the plan is always one fixed graph with its choices filled in
   ([MVP plan](../plans/mvp.md)); composing a graph per task comes next;
+- starts something small at once, without a plan (a mini task): trying
+  something out, checking how something behaves. One lead it picks, no
+  review, nothing outside the project when it is done, and no countdown
+  (`start_task`);
+- runs the project for the person, with no agent, when they ask, and keeps how
+  it runs when Althar can't tell (ADR-023);
 - follows the work, and passes messages to a task's lead;
 - judges task permission requests when the project selects that mode, in a
   fresh read-only session using its agent and model, without delaying the
   conversation ([ADR-019](../decisions/019-coordinator-judges-permissions.md)).
 
 It never edits a repository, runs builds or tests, or merges, even for a
-one-line change. A change is always a task with a lead.
+one-line change. A change is always a task with a lead, and so is trying
+something out. Althar refuses the coordinator's commands that change anything,
+for its role, and its brief says so, so it doesn't take that for the person
+saying no. What a task has built is in that task's worktree, so the coordinator
+asks its lead to try it.
 
 ## Shape
 
@@ -88,9 +98,13 @@ provisional.
 | `read_thread` | Earlier turns of a task's thread or its own, by range | Read |
 | `read_change` | A task's diff and checks | Read |
 | `draft_task` | Creates a task in draft, with its repositories and intent: a title of a few words (at most 60 characters), and what the person last said to it kept as what they asked for, which the task's thread opens with and its lead reads | Command |
+| `read_issue`, `find_issues` | An issue on a connected tracker or in the project's repository, and the person's open ones | Read |
+| `draft_issue` | Drafts an issue on a connected tracker, as a card the person files, changes or discards; nothing is filed on its word ([06](06-integrations-and-skills.md#drafting-issues)) | Command |
 | `list_models` | The models it can use now, by maker, with their scores | Query |
 | `propose_plan` | Steps, a model per step, optional steps | Command |
-| `start_task` | Starts a planned task, through the countdown | Command |
+| `start_task` | Drafts a mini task and starts it at once: one lead, no review, nothing outside the project when it is done | Command |
+| `run_project` | Runs the project with no agent: the default branch in a copy of its own, or a task's worktree (ADR-023) | Command |
+| `set_run_command` | Keeps how the project runs, for Althar to run it; leads have it too (ADR-023) | Command |
 | `order_tasks` | Orders a batch | Command |
 | `message_lead` | Sends a message to a task's lead, queued or as an interrupt | Command |
 | `recommend_lead` | Records a lead recommendation and its reasons | Command |
@@ -167,8 +181,6 @@ in the tools assumes one coordinator: every command carries its actor.
 
 - Its default model.
 - Whether task events prompt it, and which.
-- Whether it can start a task without the countdown when you asked for exactly
-  that task.
 - When continuous compaction summarises, and with which model.
 
 ## Verification gates

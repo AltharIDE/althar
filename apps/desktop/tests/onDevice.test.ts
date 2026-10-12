@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { Effect } from 'effect'
 
-import { deviceHere, envFound, portalPath, relayOut, whereFound, whereScript } from '../src/runtime/onDevice'
+import { deviceHere, envFound, HOST_COMMANDS, portalPath, relayOut, whereFound, whereScript, worktreeEnvironment } from '../src/runtime/onDevice'
 
 /*
  * The device outside a Flatpak (onDevice.ts): the person's own commands are
@@ -23,6 +23,20 @@ describe('the device outside a Flatpak', () => {
     expect(portalPath('/home/me/.var/app/dev.althar.app/data/althar/worktrees/p/t', 1000)).toBe(
       '/home/me/.var/app/dev.althar.app/data/althar/worktrees/p/t',
     )
+  })
+
+  it('translates the .git file and worktree paths for host git', () => {
+    expect(
+      worktreeEnvironment(
+        '/run/flatpak/doc/abc123/repo',
+        'gitdir: /run/flatpak/doc/abc123/repo/.git/worktrees/task\n',
+        1000,
+      ),
+    ).toEqual({
+      GIT_DIR: '/run/user/1000/doc/abc123/repo/.git/worktrees/task',
+      GIT_WORK_TREE: '/run/user/1000/doc/abc123/repo',
+    })
+    expect(HOST_COMMANDS).toEqual(['opencode', 'codex'])
   })
 
   it('takes a launch out to the device with the names it needs and what the agent was given, and nothing else', () => {
@@ -63,7 +77,7 @@ describe('the device outside a Flatpak', () => {
   })
 
   it('finds the person’s commands where the device’s shell and installers put them', () => {
-    const script = whereScript(['opencode', 'codex'])
+    const script = whereScript(HOST_COMMANDS)
     expect(script).toContain('command -v "$name"')
     expect(script).toContain('$HOME/.local/bin')
     expect(script).toContain('opencode codex')

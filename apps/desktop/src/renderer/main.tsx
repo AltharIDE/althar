@@ -11,8 +11,9 @@ import { Launch, OpenFailed } from '@althar/ui/screens'
 
 import { receivePort } from './data/client'
 import { openWindow } from './data/open'
-import { ServicesProvider } from './data/services'
+import { ServicesProvider, type StoreFailure } from './data/services'
 import { useMaximized } from './shared/useWindowChrome'
+import { UpdateStoppedView } from './features/update/UpdateStoppedView'
 
 /*
  * The window's entry. The launch plays at once, while the window waits for
@@ -20,7 +21,9 @@ import { useMaximized } from './shared/useWindowChrome'
  * the place it opens on shows is read under the launch, and the app is drawn
  * whole under it before the launch opens onto it. If it can't open (no port
  * within WAIT_PORT, or connecting or the first reads fail), it says so in
- * the launch's place, and offers to try again.
+ * the launch's place, and offers to try again. If an update couldn't move
+ * the store, main sends that instead of a port, and the window shows it,
+ * whatever it was showing.
  */
 
 /** How long the window waits for the runtime's port before it says it couldn't open. */
@@ -77,6 +80,8 @@ function FailedOpen({ reason }: { reason: string }) {
 function Window() {
   const [opened, setOpened] = useState<Awaited<typeof opening> | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
+  const [storeFailure, setStoreFailure] = useState<StoreFailure | null>(null)
+  useEffect(() => window.althar.onStoreFailed(setStoreFailure), [])
   useEffect(
     () =>
       // Drawn as a transition, a little at a time, so the launch playing over it keeps every frame.
@@ -86,6 +91,7 @@ function Window() {
       ),
     [],
   )
+  if (storeFailure !== null) return <UpdateStoppedView failure={storeFailure} host={window.althar} />
   if (failed !== null) return <FailedOpen reason={failed} />
   return (
     <Launch ready={opened !== null} quick={openedBefore}>

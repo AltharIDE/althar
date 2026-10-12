@@ -12,7 +12,10 @@
   composes: name from '../Listening/Listening.module.css';
 }
 .mono {
+  /* even a command that can't be shortened leaves the pill its size */
+  max-width: 36ch;
   overflow: hidden;
+  white-space: nowrap;
   text-overflow: ellipsis;
   font: 500 11px var(--mono);
 }
@@ -72,4 +75,14 @@ span.url {
 }
 .rowMeta {
   composes: rowMeta from '../Listening/Listening.module.css';
+}
+
+/* where it runs, kept to a line beside how long */
+.where {
+  display: inline-block;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }

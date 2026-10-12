@@ -1,15 +1,30 @@
-/* The footer: cobalt words over a landscape engraved in cobalt, on the page's paper. */
+/* The footer: cobalt words over a landscape engraved in cobalt, on the page's paper. Never taller than the screen. */
 
-.footer { position: relative; height: clamp(900px, 76vw, 1120px); overflow: hidden; background: var(--n-2); color: #1f35c8; }
-.canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.footer {
+  position: relative;
+  height: max(600px, min(clamp(720px, 76vw, 1120px), 100svh));
+  overflow: hidden;
+  background: var(--n-2);
+  color: #1f35c8;
+}
+.land, .glow { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+/* Drawn off the page's thread, the landscape comes in when it is ready. */
+.land { opacity: 0; transition: opacity 900ms ease; }
+.land[data-drawn] { opacity: 1; }
+/* The light's canvas is as wide as the light; the script places it. */
+.glow { right: auto; }
 
-.words { position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 48px; max-width: var(--max); margin: 0 auto; padding: 140px var(--gut) 0; }
-.left { display: grid; justify-items: start; gap: 34px; }
+.words {
+  position: relative; z-index: 1; display: flex; justify-content: space-between; gap: 48px;
+  max-width: var(--max); margin: 0 auto; padding: clamp(72px, 12svh, 140px) var(--gut) 0;
+}
+.left { display: grid; justify-items: start; gap: clamp(22px, 3.4svh, 34px); }
 .statement {
   margin: 0;
   font-family: 'Inter Display', var(--display);
   font-weight: 200;
-  font-size: clamp(44px, 6.6vw, 100px);
+  /* As wide as the page allows, and short enough that the landscape keeps its room on a short screen. */
+  font-size: clamp(44px, min(6.6vw, 9.6svh), 100px);
   line-height: 0.98;
   letter-spacing: -0.05em;
 }
@@ -18,7 +33,10 @@
 .links { padding-top: 10px; }
 
 @media (max-width: 900px) {
-  .footer { height: auto; min-height: 980px; }
-  .words { flex-direction: column; padding-top: 96px; padding-bottom: 470px; }
+  .footer { height: max(100svh, 720px); }
+  .words { flex-direction: column; gap: 36px; padding-top: 64px; }
   .links { padding-top: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .land { transition: none; }
 }

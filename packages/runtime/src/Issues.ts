@@ -75,6 +75,17 @@ const summaryOf = (product: Product, issue: Issue): IssueSummary => ({
 
 type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections | ToolServer
 
+/** The repository a project's tasks change, as its host has it, through a ready connection: where `#12` lives. */
+export const projectRepository = (projectId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [binding] = yield* sql<{ remotes: string }>`
+      SELECT remote_fingerprints AS remotes FROM repository_bindings WHERE project_id = ${projectId} AND detached_at IS NULL ORDER BY created_at LIMIT 1`
+    if (binding === undefined) return null
+    const remotes = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(binding.remotes)
+    return yield* (yield* Connections).hostOf(remotes)
+  })
+
 export class Issues extends Context.Service<
   Issues,
   {
@@ -97,17 +108,6 @@ export class Issues extends Context.Service<
       const instance = yield* Instance
       const connections = yield* Connections
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
-
-      /** The repository a project's tasks change, as its host has it: where `#12` lives. */
-      const repositoryOf = (projectId: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const [binding] = yield* sql<{ remotes: string }>`
-            SELECT remote_fingerprints AS remotes FROM repository_bindings WHERE project_id = ${projectId} AND detached_at IS NULL ORDER BY created_at LIMIT 1`
-          if (binding === undefined) return null
-          const remotes = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(binding.remotes)
-          return yield* connections.hostOf(remotes)
-        })
 
       const unfurl = (link: string) =>
         Effect.gen(function* () {
@@ -167,10 +167,24 @@ export class Issues extends Context.Service<
             const issue = yield* found.tracker.issue(found.ref.ref)
             return { ...summaryOf(found.ref.product, issue), body: issue.body, connectionId: found.connectionId }
           }
+          // An issue the coordinator drafted and the person filed, by its key: through the connection that filed it. A repository's
+          // #12 is the project's own repository's, below; another repository's is read by its link.
+          if (projectId !== undefined && !wanted.startsWith('#')) {
+            const sql = yield* SqlClient.SqlClient
+            const [filed] = yield* sql<{ connectionId: string; product: Product; ref: string }>`
+              SELECT connection_id, product, issue_ref AS ref FROM issue_drafts
+              WHERE project_id = ${projectId} AND state = 'filed' AND upper(issue_key) = ${wanted.toUpperCase()}
+              ORDER BY decided_at DESC LIMIT 1`
+            const tracker = filed === undefined ? undefined : (yield* connections.adapters(filed.connectionId)).tracker
+            if (filed !== undefined && tracker !== undefined) {
+              const issue = yield* tracker.issue(filed.ref)
+              return { ...summaryOf(filed.product, issue), body: issue.body, connectionId: filed.connectionId }
+            }
+          }
           // #12: an issue in the project's repository.
           const number = /^#?(\d+)$/.exec(wanted)?.[1]
           if (number !== undefined && projectId !== undefined) {
-            const host = yield* repositoryOf(projectId)
+            const host = yield* projectRepository(projectId)
             const adapters = host === null ? undefined : yield* connections.adapters(host.connectionId)
             if (host === null || adapters?.tracker === undefined) return yield* new NotConnected({ product: 'github', what: wanted })
             const issue = yield* adapters.tracker.issue(`${host.path.join('/')}#${number}`)
@@ -187,7 +201,7 @@ export class Issues extends Context.Service<
 
       const mine = (projectId: string) =>
         Effect.gen(function* () {
-          const host = yield* repositoryOf(projectId)
+          const host = yield* projectRepository(projectId)
           const lists = yield* Effect.forEach(
             yield* connections.trackers,
             ({ connectionId, product, tracker }) => {

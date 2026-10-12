@@ -40,15 +40,26 @@ export function WindowButtons({ onClose, onMinimize, onToggleMaximize, maximized
   const t = { ...windowButtonsText, ...text }
   return (
     <span className={cx(s.lights, className)} {...rest}>
-      <button type="button" className={s.close} aria-label={t.close} onClick={onClose} />
-      <button type="button" className={s.minimize} aria-label={t.minimize} onClick={onMinimize} />
+      <button type="button" className={s.close} aria-label={t.close} onClick={onClose}>
+        <svg className={s.glyph} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="m4 4 8 8M12 4l-8 8" />
+        </svg>
+      </button>
+      <button type="button" className={s.minimize} aria-label={t.minimize} onClick={onMinimize}>
+        <svg className={s.glyph} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          <path d="M3 8h10" />
+        </svg>
+      </button>
       <button
         type="button"
         className={s.maximize}
         aria-label={maximized ? t.restore : t.maximize}
-        data-restore={maximized ? '' : undefined}
         onClick={onToggleMaximize}
-      />
+      >
+        <svg className={s.glyph} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+          {maximized ? <path d="M5 3h8v8M3 5v8h8" /> : <rect x="3.5" y="3.5" width="9" height="9" rx="0.7" />}
+        </svg>
+      </button>
     </span>
   )
 }

@@ -11,7 +11,9 @@ import {
   type CoordinatorSnapshot,
   type HomeEvent,
   type HomeSnapshot,
+  IssueDraftCard,
   type IssueSummary,
+  LimitCall,
   PAGE,
   Unfurl,
   type TaskPhase,
@@ -19,6 +21,10 @@ import {
   type StuckStep,
   type TaskList,
   type TaskSummary,
+  type DocumentText,
+  FieldAnswer,
+  type OutputText,
+  QuestionField,
   type ThreadItem,
   type ThreadSnapshot,
 } from '@althar/contracts'
@@ -26,14 +32,20 @@ import { Context, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Agents, RuntimeConfig } from './Config'
+import { questionTitle } from './Questions'
 import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
-import { GitFailed, NotFound } from './errors'
+import { filesOf, outputOf, picturesOf } from './handed'
+import { documentText, outputText } from './reading'
+import type { Artifacts } from './Artifacts'
+import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { Instance } from './Instance'
+import { Launches } from './Launches'
 import { commitsAhead, commitsOf, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
-import { commandIn } from './rules'
+import { commandIn, shortCommand } from './rules'
 import { Sessions } from './Sessions'
+import { actionsOf, standingOf } from './Tasks'
 
 /*
  * What screens show, read from the store (docs/architecture/02: queries
@@ -93,7 +105,7 @@ export const parse = (json: string | null): unknown => {
   }
 }
 
-const field = (value: unknown, key: string): unknown =>
+export const field = (value: unknown, key: string): unknown =>
   typeof value === 'object' && value !== null && key in value ? (value as Record<string, unknown>)[key] : undefined
 
 export const text = (value: unknown, key: string): string => {
@@ -113,10 +125,35 @@ interface ItemRow {
   readonly decision: string | null
   /** For a tool call the project's allow rules let through: the rules, as the decision keeps them (ADR-018). */
   readonly rule?: string | null
+  /** For a question: its call's state and payload, where its answer is. */
+  readonly questionState?: string | null
+  readonly questionPayload?: string | null
+  /** For a tool call: the agent asking the person something, which its question stands for. */
+  readonly asks?: number | null
   readonly createdAt: string
 }
 
+const decodeFields = Schema.decodeUnknownOption(Schema.Array(QuestionField))
+const decodeAnswers = Schema.decodeUnknownOption(Schema.Record(Schema.String, FieldAnswer))
+
+/** An agent's question as its call keeps it: what it asks, and once answered, what was said. */
+const questionOf = (payload: unknown) => ({
+  message: text(payload, 'message'),
+  fields: Option.getOrElse(decodeFields(field(payload, 'fields')), () => []),
+})
+
+/** An agent's question as a call shows it: what it asks, why, and who asks. */
+const askedOf = (payload: unknown, asker: { readonly agentId?: string | null; readonly model?: string | null }) => {
+  const why = text(payload, 'why')
+  return {
+    ...questionOf(payload),
+    ...(why === '' ? {} : { why }),
+    ...(asker.agentId == null ? {} : { askedBy: { agentId: asker.agentId, model: asker.model ?? null } }),
+  }
+}
+
 const decodeAllowedBy = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(AllowedBy)))
+const decodeLimit = Schema.decodeUnknownOption(LimitCall)
 const decodeAlways = Schema.decodeUnknownOption(AttentionRequest.fields.always)
 
 /** The first of the allow rules a decision keeps, or none where it keeps none. */
@@ -132,6 +169,7 @@ export const stuckOf = (payload: unknown): StuckStep => {
   const round = field(payload, 'round')
   const open = field(payload, 'open')
   const tried = field(payload, 'tried')
+  const limit = Option.getOrUndefined(decodeLimit(field(payload, 'limit')))
   return {
     step: step === 'review' || step === 'settle' || step === 'publish' ? step : 'implement',
     why:
@@ -159,6 +197,7 @@ export const stuckOf = (payload: unknown): StuckStep => {
           ),
         }
       : {}),
+    ...(limit === undefined ? {} : { limit }),
   }
 }
 
@@ -168,15 +207,26 @@ const number = (value: unknown, key: string): number | null => {
 }
 
 /** A call that waits on the person, as a screen shows it: what was asked, why it waits, and, for a step that needs them, which and why. */
-const callOf = (request: { readonly id: string; readonly kind: string; readonly payload: string; readonly createdAt: string }) => {
+const callOf = (request: {
+  readonly id: string
+  readonly kind: string
+  readonly payload: string
+  readonly createdAt: string
+  /** For a question: the agent and model of the session that asked. */
+  readonly askerAgentId?: string | null
+  readonly askerModel?: string | null
+}) => {
   const payload = parse(request.payload)
   return {
     id: request.id,
-    kind: request.kind === 'stuck' ? ('stuck' as const) : ('permission' as const),
-    title: text(payload, 'title'),
+    kind: request.kind === 'stuck' ? ('stuck' as const) : request.kind === 'question' ? ('question' as const) : ('permission' as const),
+    title: request.kind === 'question' ? questionTitle(questionOf(payload)) : text(payload, 'title'),
     reason: text(payload, 'reason'),
     command: text(payload, 'command') || null,
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
+    ...(request.kind === 'question'
+      ? { question: askedOf(payload, { agentId: request.askerAgentId ?? null, model: request.askerModel ?? null }) }
+      : {}),
     // What an "always" would keep, for a permission that says (ADR-018); earlier ones don't.
     ...Option.match(decodeAlways(field(payload, 'always')), {
       onNone: () => ({}),
@@ -232,6 +282,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
 }
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
+const decodeDraft = Schema.decodeUnknownOption(IssueDraftCard)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
 const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
@@ -255,9 +306,16 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       }
     case 'agent_message':
     case 'agent_thought':
-      return { ...base, kind: row.kind, content: { text: text(content, 'text') } }
+      return {
+        ...base,
+        kind: row.kind,
+        content: { text: text(content, 'text'), pictures: picturesOf(field(content, 'pictures')), files: filesOf(field(content, 'files')) },
+      }
     case 'tool_call': {
       const locations = field(content, 'locations')
+      const exit = field(content, 'exit')
+      const command = commandIn(field(content, 'rawInput')) ?? null
+      const label = command === null ? command : shortCommand(command)
       const allowedBy = row.decision === 'allow' ? allowedByOf(row.rule) : undefined
       return {
         ...base,
@@ -266,14 +324,20 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           title: text(content, 'title'),
           toolKind: text(content, 'kind') || 'other',
           status: text(content, 'status') || 'pending',
-          command: commandIn(field(content, 'rawInput')) ?? null,
+          command,
+          ...(label !== null && label !== command ? { label } : {}),
           locations: (Array.isArray(locations) ? locations : []).flatMap((location) => {
             const path = text(location, 'path')
             const line = field(location, 'line')
             return path === '' ? [] : [{ path, ...(typeof line === 'number' ? { line } : {}) }]
           }),
           declined: row.decision === 'reject',
+          ...(row.asks === 1 ? { asks: true } : {}),
           ...(allowedBy === undefined ? {} : { allowedBy }),
+          pictures: picturesOf(field(content, 'pictures')),
+          files: filesOf(field(content, 'files')),
+          output: outputOf(field(content, 'output')),
+          exit: typeof exit === 'number' ? exit : null,
         },
       }
     }
@@ -333,6 +397,23 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         },
       }
     }
+    case 'question': {
+      const payload = parse(row.questionPayload ?? '{}')
+      const state = row.questionState === 'answered' ? 'answered' : row.questionState === 'open' ? 'open' : 'withdrawn'
+      const toolCallId = text(content, 'toolCallId')
+      return {
+        ...base,
+        kind: 'question',
+        content: {
+          attentionId: text(content, 'attentionId'),
+          ...questionOf(content),
+          toolCallId: toolCallId === '' ? null : toolCallId,
+          state,
+          answers: state === 'answered' ? Option.getOrNull(decodeAnswers(field(payload, 'answers'))) : null,
+          withdrawn: state === 'withdrawn' ? (text(payload, 'withdrawn') === 'turn' ? 'turn' : 'task') : null,
+        },
+      }
+    }
     case 'arrival': {
       const source = text(content, 'source')
       const kind = text(content, 'kind')
@@ -362,6 +443,37 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         },
       }
     }
+    case 'run': {
+      const ended = field(content, 'ended')
+      const code = field(ended, 'code')
+      return {
+        ...base,
+        kind: 'run',
+        content: {
+          launchId: text(content, 'launchId'),
+          taskId: text(content, 'taskId') || null,
+          where: text(content, 'where'),
+          command: text(content, 'command'),
+          url: text(content, 'url') || null,
+          startedAt: text(content, 'startedAt'),
+          ended:
+            typeof ended === 'object' && ended !== null
+              ? {
+                  at: text(ended, 'at'),
+                  code: typeof code === 'number' ? code : null,
+                  stopped: field(ended, 'stopped') === true,
+                  last: text(ended, 'last') || null,
+                }
+              : null,
+        },
+      }
+    }
+    // An issue draft's card: Althar writes it whole with each change to the draft.
+    case 'issue_draft':
+      return Option.match(decodeDraft(content), {
+        onNone: () => undefined,
+        onSome: (card) => ({ ...base, kind: 'issue_draft' as const, content: card }),
+      })
     default:
       return undefined
   }
@@ -376,7 +488,7 @@ export interface ThreadChange {
   readonly threadId: string | null
 }
 
-type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig
+type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig | Artifacts | Launches
 
 export class Queries extends Context.Service<
   Queries,
@@ -390,6 +502,10 @@ export class Queries extends Context.Service<
       page?: { readonly before?: number; readonly limit?: number; readonly fresh?: boolean },
     ): Effect.Effect<ThreadSnapshot, SqlError.SqlError | NotFound>
     item(threadId: string, itemId: string): Effect.Effect<ThreadItem, SqlError.SqlError | NotFound>
+    /** What a command in a thread printed, as kept when it ended. */
+    output(threadId: string, itemId: string): Effect.Effect<OutputText, SqlError.SqlError | NotFound>
+    /** A markdown document an agent in a thread wrote, as it is now in the task's worktrees. */
+    document(threadId: string, path: string): Effect.Effect<DocumentText, SqlError.SqlError | NotFound | DocumentRefused>
     /** One file a task changed, as a diff from its base to its worktree; only a file it changed. */
     fileDiff(taskId: string, path: string): Effect.Effect<FileDiff, unknown>
     /** A project's board: its tasks, by card, and the calls that wait on the person. */
@@ -413,6 +529,7 @@ export class Queries extends Context.Service<
       const context = yield* Effect.context<Store>()
       const instance = yield* Instance
       const config = yield* RuntimeConfig
+      const launches = yield* Launches
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const live = LIVE.map((state) => `'${state}'`).join(', ')
 
@@ -459,7 +576,8 @@ export class Queries extends Context.Service<
                   WHERE e.run_id = r.id AND a.state = 'admitted')) AS ready,
             coalesce((SELECT json_extract(r.rules, '$.usageLimit') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 'move') AS usage_limit,
             coalesce((SELECT json_extract(r.rules, '$.accounts.rotate') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 0) AS rotate_accounts,
-            (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts
+            (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts,
+            (SELECT t.id FROM threads t WHERE t.project_id = p.id AND t.kind = 'coordinator' AND t.owner_actor_id = ${instance.personId}) AS coordinator_thread_id
           FROM projects p WHERE p.archived_at IS NULL ORDER BY p.created_at DESC, p.id DESC`
         return {
           cursor: at,
@@ -501,8 +619,15 @@ export class Queries extends Context.Service<
                 ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS decision,
               (SELECT d.rule FROM permission_requests r JOIN decisions d ON d.permission_request_id = r.id
                 WHERE r.provider_session_id = i.provider_session_id AND r.tool_call_id = i.tool_call_id
-                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS rule
+                ORDER BY d.decided_at DESC, d.id DESC LIMIT 1) AS rule,
+              q.state AS question_state, q.payload AS question_payload,
+              -- An agent's tool call that asks the person is the question it asks, which stands in its place.
+              (x.tool_call_id IS NOT NULL) AS asks
             FROM thread_items i
+            LEFT JOIN (SELECT provider_session_id, json_extract(content, '$.toolCallId') AS tool_call_id FROM thread_items
+              WHERE thread_id = ${threadId} AND kind = 'question') x
+              ON i.kind = 'tool_call' AND x.provider_session_id = i.provider_session_id AND x.tool_call_id = i.tool_call_id
+            LEFT JOIN attention_requests q ON i.kind = 'question' AND q.id = json_extract(i.content, '$.attentionId')
             LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
             LEFT JOIN user_inputs u ON u.id = i.user_input_id
             WHERE i.thread_id = ${threadId}
@@ -551,6 +676,7 @@ export class Queries extends Context.Service<
             models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
             turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
             context: Option.isSome(running) && running.value.sessionId === session.id ? running.value.context : null,
+            background: Option.isSome(running) && running.value.sessionId === session.id ? running.value.background : [],
           }
         })
 
@@ -1103,22 +1229,35 @@ export class Queries extends Context.Service<
       const callsIn = (projectId: string | null) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          const where = projectId === null ? sql`p.archived_at IS NULL` : sql`a.project_id = ${projectId}`
+          // A task's calls, and the questions a project's coordinator asks in its conversation.
           const calls = yield* sql<{
             id: string
             kind: string
             payload: string
             createdAt: string
             projectId: string
-            taskId: string
+            taskId: string | null
             threadId: string
-            taskTitle: string
-            taskSlug: string
+            taskTitle: string | null
+            taskSlug: string | null
+            askerAgentId: string | null
+            askerModel: string | null
           }>`
-            SELECT a.id, a.kind, a.payload, a.created_at, a.project_id, k.id AS task_id, t.id AS thread_id, k.title AS task_title, k.slug AS task_slug
-            FROM attention_requests a JOIN tasks k ON k.id = a.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-            JOIN projects p ON p.id = a.project_id
-            WHERE ${projectId === null ? sql`p.archived_at IS NULL` : sql`a.project_id = ${projectId}`} AND a.state = 'open'
-            ORDER BY a.created_at, a.id`
+            SELECT id, kind, payload, created_at, project_id, task_id, thread_id, task_title, task_slug,
+              (SELECT agent_id FROM provider_sessions WHERE id = json_extract(payload, '$.sessionId')) AS asker_agent_id,
+              (SELECT model FROM provider_sessions WHERE id = json_extract(payload, '$.sessionId')) AS asker_model
+            FROM (
+              SELECT a.id, a.kind, a.payload, a.created_at, a.project_id, k.id AS task_id, t.id AS thread_id, k.title AS task_title, k.slug AS task_slug
+              FROM attention_requests a JOIN tasks k ON k.id = a.task_id JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+              JOIN projects p ON p.id = a.project_id
+              WHERE ${where} AND a.state = 'open'
+              UNION ALL
+              SELECT a.id, a.kind, a.payload, a.created_at, a.project_id, NULL, t.id, NULL, NULL
+              FROM attention_requests a JOIN threads t ON t.id = json_extract(a.payload, '$.threadId') AND t.kind = 'coordinator'
+              JOIN projects p ON p.id = a.project_id
+              WHERE ${where} AND a.state = 'open' AND a.task_id IS NULL AND a.kind = 'question')
+            ORDER BY created_at, id`
           return calls.map((call) => ({
             projectId: call.projectId,
             call: {
@@ -1302,8 +1441,17 @@ export class Queries extends Context.Service<
           if (head === undefined) return yield* new NotFound({ kind: 'task thread', id: threadId })
           // What the store says comes first, together, so it is as of the cursor; git after.
           const { items, earlier } = yield* pageOf(threadId, page)
-          const attention = yield* sql<{ id: string; kind: string; payload: string; createdAt: string }>`
-            SELECT id, kind, payload, created_at FROM attention_requests WHERE task_id = ${head.taskId} AND state = 'open' ORDER BY created_at`
+          const attention = yield* sql<{
+            id: string
+            kind: string
+            payload: string
+            createdAt: string
+            askerAgentId: string | null
+            askerModel: string | null
+          }>`
+            SELECT a.id, a.kind, a.payload, a.created_at, (SELECT agent_id FROM provider_sessions WHERE id = json_extract(a.payload, '$.sessionId')) AS asker_agent_id,
+              (SELECT model FROM provider_sessions WHERE id = json_extract(a.payload, '$.sessionId')) AS asker_model
+            FROM attention_requests a WHERE a.task_id = ${head.taskId} AND a.state = 'open' ORDER BY a.created_at`
           // Since when the step it is on has run, or been held.
           const [onStep] = yield* sql<{ admittedAt: string }>`
             SELECT a.admitted_at FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
@@ -1318,6 +1466,8 @@ export class Queries extends Context.Service<
             SELECT s.agent_id, s.model, a.name AS account FROM provider_sessions s LEFT JOIN agent_accounts a ON a.id = s.account_id
             WHERE s.thread_id = ${threadId} ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
           const planned = card?.plan?.steps.find((step) => step.key === 'implement')
+          // What the person can do to it as a whole, from where it stands.
+          const standing = yield* standingOf(head.taskId)
           // Its links, whose open pull requests say what isn't pushed, what git says of its worktrees, and its host, read at the same time.
           const [links, said, host] = yield* Effect.all(
             [linksOf(head.taskId), gitOf(head.taskId, { changed: true, here: true, fresh: page.fresh === true }), hostOf(head.projectId)],
@@ -1353,6 +1503,10 @@ export class Queries extends Context.Service<
               commits: said.commits,
               here: said.here,
               merged: said.merged,
+              actions: [...actionsOf(standing)],
+              planId: standing.planId,
+              runCommand: yield* launches.commandFor(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => null)),
+              launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
             },
             session,
             attention: attention.map(callOf),
@@ -1395,6 +1549,9 @@ export class Queries extends Context.Service<
             items,
             earlier,
             host,
+            runCommand: yield* launches.commandFor(projectId, null).pipe(Effect.orElseSucceed(() => null)),
+            // Every run in the project, the tasks' too: the coordinator's screen is the project's.
+            launches: yield* launches.ofProject(projectId),
           } satisfies CoordinatorSnapshot
         })
 
@@ -1425,6 +1582,7 @@ export class Queries extends Context.Service<
                 WHEN 'task' THEN (SELECT id FROM threads WHERE task_id = c.aggregate_id AND kind = 'task')
                 WHEN 'external_link' THEN (SELECT t.id FROM external_links x
                   JOIN threads t ON t.task_id = x.task_id AND t.kind = 'task' WHERE x.id = c.aggregate_id)
+                WHEN 'issue_draft' THEN (SELECT thread_id FROM issue_drafts WHERE id = c.aggregate_id)
               END AS thread_id
             FROM change_log c WHERE c.cursor > ${after} ORDER BY c.cursor LIMIT ${limit}`
         })
@@ -1449,6 +1607,28 @@ export class Queries extends Context.Service<
         board: (projectId) => run(board(projectId)),
         home: (since) => run(home(since)),
         item: (threadId, itemId) => run(item(threadId, itemId)),
+        // A command still running is read from what it has printed so far; one that ended, from what was kept.
+        output: (threadId, itemId) =>
+          run(
+            Effect.gen(function* () {
+              const soFar = yield* (yield* Sessions).outputSoFar(threadId, itemId)
+              return Option.isSome(soFar) ? { text: soFar.value.text, dropped: soFar.value.dropped } : yield* outputText(threadId, itemId)
+            }),
+          ),
+        document: (threadId, path) =>
+          run(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              // A task's documents are in its worktrees here; the coordinator writes none.
+              const [thread] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM threads WHERE id = ${threadId}`
+              if (thread?.taskId == null) return yield* new NotFound({ kind: 'document', id: path })
+              const worktrees = yield* worktreesOf(thread.taskId)
+              return yield* documentText(
+                path,
+                worktrees.map((worktree) => worktree.path),
+              )
+            }),
+          ),
         coordinator: (projectId, page) => run(coordinator(projectId, page)),
         changesSince: (after, limit) => run(changesSince(after, limit)),
         cursor: run(cursor),

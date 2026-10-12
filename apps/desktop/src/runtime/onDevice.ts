@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 import { type LaunchSpec, usualDirs } from '@althar/provider-adapters'
 import type { OnDevice } from '@althar/runtime'
@@ -47,6 +49,24 @@ const FROM_THE_EXECUTOR = [
   'GIT_TERMINAL_PROMPT',
 ] as const
 
+/**
+ * A worktree's .git file can name its git directory through the portal path,
+ * which only exists inside the sandbox. Give host git the translated paths.
+ */
+export const worktreeEnvironment = (cwd: string, gitFile: string, uid: number): Readonly<Record<string, string>> => {
+  const gitDir = /^gitdir:\s*(.+?)\s*$/m.exec(gitFile)?.[1]
+  if (gitDir === undefined) return {}
+  return { GIT_DIR: portalPath(resolve(cwd, gitDir), uid), GIT_WORK_TREE: portalPath(cwd, uid) }
+}
+
+const worktreeEnvironmentAt = (cwd: string, uid: number): Readonly<Record<string, string>> => {
+  try {
+    return worktreeEnvironment(cwd, readFileSync(resolve(cwd, '.git'), 'utf8'), uid)
+  } catch {
+    return {}
+  }
+}
+
 export interface DeviceFacts {
   /** The device's own environment, as its session has it. */
   readonly env: Readonly<Record<string, string>>
@@ -77,7 +97,10 @@ export const relayOut = (
     const value = at.env[name]
     if (value !== undefined && value !== facts.ambient[name]) args.push(`--env=${name}=${portalPath(value, facts.uid)}`)
   }
-  if (at.cwd !== undefined) args.push(`--directory=${portalPath(at.cwd, facts.uid)}`)
+  if (at.cwd !== undefined) {
+    for (const [name, value] of Object.entries(worktreeEnvironmentAt(at.cwd, facts.uid))) args.push(`--env=${name}=${value}`)
+    args.push(`--directory=${portalPath(at.cwd, facts.uid)}`)
+  }
   return {
     command: 'flatpak-spawn',
     args: [...args, portalPath(spec.command, facts.uid), ...spec.args.map((arg) => portalPath(arg, facts.uid))],
@@ -85,8 +108,12 @@ export const relayOut = (
   }
 }
 
-/** The commands whose places are looked up on the device: the agents the person may have installed themselves. */
-export const HOST_COMMANDS = ['opencode', 'claude', 'codex'] as const
+/**
+ * The commands whose places are looked up on the device. Claude's ACP
+ * adapter and CLI are bundled in the Flatpak and use its persistent profile;
+ * host `claude` sign-in would report a different home from its sessions.
+ */
+export const HOST_COMMANDS = ['opencode', 'codex'] as const
 
 /** A shell script for the device that prints each name it finds, and where: one line, a tab apart. */
 export const whereScript = (names: ReadonlyArray<string>, dirs: ReadonlyArray<string> = usualDirs('linux', '$HOME', {})): string =>

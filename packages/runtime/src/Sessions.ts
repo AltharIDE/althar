@@ -5,9 +5,12 @@ import { Commands, type CommandIdReused, Ledger, type RevisionConflict, type Row
 import {
   type AgentConnection,
   type AgentDefinition,
+  type AgentExited,
+  type AgentRequestFailed,
   type AgentSession,
   connect,
   type ConfigOption,
+  type Question,
   type SessionEvent,
   type StopReport,
 } from '@althar/provider-adapters'
@@ -15,8 +18,10 @@ import { Cause, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Option
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
+import type { Artifacts } from './Artifacts'
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
+import { coordinatorNews, modelNamer } from './coordinatorNews'
 import {
   AlreadyDelivered,
   EffortUnchanged,
@@ -26,19 +31,24 @@ import {
   NotFound,
   SessionFailed,
   SessionRunning,
+  TaskRefused,
   type UnknownAgent,
 } from './errors'
 import { Instance } from './Instance'
 import { Limits } from './Limits'
 import { Live } from './Live'
+import type { Models } from './Models'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
+import { Questions } from './Questions'
 import { touchCard } from './cards'
 import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
 import { git } from './git'
 import { reviewCopyOf } from './reviewCopy'
 import { defaultEffortOf } from './preferences'
-import { addItem, recorder, transcript } from './threads'
+import { addItem, type OutputSoFar, recorder, toolItem, transcript } from './threads'
+import { commandOfCall, exitCodeIn, type LeftRunning, printedMore, servingAt, type ShownLeftRunning, shownOf, tailOf } from './leftRunning'
+import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
 
@@ -134,6 +144,12 @@ type ThreadContext = TaskThread | CoordinatorThread | ReviewThread
 /** Where a thread's agent works. */
 const cwdOf = (thread: ThreadContext) => (thread.role === 'coordinator' ? thread.folder.folder : thread.cwd)
 
+/** Every folder a thread's agent works in: a picture an agent points at is read only from inside them. */
+const foldersOf = (thread: ThreadContext): ReadonlyArray<string> =>
+  thread.role === 'coordinator'
+    ? [thread.folder.folder]
+    : [...new Set([thread.cwd, ...thread.repositories.map((repository) => repository.worktree)])]
+
 /** Where an agent starts among a task's repositories: in the one, or the folder in it the project is about; among several, the folder that holds them. */
 const startIn = (repositories: ReadonlyArray<{ readonly worktree: string; readonly within: string | null }>) => {
   const [first] = repositories
@@ -172,7 +188,15 @@ interface Running {
   stopping: boolean
   /** How full the agent's context is, in tokens, as it last said; null until it says (ACP's usage updates). */
   context: { readonly used: number; readonly size: number } | null
+  /** What records its events now: its turn's, or the one between turns. */
+  recording: { readonly outputOf: (itemId: string) => OutputSoFar | undefined } | undefined
+  /** What it left running in the background, in the order it started them (leftRunning.ts). */
+  readonly background: Map<string, LeftRunning>
 }
+
+/** How often, and for how long, what one left running is read for where it answers. */
+const SERVING_EVERY = Duration.millis(500)
+const SERVING_TRIES = 240
 
 /** Keeps what the agent last said of its context, from an event it streamed. */
 const heardContext = (running: Running, event: SessionEvent) => {
@@ -185,6 +209,7 @@ const accountOf = (input: { readonly accountId?: string }) => (input.accountId =
 type StopRequest = { readonly state: 'completed' } | { readonly state: 'superseded'; readonly by: string }
 
 type Store =
+  | Artifacts
   | SqlClient.SqlClient
   | Ledger
   | Commands
@@ -193,10 +218,12 @@ type Store =
   | Live
   | Agents
   | Permissions
+  | Questions
   | ToolServer
   | RuntimeConfig
   | Accounts
   | Limits
+  | Models
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
 
 /** A turn's input was taken back while the turn was being made: it is made again from what still waits. */
@@ -244,6 +271,8 @@ export const promptFor = (
     readonly cutShort?: string
   }>,
   brief: { readonly text: string; readonly closing: string } | undefined,
+  /** What Althar tells the agent first, before what was said: what changed while it wasn't speaking. */
+  news: string | null = null,
 ) => {
   const parts = inputs.map((input) => {
     const said =
@@ -255,8 +284,9 @@ export const promptFor = (
       ? said
       : `${input.cutShort} was working on this when it reached its usage limit, and may have done some of it already. Check what is done before you carry on.\n\n${said}`
   })
-  if (brief === undefined) return parts.join('\n\n')
-  return [brief.text, ...(parts.length === 0 ? [brief.closing] : parts)].join('\n\n')
+  const said = news === null ? parts : [news, ...parts]
+  if (brief === undefined) return said.join('\n\n')
+  return [brief.text, ...(parts.length === 0 ? [brief.closing] : said)].join('\n\n')
 }
 
 /** Why a turn ended in failure, as a class for the record. */
@@ -287,7 +317,9 @@ export class Sessions extends Context.Service<
       readonly model?: string
       /** How hard it thinks, where the agent offers a choice; the agent's own default without one. */
       readonly effort?: string
-    }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | Failure>
+      /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
+      readonly accountId?: string
+    }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Accepts input into the thread's queue, and delivers it when the session can take it. */
     send(input: {
       readonly envelope: CommandEnvelope
@@ -320,11 +352,17 @@ export class Sessions extends Context.Service<
       readonly about?: 'limit' | 'stall'
       /** What the person said with it: the new agent's first turn, after its brief, and never the old one's. */
       readonly message?: { readonly envelope: CommandEnvelope; readonly body: string }
-    }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | Failure>
+      /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
+      readonly accountId?: string
+    }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
     interrupt(threadId: string): Effect.Effect<void, NoSession>
     /** Stops the thread's session, after ending its turn. */
     stop(threadId: string): Effect.Effect<void, NoSession>
+    /** Stops a command the thread's session left running; it goes from the list. Nothing, where the session or the command is gone already. */
+    stopBackground(threadId: string, id: string): Effect.Effect<void, AgentRequestFailed | AgentExited>
+    /** Clears one that ended by itself from the list. */
+    clearBackground(threadId: string, id: string): Effect.Effect<void>
     /** The session running on a thread, if there is one. */
     running(threadId: string): Effect.Effect<
       Option.Option<{
@@ -336,8 +374,14 @@ export class Sessions extends Context.Service<
         readonly pid: number | null
         /** How full its context is, in tokens, as the agent last said; null until it says. */
         readonly context: { readonly used: number; readonly size: number } | null
+        /** It is being stopped: on its way out, not one to carry on with. */
+        readonly stopping: boolean
+        /** What it left running in the background. */
+        readonly background: ReadonlyArray<ShownLeftRunning>
       }>
     >
+    /** What a command on a thread has printed so far, while it runs: its last lines, and how many came before them. */
+    outputSoFar(threadId: string, itemId: string): Effect.Effect<Option.Option<OutputSoFar>>
   }
 >()('@althar/runtime/Sessions') {
   static readonly layer: Layer.Layer<Sessions, never, Store> = Layer.effect(
@@ -347,6 +391,7 @@ export class Sessions extends Context.Service<
       const instance = yield* Instance
       const live = yield* Live
       const permissions = yield* Permissions
+      const questions = yield* Questions
       const accounts = yield* Accounts
       const limits = yield* Limits
       const toolServer = yield* ToolServer
@@ -356,6 +401,92 @@ export class Sessions extends Context.Service<
       const threads = new Map<string, Running>()
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
+      /** Tells watching clients what a session has left running, whole. */
+      const toldBackground = (running: Running) =>
+        live.publish({ _tag: 'Background', threadId: running.thread.threadId, background: [...running.background.values()].map(shownOf) })
+
+      /** What one has printed: its file, where the agent says, else what came on its tool call. */
+      const printedBy = (left: LeftRunning) => (left.outputPath !== null ? tailOf(left.outputPath) : Effect.succeed(left.printed))
+
+      /** What its tool call printed before the agent said it left it running: in the turn still, or kept when the turn ended. */
+      const printedBefore = (running: Running, itemId: string | undefined) =>
+        itemId === undefined
+          ? Effect.succeed('')
+          : Option.match(Option.fromNullishOr(running.recording?.outputOf(itemId)), {
+              onSome: (soFar) => Effect.succeed(soFar.text),
+              onNone: () =>
+                outputText(running.thread.threadId, itemId).pipe(
+                  Effect.map((kept) => kept.text),
+                  Effect.orElseSucceed(() => ''),
+                ),
+            })
+
+      /** Reads what one prints, now and then, until it says where it answers, ends, or a couple of minutes go by. */
+      const watchServing = (running: Running, id: string) =>
+        Effect.gen(function* () {
+          for (let tries = 0; tries < SERVING_TRIES; tries += 1) {
+            const left = running.background.get(id)
+            if (left === undefined || left.ended !== null) return
+            const url = servingAt(yield* printedBy(left))
+            if (url !== null) {
+              left.url = url
+              return yield* toldBackground(running)
+            }
+            yield* Effect.sleep(SERVING_EVERY)
+          }
+        })
+
+      /** Keeps what the agent says of what it left running, from an event it streamed, in a turn or between. */
+      const heardBackground = (running: Running, event: SessionEvent) =>
+        run(
+          Effect.gen(function* () {
+            switch (event._tag) {
+              case 'BackgroundStarted': {
+                // The thread has its tool call already: the agent says what it left running once the call is made.
+                const item = event.toolCallId === undefined ? undefined : yield* toolItem(running.sessionId, event.toolCallId)
+                running.background.set(event.id, {
+                  id: event.id,
+                  command: commandOfCall(item?.content, event.name),
+                  toolCallId: event.toolCallId ?? null,
+                  outputPath: event.outputPath ?? null,
+                  printed: yield* printedBefore(running, item?.id),
+                  url: null,
+                  startedAt: yield* timestamp,
+                  ended: null,
+                })
+                yield* toldBackground(running)
+                yield* Effect.forkIn(watchServing(running, event.id), running.scope)
+                return
+              }
+              case 'ToolCallUpdate': {
+                const more = event.terminal?.output
+                if (more === undefined) return
+                for (const left of running.background.values())
+                  if (left.toolCallId === event.toolCallId) left.printed = printedMore(left.printed, more)
+                return
+              }
+              case 'BackgroundOutput': {
+                const left = running.background.get(event.id)
+                if (left !== undefined) left.outputPath = event.outputPath
+                return
+              }
+              case 'BackgroundEnded': {
+                const left = running.background.get(event.id)
+                if (left === undefined) return
+                // Stopped, it goes, whoever stopped it. Ended by itself, it stays, to say how.
+                if (event.end === 'stopped') running.background.delete(event.id)
+                else {
+                  const code = exitCodeIn(yield* printedBy(left)) ?? (event.end === 'completed' ? 0 : null)
+                  left.ended = { at: yield* timestamp, code }
+                }
+                return yield* toldBackground(running)
+              }
+              default:
+                return
+            }
+          }),
+        ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not keep what an agent left running', cause)))
+
       /** No agent starts, and nothing is said to one, in a project removed from Althar: a window that hadn't heard yet is told it's gone. */
       const inLiveProject = (threadId: string) =>
         Effect.gen(function* () {
@@ -364,6 +495,15 @@ export class Sessions extends Context.Service<
             SELECT p.id AS project_id FROM threads t JOIN projects p ON p.id = t.project_id
             WHERE t.id = ${threadId} AND p.archived_at IS NOT NULL`
           if (removed !== undefined) return yield* new NotFound({ kind: 'project', id: removed.projectId })
+        })
+
+      /** An abandoned task has no agent on it until it is reopened. */
+      const notAbandoned = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [abandoned] = yield* sql<{ taskId: string }>`
+            SELECT k.id AS task_id FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.id = ${threadId} AND k.state = 'abandoned'`
+          if (abandoned !== undefined) return yield* new TaskRefused({ taskId: abandoned.taskId, why: 'abandoned' })
         })
 
       const loadThread = (threadId: string) =>
@@ -486,7 +626,16 @@ export class Sessions extends Context.Service<
               Effect.catchCause((cause) => Effect.logWarning('Could not refresh the coordinator folder', cause)),
             )
           const brief = running.brief
-          const prompt = promptFor(inputs, brief)
+          // The coordinator is told what became of its plans in its models' names, which are read first: asking an agent may take a while.
+          const named =
+            thread.role === 'coordinator'
+              ? yield* modelNamer.pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.as(Effect.logWarning('Could not read the models to name for the coordinator', cause), null),
+                  ),
+                )
+              : null
+          let prompt = promptFor(inputs, brief)
           const turnId = yield* newId(Ids.turnDelivery)
           const [session] = yield* sql<{
             model: string | null
@@ -501,6 +650,15 @@ export class Sessions extends Context.Service<
                     id: string
                   }>`SELECT id FROM user_inputs WHERE state = 'queued' AND id IN ${sql.in(inputs.map((input) => input.id))}`
                   if (still.length < inputs.length) return yield* new TakenBack()
+                }
+                // What became of its plans since it last spoke, which only the cards show the person: read with the turn's record, so none falls between two turns.
+                if (thread.role === 'coordinator' && named !== null) {
+                  const news = yield* coordinatorNews(thread.threadId, thread.projectId, named).pipe(
+                    Effect.catchCause((cause) =>
+                      Effect.as(Effect.logWarning('Could not read what changed for the coordinator', cause), null),
+                    ),
+                  )
+                  prompt = promptFor(inputs, brief, news)
                 }
                 const at = yield* timestamp
                 yield* sql`INSERT INTO turn_deliveries ${sql.insert({
@@ -575,7 +733,9 @@ export class Sessions extends Context.Service<
             threadId: thread.threadId,
             sessionId: running.sessionId,
             deliveryId: turnId,
+            folders: foldersOf(thread),
           })
+          running.recording = items
           let ended: Extract<SessionEvent, { _tag: 'TurnEnded' }> | undefined
           // A failure to record one event doesn't stop the runtime reading the rest of the turn.
           const record = (event: SessionEvent) =>
@@ -583,22 +743,30 @@ export class Sessions extends Context.Service<
           /*
            * The text being written goes to watching clients whole, at most every
            * STREAM_EVERY, and once more after the last piece, so a long message
-           * doesn't cost the square of its length on the way.
+           * doesn't cost the square of its length on the way. So does each
+           * command's output that grew, as its last lines.
            */
           const streaming = { sentAt: 0, trailing: false }
           const sendOpen = Effect.suspend(() => {
             streaming.sentAt = Date.now()
             const open = items.current()
-            return open === undefined
-              ? Effect.void
-              : live.publish({
-                  _tag: 'Streaming',
-                  threadId: thread.threadId,
-                  itemId: open.id,
-                  kind: open.kind,
-                  agentId: running.entry.definition.id,
-                  text: open.text,
-                })
+            const message =
+              open === undefined
+                ? Effect.void
+                : live.publish({
+                    _tag: 'Streaming',
+                    threadId: thread.threadId,
+                    itemId: open.id,
+                    kind: open.kind,
+                    agentId: running.entry.definition.id,
+                    text: open.text,
+                  })
+            return Effect.andThen(
+              message,
+              Effect.forEach(items.outputsSoFar(), (output) => live.publish({ _tag: 'Output', threadId: thread.threadId, ...output }), {
+                discard: true,
+              }),
+            )
           })
           const stream = Effect.suspend(() => {
             const wait = STREAM_EVERY - (Date.now() - streaming.sentAt)
@@ -624,11 +792,13 @@ export class Sessions extends Context.Service<
               if (event._tag === 'TurnEnded') ended = event
               heardContext(running, event)
               yield* record(event)
+              yield* heardBackground(running, event)
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
-              if (event._tag === 'AgentMessage' || event._tag === 'AgentThought') yield* stream
+              if (event._tag === 'AgentMessage' || event._tag === 'AgentThought' || event._tag === 'ToolCallUpdate') yield* stream
             }),
           ).pipe(Effect.exit)
-          yield* items.flush.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the end of a message', cause)))
+          // What the turn left open is kept as far as it came: the message being written, and any command's output.
+          yield* items.end.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the end of a message', cause)))
           running.turnRunning = false
 
           const failure = Exit.isFailure(streamed) ? Cause.findErrorOption(streamed.cause) : Option.none()
@@ -771,6 +941,8 @@ export class Sessions extends Context.Service<
           threads.delete(running.thread.threadId)
           yield* running.revokeTools
           yield* permissions.withdrawAll(running.sessionId)
+          // What it asked the person stays for them: the answer goes to the agent on the thread next.
+          yield* questions.release(running.sessionId)
           yield* Scope.close(running.scope, Exit.void)
           const stop: StopReport | undefined =
             running.connection.process === undefined ? undefined : yield* running.connection.process.stopped
@@ -915,6 +1087,16 @@ export class Sessions extends Context.Service<
                 transport,
                 onPermission: (request) => permissions.decide(requestContext, request),
                 permissions: definition.permissions,
+                // The lead and the coordinator may ask the person; a reviewer is given no way to, and decides for itself.
+                ...(thread.role === 'reviewer'
+                  ? {}
+                  : {
+                      onQuestion: (question: Question) =>
+                        questions.ask(
+                          { projectId: thread.projectId, threadId: thread.threadId, taskId: requestContext.taskId, sessionId },
+                          question,
+                        ),
+                    }),
               })
               const agent = yield* connection.newSession({
                 cwd: cwdOf(thread),
@@ -1007,19 +1189,26 @@ export class Sessions extends Context.Service<
             turnRunning: false,
             stopping: false,
             context: null,
+            recording: undefined,
+            background: new Map(),
           }
           threads.set(thread.threadId, running)
           yield* Effect.forkIn(run(deliveries(running)), scope)
           // What the agent says between turns, such as leaving plan mode, goes to the thread too.
-          const between = recorder({ projectId: thread.projectId, threadId: thread.threadId, sessionId })
+          const between = recorder({ projectId: thread.projectId, threadId: thread.threadId, sessionId, folders: foldersOf(thread) })
+          // A turn that already started records itself; between turns, this one does.
+          running.recording ??= between
           yield* Effect.forkIn(
             run(
               Stream.runForEach(agent.events, (event) =>
                 Effect.andThen(
                   Effect.andThen(
-                    Effect.sync(() => heardContext(running, event)),
-                    Effect.andThen(between.record(event), between.flush),
-                  ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
+                    Effect.andThen(
+                      Effect.sync(() => heardContext(running, event)),
+                      Effect.andThen(between.record(event), between.flush),
+                    ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
+                    heardBackground(running, event),
+                  ),
                   live.publish({ _tag: 'Agent', threadId: thread.threadId, event }),
                 ),
               ),
@@ -1047,6 +1236,8 @@ export class Sessions extends Context.Service<
       const stopRunning = (running: Running, request: StopRequest) =>
         Effect.gen(function* () {
           running.stopping = true
+          // What it asked the person stays for them, though its turn ends now: the answer goes to the agent on the thread next.
+          yield* questions.release(running.sessionId)
           const ended = yield* Effect.andThen(
             Effect.ignore(running.agent.interrupt),
             running.delivering.withPermits(1)(Deferred.succeed(running.stopRequest, request)),
@@ -1079,6 +1270,7 @@ export class Sessions extends Context.Service<
           Effect.gen(function* () {
             if (threads.has(input.threadId)) return yield* new SessionRunning({ threadId: input.threadId })
             yield* inLiveProject(input.threadId)
+            yield* notAbandoned(input.threadId)
             const thread = yield* loadThread(input.threadId)
             const entry = yield* (yield* Agents).get(input.agentId)
             const account = yield* limits.pick({
@@ -1372,6 +1564,8 @@ export class Sessions extends Context.Service<
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
             // Althar reaches the code host for the task (ADR-011).
             "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: the person looks at your commits and pushes them to the pull request themselves. read_issue reads the issue the task came from, or any other.",
+            // Althar runs the project for the person itself (ADR-023): the lead keeps how, when it changes it.
+            'Althar runs the project for the person, with no agent, from a command it works out from the repository or keeps for it. If you change how the project runs, such as its dev script, its port or what it needs installed first, keep it with set_run_command.',
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),
             ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
             ...(status === '' ? [] : [`Not yet committed:\n${cap(status)}`]),
@@ -1393,14 +1587,19 @@ export class Sessions extends Context.Service<
                       ? `- ${repository.name}: ${repository.path} (${repository.base})`
                       : `- ${repository.name}, its folder ${repository.within}: ${repository.path} (${repository.base}). That folder is what the project is about; the rest of the repository is in ${repository.root}.`,
                   )
-                  .join('\n')}\nRead and search them to answer questions and to plan. Anything you write there is thrown away.`,
+                  .join(
+                    '\n',
+                  )}\nRead and search them to answer questions and to plan. Anything you write there is thrown away. Commands that change anything, such as installing packages or starting a server, are refused there by Althar, for your role, not by the person. To run the project, use run_project.`,
             [
               "To get a change made, use Althar's tools:",
               `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
               '- list_models, for the models you can give work to now, with how each scores and whether a plan pays for it.',
               '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
+              "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built. It shows over the composer with where it answers. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command.",
+              "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
               '- list_tasks, read_task and read_thread, to see what is under way and how it went.',
               "- read_issue and find_issues, for the issues on the person's connected trackers and in the project's repository. When the person points at an issue, read it, and draft the task from it with its link or key as draft_task's issue.",
+              "- draft_issue, when the person wants something tracked rather than done now, such as a bug you found or follow-up work, as an issue on one of their connected trackers. It files nothing: the person sees it as a card, and files it, changes it or discards it there. Once they file it, you hear its key and link, and a task drafted from it later takes that as draft_task's issue.",
               "- message_lead, to pass something to a task's lead.",
             ].join('\n'),
             [
@@ -1410,7 +1609,7 @@ export class Sessions extends Context.Service<
               '- Prefer a model a plan pays for over one paid per use, when they would do the work as well.',
               "- Review with a model from a different maker than the lead's, where one can be used.",
             ].join('\n'),
-            'Answer questions yourself; only changes become tasks. Keep your replies short: the person sees each task as a card, so say in a sentence what you planned, and not the plan itself again.',
+            'Answer questions yourself; changes, and anything to try out, become tasks. Keep your replies short: the person sees each task as a card, so say in a sentence what you planned, and not the plan itself again.',
             ...(yield* threadSoFar(thread.threadId)),
           ].join('\n\n')
         })
@@ -1436,6 +1635,7 @@ export class Sessions extends Context.Service<
         exclusive(
           input.threadId,
           Effect.gen(function* () {
+            yield* notAbandoned(input.threadId)
             const thread = yield* loadThread(input.threadId)
             const entry = yield* (yield* Agents).get(input.agentId)
             const previous = threads.get(input.threadId)
@@ -1513,8 +1713,28 @@ export class Sessions extends Context.Service<
                   turnRunning: running.turnRunning,
                   pid: running.connection.process?.pid ?? null,
                   context: running.context,
+                  stopping: running.stopping,
+                  background: [...running.background.values()].map(shownOf),
                 })
           }),
+        stopBackground: (threadId, id) =>
+          Effect.gen(function* () {
+            const running = threads.get(threadId)
+            const left = running?.background.get(id)
+            if (running === undefined || left === undefined) return
+            // Ended by itself, there is nothing to stop. Gone already as the agent tells it, it goes from the list all the same.
+            if (left.ended === null) yield* running.agent.stopBackground(id)
+            running.background.delete(id)
+            yield* toldBackground(running)
+          }),
+        clearBackground: (threadId, id) =>
+          Effect.gen(function* () {
+            const running = threads.get(threadId)
+            if (running === undefined || running.background.get(id)?.ended == null) return
+            running.background.delete(id)
+            yield* toldBackground(running)
+          }),
+        outputSoFar: (threadId, itemId) => Effect.sync(() => Option.fromNullishOr(threads.get(threadId)?.recording?.outputOf(itemId))),
       })
     }),
   )

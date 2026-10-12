@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, rmSync } from 'node:fs'
+import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import * as acp from '@agentclientprotocol/sdk'
@@ -7,6 +8,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
 import type { InProcessAgent } from '../AgentConnection'
+import { stopBackgroundMethod, type StopBackgroundResponse } from '../background'
 
 /*
  * A scripted ACP agent for tests, so the adapter's contract runs in CI without
@@ -48,8 +50,14 @@ export const scenarios = {
   fileEdit: 'file-edit',
   /** Like `fileEdit`, but it asks again every time the turn is resumed. */
   stubborn: 'stubborn',
-  /** Asks the person a question and repeats the answer. */
+  /** Asks the person a plain question, as an MCP server's form does, and repeats the answer. */
   question: 'question',
+  /**
+   * Asks as Claude Code's AskUserQuestion does: a tool call, then a form of
+   * two questions, the second with several picks, each with a field for the
+   * person's own words; repeats the answer.
+   */
+  questions: 'questions',
   /** Claude's structured report of an exhausted quota, then a normal end. */
   quota: 'quota',
   /** Claude's structured report of a full context. */
@@ -65,12 +73,54 @@ export const scenarios = {
   /** The process exits mid-turn. Only when the agent runs as a process. */
   exit: 'exit',
   /**
+   * What an agent hands back, in each agent's shape: a command's output
+   * streamed in chunks and its exit (Codex), a failing command's output
+   * whole at its end (Claude Code), output as the tool's own words, whole
+   * each time (OpenCode), a screenshot, a picture in a message, a markdown
+   * document it writes in its folder, a link to a file, and a message with
+   * a table in it.
+   */
+  handsBack: 'hands-back',
+  /** A command whose output streams until the turn is cancelled. */
+  streams: 'streams',
+  /**
+   * Leaves `bun dev` running, as Claude Code reports a command it sends to
+   * the background: its tool call done, then the command spawned under what
+   * the call says it does, then the file its output goes to, where it says
+   * where it serves. Some other background work, which isn't a command, too.
+   * Stopping it ends it. `[lead:serve]` does the same for a lead, and
+   * `[lead:serve-exits]` has it end by itself just after the turn, failing.
+   */
+  background: 'background',
+  /** The same as Codex reports one: spawned after the turn, by its command, its output on its tool call. */
+  backgroundCodex: 'background-codex',
+  /**
+   * Commands the agent starts of its own, with no tool call: `npm run watch`
+   * keeps running, `npm test` ends well and `npm run lint` badly, neither
+   * saying an exit code, and `npm run dev`, which it stops itself. Output
+   * for a call and a command it never named, too.
+   */
+  backgroundOwn: 'background-own',
+  /**
    * Followed by a command, `run git status --short`: runs it, asking first
    * with Codex's command options, each time as a tool call of its own, and
    * says what was chosen (`chosen=allow_once`).
    */
   run: 'run ',
 } as const
+
+/** A 480 × 300 PNG of a page, as a screenshot tool hands it back. */
+export const SCREENSHOT_PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAeAAAAEsCAIAAACUnPcNAAAEeElEQVR42u3cIQ4CQRBEUS7Xbu6vUAQHCgFBLRs0jiGpod/POwFkS23vYZMkRXbwE0iSgZYkGWhJMtCSJAMtSQZakmSgJUkGWpIMtCTJQEuSgZYkGWhJkoGWJAMtSTLQkmSgJUkGWpIMtCTJQEuSDLQkGWhJkoGWJAMtSTLQkiQDLUkGWpJkoCXpzwb6cb8BEMhAAxhoAAw0gIEGwEADGGgADDQABhrAQANgoAEMNAAGGgADDWCgATDQAAYaAAMNYKABMNAAGGgAAw2AgQYw0AAYaAAMNICBBsBAAxjoz86nIwC7xIHeJKl9BlqSDLSBliQDLUkG2kBLkoGWJANtoCXJQBtoSTLQkmSgDbQkNR3oqsFyPGmSgcZASwbaQGOgJQNtoA20ZKANNAZaMtDe4pAkAy1JBtpAS5KBliQDbaAlyUAbaEky0JJkoA20JBloSTLQBlqSDLQkGei4gQYgcaABmMtAAxhoAAw0gIEGwEADGGgADDQADlUA2h6qOPWWJN/ikCQDbaAlyUBLkoE20JJkoCXJQBtoSTLQBlqSDLQkGWgDLUl9B7pqsBxPmmSgMdCSgTbQGGjJQBtoAy0ZaAONgZYMtLc4JMlAS5KBNtCSZKAlyUAbaEky0AZakgy0JBloAy1JBlqSDLSBliQDLUkGOm6gAUgcaADmMtAABhoAAw1goAEw0AAGGgADDYBDFYC2hypOvSXJtzgkyUAbaEky0JJkoA20JBloSTLQBlqSDLSBliQDLUkG2kBLUt+Brhosx5MmGWgMtGSgDTQGWjLQBtpASwbaQGOgJQPtLQ5JMtCSZKANtCQZaEky0AZakgy0gZYkAy1JBtpAS5KBliQDbaAlyUBLkoGOG2gAEgcagLkMNICBBsBAAxhoAAw0gIEGwEAD4FAFoO2hilNvSfItDkky0AZakgy0JBloAy1JBlqSDLSBliQDbaAlyUBLkoE20JLUd6CrBsvxpEkGGgMtGWgDjYGWDLSBNtCSgTbQGGjJQHuLQ5IMtCQZaAMtSQZakgy0gZYkA22gJclAS5KBNtCSZKAlyUAbaEky0JJkoOMGGoDEgQZgLgMNYKABMNAABhoAAw1goAEw0AAYaAADDYCBBjDQABhoAAw0gIEGwEADGGgADDSAgf7G9fIEYGegAQy0gQYw0AAG2kADGGgAA22gAQy0gQYw0AAG2kADGGgAA22gAQy0vwTAQAMYaAMNYKABDLSBBjDQAAbaQAMYaAMNYKABDLSBBjDQAAbaQAMYaAMNYKABDLSBBjDQAAbaQAMYaAADbaABDLSBBjDQAAbaQAMYaAADbaABDDQAv2OgAQw0AAYawEADYKABDDQABhoAAw1goAEw0AAGGgADDYCBBjDQABhoAAMNgIEGMNAAGGgADDSAgQbAQAMYaAAMNAAGGsBAA2CgAQw0AAYawEADYKABMNAABhoAAw1goAEw0AAYaAADDYCBBjDQABhoAAPtJwAw0AAYaAADDYCBBjDQABhoAAw0gIEGwEADGGgADDQAby/e9HZPsgFukQAAAABJRU5ErkJggg=='
+
+/** What the fake agent says before it asks as Claude Code does: why it asks. */
+export const WHY = 'The rates change hourly, so a cache would save most of the calls to the provider.'
+
+/** The document `hands-back` writes, in the session's folder. */
+export const HANDED_DOCUMENT = {
+  path: 'docs/notes.md',
+  body: '# Notes\n\nRefunds share the partner budget.\n\n| Endpoint | Budget |\n| --- | --: |\n| charges | 600 |\n| refunds | shared |\n',
+}
 
 export const USAGE_LIMIT_MESSAGE = 'Claude AI usage limit reached|1759075200'
 
@@ -127,6 +177,10 @@ export interface FakeAgentOptions {
   readonly bare?: boolean
   /** Called when a session is closed with `session/close`. */
   readonly closed?: (sessionId: string) => void
+  /** Called when something a session left running is stopped, with its task's id. */
+  readonly stoppedBackground?: (id: string) => void
+  /** Called with what the client says it can do, as it initializes. */
+  readonly initialized?: (capabilities: acp.ClientCapabilities | undefined) => void
   /** Leave a permission request open when the turn is cancelled, for Althar to answer. */
   readonly keepsRequests?: boolean
   /**
@@ -145,6 +199,8 @@ export interface FakeAgentOptions {
   readonly failsOnce?: ReadonlyArray<string>
   /** Models it says yes to but doesn't put a session on: the session stays on the model it was on. */
   readonly staysOn?: ReadonlyArray<string>
+  /** How long it takes to make a session, in milliseconds: for what happens while an agent starts. */
+  readonly slowStart?: number
 }
 
 interface SessionState {
@@ -166,8 +222,79 @@ interface SessionState {
   markers: Set<string>
   /** Markers it has played once already, such as `[lead:hang-once]`. */
   played: Set<string>
+  /** It was briefed as a project's coordinator: it plans what a lead's markers say, and plays none of them itself. */
+  coordinator: boolean
   /** Commands it has run with `run`, so each is a tool call of its own. */
   runs: number
+  /** What it left running, by its task's id. */
+  background: Map<string, { readonly toolCallId: string; readonly outputPath?: string }>
+  /** How many commands it has left running, so each has an id of its own. */
+  served: number
+}
+
+/** What `bun dev` prints, coloured as Vite colours it. */
+const SERVING =
+  '\n  \u001b[32mVITE\u001b[39m v7.1.0  ready in 312 ms\n\n  ➜  Local:   \u001b[36mhttp://localhost:\u001b[1m5173\u001b[22m/\u001b[39m\n  ➜  Network: use --host to expose\n'
+
+/**
+ * Leaves `bun dev` running in the background (`background`), as Claude Code
+ * or Codex reports it. Sent as raw notifications: ACP's schema doesn't have
+ * these updates yet.
+ */
+const leaveRunning = async (
+  sessionId: string,
+  session: SessionState,
+  client: acp.AgentContext,
+  as: 'claude' | 'codex',
+  options: { readonly exits?: boolean } = {},
+) => {
+  const notify = (update: Record<string, unknown>) =>
+    client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
+  session.served += 1
+  const id = `bg-${session.served}`
+  const toolCallId = `serve-${session.served}`
+  await notify({
+    sessionUpdate: 'tool_call',
+    toolCallId,
+    title: 'bun dev',
+    kind: 'execute',
+    status: 'in_progress',
+    rawInput: { command: 'bun dev' },
+  })
+  if (as === 'codex') {
+    session.background.set(id, { toolCallId })
+    // Codex says it once its list of background terminals names it, after the turn, and streams its output on its tool call.
+    setTimeout(() => {
+      void notify({ sessionUpdate: 'async_task_spawned', asyncTaskId: id, name: 'bun dev', taskType: 'shell', canStop: true, toolCallId })
+      void notify({ sessionUpdate: 'tool_call_update', toolCallId, _meta: { terminal_output_delta: { data: SERVING } } })
+    }, 20)
+    return
+  }
+  const folder = join(tmpdir(), 'althar-fake-agent')
+  mkdirSync(folder, { recursive: true })
+  const outputPath = join(folder, `${sessionId}-${id}.output`)
+  writeFileSync(outputPath, SERVING)
+  session.background.set(id, { toolCallId, outputPath })
+  await notify({
+    sessionUpdate: 'async_task_spawned',
+    asyncTaskId: id,
+    name: 'Start the dev server',
+    taskType: 'shell',
+    description: 'Start the dev server',
+    showInTranscript: false,
+    canStop: true,
+    toolCallId,
+  })
+  await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
+  await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
+  // Background work that isn't a command, as Claude Code reports some.
+  await notify({ sessionUpdate: 'async_task_spawned', asyncTaskId: `dream-${id}`, name: 'Dreaming', taskType: 'dream', canStop: true })
+  if (options.exits === true)
+    setTimeout(() => {
+      if (!session.background.delete(id)) return
+      appendFileSync(outputPath, 'error: Port 5173 is in use\n[exited with code 1]\n')
+      void notify({ sessionUpdate: 'async_task_state_update', asyncTaskId: id, state: 'failed' })
+    }, 300)
 }
 
 /** What `[lead:explore]` reads, in order. */
@@ -266,14 +393,16 @@ const playStall = async (
  * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task,
- * passing on the `[lead:…]` and `[review:…]` markers it was given;
+ * passing on the `[lead:…]` and `[review:…]` markers it was given, and
+ * `[coordinator:start]` starts one at once, without a plan;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
  * it after; `[review:pass]` and `[review:findings]`
  * report a review. Settling findings, it writes a file and commits it, so
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
- * until it is stopped, and `[lead:settle-quietly]` settles without reporting.
+ * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round;
+ * `[lead:settle-quietly]` settles without reporting.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
  * Althar says it isn't committed. Asked for its pull request's description
@@ -293,7 +422,7 @@ const commitIn = (cwd: string, file: string, message: string) => {
   git('commit', '-q', '-m', message)
 }
 
-const playRole = async (session: SessionState, text: string): Promise<string | undefined> => {
+const playRole = async (session: SessionState, text: string, serve: (exits: boolean) => Promise<void>): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
   const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ')
   if (session.tools === undefined || !asked) return undefined
@@ -309,6 +438,11 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
       return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
     }
     if (available.has('report_review')) {
+      // Reviews until it is stopped: for a review cut short in the middle; or, `[review:wait-later]`, a later round.
+      if (session.markers.has('[review:wait]') || (session.markers.has('[review:wait-later]') && text.startsWith('Round '))) {
+        for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        return 'Stopped reviewing.'
+      }
       if (session.markers.has('[review:always]'))
         return await call('report_review', {
           verdict: 'changes_requested',
@@ -329,6 +463,11 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
       return undefined
     }
     if (available.has('finish_step')) {
+      // A lead that leaves a dev server running, once, then carries on as its other markers say.
+      if (text.includes('[lead:serve') && !session.played.has('[lead:serve]')) {
+        session.played.add('[lead:serve]')
+        await serve(text.includes('[lead:serve-exits]'))
+      }
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
@@ -378,6 +517,17 @@ const playRole = async (session: SessionState, text: string): Promise<string | u
         return 'Stopped working.'
       }
       return undefined
+    }
+    // Asked for something small, it starts it at once, passing its lead the markers it was given.
+    if (available.has('start_task') && text.includes('[coordinator:start]')) {
+      const markers = text.match(/\[(lead|review):[a-z-]+\]/g) ?? []
+      const asked = (text.slice(0, text.indexOf('[coordinator:start]')).split('\n').at(-1) ?? '').replace(/^\[\w+\]\s*/, '')
+      const title = asked.split(/[.!?]/)[0]?.trim() || 'Try it'
+      return await call('start_task', {
+        title,
+        description: `Try it and say how it went. ${markers.join(' ')}`,
+        lead: { agent: 'claude-code', reason: 'Quick to start.' },
+      })
     }
     if (available.has('draft_task') && text.includes('[coordinator:plan')) {
       const markers = text.match(/\[(lead|review):[a-z-]+\]/g) ?? []
@@ -496,8 +646,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
 
   return acp
     .agent({ name: 'fake-agent' })
-    .onRequest(acp.methods.agent.initialize, () =>
-      options.bare === true
+    .onRequest(acp.methods.agent.initialize, ({ params }) => {
+      options.initialized?.(params.clientCapabilities ?? undefined)
+      return options.bare === true
         ? { protocolVersion: acp.PROTOCOL_VERSION }
         : {
             protocolVersion: acp.PROTOCOL_VERSION,
@@ -505,9 +656,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             authMethods: [],
             agentInfo: { name: 'fake-agent', version: '0.0.0' },
             _meta: { steering: { supported: true } },
-          },
-    )
-    .onRequest(acp.methods.agent.session.new, ({ params }) => {
+          }
+    })
+    .onRequest(acp.methods.agent.session.new, async ({ params }) => {
+      if (options.slowStart !== undefined) await pause(options.slowStart)
       created += 1
       const sessionId = `fake-${created}`
       const session: SessionState = {
@@ -529,7 +681,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         })(),
         markers: new Set(),
         played: new Set(),
+        coordinator: false,
         runs: 0,
+        background: new Map(),
+        served: 0,
       }
       sessions.set(sessionId, session)
       return {
@@ -566,6 +721,27 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       options.closed?.(params.sessionId)
       return {}
     })
+    .onRequest(
+      stopBackgroundMethod,
+      { parse: (params) => params as { readonly sessionId: string; readonly asyncTaskId: string } },
+      async ({ params, client }): Promise<StopBackgroundResponse> => {
+        // Stopping what a session left running, as the adapters do: it ends, and says so.
+        const session = sessions.get(params.sessionId)
+        const left = session?.background.get(params.asyncTaskId)
+        if (session === undefined || left === undefined) return { stopped: false }
+        session.background.delete(params.asyncTaskId)
+        options.stoppedBackground?.(params.asyncTaskId)
+        await client.notify(acp.methods.client.session.update, {
+          sessionId: params.sessionId,
+          update: {
+            sessionUpdate: 'async_task_state_update',
+            asyncTaskId: params.asyncTaskId,
+            state: 'stopped',
+          } as unknown as acp.SessionUpdate,
+        })
+        return { stopped: true }
+      },
+    )
     .onNotification(acp.methods.agent.session.cancel, ({ params }) => {
       const session = sessionOf(params.sessionId)
       session.cancelled = true
@@ -601,6 +777,89 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
 
+      /**
+       * Asks the person: one plain question, as an MCP server's form asks it; or, as Claude Code asks,
+       * one or two in a form, each option with what it means. Cancelling the turn withdraws it.
+       */
+      const askPerson = async (form: 'plain' | 'one' | 'two'): Promise<string> => {
+        const database = {
+          type: 'string',
+          title: 'Database',
+          description: 'Which database should the cache use?',
+          oneOf: [
+            {
+              const: 'Postgres',
+              title: 'Postgres',
+              description: 'What production already runs: the cache is one more table, backed up with the rest.',
+            },
+            {
+              const: 'SQLite',
+              title: 'SQLite',
+              description: 'One file beside the service, with no server to run, but nothing shared between instances.',
+            },
+          ],
+        }
+        const checks = {
+          type: 'array',
+          title: 'Checks',
+          description: 'Which checks should run before it lands?',
+          items: {
+            anyOf: [
+              { const: 'Unit tests', title: 'Unit tests', description: 'Fast, and already run on every push.' },
+              { const: 'Lint', title: 'Lint', description: 'Catches what the type checker doesn’t, in seconds.' },
+              { const: 'End-to-end', title: 'End-to-end', description: 'Drives the app as a person would; takes a few minutes.' },
+            ],
+          },
+        }
+        const request: acp.CreateElicitationRequest =
+          form === 'plain'
+            ? {
+                sessionId: params.sessionId,
+                mode: 'form',
+                message: 'Which database?',
+                requestedSchema: {
+                  type: 'object',
+                  properties: { database: { type: 'string', enum: ['postgres', 'sqlite'] } },
+                  required: ['database'],
+                },
+              }
+            : {
+                sessionId: params.sessionId,
+                toolCallId: 'ask-1',
+                mode: 'form',
+                message: form === 'one' ? database.description : 'Please answer the following questions.',
+                requestedSchema: {
+                  type: 'object',
+                  properties: {
+                    question_0: database,
+                    question_0_custom: { type: 'string', title: 'Other' },
+                    ...(form === 'two' ? { question_1: checks, question_1_custom: { type: 'string', title: 'Other' } } : {}),
+                  },
+                } as acp.ElicitationSchema,
+              }
+        if (form !== 'plain') {
+          // What it says before asking: why, the way Claude Code does before AskUserQuestion.
+          await say(WHY)
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'ask-1',
+            title: 'Asking for your input',
+            kind: 'other',
+            status: 'pending',
+            rawInput: {},
+          })
+        }
+        const answer = await client
+          .request<acp.CreateElicitationResponse, acp.CreateElicitationRequest>(acp.methods.client.elicitation.create, request, {
+            cancellationSignal: (session.abort = new AbortController()).signal,
+          })
+          .catch((): acp.CreateElicitationResponse => ({ action: 'cancel' }))
+        session.abort = undefined
+        return answer.action === 'accept'
+          ? `answer=${JSON.stringify((answer as { readonly content?: unknown }).content)}`
+          : `answer=${answer.action}`
+      }
+
       if (text.startsWith('You are the project coordinator, judging one permission request')) {
         const reply =
           options.judgment === undefined
@@ -623,11 +882,27 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return ended({ inputTokens: 100, outputTokens: 20, totalTokens: 120 })
       }
 
+      // An answer to a question asked before, told in a later turn, as after a restart: said, then the role played on.
+      const told = /The person answered[^\n]*\n([\s\S]*)$/.exec(text)
+      if (told?.[1] !== undefined) {
+        await say(`told=${told[1].trim().split('\n').join(' | ')}`)
+        const after = await playRole(session, text, (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }))
+        if (after !== undefined) await say(after)
+        return ended()
+      }
+      // A lead that asks the person first, `[lead:ask]`, once: then it plays its part with the answer. The coordinator that plans it only passes the marker on.
+      if (text.includes('You are the coordinator of the project')) session.coordinator = true
+      if (text.includes('[lead:ask]') && !session.played.has('[lead:ask]') && !session.coordinator) {
+        session.played.add('[lead:ask]')
+        await say(await askPerson('one'))
+        if (session.cancelled) return { stopReason: 'cancelled' }
+      }
+
       // A lead that stalls or loops, where a marker says so.
       const stalled = await playStall(session, text, update)
       if (stalled !== undefined) return stalled
       // With Althar's tools, a marker in the prompt says which role to play.
-      const played = await playRole(session, text)
+      const played = await playRole(session, text, (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }))
       // Stopped while it played its part, the turn was cancelled, as an agent says.
       if (played !== undefined && session.cancelled) return { stopReason: 'cancelled' }
       if (played !== undefined) {
@@ -671,26 +946,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           if (scenario === scenarios.deniedThenWait) while (!session.cancelled) await pause(10)
           return session.cancelled || chosen === 'cancel' || chosen === 'cancelled' ? { stopReason: 'cancelled' } : ended()
         }
-        case scenarios.question: {
-          const answer = await client.request<acp.CreateElicitationResponse, acp.CreateElicitationRequest>(
-            acp.methods.client.elicitation.create,
-            {
-              sessionId: params.sessionId,
-              mode: 'form',
-              message: 'Which database?',
-              requestedSchema: {
-                type: 'object',
-                properties: { database: { type: 'string', enum: ['postgres', 'sqlite'] } },
-                required: ['database'],
-              },
-            },
-          )
-          await say(
-            answer.action === 'accept'
-              ? `answer=${JSON.stringify((answer as { readonly content?: unknown }).content)}`
-              : `answer=${answer.action}`,
-          )
-          return ended()
+        case scenarios.question:
+        case scenarios.questions: {
+          await say(await askPerson(scenario === scenarios.questions ? 'two' : 'plain'))
+          return session.cancelled ? { stopReason: 'cancelled' } : ended()
         }
         case scenarios.quota:
           await update({
@@ -732,6 +991,33 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await update({ sessionUpdate: 'config_option_update', configOptions: configOptions(session) })
           await say('Left plan mode')
           return ended()
+        case scenarios.background:
+        case scenarios.backgroundCodex:
+          await leaveRunning(params.sessionId, session, client, scenario === scenarios.background ? 'claude' : 'codex')
+          await say('serving')
+          return ended()
+        case scenarios.backgroundOwn: {
+          const commands = ['npm run watch', 'npm test', 'npm run lint', 'npm run dev']
+          for (const [index, name] of commands.entries())
+            await update({
+              sessionUpdate: 'async_task_spawned',
+              asyncTaskId: `own-${index}`,
+              name,
+              taskType: 'shell',
+              canStop: true,
+            } as never)
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'never-made',
+            _meta: { terminal_output_delta: { data: 'ready\n' } },
+          })
+          await update({ sessionUpdate: 'async_task_progress', asyncTaskId: 'never-named', outputFilePath: '/tmp/none' } as never)
+          await update({ sessionUpdate: 'async_task_state_update', asyncTaskId: 'own-1', state: 'completed' } as never)
+          await update({ sessionUpdate: 'async_task_state_update', asyncTaskId: 'own-2', state: 'failed' } as never)
+          await update({ sessionUpdate: 'async_task_state_update', asyncTaskId: 'own-3', state: 'stopped' } as never)
+          await say('started')
+          return ended()
+        }
         case scenarios.afterTurn:
           await say('Done')
           setTimeout(() => void update({ sessionUpdate: 'available_commands_update', availableCommands: [] }), 20)
@@ -807,6 +1093,138 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         case scenarios.settings:
           await say(`mode=${session.mode} model=${session.model} directories=${session.directories} mcp=${session.mcpServers}`)
           return ended()
+        case scenarios.handsBack: {
+          // Codex: a command's output in chunks as it runs, then its exit.
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'run-chunks',
+            title: 'npm test',
+            kind: 'execute',
+            status: 'in_progress',
+            rawInput: { command: 'npm test' },
+            content: [{ type: 'terminal', terminalId: 'run-chunks' }],
+            _meta: { terminal_info: { terminal_id: 'run-chunks', cwd: session.cwd } },
+          })
+          for (const data of [' ✓ charges/limit (14)\n', ' ✓ refunds/router (38)\n', ' 52 passed\n']) {
+            await pause(20)
+            await update({
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'run-chunks',
+              _meta: { terminal_output_delta: { terminal_id: 'run-chunks', data } },
+            })
+          }
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'run-chunks',
+            status: 'completed',
+            _meta: { terminal_exit: { terminal_id: 'run-chunks', exit_code: 0, signal: null } },
+          })
+          // Claude Code: a failing command's output whole when it ends.
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'run-whole',
+            title: 'npm run lint',
+            kind: 'execute',
+            status: 'pending',
+            rawInput: { command: 'npm run lint' },
+          })
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'run-whole',
+            _meta: { terminal_output_delta: { terminal_id: 'run-whole', data: 'src/a.ts\n  3:1  error  Unexpected any\n✗ 1 problem\n' } },
+          })
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'run-whole',
+            status: 'failed',
+            _meta: { terminal_exit: { terminal_id: 'run-whole', exit_code: 1, signal: null } },
+          })
+          // OpenCode: the output so far as the tool's own words, whole each time.
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'run-words',
+            title: 'git status --short',
+            kind: 'execute',
+            status: 'pending',
+            rawInput: { command: 'git status --short' },
+          })
+          for (const [status, text] of [
+            ['in_progress', ' M src/a.ts\n'],
+            ['completed', ' M src/a.ts\n?? docs/notes.md\n'],
+          ] as const)
+            await update({
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'run-words',
+              status,
+              content: [{ type: 'content', content: { type: 'text', text } }],
+            })
+          // A screenshot, from a browser tool.
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'shot',
+            title: 'mcp__playwright__browser_take_screenshot',
+            kind: 'other',
+            status: 'in_progress',
+          })
+          await update({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'shot',
+            status: 'completed',
+            content: [
+              { type: 'content', content: { type: 'text', text: 'Took a screenshot of the page.' } },
+              { type: 'content', content: { type: 'image', data: SCREENSHOT_PNG, mimeType: 'image/png' } },
+            ],
+          })
+          // A markdown document it writes in its folder.
+          const document = join(session.cwd, HANDED_DOCUMENT.path)
+          mkdirSync(join(session.cwd, 'docs'), { recursive: true })
+          writeFileSync(document, HANDED_DOCUMENT.body)
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'write-doc',
+            title: `Write ${HANDED_DOCUMENT.path}`,
+            kind: 'edit',
+            status: 'completed',
+            rawInput: { file_path: document, content: HANDED_DOCUMENT.body },
+            locations: [{ path: document }],
+            content: [{ type: 'diff', path: document, oldText: null, newText: HANDED_DOCUMENT.body }],
+          })
+          // A file it points at, and a picture, in what it says.
+          writeFileSync(join(session.cwd, 'report.csv'), 'endpoint,budget\ncharges,600\nrefunds,shared\n')
+          await say('Here is what I found. ')
+          await update({
+            sessionUpdate: 'agent_message_chunk',
+            content: {
+              type: 'resource_link',
+              uri: `file://${join(session.cwd, 'report.csv')}`,
+              name: 'report.csv',
+              mimeType: 'text/csv',
+              size: 43,
+            },
+          })
+          await update({ sessionUpdate: 'agent_message_chunk', content: { type: 'image', data: SCREENSHOT_PNG, mimeType: 'image/png' } })
+          await say('\n\n| Endpoint | Budget |\n| --- | --: |\n| charges | 600 |\n| refunds | shared |\n')
+          return ended()
+        }
+        case scenarios.streams: {
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'run-long',
+            title: 'npm run dev',
+            kind: 'execute',
+            status: 'in_progress',
+            rawInput: { command: 'npm run dev' },
+          })
+          for (let line = 1; !session.cancelled && line < 500; line += 1) {
+            await update({
+              sessionUpdate: 'tool_call_update',
+              toolCallId: 'run-long',
+              _meta: { terminal_output_delta: { terminal_id: 'run-long', data: `ready in ${line} ms\n` } },
+            })
+            await pause(25)
+          }
+          return { stopReason: session.cancelled ? 'cancelled' : 'end_turn' }
+        }
         case scenarios.exit:
           await say('Exiting')
           options.exit?.()

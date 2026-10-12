@@ -11,11 +11,10 @@ base-version: '24.08'
 command: althar
 separate-locales: false
 
-# Narrow on purpose: the agents need the network, the window needs a display
-# and the GPU, and sign-ins need the host's keyring through the secrets
-# service. No host filesystem: project folders reach the app through the
-# file chooser's document portal, and the person's own agents and editors
-# are found and run where they are installed, through flatpak-spawn.
+# Network, display, GPU and the host keyring are available. The permission to
+# talk to org.freedesktop.Flatpak is broad: it can run commands on the host,
+# which the app uses to reach the person's tools. Project folders enter via
+# the document portal; the host bridge is not a sandbox boundary.
 finish-args:
   - --share=network
   - --socket=wayland
@@ -27,8 +26,6 @@ finish-args:
   # The person's own agents and editors, found and run where they are
   # installed (Codex among them: flatpak/codex-host.sh); nothing else.
   - --talk-name=org.freedesktop.Flatpak
-  # The person's ssh-agent, for the git pushes Althar makes itself.
-  - --socket=ssh-auth
 
 modules:
   - name: althar

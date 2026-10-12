@@ -1,5 +1,7 @@
+import { realpathSync } from 'node:fs'
+
 import { assert, describe, it } from '@effect/vitest'
-import { Deferred, Effect, Exit, Scope, Stream } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Scope, Stream } from 'effect'
 
 import { connect } from '../src/AgentConnection'
 import { AgentExited, AgentStartFailed } from '../src/errors'
@@ -69,6 +71,36 @@ describe('the process transport', () => {
         assert.instanceOf(error, AgentExited)
         assert.strictEqual((error as AgentExited).code, 3)
         assert.deepStrictEqual(yield* connection.closed, { code: 3, signal: null })
+      }),
+    ),
+  )
+
+  it.live('keeps a question waiting when the agent that asked it goes', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const asked = yield* Deferred.make<void>()
+        const answered = yield* Deferred.make<void>()
+        let dropped = false
+        const connection = yield* connect({
+          transport: fakeProcess,
+          onPermission: reject,
+          onQuestion: () =>
+            Deferred.succeed(asked, undefined).pipe(
+              Effect.andThen(Deferred.await(answered)),
+              Effect.as({ action: 'cancel' as const }),
+              Effect.onInterrupt(() => Effect.sync(() => (dropped = true))),
+            ),
+        })
+        const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+        const turn = yield* Effect.forkChild(Effect.flip(Stream.runCollect(session.prompt(scenarios.question))))
+        yield* Deferred.await(asked)
+        process.kill(connection.process?.pid ?? 0, 'SIGKILL')
+        assert.instanceOf(yield* Fiber.join(turn), AgentExited)
+        yield* connection.closed
+        yield* Effect.sleep('50 millis')
+        // Its going is not its taking the question back: whoever asked through Althar lets it go.
+        assert.isFalse(dropped)
+        yield* Deferred.succeed(answered, undefined)
       }),
     ),
   )
@@ -161,7 +193,7 @@ describe('the process transport', () => {
         text += new TextDecoder().decode(value)
       }
       yield* Scope.close(scope, Exit.void)
-      assert.strictEqual(text, '/tmp|yes')
+      assert.strictEqual(text, `${realpathSync('/tmp')}|yes`)
       assert.strictEqual(said[0]?.cwd, '/tmp')
       assert.strictEqual(said[0]?.env.SMOKE, undefined)
     }),

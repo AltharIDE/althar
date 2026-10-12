@@ -127,7 +127,12 @@ export const fakeAgents = (
  */
 export const fakeConnectors = (
   services: { readonly github?: FakeService; readonly linear?: FakeService; readonly trello?: FakeService },
-  more: { readonly fetch?: Fetch; readonly clientIds?: Readonly<Record<string, string>>; readonly callbackPort?: number } = {},
+  more: {
+    readonly fetch?: Fetch
+    readonly clientIds?: Readonly<Record<string, string>>
+    readonly callbackPort?: number
+    readonly cliToken?: (tool: 'gh' | 'glab', host: string) => Effect.Effect<string | null>
+  } = {},
 ) =>
   Layer.succeed(
     Connectors,
@@ -136,13 +141,23 @@ export const fakeConnectors = (
         {
           ...products.github,
           make: () => (services.github === undefined ? {} : { host: services.github, tracker: services.github }),
+          access: services.github?.access ?? null,
         },
-        { ...products.linear, make: () => (services.linear === undefined ? {} : { tracker: services.linear }) },
-        { ...products.trello, make: () => (services.trello === undefined ? {} : { tracker: services.trello }) },
+        {
+          ...products.linear,
+          make: () => (services.linear === undefined ? {} : { tracker: services.linear }),
+          access: services.linear?.access ?? null,
+        },
+        {
+          ...products.trello,
+          make: () => (services.trello === undefined ? {} : { tracker: services.trello }),
+          access: services.trello?.access ?? null,
+        },
       ],
       fetch: more.fetch ?? (() => Promise.reject(new Error('No network in tests'))),
       clientIds: more.clientIds ?? {},
       callbackPort: more.callbackPort ?? 0,
+      cliToken: more.cliToken ?? (() => Effect.succeed(null)),
     }),
   )
 
@@ -166,12 +181,15 @@ export const runtime = (
     readonly modelFacts?: ModelFactsOptions
     /** The editors a task's files open in, and what opening one does. */
     readonly editors?: RuntimeOptions['editors']
+    /** Where the artifact store keeps bytes; a folder of its own unless a test says (null: nowhere). */
+    readonly artifactsRoot?: string | null
   } = {},
 ) =>
   Runtime.layer({
     database,
     worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
     accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
+    ...(more.artifactsRoot === null ? {} : { artifactsRoot: more.artifactsRoot ?? mkdtempSync(join(tmpdir(), 'althar-artifacts-')) }),
     // Nothing opens on the Mac running the tests: what would have is kept.
     openTerminal: (line) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(false)),
     appVersion: '0.0.0-test',

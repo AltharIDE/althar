@@ -21,30 +21,23 @@
   transition: background var(--base) var(--ease);
 }
 
-/* The glyph says what the dot does; it comes on hover, and where the keyboard is. */
-.lights button::after {
-  font-size: 9px;
-  line-height: 1;
-  color: transparent;
-  transition: color var(--base) var(--ease);
-}
-.lights .close::after {
-  content: '×';
-}
-.lights .minimize::after {
-  content: '−';
-}
-.lights .maximize::after {
-  content: '□';
-}
-.lights .maximize[data-restore]::after {
-  content: '❐';
+.glyph {
+  width: 8px;
+  height: 8px;
+  overflow: visible;
+  fill: none;
+  stroke: #4a3b33;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transition: opacity var(--base) var(--ease);
 }
 
-.lights:hover button::after,
-.lights:focus-within button::after,
-.lights button:focus-visible::after {
-  color: #4a3b33;
+.lights:hover .glyph,
+.lights:focus-within .glyph,
+.lights button:focus-visible .glyph {
+  opacity: 1;
 }
 
 .lights:hover .close,

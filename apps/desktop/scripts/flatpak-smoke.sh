@@ -3,7 +3,8 @@
 # the window's entry inside the sandbox, the device outside it (the person's
 # own OpenCode and Codex, through the permission the manifest asks for),
 # data that persists beside the profile (its home is fresh each run), and
-# the narrow permissions (no host filesystem). The window's own behavior is
+# permissions (no host filesystem or ssh-agent socket). The window's own
+# behavior is
 # the same X11 smoke the other packages use: ALTHAR_BIN=/usr/bin/althar
 # ALTHAR_ARGS=--ozone-platform=x11 scripts/x11-smoke.sh. Needs the app
 # installed: scripts/flatpak.sh.
@@ -27,12 +28,12 @@ echo "$perms" | grep -qE '(^|[=;])ipc(;|$)' && ok "shared memory allowed (ipc)" 
 echo "$perms" | grep -q 'wayland' && ok "wayland allowed" || bad "wayland allowed"
 echo "$perms" | grep -q 'org.freedesktop.secrets' && ok "the keyring is reachable (org.freedesktop.secrets)" || bad "keyring reachable"
 echo "$perms" | grep -q 'org.freedesktop.Flatpak' && ok "the device is reachable (org.freedesktop.Flatpak)" || bad "device reachable"
-echo "$perms" | grep -q 'ssh-auth' && ok "the ssh agent is reachable (ssh-auth)" || bad "ssh agent reachable"
+echo "$perms" | grep -q 'ssh-auth' && bad "ssh agent is not exposed" || ok "ssh agent is not exposed"
 echo "$perms" | grep -q 'filesystems=host' && bad "no host filesystem in permissions" || ok "no host filesystem in permissions"
 
-# The device outside the sandbox: a command runs there, the person's own agents are found and run there, and the ssh agent's socket is there.
+# The device outside the sandbox: a command runs there, and the person's own OpenCode and Codex are found and run there.
 run 'flatpak-spawn --host true' && ok "a command runs on the device" || bad "a command runs on the device"
-run 'test -S "$SSH_AUTH_SOCK"' && ok "the ssh agent's socket is there (ssh-auth)" || bad "the ssh agent's socket"
+run '[ -z "$SSH_AUTH_SOCK" ] || [ ! -S "$SSH_AUTH_SOCK" ]' && ok "the ssh agent socket is unavailable" || bad "the ssh agent socket is unavailable"
 run 'test -x /app/bin/althar-host-codex' && ok "the Codex host bridge is installed" || bad "the Codex host bridge"
 device_bin() { run "flatpak-spawn --host sh -c 'command -v $1'"; }
 opencode=$(device_bin opencode)
