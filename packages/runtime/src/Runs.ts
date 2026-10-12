@@ -19,10 +19,19 @@ import { Policies, usageLimitOf } from './Policies'
 import { conventionsAt } from './conventions'
 import { commitsAhead, treeOf, uncommittedFiles } from './git'
 import { filesLine, templateAsk } from './pullRequestWords'
-import { snapshotForReview } from './reviewCopy'
+import { evidenceFolderOf, reviewCopyOf, snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
-import { EVIDENCE_KINDS, EvidenceGiven, evidenceFiles, evidencePaths, keepEvidence, readEvidence, unverifiedOf } from './evidence'
+import {
+  EVIDENCE_KINDS,
+  EvidenceGiven,
+  evidenceFiles,
+  evidenceForReview,
+  evidencePaths,
+  keepEvidence,
+  readEvidence,
+  unverifiedOf,
+} from './evidence'
 import { Sessions } from './Sessions'
 import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
@@ -1011,11 +1020,17 @@ export class Runs extends Context.Service<
                 ...(step.effort == null ? {} : { effort: step.effort }),
                 ...(accountId === undefined ? {} : { accountId }),
               })
+          // A reviewer carrying on has the brief it started with: the lead's evidence as it stands now, written out again, goes with the round.
+          const [first] = yield* worktreesOf(run.taskId)
+          const shown =
+            Option.isSome(live) && first !== undefined
+              ? yield* evidenceForReview(run.threadId, evidenceFolderOf(reviewCopyOf(first.path))).pipe(Effect.orElseSucceed(() => ''))
+              : ''
           if (Option.isSome(live) || round > 0)
             yield* sessions.send({
               envelope: yield* envelope('thread.send', { threadId, round }),
               threadId,
-              body: `Round ${round + 1}. The lead settled your findings:\n\n${settled ?? ''}\n\nYour copy now holds the settled work. Review the change again. Check that the fixes hold, and don't raise again what the lead set aside unless you have new evidence; then say which finding you repeat, and why.`,
+              body: `Round ${round + 1}. The lead settled your findings:\n\n${settled ?? ''}\n\nYour copy now holds the settled work. Review the change again. Check that the fixes hold, and don't raise again what the lead set aside unless you have new evidence; then say which finding you repeat, and why.${shown === '' ? '' : `\n\nAs it stands now, in place of what you were told before:\n\n${shown}`}`,
               quiet: true,
             })
           yield* begin(run, attemptId, sessionId, threadId)

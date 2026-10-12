@@ -469,7 +469,7 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
           findings: [{ severity: 'major', file: 'README.md', line: 1, claim: 'The heading is wrong.' }],
         })
       if (text.includes('[review:') || text.startsWith('Round '))
-        return await call('report_review', { verdict: 'pass', summary: 'The change holds.' })
+        return await call('report_review', { verdict: 'pass', summary: `The change holds.${looked}` })
       return undefined
     }
     if (available.has('finish_step')) {

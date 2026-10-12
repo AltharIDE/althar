@@ -303,6 +303,8 @@ export const evidenceForReview = (taskThreadId: string, folder: string) =>
       lines.length === 0
         ? 'The lead handed no evidence.'
         : `The lead's evidence, each picture and output where you can read it:\n${lines.join('\n')}`,
-      ...(unverified.length === 0 ? [] : [`What it says it couldn't show:\n${unverified.map((line) => `- ${line}`).join('\n')}`]),
+      unverified.length === 0
+        ? "It lists nothing it couldn't show."
+        : `What it says it couldn't show:\n${unverified.map((line) => `- ${line}`).join('\n')}`,
     ].join('\n\n')
   })

@@ -44,7 +44,7 @@ import { touchCard } from './cards'
 import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
 import { git } from './git'
-import { reviewCopyOf } from './reviewCopy'
+import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
 import { evidenceForReview } from './evidence'
 import { defaultEffortOf } from './preferences'
 import { addItem, type OutputSoFar, recorder, toolItem, transcript } from './threads'
@@ -1502,7 +1502,7 @@ export class Sessions extends Context.Service<
           const shown =
             taskThread === undefined || first === undefined
               ? ''
-              : yield* evidenceForReview(taskThread.id, join(dirname(first.worktree), '.evidence')).pipe(Effect.orElseSucceed(() => ''))
+              : yield* evidenceForReview(taskThread.id, evidenceFolderOf(first.worktree)).pipe(Effect.orElseSucceed(() => ''))
           return [
             "You are reviewing another agent's change, in Althar. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
             `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,

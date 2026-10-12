@@ -634,6 +634,36 @@ describe('a task that ends in a pull request', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live(
+    'gives a reviewer carrying on to another round the evidence the lead handed settling',
+    () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare })
+      github.addRepository(['meridian', 'api'])
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        // Settling commits a fix, so the review looks again, in the same session.
+        const projectId = yield* ask(
+          working,
+          'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:evidence] [review:findings] [review:evidence]',
+        )
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
+        const reviews = (yield* items(ready?.threadId ?? '')).flatMap((item) =>
+          item.kind === 'step_result' && item.content.step === 'review' ? [String(item.content.summary)] : [],
+        )
+        assert.lengthOf(reviews, 2)
+        assert.notInclude(reviews[0] ?? '', '3-test_run')
+        // The second round read the run the lead handed settling, written out for it then.
+        assert.match(reviews[1] ?? '', / Read: 1-retry\.png \(\d+ bytes\), 2-test_run\.txt \(\d+ bytes\), 3-test_run\.txt \(\d+ bytes\)\./)
+        const sql = yield* SqlClient.SqlClient
+        const [sessions] = yield* sql<{ n: number }>`
+        SELECT count(*) AS n FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.kind = 'step' AND t.node_key = 'review'`
+        assert.strictEqual(sessions?.n, 1)
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    },
+    60_000,
+  )
+
   it.live('goes on without its pull request when the person says so', () => {
     const { working } = hosted()
     return Effect.gen(function* () {
