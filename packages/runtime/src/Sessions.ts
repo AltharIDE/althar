@@ -180,6 +180,8 @@ interface Running {
   readonly wake: Queue.Queue<void>
   /** Held while a turn is delivered, so stopping waits for the turn to be recorded. */
   readonly delivering: Semaphore.Semaphore
+  /** Told once the next turn is under way: the place it was given among the agents at work here is then its session's. */
+  begun?: Effect.Effect<void> | undefined
   readonly stopRequest: Deferred.Deferred<StopRequest>
   readonly ended: Deferred.Deferred<void>
   /** The brief the session's first turn starts with, and what it asks for when no input is waiting. */
@@ -410,8 +412,27 @@ export class Sessions extends Context.Service<
      * coordinator's.
      */
     readonly onTasks: Effect.Effect<
-      ReadonlyArray<{ readonly threadId: string; readonly taskId: string; readonly turnRunning: boolean; readonly background: boolean }>
+      ReadonlyArray<{
+        readonly threadId: string
+        readonly taskId: string
+        /** A task's reviewer, not its lead. */
+        readonly reviewer: boolean
+        readonly turnRunning: boolean
+        readonly background: boolean
+      }>
     >
+    /**
+     * What a lead's or a reviewer's turns wait for before they are delivered:
+     * a place among the agents at work on this machine (Busy.ts). `work`
+     * delivers what the thread has queued; the gate runs it now, or once
+     * there is a place.
+     */
+    gateTurns(
+      gate: (
+        agent: { readonly taskId: string; readonly threadId: string; readonly review: boolean },
+        work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
+      ) => Effect.Effect<boolean>,
+    ): Effect.Effect<void>
   }
 >()('@althar/runtime/Sessions') {
   static readonly layer: Layer.Layer<Sessions, never, Store> = Layer.effect(
@@ -430,6 +451,11 @@ export class Sessions extends Context.Service<
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
+      /* What a lead's or a reviewer's turns wait for, once Busy says (gateTurns): until then, nothing. */
+      let gate = (
+        _agent: { readonly taskId: string; readonly threadId: string; readonly review: boolean },
+        work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
+      ) => Effect.as(work(Effect.void), true)
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
 
       /** Tells watching clients what a session has left running, whole. */
@@ -786,6 +812,9 @@ export class Sessions extends Context.Service<
           )
           running.brief = undefined
           running.turnRunning = true
+          const begun = running.begun
+          running.begun = undefined
+          if (begun !== undefined) yield* begun
           // Images the agent doesn't get are said in the thread as well as to the agent, so none goes missing unsaid.
           const withheld = inputs.reduce((sum, input) => sum + (input.withheld ?? 0), 0)
           if (withheld > 0)
@@ -999,6 +1028,16 @@ export class Sessions extends Context.Service<
           )
         })
 
+      /** Whether the thread has input waiting to be delivered. */
+      const hasQueued = (threadId: string) =>
+        run(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const [one] = yield* sql<{ id: string }>`SELECT id FROM user_inputs WHERE thread_id = ${threadId} AND state = 'queued' LIMIT 1`
+            return one !== undefined
+          }),
+        ).pipe(Effect.orElseSucceed(() => true))
+
       /** Delivers queued input, one turn at a time, until the session stops. */
       const deliveries = (running: Running) =>
         Effect.forever(
@@ -1007,13 +1046,26 @@ export class Sessions extends Context.Service<
             // A lead's first turn waits for its worktrees to be set up (Setups.ts), and so has what was said meanwhile. It
             // waits before it holds the turn, so the lead can be stopped meanwhile.
             if (running.thread.role === 'task' && running.brief !== undefined) yield* setups.ready(running.thread.taskId)
-            yield* running.delivering.withPermits(1)(
+            const work = running.delivering.withPermits(1)(
               Effect.gen(function* () {
                 while (!running.stopping && (yield* deliver(running))) {
                   // Each turn may leave more input queued, such as what arrived while it ran.
                 }
               }),
             )
+            const { thread } = running
+            // A lead's or a reviewer's turn, with something to deliver, waits for a place among the agents at work here.
+            if (thread.role === 'coordinator' || !(running.brief !== undefined || (yield* hasQueued(thread.threadId)))) yield* work
+            else
+              yield* gate({ taskId: thread.taskId, threadId: thread.threadId, review: thread.role === 'reviewer' }, (begun) =>
+                Effect.suspend(() => {
+                  running.begun = begun
+                  return run(work)
+                }).pipe(
+                  Effect.catchCause((cause) => Effect.logWarning('Could not deliver a turn', cause)),
+                  Effect.ensuring(Effect.sync(() => (running.begun = undefined))),
+                ),
+              )
           }),
         )
 
@@ -1903,6 +1955,10 @@ export class Sessions extends Context.Service<
             yield* toldBackground(running)
           }),
         outputSoFar: (threadId, itemId) => Effect.sync(() => Option.fromNullishOr(threads.get(threadId)?.recording?.outputOf(itemId))),
+        gateTurns: (next) =>
+          Effect.sync(() => {
+            gate = next
+          }),
         onTasks: Effect.sync(() =>
           [...threads.values()].flatMap((running) =>
             running.thread.role === 'coordinator'
@@ -1911,6 +1967,7 @@ export class Sessions extends Context.Service<
                   {
                     threadId: running.thread.threadId,
                     taskId: running.thread.taskId,
+                    reviewer: running.thread.role === 'reviewer',
                     turnRunning: running.turnRunning,
                     background: [...running.background.values()].some((left) => left.ended === null),
                   },
