@@ -416,7 +416,8 @@ const playStall = async (
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
  * publishes it, `[lead:fix-more]` commits other work after it, and
- * `[lead:fix-hold]` works on after it until it is interrupted. Asked to bring its branch up to date, `[lead:resolve]`
+ * `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
+ * `[lead:push]` commits what it has and asks the person to push it. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
  * of it; `[lead:resolve-fails]` can't, and says so; `[lead:resolve-wait]`
@@ -526,6 +527,11 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         if (!/These aren.t committed/.test(answer)) return answer
         rmSync(join(session.cwd, 'scratch.log'))
         return await finish()
+      }
+      // Asked to push, it commits and asks the person to, as a lead does: it never pushes itself.
+      if (available.has('push_to_pull_request') && session.markers.has('[lead:push]') && /\bpush pls\b/i.test(text)) {
+        commitIn(session.cwd, 'pushed.txt', 'Tidy up before pushing')
+        return await call('push_to_pull_request', {})
       }
       // What people said on the task's pull request, and its checks.
       if (available.has('reply_on_pull_request') && session.markers.has('[lead:answer]') && / commented on /.test(text)) {

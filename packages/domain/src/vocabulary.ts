@@ -93,6 +93,8 @@ export const ThreadItemKind = Schema.Literals([
   'issue_draft',
   /** Althar setting up a task's worktree, in the task's thread, before its lead starts. Althar posts it and keeps it current. */
   'setup',
+  /** The lead asking the person to push its new commits to the task's pull request. Althar posts it and keeps it current. */
+  'push_request',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
