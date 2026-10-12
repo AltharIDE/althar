@@ -179,6 +179,7 @@ describe('the API', () => {
         summary: null,
         lead: null,
         leadModel: null,
+        leadEffort: null,
         branch: null,
         startedAt: null,
         waits: null,

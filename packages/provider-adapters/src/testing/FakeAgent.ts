@@ -397,8 +397,9 @@ const playStall = async (
  * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task,
- * passing on the `[lead:…]` and `[review:…]` markers it was given, and
- * `[coordinator:start]` starts one at once, without a plan;
+ * passing on the `[lead:…]` and `[review:…]` markers it was given
+ * (`[coordinator:plan-effort]` puts its lead on the large model at high
+ * effort), and `[coordinator:start]` starts one at once, without a plan;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
  * it after; `[review:pass]` and `[review:findings]`
  * report a review. Settling findings, it writes a file and commits it, so
@@ -598,7 +599,12 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
       const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
       return await call('propose_plan', {
         task: slug,
-        lead: { agent: 'claude-code', reason: 'It knows the code.' },
+        lead: {
+          agent: 'claude-code',
+          // `[coordinator:plan-effort]`: on its large model, thinking hard.
+          ...(text.includes('[coordinator:plan-effort]') ? { model: 'large', effort: 'high' } : {}),
+          reason: 'It knows the code.',
+        },
         review: text.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
       })
     }

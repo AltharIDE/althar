@@ -523,6 +523,7 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   summary: null,
   lead: 'claude-code',
   leadModel: null,
+  leadEffort: null,
   branch: 'althar/add-a-retry',
   startedAt: null,
   waits: null,

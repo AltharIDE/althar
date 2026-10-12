@@ -637,10 +637,15 @@ never under running work.
   removes the wait. Open: should the coordinator move an optional step to a
   free agent by itself, and only leave rule-pinned steps waiting?
   *Prototype:* Coordinator → "Plan, an agent is out".
-- [ ] **Effort in the plan.** Each step carries its own model and effort,
-  which the person sets on the plan's card; the coordinator proposes neither,
-  so a step starts on the agent's own. Does the coordinator recommend effort
-  per step, or always start at the model's default?
+- [x] **Effort in the plan.** Each step carries its own model and effort,
+  which the person sets on the plan's card. Does the coordinator recommend
+  effort per step, or always start at the model's default?
+  Settled on 12 October 2026: the coordinator may name an effort for each
+  step, from the ones `list_models` gives for its model, by what the step
+  needs and what the person has said they prefer; it shows on the card as
+  the person's own would, and they can change it. Left out, which its brief
+  asks when unsure, a step starts at the person's default for the model, or
+  else the model's own (docs/architecture/04).
 - [x] **Allow all, with always-ask items in the stack.** "Allow all 7"
   currently covers pushing to main too. Should items the rules keep for you
   be left out of Allow all?
