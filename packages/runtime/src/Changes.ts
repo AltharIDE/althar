@@ -331,11 +331,15 @@ export class Changes extends Context.Service<
      */
     stopListening(taskId: string, url: string): Effect.Effect<void, unknown>
     /**
-     * The person stopped a task's lead, or the task: a conflict its lead was
-     * resolving, or whose checks Althar was waiting for, is theirs from here.
-     * Nothing more is pushed for it, and the lead isn't started again for it.
+     * The person stopped or interrupted a task's lead, or stopped the task: a
+     * conflict its lead was resolving, or whose checks Althar was waiting for,
+     * is theirs from here. Nothing more is pushed for it, and the lead isn't
+     * asked again for it.
      */
-    leadStopped(where: { readonly taskId: string } | { readonly threadId: string }): Effect.Effect<void, unknown>
+    leadStopped(
+      where: { readonly taskId: string } | { readonly threadId: string },
+      how?: 'stopped' | 'interrupted',
+    ): Effect.Effect<void, unknown>
     /**
      * Where a project's leads, or a task's, are newly to resolve conflicts on
      * their own (ADR-030): each of its open tasks is looked at now, rather
@@ -2119,8 +2123,8 @@ export class Changes extends Context.Service<
           })
         })
 
-      /** The person stopped a task's lead: what it was resolving waits for them, and checks that fail don't start it again. */
-      const leadStopped = (where: { readonly taskId: string } | { readonly threadId: string }) =>
+      /** The person stopped or interrupted a task's lead: what it was resolving waits for them, and checks that fail don't ask it again. */
+      const leadStopped = (where: { readonly taskId: string } | { readonly threadId: string }, how: 'stopped' | 'interrupted') =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [task] =
@@ -2132,14 +2136,14 @@ export class Changes extends Context.Service<
             SELECT id, state FROM conflict_resolutions WHERE task_id = ${task.taskId} AND state IN ('resolving', 'checking')`
           for (const one of under) {
             if (one.state === 'resolving') {
-              yield* settleRound(one.id, { why: 'You stopped the lead.', stopped: true })
+              yield* settleRound(one.id, { why: `You ${how} the lead.`, stopped: true })
               continue
             }
             const round = yield* roundOf({ id: one.id })
             if (round === undefined) continue
             const place = (yield* placeOf(round.taskId, round.url)).change ?? 'the pull request'
             yield* endRound(round, null, {
-              title: `You stopped the lead, so the checks on what Althar pushed to ${place} are yours.`,
+              title: `You ${how} the lead, so the checks on what Althar pushed to ${place} are yours.`,
               description: 'Althar won’t ask the lead to fix them.',
             })
           }
@@ -2455,15 +2459,15 @@ export class Changes extends Context.Service<
         read: (taskId) => provide(read(taskId)),
         ofTask: (taskId) => provide(Effect.flatMap(linksOf(taskId), (links) => Effect.forEach(links, summaryOf))),
         stopListening: (taskId, url) => provide(locked(taskId)(stopListening(taskId, url))),
-        leadStopped: (where) =>
+        leadStopped: (where, how = 'stopped') =>
           provide(
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
               const [task] =
                 'taskId' in where
                   ? [{ taskId: where.taskId }]
-                  : yield* sql<{ taskId: string }>`SELECT task_id FROM threads WHERE id = ${where.threadId}`
-              if (task !== undefined) yield* locked(task.taskId)(leadStopped(where))
+                  : yield* sql<{ taskId: string }>`SELECT task_id FROM threads WHERE id = ${where.threadId} AND task_id IS NOT NULL`
+              if (task !== undefined) yield* locked(task.taskId)(leadStopped(where, how))
             }),
           ),
         resolveNow: (where) => Effect.asVoid(Effect.forkIn(provide(resolveNow(where)), scope)),

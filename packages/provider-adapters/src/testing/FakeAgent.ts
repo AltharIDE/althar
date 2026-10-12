@@ -417,7 +417,8 @@ const playStall = async (
  * publishes it, and `[lead:fix-more]` commits other work after it. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
- * of it; `[lead:resolve-fails]` can't, and says so. Asked to plan a
+ * of it; `[lead:resolve-fails]` can't, and says so; `[lead:resolve-wait]`
+ * works at it until it is interrupted or stopped. Asked to plan a
  * change with a link in it, the coordinator drafts the task from that issue.
  */
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
@@ -535,6 +536,10 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
       const merging = /Bring the branch up to date: merge (\S+) into it/.exec(text)?.[1]
       if (merging !== undefined && session.markers.has('[lead:resolve-fails]'))
         return "Couldn't settle the conflict: both sides change the same lines."
+      if (merging !== undefined && session.markers.has('[lead:resolve-wait]')) {
+        for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        return 'Stopped before settling it.'
+      }
       const more = session.markers.has('[lead:resolve-more]')
       if (merging !== undefined && (session.markers.has('[lead:resolve]') || more)) {
         resolveIn(session.cwd, merging)

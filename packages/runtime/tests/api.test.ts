@@ -1326,6 +1326,93 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
+  it.live('gives a conflict to the person when they interrupt the lead resolving it, or while Althar waits for its checks', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, store } = yield* connected()
+        const root = repository()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Retry',
+          description: '[lead:finish] [lead:edit] [lead:resolve-wait]',
+          steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        })
+        yield* eventually(client.GetBoard({ projectId: project.id }), (board) =>
+          board.tasks.some((one) => one.taskId === task.id && one.phase === 'ready'),
+        )
+        const git = (...args: Array<string>) =>
+          execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd: root, stdio: 'pipe' })
+        writeFileSync(join(root, 'change.txt'), 'rate limits\n')
+        git('add', '.')
+        git('commit', '-q', '-m', 'Limit rates')
+        const rounds = () =>
+          store(
+            Effect.flatMap(
+              SqlClient.SqlClient,
+              (sql) => sql<{ id: string; state: string; failure: string | null }>`
+                SELECT id, state, failure FROM conflict_resolutions WHERE task_id = ${task.id} ORDER BY created_at, rowid`,
+            ),
+          )
+        const asked = () =>
+          store(
+            Effect.flatMap(
+              SqlClient.SqlClient,
+              (sql) => sql<{ n: number }>`
+                SELECT count(*) AS n FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE '%Bring the branch up to date%'`,
+            ),
+          )
+        // The task has its lead resolve what conflicts, which it works at.
+        yield* client.SetTaskResolveConflicts({ commandId: commandId(), taskId: task.id, resolveConflicts: true })
+        yield* eventually(
+          Effect.andThen(Effect.sleep('40 millis'), client.GetThread({ threadId: task.threadId, limit: 0 })),
+          (thread) => thread.session?.turnRunning === true,
+        )
+        assert.deepStrictEqual(
+          (yield* rounds()).map((round) => round.state),
+          ['resolving'],
+        )
+        // The window's interrupt: the conflict is the person's, as the lead left it, and the lead isn't asked again.
+        yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
+        const [interrupted] = yield* rounds()
+        assert.strictEqual(interrupted?.state, 'failed')
+        assert.match(interrupted?.failure ?? '', /^You interrupted the lead\. /)
+        const thread = yield* eventually(client.GetThread({ threadId: task.threadId }), (one) => one.session?.turnRunning !== true)
+        assert.isTrue(
+          thread.items.some(
+            (item) => item.kind === 'notice' && item.content.title?.startsWith('The lead couldn’t resolve the conflict with main') === true,
+          ),
+        )
+        yield* Effect.sleep('300 millis')
+        assert.deepStrictEqual(yield* asked(), [{ n: 1 }])
+        // Waiting for the checks on what Althar pushed, an interrupt hands those over too.
+        const checking = yield* store(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const id = `cres_${randomBytes(16).toString('hex')}`
+            const at = new Date().toISOString()
+            yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+              id,
+              projectId: project.id,
+              taskId: task.id,
+              pullRequestUrl: 'https://github.test/meridian/api/pull/1',
+              conflicts: '[]',
+              state: 'checking',
+              pushedHead: 'a'.repeat(40),
+              createdAt: at,
+              updatedAt: at,
+            })}`
+            return id
+          }),
+        )
+        // Whether or not a lead is there to interrupt.
+        yield* Effect.exit(client.Interrupt({ commandId: commandId(), threadId: task.threadId }))
+        assert.deepStrictEqual((yield* rounds()).find((round) => round.id === checking)?.state, 'resolved')
+      }),
+    ),
+  )
+
   it.live('stops, resumes, abandons and reopens a task', () =>
     Effect.scoped(
       Effect.gen(function* () {

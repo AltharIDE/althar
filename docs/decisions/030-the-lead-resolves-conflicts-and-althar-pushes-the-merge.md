@@ -56,8 +56,9 @@
     Needs you.
   - **Only once the task's run has succeeded, and only until the person
     stops it.** A task the person stopped isn't started again for a
-    conflict, and stopping the lead or the task mid-round makes the round
-    theirs: nothing more is pushed, and failed checks don't restart the lead.
+    conflict, and stopping or interrupting the lead, or stopping the task,
+    mid-round makes the round theirs: nothing more is pushed, and failed
+    checks don't ask the lead again.
     Stopping listening to the pull request ends its round as well.
   - **The lead still never pushes.** Its environment has no way to
     ([ADR-011](011-own-connectors-for-hosts-and-trackers.md)); its brief, and

@@ -393,9 +393,11 @@ for the person, as above.
   person's. Where the lead committed anything else since the push, the pull
   request moved on past it, or it was merged or closed, the round is over,
   and what comes after is as ever.
-- **Stopping is the person's say.** Where the person stops the lead or the
-  task, a round under way is theirs: nothing more is pushed for it, and
-  checks that fail after don't start the lead again. Stopping listening to
+- **Stopping is the person's say.** Where the person stops or interrupts
+  the lead, or stops the task, a round under way is theirs: nothing more is
+  pushed for it, and checks that fail after don't ask the lead again. A
+  message sent to interrupt it is the person talking to the lead, not taking
+  the conflict over, and the round goes on. Stopping listening to
   the pull request ends its round too, since nothing there is heard; Althar
   does the same, as it starts, for a round left waiting on a pull request it
   no longer listens to.
