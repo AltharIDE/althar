@@ -286,15 +286,32 @@ export const Dictating: Story = { render: () => <Example recording /> }
 export const DictatingWordByWord: Story = { render: () => <Example recording streaming initial="Keep the limiter where it is." /> }
 /** Enter while dictating stops without sending, and the field is the size the same text typed would be: one row for a short transcript. */
 export const EnterEndsDictationAtItsSize: Story = {
-  render: () => <Example recording streaming />,
+  render: () => {
+    const said = SAID.join(' ')
+    const long = Array.from({ length: 12 }, () => said).join(' ')
+    return (
+      <>
+        <div data-testid="dictated-short"><Example recording streaming /></div>
+        <div data-testid="typed-short"><Example initial={said} /></div>
+        <div data-testid="dictated-long"><Example recording streaming initial={long} /></div>
+        <div data-testid="typed-long"><Example initial={`${long} ${said}`} /></div>
+      </>
+    )
+  },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    const field = c.getByRole('textbox') as HTMLTextAreaElement
-    await userEvent.type(field, '{Enter}')
-    await expect(c.queryByRole('button', { name: /^Stop dictating/ })).not.toBeInTheDocument()
-    /* stopped, not sent: what was said is still in the field */
-    await expect(field.value).not.toBe('')
-    await expect(Number.parseFloat(field.style.height)).toBeLessThanOrEqual(Math.max(field.scrollHeight, 22) + 1)
+    const box = (id: string) => within(c.getByTestId(id)).getByRole('textbox') as HTMLTextAreaElement
+    const height = (id: string) => box(id).getBoundingClientRect().height
+    for (const kind of ['short', 'long']) {
+      const field = box(`dictated-${kind}`)
+      await userEvent.type(field, '{Enter}')
+      await expect(within(c.getByTestId(`dictated-${kind}`)).queryByRole('button', { name: /^Stop dictating/ })).not.toBeInTheDocument()
+      /* stopped, not sent: the words are in the field, and it is as tall as the same text typed */
+      await expect(field.value).toBe(box(`typed-${kind}`).value)
+      await expect(height(`dictated-${kind}`)).toBeCloseTo(height(`typed-${kind}`), 0)
+    }
+    /* a short transcript stays one row; a long one is capped like typed text */
+    await expect(height('dictated-short')).toBeLessThan(height('dictated-long'))
   },
 }
 /** Which microphone it hears, from the menu beside it: the system's default first, then each the system names. */
