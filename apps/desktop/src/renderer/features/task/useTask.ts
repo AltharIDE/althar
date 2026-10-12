@@ -491,9 +491,11 @@ export const useTask = (threadId: string): TaskModel => {
           try {
             await client.push(snapshot.task.id, head, url)
           } catch (failure) {
-            // Commits on it the branch doesn't have are the lead's to bring in: the card offers to ask it.
-            if (failure instanceof ApiError && failure.reason === 'PushRefused' && failure.why === 'behind')
+            // Commits on it the branch doesn't have are the lead's to bring in: the card says so, and offers to ask it, in place of an error.
+            if (failure instanceof ApiError && failure.reason === 'PushRefused' && failure.why === 'behind') {
               setRefused(url ?? snapshot.task.changes[0]?.url ?? '')
+              return
+            }
             throw failure
           }
         },

@@ -934,8 +934,18 @@ export class Changes extends Context.Service<
           const where = nameOf(snapshot)
           const short = head.slice(0, 12)
           const rewritten = head === sent && !(yield* onHead(workspace.path, head))
+          // A hard reset loses what isn't committed: the note has it committed, and the backup checked, before any reset.
+          const left = rewritten ? yield* uncommittedFiles(workspace.path).pipe(Effect.orElseSucceed(() => [])) : []
+          const saved = `${workspace.branch}-rewritten`
           const note = rewritten
-            ? `Your branch ${workspace.branch} was rewritten after it was pushed, so ${where} won't take a plain push of it: its commits are no longer under yours. ${where} is at ${short}. Put your work back on top of it, keeping your fixes: save where you are with \`git branch ${workspace.branch}-rewritten\`, reset to the pull request's head with \`git reset --hard ${head}\`, merge ${workspace.base} into it with \`git merge ${workspace.base}\`, and bring in any change of the rewritten commits that isn't there yet as new commits (\`git diff HEAD ${workspace.branch}-rewritten\` shows what differs). Merge, never rebase, amend or squash commits that are pushed. Run the checks, commit, and say so: Althar pushes it as a plain push.`
+            ? [
+                `Your branch ${workspace.branch} was rewritten after it was pushed, so ${where} won't take a plain push of it: its commits are no longer under yours. ${where} is at ${short}. Put your work back on top of it, keeping your fixes, in this order:`,
+                `1. Commit everything not committed yet, so the reset below can't lose it${left.length === 0 ? '' : ` (${left.length === 1 ? 'this file has' : 'these files have'} changes not committed: ${left.slice(0, 10).join(', ')}${left.length > 10 ? `, and ${left.length - 10} more` : ''})`}. \`git status --short\` must then print nothing.`,
+                `2. Save where you are with \`git branch ${saved}\` (another name, if that one is taken, used below in its place), and check \`git rev-parse ${saved} HEAD\` prints the same commit twice.`,
+                `3. Only once both hold: reset to the pull request's head with \`git reset --hard ${head}\`, and merge ${workspace.base} into it with \`git merge ${workspace.base}\`.`,
+                `4. Bring in each change of ${saved} that isn't there yet as new commits: \`git diff HEAD ${saved}\` shows what differs.`,
+                `Merge, never rebase, amend or squash commits that are pushed. Run the checks, commit, and say so: Althar pushes it as a plain push. Keep ${saved} until it has.`,
+              ].join('\n')
             : `${where} has commits your branch ${workspace.branch} doesn't: someone pushed to it, such as with the host's "Update branch". Althar fetched them here as ${ref}, at ${short}. Merge them into your branch with \`git merge ${head}\`, settle any conflict so both sides' changes hold, run the checks, and commit the merge. Merge, never rebase. Then say so: Althar pushes it as a plain push.`
           return { note, head }
         })

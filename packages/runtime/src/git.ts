@@ -376,12 +376,16 @@ export const commitsAhead = (cwd: string, base: string, head = 'HEAD') =>
 export const onHead = (cwd: string, commit: string) =>
   Effect.match(git(cwd, 'merge-base', '--is-ancestor', commit, 'HEAD'), { onFailure: () => false, onSuccess: () => true })
 
+/** Where Althar keeps, by branch, the commit it last pushed of it: evidence the branch is published that git's own refs don't have. */
+export const PUSHED = 'refs/althar/pushed/'
+
 /**
  * Pushes HEAD to a branch of a remote by URL, never forced, unless `lease`
  * names the commit the branch must still be on there: then it replaces what
  * the branch has, and only that (`--force-with-lease`), so commits someone
- * else pushed meanwhile are never lost. The header that signs the push in
- * goes to git through its environment, so it is in no process's arguments.
+ * else pushed meanwhile are never lost. Pushed, the branch is kept under
+ * `PUSHED`. The header that signs the push in goes to git through its
+ * environment, so it is in no process's arguments.
  */
 export const pushTo = (
   cwd: string,
@@ -403,6 +407,9 @@ export const pushTo = (
       `${commit}:refs/heads/${branch}`,
     ],
     signedIn(target),
+  ).pipe(
+    // A push by URL moves no remote-tracking ref: Althar keeps its own, so the branch is known here to be published.
+    Effect.tap(() => Effect.ignore(git(cwd, 'update-ref', `${PUSHED}${branch}`, commit))),
   )
 
 /** Fetches a remote's branch by URL into `ref` here, whatever it was: the commit it is on. */

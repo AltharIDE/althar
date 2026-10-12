@@ -948,6 +948,11 @@ describe('a task’s pull request', () => {
     expect(screen.queryByText(/fast-forwards/)).toBeNull()
     expect(screen.queryByText(/didn’t take the push/)).toBeNull()
     expect(screen.queryByRole('button', { name: /Replace/ })).toBeNull()
+    // What fails after is said on the card, not hidden behind the refusal.
+    vi.mocked(client.mergeNote).mockRejectedValueOnce(new ApiError({ reason: 'ConnectorFailed', message: 'GitHub no longer takes it.' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Bring in the pull request’s commits' }))
+    expect(await within(screen.getByRole('article', { name: 'Add a retry' })).findByText('GitHub no longer takes it.')).toBeTruthy()
+    expect(client.send).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole('button', { name: 'Bring in the pull request’s commits' }))
     await waitFor(() => expect(client.mergeNote).toHaveBeenCalledWith('t1', url))
     await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ body: 'Merge them.' })))

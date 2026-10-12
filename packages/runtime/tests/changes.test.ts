@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -720,6 +720,8 @@ describe('a branch that parted from its pull request', () => {
       assert.isNull(ahead?.change?.diverged)
       yield* changes.push(taskId, ahead?.change?.localHead ?? '')
       assert.strictEqual(tip(), at(here, 'rev-parse', 'HEAD'))
+      // Pushed by URL, with no remote-tracking ref: Althar keeps its own, for the brief to say the branch is published.
+      assert.strictEqual(at(here, 'rev-parse', `refs/althar/pushed/${branch}`), tip())
 
       // The lead rewrites what was pushed: the card says so, with nothing to push plainly.
       const published = tip() ?? ''
@@ -738,11 +740,23 @@ describe('a branch that parted from its pull request', () => {
         'PR #1 has commits that aren’t here yet, so it didn’t take the push. Bring them in, then push again.',
       )
 
-      // Asking the lead to merge instead: the note has it start again from what was pushed, and merge, never rebase.
+      // Asking the lead to merge instead: the note has it start again from what was pushed, and merge, never rebase;
+      // what it hasn't committed is committed, and the backup checked, before any reset.
+      writeFileSync(join(here, 'half-done.ts'), 'export {}\n')
       const asked = yield* changes.mergeNote(taskId)
+      rmSync(join(here, 'half-done.ts'))
       assert.strictEqual(asked.head, published)
       assert.include(asked.note, 'was rewritten after it was pushed')
-      assert.include(asked.note, `git reset --hard ${published}`)
+      assert.include(asked.note, 'this file has changes not committed: half-done.ts')
+      const order = ['Commit everything not committed yet', `git rev-parse ${branch}-rewritten HEAD`, `git reset --hard ${published}`]
+      assert.deepStrictEqual(
+        order.map((step) => asked.note.indexOf(step)),
+        order.map((step) => asked.note.indexOf(step)).toSorted((a, b) => a - b),
+      )
+      assert.notInclude(
+        order.map((step) => asked.note.indexOf(step)),
+        -1,
+      )
       assert.include(asked.note, 'Merge, never rebase')
       assert.strictEqual(at(here, 'rev-parse', `refs/althar/pull-request/${branch}`), published)
 

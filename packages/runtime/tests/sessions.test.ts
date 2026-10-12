@@ -719,13 +719,20 @@ describe('sessions', () => {
         assert.include(brief, 'Not yet committed:\n?? notes.txt')
         // Whether its branch is published, as Althar knows it, and that a published one is merged into, never rebased.
         const branch = execFileSync('git', ['branch', '--show-current'], { cwd: created.worktree }).toString().trim()
-        assert.include(brief, `The branch ${branch} isn't published yet.`)
-        assert.include(brief, 'bring the default branch in by merging it, never by rebasing')
+        // Nothing says it was never pushed: unknown, it is merged into all the same.
+        assert.include(brief, `The branch ${branch} isn't on any remote Althar knows of, but it may still have been pushed some other way.`)
+        assert.include(brief, 'Bring the default branch in by merging it, never by rebasing')
         const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: created.worktree }).toString().trim()
         execFileSync('git', ['update-ref', `refs/remotes/origin/${branch}`, head], { cwd: created.worktree })
         yield* sessions.switchAgent({ threadId: created.threadId, agentId: 'codex' })
         const again = (yield* settled(created.threadId, 4)).at(-1)?.prompt ?? ''
         assert.include(again, `The branch ${branch} is published: origin/${branch} has it at ${head.slice(0, 12)}.`)
+        // Pushed by Althar, by URL, with no remote-tracking ref: still published.
+        execFileSync('git', ['update-ref', '-d', `refs/remotes/origin/${branch}`], { cwd: created.worktree })
+        execFileSync('git', ['update-ref', `refs/althar/pushed/${branch}`, head], { cwd: created.worktree })
+        yield* sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode' })
+        const pushed = (yield* settled(created.threadId, 5)).at(-1)?.prompt ?? ''
+        assert.include(pushed, `The branch ${branch} is published: Althar pushed it, at ${head.slice(0, 12)}.`)
       }).pipe(Effect.provide(runtime())),
     )
   })
