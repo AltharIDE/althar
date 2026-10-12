@@ -90,11 +90,11 @@ const implement = Effect.gen(function* () {
     SELECT a.id, a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'implement' ORDER BY a.admitted_at`
 })
 
-/** The task's Review attempts, oldest first, with the agent each ran on. */
+/** The task's Review attempts, oldest first, with their round and the agent each ran on. */
 const review = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient
-  return yield* sql<{ state: string; agentId: string | null }>`
-    SELECT a.state, s.agent_id FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+  return yield* sql<{ round: number; state: string; agentId: string | null }>`
+    SELECT n.iteration AS round, a.state, s.agent_id FROM node_attempts a JOIN nodes n ON n.id = a.node_id
     LEFT JOIN provider_sessions s ON s.id = a.provider_session_id
     WHERE n.node_key = 'review' ORDER BY a.admitted_at, a.rowid`
 })
@@ -115,7 +115,7 @@ const sessionsOf = (threadId: string) =>
   })
 
 /** A task whose review, on Codex, reviews until it is stopped, in the store at `file`: with its account out of usage until `out`, where given. */
-const reviewing = (file: string, out?: string) =>
+const reviewing = (file: string, out?: string, later = false) =>
   Effect.gen(function* () {
     const plans = yield* Plans
     const projects = yield* Projects
@@ -127,7 +127,8 @@ const reviewing = (file: string, out?: string) =>
       envelope: yield* Runtime.envelope('task.create', {}),
       projectId: project.projectId,
       title: 'Review after a restart',
-      description: '[lead:finish] [review:wait]',
+      // Later, its first round finds something, the lead settles it, and the second reviews until it is stopped.
+      description: later ? '[lead:finish] [review:findings] [review:wait-later]' : '[lead:finish] [review:wait]',
       draft: true,
     })
     const planId = yield* plans.propose({
@@ -141,7 +142,7 @@ const reviewing = (file: string, out?: string) =>
       actorId: actor,
     })
     yield* plans.start(planId, actor)
-    yield* until(review, (rows) => rows[0]?.state === 'running')
+    yield* until(review, (rows) => rows.some((row) => row.round === (later ? 1 : 0) && row.state === 'running'))
     if (out !== undefined) yield* outOfUsage(yield* reviewThread(created.taskId), out)
     return created
   }).pipe(Effect.provide(runtime(file)))
@@ -188,6 +189,39 @@ describe('A step a restart stopped', () => {
         assert.strictEqual(again?.agentId, 'codex')
         assert.deepStrictEqual(yield* callsOf(task.taskId), [])
         assert.strictEqual((yield* notices(task.threadId)).filter((notice) => notice.title === CARRIED).length, 1)
+      }).pipe(Effect.provide(runtime(file)))
+    }),
+  )
+
+  it.live('carries a later round of review on with what the lead settled before it', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const task = yield* reviewing(file, undefined, true)
+      yield* Effect.gen(function* () {
+        const rows = yield* until(review, (rows) => rows.filter((row) => row.round === 1).length === 2)
+        assert.strictEqual(rows.find((row) => row.round === 1)?.state, 'failed')
+        // The new reviewer is told what the lead settled, as the round it takes up was.
+        const sql = yield* SqlClient.SqlClient
+        const told = yield* until(
+          sql<{ body: string }>`
+            SELECT body FROM user_inputs WHERE thread_id = ${yield* reviewThread(task.taskId)} AND body LIKE 'Round 2.%' ORDER BY sequence`,
+          (found) => found.length === 2,
+        )
+        assert.include(told[1]?.body ?? '', 'Fixed the heading.')
+        assert.deepStrictEqual(yield* callsOf(task.taskId), [])
+      }).pipe(Effect.provide(runtime(file)))
+    }),
+  )
+
+  it.live('needs the person where a restart stops a review again soon after the last one carried it on', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const task = yield* reviewing(file)
+      yield* until(review, (rows) => rows.length === 2 && rows[1]?.state === 'running').pipe(Effect.provide(runtime(file)))
+      yield* Effect.gen(function* () {
+        const [call] = yield* until(callsOf(task.taskId), (rows) => rows.length === 1)
+        assert.deepStrictEqual(call, { kind: 'stuck', state: 'open', why: 'restarted' })
+        assert.strictEqual((yield* review).length, 2)
       }).pipe(Effect.provide(runtime(file)))
     }),
   )

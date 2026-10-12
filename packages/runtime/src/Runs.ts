@@ -2163,10 +2163,11 @@ export class Runs extends Context.Service<
 
       /**
        * Whether a restart stopped the step soon after the last one carried it
-       * on: its agent's last sign of life, on the step's thread, came within
-       * RESTART_GRACE of the line that said it carried on.
+       * on: the last sign of life in the task's thread or its review's, the
+       * line that said it carried on at least, came within RESTART_GRACE of
+       * that line.
        */
-      const restartedAgain = (current: RunRow, step: { readonly nodeKey: string; readonly nodeId: string }) =>
+      const restartedAgain = (current: RunRow, step: { readonly nodeId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [carried] = yield* sql<{ createdAt: string }>`
@@ -2174,15 +2175,12 @@ export class Runs extends Context.Service<
             WHERE thread_id = ${current.threadId} AND kind = 'notice' AND json_extract(content, '$.restarted') = ${step.nodeId}
             ORDER BY sequence DESC LIMIT 1`
           if (carried === undefined) return false
-          const [last] =
-            step.nodeKey === 'review'
-              ? yield* sql<{ at: string | null }>`
-                  SELECT max(i.created_at) AS at FROM thread_items i JOIN threads t ON t.id = i.thread_id
-                  WHERE t.task_id = ${current.taskId} AND t.kind = 'step' AND t.node_key = 'review'`
-              : yield* sql<{ at: string | null }>`SELECT max(created_at) AS at FROM thread_items WHERE thread_id = ${current.threadId}`
-          const from = Date.parse(carried.createdAt)
-          const alive = Math.max(from, last?.at == null ? from : Date.parse(last.at))
-          return alive - from < Duration.toMillis(RESTART_GRACE)
+          const grace = new Date(Date.parse(carried.createdAt) + Duration.toMillis(RESTART_GRACE)).toISOString()
+          const [alive] = yield* sql<{ later: number }>`
+            SELECT count(*) AS later FROM thread_items i JOIN threads t ON t.id = i.thread_id
+            WHERE t.task_id = ${current.taskId} AND (t.kind = 'task' OR (t.kind = 'step' AND t.node_key = 'review'))
+              AND i.created_at >= ${grace}`
+          return alive?.later === 0
         })
 
       /** A step a restart stopped, to carry on once the launch is up. */
@@ -2192,7 +2190,6 @@ export class Runs extends Context.Service<
         readonly nodeId: string
         readonly nodeKey: string
         readonly iteration: number
-        readonly config: string
         readonly ranOn: string | null
         readonly ranModel: string | null
       }
@@ -2214,12 +2211,13 @@ export class Runs extends Context.Service<
             nodeId: string
             attemptId: string
             iteration: number
-            config: string
             ranOn: string | null
             ranModel: string | null
           }>`
-            SELECT r.task_id, n.node_key, n.id AS node_id, a.id AS attempt_id, n.iteration, n.config,
-              s.agent_id AS ran_on, s.model AS ran_model
+            SELECT r.task_id, n.node_key, n.id AS node_id, a.id AS attempt_id, n.iteration,
+              -- The agent it ran on, on its model; one not started yet, the plan's for the step (Althar's own, none).
+              coalesce(s.agent_id, json_extract(n.config, '$.agentId')) AS ran_on,
+              CASE WHEN s.id IS NULL THEN json_extract(n.config, '$.model') ELSE s.model END AS ran_model
             FROM runs r JOIN workflow_executions e ON e.run_id = r.id JOIN nodes n ON n.execution_id = e.id
             JOIN node_attempts a ON a.node_id = n.id LEFT JOIN provider_sessions s ON s.id = a.provider_session_id
             WHERE r.state = 'running' AND a.state IN ('admitted', 'running')`
@@ -2242,11 +2240,10 @@ export class Runs extends Context.Service<
               continue
             }
             if (yield* restartedAgain(current, step)) {
-              const agent = step.ranOn ?? (JSON.parse(step.config) as { agentId?: string }).agentId ?? null
               yield* stuck(
                 current,
                 { id: step.attemptId },
-                { step: stepOf(step.nodeKey), why: 'restarted', detail: null, agentId: agent, round: step.iteration, open: 0 },
+                { step: stepOf(step.nodeKey), why: 'restarted', detail: null, agentId: step.ranOn, round: step.iteration, open: 0 },
               )
               continue
             }
@@ -2271,16 +2268,21 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const { current } = step
           const kind = stepOf(step.nodeKey)
-          const config = JSON.parse(step.config) as { agentId?: string; model?: string | null }
-          const lead = kind === 'implement' || kind === 'settle' ? yield* lastLead(current) : undefined
-          const agentId = lead?.agentId ?? step.ranOn ?? config.agentId ?? null
-          const model = lead === undefined ? (step.ranOn === null ? (config.model ?? null) : step.ranModel) : lead.model
+          // The lead's steps on the lead, as it last was; a review on its reviewer.
+          const { agentId, model, effort } =
+            kind === 'implement' || kind === 'settle'
+              ? yield* lastLead(current)
+              : { agentId: step.ranOn, model: step.ranModel, effort: null }
           const info: StuckInfo = { step: kind, why: 'restarted', detail: null, agentId, round: step.iteration, open: 0 }
           // Out of usage on what the project runs it on, it goes the way a limit takes it, with the account that is out.
-          const out = kind === 'publish' || agentId === null ? Option.none() : yield* limits.out(agentId, current.projectId)
+          const out = agentId === null ? Option.none() : yield* limits.out(agentId, current.projectId)
           const carried = yield* Effect.exit(
-            Option.isSome(out) && agentId !== null
-              ? outOfUsage({ ...step, taskId: current.taskId, output: null, run: current, step: kind }, agentId, out.value.accountId)
+            Option.isSome(out)
+              ? outOfUsage(
+                  { ...step, taskId: current.taskId, output: null, run: current, step: kind },
+                  out.value.agentId,
+                  out.value.accountId,
+                )
               : Effect.gen(function* () {
                   // Said first, so a restart while it starts counts as one soon after.
                   yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
@@ -2294,11 +2296,12 @@ export class Runs extends Context.Service<
                     current,
                     step.attemptId,
                     info,
-                    { kind: 'retry', agentId: agentId ?? 'althar', ...(model == null ? {} : { model }) },
+                    // Publishing, which is Althar's own, is tried again whoever is named.
+                    { kind: 'retry', agentId: agentId ?? 'althar' },
                     carrying,
                     model,
                     undefined,
-                    lead?.effort,
+                    effort,
                   )
                 }),
           )
