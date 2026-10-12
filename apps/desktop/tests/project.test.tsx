@@ -345,6 +345,46 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledWith('pln1')
   })
 
+  it('shows the effort the coordinator picked for a step as one the person chose, keeps it, and lets the person change it', async () => {
+    const plan = {
+      ...card().plan!,
+      steps: [
+        { key: 'implement' as const, agentId: 'claude-code', model: 'opus', effort: 'high', skipped: false },
+        { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+      ],
+    }
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(card({ plan }))] })) })
+    withServices(<Project />, client)
+    // The lead at the coordinator's effort; the review, which it left out, at the model's own.
+    expect(await screen.findByRole('button', { name: 'Lead for this task: Claude Opus High' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Review: gpt-5.2-codex Medium' })).toBeTruthy()
+    // Skipping the review keeps it.
+    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    await waitFor(() =>
+      expect(client.changePlan).toHaveBeenLastCalledWith(
+        'pln1',
+        [
+          { key: 'implement', agentId: 'claude-code', model: 'opus', effort: 'high', skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        null,
+      ),
+    )
+    // The person changes it as they would their own.
+    await userEvent.click(screen.getByRole('button', { name: 'Lead for this task: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'Low' }))
+    await waitFor(() =>
+      expect(client.changePlan).toHaveBeenLastCalledWith(
+        'pln1',
+        [
+          { key: 'implement', agentId: 'claude-code', model: 'opus', effort: 'low', skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        null,
+      ),
+    )
+  })
+
   it('talks to the coordinator on the agent last used, or on another the person picks', async () => {
     const { client } = fakeClient()
     withServices(<Project />, client)
