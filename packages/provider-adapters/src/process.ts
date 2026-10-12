@@ -170,20 +170,24 @@ export const spawnOwned = (
       child.stderr.on('data', (chunk: Buffer) => {
         stderr = (stderr + chunk.toString()).slice(-STDERR_KEPT)
       })
+      // Taken hold of at once: a process that exits while its start is still being read would otherwise have what it
+      // printed thrown away, as Node discards the output of a child that exited with no one reading it.
+      let sequence = 0
+      const next = () => ++sequence
+      const stdin = tapped(Writable.toWeb(child.stdin), 'to_agent', options.capture, next)
+      const stdout = tapped(Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>, 'from_agent', options.capture, next)
       child.once('exit', (code, signal) => Deferred.doneUnsafe(exited, Effect.succeed({ code, signal })))
       const pid = yield* Effect.callback<number, AgentStartFailed>((resume) => {
         child.once('spawn', () => resume(Effect.succeed(child.pid ?? 0)))
         child.once('error', (error) => resume(Effect.fail(new AgentStartFailed({ command: launched.command, reason: error.message }))))
       })
       const osStartedAt = yield* osStartTime(pid)
-      let sequence = 0
-      const next = () => ++sequence
       return {
         pid,
         ...(osStartedAt === undefined ? {} : { osStartedAt }),
         environmentDigest: environmentDigest(env),
-        stdin: tapped(Writable.toWeb(child.stdin), 'to_agent', options.capture, next),
-        stdout: tapped(Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>, 'from_agent', options.capture, next),
+        stdin,
+        stdout,
         exited,
         stopped,
         stderrTail: () => stderr,

@@ -52,20 +52,28 @@ export const modelNamer = Effect.gen(function* () {
     const entry = agents.list.find((one) => one.definition.id === step.agentId)
     const agent = { id: step.agentId, name: entry?.definition.name ?? step.agentId }
     const model = catalog.find((one) => one.agentId === step.agentId)?.models.find((one) => one.id === step.model)
-    const name = model === undefined ? (step.model === null ? `${agent.name}'s default model` : step.model) : knownModelName(agent, model)
-    return step.effort === undefined || step.effort === null ? name : `${name} (effort ${step.effort})`
+    return model === undefined ? (step.model === null ? `${agent.name}'s default model` : step.model) : knownModelName(agent, model)
   }
 })
 
-/** Who does a plan's steps, in words: its lead, and its reviewer or no review. */
-export const teamOf = (parameters: PlanParameters, modelOf: ModelNamer) => {
+/** A step's effort, by the id the coordinator's tools take; without one, it starts at the person's default for its model, or the model's own. */
+const effortWords = (effort: string | null | undefined) => (effort == null ? 'default effort' : `effort ${effort}`)
+
+/** Who does a plan's steps, in words: its lead, and its reviewer or no review, each named as `named` says. */
+export const teamOf = (parameters: PlanParameters, named: ModelNamer) => {
   // Every plan has its lead; a review may be left out, or skipped.
   const review = parameters.steps.find((step) => step.key === 'review' && !step.skipped)
   return [
-    ...parameters.steps.filter((step) => step.key === 'implement').map((lead) => `${modelOf(lead)} leads`),
-    review === undefined ? 'no review' : `${modelOf(review)} reviews`,
+    ...parameters.steps.filter((step) => step.key === 'implement').map((lead) => `${named(lead)} leads`),
+    review === undefined ? 'no review' : `${named(review)} reviews`,
   ].join(', ')
 }
+
+/** A step's model, and its effort where it has one: how a plan is told to a coordinator taking it over. */
+export const withEffort =
+  (modelOf: ModelNamer): ModelNamer =>
+  (step) =>
+    step.effort == null ? modelOf(step) : `${modelOf(step)} (${effortWords(step.effort)})`
 
 /**
  * The coordinator's news since its last turn on the thread, or null with
@@ -88,7 +96,12 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
     const drafts = yield* draftNews(projectId, last.sequence)
     if (events.length === 0 && drafts.length === 0) return null
 
-    const team = (parameters: PlanParameters) => teamOf(parameters, modelOf)
+    /** Who does a plan's steps; each step's effort too where it isn't what the other plan gives it, as its ending is said only where it changed. */
+    const team = (parameters: PlanParameters, other: PlanParameters) =>
+      teamOf(parameters, (step) => {
+        const was = other.steps.find((one) => one.key === step.key)
+        return (was?.effort ?? null) === (step.effort ?? null) ? modelOf(step) : `${modelOf(step)} (${effortWords(step.effort)})`
+      })
     const decode = Schema.decodeUnknownSync(Schema.fromJsonString(PlanParameters))
 
     const lines: Array<string> = []
@@ -116,7 +129,7 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
         const was = proposed?.actorId === instance.coordinatorId ? 'you proposed' : 'it was'
         const ends = (before.end ?? null) !== (now.end ?? null)
         said.push(
-          `The person changed its plan: ${was} ${team(before)}${ends ? `, and ${endWords(before.end)}` : ''}. Now ${team(now)}${ends ? `, and ${endWords(now.end)}` : ''}.`,
+          `The person changed its plan: ${was} ${team(before, now)}${ends ? `, and ${endWords(before.end)}` : ''}. Now ${team(now, before)}${ends ? `, and ${endWords(now.end)}` : ''}.`,
         )
       }
       if (plan.state === 'accepted')

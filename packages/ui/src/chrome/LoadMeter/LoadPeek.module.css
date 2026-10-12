@@ -1,0 +1,258 @@
+.peek {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 12px 4px;
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: -4px;
+}
+.heading {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.level {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+
+/* ---- the trace ---- */
+.trace {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.spark {
+  display: block;
+  overflow: visible;
+}
+.sparkLine {
+  fill: none;
+  stroke: var(--t-3);
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.sparkOurs {
+  fill: var(--live);
+  fill-opacity: 0.22;
+}
+.axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  color: var(--t-3);
+}
+
+/* ---- the figures, each a bar split into Althar's part and the rest ---- */
+.machine {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: baseline;
+  row-gap: 5px;
+}
+.name {
+  font-size: 12px;
+  color: var(--t-2);
+}
+.figure {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-1);
+  white-space: nowrap;
+}
+.bar {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 1px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--n-4);
+  overflow: hidden;
+}
+.bar i {
+  display: block;
+  height: 100%;
+  transition: width var(--slow) var(--ease);
+}
+.ours {
+  background: var(--live);
+}
+.rest {
+  background: var(--t-3);
+}
+.work {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+.key {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: var(--live);
+}
+.state {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--t-3);
+  text-wrap: pretty;
+}
+/* memory short is said in full ink, its first words carrying it */
+.strained {
+  color: var(--t-2);
+}
+.strained b {
+  font-weight: 600;
+  color: var(--t-1);
+}
+
+/* ---- each piece of Althar's work; its rows reach the peek's edges ---- */
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 -6px;
+}
+.rowsHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 6px;
+}
+.eyebrow {
+  margin: 0;
+  font: 500 10.5px/1 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.share {
+  display: grid;
+  grid-template-columns: 13px 1fr auto;
+  align-items: start;
+  column-gap: 8px;
+  width: 100%;
+  padding: 6px;
+  border-radius: 6px;
+  text-align: left;
+}
+.way {
+  transition: background var(--fast) var(--ease);
+}
+.way:hover {
+  background: var(--n-2);
+}
+.mark {
+  margin-top: 2px;
+  color: var(--t-3);
+}
+.words {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.title,
+.meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.title {
+  font-size: 12.5px;
+  font-weight: 520;
+  color: var(--t-1);
+}
+.meta {
+  font-size: 11px;
+  color: var(--t-3);
+}
+/* its CPU, and under it the memory it holds */
+.figures {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+.held {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+.none {
+  margin: 0;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.other {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 6px 0;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--t-3);
+}
+.other .figure {
+  color: var(--t-3);
+}
+
+/* ---- the switch that takes the meter out of the bar ---- */
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: -4px;
+  padding: 10px 0 8px;
+  border-top: 1px solid var(--line);
+}
+.footWords {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.footTitle {
+  font-size: 12.5px;
+  color: var(--t-1);
+}
+.footNote {
+  font-size: 11px;
+  color: var(--t-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar i,
+  .way {
+    transition: none;
+  }
+}

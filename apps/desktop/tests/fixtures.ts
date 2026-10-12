@@ -9,6 +9,7 @@ import type {
   ConnectionSummary,
   CoordinatorSnapshot,
   HomeSnapshot,
+  Load,
   Picture,
   ProjectNote,
   ProjectRulesView,
@@ -52,6 +53,7 @@ export const projectRules: ProjectRulesView = {
   alwaysAllow: [],
   commands: [],
   end: null,
+  resolveConflicts: false,
   usageLimit: 'move',
   rotateAccounts: false,
   onlyAccounts: null,
@@ -239,6 +241,59 @@ export const task: TaskSummary = {
   createdAt: NOW,
 }
 
+const GiB = 1024 ** 3
+const MiB = 1024 ** 2
+
+/** This Mac a moment ago, 32 GB of it: the task's lead running its suite, meridian's coordinator, and its default branch running. */
+export const load: Load = {
+  cpu: 0.42,
+  memoryUsed: 12.5 * GiB,
+  memoryTotal: 32 * GiB,
+  pressure: 'normal',
+  shares: [
+    {
+      kind: 'task',
+      projectId: 'p1',
+      project: 'meridian',
+      taskId: 't1',
+      threadId: 'th1',
+      title: 'Add a retry',
+      agent: { id: 'claude-code', name: 'Claude Code' },
+      cpu: 0.3,
+      memory: 1.5 * GiB,
+      processes: 12,
+    },
+    {
+      kind: 'coordinator',
+      projectId: 'p1',
+      project: 'meridian',
+      taskId: null,
+      threadId: null,
+      title: null,
+      agent: { id: 'codex', name: 'Codex' },
+      cpu: 0.02,
+      memory: 300 * MiB,
+      processes: 1,
+    },
+    {
+      kind: 'run',
+      projectId: 'p1',
+      project: 'meridian',
+      taskId: null,
+      threadId: null,
+      title: null,
+      agent: null,
+      cpu: 0.01,
+      memory: 220 * MiB,
+      processes: 3,
+    },
+  ],
+  history: [
+    { cpu: 0.2, work: 0.1 },
+    { cpu: 0.42, work: 0.33 },
+  ],
+}
+
 let sequence = 0
 const next = () => {
   sequence += 1
@@ -416,6 +471,41 @@ export const items = {
       ...content,
     },
   }),
+  /** Althar setting up the task's worktree, installing the dependencies its lockfile names, still running unless told otherwise. */
+  setup: (content: Partial<Extract<ThreadItem, { kind: 'setup' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'setup',
+    content: {
+      repository: 'meridian',
+      command: 'bun install --frozen-lockfile',
+      kept: false,
+      startedAt: NOW,
+      ended: null,
+      ...content,
+    },
+  }),
+  push: (content: Partial<Extract<ThreadItem, { kind: 'push_request' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'push_request',
+    content: {
+      url: 'https://github.com/meridian/api/pull/12',
+      where: 'PR #12',
+      product: 'github',
+      head: 'def4567890',
+      commits: [
+        { sha: 'abc1234', subject: 'Read Retry-After as seconds' },
+        { sha: 'def4567', subject: 'Name the retry option' },
+      ],
+      count: 2,
+      moved: false,
+      blocked: null,
+      state: 'open',
+      settledAt: null,
+      ...content,
+    },
+  }),
 }
 
 type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
@@ -455,6 +545,7 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   summary: null,
   lead: 'claude-code',
   leadModel: null,
+  leadEffort: null,
   branch: 'althar/add-a-retry',
   startedAt: null,
   waits: null,
@@ -544,6 +635,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     planId: null,
     runCommand: null,
     launches: [],
+    resolveConflicts: { task: null, project: false },
   },
   session: {
     id: 's1',
@@ -677,6 +769,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'zed', name: 'Zed' },
       { id: 'finder', name: 'Finder' },
     ]),
+    getLoad: vi.fn(async () => load),
     openInEditor: vi.fn(async () => true),
     installAgent: vi.fn(async () => {}),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
@@ -701,6 +794,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setCoAuthor: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
+    setTaskResolveConflicts: vi.fn(async () => {}),
     resumeTask: vi.fn(async () => {}),
     abandonTask: vi.fn(async () => {}),
     reopenTask: vi.fn(async () => {}),

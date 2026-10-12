@@ -91,6 +91,10 @@ export const ThreadItemKind = Schema.Literals([
   'run',
   /** An issue the coordinator drafted, in its thread: the person files it, changes it or discards it there. Althar posts it. */
   'issue_draft',
+  /** Althar setting up a task's worktree, in the task's thread, before its lead starts. Althar posts it and keeps it current. */
+  'setup',
+  /** The lead asking the person to push its new commits to the task's pull request. Althar posts it and keeps it current. */
+  'push_request',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -225,6 +229,15 @@ export type ExternalKind = typeof ExternalKind.Type
 export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
 export type IssueDraftState = typeof IssueDraftState.Type
 
+/**
+ * Where a lead resolving a conflict on its own stands (docs/architecture/06):
+ * at it (or at fixing the checks that failed on it), pushed and waiting for
+ * the pull request's checks, done, or given back to the person, who settles
+ * it or asks again.
+ */
+export const ConflictResolutionState = Schema.Literals(['resolving', 'checking', 'resolved', 'failed'])
+export type ConflictResolutionState = typeof ConflictResolutionState.Type
+
 /** What an artifact is, which decides how long it is kept: a command's output is a log, a picture an agent hands back an image. */
 export const ArtifactKind = Schema.Literals([
   'brief',
@@ -272,6 +285,7 @@ export const AggregateType = Schema.Literals([
   'policy',
   'agent_account',
   'issue_draft',
+  'conflict_resolution',
   'project_note',
 ])
 export type AggregateType = typeof AggregateType.Type

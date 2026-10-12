@@ -1,7 +1,7 @@
 import { at, id, index, project, ref, revision, table } from './0001_initial/columns'
 
 /*
- * A project's notes (ADR-029): short decisions the person made in
+ * A project's notes (ADR-031): short decisions the person made in
  * conversation with the coordinator that the code doesn't show, such as how
  * a kind of task goes or what not to change. The coordinator keeps them, and
  * every session of it starts with them; the person sees them in the

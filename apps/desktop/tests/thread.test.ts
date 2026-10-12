@@ -207,6 +207,20 @@ describe('work, folded', () => {
     // While it is still saying it, it stays where it is.
     expect(blocksOf(source(thread, true), new Map(), at).map((block) => block.kind)).toEqual(['turn', 'step', 'turn'])
   })
+
+  it("keeps a run the lead starts on its own after its step's result as a turn of its own, with its last message in the open", () => {
+    const thread = [
+      items.tool(),
+      items.step({ summary: 'Published.' }),
+      later(items.tool(), 60),
+      later(items.says('The log was under the build output.'), 70),
+      later(items.says('Branch coverage clears 90%.'), 80),
+    ]
+    const blocks = blocksOf(source(thread), new Map(), at)
+    expect(blocks.map((block) => block.kind)).toEqual(['turn', 'step', 'turn'])
+    expect(counts(blocks[2])).toEqual({ work: ['tool', 'message'], said: ['message'] })
+    expect(blocks[2]).toMatchObject({ said: [{ text: 'Branch coverage clears 90%.' }] })
+  })
 })
 
 describe('tool calls', () => {

@@ -4,7 +4,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 
-import { Api, ApiError, CommandId, NewProjectId, PAGE, Product, type SentImage, SentImages, ThreadItem, WatchEvent } from '../src/Api'
+import { Api, ApiError, CommandId, Load, NewProjectId, PAGE, Product, type SentImage, SentImages, ThreadItem, WatchEvent } from '../src/Api'
 import { MESSAGE_IMAGES } from '../src/pictures'
 import { clientProtocol, emitterPort, serverProtocol } from '../src/transport'
 
@@ -179,6 +179,7 @@ describe('the API', () => {
         summary: null,
         lead: null,
         leadModel: null,
+        leadEffort: null,
         branch: null,
         startedAt: null,
         waits: null,
@@ -198,6 +199,28 @@ describe('the API', () => {
       Schema.decodeUnknownSync(WatchEvent)({ _tag: 'Changed', aggregateType: 'task', aggregateId: 't', projectId: null, threadId: null }),
     )
     assert.strictEqual(PAGE, 100)
+  })
+
+  it('takes a load only as parts of the whole and bytes', () => {
+    const load = { cpu: 0.5, memoryUsed: 8e9, memoryTotal: 16e9, pressure: null, shares: [], history: [] }
+    const share = {
+      kind: 'task',
+      projectId: 'p1',
+      project: 'Meridian',
+      taskId: 't1',
+      threadId: 'th1',
+      title: 'Fix it',
+      cpu: 0.2,
+      memory: 1e9,
+      processes: 3,
+    }
+    const decode = Schema.decodeUnknownSync(Load)
+    assert.strictEqual(decode({ ...load, shares: [{ ...share, agent: { id: 'codex', name: 'Codex' } }] }).shares?.length, 1)
+    assert.throws(() => decode({ ...load, cpu: 1.2 }))
+    assert.throws(() => decode({ ...load, memoryUsed: -1 }))
+    assert.throws(() => decode({ ...load, pressure: 'high' }))
+    // A share has at least the one process it is.
+    assert.throws(() => decode({ ...load, shares: [{ ...share, agent: null, processes: 0 }] }))
   })
 
   it('takes images sent with a message as bytes or a digest, as many as a message carries', () => {
@@ -240,6 +263,15 @@ describe('the API', () => {
               PushHere: () => Effect.die('unused'),
               PushBranch: () => Effect.die('unused'),
               ListEditors: () => Effect.die('unused'),
+              GetLoad: () =>
+                Effect.succeed({
+                  cpu: 0.4,
+                  memoryUsed: 8e9,
+                  memoryTotal: 16e9,
+                  pressure: 'normal' as const,
+                  shares: null,
+                  history: [{ cpu: 0.4, work: 0.1 }],
+                }),
               InstallAgent: () => Effect.die('unused'),
               OpenInEditor: () => Effect.die('unused'),
               SetEffort: () => Effect.die('unused'),
@@ -270,6 +302,7 @@ describe('the API', () => {
               Interrupt: () => Effect.void,
               StopSession: () => Effect.void,
               StopTask: () => Effect.void,
+              SetTaskResolveConflicts: () => Effect.void,
               ResumeTask: () => Effect.void,
               AbandonTask: () => Effect.void,
               ReopenTask: () => Effect.void,
@@ -357,6 +390,8 @@ describe('the API', () => {
         assert.strictEqual((yield* client.StartSignIn({ commandId, product: 'linear' })).kind, 'browser')
         // A product Althar doesn't know isn't one.
         assert.throws(() => Schema.decodeUnknownSync(Product)('gitea'))
+        // Where Althar's processes can't be read, its work's part is unknown, not none.
+        assert.strictEqual((yield* client.GetLoad({})).shares, null)
         const refused = yield* Effect.flip(client.OpenProject({ commandId, grant: 'g1' }))
         assert.strictEqual(refused.message, 'No folder was chosen as g1.')
         assert.deepStrictEqual(

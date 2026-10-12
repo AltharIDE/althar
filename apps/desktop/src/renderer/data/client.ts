@@ -25,6 +25,7 @@ import {
   type FileDiff,
   type FolderReading,
   type IssueList,
+  type Load,
   type OutputText,
   type Product,
   type ChangeTarget,
@@ -135,6 +136,8 @@ export interface Client {
   readonly interrupt: (threadId: string) => Promise<void>
   /** Stops a task: every agent on it, and the step it was on waits until it is resumed. */
   readonly stopTask: (taskId: string) => Promise<void>
+  /** Whether a task's lead resolves conflicts on its own otherwise than its project says; null goes back to the project. */
+  readonly setTaskResolveConflicts: (input: { readonly taskId: string; readonly resolveConflicts: boolean | null }) => Promise<void>
   /** Carries a stopped task on from the step it was on: with its last lead, or the agent picked. */
   readonly resumeTask: (input: {
     readonly taskId: string
@@ -276,6 +279,8 @@ export interface Client {
   readonly pushBranch: (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) => Promise<void>
   /** The editors on this Mac a task's files open in. */
   readonly listEditors: () => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>
+  /** How hard this computer works now, and Althar's work's part, for the bar while it shows it. */
+  readonly getLoad: () => Promise<Load>
   /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
   readonly installAgent: (agentId: string) => Promise<void>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
@@ -420,6 +425,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
+    setTaskResolveConflicts: (input) => command((commandId) => api.SetTaskResolveConflicts({ commandId, ...input })),
     resumeTask: (input) => command((commandId) => api.ResumeTask({ commandId, ...input })),
     abandonTask: (taskId) => command((commandId) => api.AbandonTask({ commandId, taskId })),
     reopenTask: (taskId) => command((commandId) => api.ReopenTask({ commandId, taskId })),
@@ -486,6 +492,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     pushHere: (taskId) => command((commandId) => api.PushHere({ commandId, taskId })),
     pushBranch: (taskId, heads) => command((commandId) => api.PushBranch({ commandId, taskId, heads })),
     listEditors: () => settle(api.ListEditors({})),
+    getLoad: () => settle(api.GetLoad({})),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),

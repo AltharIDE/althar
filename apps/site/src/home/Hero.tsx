@@ -7,6 +7,7 @@ import { cx } from '../lib/cx'
 import { Bar } from '../shared/Bar'
 import { drawColumn, heightOf, STOPS, tonesOf } from '../shared/light'
 import { Get } from '../shared/Close'
+import { LightUnder } from '../shared/lightUnder'
 import { addDisplay } from './display'
 import s from './Hero.module.css'
 import { NameSwap } from './NameSwap'
@@ -43,6 +44,8 @@ const OPEN = 1900
 const REGION = { x: 1, y: 4.5, width: 22, height: 30 }
 /** The bar's height: the light stops short of it. */
 const BAR = 64
+/** How strongly the grain shows over the light, as the app's home has it (foundations/Light). */
+const GRAIN = 0.9
 
 const still = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(window.location.search).has('t')
 
@@ -160,10 +163,10 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
   useLayoutEffect(() => {
     const live = (root.current && getComputedStyle(root.current).getPropertyValue('--live').trim()) || undefined
     COLUMNS.forEach((column, i) => {
-      const context = columns.current[i]?.getContext('2d')
+      const canvas = columns.current[i]
       const tones = tonesOf(column.d, heart)
       // The middle's foot is the page's --live, as the mark's dots are.
-      if (context) drawColumn(context, tones[0] === '#2b3bff' && live ? [live, tones[1], tones[2]] : tones)
+      if (canvas) drawColumn(canvas, tones[0] === '#2b3bff' && live ? [live, tones[1], tones[2]] : tones)
     })
     const tile = document.createElement('canvas')
     tile.width = tile.height = 128
@@ -179,9 +182,15 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
     const whole = light.current
     if (!el || !whole) return
     const fast = still()
-    const first = opened.current === null
-    if (first) opened.current = performance.now()
+    if (opened.current === null) opened.current = performance.now()
     const since = () => performance.now() - (opened.current ?? 0)
+    /*
+     * How far into the opening this is. The effect runs again within it (in
+     * development React runs it twice; on a phone the light's heart is only
+     * known once the page has hydrated): the light rises on from where it
+     * would be by now, not stood up at once, which lost the rise.
+     */
+    const into = since()
     const rests = COLUMNS.map((column) => heightOf(column, heart))
 
     /*
@@ -226,14 +235,15 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
       if (!node) return
       const stand = `translateX(0px) scaleY(${rests[i]!.toFixed(4)})`
       // Risen already (the page changed size across a phone's width), or held still, it stands at once.
-      if (fast || !first) {
+      const delay = rise.start + column.d * rise.spread - into
+      if (fast || delay + rise.duration <= 0) {
         node.style.transform = stand
         if (!fast) sway(node, i, 0)
         return
       }
       const up = node.animate([{ transform: 'translateX(0px) scaleY(0)' }, { transform: stand }], {
         duration: rise.duration,
-        delay: rise.start + column.d * rise.spread,
+        delay,
         easing: rise.easing,
         fill: 'forwards',
       })
@@ -250,8 +260,9 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
       )
     })
     if (grain.current) {
-      if (fast || !first) grain.current.style.opacity = '0.5'
-      else runs.add(grain.current.animate([{ opacity: 0 }, { opacity: 0.5 }], { ...springEasing(1, 1), delay: 200, fill: 'both' }))
+      const fade = springEasing(1, 1)
+      if (fast || 200 + fade.duration <= into) grain.current.style.opacity = String(GRAIN)
+      else runs.add(grain.current.animate([{ opacity: 0 }, { opacity: GRAIN }], { ...fade, delay: 200 - into, fill: 'both' }))
     }
 
     // The name's turn swells it, a breath up and back, most in the middle.
@@ -421,6 +432,7 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
       <header className={s.head}>
         {/* The spaces between the lines don't show, as the lines are blocks; they keep the words apart for anything that reads the text alone. */}
         <h1 ref={headline} className={s.h1}>
+          <LightUnder className={s.under} />
           <span className={cx(s.line, s.pay)} data-line>
             <Words text={HERO.pay} />
           </span>{' '}

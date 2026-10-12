@@ -65,6 +65,10 @@ function Example(
     initial?: string
     recording?: boolean
     streaming?: boolean
+    /** The words the transcriber hears and writes on stopping (default: one sentence). */
+    transcript?: readonly string[]
+    /** Words heard per step of the streaming transcriber (default: one). */
+    pace?: number
     waiting?: (string | { text: string; attached: string })[]
     at?: number
     inputs?: readonly DictationInput[]
@@ -78,6 +82,8 @@ function Example(
     initial = '',
     recording = false,
     streaming = false,
+    transcript = SAID,
+    pace = 1,
     waiting = [],
     at,
     inputs = INPUTS,
@@ -104,7 +110,7 @@ function Example(
     }
   }, [running])
   /* a streaming transcriber: a word every few ticks, until the sentence is out */
-  const heard = streaming ? SAID.slice(0, Math.min(SAID.length, 3 + Math.floor(tick / 4))).join(' ') : undefined
+  const heard = streaming ? transcript.slice(0, Math.min(transcript.length, 3 + pace * Math.floor(tick / 4))).join(' ') : undefined
   return (
     <div style={{ maxWidth: 700, paddingTop: 60 }}>
       <Composer
@@ -151,7 +157,7 @@ function Example(
           onStart: () => setSeconds(0),
           onStop: () => {
             setSeconds(null)
-            setValue((v) => `${v ? `${v.trimEnd()} ` : ''}${SAID.join(' ')}`)
+            setValue((v) => `${v ? `${v.trimEnd()} ` : ''}${transcript.join(' ')}`)
           },
         }}
         queued={queue}
@@ -284,6 +290,50 @@ export const SendingNow: Story = {
 export const Dictating: Story = { render: () => <Example recording /> }
 /** A transcriber that streams: the words arrive faint in the field as you say them. */
 export const DictatingWordByWord: Story = { render: () => <Example recording streaming initial="Keep the limiter where it is." /> }
+/** Enter while dictating stops without sending, and the field is the size the same text typed would be: one row for a short transcript. */
+export const EnterEndsDictationAtItsSize: Story = {
+  render: () => {
+    const said = SAID.join(' ')
+    const longWords = Array.from({ length: 12 }, () => SAID).flat()
+    const long = longWords.join(' ')
+    return (
+      <>
+        <div data-testid="dictated-short">
+          <Example recording streaming />
+        </div>
+        <div data-testid="typed-short">
+          <Example initial={said} />
+        </div>
+        <div data-testid="dictated-long">
+          <Example recording streaming transcript={longWords} pace={10} />
+        </div>
+        <div data-testid="typed-long">
+          <Example initial={long} />
+        </div>
+      </>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const box = (id: string) => within(c.getByTestId(id)).getByRole('textbox') as HTMLTextAreaElement
+    const height = (id: string) => box(id).getBoundingClientRect().height
+    for (const kind of ['short', 'long']) {
+      const field = box(`dictated-${kind}`)
+      /* the long transcript is still arriving: stop with its faint words several rows tall over the field */
+      if (kind === 'long')
+        await waitFor(() => expect((field.previousElementSibling as HTMLElement).getBoundingClientRect().height).toBeGreaterThan(80), {
+          timeout: 10000,
+        })
+      await userEvent.type(field, '{Enter}')
+      await expect(within(c.getByTestId(`dictated-${kind}`)).queryByRole('button', { name: /^Stop dictating/ })).not.toBeInTheDocument()
+      /* stopped, not sent: the words are in the field, and it is as tall as the same text typed */
+      await expect(field.value).toBe(box(`typed-${kind}`).value)
+      await expect(height(`dictated-${kind}`)).toBeCloseTo(height(`typed-${kind}`), 0)
+    }
+    /* a short transcript stays one row; a long one is capped like typed text */
+    await expect(height('dictated-short')).toBeLessThan(height('dictated-long'))
+  },
+}
 /** Which microphone it hears, from the menu beside it: the system's default first, then each the system names. */
 export const ChoosingTheMicrophone: Story = {
   render: () => <Example />,
@@ -573,7 +623,6 @@ export const EnterStopsDictating: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
     const field = c.getByRole('textbox', { name: 'Tell the lead' })
-    await expect(c.getByText('Enter to stop; it is not sent')).toBeInTheDocument()
     await userEvent.click(field)
     await userEvent.keyboard('{Enter}')
     await userEvent.keyboard('{Meta>}{Enter}{/Meta}')

@@ -98,8 +98,6 @@ export interface ComposerText {
   /** The microphone while the speech model downloads. */
   dictateProgress: (percent: number) => string
   stopDictating: (elapsed: string) => string
-  /** Under the field while dictating: Enter stops and writes it down, without sending. */
-  stopNote: string
   /** The button beside the microphone that opens the list of microphones. */
   chooseInput: string
   /** The list's name and heading. */
@@ -139,7 +137,6 @@ export const composerText: ComposerText = {
   dictateBusy: 'Writing down what you said',
   dictateProgress: (percent) => `Dictate. The speech model is downloading, ${percent}%`,
   stopDictating: (elapsed) => `Stop dictating, ${elapsed}`,
-  stopNote: 'Enter to stop; it is not sent',
   chooseInput: 'Choose the microphone',
   inputs: 'Microphone',
   systemDefault: 'System default',
@@ -264,7 +261,8 @@ export function Composer({
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
-  }, [value, ref])
+    /* the words arriving draw over the field in its grid cell: measure again when they come and go, not only when the text changes */
+  }, [value, interim, ref])
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault()
@@ -284,7 +282,6 @@ export function Composer({
   })()
 
   const note = (() => {
-    if (elapsed !== null && dictation?.busy !== true) return t.stopNote
     if (busy && drafted) return t.queueNote
     if (value.includes('\n')) return t.newlineNote
     return null

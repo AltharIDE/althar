@@ -1,7 +1,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 
-import { ProjectTabs, TitleBar, type Room, UpdateReady } from '@althar/ui'
+import { LoadMeter, ProjectTabs, TitleBar, type Room, UpdateReady } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { useWindowChrome } from '../../shared/useWindowChrome'
@@ -9,6 +9,7 @@ import { useUpdate } from '../../shared/useUpdate'
 import { tabsStoreOf } from './store'
 import { beside, byNumber } from './tabs'
 import s from './Tabs.module.css'
+import { SLOTS, text as loadText, useLoad } from './useLoad'
 import { useTabs } from './useTabs'
 
 /*
@@ -18,9 +19,10 @@ import { useTabs } from './useTabs'
  * as in a browser. ⌘N starts a new project in a tab of its own, as the +
  * does. The tabs are the window's one bar: a screen puts its own controls at
  * the bar's end with BarEnd, and its way back, where it has one, at the top
- * of its page. Before it, on every screen, a newer Althar ready to install
- * says so in one quiet line. Before there is any project there are no tabs:
- * the first screen has the whole window.
+ * of its page. Before it, on every screen, how hard the computer works, in
+ * two short meters the person may turn off (`useLoad`), and a newer Althar
+ * ready to install, in one quiet line. Before there is any project there are
+ * no tabs: the first screen has the whole window.
  */
 
 const VisitContext = createContext<(threadId: string, projectId: string) => void>(() => undefined)
@@ -83,6 +85,7 @@ function TabsBar({ tabs, endRef }: { tabs: ReturnType<typeof useTabs>; endRef: (
   const { host } = useServices()
   const chrome = useWindowChrome()
   const update = useUpdate()
+  const load = useLoad(tabs.tabs.length > 0 || tabs.others.length > 0)
   const { select, current } = tabs
   return (
     <ProjectTabs
@@ -96,6 +99,9 @@ function TabsBar({ tabs, endRef }: { tabs: ReturnType<typeof useTabs>; endRef: (
       onNewProject={tabs.newProject}
       end={
         <>
+          {load.glance !== null && (
+            <LoadMeter load={load.glance} slots={SLOTS} onOpen={load.open} onHide={load.hide} text={loadText.meter} />
+          )}
           {update.ready !== null && <UpdateReady {...update.ready} />}
           <div ref={endRef} className={s.end} />
         </>

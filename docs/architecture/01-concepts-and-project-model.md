@@ -263,8 +263,12 @@ It never:
 - rewrites remotes;
 - initializes Git without a separate explicit action.
 
-A project can declare a setup command, run in each new worktree, and untracked
-files to copy into it, such as `.env`.
+Each new worktree is set up before its lead starts, by Althar itself and
+outside any agent's sandbox: the setup kept for its repository, else the
+install its lockfile names, which never changes the lockfile
+([ADR-023](../decisions/023-althar-runs-the-project.md),
+[03](03-agent-runtime-and-auth.md#setting-up-a-worktree)). Untracked files to
+copy into it, such as `.env`, are not declared yet.
 
 Working on a plain branch in the user's own checkout may come later, as an
 explicit per-project choice. It relaxes the rules above and must say so where

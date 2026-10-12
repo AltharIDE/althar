@@ -750,6 +750,51 @@ describe('running what a task built, with no agent', () => {
     opened.mockRestore()
   })
 
+  it('shows Althar setting up the worktree before the lead starts: as it installs, once it has, and what it printed if it failed', async () => {
+    const thread = snapshot()
+    const setup = items.setup()
+    let current = { ...thread, items: [...thread.items, setup] }
+    const { client, emit } = fakeClient({
+      getThread: vi.fn(async () => current),
+      getThreadItem: vi.fn(async () => current.items.at(-1) as ThreadItem),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Installing dependencies in meridian…')).toBeTruthy()
+    type Setup = Extract<ThreadItem, { kind: 'setup' }>['content']
+    const ended = (over: Partial<NonNullable<Setup['ended']>>, more: Partial<Setup> = {}) =>
+      ({
+        ...setup,
+        content: {
+          ...(setup.content as Setup),
+          ...more,
+          ended: { at: NOW, code: 0, timedOut: false, stopped: false, last: null, ...over },
+        },
+      }) as ThreadItem
+    // Installed, it is a line across the thread, and no more.
+    current = { ...thread, items: [...thread.items, ended({})] }
+    act(() => emit(changed('thread_item', setup.id)))
+    expect(await screen.findByText('Installed dependencies in meridian')).toBeTruthy()
+    expect(screen.queryByText('bun install --frozen-lockfile')).toBeNull()
+    // Failed, the end of what it printed stands under it, with how it ended; the lead hears of it.
+    current = { ...thread, items: [...thread.items, ended({ code: 1, last: 'resolving\nerror: lockfile had changes' })] }
+    act(() => emit(changed('thread_item', setup.id)))
+    expect(await screen.findByText('Couldn’t install dependencies in meridian. The lead is told.')).toBeTruthy()
+    expect(screen.getByText('error: lockfile had changes')).toBeTruthy()
+    expect(screen.getByText('exit 1')).toBeTruthy()
+    // A setup kept for the repository, out of time: it says so.
+    current = {
+      ...thread,
+      items: [...thread.items, ended({ code: null, timedOut: true, last: 'waiting' }, { kept: true, command: 'make deps' })],
+    }
+    act(() => emit(changed('thread_item', setup.id)))
+    expect(await screen.findByText('Couldn’t set up meridian. The lead is told.')).toBeTruthy()
+    expect(screen.getByText('It took too long, and was stopped.')).toBeTruthy()
+    // Cut short as Althar quit, it says it runs again.
+    current = { ...thread, items: [...thread.items, ended({ code: null, stopped: true })] }
+    act(() => emit(changed('thread_item', setup.id)))
+    expect(await screen.findByText('Setting up meridian stopped as Althar quit. It runs again before the lead starts.')).toBeTruthy()
+  })
+
   it('offers no run where nothing says how it runs', async () => {
     const { client } = fakeClient()
     withServices(<Task />, client)
@@ -886,6 +931,54 @@ describe('a task’s pull request', () => {
     expect(await screen.findByText('2 commits aren’t on the pull request yet.')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Push 2 commits' }))
     await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456', 'https://github.com/meridian/api/pull/12'))
+  })
+
+  it('asks, in the thread, for a push the lead asked for: what would go up, pushed up to the head it shows', async () => {
+    const thread = snapshot()
+    const asked = items.push()
+    let current = { ...thread, items: [...thread.items, asked] }
+    const push = vi.fn(async () => {})
+    const { client, emit } = fakeClient({
+      push,
+      getThread: vi.fn(async () => current),
+      getThreadItem: vi.fn(async () => current.items.at(-1) as ThreadItem),
+    })
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => null)
+    withServices(<Task />, client)
+    const card = within(await screen.findByRole('article', { name: 'Push to PR #12' }))
+    expect(card.getByText('Read Retry-After as seconds')).toBeTruthy()
+    expect(card.getByText('Name the retry option')).toBeTruthy()
+    await userEvent.click(card.getByRole('button', { name: 'Open PR #12' }))
+    expect(opened).toHaveBeenCalledWith('https://github.com/meridian/api/pull/12', '_blank')
+    await userEvent.click(card.getByRole('button', { name: 'Push 2 commits to PR #12' }))
+    await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def4567890', 'https://github.com/meridian/api/pull/12'))
+    // The branch changed since: the runtime shows what is on it now, and Push pushes that.
+    const moved = {
+      ...asked,
+      content: { ...asked.content, moved: true, head: 'fed7654321', commits: [{ sha: 'fed7654', subject: 'Name it again' }], count: 1 },
+    } as ThreadItem
+    current = { ...current, items: [...thread.items, moved] }
+    act(() => emit(changed('thread_item', asked.id)))
+    expect(await screen.findByText('The branch changed since this was asked. This is what is on it now.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Push 1 commit to PR #12' }))
+    await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'fed7654321', 'https://github.com/meridian/api/pull/12'))
+    // Changed so that it can't go up: why, and what would let it, with nothing to press.
+    current = {
+      ...current,
+      items: [...thread.items, { ...moved, content: { ...moved.content, commits: [], count: 0, blocked: 'rewritten' } } as ThreadItem],
+    }
+    act(() => emit(changed('thread_item', asked.id)))
+    expect(await screen.findByText(/no longer has what PR #12 already has/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Push \d/ })).toBeNull()
+    // Pushed, it stays as a record, with nothing to press.
+    current = {
+      ...current,
+      items: [...thread.items, { ...moved, content: { ...asked.content, state: 'pushed', settledAt: NOW } } as ThreadItem],
+    }
+    act(() => emit(changed('thread_item', asked.id)))
+    await waitFor(() => expect(screen.getByRole('article', { name: 'Push to PR #12' }).textContent).toContain('Pushed'))
+    expect(screen.queryByRole('button', { name: /^Push \d/ })).toBeNull()
+    opened.mockRestore()
   })
 
   it('shows what it changed, file by file, from its header, its outputs, or ⌘D', async () => {

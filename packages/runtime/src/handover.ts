@@ -2,7 +2,7 @@ import type { ProjectId } from '@althar/domain'
 import { Effect, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { endWords, type ModelNamer, teamOf } from './coordinatorNews'
+import { endWords, type ModelNamer, teamOf, withEffort } from './coordinatorNews'
 import { git } from './git'
 import { Instance } from './Instance'
 import { type Note, notesOf, sayNotes } from './notes'
@@ -14,7 +14,7 @@ import { transcript } from './threads'
 
 /*
  * Handing the coordinator to a fresh session before its context fills
- * (ADR-029). An agent left to fill its context compacts it on its own, at a
+ * (ADR-031). An agent left to fill its context compacts it on its own, at a
  * moment of its choosing, mid-reply even, and what was decided only in
  * conversation may not survive its summary. So Althar watches how full the
  * coordinator's context is, as the agent says, and once it reaches
@@ -178,7 +178,7 @@ export const openTasks = (projectId: string, modelOf: ModelNamer, working: (thre
             : null
         const who = full
           ? [
-              ...(plan === undefined ? [] : [`Plan: ${teamOf(plan, modelOf)}; ${endWords(plan.end)}.`]),
+              ...(plan === undefined ? [] : [`Plan: ${teamOf(plan, withEffort(modelOf))}; ${endWords(plan.end)}.`]),
               ...(lead === null ? [] : [`Its lead now: ${lead}.`]),
             ]
           : // In short, only who leads it.

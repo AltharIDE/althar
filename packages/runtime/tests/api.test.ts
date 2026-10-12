@@ -11,6 +11,7 @@ import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
+import { SqlClient } from 'effect/sql'
 
 import { connection, isInside, services } from '../src/Api'
 import {
@@ -85,7 +86,9 @@ const connected = (
     const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
     /** A folder the person chose, as the app's main process allows it. */
     const grant = (path: string) => Context.get(context, Folders).allow(path)
-    return { client, grant, context }
+    /** Reads or writes the runtime's store directly, for what no client does. */
+    const store = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) => effect.pipe(Effect.provideContext(context))
+    return { client, grant, store, context }
   })
 
 const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
@@ -739,6 +742,22 @@ describe('settings, through the API', () => {
   )
 })
 
+describe('this computer’s load, through the API', () => {
+  it.live('says how hard this computer works, read as it is, checked on the way', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        const load = yield* client.GetLoad({})
+        assert.isAbove(load.memoryTotal, 0)
+        assert.isAtMost(load.memoryUsed, load.memoryTotal)
+        assert.lengthOf(load.history, 1)
+        // Nothing of Althar's runs, so its part is none; or unknown, where processes can't be listed.
+        if (load.shares !== null) assert.lengthOf(load.shares, 0)
+      }),
+    ),
+  )
+})
+
 describe('project rules, through the API', () => {
   it.live('reads a project’s rules, and changes them in part as the person', () =>
     Effect.scoped(
@@ -755,6 +774,7 @@ describe('project rules, through the API', () => {
           alwaysAllow: [],
           commands: [],
           end: null,
+          resolveConflicts: false,
           usageLimit: 'move',
           rotateAccounts: false,
           onlyAccounts: null,
@@ -773,6 +793,7 @@ describe('project rules, through the API', () => {
           never: ['force-push'],
           commands: [{ pattern: 'terraform *', decision: 'ask' }],
           end: 'ready',
+          resolveConflicts: true,
           usageLimit: 'wait',
           rotateAccounts: true,
           onlyAccounts: { codex: ['acc_x'] },
@@ -783,6 +804,7 @@ describe('project rules, through the API', () => {
             changed.never,
             changed.commands,
             changed.end,
+            changed.resolveConflicts,
             changed.usageLimit,
             changed.rotateAccounts,
             changed.onlyAccounts,
@@ -792,6 +814,7 @@ describe('project rules, through the API', () => {
             ['force-push'],
             [{ pattern: 'terraform *', decision: 'ask' }],
             'ready',
+            true,
             'wait',
             true,
             { codex: ['acc_x'] },
@@ -799,7 +822,10 @@ describe('project rules, through the API', () => {
         )
         // Back to deciding the ending by the host, and every account; the rest stays.
         const back = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, end: null, onlyAccounts: null })
-        assert.deepStrictEqual([back.end, back.onlyAccounts, back.rotateAccounts, back.never], [null, null, true, ['force-push']])
+        assert.deepStrictEqual(
+          [back.end, back.onlyAccounts, back.rotateAccounts, back.never, back.resolveConflicts],
+          [null, null, true, ['force-push'], true],
+        )
         assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
         const missing = yield* Effect.flip(client.GetProjectRules({ projectId: 'proj_missing' }))
         assert.strictEqual(missing.reason, 'NotFound')
@@ -1275,10 +1301,144 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
+  it.live('has the project’s leads resolve what already conflicts as soon as its rules say they do, and a task say otherwise', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const root = repository()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Retry',
+          description: '[lead:finish] [lead:edit] [lead:resolve]',
+          steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        })
+        yield* eventually(client.GetBoard({ projectId: project.id }), (board) =>
+          board.tasks.some((one) => one.taskId === task.id && one.phase === 'ready'),
+        )
+        // The default branch moves on, conflicting with what it changed; nobody merges, so nothing finds it.
+        const git = (...args: Array<string>) =>
+          execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd: root, stdio: 'pipe' })
+        writeFileSync(join(root, 'change.txt'), 'rate limits\n')
+        git('add', '.')
+        git('commit', '-q', '-m', 'Limit rates')
+        const resolvedIn = (thread: ThreadSnapshot) =>
+          thread.items.some(
+            (item) => item.kind === 'notice' && item.content.title?.startsWith('The lead resolved the conflict with main') === true,
+          )
+        const before = yield* client.GetThread({ threadId: task.threadId })
+        assert.deepStrictEqual(before.task.resolveConflicts, { task: null, project: false })
+        // The task says otherwise, then goes back to the project's say: neither asks the lead anything.
+        yield* client.SetTaskResolveConflicts({ commandId: commandId(), taskId: task.id, resolveConflicts: false })
+        assert.deepStrictEqual((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).task.resolveConflicts, {
+          task: false,
+          project: false,
+        })
+        yield* client.SetTaskResolveConflicts({ commandId: commandId(), taskId: task.id, resolveConflicts: null })
+        // The project turns its leads resolving conflicts on: the lead resolves it now, with no Merge pressed.
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, resolveConflicts: true })
+        const after = yield* eventually(
+          Effect.andThen(Effect.sleep('80 millis'), client.GetThread({ threadId: task.threadId })),
+          resolvedIn,
+        )
+        assert.deepStrictEqual(after.task.resolveConflicts, { task: null, project: true })
+        assert.isFalse(resolvedIn(before))
+      }),
+    ),
+  )
+
+  it.live('gives a conflict to the person when they interrupt the lead resolving it, or while Althar waits for its checks', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, store } = yield* connected()
+        const root = repository()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Retry',
+          description: '[lead:finish] [lead:edit] [lead:resolve-wait]',
+          steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        })
+        yield* eventually(client.GetBoard({ projectId: project.id }), (board) =>
+          board.tasks.some((one) => one.taskId === task.id && one.phase === 'ready'),
+        )
+        const git = (...args: Array<string>) =>
+          execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd: root, stdio: 'pipe' })
+        writeFileSync(join(root, 'change.txt'), 'rate limits\n')
+        git('add', '.')
+        git('commit', '-q', '-m', 'Limit rates')
+        const rounds = () =>
+          store(
+            Effect.flatMap(
+              SqlClient.SqlClient,
+              (sql) => sql<{ id: string; state: string; failure: string | null }>`
+                SELECT id, state, failure FROM conflict_resolutions WHERE task_id = ${task.id} ORDER BY created_at, rowid`,
+            ),
+          )
+        const asked = () =>
+          store(
+            Effect.flatMap(
+              SqlClient.SqlClient,
+              (sql) => sql<{ n: number }>`
+                SELECT count(*) AS n FROM user_inputs WHERE thread_id = ${task.threadId} AND body LIKE '%Bring the branch up to date%'`,
+            ),
+          )
+        // The task has its lead resolve what conflicts, which it works at.
+        yield* client.SetTaskResolveConflicts({ commandId: commandId(), taskId: task.id, resolveConflicts: true })
+        yield* eventually(
+          Effect.andThen(Effect.sleep('40 millis'), client.GetThread({ threadId: task.threadId, limit: 0 })),
+          (thread) => thread.session?.turnRunning === true,
+        )
+        assert.deepStrictEqual(
+          (yield* rounds()).map((round) => round.state),
+          ['resolving'],
+        )
+        // The window's interrupt: the conflict is the person's, as the lead left it, and the lead isn't asked again.
+        yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
+        const [interrupted] = yield* rounds()
+        assert.strictEqual(interrupted?.state, 'failed')
+        assert.match(interrupted?.failure ?? '', /^You interrupted the lead\. /)
+        const thread = yield* eventually(client.GetThread({ threadId: task.threadId }), (one) => one.session?.turnRunning !== true)
+        assert.isTrue(
+          thread.items.some(
+            (item) => item.kind === 'notice' && item.content.title?.startsWith('The lead couldn’t resolve the conflict with main') === true,
+          ),
+        )
+        yield* Effect.sleep('300 millis')
+        assert.deepStrictEqual(yield* asked(), [{ n: 1 }])
+        // Waiting for the checks on what Althar pushed, an interrupt hands those over too.
+        const checking = yield* store(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const id = `cres_${randomBytes(16).toString('hex')}`
+            const at = new Date().toISOString()
+            yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+              id,
+              projectId: project.id,
+              taskId: task.id,
+              pullRequestUrl: 'https://github.test/meridian/api/pull/1',
+              conflicts: '[]',
+              state: 'checking',
+              pushedHead: 'a'.repeat(40),
+              createdAt: at,
+              updatedAt: at,
+            })}`
+            return id
+          }),
+        )
+        // Whether or not a lead is there to interrupt.
+        yield* Effect.exit(client.Interrupt({ commandId: commandId(), threadId: task.threadId }))
+        assert.deepStrictEqual((yield* rounds()).find((round) => round.id === checking)?.state, 'resolved')
+      }),
+    ),
+  )
+
   it.live('stops, resumes, abandons and reopens a task', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { client, grant } = yield* connected({ countdown: Duration.minutes(5) })
+        const { client, grant, store } = yield* connected({ countdown: Duration.minutes(5) })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.StartTask({
           commandId: commandId(),
@@ -1292,12 +1452,39 @@ describe('the coordinator, through the API', () => {
           (thread) => thread.session?.turnRunning === true,
         )
         assert.deepStrictEqual([working.task.actions, working.task.planId], [['stop', 'abandon'], null])
+        // A conflict whose checks Althar waits for, as one its lead resolved leaves it: stopping hands it to the person (ADR-030).
+        const waiting = () =>
+          store(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const id = `cres_${randomBytes(16).toString('hex')}`
+              const at = new Date().toISOString()
+              yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+                id,
+                projectId: project.id,
+                taskId: task.id,
+                pullRequestUrl: 'https://github.test/meridian/api/pull/1',
+                conflicts: '[]',
+                state: 'checking',
+                pushedHead: 'a'.repeat(40),
+                createdAt: at,
+                updatedAt: at,
+              })}`
+              return id
+            }),
+          )
+        const stateOf = (id: string) =>
+          store(
+            Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ state: string }>`SELECT state FROM conflict_resolutions WHERE id = ${id}`),
+          )
+        const checking = yield* waiting()
         const stopping = { commandId: commandId(), taskId: task.id }
         yield* client.StopTask(stopping)
         // Sent again by a retry, it is one stop.
         yield* client.StopTask(stopping)
         const stopped = yield* client.GetThread({ threadId: task.threadId, limit: 0 })
         assert.deepStrictEqual([stopped.task.phase, stopped.task.actions, stopped.session], ['stopped', ['resume', 'abandon'], null])
+        assert.deepStrictEqual(yield* stateOf(checking), [{ state: 'resolved' }])
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'codex', model: 'large', effort: 'high' })
         const resumed = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
         assert.strictEqual(resumed.session?.agentId, 'codex')
@@ -1311,6 +1498,10 @@ describe('the coordinator, through the API', () => {
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id })
         const again = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
         assert.strictEqual(again.session?.agentId, 'codex')
+        // So does stopping its lead alone.
+        const checkingAgain = yield* waiting()
+        yield* client.StopSession({ commandId: commandId(), threadId: task.threadId })
+        assert.deepStrictEqual(yield* stateOf(checkingAgain), [{ state: 'resolved' }])
         // On an agent picked with no model or effort of its own, as the window sends one: its own.
         yield* client.StopTask({ commandId: commandId(), taskId: task.id })
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'claude-code', model: null, effort: null })

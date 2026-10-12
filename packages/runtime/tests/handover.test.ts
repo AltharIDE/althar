@@ -17,7 +17,7 @@ import { callTool, items, notices, repository, runtime, until } from './support'
 
 /*
  * Althar hands the coordinator to a fresh session before its context fills
- * (ADR-029): between turns, on the same agent, model and effort, briefed
+ * (ADR-031): between turns, on the same agent, model and effort, briefed
  * from its records. The fake agent says its context is as full as a prompt
  * ending `[context:85]` says.
  */

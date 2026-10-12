@@ -40,7 +40,7 @@ import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectD
 import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
 import { DraftCard, type DraftActions } from './DraftCard'
-import { lastSettledOf, partsOf, tasksOf, trackerOf } from './front'
+import { lastSettledOf, partsOf, tasksOf, trackersOf } from './front'
 import { nextRoom, ProjectBar } from './ProjectBar'
 import { inkOf, ProjectSettings } from './ProjectSettings'
 import s from './Project.module.css'
@@ -340,7 +340,7 @@ export function ProjectView({
   // The front page: its name and ink as the person last chose them, how it stands, and what it is made of.
   const projectId = model.project?.id ?? coordinator?.project.id ?? ''
   const kept = settings?.model
-  const tracker = lanes === null ? null : trackerOf(tasksOf(lanes), connections.list)
+  const trackers = lanes === null ? [] : trackersOf(tasksOf(lanes), connections.list)
   const front = (
     <Front
       lanes={lanes}
@@ -350,7 +350,13 @@ export function ProjectView({
       yours={yours}
       {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask), inProgress: lanes.running.length })}
       onYours={openYours}
-      parts={partsOf({ repositories: model.repositories, names: model.project?.repositories ?? [], host, tracker })}
+      parts={partsOf({
+        repositories: model.repositories,
+        names: model.project?.repositories ?? [],
+        host,
+        trackers,
+        open: (url) => window.open(url, '_blank'),
+      })}
       // The default branch runs with no agent, where its repository says how.
       {...(coordinator?.runCommand == null ? {} : { run: { command: coordinator.runCommand, onRun: () => void model.runProject() } })}
       {...(settings === undefined
@@ -363,7 +369,7 @@ export function ProjectView({
                 repositories={model.repositories ?? []}
                 connections={connections.list}
                 host={host}
-                tracker={tracker}
+                tracker={trackers[0] ?? null}
                 onRepositories={settings.onRepositories}
                 onRules={settings.onRules}
                 onConnect={(product, at) => setConnecting(openingFor(connections.list, product, at))}
