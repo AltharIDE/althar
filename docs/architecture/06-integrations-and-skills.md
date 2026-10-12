@@ -328,11 +328,11 @@ service's model.
 
 **Resolving a conflict, where the project says so** (ADR-030). A project's
 rules can have its leads resolve a conflict with the default branch on their
-own, switched by "Resolve conflicts" in its settings. Off, a conflict waits
+own, switched by "Resolve conflicts automatically" in its settings. Off, a conflict waits
 for the person, as above.
 
-- **A task can say otherwise.** Its ⋯ menu offers "Resolve conflicts": as
-  the project says, the lead does unasked, or when the person asks. It is
+- **A task can say otherwise.** Its ⋯ menu offers "Resolve conflicts
+  automatically": use the project setting, on for this task, or off for it. It is
   kept on the task; where it differs from the project's, a quiet word beside
   the menu says so, and otherwise nothing shows. Each conflict found goes by
   what the task and its project say then, and the lead's brief by what they

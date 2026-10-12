@@ -74,14 +74,14 @@ export const taskMenuText: TaskMenuText = {
   abandonAbout: 'It ends here, and its change isn’t merged. Its worktree and branch stay.',
   reopen: 'Reopen',
   reopenAbout: 'It opens again, on the same worktree and branch.',
-  conflicts: 'Resolve conflicts',
-  conflictsProject: 'As the project says',
-  conflictsProjectAbout: (on) => (on ? 'Now: the lead does, unasked.' : 'Now: when you ask the lead.'),
-  conflictsOn: 'The lead does, unasked',
-  conflictsOnAbout: 'It merges the default branch in and settles the conflict. Althar pushes the merge to a pull request.',
-  conflictsOff: 'When you ask the lead',
-  conflictsOffAbout: 'A conflict waits for you, as the merge card offers.',
-  conflictsHint: (on) => (on ? 'Lead resolves conflicts' : 'Conflicts wait for you'),
+  conflicts: 'Resolve conflicts automatically',
+  conflictsProject: 'Use the project setting',
+  conflictsProjectAbout: (on) => `It’s ${on ? 'on' : 'off'} for this project.`,
+  conflictsOn: 'On for this task',
+  conflictsOnAbout: 'The lead fixes merge conflicts itself, and Althar pushes the fix to an open pull request.',
+  conflictsOff: 'Off for this task',
+  conflictsOffAbout: 'You ask the lead to fix a conflict when one comes up.',
+  conflictsHint: (on) => `Auto-resolve conflicts: ${on ? 'on' : 'off'}`,
 }
 
 export interface TaskMenuProps {

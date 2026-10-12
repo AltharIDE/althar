@@ -14,7 +14,8 @@
   checks say whether it holds (DEV-85).
 - **Decision:**
   - **A project rule, off unless the person turns it on,** from a switch in
-    the project's settings, beside its rules: "Resolve conflicts". It is
+    the project's settings, beside its rules: "Resolve conflicts
+    automatically". It is
     kept as a revision of the rules like any other
     ([ADR-013](013-project-rules.md)). App-wide defaults for new projects
     are DEV-15.

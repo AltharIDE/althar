@@ -896,10 +896,10 @@ describe('a task', () => {
 
   it('offers how its conflicts go, as its project says or otherwise, and nothing beside the menu while it goes by the project', async () => {
     const { client } = await taskMenu({ resolveConflicts: { task: null, project: true } })
-    expect(screen.getByRole('menuitemradio', { name: /As the project says/ }).getAttribute('aria-checked')).toBe('true')
-    expect(screen.getByText('Now: the lead does, unasked.')).toBeTruthy()
-    expect(screen.queryByText('Lead resolves conflicts')).toBeNull()
-    await userEvent.click(screen.getByRole('menuitemradio', { name: /When you ask the lead/ }))
+    expect(screen.getByRole('menuitemradio', { name: /Use the project setting/ }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByText('It’s on for this project.')).toBeTruthy()
+    expect(screen.queryByText('Auto-resolve conflicts: on')).toBeNull()
+    await userEvent.click(screen.getByRole('menuitemradio', { name: /Off for this task/ }))
     await waitFor(() => expect(client.setTaskResolveConflicts).toHaveBeenCalledWith({ taskId: 't1', resolveConflicts: false }))
   })
 
@@ -910,7 +910,9 @@ describe('a task', () => {
       })
       const view = withServices(<Task />, client)
       await screen.findByRole('button', { name: 'More for this task' })
-      const said = [screen.queryByText('Lead resolves conflicts'), screen.queryByText('Conflicts wait for you')].map((one) => one !== null)
+      const said = [screen.queryByText('Auto-resolve conflicts: on'), screen.queryByText('Auto-resolve conflicts: off')].map(
+        (one) => one !== null,
+      )
       view.unmount()
       return said
     }
