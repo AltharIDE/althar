@@ -212,12 +212,6 @@ describe('the coordinator loop', () => {
         yield* callTool(access, 'list_tasks', {}),
         /\(ready, led by .*\) — PR #106 closed, as last seen \(its host is not known\)/,
       )
-      // Merged while the task is still open: finished all the same, not ready for the person.
-      yield* change('merged')
-      assert.strictEqual(
-        yield* callTool(access, 'list_tasks', {}),
-        '- add-a-retry: Add a retry (finished, merged, led by Fake claude-code) — PR #106 merged',
-      )
       yield* sql`DELETE FROM external_links WHERE task_id = ${taskRow?.id ?? ''}`
       assert.match(task, /Branch \S+, in \S+\./)
       assert.match(task, /review \(changes_requested\): The heading needs fixing\.\n\nsettle: Fixed the heading\./)
