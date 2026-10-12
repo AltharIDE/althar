@@ -610,7 +610,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'list_tasks',
-          "The project's tasks, newest first: what each is, where it stands, who leads it, and, after a dash, how its pull request stands as Althar last saw it: draft or ready for review, checks, commits not pushed yet, merged or closed. A task whose pull request is merged or closed is finished: don't suggest merging it.",
+          "The project's tasks, newest first: what each is, where it stands, who leads it, and, after a dash, how its pull request stands as Althar last saw it: draft or ready for review, checks, commits not pushed yet, merged or closed. A merged pull request is finished: don't suggest merging it. A closed one is as last seen only, since Althar stops watching it and it may have been reopened: say so rather than calling the task finished.",
           nothing,
           (access) => list(access),
         ),
