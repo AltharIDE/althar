@@ -57,6 +57,9 @@ export interface Place {
   readonly change: string | null
 }
 
+/** The pull request a round is on, by name: one merging here has none, so it is only ever asked of a round on one. */
+export const changeOf = (place: Place) => place.change ?? 'the pull request'
+
 const list = (files: ReadonlyArray<string>) => files.join(', ')
 
 /** Where it conflicts, in a line: "main, in README.md", or for several "web’s develop, in README.md; api’s main, in a.ts". */
@@ -93,20 +96,11 @@ export const noteFor = (conflicts: ReadonlyArray<Conflict>, place: Place, failur
  * pushed for it: in the words failed checks always come in, saying what
  * Althar pushes this time.
  */
-export const fixNoteFor = (
-  place: Place,
-  failed: { readonly failing: ReadonlyArray<string>; readonly logs: ReadonlyArray<string> } | null,
-  failure: string | null,
-) =>
+export const fixNoteFor = (place: Place, failed: { readonly failing: ReadonlyArray<string>; readonly logs: ReadonlyArray<string> }) =>
   [
-    ...(failure === null ? [] : [`The checks aren't fixed yet: ${failure} Try once more.`]),
-    ...(failed === null
-      ? []
-      : [
-          `Checks failed on the merge Althar pushed to ${place.change ?? 'the pull request'}: ${failed.failing.join(', ')}.`,
-          ...failed.logs,
-        ]),
-    `Fix what broke and commit the fix as one commit on top of the merge, with nothing else: Althar pushes it to ${place.change ?? 'the pull request'} too. Don't push it yourself. If it isn't the task's to fix, commit nothing and say why.`,
+    `Checks failed on the merge Althar pushed to ${changeOf(place)}: ${failed.failing.join(', ')}.`,
+    ...failed.logs,
+    `Fix what broke and commit the fix as one commit on top of the merge, with nothing else: Althar pushes it to ${changeOf(place)} too. Don't push it yourself. If it isn't the task's to fix, commit nothing and say why.`,
   ].join('\n\n')
 
 /** Why a repository's conflict isn't resolved, in a sentence; null where it is. */

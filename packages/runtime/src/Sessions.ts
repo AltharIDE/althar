@@ -329,6 +329,14 @@ export class Sessions extends Context.Service<
       /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
       readonly accountId?: string
     }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
+    /**
+     * Starts the agent last on the thread again, on the model and effort it
+     * had, for what waits in its queue: false, and nothing started, where no
+     * agent has been on it.
+     */
+    startLast(
+      threadId: string,
+    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Accepts input into the thread's queue, and delivers it when the session can take it. */
     send(input: {
       readonly envelope: CommandEnvelope
@@ -1794,8 +1802,24 @@ export class Sessions extends Context.Service<
         ),
       )
 
+      const startLast = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
+            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC LIMIT 1`
+          if (last === undefined) return false
+          yield* start({
+            threadId,
+            agentId: last.agentId,
+            ...(last.model === null ? {} : { model: last.model }),
+            ...(last.effort === null ? {} : { effort: last.effort }),
+          })
+          return true
+        })
+
       return Sessions.of({
         start: (input) => run(start(input)),
+        startLast: (threadId) => run(startLast(threadId)),
         send: (input) => run(send(input)),
         takeBack: (input) => run(takeBack(input)),
         setModel: (input) => run(setModel(input)),

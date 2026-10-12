@@ -414,11 +414,13 @@ const playStall = async (
  * Told what people said on its pull
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
- * publishes it, and `[lead:fix-more]` commits other work after it. Asked to bring its branch up to date, `[lead:resolve]`
+ * publishes it, `[lead:fix-more]` commits other work after it, and
+ * `[lead:fix-hold]` works on after it until it is interrupted. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
  * of it; `[lead:resolve-fails]` can't, and says so; `[lead:resolve-wait]`
- * works at it until it is interrupted or stopped. Asked to plan a
+ * works at it until it is interrupted or stopped, and `[lead:resolve-hold]`
+ * does so once it has committed the merge. Asked to plan a
  * change with a link in it, the coordinator drafts the task from that issue.
  */
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
@@ -541,16 +543,20 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         return 'Stopped before settling it.'
       }
       const more = session.markers.has('[lead:resolve-more]')
-      if (merging !== undefined && (session.markers.has('[lead:resolve]') || more)) {
+      const hold = session.markers.has('[lead:resolve-hold]')
+      if (merging !== undefined && (session.markers.has('[lead:resolve]') || more || hold)) {
         resolveIn(session.cwd, merging)
+        if (hold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
         if (!more) return 'Merged it, settled the conflict, and committed the merge.'
         commitIn(session.cwd, 'more.txt', 'Tidy up while here')
         return 'Merged it, settled the conflict, committed the merge, and tidied up while here.'
       }
       // Fixed and committed, for the person to push.
       const fixMore = session.markers.has('[lead:fix-more]')
-      if ((session.markers.has('[lead:fix]') || fixMore) && text.startsWith('Checks failed')) {
+      const fixHold = session.markers.has('[lead:fix-hold]')
+      if ((session.markers.has('[lead:fix]') || fixMore || fixHold) && text.startsWith('Checks failed')) {
         commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
+        if (fixHold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
         if (!fixMore) return 'Fixed the failing check, and committed it.'
         commitIn(session.cwd, 'more.txt', 'Tidy up while here')
         return 'Fixed the failing check, committed it, and tidied up while here.'

@@ -20,6 +20,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import {
   ATTEMPTS,
+  changeOf,
   type Conflict,
   Conflicts,
   Ended,
@@ -77,7 +78,7 @@ import { Policies, resolvesConflictsFor } from './Policies'
 import { Sessions } from './Sessions'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
-import { summarize } from './words'
+import { summarize, words } from './words'
 
 /*
  * A task's change on its code host (docs/architecture/06; docs/plans/
@@ -1042,18 +1043,16 @@ export class Changes extends Context.Service<
               return { repository, plan, settle }
             }),
           )
-          const conflicts = plans.flatMap(({ repository, plan }) =>
-            plan.kind === 'conflicts' ? [named(repository, plan.files.join(', '))] : [],
+          const conflicting = plans.flatMap(({ repository, plan }) =>
+            plan.kind === 'conflicts' ? [{ repository, files: plan.files }] : [],
           )
+          const conflicts = conflicting.map(({ repository, files }) => named(repository, files.join(', ')))
           if (conflicts.length > 0) {
             // Where the project says so, the lead resolves it unasked, and the person merges again after.
             const asked = yield* askable(taskId, null)
             if (asked === 'resolving') return yield* cant('resolving', conflicts.join('; '))
             if (asked === 'yes') {
-              const found = yield* Effect.forEach(
-                plans.flatMap(({ repository, plan }) => (plan.kind === 'conflicts' ? [{ repository, files: plan.files }] : [])),
-                ({ repository, files }) => conflictHere(repository, files),
-              )
+              const found = yield* Effect.forEach(conflicting, ({ repository, files }) => conflictHere(repository, files))
               yield* beginRound({ projectId: task.projectId, taskId, threadId: task.threadId }, null, found)
               return yield* cant('resolving', conflicts.join('; '))
             }
@@ -1559,11 +1558,23 @@ export class Changes extends Context.Service<
       const decodeConflicts = Schema.decodeUnknownEffect(Schema.fromJsonString(Conflicts))
       const decodeEnded = Schema.decodeUnknownEffect(Schema.fromJsonString(Ended))
 
+      const roundColumns = (sql: SqlClient.SqlClient) =>
+        sql`c.id, c.project_id, c.task_id, t.id AS thread_id, c.pull_request_url AS url, c.conflicts, c.attempt, c.state,
+            c.failure, c.ended, c.pushed_head, c.asked_sequence, c.updated_at`
+
+      /** The task's round under way, resolving or waiting for its checks: one at most. */
+      const underWay = (taskId: string) =>
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<RoundRow>`
+            SELECT ${roundColumns(sql)} FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
+            WHERE c.task_id = ${taskId} AND c.state IN ('resolving', 'checking')`,
+        )
+
       const roundOf = (where: { readonly id: string } | { readonly threadId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const columns = sql`c.id, c.project_id, c.task_id, t.id AS thread_id, c.pull_request_url AS url, c.conflicts, c.attempt, c.state,
-            c.failure, c.ended, c.pushed_head, c.asked_sequence, c.updated_at`
+          const columns = roundColumns(sql)
           const [round] =
             'id' in where
               ? yield* sql<RoundRow>`
@@ -1642,7 +1653,7 @@ export class Changes extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [other] = yield* sql<{ id: string }>`
-            SELECT id FROM user_inputs WHERE thread_id = ${round.threadId} AND sequence > ${round.askedSequence ?? 0} LIMIT 1`
+            SELECT id FROM user_inputs WHERE thread_id = ${round.threadId} AND sequence > ${round.askedSequence} LIMIT 1`
           return other !== undefined
         })
 
@@ -1659,7 +1670,6 @@ export class Changes extends Context.Service<
         why: Readonly<Record<string, unknown>> = {},
       ): Effect.Effect<void, unknown, Store> =>
         Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
           const accepted = yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId: round.threadId, resolving: round.id, attempt }),
             threadId: round.threadId,
@@ -1668,24 +1678,17 @@ export class Changes extends Context.Service<
           })
           yield* reviseRound(round, 'conflict_resolution.asked', { attempt, askedSequence: accepted.sequence }, { attempt, ...why })
           if (Option.isSome(yield* sessions.running(round.threadId))) return
-          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
-            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${round.threadId} ORDER BY started_at DESC LIMIT 1`
-          if (last === undefined) return yield* settleRound(round.id, { why: 'There was no lead to ask.' })
           // Started apart, so what holds the task's pull request isn't held while an agent starts.
           yield* Effect.forkIn(
-            sessions
-              .start({
-                threadId: round.threadId,
-                agentId: last.agentId,
-                ...(last.model === null ? {} : { model: last.model }),
-                ...(last.effort === null ? {} : { effort: last.effort }),
-              })
-              .pipe(
-                Effect.catchCause((cause) =>
-                  locked(round.taskId)(settleRound(round.id, { why: `The lead couldn't start: ${summarize(cause) || 'it failed to'}.` })),
-                ),
-                provide,
+            sessions.startLast(round.threadId).pipe(
+              Effect.flatMap((started) =>
+                started ? Effect.void : locked(round.taskId)(settleRound(round.id, { why: 'There was no lead to ask.' })),
               ),
+              Effect.catchCause((cause) =>
+                locked(round.taskId)(settleRound(round.id, { why: `The lead couldn't start. ${summarize(cause)}`.trim() })),
+              ),
+              provide,
+            ),
             scope,
           )
         })
@@ -1769,7 +1772,7 @@ export class Changes extends Context.Service<
       const endRound = (
         round: RoundRow,
         ended: Ended | null,
-        notice: { readonly severity?: 'info' | 'warning'; readonly title: string; readonly description?: string } | null,
+        notice: { readonly severity?: 'info' | 'warning'; readonly title: string; readonly description: string } | null,
         payload: Readonly<Record<string, unknown>> = {},
       ) =>
         Effect.gen(function* () {
@@ -1784,7 +1787,7 @@ export class Changes extends Context.Service<
               source: 'runtime',
               severity: notice.severity ?? 'info',
               title: notice.title,
-              ...(notice.description === undefined ? {} : { description: notice.description }),
+              description: notice.description,
             })
         })
 
@@ -1827,25 +1830,21 @@ export class Changes extends Context.Service<
                   fixing === null
                     ? `The lead resolved the conflict with ${whereLine(conflicts)}.`
                     : 'The lead fixed the checks on the merge.',
-                description: `The lead was stopped, so it waits for you to look at it and push it to ${place.change ?? 'the pull request'}.`,
+                description: `The lead was stopped, so it waits for you to look at it and push it to ${changeOf(place)}.`,
               })
             return yield* fixing === null ? resolved(round, conflicts, ended, place) : fixed(round, fixing, ended, place)
           }
           const failure = [...(how.why === undefined ? [] : [how.why]), ...failures].join(' ')
           const what = fixing === null ? `the conflict with ${whereLine(conflicts)}` : `the checks on the merge`
-          if (how.why === undefined && round.attempt < ATTEMPTS) {
+          // A fix for the checks is the lead's one more try already: only resolving the conflict is asked again.
+          if (fixing === null && how.why === undefined && round.attempt < ATTEMPTS) {
             yield* addItem(thread, 'notice', {
               source: 'runtime',
               severity: 'info',
-              title: `${fixing === null ? 'The conflict' : 'The checks'} ${fixing === null ? `with ${whereLine(conflicts)} isn’t resolved` : 'aren’t fixed'} yet: ${failure}`,
+              title: `The conflict with ${whereLine(conflicts)} isn’t resolved yet: ${failure}`,
               description: 'Althar asked the lead once more.',
             })
-            return yield* askLead(
-              round,
-              round.attempt + 1,
-              fixing === null ? noteFor(conflicts, place, failure) : fixNoteFor(place, null, failure),
-              { failure },
-            )
+            return yield* askLead(round, round.attempt + 1, noteFor(conflicts, place, failure), { failure })
           }
           yield* reviseRound(
             round,
@@ -1866,15 +1865,27 @@ export class Changes extends Context.Service<
        * round waits for the checks on it. Where it can't, the round is over,
        * and the person pushes it from the card.
        */
-      const pushRound = (round: RoundRow, head: string, ended: Ended, said: string, place: Place) =>
+      const pushRound = (
+        round: RoundRow,
+        url: string,
+        head: string,
+        ended: Ended,
+        said: string,
+        what: 'the merge' | 'the fix',
+        place: Place,
+      ) =>
         Effect.gen(function* () {
-          const pushed = yield* Effect.exit(push(round.taskId, head, round.url ?? undefined))
-          if (pushed._tag === 'Failure')
+          const pushed = yield* Effect.exit(push(round.taskId, head, url))
+          if (pushed._tag === 'Failure') {
+            // In the words the task's Push card would have for it.
+            const failed = Option.getOrUndefined(Cause.findErrorOption(pushed.cause))
+            const why = failed === undefined ? 'The push failed.' : words(failed, (agentId) => agentId).message
             return yield* endRound(round, ended, {
               severity: 'warning',
-              title: `${said}, but Althar couldn’t push it.`,
-              description: `${summarize(pushed.cause) || 'The push failed.'} Push it from ${place.change ?? 'the pull request'}’s card.`,
+              title: `${said}, but Althar couldn’t push ${what}.`,
+              description: `${why} Push it from ${changeOf(place)}’s card.`,
             })
+          }
           const headSha = pushed.value.change.headSha
           yield* reviseRound(
             round,
@@ -1885,9 +1896,20 @@ export class Changes extends Context.Service<
           yield* addItem({ projectId: round.projectId, threadId: round.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `${said} to ${place.change ?? 'the pull request'}.`,
+            title: `${said}, and Althar pushed ${what} to ${changeOf(place)}.`,
             description: 'Althar waits for its checks.',
           })
+        })
+
+      /** Where a round on a pull request left its one repository's branch here: its worktree, and the commit it is at; none where it is gone. */
+      const branchHere = (taskId: string, ended: Ended) =>
+        Effect.gen(function* () {
+          const worktrees = yield* worktreesOf(taskId)
+          const [here] = ended.flatMap((one) => {
+            const worktree = worktrees.get(one.repository)
+            return worktree === undefined ? [] : [{ worktree, head: one.head }]
+          })
+          return here
         })
 
       /**
@@ -1903,10 +1925,10 @@ export class Changes extends Context.Service<
         Effect.gen(function* () {
           const said = `The lead resolved the conflict with ${whereLine(conflicts)}`
           const [conflict] = conflicts
-          const head = ended.find((one) => one.repository === conflict?.repository)?.head ?? ''
-          const worktree = (yield* worktreesOf(round.taskId)).get(conflict?.repository ?? '')
-          if (round.url === null || conflict === undefined || worktree === undefined || head === '')
+          const branch = yield* branchHere(round.taskId, ended)
+          if (round.url === null || conflict === undefined || branch === undefined)
             return yield* endRound(round, ended, { title: `${said}.`, description: 'Merge it again.' })
+          const { worktree, head } = branch
           const others = yield* askedSince(round)
           const alone =
             !others &&
@@ -1918,10 +1940,10 @@ export class Changes extends Context.Service<
             return yield* endRound(round, ended, {
               title: `${said}.`,
               description: others
-                ? `The lead was asked something else meanwhile, so the merge waits for you to look at it and push it to ${place.change ?? 'the pull request'}.`
-                : `Its branch has commits besides the merge that ${place.change ?? 'the pull request'} doesn’t have yet, so the merge waits for you to push it with them.`,
+                ? `The lead was asked something else meanwhile, so the merge waits for you to look at it and push it to ${changeOf(place)}.`
+                : `Its branch has commits besides the merge that ${changeOf(place)} doesn’t have yet, so the merge waits for you to push it with them.`,
             })
-          yield* pushRound(round, head, ended, `${said}, and Althar pushed the merge`, place)
+          yield* pushRound(round, round.url, head, ended, said, 'the merge', place)
         })
 
       /**
@@ -1933,23 +1955,20 @@ export class Changes extends Context.Service<
       const fixed = (round: RoundRow, base: string, ended: Ended, place: Place) =>
         Effect.gen(function* () {
           const said = 'The lead fixed the checks on the merge'
-          const [first] = ended
-          const worktree = (yield* worktreesOf(round.taskId)).get(first?.repository ?? '')
-          const head = first?.head ?? ''
+          const branch = yield* branchHere(round.taskId, ended)
           const others = yield* askedSince(round)
           const fixes =
             !others &&
-            worktree !== undefined &&
-            head !== '' &&
-            (yield* onlyTheFix(worktree, base, head).pipe(Effect.orElseSucceed(() => false)))
-          if (!fixes)
+            branch !== undefined &&
+            (yield* onlyTheFix(branch.worktree, base, branch.head).pipe(Effect.orElseSucceed(() => false)))
+          if (!fixes || branch === undefined || round.url === null)
             return yield* endRound(round, ended, {
               title: `${said}.`,
               description: others
-                ? `The lead was asked something else meanwhile, so the fix waits for you to look at it and push it to ${place.change ?? 'the pull request'}.`
-                : `Its branch has commits besides the fix that ${place.change ?? 'the pull request'} doesn’t have yet, so the fix waits for you to push it with them.`,
+                ? `The lead was asked something else meanwhile, so the fix waits for you to look at it and push it to ${changeOf(place)}.`
+                : `Its branch has commits besides the fix that ${changeOf(place)} doesn’t have yet, so the fix waits for you to push it with them.`,
             })
-          yield* pushRound(round, head, ended, `${said}, and Althar pushed the fix`, place)
+          yield* pushRound(round, round.url, branch.head, ended, said, 'the fix', place)
         })
 
       /**
@@ -2022,7 +2041,8 @@ export class Changes extends Context.Service<
           if (round === undefined || round.pushedHead === null) return false
           const pushedHead = round.pushedHead
           const conflicts = yield* decodeConflicts(round.conflicts)
-          const worktree = (yield* worktreesOf(round.taskId)).get(conflicts[0]?.repository ?? '')
+          const worktrees = yield* worktreesOf(round.taskId)
+          const worktree = conflicts.map((conflict) => worktrees.get(conflict.repository)).find((path) => path !== undefined)
           if (now.state !== 'open' || now.headSha === null) return yield* Effect.as(endRound(round, null, null), false)
           if (now.headSha !== pushedHead) {
             // The host may not have read the push yet: what it had before is behind what was pushed.
@@ -2031,7 +2051,7 @@ export class Changes extends Context.Service<
             return behind ? false : yield* Effect.as(endRound(round, null, null), false)
           }
           const place = yield* placeOf(round.taskId, url)
-          const where = place.change ?? 'the pull request'
+          const where = changeOf(place)
           const all = yield* host.checks(repository, now.headSha)
           const sum = checksOf(now.headSha, all)
           if (sum.outcome === 'running') return false
@@ -2087,7 +2107,7 @@ export class Changes extends Context.Service<
             title: `The checks failed on what Althar pushed to ${where}: ${sum.failing.join(', ')}.`,
             description: 'Althar asked the lead to fix them.',
           })
-          yield* askLead(round, round.attempt + 1, fixNoteFor(place, { failing: sum.failing, logs }, null), { failing: sum.failing })
+          yield* askLead(round, round.attempt + 1, fixNoteFor(place, { failing: sum.failing, logs }), { failing: sum.failing })
           return true
         })
 
@@ -2100,7 +2120,7 @@ export class Changes extends Context.Service<
         Effect.gen(function* () {
           const round = yield* roundOf({ id })
           if (round === undefined || (round.state !== 'resolving' && round.state !== 'checking')) return
-          const where = (yield* placeOf(round.taskId, round.url)).change ?? 'the pull request'
+          const where = changeOf(yield* placeOf(round.taskId, round.url))
           const description = `Althar no longer listens to ${where}, so it doesn’t push for the lead there or hear the checks: that’s yours.`
           if (round.state === 'checking')
             return yield* endRound(round, null, {
@@ -2124,24 +2144,14 @@ export class Changes extends Context.Service<
         })
 
       /** The person stopped or interrupted a task's lead: what it was resolving waits for them, and checks that fail don't ask it again. */
-      const leadStopped = (where: { readonly taskId: string } | { readonly threadId: string }, how: 'stopped' | 'interrupted') =>
+      const leadStopped = (taskId: string, how: 'stopped' | 'interrupted') =>
         Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const [task] =
-            'taskId' in where
-              ? [{ taskId: where.taskId }]
-              : yield* sql<{ taskId: string }>`SELECT task_id FROM threads WHERE id = ${where.threadId} AND kind = 'task'`
-          if (task === undefined) return
-          const under = yield* sql<{ id: string; state: string }>`
-            SELECT id, state FROM conflict_resolutions WHERE task_id = ${task.taskId} AND state IN ('resolving', 'checking')`
-          for (const one of under) {
-            if (one.state === 'resolving') {
-              yield* settleRound(one.id, { why: `You ${how} the lead.`, stopped: true })
+          for (const round of yield* underWay(taskId)) {
+            if (round.state === 'resolving') {
+              yield* settleRound(round.id, { why: `You ${how} the lead.`, stopped: true })
               continue
             }
-            const round = yield* roundOf({ id: one.id })
-            if (round === undefined) continue
-            const place = (yield* placeOf(round.taskId, round.url)).change ?? 'the pull request'
+            const place = changeOf(yield* placeOf(round.taskId, round.url))
             yield* endRound(round, null, {
               title: `You ${how} the lead, so the checks on what Althar pushed to ${place} are yours.`,
               description: 'Althar won’t ask the lead to fix them.',
@@ -2259,23 +2269,21 @@ export class Changes extends Context.Service<
        * One round at a time, so a task conflicting both ways starts with what
        * conflicts here.
        */
-      const conflictsNow = (taskId: string) =>
+      const conflictsNow = (task: { readonly taskId: string; readonly projectId: ProjectId; readonly threadId: string }) =>
         Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const [task] = yield* sql<{ projectId: ProjectId; threadId: string }>`
-            SELECT k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${taskId}`
-          if (task === undefined) return
+          const { taskId } = task
           yield* locked(taskId)(
             Effect.gen(function* () {
               if ((yield* askable(taskId, null)) !== 'yes') return
               const found: Array<Conflict> = []
               for (const repository of yield* repositoriesHere(taskId)) {
                 if (repository.opened !== 0) continue
+                // A branch git can't read says nothing conflicts.
                 const head = yield* commitOf(repository.worktree, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
-                const files = head === '' ? [] : yield* conflictsOf(repository.root, repository.base, head)
+                const files = yield* conflictsOf(repository.root, repository.base, head)
                 if (files.length > 0) found.push(yield* conflictHere(repository, files))
               }
-              if (found.length > 0) yield* beginRound({ projectId: task.projectId, taskId, threadId: task.threadId }, null, found)
+              if (found.length > 0) yield* beginRound(task, null, found)
             }),
           )
           const now = yield* Clock.currentTimeMillis
@@ -2286,13 +2294,14 @@ export class Changes extends Context.Service<
       const resolveNow = (where: { readonly projectId: string } | { readonly taskId: string }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const open = yield* sql<{ id: string }>`
-            SELECT k.id FROM tasks k WHERE k.state = 'open'
+          const open = yield* sql<{ taskId: string; projectId: ProjectId; threadId: string }>`
+            SELECT k.id AS task_id, k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE k.state = 'open'
               AND ${'taskId' in where ? sql`k.id = ${where.taskId}` : sql`k.project_id = ${where.projectId}`}
               AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.device_id = ${instance.deviceId})
             ORDER BY k.created_at, k.rowid`
           for (const task of open)
-            yield* conflictsNow(task.id).pipe(
+            yield* conflictsNow(task).pipe(
               Effect.catchCause((cause) => Effect.logWarning('Could not look for a conflict to resolve', cause)),
             )
         })
@@ -2467,7 +2476,7 @@ export class Changes extends Context.Service<
                 'taskId' in where
                   ? [{ taskId: where.taskId }]
                   : yield* sql<{ taskId: string }>`SELECT task_id FROM threads WHERE id = ${where.threadId} AND task_id IS NOT NULL`
-              if (task !== undefined) yield* locked(task.taskId)(leadStopped(where, how))
+              if (task !== undefined) yield* locked(task.taskId)(leadStopped(task.taskId, how))
             }),
           ),
         resolveNow: (where) => Effect.asVoid(Effect.forkIn(provide(resolveNow(where)), scope)),
