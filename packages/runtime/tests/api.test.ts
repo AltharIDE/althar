@@ -1685,10 +1685,12 @@ describe('words', () => {
     )
     // A push the remote refused says how to put it right.
     assert.deepStrictEqual(
-      (['behind', 'denied'] as const).map((why) => said(new PushRefused({ taskId: 't', why, remote: 'origin/main' }))),
+      (['behind', 'denied', 'moved', 'never'] as const).map((why) => said(new PushRefused({ taskId: 't', why, remote: 'origin/main' }))),
       [
-        'origin/main has commits that aren’t here yet, so it didn’t take the push. Pull them in, then push again.',
+        'origin/main has commits that aren’t here yet, so it didn’t take the push. Bring them in, then push again.',
         'git couldn’t sign in to push to origin/main. Push once from a terminal so your sign-in is kept, then push again here.',
+        'origin/main has commits pushed since you looked, so nothing was replaced. Look again before replacing them.',
+        'The project’s rules never allow force pushes, so origin/main’s commits stay. Ask the lead to merge instead.',
       ],
     )
     assert.strictEqual(
@@ -1714,7 +1716,8 @@ describe('words', () => {
     // A merge that conflicts carries its files, for the window to have the lead settle them.
     assert.deepStrictEqual(words(new CantMerge({ taskId: 't', why: 'conflicts', detail: 'README.md' }), name), {
       reason: 'CantMerge',
-      message: 'It conflicts with the default branch, in README.md. Tell the lead to bring its branch up to date, then merge again.',
+      message:
+        'It conflicts with the default branch, in README.md. Tell the lead to merge the default branch into its branch (merge, don’t rebase), then merge again.',
       why: 'conflicts',
       detail: 'README.md',
     })

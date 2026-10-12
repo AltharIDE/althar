@@ -966,8 +966,8 @@ export class Queries extends Context.Service<
           const none = { localHead, unpushed: 0, diverged: null }
           if (localHead === null) return none
           const from = there ?? ours
-          // Its head unknown here, and not what Althar pushed: someone else pushed to it.
-          if (pullRequestHead !== null && there === null && pullRequestHead !== sent)
+          // Its head a commit unknown here, and not what Althar pushed: someone else pushed to it.
+          if (pullRequestHead !== null && /^[0-9a-f]{40,64}$/.test(pullRequestHead) && there === null && pullRequestHead !== sent)
             return { localHead, unpushed: 0, diverged: { kind: 'moved' as const, local: 0, onPullRequest: null } }
           if (from === null) return none
           // Counted up to the head looked at, not HEAD again: the lead may commit in between.
