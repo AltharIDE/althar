@@ -221,6 +221,13 @@ export type ExternalKind = typeof ExternalKind.Type
 export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
 export type IssueDraftState = typeof IssueDraftState.Type
 
+/**
+ * Where a lead resolving a conflict on its own stands (docs/architecture/06):
+ * at it, done, or given back to the person, who settles it or asks again.
+ */
+export const ConflictResolutionState = Schema.Literals(['resolving', 'resolved', 'failed'])
+export type ConflictResolutionState = typeof ConflictResolutionState.Type
+
 /** What an artifact is, which decides how long it is kept: a command's output is a log, a picture an agent hands back an image. */
 export const ArtifactKind = Schema.Literals([
   'brief',
@@ -268,5 +275,6 @@ export const AggregateType = Schema.Literals([
   'policy',
   'agent_account',
   'issue_draft',
+  'conflict_resolution',
 ])
 export type AggregateType = typeof AggregateType.Type

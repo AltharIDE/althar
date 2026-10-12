@@ -22,6 +22,7 @@ import { statements as artifactImages } from './0017_artifact_images'
 import { statements as questions } from './0018_questions'
 import { statements as runCommands } from './0019_run_commands'
 import { statements as issueDrafts } from './0020_issue_drafts'
+import { statements as conflictResolutions } from './0021_conflict_resolutions'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -61,6 +62,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0018_questions', statements: questions },
   { key: '0019_run_commands', statements: runCommands },
   { key: '0020_issue_drafts', statements: issueDrafts },
+  { key: '0021_conflict_resolutions', statements: conflictResolutions },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>
