@@ -11,6 +11,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import { coAuthorOn, creditBranch, type Memory, recallMade, rememberMade, withoutAgentCredit } from './credit'
 import { envelope } from './envelope'
+import { evidenceOf, unverifiedIn } from './evidence'
 import { CantMerge, ChangedSinceSeen, type GitFailed, NotFound, PushRefused } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
 import { forkOf } from './forks'
@@ -415,6 +416,13 @@ export class Changes extends Context.Service<
                 AND json_extract(content, '$.step') = 'review' ORDER BY sequence DESC LIMIT 1) AS verdict,
               (SELECT count(*) FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
                 AND json_extract(content, '$.step') = 'review') AS rounds`
+          // What the lead showed across its steps, and what it last said it couldn't.
+          const shown = yield* sql<{ evidence: string | null; unverified: string | null }>`
+            SELECT json_extract(content, '$.evidence') AS evidence, json_extract(content, '$.unverified') AS unverified FROM thread_items
+            WHERE thread_id = ${threadId} AND kind = 'step_result' AND json_extract(content, '$.step') IN ('implement', 'settle')
+            ORDER BY sequence`
+          const evidence = shown.flatMap((row) => (row.evidence === null ? [] : evidenceOf(JSON.parse(row.evidence))))
+          const unverified = unverifiedIn(JSON.parse(shown.findLast((row) => row.unverified !== null)?.unverified ?? '[]'))
           // An agent may sign its summary as it signs a commit; that stays here too.
           const summary = lead?.summary ?? null
           return bodyOf({
@@ -424,6 +432,8 @@ export class Changes extends Context.Service<
               const location = JSON.parse(finding.location) as { file?: string | null; line?: number | null }
               return { ...finding, file: location.file ?? null, line: location.line ?? null }
             }),
+            evidence,
+            unverified,
             issue,
             template: repository.template,
             written: written === undefined || written.text === null ? null : withoutAgentCredit(written.text, agentNames),
@@ -563,8 +573,12 @@ export class Changes extends Context.Service<
           const from = repository === own ? undefined : own
           // The repository as its host names it, not as the remote spells it: Bitbucket Data Center's has `scm/` in front.
           const path = repository.path
-          // Althar pushes what the lead committed, never what it left lying in the worktree.
-          const left = yield* uncommittedFiles(task.path)
+          // Althar pushes what the lead committed, never what it left lying in the worktree; a screenshot it handed as evidence isn't left.
+          const pictures = yield* sql<{ path: string }>`
+            SELECT DISTINCT json_extract(e.value, '$.path') AS path
+            FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind = 'task', json_each(i.content, '$.evidence') e
+            WHERE t.task_id = ${input.taskId} AND i.kind = 'step_result' AND json_extract(e.value, '$.path') IS NOT NULL`
+          const left = (yield* uncommittedFiles(task.path)).filter((file) => !pictures.some((picture) => picture.path === file))
           const base = task.baseCommit ?? task.baseRef ?? own.defaultBranch
           if ((yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing', left } as const
           const [sent] = yield* sql<{ head: string | null }>`

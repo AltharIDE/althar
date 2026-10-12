@@ -6,6 +6,7 @@ import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import type { Artifacts } from './Artifacts'
 import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Changes, type Published } from './Changes'
@@ -21,6 +22,7 @@ import { filesLine, templateAsk } from './pullRequestWords'
 import { snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
+import { EVIDENCE_KINDS, EvidenceGiven, evidenceFiles, keepEvidence, readEvidence, unverifiedOf } from './evidence'
 import { Sessions } from './Sessions'
 import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
@@ -89,6 +91,9 @@ const Finished = Schema.Struct({
   summary: Schema.String,
   /** The pull request's description, in the repository's template: by repository, which a task of one needn't name. */
   descriptions: Schema.optional(Schema.Array(Schema.Struct({ repository: Schema.optional(Schema.String), text: Schema.String }))),
+  /** What shows the change does what it should; and what couldn't be shown. */
+  evidence: Schema.optional(Schema.Array(EvidenceGiven)),
+  unverified: Schema.optional(Schema.Array(Schema.String)),
   /** When settling a review: what became of each finding, by its id. */
   findings: Schema.optional(
     Schema.Array(
@@ -142,6 +147,7 @@ type Store =
   | Policies
   | Agents
   | RuntimeConfig
+  | Artifacts
 
 /**
  * Why a step needs the person (docs/architecture/05): its agent didn't report
@@ -490,8 +496,8 @@ export class Runs extends Context.Service<
         })
 
       /** A step's result, in the task's thread: what the person reads instead of the work. */
-      const result = (run: Pick<RunRow, 'projectId' | 'threadId'>, content: Readonly<Record<string, unknown>>) =>
-        addItem({ projectId: run.projectId, threadId: run.threadId }, 'step_result', content)
+      const result = (run: Pick<RunRow, 'projectId' | 'threadId'>, content: Readonly<Record<string, unknown>>, id?: string) =>
+        addItem({ projectId: run.projectId, threadId: run.threadId }, 'step_result', content, id === undefined ? {} : { id })
 
       /** The run is over: the task is ready for the person, or stopped. */
       const finish = (run: RunRow, state: 'succeeded' | 'failed' | 'cancelled') =>
@@ -1458,8 +1464,25 @@ export class Runs extends Context.Service<
       const finishStep = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { summary, findings: settled = [], descriptions: given = [] } = yield* read(Finished, input)
+          const {
+            summary,
+            findings: settled = [],
+            descriptions: given = [],
+            evidence: handed = [],
+            unverified = [],
+          } = yield* read(Finished, input)
           const worktrees = access.taskId === null ? [] : yield* worktreesOf(access.taskId)
+          // What it shows of its work: its pictures read now, and kept once the step is taken.
+          const evidence = yield* readEvidence(
+            handed,
+            worktrees.map((worktree) => worktree.path),
+          )
+          const itemId = yield* newId(Ids.threadItem)
+          const shows = Effect.gen(function* () {
+            const kept = yield* keepEvidence({ projectId: access.projectId as ProjectId, itemId, folders: [] }, evidence)
+            const unshown = unverifiedOf(unverified)
+            return { ...(kept.length === 0 ? {} : { evidence: kept }), ...(unshown.length === 0 ? {} : { unverified: unshown }) }
+          })
           // What it gave before Althar sent the step back, and what it gives now.
           const now = yield* descriptionsOf(worktrees, given)
           const kept = { ...givenBefore.get(access.threadId), ...now.descriptions }
@@ -1469,11 +1492,12 @@ export class Runs extends Context.Service<
             access.taskId === null ? [] : yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${access.taskId} LIMIT 1`
           if (current === undefined && planned === undefined) {
             // A task started without a plan has no steps: the summary is still what the person reads.
-            yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'step_result', {
-              step: 'implement',
-              summary,
-              ...descriptions,
-            })
+            yield* addItem(
+              { projectId: access.projectId as ProjectId, threadId: access.threadId },
+              'step_result',
+              { step: 'implement', summary, ...descriptions, ...(yield* shows) },
+              { id: itemId },
+            )
             return 'Althar has your summary.'
           }
           const attempt = current === undefined ? undefined : yield* running(current, ['implement', 'settle'])
@@ -1483,10 +1507,13 @@ export class Runs extends Context.Service<
           // A task that ends on its host pushes commits only: what isn't committed is the lead's to commit or clear away first.
           const end = (yield* stepsOf(current)).end ?? (yield* changes.endFor(current.projectId, current.taskId))
           if (end !== null) {
-            // In a task of several repositories, each file by the repository it's in.
+            // In a task of several repositories, each file by the repository it's in. A picture handed as evidence needn't be committed.
+            const pictures = evidenceFiles(evidence)
             const left = (yield* Effect.forEach(worktrees, (worktree) =>
               Effect.map(uncommittedFiles(worktree.path), (files) =>
-                worktrees.length > 1 ? files.map((file) => `${worktree.name}/${file}`) : files,
+                files
+                  .filter((file) => !pictures.some((picture) => picture.worktree === worktree.path && picture.file === file))
+                  .map((file) => (worktrees.length > 1 ? `${worktree.name}/${file}` : file)),
               ),
             )).flat()
             if (left.length > 0)
@@ -1503,12 +1530,13 @@ export class Runs extends Context.Service<
             }
           }
           givenBefore.delete(access.threadId)
+          const showing = yield* shows
           const taken = yield* sql.withTransaction(
             Effect.gen(function* () {
               // Read before the looks at git above: stopped and resumed meanwhile, the report is dropped.
               if (!(yield* keeps(current, attempt.id, { step, summary }))) return false
               yield* ended(current, attempt, 'succeeded', { summary })
-              yield* result(current, { step, round: attempt.iteration, summary, ...descriptions })
+              yield* result(current, { step, round: attempt.iteration, summary, ...descriptions, ...showing }, itemId)
               // What became of each finding, as the lead says: the input to the next round, and to what reviews learn.
               if (step === 'settle') yield* settleFindings(current, attempt.id, settled)
               // A step that needed the person and reported after all no longer does.
@@ -1659,11 +1687,41 @@ export class Runs extends Context.Service<
       yield* toolServer.serve('lead', [
         tool(
           'finish_step',
-          "Tells Althar you have done your step: the task, or settling a review's findings. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open.",
+          "Tells Althar you have done your step: the task, or settling a review's findings. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open. With it, the evidence you gathered that the change does what it should, and in `unverified` what you couldn't show.",
           {
             type: 'object',
             properties: {
               summary: { type: 'string' },
+              evidence: {
+                type: 'array',
+                description:
+                  "What shows the change does what it should, in the form that fits the task, each with a caption saying what it shows. A screenshot or recording is a PNG, JPEG, GIF or WebP file in the worktree, by its path (it needn't be committed); a command or test run is what you ran, its exit code and the end of its output; a response, log or note is text. Where nothing fits (a typo, a version bump), one note saying so.",
+                items: {
+                  type: 'object',
+                  properties: {
+                    kind: { type: 'string', enum: [...EVIDENCE_KINDS] },
+                    caption: {
+                      type: 'string',
+                      description: 'What it shows, in a line: "The Evidence section with two screenshots and a test run".',
+                    },
+                    path: { type: 'string', description: 'For a screenshot or recording: the picture, from the worktree.' },
+                    command: { type: 'string', description: 'For a command or test run: what you ran.' },
+                    exit_code: { type: 'integer' },
+                    output: {
+                      type: 'string',
+                      description: 'What it printed: the part that shows the result, such as the summary of a test run.',
+                    },
+                    text: { type: 'string', description: 'For a response, log or note: the text.' },
+                  },
+                  required: ['kind', 'caption'],
+                },
+              },
+              unverified: {
+                type: 'array',
+                description:
+                  'What you changed but couldn\'t show working, each in a line, and why: "Not tried with a real microphone: none in the sandbox". A claim with no evidence belongs here.',
+                items: { type: 'string' },
+              },
               descriptions: {
                 type: 'array',
                 description:

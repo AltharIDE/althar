@@ -9,6 +9,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Artifacts } from '../src/Artifacts'
 import { Changes } from '../src/Changes'
 import { coAuthorLine, setCoAuthor } from '../src/credit'
 import { ChangedSinceSeen } from '../src/errors'
@@ -534,6 +535,70 @@ describe('a task that ends in a pull request', () => {
       const [workspace] = yield* sql<{ path: string; branch: string }>`SELECT path, branch FROM workspaces`
       assert.isFalse(existsSync(join(workspace?.path ?? '', 'scratch.log')))
       assert.deepStrictEqual(git(bare, 'ls-tree', '--name-only', workspace?.branch ?? '').split('\n'), ['README.md', 'change.txt'])
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('keeps the evidence the lead hands, its screenshot uncommitted, and describes it in the pull request', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:evidence]',
+      )
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const queries = yield* Queries
+      const thread = yield* queries.thread(ready?.threadId ?? '')
+      const implement = thread.items.find((item) => item.kind === 'step_result' && item.content.step === 'implement')
+      assert(implement?.kind === 'step_result')
+      const [shot, tests] = implement.content.evidence
+      // The screenshot is kept as a picture an agent hands back is: by its digest, in the store.
+      assert.strictEqual(shot?.kind, 'screenshot')
+      assert.strictEqual(shot?.caption, 'The retry button after a failed checkout')
+      assert.match(shot?.picture?.digest ?? '', /^[0-9a-f]{64}$/)
+      assert.deepStrictEqual([shot?.picture?.width, shot?.picture?.height], [480, 300])
+      assert.isNotNull(yield* (yield* Artifacts).read(shot?.picture?.digest ?? ''))
+      assert.deepStrictEqual(tests, {
+        kind: 'test_run',
+        caption: 'The checkout tests',
+        picture: null,
+        command: 'bun test checkout',
+        exit: 0,
+        text: 'checkout.test.ts\n  ✓ retries once\n\n1 passed\n',
+        dropped: 0,
+      })
+      assert.deepStrictEqual(implement.content.unverified, ['Not tried against the real payment provider: no sandbox account'])
+      // Its screenshot needn't be committed, and isn't pushed.
+      const published = thread.items.find((item) => item.kind === 'step_result' && item.content.step === 'publish')
+      assert.strictEqual(published?.kind === 'step_result' ? published.content.summary : null, 'Opened draft pull request #1.')
+      const sql = yield* SqlClient.SqlClient
+      const [workspace] = yield* sql<{ branch: string }>`SELECT branch FROM workspaces`
+      assert.deepStrictEqual(git(bare, 'ls-tree', '--name-only', workspace?.branch ?? '').split('\n'), ['README.md', 'change.txt'])
+      // The pull request says what was shown, in words: the screenshot is in Althar.
+      const body = github.changes[0]?.body ?? ''
+      assert.include(
+        body,
+        [
+          '### Evidence',
+          '',
+          '- Screenshot: The retry button after a failed checkout',
+          '- Test run: The checkout tests: `bun test checkout`, exit 0',
+          '  ~~~~',
+          '  checkout.test.ts',
+          '    ✓ retries once',
+          '  ',
+          '  1 passed',
+          '  ~~~~',
+          '',
+          'Screenshots are in Althar, on the task.',
+          '',
+          '### Unverified',
+          '',
+          '- Not tried against the real payment provider: no sandbox account',
+        ].join('\n'),
+      )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

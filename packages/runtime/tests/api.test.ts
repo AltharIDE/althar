@@ -1884,6 +1884,8 @@ describe('thread items', () => {
           { severity: 'blocking', file: 'a.ts', line: null, claim: 'y' },
           { severity: 'nit', file: null, line: null, claim: 'z' },
         ],
+        evidence: [],
+        unverified: [],
         agentId: 'codex',
         change: null,
       },
@@ -1894,8 +1896,57 @@ describe('thread items', () => {
       summary: 'Done.',
       verdict: null,
       findings: [],
+      evidence: [],
+      unverified: [],
       agentId: null,
       change: null,
     })
+    // Evidence as the lead's step keeps it: a picture by its digest, a command with its exit, and what wasn't shown; what it can't read is left out.
+    const digest = 'a'.repeat(64)
+    assert.deepStrictEqual(
+      itemOf(
+        row('step_result', {
+          summary: 'Done.',
+          evidence: [
+            {
+              kind: 'screenshot',
+              caption: 'The Evidence section',
+              picture: { artifactId: 'art_1', sha256: digest, mediaType: 'image/png', bytes: 10, width: 4, height: 2, name: 'shot.png' },
+              path: 'shot.png',
+              command: null,
+              exit: null,
+              text: null,
+              dropped: 0,
+            },
+            { kind: 'command', caption: 'The tests', picture: null, command: 'bun test', exit: 0, text: '3 passed\n', dropped: 2 },
+            { kind: 'magic', caption: 'Unknown' },
+            { kind: 'note', caption: '' },
+          ],
+          unverified: ['Not tried with a real microphone', 4],
+        }),
+      )?.content,
+      {
+        step: 'implement',
+        round: 0,
+        summary: 'Done.',
+        verdict: null,
+        findings: [],
+        evidence: [
+          {
+            kind: 'screenshot',
+            caption: 'The Evidence section',
+            picture: { digest, mediaType: 'image/png', bytes: 10, width: 4, height: 2, name: 'shot.png', unkept: null },
+            command: null,
+            exit: null,
+            text: null,
+            dropped: 0,
+          },
+          { kind: 'command', caption: 'The tests', picture: null, command: 'bun test', exit: 0, text: '3 passed\n', dropped: 2 },
+        ],
+        unverified: ['Not tried with a real microphone'],
+        agentId: null,
+        change: null,
+      },
+    )
   })
 })

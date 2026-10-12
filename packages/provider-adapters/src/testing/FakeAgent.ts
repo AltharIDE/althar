@@ -405,7 +405,9 @@ const playStall = async (
  * `[lead:settle-quietly]` settles without reporting.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
- * Althar says it isn't committed. Asked for its pull request's description
+ * Althar says it isn't committed; `[lead:evidence]` saves a screenshot in
+ * the worktree, uncommitted, and finishes with it, a test run and something
+ * it couldn't try. Asked for its pull request's description
  * in the repository's template, it fills it in, ticking a box it shouldn't.
  * Told what people said on its pull
  * request, `[lead:answer]`
@@ -482,8 +484,27 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
       // Told to carry on, or to try another way, as Althar tells one that stalled or went round in circles.
       const toldToGoOn = /^(Carry on with the task|Your last turn|You ran )/.test(text)
       // Asked for its pull request's description in the repository's template, it writes under the first heading, and ticks a box it shouldn't.
+      // Asked to show its work, it saves a screenshot in its worktree, uncommitted, and hands it with a test run and what it couldn't try.
+      const evidence = (): Record<string, unknown> => {
+        if (!session.markers.has('[lead:evidence]')) return {}
+        mkdirSync(join(session.cwd, 'evidence'), { recursive: true })
+        writeFileSync(join(session.cwd, 'evidence', 'retry.png'), Buffer.from(SCREENSHOT_PNG, 'base64'))
+        return {
+          evidence: [
+            { kind: 'screenshot', caption: 'The retry button after a failed checkout', path: 'evidence/retry.png' },
+            {
+              kind: 'test_run',
+              caption: 'The checkout tests',
+              command: 'bun test checkout',
+              exit_code: 0,
+              output: 'checkout.test.ts\n  ✓ retries once\n\n1 passed\n',
+            },
+          ],
+          unverified: ['Not tried against the real payment provider: no sandbox account'],
+        }
+      }
       const finish = async () => {
-        const answer = await call('finish_step', { summary: 'Did the task.' })
+        const answer = await call('finish_step', { summary: 'Did the task.', ...evidence() })
         const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
         if (template === undefined) return answer
         const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
