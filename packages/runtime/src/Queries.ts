@@ -525,6 +525,8 @@ export class Queries extends Context.Service<
             effort: session.effort,
             models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
             turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
+            // A session only in the record, which the runtime no longer holds, can take neither a note nor a choice: the screen starts the lead again.
+            held: Option.isSome(running) && running.value.sessionId === session.id,
             context: Option.isSome(running) && running.value.sessionId === session.id ? running.value.context : null,
           }
         })

@@ -46,6 +46,7 @@ const session = {
   effort: null,
   models: [],
   turnRunning: false,
+  held: true,
   context: null,
 }
 

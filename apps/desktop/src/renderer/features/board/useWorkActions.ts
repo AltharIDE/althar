@@ -82,10 +82,13 @@ export const useWorkActions = (): WorkActions => {
     sendBack: useCallback(
       (task, note) =>
         busy(setSending, task.taskId, async () => {
-          // A lead that stopped starts again, on the agent that led it, with the note as its first turn: queued first, so it reads it then.
+          // The note is queued first, so a lead that starts reads it in its first turn rather than after one of its own.
           const head = await client.getThread(task.threadId, { limit: 0 })
           await client.send({ threadId: task.threadId, body: note, disposition: 'after_current' })
-          if (head.session === null && task.lead !== null) await client.startSession({ threadId: task.threadId, agentId: task.lead })
+          // A lead the runtime no longer holds can't take it — its recorded session may be stale or dead — so it starts again, on the agent that led it.
+          // One it holds takes the note itself: running, after the current turn; between turns, now. Only when nothing can start does the person see why.
+          if ((head.session === null || !head.session.held) && task.lead !== null)
+            await client.startSession({ threadId: task.threadId, agentId: task.lead })
         }),
       [busy, client],
     ),

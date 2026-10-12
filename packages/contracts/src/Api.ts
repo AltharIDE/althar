@@ -652,6 +652,14 @@ export const SessionSummary = Schema.Struct({
   /** The models the agent offers for this session. */
   models: Schema.Array(Schema.String),
   turnRunning: Schema.Boolean,
+  /**
+   * Whether the runtime still holds it. A recorded session it no longer has —
+   * left by a crash, or by a start that never took — looks the same as a live
+   * one here, but can take neither a note nor a choice: sending one back to
+   * such a lead has to start it afresh. While it is held, a note waits its
+   * turn there, running or between turns.
+   */
+  held: Schema.Boolean,
   /** How full its context is, in tokens, as the agent last said while it runs; null until it says, or where it doesn't. */
   context: Schema.NullOr(ContextUse),
 })
