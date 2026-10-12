@@ -109,4 +109,4 @@ Each feature holds its route (`route.tsx`, with what it reads before it shows), 
 - **The home has no sign-in card yet.** An agent that is signed out shows in the bar, in violet; signing it in is in Settings.
 - **A packaged app started from the Finder** gets a short `PATH`, so agents on the user's own `PATH` (OpenCode, Claude's status check) may not be found. Development runs from a terminal and inherits its `PATH`.
 - **The packaged app is Apple silicon only,** and is notarized only where the release has Apple's credentials; see the README's "The packaged app". Updates have one track, stable, and no rollback.
-- **The bundled adapters run on Electron's own binaries as Node,** so the signed app keeps the RunAsNode fuse on, and Electron's helpers carry the agents' entitlements (ADR-024); see the open questions.
+- **The bundled adapters run on Electron's own binary as Node in dev** (`ELECTRON_RUN_AS_NODE`), and on the Node the packaged app ships there, whose `runAsNode` fuse is off (ADR-030). A packaged build is the only place the shipped Node runs.
