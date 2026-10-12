@@ -33,6 +33,7 @@ import { Context, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Busy } from './Busy'
+import { planWaits } from './Runs'
 import { Agents, RuntimeConfig } from './Config'
 import { questionTitle } from './Questions'
 import { Changes } from './Changes'
@@ -1281,6 +1282,7 @@ export class Queries extends Context.Service<
             startedAt: task.runAt ?? task.firstSession,
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             queued: queued && task.state !== 'done' && task.state !== 'abandoned' ? yield* (yield* Busy).now : null,
+            ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
 

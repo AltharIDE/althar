@@ -1011,6 +1011,8 @@ export const TaskCard = Schema.Struct({
   waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
   /** It waits for a place among the agents this machine runs at once (ADR-031): how many are busy, and how many it runs at once. */
   queued: Schema.NullOr(Queued),
+  /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
+  planWaits: Schema.optional(Schema.Boolean),
 })
 export type TaskCard = typeof TaskCard.Type
 

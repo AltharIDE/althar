@@ -12,17 +12,24 @@
   already more than a laptop can carry. This reverses that decision, for
   launch on 14 October; the rest of DEV-58 comes later.
 - **Decision:**
-  - **What counts is a task at work:** a step of its run admitted or under
-    way (implement, review, settle), a quick task's lead (`start_task`), and
-    a lead asked to resolve a conflict or fix the checks on one, since each
-    runs a lead. A task's steps follow one another in its one place, so it
-    never waits on itself. The coordinator, the permission judge and the
-    runs Althar makes itself (`run_project`) don't count: they are light, or
-    the person's own.
-  - **A lead waiting on the person's answer to a question doesn't count:**
-    it isn't using the machine. **One idle but with something it left
-    running still running counts** ([ADR-022](022-what-agents-leave-running.md)):
-    that is often when its tests run.
+  - **What counts is an agent at work,** each in a place of its own: a
+    task's lead while a step of its run is admitted or under way
+    (implement, settle; a quick task's, from `start_task`), while it is asked
+    to resolve a conflict or fix the checks on one, or while it is in a
+    turn; and a task's reviewer while a review is admitted or under way, or
+    in a turn. The coordinator, the permission judge and the runs Althar
+    makes itself (`run_project`) don't count: they are light, or the
+    person's own.
+  - **A lead or reviewer waiting on the person's answer to a question
+    doesn't count:** it isn't using the machine. **One idle but with
+    something it left running still running counts**
+    ([ADR-022](022-what-agents-leave-running.md)): that is often when its
+    tests run.
+  - **A step after another on the same task** (the review after the lead's
+    step, the lead settling after a review) takes the place of the agent
+    before it, unless what that agent left running still runs: then the two
+    would be two agents at work, and the next step waits for a place of its
+    own.
   - **The default is worked out at each launch, from this machine,** and
     isn't stored: the lower of a figure from its cores (`os.cpus()`) and one
     from its memory (`os.totalmem()`), at least 1 and at most 16, the active
@@ -45,14 +52,20 @@
     when a place frees, **first come, first served:** what waited longest
     goes first. That holds for a plan's first step when its countdown ends,
     a quick task, a step carried on after a restart or resumed by the
-    person, a step back from a usage limit, and a conflict or check-fix
-    round. What the person does to an agent themselves (a message, an
-    answer) never waits; it counts all the same.
+    person, a step back from a usage limit, a conflict or check-fix round,
+    and the step after another. What the person does waits too, where it
+    would set an agent not at work going: their answer to a question is
+    kept at once and told once there is a place, and what they say to an
+    idle lead, or an agent they start, waits in its thread until then. A
+    lead at work on a step takes no other place for their messages.
   - **Waiting is a state Althar shows and keeps.** A waiting step is written
     in the store as held for a busy machine, and a waiting round keeps what
     it will ask its lead, so a restart doesn't lose either: after one, they
-    wait on, in the same order. The person can still stop a waiting task;
-    resumed, it waits again for a place. The home, the task's card, the board and the task say
+    wait on, in the same order; so does a kept answer. The person can still
+    stop a waiting task (resumed, it waits again for a place), and change
+    its plan while its first step waits, nothing of it started yet: who
+    leads, who reviews, and how it ends. The home, the task's card, the
+    board and the task say
     what it waits for: "Waiting: 4 of 4 agents busy on this Mac". Settings
     says nothing of what runs now.
 - **Alternatives considered:**

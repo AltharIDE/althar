@@ -73,7 +73,7 @@ const started = (projectId: ProjectId, title: string, description: string, agent
       end: null,
       held: true,
     })
-    return { ...created, outcome: yield* plans.start(planId, actor) }
+    return { ...created, planId, outcome: yield* plans.start(planId, actor) }
   })
 
 /** The task's step attempts, oldest first: which step, where each stands, and why one is held. */
@@ -479,6 +479,77 @@ describe('Agents at once', () => {
 })
 
 describe('Agents at once, across a restart', () => {
+  it.live('let the person change a plan whose first step waits, after a restart too, and start it as changed', () =>
+    Effect.gen(function* () {
+      const file = store()
+      /** The plan as its run keeps it: who leads, who reviews, and how it ends. */
+      const planOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [run] = yield* sql<{ parameters: string }>`SELECT parameters FROM runs WHERE task_id = ${taskId}`
+          const [plan] = yield* sql<{
+            parameters: string
+          }>`SELECT parameters FROM task_plans WHERE task_id = ${taskId} AND state = 'accepted'`
+          return { run: JSON.parse(run?.parameters ?? '{}'), plan: JSON.parse(plan?.parameters ?? '{}') }
+        })
+      const before = yield* Effect.gen(function* () {
+        const plans = yield* Plans
+        const { projectId } = yield* opened
+        const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
+        yield* working(first.taskId)
+        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish] [review:pass]')
+        yield* waiting(second.taskId)
+        assert.isTrue((yield* cardOf(projectId, second.taskId))?.planWaits)
+        // Changed while it waits: Claude Code leads now, Codex reviews, and it ends on its branch.
+        const steps = [
+          { key: 'implement' as const, agentId: 'claude-code', model: null, skipped: false },
+          { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+        ]
+        yield* plans.change(second.planId, steps, yield* person, 'none')
+        const changed = yield* planOf(second.taskId)
+        assert.deepStrictEqual(changed.run.steps, steps)
+        assert.deepStrictEqual(changed.plan.steps, steps)
+        assert.strictEqual(changed.run.end, 'none')
+        // One at work already can't be changed so: its plan stays as it was.
+        yield* plans.change(first.planId, steps, yield* person, 'none')
+        assert.strictEqual((yield* planOf(first.taskId)).run.steps[0].agentId, 'codex')
+        assert.isUndefined((yield* cardOf(projectId, first.taskId))?.planWaits)
+        return { projectId, first, second }
+      }).pipe(Effect.provide(machine(1, file)))
+
+      yield* Effect.gen(function* () {
+        const plans = yield* Plans
+        const { projectId, first, second } = before
+        yield* until(sessionsOn(first.threadId), (rows) => rows.length === 2)
+        yield* waiting(second.taskId)
+        assert.isTrue((yield* cardOf(projectId, second.taskId))?.planWaits)
+        // Changed again after the restart: its reviewer skipped.
+        yield* plans.change(
+          second.planId,
+          [
+            { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+            { key: 'review', agentId: 'codex', model: null, skipped: true },
+          ],
+          yield* person,
+        )
+        assert.isTrue((yield* planOf(second.taskId)).run.steps[1].skipped)
+        // Once a place frees, it starts as changed: on Claude Code, with no review, and on to how it ends now.
+        const tasks = yield* Tasks
+        yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
+        yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded' && rows.length === 2)
+        assert.deepStrictEqual(
+          (yield* sessionsOn(second.threadId)).map((session) => session.agentId),
+          ['claude-code'],
+        )
+        assert.deepStrictEqual(
+          (yield* attempts(second.taskId)).map((row) => row.step),
+          ['implement', 'publish'],
+        )
+        assert.isUndefined((yield* cardOf(projectId, second.taskId))?.planWaits)
+      }).pipe(Effect.provide(machine(1, file)))
+    }),
+  )
+
   it.live('keep an answer that waits for a place, and tell it once there is one', () =>
     Effect.gen(function* () {
       const file = store()

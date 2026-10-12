@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto'
 
 import type { LimitCall } from '@althar/contracts'
 import type { FieldAnswer } from '@althar/provider-adapters'
-import { type CommandEnvelope, Ids, newId, type ProjectId, type RunState, runLifecycle, transition } from '@althar/domain'
+import { type ActorId, type CommandEnvelope, Ids, newId, type ProjectId, type RunState, runLifecycle, transition } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
-import { SqlClient } from 'effect/sql'
+import { SqlClient, type SqlError } from 'effect/sql'
 
 import { Busy } from './Busy'
 import { touchCard } from './cards'
@@ -250,6 +250,20 @@ const waitingOf = (output: string | null, now: string): Waiting => {
   return { place: { how: 'restart' }, since: now }
 }
 
+/** Whether the task's run waits for a place before its first step: its one attempt, Implement, held for one, to start. */
+export const planWaits = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ nodeKey: string; state: string; holdReason: string | null; output: string | null }>`
+      SELECT n.node_key, a.state, a.hold_reason, a.output FROM runs r JOIN workflow_executions e ON e.run_id = r.id
+      JOIN nodes n ON n.execution_id = e.id JOIN node_attempts a ON a.node_id = n.id
+      WHERE r.id = (SELECT id FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC LIMIT 1) AND r.state = 'running'`
+    const [only] = rows
+    if (rows.length !== 1 || only === undefined) return false
+    if (only.nodeKey !== 'implement' || only.state !== 'held' || only.holdReason !== 'machine_busy') return false
+    return waitingOf(only.output, '').place.how === 'start'
+  })
+
 export class Runs extends Context.Service<
   Runs,
   {
@@ -292,6 +306,19 @@ export class Runs extends Context.Service<
       readonly attentionId: string
       readonly answers: Readonly<Record<string, FieldAnswer>>
     }): Effect.Effect<void, unknown>
+    /** Whether the task's plan waits for a place before its first step, nothing of it started yet: the person can still change it. */
+    planWaits(taskId: string): Effect.Effect<boolean, SqlError.SqlError, SqlClient.SqlClient>
+    /**
+     * Changes the plan of a run whose first step waits for a place, as the
+     * person changed it: who leads and reviews, and how it ends. False, and
+     * nothing changed, where it no longer waits. Inside the caller's
+     * transaction.
+     */
+    changeWaiting(
+      taskId: string,
+      parameters: string,
+      actorId: ActorId,
+    ): Effect.Effect<boolean, unknown, SqlClient.SqlClient | Ledger | Crypto.Crypto>
   }
 >()('@althar/runtime/Runs') {
   static readonly layer: Layer.Layer<Runs, never, Store> = Layer.effect(
@@ -2859,6 +2886,29 @@ export class Runs extends Context.Service<
         answerStuck: (input) => provide(answerStuck(input)),
         resume: (input) => provide(resume(input)),
         answered: (input) => provide(answered(input)),
+        planWaits,
+        changeWaiting: (taskId, parameters, actorId) =>
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            if (!(yield* planWaits(taskId))) return false
+            const current = yield* currentRun(taskId)
+            if (current === undefined) return false
+            const revision = yield* change('runs', current.runId, { parameters })
+            yield* fact({
+              projectId: current.projectId,
+              aggregateType: 'run',
+              aggregateId: current.runId,
+              revision,
+              type: 'run.plan_changed',
+              actorId,
+            })
+            // Its first step starts on the lead the plan now names, as admitted.
+            const steps = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PlanParameters))(parameters)
+            const implement = steps.steps.find((step) => step.key === 'implement')
+            if (implement !== undefined)
+              yield* sql`UPDATE nodes SET config = ${JSON.stringify(implement)} WHERE execution_id = ${current.executionId} AND node_key = 'implement'`
+            return true
+          }),
         answer: (input) =>
           provide(
             Effect.gen(function* () {

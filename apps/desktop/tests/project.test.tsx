@@ -345,6 +345,27 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledWith('pln1')
   })
 
+  it('lets the person change a started plan while its first step waits for a free agent, saying what it waits for', async () => {
+    const waitingCard = card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4 }, planWaits: true })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
+    withServices(<Project />, client)
+    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
+    // Nothing to start or hold: it starts on its own once an agent is free.
+    expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Hold' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    await waitFor(() =>
+      expect(client.changePlan).toHaveBeenLastCalledWith(
+        'pln1',
+        [
+          { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        null,
+      ),
+    )
+  })
+
   it('shows the effort the coordinator picked for a step as one the person chose, keeps it, and lets the person change it', async () => {
     const plan = {
       ...card().plan!,

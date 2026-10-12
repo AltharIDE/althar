@@ -77,7 +77,18 @@ const launchSteps = (plan: Plan, named: NameModel): ReadonlyArray<LaunchStep> =>
     skipped: step.skipped,
   }))
 
-function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; actions: CardActions }) {
+function PlanCard({
+  card,
+  plan,
+  actions,
+  queued,
+}: {
+  card: TaskCardContent
+  plan: Plan
+  actions: CardActions
+  /** Started, waiting for a free agent: what for. */
+  queued?: string
+}) {
   const named = useModelNames()
   // What the person changed shows at once; the runtime's copy replaces it when it comes back.
   const [shown, setShown] = useState<{ readonly from: Plan; readonly steps: ReadonlyArray<PlanStep>; readonly end: End | null }>({
@@ -118,6 +129,7 @@ function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; 
         )
       }}
       wait={COUNTDOWN}
+      {...(queued === undefined ? {} : { queued })}
       {...(plan.startsAt === null ? {} : { startsAt: Date.parse(plan.startsAt) })}
       held={card.phase === 'held'}
       onHeldChange={(held) => {
@@ -137,6 +149,9 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
   const effortOf = useEffortNames()
   if ((card.phase === 'planned' || card.phase === 'held') && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} />
+  // Started, its first step waiting for a free agent, the plan can still be changed: it says what it waits for where the clock was.
+  if (card.planWaits === true && card.queued !== null && card.plan !== null)
+    return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={queuedWords(card.queued)} />
   const steps = stepNames(card.plan?.steps ?? [])
   const at = stepIndex(steps, card.step)
   // Waiting for a free agent, it says so, rather than that it runs.
