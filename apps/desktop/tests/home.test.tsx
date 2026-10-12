@@ -951,6 +951,12 @@ describe('the app’s own preferences in settings', () => {
     expect(host.setPreference).toHaveBeenLastCalledWith('keepAwake', true)
     await userEvent.click(battery)
     expect(host.setPreference).toHaveBeenLastCalledWith('awakeOnBattery', true)
+    // How hard the Mac works shows in the bar until it is turned off here, for every window.
+    const load = within(panel).getByRole('switch', { name: 'Show how hard this Mac works' })
+    expect(load.getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(load)
+    expect(host.setPreference).toHaveBeenLastCalledWith('showLoad', false)
+    await waitFor(() => expect(load.getAttribute('aria-checked')).toBe('false'))
     // Each editor by its own icon; the first one found until one is chosen.
     const editors = within(panel).getByRole('radiogroup', { name: 'Open files in' })
     expect(within(editors).getByRole('radio', { name: 'Cursor' }).getAttribute('aria-checked')).toBe('true')

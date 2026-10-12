@@ -32,6 +32,7 @@ import { CommandOutput } from './CommandOutput'
 import { piecesOf } from './evidence'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
+import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
 import { RuleReceipt } from './RuleReceipt'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
@@ -427,7 +428,13 @@ export function ThreadBlocks({
       case 'you':
         return (
           <Fragment key={block.id}>
-            <You at={block.at} delivery={block.delivery} {...(queued === undefined ? {} : { text: { queued } })}>
+            <You
+              at={block.at}
+              delivery={block.delivery}
+              {...(queued === undefined ? {} : { text: { queued } })}
+              // The images sent with it, each opening full size with the others.
+              {...(block.pictures.length === 0 ? {} : { attach: sentAttachments(block.pictures) })}
+            >
               {block.text}
             </You>
             {block.links.length > 0 && (

@@ -24,4 +24,6 @@ export const checksums: Readonly<Record<string, string>> = {
   '0018_questions': 'f775a6417512859d6167b73c4df83d7d76a8c5ffaf338dfd83d1c0aad6d84dc0',
   '0019_run_commands': '1d99bf7dd390bcd630320a9e9aea75197fbc143257737bd8c197f2ee4ab32cbd',
   '0020_issue_drafts': '060cf883456f697c925ccc0befd5c87d1ce01901c5a2a4f87c65975aa6a1bd98',
+  '0021_input_images': '048b5727048aae868c44a6f3a7640775f2311fd3852bdfd81e414aa857b4a82b',
+  '0022_connection_cli': 'a2e1df1a078b718b1c1c24bf23f3e93ad97407339a670cd2a70cdf80477f26ae',
 }

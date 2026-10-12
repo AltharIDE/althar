@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 
 import { type Credential, type Fetch, type ProductInfo, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
@@ -11,6 +11,7 @@ import { SqlClient } from 'effect/sql'
 
 import { cliToken, Connectors } from '../src/Config'
 import { CliElsewhere, CliSignedOut, Connections, OtherAccount } from '../src/Connections'
+import { CliUnanswered } from '../src/errors'
 import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
@@ -29,6 +30,24 @@ describe('connecting', () => {
     Effect.gen(function* () {
       assert.isNull(yield* cliToken('gh', 'nowhere.invalid'))
       assert.isNull(yield* cliToken('glab', 'nowhere.invalid'))
+    }),
+  )
+
+  it.live('fails, rather than reading no sign-in, where gh didn’t get to answer', () =>
+    Effect.gen(function* () {
+      // A gh that is ended before it answers, as one timed out is.
+      const bin = mkdtempSync(join(tmpdir(), 'althar-bin-'))
+      writeFileSync(join(bin, 'gh'), '#!/bin/sh\nkill -9 $$\n', { mode: 0o755 })
+      const path = process.env.PATH ?? ''
+      process.env.PATH = `${bin}${delimiter}${path}`
+      const said = yield* Effect.flip(cliToken('gh', 'github.com')).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            process.env.PATH = path
+          }),
+        ),
+      )
+      assert.instanceOf(said, CliUnanswered)
     }),
   )
 

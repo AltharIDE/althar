@@ -24,7 +24,7 @@ export const text = {
       case 'failed_to_start':
         return `${agent} couldn't start.${stuck.detail === null ? '' : ` ${stuck.detail}`}`
       case 'restarted':
-        return 'Althar restarted while this step was running.'
+        return `Althar stopped again soon after it carried this step on after a restart, so it waits for you rather than start ${agent} once more.`
       case 'round_limit':
         return `Three rounds of review are done, and the lead's last changes haven't been reviewed.${
           stuck.open === 0 ? '' : stuck.open === 1 ? ' One finding is still open.' : ` ${stuck.open} findings are still open.`
@@ -53,11 +53,12 @@ export const text = {
   again: {
     stalled: { again: (agent: string) => `Start ${agent} again`, tryingAgain: (agent: string) => `Starting ${agent} again` },
     over_budget: { again: (agent: string) => `Let ${agent} carry on`, tryingAgain: (agent: string) => `${agent} carries on` },
+    restarted: { again: (agent: string) => `Start ${agent} again`, tryingAgain: (agent: string) => `Starting ${agent} again` },
   },
   /** For the pull request, which Althar opens itself: what went wrong. */
   publishing: (stuck: StuckStep): string =>
     stuck.why === 'restarted'
-      ? 'Althar restarted while it was opening the pull request.'
+      ? 'Althar stopped again soon after it went back to opening the pull request.'
       : `Althar couldn't open the pull request.${stuck.detail === null ? '' : ` ${stuck.detail}`}`,
   publish: {
     abandon: 'Go on without it',
@@ -121,8 +122,8 @@ export function StuckCall({
   const others = agents.filter((candidate) => review || candidate.id !== stuck.agentId)
   const lastRound = stuck.why === 'round_limit'
   const out = stuck.why === 'usage_limit'
-  // Gone quiet, or long at it, a lead's agent can start again, or carry on; a review runs again by its own button.
-  const again = stuck.why === 'stalled' || stuck.why === 'over_budget' ? text.again[stuck.why] : undefined
+  // Gone quiet, long at it, or stopped by restarts, a lead's agent can start again, or carry on; a review runs again by its own button.
+  const again = stuck.why === 'stalled' || stuck.why === 'over_budget' || stuck.why === 'restarted' ? text.again[stuck.why] : undefined
   // Opening the pull request is Althar's own step: tried again as it was, or gone on without.
   if (stuck.step === 'publish')
     return (

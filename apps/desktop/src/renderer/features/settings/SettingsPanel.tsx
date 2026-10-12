@@ -39,6 +39,7 @@ import {
   type NotifyChoices,
   OpenFilesIn,
   SettingList,
+  SettingSwitch,
   Switch,
   UpdateReady,
 } from '@althar/ui'
@@ -130,6 +131,8 @@ export const text = {
   withSound: 'With sound',
   awakeTitle: `Keep ${device.this} awake while work runs`,
   awakeNote: `Work stops when ${device.the} sleeps. The display can still sleep.`,
+  loadTitle: `Show how hard ${device.this} works`,
+  loadNote: 'CPU and memory in the bar, and how much of each Althar’s work uses.',
   badge: `Count them on ${device.count ?? 'the icon'}`,
   soundNote:
     platform === 'darwin'
@@ -564,6 +567,13 @@ export function SettingsView({
                 onBattery={preferences.awakeOnBattery}
                 onBatteryChange={(on) => set('awakeOnBattery', on)}
                 text={{ title: text.awakeTitle, note: text.awakeNote }}
+              />
+              <SettingSwitch
+                title={text.loadTitle}
+                note={text.loadNote}
+                glyph={<Icon name="load" size={15} />}
+                checked={preferences.showLoad}
+                onChange={(on) => set('showLoad', on)}
               />
               {editors.length > 0 && (
                 <OpenFilesIn

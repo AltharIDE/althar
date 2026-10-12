@@ -18,7 +18,7 @@ import { Cause, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Option
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
-import type { Artifacts } from './Artifacts'
+import { Artifacts } from './Artifacts'
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, modelNamer } from './coordinatorNews'
@@ -45,6 +45,7 @@ import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
 import { git } from './git'
 import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
+import type { InputImage } from './sentImages'
 import { evidenceForReview } from './evidence'
 import { defaultEffortOf } from './preferences'
 import { addItem, type OutputSoFar, recorder, toolItem, transcript } from './threads'
@@ -270,16 +271,24 @@ export const promptFor = (
     readonly disposition: string
     /** The agent whose turn it was given to reached its usage limit on it, and may have acted on it first. */
     readonly cutShort?: string
+    /** Images the person sent with it that the agent doesn't get: it doesn't take images, or they aren't kept any more. */
+    readonly withheld?: number
   }>,
   brief: { readonly text: string; readonly closing: string } | undefined,
   /** What Althar tells the agent first, before what was said: what changed while it wasn't speaking. */
   news: string | null = null,
 ) => {
   const parts = inputs.map((input) => {
+    // Images it doesn't get are said, so it knows they were there and can ask what they show.
+    const withheld = input.withheld ?? 0
+    const body =
+      withheld === 0
+        ? input.body
+        : `${input.body}${input.body === '' ? '' : '\n\n'}(The person sent ${withheld === 1 ? 'an image' : `${withheld} images`} with this, which Althar couldn't pass on to you.)`
     const said =
       input.disposition === 'interrupt_and_continue'
-        ? `The person interrupted your last turn to say:\n\n${input.body}\n\nTake it into account, and carry on with the task.`
-        : input.body
+        ? `The person interrupted your last turn to say:\n\n${body}\n\nTake it into account, and carry on with the task.`
+        : body
     // A delivered turn may have acted: what it was given isn't new, and some of it may be done.
     return input.cutShort === undefined
       ? said
@@ -327,6 +336,8 @@ export class Sessions extends Context.Service<
       readonly threadId: string
       readonly body: string
       readonly disposition?: Disposition
+      /** Images the person sent with it, in the store already (`keepSent`): sent with its words in every turn that delivers it. */
+      readonly images?: ReadonlyArray<InputImage>
       /** Input Althar writes, such as findings to settle: delivered, but shown in the thread by what it came from, not as the person's message. */
       readonly quiet?: boolean
     }): Effect.Effect<AcceptedInput, NotFound | Failure>
@@ -351,8 +362,8 @@ export class Sessions extends Context.Service<
       readonly said?: string
       /** What the loop dealt with by switching, for the home: an agent's usage limit, or a step gone quiet. */
       readonly about?: 'limit' | 'stall'
-      /** What the person said with it: the new agent's first turn, after its brief, and never the old one's. */
-      readonly message?: { readonly envelope: CommandEnvelope; readonly body: string }
+      /** What the person said with it, and any images: the new agent's first turn, after its brief, and never the old one's. */
+      readonly message?: { readonly envelope: CommandEnvelope; readonly body: string; readonly images?: ReadonlyArray<InputImage> }
       /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
       readonly accountId?: string
     }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
@@ -598,6 +609,34 @@ export class Sessions extends Context.Service<
           return sessionId
         })
 
+      /**
+       * The images sent with each input, from the store, in order, for an
+       * agent that takes images; and how many of each it doesn't get: all of
+       * them where it doesn't take images, else any no longer kept.
+       */
+      const imagesFor = (inputIds: ReadonlyArray<string>, takes: boolean) =>
+        Effect.gen(function* () {
+          const images = new Map<string, Array<{ readonly data: string; readonly mimeType: string }>>()
+          const withheld = new Map<string, number>()
+          if (inputIds.length === 0) return { images, withheld }
+          const sql = yield* SqlClient.SqlClient
+          const artifacts = yield* Artifacts
+          const rows = yield* sql<{ userInputId: string; sha256: string; mediaType: string }>`
+            SELECT ii.user_input_id, a.sha256, a.media_type
+            FROM user_input_images ii JOIN artifacts a ON a.id = ii.artifact_id
+            WHERE ii.user_input_id IN ${sql.in(inputIds)} ORDER BY ii.user_input_id, ii.position`
+          for (const row of rows) {
+            const bytes = takes ? yield* artifacts.read(row.sha256) : null
+            if (bytes === null) withheld.set(row.userInputId, (withheld.get(row.userInputId) ?? 0) + 1)
+            else
+              images.set(row.userInputId, [
+                ...(images.get(row.userInputId) ?? []),
+                { data: Buffer.from(bytes).toString('base64'), mimeType: row.mediaType },
+              ])
+          }
+          return { images, withheld }
+        })
+
       /** Delivers the queued input as one turn, and records it to its end. */
       const deliver = (running: Running) =>
         Effect.gen(function* () {
@@ -612,11 +651,17 @@ export class Sessions extends Context.Service<
             FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
             WHERE i.thread_id = ${thread.threadId} AND i.state = 'queued'
             ORDER BY i.disposition = 'interrupt_and_continue' DESC, i.sequence`
+          // The images the person sent with each, read from the store for this turn: only an agent that takes images is sent them.
+          const sent = yield* imagesFor(
+            queued.map((input) => input.id),
+            running.connection.info.images,
+          )
           // What an agent out of usage was given goes on with word of that, by the name of the agent it went to.
           const agents = yield* Agents
           const inputs = queued.map(({ cutBy, ...input }) => {
             const by = cutBy === null ? undefined : (agents.list.find((entry) => entry.definition.id === cutBy)?.definition.name ?? cutBy)
-            return by === undefined ? input : { ...input, cutShort: by }
+            const withheld = sent.withheld.get(input.id) ?? 0
+            return { ...input, ...(by === undefined ? {} : { cutShort: by }), ...(withheld === 0 ? {} : { withheld }) }
           })
           if (inputs.length === 0 && running.brief === undefined) return false
           // The coordinator speaks when spoken to: its brief waits for the person's first message.
@@ -719,6 +764,22 @@ export class Sessions extends Context.Service<
           )
           running.brief = undefined
           running.turnRunning = true
+          // Images the agent doesn't get are said in the thread as well as to the agent, so none goes missing unsaid.
+          const withheld = inputs.reduce((sum, input) => sum + (input.withheld ?? 0), 0)
+          if (withheld > 0)
+            yield* addItem(
+              { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId },
+              'notice',
+              {
+                source: 'runtime',
+                severity: 'warning',
+                title: running.connection.info.images
+                  ? withheld === 1
+                    ? `An image you sent isn't kept any more, so ${running.entry.definition.name} didn't get it.`
+                    : `${withheld} images you sent aren't kept any more, so ${running.entry.definition.name} didn't get them.`
+                  : `${running.entry.definition.name} doesn't take images, so ${withheld === 1 ? 'the image' : `the ${withheld} images`} you sent ${withheld === 1 ? "wasn't" : "weren't"} passed on to it.`,
+              },
+            )
           // A task's card says when its lead or reviewer is at work.
           if (thread.role !== 'coordinator') yield* touchCard(thread.taskId)
           yield* live.publish({
@@ -788,7 +849,8 @@ export class Sessions extends Context.Service<
               ),
             )
           })
-          const streamed = yield* Stream.runForEach(running.agent.prompt(prompt), (event) =>
+          const images = inputs.flatMap((input) => sent.images.get(input.id) ?? [])
+          const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, images), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
               heardContext(running, event)
@@ -1334,11 +1396,14 @@ export class Sessions extends Context.Service<
         readonly threadId: string
         readonly body: string
         readonly disposition?: Disposition
+        readonly images?: ReadonlyArray<InputImage>
         readonly quiet?: boolean
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const commands = yield* Commands
+          const artifacts = yield* Artifacts
+          const images = input.images ?? []
           const disposition = input.disposition ?? 'after_current'
           const [thread] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM threads WHERE id = ${input.threadId}`
           if (thread === undefined) return yield* new NotFound({ kind: 'thread', id: input.threadId })
@@ -1366,20 +1431,57 @@ export class Sessions extends Context.Service<
                 state: 'queued',
                 acceptedAt: yield* timestamp,
               })}`
-              if (input.quiet !== true)
-                yield* addItem(
+              // Its images, in order, each an artifact the input refers to; their bytes are in the store already.
+              const kept = yield* Effect.forEach(images, (image, index) =>
+                Effect.gen(function* () {
+                  const artifact = {
+                    projectId: thread.projectId,
+                    sha256: image.sha256,
+                    size: image.size,
+                    mediaType: image.mediaType,
+                    kind: 'image' as const,
+                    // A screenshot can show anything on the screen.
+                    sensitivity: 'may_contain_secrets' as const,
+                  }
+                  const artifactId = yield* artifacts.record({ ...artifact, subject: { type: 'user_input', id: inputId, role: 'image' } })
+                  yield* sql`INSERT INTO user_input_images ${sql.insert({ projectId: thread.projectId, userInputId: inputId, position: index + 1, artifactId })}`
+                  return { artifact, picture: { artifactId, ...image, bytes: image.size } }
+                }),
+              )
+              if (input.quiet !== true) {
+                const itemId = yield* addItem(
                   { projectId: thread.projectId, threadId: input.threadId },
                   'user_message',
-                  { text: input.body },
+                  {
+                    text: input.body,
+                    // As a picture an agent hands back is kept on its item: what it is, and its digest.
+                    ...(kept.length === 0
+                      ? {}
+                      : {
+                          pictures: kept.map(({ picture }) => ({
+                            artifactId: picture.artifactId,
+                            sha256: picture.sha256,
+                            mediaType: picture.mediaType,
+                            bytes: picture.bytes,
+                            width: picture.width,
+                            height: picture.height,
+                            name: picture.name,
+                          })),
+                        }),
+                  },
                   { userInputId: inputId },
                 )
+                // The item names them too, so it is one of what refers to them.
+                for (const { artifact } of kept)
+                  yield* artifacts.record({ ...artifact, subject: { type: 'thread_item', id: itemId, role: 'image' } })
+              }
               yield* fact({
                 projectId: thread.projectId,
                 aggregateType: 'user_input',
                 aggregateId: inputId,
                 revision: 1,
                 type: disposition === 'interrupt_and_continue' ? 'user_input.interrupt_requested' : 'user_input.accepted',
-                payload: { disposition, sequence },
+                payload: { disposition, sequence, ...(images.length === 0 ? {} : { images: images.map((image) => image.sha256) }) },
                 actorId: input.envelope.actorId,
                 commandId: input.envelope.commandId,
               })
@@ -1641,7 +1743,7 @@ export class Sessions extends Context.Service<
         readonly said?: string
         readonly about?: 'limit' | 'stall'
         readonly accountId?: string
-        readonly message?: { readonly envelope: CommandEnvelope; readonly body: string }
+        readonly message?: { readonly envelope: CommandEnvelope; readonly body: string; readonly images?: ReadonlyArray<InputImage> }
       }) =>
         exclusive(
           input.threadId,
@@ -1669,7 +1771,12 @@ export class Sessions extends Context.Service<
               ...(input.about === undefined ? {} : { about: input.about }),
             })
             if (input.message !== undefined)
-              yield* send({ envelope: input.message.envelope, threadId: input.threadId, body: input.message.body })
+              yield* send({
+                envelope: input.message.envelope,
+                threadId: input.threadId,
+                body: input.message.body,
+                ...(input.message.images === undefined ? {} : { images: input.message.images }),
+              })
             const brief = yield* briefFor(thread, { kind: 'takeover', from })
             return yield* activate(connected, { text: brief, closing: 'Carry on with the task from where it stands.' })
           }),

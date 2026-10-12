@@ -18,6 +18,7 @@ import {
 } from '@althar/ui'
 
 import { contextMeter } from '../../shared/ContextMeter'
+import { useModels } from '../../data/models'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
@@ -30,6 +31,7 @@ import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
+import { takesImages, useImages } from '../../shared/useImages'
 import { BoardView } from '../board/BoardView'
 import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
@@ -38,7 +40,7 @@ import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectD
 import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
 import { DraftCard, type DraftActions } from './DraftCard'
-import { lastSettledOf, partsOf, tasksOf, trackerOf } from './front'
+import { lastSettledOf, partsOf, tasksOf, trackersOf } from './front'
 import { nextRoom, ProjectBar } from './ProjectBar'
 import { inkOf, ProjectSettings } from './ProjectSettings'
 import s from './Project.module.css'
@@ -173,6 +175,9 @@ export function ProjectView({
   }, [])
   const [draft, setDraft] = useState('')
   const voice = useDictation(setDraft, { projectId: model.project?.id ?? model.coordinator?.project.id ?? null })
+  // Images to send with what the person says, and which agents take them.
+  const images = useImages()
+  const models = useModels()
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
@@ -221,12 +226,25 @@ export function ProjectView({
     onDiscard: (draftId) => void model.discardIssueDraft(draftId),
   }
 
+  // The agent what the person says goes to, and whether it takes images.
+  const receiver = { name: agentName(chosen?.agentId ?? null), takes: takesImages(models, chosen?.agentId ?? null) }
   const send = (body: string, now: boolean) => {
+    // Images that can't go yet hold the message back, and the composer says why.
+    const outgoing = images.take(receiver)
+    if (outgoing === null) return
     setDraft('')
-    if (waiting !== null) {
-      setHandover(null)
-      void model.handOver(waiting, body)
-    } else void (now ? model.sayNow(body) : model.say(body, chosen))
+    images.clear()
+    const picked = waiting
+    if (picked !== null) setHandover(null)
+    const said =
+      picked !== null ? model.handOver(picked, body, outgoing) : now ? model.sayNow(body, outgoing) : model.say(body, chosen, outgoing)
+    // One Althar doesn't take goes back in the composer: its words, its images, and the agent picked to take over.
+    void said.then((accepted) => {
+      if (accepted) return
+      setDraft((current) => withQueued(current, body))
+      images.giveBack(outgoing)
+      if (picked !== null) setHandover(picked)
+    })
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {
@@ -238,7 +256,12 @@ export function ProjectView({
   // A queued message goes back in the composer to be changed, and out of the queue, unless the coordinator has it already.
   const edit = async (id: string) => {
     const said = queuedOf(coordinator?.items ?? [], queue).find((message) => message.id === id)
-    if (said !== undefined && (await model.takeBack(id))) setDraft((current) => withQueued(current, said.text))
+    // One whose images wouldn't fit beside those waiting stays in the queue, and the composer says why.
+    if (said === undefined || !images.fits(said.pictures)) return
+    if (await model.takeBack(id)) {
+      setDraft((current) => withQueued(current, said.text))
+      images.restore(said.pictures)
+    }
   }
 
   const composer = (
@@ -280,6 +303,7 @@ export function ProjectView({
         }
         onSubmit={(body) => send(body, false)}
         onSendNow={(body) => send(body, true)}
+        {...images.props(receiver)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
         queued={queuedOf(coordinator?.items ?? [], queue)}
@@ -316,7 +340,7 @@ export function ProjectView({
   // The front page: its name and ink as the person last chose them, how it stands, and what it is made of.
   const projectId = model.project?.id ?? coordinator?.project.id ?? ''
   const kept = settings?.model
-  const tracker = lanes === null ? null : trackerOf(tasksOf(lanes), connections.list)
+  const trackers = lanes === null ? [] : trackersOf(tasksOf(lanes), connections.list)
   const front = (
     <Front
       lanes={lanes}
@@ -326,7 +350,13 @@ export function ProjectView({
       yours={yours}
       {...(lanes === null ? {} : { needs: needsOf(lanes, agentName, onTask), inProgress: lanes.running.length })}
       onYours={openYours}
-      parts={partsOf({ repositories: model.repositories, names: model.project?.repositories ?? [], host, tracker })}
+      parts={partsOf({
+        repositories: model.repositories,
+        names: model.project?.repositories ?? [],
+        host,
+        trackers,
+        open: (url) => window.open(url, '_blank'),
+      })}
       // The default branch runs with no agent, where its repository says how.
       {...(coordinator?.runCommand == null ? {} : { run: { command: coordinator.runCommand, onRun: () => void model.runProject() } })}
       {...(settings === undefined
@@ -339,7 +369,7 @@ export function ProjectView({
                 repositories={model.repositories ?? []}
                 connections={connections.list}
                 host={host}
-                tracker={tracker}
+                tracker={trackers[0] ?? null}
                 onRepositories={settings.onRepositories}
                 onRules={settings.onRules}
                 onConnect={(product, at) => setConnecting(openingFor(connections.list, product, at))}

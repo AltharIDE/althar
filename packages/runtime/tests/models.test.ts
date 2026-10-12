@@ -113,6 +113,7 @@ describe('the models each agent offers', () => {
         defaults: [],
         blocked: [],
         probing: false,
+        images: true,
       })
       // Asking left nothing behind: no session was recorded for it.
       const sql = yield* SqlClient.SqlClient
@@ -146,6 +147,7 @@ describe('the models each agent offers', () => {
         defaults: [],
         blocked: [],
         probing: true,
+        images: true,
       })
       const [asked] = yield* until(
         Effect.map(models.catalog, (all) => all.filter((agent) => agent.agentId === 'codex')),
@@ -159,6 +161,7 @@ describe('the models each agent offers', () => {
         defaults: [],
         blocked: [],
         probing: false,
+        images: true,
       })
       // Changed while it runs, it says what it is on now.
       yield* sessions.setModel({ threadId, model: 'small' })
@@ -195,6 +198,7 @@ describe('the models each agent offers', () => {
         defaults: [],
         blocked: [],
         probing: false,
+        images: true,
       })
     }).pipe(Effect.provide(runtime())),
   )

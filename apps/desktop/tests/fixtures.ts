@@ -9,6 +9,8 @@ import type {
   ConnectionSummary,
   CoordinatorSnapshot,
   HomeSnapshot,
+  Load,
+  Picture,
   ProjectRulesView,
   ProjectRepository,
   ProjectSummary,
@@ -115,7 +117,7 @@ const offering =
     effort: 'medium',
   })
 
-/** What the agents offer: Claude Code's own default first, Codex's models by id, OpenCode still being asked. */
+/** What the agents offer: Claude Code's own default first, Codex's models by id, OpenCode still being asked. Claude Code takes images; Codex here doesn't; OpenCode hasn't said. */
 export const models: ReadonlyArray<AgentModels> = [
   {
     agentId: 'claude-code',
@@ -129,6 +131,7 @@ export const models: ReadonlyArray<AgentModels> = [
     defaults: [],
     blocked: [],
     probing: false,
+    images: true,
   },
   {
     agentId: 'codex',
@@ -141,8 +144,9 @@ export const models: ReadonlyArray<AgentModels> = [
     defaults: [],
     blocked: [],
     probing: false,
+    images: false,
   },
-  { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], blocked: [], probing: true },
+  { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], blocked: [], probing: true, images: null },
 ]
 
 /** A project's repositories as this Mac has them: one plain and one a fork, on GitHub as you, and one on GitLab, not connected. */
@@ -235,6 +239,59 @@ export const task: TaskSummary = {
   createdAt: NOW,
 }
 
+const GiB = 1024 ** 3
+const MiB = 1024 ** 2
+
+/** This Mac a moment ago, 32 GB of it: the task's lead running its suite, meridian's coordinator, and its default branch running. */
+export const load: Load = {
+  cpu: 0.42,
+  memoryUsed: 12.5 * GiB,
+  memoryTotal: 32 * GiB,
+  pressure: 'normal',
+  shares: [
+    {
+      kind: 'task',
+      projectId: 'p1',
+      project: 'meridian',
+      taskId: 't1',
+      threadId: 'th1',
+      title: 'Add a retry',
+      agent: { id: 'claude-code', name: 'Claude Code' },
+      cpu: 0.3,
+      memory: 1.5 * GiB,
+      processes: 12,
+    },
+    {
+      kind: 'coordinator',
+      projectId: 'p1',
+      project: 'meridian',
+      taskId: null,
+      threadId: null,
+      title: null,
+      agent: { id: 'codex', name: 'Codex' },
+      cpu: 0.02,
+      memory: 300 * MiB,
+      processes: 1,
+    },
+    {
+      kind: 'run',
+      projectId: 'p1',
+      project: 'meridian',
+      taskId: null,
+      threadId: null,
+      title: null,
+      agent: null,
+      cpu: 0.01,
+      memory: 220 * MiB,
+      processes: 3,
+    },
+  ],
+  history: [
+    { cpu: 0.2, work: 0.1 },
+    { cpu: 0.42, work: 0.33 },
+  ],
+}
+
 let sequence = 0
 const next = () => {
   sequence += 1
@@ -247,11 +304,12 @@ export const items = {
     text: string,
     input: Extract<ThreadItem, { kind: 'user_message' }>['input'] = { state: 'delivered', interrupting: false },
     links: ReadonlyArray<Unfurl> = [],
+    pictures: ReadonlyArray<Picture> = [],
   ): ThreadItem => ({
     ...next(),
     agentId: null,
     kind: 'user_message',
-    content: { text, links },
+    content: { text, links, pictures },
     input,
   }),
   says: (text: string, agentId = 'claude-code', id?: string): ThreadItem => ({
@@ -674,6 +732,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'zed', name: 'Zed' },
       { id: 'finder', name: 'Finder' },
     ]),
+    getLoad: vi.fn(async () => load),
     openInEditor: vi.fn(async () => true),
     installAgent: vi.fn(async () => {}),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({

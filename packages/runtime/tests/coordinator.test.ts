@@ -753,23 +753,6 @@ describe('a step that needs the person', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('needs the person for a step a restart stopped', () =>
-    Effect.gen(function* () {
-      const file = join(mkdtempSync(join(tmpdir(), 'althar-steps-')), 'althar.sqlite')
-      const taskId = yield* Effect.gen(function* () {
-        const sessions = yield* Sessions
-        const { task } = yield* planned('Interrupted', '[lead:wait]', [{ key: 'implement', agentId: 'codex' }])
-        yield* until(
-          Effect.map(sessions.running(task.threadId), (running) => (running._tag === 'Some' && running.value.turnRunning ? [running] : [])),
-          (rows) => rows.length === 1,
-        )
-        return task.taskId
-      }).pipe(Effect.provide(withQueries(file)))
-      const call = yield* stuckCall(taskId).pipe(Effect.provide(withQueries(file)))
-      assert.deepStrictEqual([call.step, call.why, call.agentId], ['implement', 'restarted', 'codex'])
-    }),
-  )
-
   it.live("reminds a reviewer that doesn't report, then needs the person, who tells it to", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient

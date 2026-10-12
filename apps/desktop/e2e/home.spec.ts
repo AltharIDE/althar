@@ -66,12 +66,32 @@ test('comes back to what runs and what waits across projects, with the projects 
     await tabs.getByRole('button', { name: /^Home/ }).click()
     await expect(page.getByRole('heading', { name: 'Name the limits better', level: 4 })).toHaveCount(0)
 
+    // How hard the computer works shows at the end of the bar, as the runtime reads it; its peek says what each piece of work uses.
+    const meter = page.getByRole('button', { name: /^CPU \d+%, MEM \d+%$/ })
+    await expect(meter).toBeVisible()
+    await meter.click()
+    const load = page.getByRole('dialog', { name: /’s load$/ })
+    await expect(load.getByText(/^\d+(\.\d)? GB of \d+(\.\d)? GB$/)).toBeVisible()
+    await page.screenshot({ path: 'test-results/load.png', animations: 'disabled' })
+    await page.keyboard.press('Escape')
+    await expect(meter).toBeFocused()
+
     // Settings is a panel from the bar: the agents and their accounts, the code hosts, the app's icon, where Althar shows and
     // Althar as co-author, kept in the profile.
     await page.keyboard.press('Meta+,')
     const settings = page.getByRole('dialog', { name: 'Settings' })
     await expect(settings.getByText('Claude Code')).toBeVisible()
     await page.screenshot({ path: 'test-results/settings.png', animations: 'disabled' })
+    // The meter is turned off for every window from the computer's own sheet, and kept so; then back on.
+    await settings.getByRole('button', { name: /^Keep awake/ }).click()
+    const showLoad = settings.getByRole('switch', { name: /^Show how hard this (Mac|PC|computer) works$/ })
+    await expect(showLoad).toHaveAttribute('aria-checked', 'true')
+    await showLoad.click()
+    await expect(meter).toHaveCount(0)
+    await expect.poll(() => readFileSync(join(home, 'profile', 'desktop.json'), 'utf8')).toContain('"showLoad": false')
+    await showLoad.click()
+    await expect(meter).toBeVisible()
+    await page.keyboard.press('Escape')
     await settings.getByRole('button', { name: /^Agents/ }).click()
     await expect(settings.getByRole('list', { name: 'Claude Code accounts' })).toBeVisible()
     await page.screenshot({ path: 'test-results/settings-agents.png', animations: 'disabled' })
