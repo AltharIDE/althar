@@ -888,6 +888,71 @@ describe('a task’s pull request', () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456', 'https://github.com/meridian/api/pull/12'))
   })
 
+  it('says plainly a branch rewritten since it was pushed, replaces its commits only once confirmed, or asks the lead to merge', async () => {
+    const url = 'https://github.com/meridian/api/pull/12'
+    const { client } = fakeClient({
+      mergeNote: vi.fn(async () => 'Your branch was rewritten after it was pushed. Merge, never rebase.'),
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: {
+            ...snapshot().task,
+            phase: 'ready',
+            changes: [change({ localHead: 'def456', diverged: { kind: 'rewritten', local: 5, onPullRequest: 4 } })],
+            commits: 5,
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(
+      await screen.findByText('This branch was rewritten since it was pushed: 5 new commits replace 4 on the pull request.'),
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Push/ })).toBeNull()
+    // Replacing names what goes, and pushes only on the second press, from the head it saw.
+    await userEvent.click(screen.getByRole('button', { name: 'Replace the pull request’s commits' }))
+    expect(client.replacePullRequest).not.toHaveBeenCalled()
+    expect(screen.getByText(/^Replace the 4 commits on PR #12 with the 5 commits here\?/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Replace them' }))
+    await waitFor(() => expect(client.replacePullRequest).toHaveBeenCalledWith('t1', 'def456', 'abc123', url))
+    // Or the lead merges instead: Althar fetches what was pushed, and the note goes to it.
+    await userEvent.click(screen.getByRole('button', { name: 'Ask the lead to merge instead' }))
+    await waitFor(() => expect(client.mergeNote).toHaveBeenCalledWith('t1', url))
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith(
+        expect.objectContaining({ body: 'Your branch was rewritten after it was pushed. Merge, never rebase.' }),
+      ),
+    )
+  })
+
+  it('says a push refused for commits pushed from elsewhere in a sentence, and offers to bring them in', async () => {
+    const url = 'https://github.com/meridian/api/pull/12'
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        snapshot({ task: { ...snapshot().task, phase: 'ready', changes: [change({ unpushed: 1, localHead: 'def456' })], commits: 4 } }),
+      ),
+    })
+    vi.mocked(client.push).mockRejectedValueOnce(
+      new ApiError({
+        reason: 'PushRefused',
+        message: 'PR #12 has commits that aren’t here yet, so it didn’t take the push. Bring them in, then push again.',
+        why: 'behind',
+      }),
+    )
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Push 1 commit' }))
+    expect(
+      await screen.findByText(
+        'The pull request has commits pushed from elsewhere that aren’t on this branch, so it won’t take a plain push.',
+      ),
+    ).toBeTruthy()
+    expect(screen.queryByText(/fast-forwards/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Replace/ })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Bring in the pull request’s commits' }))
+    await waitFor(() => expect(client.mergeNote).toHaveBeenCalledWith('t1', url))
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ body: 'Merge them.' })))
+    expect(await screen.findByRole('button', { name: 'Push 1 commit' })).toBeTruthy()
+  })
+
   it('shows what it changed, file by file, from its header, its outputs, or ⌘D', async () => {
     const file = (path: string, more: Partial<ThreadSnapshot['task']['files'][number]> = {}) => ({
       path,
