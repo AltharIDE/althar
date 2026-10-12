@@ -38,7 +38,7 @@ import { MachineLoad } from './MachineLoad'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
-import { accountsOf, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from './Policies'
+import { accountsOf, movesIssues, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from './Policies'
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
@@ -267,6 +267,7 @@ export const handlers = Api.toLayer(
         onlyAccounts: accounts.only ?? null,
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
+        moveIssues: movesIssues(rules),
       }
     }
 

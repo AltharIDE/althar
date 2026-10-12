@@ -305,6 +305,7 @@ export class Coordinator extends Context.Service<
           return [
             `${task.slug}: ${task.title}`,
             task.description === '' ? '' : task.description,
+            yield* issueWords(task.id),
             workspaces.length === 1
               ? `Branch ${workspaces[0]?.branch ?? ''}, in ${workspaces[0]?.path ?? ''}.`
               : workspaces.map((workspace) => `${workspace.name}: branch ${workspace.branch}, in ${workspace.path}.`).join('\n'),
@@ -316,6 +317,26 @@ export class Coordinator extends Context.Service<
           ]
             .filter((line) => line !== '')
             .join('\n\n')
+        })
+
+      /** The issue a task came from, where it stands as last seen, and whether Althar moved it to In Progress as the task started. */
+      const issueWords = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [link] = yield* sql<{ key: string; url: string; snapshot: string; type: string | null; payload: string | null }>`
+            SELECT x.key, x.url, x.snapshot, e.type, e.payload FROM external_links x
+            LEFT JOIN record_events e ON e.aggregate_id = x.id
+              AND e.type IN ('external_link.issue_started', 'external_link.issue_start_failed')
+            WHERE x.task_id = ${taskId} AND x.kind = 'issue' ORDER BY x.created_at, e.sequence DESC LIMIT 1`
+          if (link === undefined) return ''
+          const status = (JSON.parse(link.snapshot) as { status?: { name?: string } }).status?.name
+          const said = JSON.parse(link.payload ?? '{}') as { moved?: boolean; error?: string }
+          const issue = `Issue: ${link.key}${status === undefined ? '' : `, ${status}`}, ${link.url}.`
+          if (link.type === 'external_link.issue_started' && said.moved === true)
+            return `${issue} Althar moved it to In Progress as the task started: the person needn’t.`
+          if (link.type === 'external_link.issue_start_failed')
+            return `${issue} Althar couldn’t move it to In Progress as the task started: ${said.error ?? ''}.`
+          return issue
         })
 
       const readThread = (access: ToolAccess, input: unknown) =>

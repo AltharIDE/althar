@@ -1,3 +1,4 @@
+import { type Product, products } from '@althar/connectors'
 import { knownModelName } from '@althar/contracts'
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -12,7 +13,8 @@ import { PlanParameters, type PlanStep, type TaskEnd } from './Runs'
  * person changed who does a task's steps or how it ends, held it, started
  * or declined it, or its time came and it started. And of the issues it
  * drafted: the person changed one, filed it or discarded it, or filing it
- * failed. The coordinator proposed each plan and drafted each issue and moved
+ * failed. And of the issues tasks came from: Althar moved one to In
+ * Progress as its task started, or couldn't. The coordinator proposed each plan and drafted each issue and moved
  * on; the cards are the person's, and nothing else tells it. Read before
  * what the person says next, it speaks of each as it now is, not as it
  * proposed or drafted it.
@@ -75,7 +77,8 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       WHERE project_id = ${projectId} AND aggregate_type = 'task_plan' AND sequence > ${last.sequence} AND type IN ${sql.in(HEARD)}
       ORDER BY sequence`
     const drafts = yield* draftNews(projectId, last.sequence)
-    if (events.length === 0 && drafts.length === 0) return null
+    const started = yield* startedNews(projectId, last.sequence)
+    if (events.length === 0 && drafts.length === 0 && started.length === 0) return null
 
     const team = (parameters: PlanParameters) => {
       // Every plan has its lead; a review may be left out, or skipped.
@@ -127,14 +130,16 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       else if (plan.state === 'proposed' && plan.startsAt === null) said.push('The person is holding it: it waits until they start it.')
       if (said.length > 0) lines.push(`- ${plan.slug} (${plan.title}): ${said.join(' ')}`)
     }
-    if (lines.length === 0 && drafts.length === 0) return null
+    if (lines.length === 0 && drafts.length === 0 && started.length === 0) return null
     const close =
-      drafts.length === 0
-        ? 'Speak of these plans as they are now, not as they were proposed.'
-        : lines.length === 0
-          ? 'Speak of these issues as they are now, not as you drafted them.'
-          : 'Speak of these plans and issues as they are now, not as you proposed or drafted them.'
-    return `Since you last spoke, in Althar:\n${[...lines, ...drafts].join('\n')}\n${close}`
+      lines.length === 0 && drafts.length === 0
+        ? 'Speak of these issues as they are now.'
+        : drafts.length === 0
+          ? 'Speak of these plans as they are now, not as they were proposed.'
+          : lines.length === 0
+            ? 'Speak of these issues as they are now, not as you drafted them.'
+            : 'Speak of these plans and issues as they are now, not as you proposed or drafted them.'
+    return `Since you last spoke, in Althar:\n${[...lines, ...started, ...drafts].join('\n')}\n${close}`
   })
 
 /** The issue draft events the coordinator hears of: the person changed one, filed it, or discarded it; or filing it failed, or may have. */
@@ -202,4 +207,30 @@ const draftNews = (projectId: string, since: number) =>
         lines.push(`- The person changed the issue you drafted${was}: it now reads “${draft.title}”, and waits on them to file it.`)
     }
     return lines
+  })
+
+/** What Althar did with the issues tasks came from as they started, since a place in the ledger: moved one to In Progress, or couldn't. */
+const startedNews = (projectId: string, since: number) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const events = yield* sql<{ type: string; payload: string; product: Product; slug: string; title: string }>`
+      SELECT e.type, e.payload, x.product, k.slug, k.title FROM record_events e
+      JOIN external_links x ON x.id = e.aggregate_id JOIN tasks k ON k.id = x.task_id
+      WHERE e.project_id = ${projectId} AND e.aggregate_type = 'external_link' AND e.sequence > ${since}
+        AND e.type IN ('external_link.issue_started', 'external_link.issue_start_failed')
+      ORDER BY e.sequence`
+    return events.flatMap((event) => {
+      const said = JSON.parse(event.payload) as { key?: string; moved?: boolean; status?: { name?: string }; error?: string }
+      const tracker = products[event.product].name
+      // One someone had started already, or finished, was left as it was: nothing to tell.
+      if (event.type === 'external_link.issue_started')
+        return said.moved === true
+          ? [
+              `- ${event.slug} (${event.title}): as it started, Althar moved its issue ${said.key ?? ''} to ${said.status?.name ?? 'In Progress'} on ${tracker}. Don’t ask the person to.`,
+            ]
+          : []
+      return [
+        `- ${event.slug} (${event.title}): Althar couldn’t move its issue ${said.key ?? ''} to In Progress on ${tracker}: ${said.error ?? ''}. It is as it was; the person can move it themselves.`,
+      ]
+    })
   })

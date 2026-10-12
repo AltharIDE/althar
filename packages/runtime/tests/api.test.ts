@@ -754,6 +754,7 @@ describe('project rules, through the API', () => {
           onlyAccounts: null,
           branchPattern: null,
           titlePattern: null,
+          moveIssues: true,
         })
         // A repository that says nothing of its pull requests: Althar's own names, and no template.
         assert.deepStrictEqual(
