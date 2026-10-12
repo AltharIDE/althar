@@ -40,7 +40,7 @@ import { Secrets } from '../src/Secrets'
 import { ConnectorFailed, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 
-import { fakeAgents, fakeConnectors, HOST, hosted, repository } from './support'
+import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository } from './support'
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
 
@@ -88,7 +88,7 @@ const connected = (
     const grant = (path: string) => Context.get(context, Folders).allow(path)
     /** Reads or writes the runtime's store directly, for what no client does. */
     const store = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) => effect.pipe(Effect.provideContext(context))
-    return { client, grant, store }
+    return { client, grant, store, context }
   })
 
 const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
@@ -455,6 +455,28 @@ describe('the API', () => {
         // What the person turned down says so.
         const deploy = after.items.find((item) => item.kind === 'tool_call')
         assert.isTrue(deploy?.kind === 'tool_call' && deploy.content.declined)
+      }),
+    ),
+  )
+
+  it.live("reads a project's notes, and drops one as the person, for good", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, context } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const access = { role: 'coordinator' as const, projectId: project.id, threadId: 'none', sessionId: 'none', taskId: null }
+        yield* callTool(access, 'keep_note', { note: 'Issue drafts need an approval card.' }).pipe(Effect.provideContext(context))
+        const [note] = yield* client.GetProjectNotes({ projectId: project.id })
+        assert.deepInclude(note, { body: 'Issue drafts need an approval card.', keptBy: 'coordinator' })
+        yield* client.DropProjectNote({ commandId: commandId(), projectId: project.id, noteId: note?.id ?? '' })
+        assert.deepStrictEqual(yield* client.GetProjectNotes({ projectId: project.id }), [])
+        // The coordinator doesn't see it again.
+        assert.strictEqual(yield* callTool(access, 'list_notes').pipe(Effect.provideContext(context)), 'The project has no notes yet.')
+        // One that isn't there, or a project that isn't, says so.
+        const missing = yield* Effect.flip(client.DropProjectNote({ commandId: commandId(), projectId: project.id, noteId: 'note_gone' }))
+        assert.strictEqual(missing.reason, 'NotFound')
+        const gone = yield* Effect.flip(client.GetProjectNotes({ projectId: 'proj_gone' }))
+        assert.strictEqual(gone.reason, 'NotFound')
       }),
     ),
   )

@@ -11,6 +11,7 @@ import type {
   HomeSnapshot,
   Load,
   Picture,
+  ProjectNote,
   ProjectRulesView,
   ProjectRepository,
   ProjectSummary,
@@ -836,6 +837,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     leaveOutRepository: vi.fn(async () => {}),
     setRepository: vi.fn(async () => {}),
     getProjectRules: vi.fn(async (projectId: string) => ({ ...projectRules, projectId })),
+    getProjectNotes: vi.fn(async (): Promise<ReadonlyArray<ProjectNote>> => []),
+    dropProjectNote: vi.fn(async () => {}),
     getVocabulary: vi.fn(async () => ['RefundLedger', 'useEffect']),
     setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({ ...projectRules, ...change, projectId })),
     addAccount: vi.fn(async (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => ({

@@ -286,5 +286,6 @@ export const AggregateType = Schema.Literals([
   'agent_account',
   'issue_draft',
   'conflict_resolution',
+  'project_note',
 ])
 export type AggregateType = typeof AggregateType.Type
