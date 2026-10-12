@@ -1,6 +1,8 @@
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
+import { MESSAGE_IMAGES } from './pictures'
+
 /*
  * What a client can ask the runtime (docs/architecture/02): commands that
  * change state, queries that return what a screen shows, and one stream of
@@ -138,6 +140,8 @@ export const AgentModels = Schema.Struct({
   blocked: Schema.Array(Schema.String),
   /** Being asked now, for an agent not seen before: read again shortly. */
   probing: Schema.Boolean,
+  /** It takes images in a message, as it said when last asked or started (ACP's `promptCapabilities.image`); null until it has said. */
+  images: Schema.NullOr(Schema.Boolean),
 })
 export type AgentModels = typeof AgentModels.Type
 
@@ -661,21 +665,10 @@ const itemFields = {
   createdAt: Schema.String,
 }
 
-/** What the person said, and where it stands with the lead. */
-export const UserMessageItem = Schema.Struct({
-  ...itemFields,
-  kind: Schema.Literal('user_message'),
-  /** What they said, and the links in it Althar could unfurl. */
-  content: Schema.Struct({ text: Schema.String, links: Schema.Array(Unfurl) }),
-  input: Schema.NullOr(
-    Schema.Struct({ state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']), interrupting: Schema.Boolean }),
-  ),
-})
-
 /**
- * A picture an agent handed back, in a message or a tool's result: kept in
- * the artifact store by its digest, by which the window asks for its bytes,
- * or not kept, saying why.
+ * A picture an agent handed back, in a message or a tool's result, or one
+ * the person sent with a message: kept in the artifact store by its digest,
+ * by which the window asks for its bytes, or not kept, saying why.
  */
 export const Picture = Schema.Struct({
   /** Its SHA-256; null for one that wasn't kept. */
@@ -690,6 +683,34 @@ export const Picture = Schema.Struct({
   unkept: Schema.NullOr(Schema.Literals(['too_large', 'unsupported', 'unkept'])),
 })
 export type Picture = typeof Picture.Type
+
+/**
+ * An image the person sends with a message: its bytes, in base64, as the
+ * window read them; or one Althar keeps already, by its digest, as when a
+ * message waiting its turn is taken back to change and sent again. Its name
+ * is its file's, where it had one. The runtime believes the bytes, not the
+ * name: only PNG, JPEG, GIF and WebP are sent, each of at most
+ * `MESSAGE_IMAGES.bytes`.
+ */
+export const SentImage = Schema.Union([
+  Schema.Struct({ data: Schema.String, name: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ digest: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)), name: Schema.NullOr(Schema.String) }),
+])
+export type SentImage = typeof SentImage.Type
+
+/** The images sent with one message, in the order they show: at most `MESSAGE_IMAGES.count`. */
+export const SentImages = Schema.Array(SentImage).check(Schema.isMaxLength(MESSAGE_IMAGES.count))
+
+/** What the person said, and where it stands with the lead. */
+export const UserMessageItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('user_message'),
+  /** What they said, the links in it Althar could unfurl, and the images they sent with it. */
+  content: Schema.Struct({ text: Schema.String, links: Schema.Array(Unfurl), pictures: Schema.Array(Picture) }),
+  input: Schema.NullOr(
+    Schema.Struct({ state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']), interrupting: Schema.Boolean }),
+  ),
+})
 
 /** A file an agent wrote whole, or pointed at: by its path as it named it, never its contents. */
 export const FileMention = Schema.Struct({
@@ -742,6 +763,8 @@ export const ToolCallItem = Schema.Struct({
     /** ACP's status: pending, in_progress, completed or failed. */
     status: Schema.String,
     command: Schema.NullOr(Schema.String),
+    /** A command as it reads at a glance (see BackgroundCommand); absent where it is not shortened or there is no command. */
+    label: Schema.optional(Schema.String),
     locations: Schema.Array(ToolLocation),
     /** Refused when it asked: by the rules, the lead or the person. */
     declined: Schema.Boolean,
@@ -990,6 +1013,41 @@ export const RunItem = Schema.Struct({
   }),
 })
 
+/** Where an issue the coordinator drafted stands: waiting on you, being filed, filed, not filed and why, perhaps filed (its answer was lost), or discarded. */
+export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
+export type IssueDraftState = typeof IssueDraftState.Type
+
+/**
+ * An issue the coordinator drafted on a connected tracker, in its thread
+ * (docs/architecture/06, "Drafting issues"): where it goes, what it says,
+ * and where it stands. Nothing is filed until the person files it here; they
+ * can change it first, or discard it. Althar posts it and keeps it current.
+ */
+export const IssueDraftCard = Schema.Struct({
+  draftId: Schema.String,
+  product: Product,
+  /** The tracker, by its product's name, and its site or account where another connection of the product would leave it unclear: Jira (acme.atlassian.net). */
+  tracker: Schema.String,
+  /** Where it goes there, by the tracker's name for it: a team, a project, a list on a board, a repository. */
+  container: Schema.String,
+  title: Schema.String,
+  /** Markdown. */
+  body: Schema.String,
+  labels: Schema.Array(Schema.String),
+  state: IssueDraftState,
+  /** Why it wasn't filed, while it stands failed, or why it may have been, while uncertain: in the tracker's words, or Althar's. */
+  error: Schema.NullOr(Schema.String),
+  /** The issue, once filed: its key as the tracker shows it, and its link. */
+  issue: Schema.NullOr(Schema.Struct({ key: Schema.String, url: Schema.String })),
+})
+export type IssueDraftCard = typeof IssueDraftCard.Type
+
+export const IssueDraftItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('issue_draft'),
+  content: IssueDraftCard,
+})
+
 export const ThreadItem = Schema.Union([
   UserMessageItem,
   AgentTextItem,
@@ -1001,6 +1059,7 @@ export const ThreadItem = Schema.Union([
   ArrivalItem,
   QuestionItem,
   RunItem,
+  IssueDraftItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -1016,6 +1075,8 @@ export type ContextUse = typeof ContextUse.Type
 export const BackgroundCommand = Schema.Struct({
   id: Schema.String,
   command: Schema.String,
+  /** The command as it reads at a glance, without a leading `cd`, variables, `timeout` or output plumbing; the command is the whole of it. */
+  label: Schema.optional(Schema.String),
   /** Where it answers, as its output said, as a browser opens it: http://localhost:5173/. Null until it says, or where it never does. */
   url: Schema.NullOr(Schema.String),
   startedAt: Schema.String,
@@ -1681,6 +1742,16 @@ export const Api = RpcGroup.make(
     { planId: Schema.String, steps: Schema.Array(PlanStep), end: Schema.optional(Schema.NullOr(TaskEnd)) },
     Schema.Void,
   ),
+  /** Changes what an issue the coordinator drafted says, before it is filed. */
+  command(
+    'ChangeIssueDraft',
+    { draftId: Schema.String, title: Schema.String, body: Schema.String, labels: Schema.Array(Schema.String) },
+    Schema.Void,
+  ),
+  /** Files an issue the coordinator drafted, on its tracker; or one that wasn't filed, again. Its card says how it went. */
+  command('FileIssueDraft', { draftId: Schema.String }, Schema.Void),
+  /** Discards an issue the coordinator drafted: nothing is filed. */
+  command('DiscardIssueDraft', { draftId: Schema.String }, Schema.Void),
   command(
     'StartSession',
     { threadId: Schema.String, agentId: Schema.String, model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) },
@@ -1695,6 +1766,8 @@ export const Api = RpcGroup.make(
       model: Schema.optional(Schema.String),
       effort: Schema.optional(Schema.String),
       body: Schema.optional(Schema.String),
+      /** Images sent with what the person said. */
+      images: Schema.optional(SentImages),
     },
     Schema.String,
   ),
@@ -1734,7 +1807,12 @@ export const Api = RpcGroup.make(
   command('AbandonTask', { taskId: Schema.String }, Schema.Void),
   /** Opens an abandoned task again, on the same worktree and branch; nothing runs until the person says so. Never a merged one. */
   command('ReopenTask', { taskId: Schema.String }, Schema.Void),
-  command('Send', { threadId: Schema.String, body: Schema.String, disposition: Disposition }, Schema.Void),
+  /** Says something to a thread's agent, with any images: empty words with images are a message too. */
+  command(
+    'Send',
+    { threadId: Schema.String, body: Schema.String, disposition: Disposition, images: Schema.optional(SentImages) },
+    Schema.Void,
+  ),
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
   command('TakeBack', { itemId: Schema.String }, Schema.Void),
   /**

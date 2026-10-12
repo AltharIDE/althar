@@ -80,6 +80,8 @@ test('renames a project, adds and leaves out a repository, and removes it, all w
     panel = await settings(page, 'Refunds v2')
     await panel.getByRole('button', { name: /^Repositories/ }).click()
     await expect(page.getByRole('heading', { name: 'Repositories', level: 1 })).toBeVisible()
+    // A screen on a tabbed route keeps the one bar's window controls.
+    await expect(page.getByRole('button', { name: 'Close the window' })).toHaveCount(1)
     await chooseFolder(electronApp, web)
     await page.getByRole('button', { name: 'Add a folder' }).click()
     const here = page.getByRole('list', { name: HERE })

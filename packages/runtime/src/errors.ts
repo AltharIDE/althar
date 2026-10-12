@@ -174,6 +174,18 @@ export class DocumentRefused extends Schema.TaggedError<DocumentRefused>()('Docu
 }) {}
 
 /**
+ * An image sent with a message that Althar won't send: a kind other than
+ * PNG, JPEG, GIF or WebP, one larger than a message's images may be, more
+ * images than a message carries, one kept before that isn't there any more,
+ * or none of them kept, where there is nowhere to keep them. `name` is the
+ * image's, where it had one.
+ */
+export class ImageRefused extends Schema.TaggedError<ImageRefused>()('ImageRefused', {
+  reason: Schema.Literals(['unsupported', 'too_large', 'too_many', 'missing', 'unkept']),
+  name: Schema.NullOr(Schema.String),
+}) {}
+
+/**
  * A task that can't take that turn in its course: a merged task is done for
  * good, so it is never abandoned or reopened; one whose worktree went with
  * its branch can't be reopened on it; and an abandoned one has no agent on

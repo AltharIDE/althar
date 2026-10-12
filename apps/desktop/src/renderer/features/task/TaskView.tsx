@@ -30,6 +30,7 @@ import {
 } from '@althar/ui'
 
 import { waitsWords } from '../../shared/agents'
+import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { isGenerated } from '../../shared/generated'
@@ -47,6 +48,7 @@ import { documentVersions, editorPath, wholePath } from '../../shared/handed'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
+import { type Outgoing, takesImages, useImages } from '../../shared/useImages'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
 import { behindText, listeningOf, useHeard } from './behind'
@@ -227,6 +229,9 @@ export function TaskView({
 }) {
   const [draft, setDraft] = useState('')
   const voice = useDictation(setDraft, { projectId: model.snapshot?.project.id ?? null })
+  // Images to send with what the person says, and which agents take them.
+  const images = useImages()
+  const models = useModels()
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while a lead is on the task: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
@@ -351,6 +356,7 @@ export function TaskView({
             at: snapshot.task.startedAt === null ? '' : ago(snapshot.task.startedAt),
             delivery: Delivery.Delivered,
             links: [],
+            pictures: [],
           },
         ]),
     ...blocksOf(
@@ -385,14 +391,35 @@ export function TaskView({
   const waiting = session === null || handover?.agentId === session.agentId ? null : handover
   const choice = session === null ? chosen : (waiting ?? runningOn(session))
 
+  // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.
+  const receiving = waiting?.agentId ?? session?.agentId ?? chosen?.agentId ?? null
+  const receiver = { name: agentName(receiving), takes: takesImages(models, receiving) }
   // With no lead working, what the person says starts the one picked, as its first turn; with another agent picked, that one takes over with it.
-  const send = (body: string, now: boolean) => {
+  const send = (body: string, now: boolean, outgoing?: Outgoing) => {
     setDraft('')
-    if (session === null) void model.send(body, chosen ?? undefined)
-    else if (waiting !== null) {
+    if (outgoing !== undefined) images.clear()
+    if (session === null) return model.send(body, chosen ?? undefined, outgoing)
+    if (waiting !== null) {
       setHandover(null)
-      void model.handOver(waiting, body)
-    } else void (now ? model.sendNow(body) : model.send(body))
+      return model.handOver(waiting, body, outgoing)
+    }
+    return now ? model.sendNow(body, outgoing) : model.send(body, undefined, outgoing)
+  }
+  /**
+   * What the composer sends: with its images, unless they can't go yet, when
+   * the composer says why and keeps it all. One Althar doesn't take goes
+   * back in the composer, words, images and the agent picked to take over.
+   */
+  const submit = (body: string, now: boolean) => {
+    const outgoing = images.take(receiver)
+    if (outgoing === null) return
+    const picked = waiting
+    void send(body, now, outgoing).then((accepted) => {
+      if (accepted) return
+      setDraft((current) => withQueued(current, body))
+      images.giveBack(outgoing)
+      if (picked !== null) setHandover(picked)
+    })
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {
@@ -404,7 +431,12 @@ export function TaskView({
   // A queued message goes back in the composer to be changed, and out of the queue, unless the lead has it already.
   const edit = async (id: string) => {
     const said = queuedOf(snapshot.items, queue).find((message) => message.id === id)
-    if (said !== undefined && (await model.takeBack(id))) setDraft((current) => withQueued(current, said.text))
+    // One whose images wouldn't fit beside those waiting stays in the queue, and the composer says why.
+    if (said === undefined || !images.fits(said.pictures)) return
+    if (await model.takeBack(id)) {
+      setDraft((current) => withQueued(current, said.text))
+      images.restore(said.pictures)
+    }
   }
 
   const issue = snapshot.task.issue
@@ -490,8 +522,9 @@ export function TaskView({
             </>
           )
         }
-        onSubmit={(body) => send(body, false)}
-        onSendNow={(body) => send(body, true)}
+        onSubmit={(body) => submit(body, false)}
+        onSendNow={(body) => submit(body, true)}
+        {...images.props(receiver)}
         {...(busy ? { onStopAgent: () => void model.interrupt() } : {})}
         busy={busy}
         queued={queuedOf(snapshot.items, queue)}
@@ -549,6 +582,7 @@ export function TaskView({
             snapshot={snapshot}
             lead={lead}
             pending={model.pending}
+            doing={model.doing}
             error={model.error}
             onAccept={(changes) => void model.accept(changes)}
             onMergeHere={() => void model.mergeHere()}
@@ -565,7 +599,7 @@ export function TaskView({
             // So is a conflict to settle, in words the lead acts on.
             onResolve={() => {
               model.dismissConflict()
-              send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
+              void send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
             }}
           />
           {connecting && snapshot.host !== null && (

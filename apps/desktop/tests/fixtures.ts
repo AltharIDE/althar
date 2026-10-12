@@ -10,6 +10,7 @@ import type {
   CoordinatorSnapshot,
   HomeSnapshot,
   Load,
+  Picture,
   ProjectRulesView,
   ProjectRepository,
   ProjectSummary,
@@ -116,7 +117,7 @@ const offering =
     effort: 'medium',
   })
 
-/** What the agents offer: Claude Code's own default first, Codex's models by id, OpenCode still being asked. */
+/** What the agents offer: Claude Code's own default first, Codex's models by id, OpenCode still being asked. Claude Code takes images; Codex here doesn't; OpenCode hasn't said. */
 export const models: ReadonlyArray<AgentModels> = [
   {
     agentId: 'claude-code',
@@ -130,6 +131,7 @@ export const models: ReadonlyArray<AgentModels> = [
     defaults: [],
     blocked: [],
     probing: false,
+    images: true,
   },
   {
     agentId: 'codex',
@@ -142,8 +144,9 @@ export const models: ReadonlyArray<AgentModels> = [
     defaults: [],
     blocked: [],
     probing: false,
+    images: false,
   },
-  { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], blocked: [], probing: true },
+  { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], blocked: [], probing: true, images: null },
 ]
 
 /** A project's repositories as this Mac has them: one plain and one a fork, on GitHub as you, and one on GitLab, not connected. */
@@ -301,11 +304,12 @@ export const items = {
     text: string,
     input: Extract<ThreadItem, { kind: 'user_message' }>['input'] = { state: 'delivered', interrupting: false },
     links: ReadonlyArray<Unfurl> = [],
+    pictures: ReadonlyArray<Picture> = [],
   ): ThreadItem => ({
     ...next(),
     agentId: null,
     kind: 'user_message',
-    content: { text, links },
+    content: { text, links, pictures },
     input,
   }),
   says: (text: string, agentId = 'claude-code', id?: string): ThreadItem => ({
@@ -432,6 +436,24 @@ export const items = {
     content,
   }),
   /** A run of the project Althar started, up at its address unless told otherwise. */
+  draft: (content: Partial<Extract<ThreadItem, { kind: 'issue_draft' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'issue_draft',
+    content: {
+      draftId: 'idr_1',
+      product: 'linear',
+      tracker: 'Linear',
+      container: 'Meridian',
+      title: 'Refunds skip the rate limiter',
+      body: 'Charges go through it; **refunds** don’t.',
+      labels: ['payments'],
+      state: 'pending',
+      error: null,
+      issue: null,
+      ...content,
+    },
+  }),
   run: (content: Partial<Extract<ThreadItem, { kind: 'run' }>['content']> = {}): ThreadItem => ({
     ...next(),
     agentId: null,
@@ -745,6 +767,9 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     startPlan: vi.fn(async () => {}),
     holdPlan: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
+    changeIssueDraft: vi.fn(async () => {}),
+    fileIssueDraft: vi.fn(async () => {}),
+    discardIssueDraft: vi.fn(async () => {}),
     answerStuck: vi.fn(async () => {}),
     listConnections: vi.fn(async () => connectionList),
     startSignIn: vi.fn(async () => ({
@@ -845,6 +870,9 @@ const keptPreferences = (): Pick<Host, 'preferences' | 'setPreference'> => {
 export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   ...keptPreferences(),
   platform: 'darwin',
+  window: vi.fn(),
+  maximized: vi.fn(async () => false),
+  onMaximized: vi.fn(() => () => {}),
   sounds: vi.fn(async () => ['Basso', 'Glass', 'Ping', 'Purr']),
   editorPicture: vi.fn(async (id: string) => `data:image/png;base64,${id}`),
   playSound: vi.fn(async () => {}),
@@ -854,6 +882,8 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
   grantFound: vi.fn(async (id: string) => `grant_${id}`),
   onOpen: vi.fn(() => () => {}),
+  onStoreFailed: vi.fn(() => () => {}),
+  showBackup: vi.fn(async () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),
   edge: vi.fn(async () => ({ place: 'island', notch: true, platform: 'darwin', tray: true })),

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { doing, type Doing } from './actions'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
@@ -17,6 +18,7 @@ import { caughtUp, isSending, mergeItems, newestReads, sending, takenBack, unsen
 import { headsOf } from '../../shared/mergeHere'
 import { type Choice, moveTo, runningOn, startOf } from '../../shared/models'
 import type { OutputSoFar } from '../../shared/handed'
+import { type Outgoing, sentWith } from '../../shared/useImages'
 import { useOutputs } from '../../shared/useOutputs'
 import type { Streamed } from '../../shared/thread'
 import { useServices, useWatch } from '../../data/services'
@@ -55,6 +57,8 @@ export interface TaskModel {
   readonly dismissConflict: () => void
   /** An action is on its way to the runtime. */
   readonly pending: boolean
+  /** Which of them, where it is one of the outputs' (see `doing`): the others wait, but aren't working. */
+  readonly doing: Doing | null
   /** Earlier items are on their way. */
   readonly loadingEarlier: boolean
   readonly loadEarlier: () => Promise<void>
@@ -64,17 +68,18 @@ export interface TaskModel {
    * Says something to the lead. With no lead working, `start` names the one
    * to start: the message is its first turn, with its brief. A task stopped
    * in the middle of its step resumes with it, on that one; an abandoned one
-   * is reopened first.
+   * is reopened first. Whether Althar has the message: once it is queued it
+   * has, whether or not the lead it starts does, which is said apart.
    */
-  readonly send: (body: string, start?: Choice) => Promise<void>
-  readonly sendNow: (body: string) => Promise<void>
+  readonly send: (body: string, start?: Choice, images?: Outgoing) => Promise<boolean>
+  readonly sendNow: (body: string, images?: Outgoing) => Promise<boolean>
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
   /** Puts the lead on another model or effort, or hands the task to another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
-  /** Hands the task to another agent with what the person says: the new lead's first turn, after its brief. */
-  readonly handOver: (choice: Choice, body: string) => Promise<void>
+  /** Hands the task to another agent with what the person says, and any images: the new lead's first turn, after its brief. */
+  readonly handOver: (choice: Choice, body: string, images?: Outgoing) => Promise<boolean>
   /** Stops the task: every agent on it, until it is resumed. */
   readonly stop: () => Promise<void>
   /** Carries the task on from the step it stopped on, with its last lead. */
@@ -137,6 +142,7 @@ export const useTask = (threadId: string): TaskModel => {
   const [failed, setError] = useState<string | null>(null)
   const error = failed ?? (thread.error === null ? null : messageOf(thread.error))
   const [pending, setPending] = useState(false)
+  const [acting, setActing] = useState<Doing | null>(null)
   const [conflict, setConflict] = useState<string | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -265,15 +271,17 @@ export const useTask = (threadId: string): TaskModel => {
 
   /** Runs an action, says what went wrong if it did, and reads the thread's head again. */
   const act = useCallback(
-    async (action: () => Promise<unknown>) => {
+    async (action: () => Promise<unknown>, which: Doing | null = null) => {
       setError(null)
       setPending(true)
+      setActing(which)
       try {
         await action()
       } catch (failure) {
         fail(failure)
       } finally {
         setPending(false)
+        setActing(null)
         await readHead()
       }
     },
@@ -284,28 +292,46 @@ export const useTask = (threadId: string): TaskModel => {
   const onTask = (action: (taskId: string) => Promise<unknown>) =>
     act(async () => (snapshot === null ? undefined : action(snapshot.task.id)))
 
-  /** What the person sends shows at once, as the window's copy until the store's arrives; gone again if the send fails. */
+  /**
+   * What the person sends shows at once, as the window's copy until the
+   * store's arrives; gone again if the send fails. Whether Althar has it, so
+   * what was sent can go back in the composer when it doesn't. Althar has it
+   * once the action says so (`accepted`), or once it succeeds: what fails
+   * after, such as starting the lead that reads it, is said, but the message
+   * stays where it is, so it is never sent twice.
+   */
   const shown = (
     text: string,
     disposition: 'after_current' | 'interrupt_and_continue',
-    action: () => Promise<unknown>,
+    action: (accepted: () => void) => Promise<unknown>,
+    images: Outgoing | undefined,
     // Behind a turn running it waits its turn; handed to another agent, it is that one's first.
     queued = disposition === 'interrupt_and_continue' || snapshot?.session?.turnRunning === true,
   ) => {
     let id = ''
     setSnapshot((current) => {
-      const next = sending(current.items, { text, queued, interrupting: disposition === 'interrupt_and_continue' })
+      const next = sending(current.items, {
+        text,
+        queued,
+        interrupting: disposition === 'interrupt_and_continue',
+        ...(images === undefined ? {} : { pictures: images.pictures }),
+      })
       id = next.id
       return { ...current, items: next.items }
     })
+    let accepted = false
+    const accept = () => {
+      accepted = true
+    }
     return act(async () => {
       try {
-        await action()
+        await action(accept)
+        accept()
       } catch (failure) {
-        setSnapshot((current) => ({ ...current, items: unsent(current.items, id, text) }))
+        if (!accepted) setSnapshot((current) => ({ ...current, items: unsent(current.items, id, text) }))
         throw failure
       }
-    })
+    }).then(() => accepted)
   }
 
   return {
@@ -318,25 +344,39 @@ export const useTask = (threadId: string): TaskModel => {
     conflict,
     dismissConflict: () => setConflict(null),
     pending,
+    doing: acting,
     loadingEarlier,
     loadEarlier,
     readFiles,
-    send: (body, start) =>
-      shown(body, 'after_current', async () => {
-        // Abandoned, what the person says reopens it first, as its menu would; refused, nothing is sent.
-        const reopening = snapshot?.task.actions.includes('reopen') === true
-        if (reopening && snapshot !== null) await client.reopenTask(snapshot.task.id)
-        // Queued first, so the lead that starts reads it in its first turn rather than after one of its own.
-        await client.send({ threadId, body, disposition: 'after_current' })
-        if (start === undefined || snapshot === null) return
-        // Reopened, it stands where it was, which only the runtime knows: read again.
-        const actions = reopening ? (await client.getThread(threadId, { limit: 0 })).task.actions : snapshot.task.actions
-        // Stopped in the middle of its step, the task carries that step on, with what the person said first.
-        if (actions.includes('resume'))
-          await client.resumeTask({ taskId: snapshot.task.id, agentId: start.agentId, model: start.model, effort: start.effort })
-        else await client.startSession(startOf(threadId, start))
-      }),
-    sendNow: (body) => shown(body, 'interrupt_and_continue', () => client.send({ threadId, body, disposition: 'interrupt_and_continue' })),
+    send: (body, start, images) =>
+      shown(
+        body,
+        'after_current',
+        async (accepted) => {
+          // Abandoned, what the person says reopens it first, as its menu would; refused, nothing is sent.
+          const reopening = snapshot?.task.actions.includes('reopen') === true
+          if (reopening && snapshot !== null) await client.reopenTask(snapshot.task.id)
+          // Queued first, so the lead that starts reads it in its first turn rather than after one of its own.
+          await client.send({ threadId, body, disposition: 'after_current', ...sentWith(images) })
+          // Althar has it now: a lead that doesn't start is said, and what was said waits in the queue for the next.
+          accepted()
+          if (start === undefined || snapshot === null) return
+          // Reopened, it stands where it was, which only the runtime knows: read again.
+          const actions = reopening ? (await client.getThread(threadId, { limit: 0 })).task.actions : snapshot.task.actions
+          // Stopped in the middle of its step, the task carries that step on, with what the person said first.
+          if (actions.includes('resume'))
+            await client.resumeTask({ taskId: snapshot.task.id, agentId: start.agentId, model: start.model, effort: start.effort })
+          else await client.startSession(startOf(threadId, start))
+        },
+        images,
+      ),
+    sendNow: (body, images) =>
+      shown(
+        body,
+        'interrupt_and_continue',
+        () => client.send({ threadId, body, disposition: 'interrupt_and_continue', ...sentWith(images) }),
+        images,
+      ),
     takeBack: async (itemId) => {
       // What is still on its way has nothing to take back yet.
       if (isSending(itemId)) return false
@@ -357,7 +397,8 @@ export const useTask = (threadId: string): TaskModel => {
         const session = snapshot?.session
         await (session == null ? client.startSession(startOf(threadId, choice)) : moveTo(client, threadId, runningOn(session), choice))
       }),
-    handOver: (choice, body) => shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body }), false),
+    handOver: (choice, body, images) =>
+      shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body, ...sentWith(images) }), images, false),
     stop: () => onTask((taskId) => client.stopTask(taskId)),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
     abandon: async () => {
@@ -394,12 +435,13 @@ export const useTask = (threadId: string): TaskModel => {
         () => null,
         (failure: unknown) => messageOf(failure),
       ),
-    markReady: (url) => act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id, url))),
+    markReady: (url) =>
+      act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id, url)), doing.markReady(url ?? '')),
     markAllReady: (urls) =>
       onTask(async (taskId) => {
         for (const url of urls) await client.markReady(taskId, url)
       }),
-    openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id))),
+    openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id)), doing.openChange),
     mergeHere: () =>
       act(async () => {
         setConflict(null)
@@ -412,8 +454,8 @@ export const useTask = (threadId: string): TaskModel => {
             setConflict(failure.detail ?? '')
           throw failure
         }
-      }),
-    pushHere: () => act(async () => (snapshot === null ? undefined : client.pushHere(snapshot.task.id))),
+      }, doing.mergeHere),
+    pushHere: () => act(async () => (snapshot === null ? undefined : client.pushHere(snapshot.task.id)), doing.pushHere),
     pushBranch: () =>
       act(async () => {
         if (snapshot === null) return
@@ -422,13 +464,13 @@ export const useTask = (threadId: string): TaskModel => {
           repo.remote == null || repo.head === null ? [] : [{ repository: repo.repository, head: repo.head }],
         )
         await client.pushBranch(snapshot.task.id, heads)
-      }),
+      }, doing.pushBranch),
     accept: (changes) =>
       act(async () => {
         if (snapshot === null) return
         for (const change of changes) await client.merge(snapshot.task.id, change.head, change.url)
-      }),
-    push: (head, url) => act(async () => (snapshot === null ? undefined : client.push(snapshot.task.id, head, url))),
+      }, doing.accept),
+    push: (head, url) => act(async () => (snapshot === null ? undefined : client.push(snapshot.task.id, head, url)), doing.push(url ?? '')),
     stopListening: (url) => onTask((taskId) => client.stopListening(taskId, url)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),

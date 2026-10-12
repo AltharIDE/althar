@@ -13,6 +13,7 @@ import {
   serverProtocol,
   type WatchEvent,
   type ProjectRulesView,
+  type SentImage,
 } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
@@ -22,6 +23,7 @@ import { SqlClient } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
 import { AccountSignIns } from './AccountSignIns'
+import { Artifacts } from './Artifacts'
 import { Changes } from './Changes'
 import { NotFound } from './errors'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
@@ -47,10 +49,12 @@ import { Queries } from './Queries'
 import { timestamp } from './records'
 import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
+import { IssueDrafts } from './IssueDrafts'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
+import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
 import { expected, words } from './words'
 
@@ -113,6 +117,7 @@ const requestOf = (title: string, description: string | undefined, issue: string
 export const handlers = Api.toLayer(
   Effect.gen(function* () {
     const context = yield* Effect.context<Instance | Crypto.Crypto>()
+    const artifacts = yield* Artifacts
     const projects = yield* Projects
     const sessions = yield* Sessions
     const launches = yield* Launches
@@ -130,6 +135,7 @@ export const handlers = Api.toLayer(
     const accountSignIns = yield* AccountSignIns
     const policies = yield* Policies
     const plans = yield* Plans
+    const issueDrafts = yield* IssueDrafts
     const runs = yield* Runs
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
@@ -144,6 +150,15 @@ export const handlers = Api.toLayer(
     const envelope = (type: string, payload: unknown, commandId: string) =>
       Effect.provideContext(Runtime.envelope(type, payload, commandId), context)
     const agentName = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
+    /** The images sent with a message to a thread, read, checked and kept in the thread's project's store, in order. */
+    const keptFor = (threadId: string, images: ReadonlyArray<SentImage>) =>
+      Effect.gen(function* () {
+        const [thread] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM threads WHERE id = ${threadId}`
+        if (thread === undefined) return yield* new NotFound({ kind: 'thread', id: threadId })
+        return yield* keepSent(thread.projectId, images)
+      }).pipe(Effect.provideService(Artifacts, artifacts), Effect.provideService(SqlClient.SqlClient, sql))
+    /** What a message's command says of its images: their digests, in order, where it has any; nothing where it has none, as before images. */
+    const imagesSaid = (kept: ReadonlyArray<InputImage>) => (kept.length === 0 ? {} : { images: kept.map((image) => image.sha256) })
 
     /** A call's failure as the window gets it: in words, and in the log when it isn't the person's to put right. */
     const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, R> =>
@@ -536,11 +551,13 @@ export const handlers = Api.toLayer(
             sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
           ),
         ),
-      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body }) =>
+      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
+              // Its images are read and kept first, outside any transaction; one that can't be sent refuses the switch.
+              const kept = body === undefined || images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               // What the person said with it is said to the thread, under a command of its own.
               const message =
                 body === undefined
@@ -549,10 +566,11 @@ export const handlers = Api.toLayer(
                       // Its own command id, made from the switch's, so a retry of the switch is a retry of it too.
                       envelope: yield* envelope(
                         'thread.send',
-                        { threadId, body, disposition: 'after_current' },
+                        { threadId, body, disposition: 'after_current', ...imagesSaid(kept) },
                         `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
                       ),
                       body,
+                      ...(kept.length === 0 ? {} : { images: kept }),
                     }
               const sessionId = yield* sessions.switchAgent({
                 threadId,
@@ -610,14 +628,18 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
-      Send: ({ commandId, threadId, body, disposition }) =>
+      Send: ({ commandId, threadId, body, disposition, images }) =>
         api(
           Effect.gen(function* () {
+            // Its images are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
+            const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
             const message = {
-              envelope: yield* envelope('thread.send', { threadId, body, disposition }, commandId),
+              // The command says its images by their digests, never their bytes.
+              envelope: yield* envelope('thread.send', { threadId, body, disposition, ...imagesSaid(kept) }, commandId),
               threadId,
               body,
               disposition,
+              ...(kept.length === 0 ? {} : { images: kept }),
             }
             // What the person says to the coordinator starts it, if it isn't running.
             const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${threadId}`
@@ -670,6 +692,10 @@ export const handlers = Api.toLayer(
       StartPlan: ({ commandId, planId }) => once(commandId, api(plans.start(planId, instance.personId))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
+      ChangeIssueDraft: ({ commandId, draftId, title, body, labels }) =>
+        once(commandId, api(issueDrafts.change(draftId, { title, body, labels }, instance.personId))),
+      FileIssueDraft: ({ commandId, draftId }) => once(commandId, api(Effect.asVoid(issueDrafts.file(draftId, instance.personId)))),
+      DiscardIssueDraft: ({ commandId, draftId }) => once(commandId, api(issueDrafts.discard(draftId, instance.personId))),
       AnswerStuck: ({ commandId, attentionId, answer }) =>
         once(
           commandId,

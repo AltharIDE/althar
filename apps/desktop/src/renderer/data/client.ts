@@ -38,6 +38,7 @@ import {
   type SignInStart,
   type SignInState,
   type Status,
+  type SentImage,
   type TaskEnd,
   type TaskList,
   type TaskSummary,
@@ -116,8 +117,8 @@ export interface Client {
   /** The person left the home: what the loop does from now on is new to them. */
   readonly leftHome: () => Promise<void>
   readonly startSession: (input: Start) => Promise<string>
-  /** Hands the thread to another agent; with `body`, what the person said, its first turn after the brief. */
-  readonly switchAgent: (input: Start & { readonly body?: string }) => Promise<string>
+  /** Hands the thread to another agent; with `body`, what the person said, and any images, its first turn after the brief. */
+  readonly switchAgent: (input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage> }) => Promise<string>
   readonly setModel: (input: { readonly threadId: string; readonly model: string }) => Promise<void>
   /** How hard the thread's agent thinks, as the agent names it. */
   readonly setEffort: (input: { readonly threadId: string; readonly effort: string }) => Promise<void>
@@ -149,6 +150,8 @@ export interface Client {
     readonly threadId: string
     readonly body: string
     readonly disposition: 'after_current' | 'interrupt_and_continue'
+    /** Images sent with it, in order. */
+    readonly images?: ReadonlyArray<SentImage>
   }) => Promise<void>
   /** Takes back a message still waiting its turn, by its item. */
   readonly takeBack: (itemId: string) => Promise<void>
@@ -181,6 +184,14 @@ export interface Client {
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
+  /** Changes what an issue the coordinator drafted says, before it is filed. */
+  readonly changeIssueDraft: (
+    draftId: string,
+    edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
+  ) => Promise<void>
+  /** Files an issue the coordinator drafted, or one that wasn't filed, again: its card says how it went. */
+  readonly fileIssueDraft: (draftId: string) => Promise<void>
+  readonly discardIssueDraft: (draftId: string) => Promise<void>
   /** The connections on this Mac, and the code hosts and trackers a person can connect. */
   readonly listConnections: () => Promise<ConnectionList>
   /** Starts a service's own sign-in. */
@@ -420,6 +431,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
     changePlan: (planId, steps, end) =>
       command((commandId) => api.ChangePlan({ commandId, planId, steps, ...(end === undefined ? {} : { end }) })),
+    changeIssueDraft: (draftId, edit) => command((commandId) => api.ChangeIssueDraft({ commandId, draftId, ...edit })),
+    fileIssueDraft: (draftId) => command((commandId) => api.FileIssueDraft({ commandId, draftId })),
+    discardIssueDraft: (draftId) => command((commandId) => api.DiscardIssueDraft({ commandId, draftId })),
     listConnections: () => settle(api.ListConnections()),
     startSignIn: (product, webUrl, connectionId) =>
       command((commandId) =>

@@ -89,6 +89,8 @@ export const ThreadItemKind = Schema.Literals([
   'question',
   /** A run of the project Althar started, in the thread it was asked for in. Althar posts it and keeps it current. */
   'run',
+  /** An issue the coordinator drafted, in its thread: the person files it, changes it or discards it there. Althar posts it. */
+  'issue_draft',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -210,6 +212,15 @@ export type ConnectionState = typeof ConnectionState.Type
 export const ExternalKind = Schema.Literals(['issue', 'change'])
 export type ExternalKind = typeof ExternalKind.Type
 
+/**
+ * Where an issue the coordinator drafted stands: waiting on the person, being
+ * filed, filed, not filed for a reason the tracker gave, perhaps filed (its
+ * answer was lost, so the tracker is looked at before filing it again), or
+ * discarded.
+ */
+export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
+export type IssueDraftState = typeof IssueDraftState.Type
+
 /** What an artifact is, which decides how long it is kept: a command's output is a log, a picture an agent hands back an image. */
 export const ArtifactKind = Schema.Literals([
   'brief',
@@ -256,5 +267,6 @@ export const AggregateType = Schema.Literals([
   'external_link',
   'policy',
   'agent_account',
+  'issue_draft',
 ])
 export type AggregateType = typeof AggregateType.Type

@@ -16,6 +16,16 @@ import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from '
 export type AgentId = 'claude-code' | 'codex' | 'opencode'
 
 /**
+ * A launch that happens out on the device rather than here: the person's own
+ * command installed outside a sandbox that cannot see it (a Flatpak's home).
+ * The executor hands it the working directory and the environment it
+ * assembled, and runs what comes back (`Installs.ts`'s `onDevice`).
+ */
+export interface OutOnDevice {
+  (at: { readonly cwd?: string; readonly env: Readonly<Record<string, string | undefined>> }): LaunchSpec
+}
+
+/**
  * How to start a process: a command, its arguments, extra environment, and
  * which of Althar's own environment variables it may inherit beyond the
  * common allowlist (see `process.ts`).
@@ -25,6 +35,11 @@ export interface LaunchSpec {
   readonly args: ReadonlyArray<string>
   readonly env?: Readonly<Record<string, string>>
   readonly inheritEnv?: ReadonlyArray<string>
+  /**
+   * Where this command is not here but out on the device (a Flatpak): how the
+   * executor runs it there instead, with the cwd and environment it assembled.
+   */
+  readonly onDevice?: OutOnDevice
 }
 
 /**
@@ -209,7 +224,7 @@ const only =
 const require = createRequire(import.meta.url)
 const bundled = (packageName: string, entry: string) => join(dirname(require.resolve(`${packageName}/package.json`)), entry)
 
-/** The Codex binary codex-acp drives, so its sign-in status is the one that counts. */
+/** The Codex CLI shipped with the adapter, used where the person's own CLI is not required. */
 const bundledCodex = () => {
   const fromAdapter = createRequire(require.resolve('@agentclientprotocol/codex-acp/package.json'))
   return join(dirname(fromAdapter.resolve('@openai/codex/package.json')), 'bin/codex.js')
@@ -270,7 +285,13 @@ const openCodeConfig = JSON.stringify(openCodeBase)
  * a command that stays inside runs without asking, and one that has to leave
  * (the network, a write elsewhere) asks, and reaches Althar. In a git
  * worktree the sandbox lets git write to the main repository's `.git`, except
- * its hooks and config. Where the sandbox can't start, commands run without
+ * its hooks and config. A lead may also bind and listen on localhost
+ * (`network.allowLocalBinding`), so a test run can start a server and a
+ * prototype can serve a showcase page without leaving the sandbox. On macOS
+ * Claude documents that this setting is broader than listening: commands may
+ * also connect to any localhost port, including services outside the sandbox,
+ * and listen on non-loopback addresses. The domain allowlist and writable
+ * paths are unchanged. Where the sandbox can't start, commands run without
  * it and every one asks.
  *
  * Only the MCP servers Althar gives a session are loaded, not the user's
@@ -284,7 +305,13 @@ const claudeAsks = {
       // An object: the adapter reads a string as a path to a settings file.
       settings: {
         permissions: { ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
-        sandbox: { enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: true, failIfUnavailable: false },
+        sandbox: {
+          enabled: true,
+          autoAllowBashIfSandboxed: true,
+          allowUnsandboxedCommands: true,
+          failIfUnavailable: false,
+          network: { allowLocalBinding: true },
+        },
       },
     },
   },
@@ -294,20 +321,25 @@ const claudeAsks = {
  * Claude Code for a role that only reads: its edit tools denied, which also
  * denies its sandbox's writes, and every shell command asking, so each one
  * reaches Althar's reader rules rather than running because the sandbox
- * would contain it. What it reads is a throwaway copy all the same.
+ * would contain it. What it reads is a throwaway copy all the same. In a
+ * Flatpak its sandbox cannot start (no nested user namespaces there), so,
+ * as for the ask mode, commands run without it and every one reaches Althar's
+ * reader rules. Those rules refuse direct `flatpak-spawn` commands; the
+ * manifest's permission remains broad and is not a boundary against a
+ * compromised app or agent.
  */
-const claudeReads = {
+const claudeReads = (flatpak: boolean) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
       settings: {
         permissions: { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'], ask: ['Bash', 'WebFetch'] },
-        sandbox: { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false, failIfUnavailable: false },
+        sandbox: { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: flatpak, failIfUnavailable: false },
       },
     },
   },
-}
+})
 
 // claude-agent-acp 0.88.0 forwards this explicit tools array to the SDK.
 // Removing the tool set also removes Read/Grep/Glob, which never ask in plan mode.
@@ -355,7 +387,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     /* Its sign-in, status and version run `claude`: the person's own, else the copy its sessions run on, which ships with Althar. */
     cli: { name: 'claude', bundled: () => bundledClaude() },
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
-    sessionMeta: (role = 'lead') => (role === 'reader' ? claudeReads : claudeAsks),
+    sessionMeta: (role = 'lead') => (role === 'reader' ? claudeReads(process.env.FLATPAK_ID !== undefined) : claudeAsks),
     permissionJudge: { sessionMeta: claudeJudges },
     knownGaps: [
       'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Althar always sets the mode.',
@@ -370,7 +402,18 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     id: 'codex',
     name: 'Codex',
     source: 'bundled',
-    launch: (node) => ({ command: node, args: [bundled('@agentclientprotocol/codex-acp', 'dist/index.js')], inheritEnv: ['CODEX_HOME'] }),
+    /*
+     * `CODEX_HOME` is the account's home, always. `CODEX_PATH` names the Codex
+     * its adapter drives — the person's own, out on the device, where the
+     * sandbox cannot reach it — and the bus address carries it to
+     * `flatpak-spawn`; both only in a Flatpak, so a person's own `CODEX_PATH`
+     * never changes which Codex runs elsewhere.
+     */
+    launch: (node) => ({
+      command: node,
+      args: [bundled('@agentclientprotocol/codex-acp', 'dist/index.js')],
+      inheritEnv: ['CODEX_HOME', ...(process.env.FLATPAK_ID === undefined ? [] : ['CODEX_PATH', 'DBUS_SESSION_BUS_ADDRESS'])],
+    }),
     /*
      * Not `agent`, codex-acp's default: that mode sends every request to go
      * beyond the sandbox to an automatic reviewer, so none reach Althar.
@@ -379,25 +422,25 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     modes: { ask: 'workspace-write', readOnly: 'read-only', reader: 'read-only' },
     options: { mode: 'mode', model: 'model', effort: 'reasoning_effort' },
     signIn: {
-      status: (node) => ({ command: node, args: [bundledCodex(), 'login', 'status'] }),
+      status: () => ({ command: 'codex', args: ['login', 'status'] }),
       read: (output, exitCode) => (/not logged in/i.test(output) ? false : /logged in/i.test(output) && exitCode === 0 ? true : undefined),
       /* "Logged in using ChatGPT" is the person's plan; "using an API key" is paid per use. */
       paidBy: (output) => (/using chatgpt/i.test(output) ? 'plan' : /api key/i.test(output) ? 'key' : undefined),
       login: 'codex login',
-      // The bundled Codex, as its status check runs.
+      // The same Codex CLI the ACP adapter uses, where that CLI is available.
       inApp: {
         kind: 'codex-app-server',
         ways: ['browser', 'device'],
-        run: (node) => ({ command: node, args: [bundledCodex(), 'app-server'] }),
+        run: () => ({ command: 'codex', args: ['app-server'] }),
       },
-      logout: { run: (node) => ({ command: node, args: [bundledCodex(), 'logout'] }), line: 'codex logout' },
+      logout: { run: () => ({ command: 'codex', args: ['logout'] }), line: 'codex logout' },
     },
     home: {
       variable: 'CODEX_HOME',
       usual: (env, homeDir) => env.CODEX_HOME || join(homeDir, '.codex'),
       shared: only(['config.toml', 'AGENTS.md', 'skills', 'prompts', 'rules']),
     },
-    version: (node) => ({ command: node, args: [bundledCodex(), '--version'] }),
+    version: () => ({ command: 'codex', args: ['--version'] }),
     withoutOwnTools: codexWithoutOwnTools,
     /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
@@ -414,6 +457,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply.",
       'Usage limits are held by the adapter but only shown as /status text; only errors show them over ACP.',
     ],
+    cli: {
+      name: 'codex',
+      // In a Flatpak sessions use the host's Codex bridge too; reporting the
+      // bundled CLI here would show an unrelated sign-in state.
+      ...(process.env.FLATPAK_ID === undefined ? { bundled: bundledCodex } : {}),
+    },
   },
   opencode: {
     id: 'opencode',

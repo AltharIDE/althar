@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -248,6 +248,59 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledWith('pln5')
   })
 
+  it('files, changes and discards an issue the coordinator drafted, and shows it filed or why it wasn’t', async () => {
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          items: [
+            items.draft(),
+            items.draft({ draftId: 'idr_2', title: 'Flaky checkout test', state: 'failed', error: 'Linear didn’t answer.' }),
+            items.draft({
+              draftId: 'idr_3',
+              title: 'Retry webhooks',
+              state: 'filed',
+              issue: { key: 'MER-240', url: 'https://linear.app/m/issue/MER-240' },
+            }),
+            items.draft({ draftId: 'idr_4', title: 'Rename the env var', state: 'discarded' }),
+          ],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    const pending = (await screen.findByRole('heading', { name: 'Refunds skip the rate limiter' })).closest('article')
+    expect(pending).toBeTruthy()
+    const card = within(pending as HTMLElement)
+    expect(card.getByText('Issue draft · Linear · Meridian')).toBeTruthy()
+    // Its description is drawn as Markdown.
+    expect(card.getByText('refunds').tagName).toBe('STRONG')
+    expect(card.getByText('Labels: payments')).toBeTruthy()
+    await userEvent.click(card.getByRole('button', { name: 'File issue' }))
+    expect(client.fileIssueDraft).toHaveBeenCalledWith('idr_1')
+    await userEvent.click(card.getByRole('button', { name: 'Edit' }))
+    const title = card.getByRole('textbox', { name: 'Title' })
+    await userEvent.clear(title)
+    await userEvent.type(title, 'Refunds bypass the limiter')
+    await userEvent.type(card.getByRole('textbox', { name: /Labels/ }), ', billing')
+    await userEvent.click(card.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.changeIssueDraft).toHaveBeenCalledWith('idr_1', {
+        title: 'Refunds bypass the limiter',
+        body: 'Charges go through it; **refunds** don’t.',
+        labels: ['payments', 'billing'],
+      }),
+    )
+    await userEvent.click(card.getByRole('button', { name: 'Discard' }))
+    expect(client.discardIssueDraft).toHaveBeenCalledWith('idr_1')
+
+    // Not filed: why, and filing it again.
+    expect(screen.getByText(/Couldn’t file it on Linear\. Linear didn’t answer\./)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'File again' }))
+    expect(client.fileIssueDraft).toHaveBeenCalledWith('idr_2')
+    // Filed: its key, as a link to it; discarded: said so.
+    expect(screen.getByRole('link', { name: /MER-240/ }).getAttribute('href')).toBe('https://linear.app/m/issue/MER-240')
+    expect(screen.getByText('Issue draft discarded')).toBeTruthy()
+  })
+
   it('holds, changes and starts a plan before it starts on its own', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(card())] })) })
     withServices(<Project />, client)
@@ -299,7 +352,9 @@ describe('the Talk room', () => {
     const box = screen.getByRole('textbox', { name: 'Tell the coordinator something' })
     await userEvent.type(box, 'Add a retry{Enter}')
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Add a retry', disposition: 'after_current' }))
-    expect(client.startSession).not.toHaveBeenCalled()
+    // Started first, as it ran last, so a send that fails was never queued.
+    expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code' })
+    expect(vi.mocked(client.startSession).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.send).mock.invocationCallOrder[0] ?? 0)
 
     await userEvent.click(screen.getByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
     await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
@@ -338,6 +393,61 @@ describe('the Talk room', () => {
     expect(await screen.findByRole('button', { name: 'Coordinator: Claude Sonnet Medium' })).toBeTruthy()
     await userEvent.type(screen.getByRole('textbox', { name: 'Tell the coordinator something' }), 'Hello{Enter}')
     await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code', model: 'sonnet' }))
+  })
+
+  it('sends images dropped on its composer with what the person says to it', async () => {
+    const { client } = fakeClient()
+    withServices(<Project />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 2,
+    ])
+    fireEvent.paste(box, { clipboardData: { files: [new File([png], '', { type: 'image/png' })], types: ['Files'] } })
+    expect(await screen.findByRole('img', { name: 'Pasted image' })).toBeTruthy()
+    await userEvent.type(box, 'This is the bug{Enter}')
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'thc',
+        body: 'This is the bug',
+        disposition: 'after_current',
+        images: [{ data: Buffer.from(png).toString('base64'), name: 'Pasted image' }],
+      }),
+    )
+    expect(screen.getByRole('button', { name: 'View Pasted image' })).toBeTruthy()
+  })
+
+  it('puts what the person said, and its images, back in its composer when Althar didn’t take it', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.send).mockRejectedValueOnce(new Error('Althar is restarting.'))
+    withServices(<Project />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 2,
+    ])
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([png], 'bug.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'bug.png' })).toBeTruthy()
+    await userEvent.type(box, 'This is the bug{Enter}')
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('This is the bug'))
+    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+    expect(screen.getByRole('img', { name: 'bug.png' })).toBeTruthy()
+  })
+
+  it('puts what was said back when the coordinator didn’t start, since nothing was queued, and sends on past one already starting', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.startSession).mockRejectedValueOnce(new ApiError({ reason: 'SessionFailed', message: "Claude Code couldn't start." }))
+    withServices(<Project />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    await userEvent.type(box, 'Plan it{Enter}')
+    expect(await screen.findByText("Claude Code couldn't start.")).toBeTruthy()
+    expect(client.send).not.toHaveBeenCalled()
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('Plan it'))
+    // One already starting, as from a message just before, takes this one next.
+    vi.mocked(client.startSession).mockRejectedValueOnce(
+      new ApiError({ reason: 'SessionRunning', message: 'An agent is already working on this task.' }),
+    )
+    await userEvent.type(box, '{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Plan it', disposition: 'after_current' }))
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe(''))
   })
 
   it("says when the agent it last ran on isn't signed in, and starts it on one that is", async () => {
@@ -544,12 +654,14 @@ describe('what can go wrong', () => {
 })
 
 describe('a send to the coordinator that fails', () => {
-  it('takes its copy out of the conversation again, and says why', async () => {
+  it('takes its copy out of the conversation again, says why, and puts what was said back in the composer', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     vi.mocked(client.send).mockRejectedValueOnce(new ApiError({ reason: 'NotFound', message: 'The project went away.' }))
     withServices(<Project />, client)
-    await userEvent.type(await screen.findByRole('textbox', { name: 'Tell the coordinator something' }), 'Plan it{Enter}')
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    await userEvent.type(box, 'Plan it{Enter}')
     expect(await screen.findByText('The project went away.')).toBeTruthy()
-    expect(screen.queryByText('Plan it')).toBeNull()
+    expect(screen.queryByText('Plan it', { selector: 'p' })).toBeNull()
+    expect((box as HTMLTextAreaElement).value).toBe('Plan it')
   })
 })

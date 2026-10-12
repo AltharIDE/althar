@@ -1,4 +1,4 @@
-# ADR-027: How hard the computer works is read by the runtime, only while a window shows it
+# ADR-029: How hard the computer works is read by the runtime, only while a window shows it
 
 - **Status:** Accepted
 - **Date:** 2026-10-11

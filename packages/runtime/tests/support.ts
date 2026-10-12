@@ -186,6 +186,8 @@ export const runtime = (
     readonly artifactsRoot?: string | null
     /** How this computer's load is read. */
     readonly load?: LoadOptions
+    /** The device outside a sandbox, as for a Flatpak. */
+    readonly onDevice?: RuntimeOptions['onDevice']
   } = {},
 ) =>
   Runtime.layer({
@@ -208,6 +210,7 @@ export const runtime = (
     ...(more.modelFacts === undefined ? {} : { modelFacts: more.modelFacts }),
     ...(more.editors === undefined ? {} : { editors: more.editors }),
     ...(more.load === undefined ? {} : { load: more.load }),
+    ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
   })
 
 /** A GitHub instance that never answers: `.test` names nothing, so git's fetches fail at once, and the fake service stands in for its API. */

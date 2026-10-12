@@ -8,6 +8,7 @@ import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { type ProjectRef, ProjectWord } from '../ProjectWord/ProjectWord'
 import s from './NeedLine.module.css'
+import { focusQuietly } from '../../lib/focusQuietly'
 
 /*
  * Something that waits on you, as one line of the home's list: what kind
@@ -102,7 +103,7 @@ export function NeedLine({
     // Just after the commit, as AskAnswered does, so focus never lands inside React's flush.
     let live = true
     queueMicrotask(() => {
-      if (live) line.current?.focus()
+      if (live) focusQuietly(line.current)
     })
     return () => {
       live = false

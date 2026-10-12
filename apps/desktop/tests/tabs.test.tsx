@@ -88,7 +88,7 @@ const windowAt = (path: string, projects: ReadonlyArray<ProjectSummary> = [proje
   making = () => draftsOf(client).get()?.id ?? ''
   withServices(<RouterProvider router={router} />, client, host)
   const go = (to: string) => act(() => router.history.push(to))
-  return { client, emit, go, router }
+  return { client, emit, go, router, host }
 }
 
 const nav = () => within(screen.getByRole('navigation', { name: 'Projects' }))
@@ -375,6 +375,26 @@ describe('how hard the Mac works, in the bar', () => {
     expect(unknown).toMatchObject({ work: null, workMemory: null, rows: null, pressure: null, memory: 0 })
     expect(glanceOf({ ...load, pressure: 'critical' }).pressure).toBe('critical')
     expect(glanceOf({ ...load, pressure: 'warning' }).pressure).toBe('warning')
+  })
+})
+
+describe('the window’s own buttons in the strip', () => {
+  it('draws them off a Mac, and asks the main process for what they say', async () => {
+    const host = fakeHost({ platform: 'linux' })
+    windowAt('/', [project], host)
+    await waitFor(() => expect(tab('Home')).toBeTruthy())
+    await userEvent.click(screen.getByRole('button', { name: 'Minimize the window' }))
+    expect(host.window).toHaveBeenCalledWith('minimize')
+    await userEvent.click(screen.getByRole('button', { name: 'Maximize the window' }))
+    expect(host.window).toHaveBeenCalledWith('toggle-maximize')
+    await userEvent.click(screen.getByRole('button', { name: 'Close the window' }))
+    expect(host.window).toHaveBeenCalledWith('close')
+  })
+
+  it('leaves them to the system on macOS', async () => {
+    windowAt('/')
+    await waitFor(() => expect(tab('Home')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: 'Close the window' })).toBeNull()
   })
 })
 

@@ -70,6 +70,11 @@ export interface UpdateHost {
 }
 
 /**
+ * What the window's own buttons ask the main process to do where the system draws none (window-chrome).
+ */
+export type WindowAction = 'close' | 'minimize' | 'toggle-maximize'
+
+/**
  * What only the app's main process can do. The window never handles a path:
  * the main process shows the picker, or is told what was dropped, and hands
  * back a grant the runtime knows the folder by.
@@ -89,9 +94,26 @@ export interface FoundRepositories {
   }>
 }
 
+/** An update that couldn't move the store, as main says: what stopped, the copy from before it where the person knows the place, and what was said. */
+export interface StoreFailure {
+  readonly stopped: 'moving' | 'copying'
+  /** `~/Library/Application Support/Althar/backups/…`; null where no copy was made. */
+  readonly backup: string | null
+  readonly reason: string
+}
+
+/** What a problem the person reports is about, so the report carries it. */
+export type ProblemAbout = { readonly kind: 'update'; readonly reason: string }
+
 export interface Host {
-  /** The system Althar runs on: darwin, win32, linux. */
+  /** The system Althar runs on: darwin, win32, linux; off a Mac the window's chrome is the app's own. */
   readonly platform: string
+  /** Closes, minimizes, or maximizes and restores the window itself. */
+  readonly window: (action: WindowAction) => void
+  /** Whether the window is maximized now, for the buttons' maximize or restore. */
+  readonly maximized: () => Promise<boolean>
+  /** Calls `listener` as the window is maximized or restored, until the returned function is called. */
+  readonly onMaximized: (listener: (maximized: boolean) => void) => () => void
   /** Asks the person for a folder, for a project or an agent's account; its grant, or null when they cancel. */
   readonly pickFolder: (purpose?: 'project' | 'account') => Promise<string | null>
   /** Asks the person for folders for a new project, several at once; a grant for each, none when they cancel. */
@@ -116,6 +138,12 @@ export interface Host {
   readonly sounds: () => Promise<ReadonlyArray<string>>
   /** Plays one of them once, so the person hears it. */
   readonly playSound: (name: string) => Promise<void>
+  /** Calls `listener` if an update couldn't move the store, once main knows, even if it knew before the page listened, until the returned function is called. */
+  readonly onStoreFailed: (listener: (failure: StoreFailure) => void) => () => void
+  /** Shows the copy from before that update in the system's file manager. */
+  readonly showBackup: () => Promise<void>
+  /** Reports a problem, with what it is about (DEV-61). Absent until the app can send one: nothing offers to then. */
+  readonly reportProblem?: (about: ProblemAbout) => void
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
   readonly onOpen: (listener: (threadId: string) => void) => () => void
   /**

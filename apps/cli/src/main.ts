@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 
 import { agents, signInStatus } from '@althar/provider-adapters'
-import { databaseIn, type Instance, Live, Permissions, Projects, Runtime, Sessions } from '@althar/runtime'
+import { backupsIn, databaseIn, type Instance, Live, Permissions, Projects, Runtime, Sessions } from '@althar/runtime'
 import { Cause, type Crypto, Effect, Exit, Option, Queue, Stream } from 'effect'
 
 import { type Action, HELP, parseLine } from './input'
@@ -154,6 +154,8 @@ const program = Effect.gen(function* () {
 mkdirSync(options.profile, { recursive: true })
 const layer = Runtime.layer({
   database: databaseIn(options.profile),
+  // A copy of the store before an update migrates it, as the app keeps them, in the same profile.
+  backups: backupsIn(options.profile),
   worktreeRoot: options.worktrees,
   accountsRoot: join(options.profile, 'accounts'),
   // What commands print and the pictures agents hand back, as the app keeps them, in the same profile.

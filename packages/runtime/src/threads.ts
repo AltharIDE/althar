@@ -345,11 +345,14 @@ export const transcript = (threadId: string, budget: number) =>
       content: string
       agentId: string | null
       task: string | null
+      draft: string | null
       asked: string | null
       askedState: string | null
     }>`
       SELECT i.kind, i.content, s.agent_id,
         (SELECT k.slug || ': ' || k.title FROM tasks k WHERE k.id = json_extract(i.content, '$.taskId')) AS task,
+        (SELECT d.title || ' (' || d.state || CASE WHEN d.issue_key IS NULL THEN '' ELSE ', ' || d.issue_key || ' ' || d.issue_url END || ')'
+          FROM issue_drafts d WHERE d.id = json_extract(i.content, '$.draftId')) AS draft,
         a.payload AS asked, a.state AS asked_state
       FROM thread_items i
       LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
@@ -359,8 +362,12 @@ export const transcript = (threadId: string, budget: number) =>
       const content = JSON.parse(item.content) as Record<string, unknown>
       const text = (key: string) => (typeof content[key] === 'string' ? (content[key] as string) : '')
       switch (item.kind) {
-        case 'user_message':
-          return [`[person] ${text('text')}`]
+        case 'user_message': {
+          // Images the person sent are said, though only the agent they went to saw them.
+          const pictures = Array.isArray(content['pictures']) ? content['pictures'].length : 0
+          const sent = pictures === 0 ? '' : ` [sent ${pictures === 1 ? 'an image' : `${pictures} images`}]`
+          return [`[person] ${text('text')}${sent}`]
+        }
         case 'agent_message':
           return [`[${item.agentId ?? 'agent'}] ${text('text')}`]
         case 'tool_call':
@@ -371,6 +378,8 @@ export const transcript = (threadId: string, budget: number) =>
           return [`[${text('step')}${text('verdict') === '' ? '' : `, ${text('verdict')}`}] ${text('summary')}`]
         case 'task':
           return item.task === null ? [] : [`[task] ${item.task}`]
+        case 'issue_draft':
+          return item.draft === null ? [] : [`[issue draft] ${item.draft}`]
         case 'question': {
           // What was asked of the person, and what they answered: an agent that takes the thread over knows both.
           const fields = Array.isArray(content['fields']) ? (content['fields'] as ReadonlyArray<QuestionField>) : []

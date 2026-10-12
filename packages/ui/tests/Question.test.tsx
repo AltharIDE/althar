@@ -194,6 +194,28 @@ describe('Question, answered and withdrawn', () => {
   })
 })
 
+describe('Question, the page stays put', () => {
+  it('moves focus without scrolling the shell, answering or missing an answer, and leaves its scroll alone', async () => {
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus')
+    const scroll = vi.fn()
+    const shell = document.createElement('div')
+    document.body.append(shell)
+    render(<Question parts={[DATABASE, WAITING]} focusOnMount />, { container: shell })
+    await settle()
+    fireEvent.submit(form())
+    await settle()
+    fireEvent.click(screen.getByRole('radio', { name: /Postgres/ }))
+    fireEvent.click(screen.getByRole('radio', { name: 'An hour' }))
+    fireEvent.submit(form())
+    await settle()
+    expect(focus).toHaveBeenCalled()
+    for (const call of focus.mock.calls) expect(call[0]).toEqual({ preventScroll: true })
+    expect(scroll).not.toHaveBeenCalled()
+    expect(shell.scrollTop).toBe(0)
+    focus.mockRestore()
+  })
+})
+
 describe('questionText.join', () => {
   it('joins what was said as a phrase', () => {
     expect(questionText.join([])).toBe('')

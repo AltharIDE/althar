@@ -72,6 +72,28 @@ export const RunningAndExited: Story = {
     await expect(pill).toHaveTextContent('Runningbun dev· localhost:5173· 1 exited')
   },
 }
+const LONG: RunningProcess = {
+  id: 'long',
+  command: 'cd /Users/balazs/Charrette/althar/shorten-long-commands-in-running-pills/althar && timeout 600 bun run dev 2>&1 | tail -20',
+  label: 'bun run dev',
+  url: 'localhost:5173',
+  since: '3m',
+}
+/** The agent's `cd <worktree> && …` and output pipes are left off the pill; the whole command is on hover and in Stop's name. */
+export const LongCommand: Story = {
+  args: { processes: [LONG], defaultOpen: true },
+  play: async ({ canvasElement }) => {
+    const pill = within(canvasElement).getByRole('button', { name: /Running/ })
+    await expect(pill).toHaveTextContent('Runningbun run dev· localhost:5173')
+    await expect(within(canvasElement).getByTitle(LONG.command)).toBeVisible()
+  },
+}
+/** A command that can't be shortened still can't stretch the pill: it ends in an ellipsis. */
+export const LongUnshortened: Story = {
+  args: {
+    processes: [{ id: 'sh', command: 'python3 -c "print(' + '1234567890'.repeat(12) + ')"', since: '1m' }],
+  },
+}
 /** Ended by itself, with no exit code to say: it ended, no more. */
 export const EndedUnknown: Story = { args: { processes: [{ ...CRASHED, exited: null }] } }
 /** Nothing running: nothing shows. */

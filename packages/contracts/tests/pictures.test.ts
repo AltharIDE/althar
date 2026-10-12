@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
 
-import { SCREENSHOT_PNG } from '@althar/provider-adapters/testing'
-
 import { pictureSize, pictureType } from '../src/pictures'
 
 const bytes = (...parts: ReadonlyArray<ReadonlyArray<number> | string>) =>
@@ -10,10 +8,12 @@ const bytes = (...parts: ReadonlyArray<ReadonlyArray<number> | string>) =>
 const le16 = (n: number) => [n & 0xff, (n >> 8) & 0xff]
 const le24 = (n: number) => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff]
 const be16 = (n: number) => [(n >> 8) & 0xff, n & 0xff]
+const be32 = (n: number) => [(n >>> 24) & 0xff, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff]
 
 describe('pictures', () => {
   it('reads a PNG’s kind and size from its header', () => {
-    const png = new Uint8Array(Buffer.from(SCREENSHOT_PNG, 'base64'))
+    // The signature, then the header chunk: its length, its name, and the width and height first in it.
+    const png = bytes([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], be32(13), 'IHDR', be32(480), be32(300), [8, 6, 0, 0, 0])
     expect(pictureType(png)).toBe('image/png')
     expect(pictureSize(png, 'image/png')).toEqual({ width: 480, height: 300 })
     expect(pictureSize(png.slice(0, 20), 'image/png')).toBeNull()

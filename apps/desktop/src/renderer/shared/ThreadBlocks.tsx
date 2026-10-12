@@ -30,11 +30,12 @@ import {
 import { CommandOutput } from './CommandOutput'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
+import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
 import { RuleReceipt } from './RuleReceipt'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
 import { answersOf, partsOf, pickedOf, questionText } from './questions'
-import type { ArrivalContent, Block, Part, QuestionContent, RunContent, StepResult, TaskCardContent } from './thread'
+import type { ArrivalContent, Block, IssueDraftContent, Part, QuestionContent, RunContent, StepResult, TaskCardContent } from './thread'
 import s from './ThreadBlocks.module.css'
 
 /*
@@ -102,7 +103,7 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
   const [open, setOpen] = useState(part.state === ToolState.Running && part.ran !== null)
   /* once opened, what it printed stays, so it doesn't vanish as the call folds */
   const [seen, setSeen] = useState(open)
-  const long = part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND)
+  const long = part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND || part.label !== undefined)
   const body =
     part.ran !== null ? (
       seen ? (
@@ -370,6 +371,7 @@ export function ThreadBlocks({
   session,
   card,
   run,
+  draft,
   queued,
   onPassOn,
   onAnswerQuestion,
@@ -397,6 +399,8 @@ export function ThreadBlocks({
   card?: (card: TaskCardContent) => ReactNode
   /** Draws a run's card, in the thread it was asked for in. */
   run?: (run: RunContent) => ReactNode
+  /** Draws an issue the coordinator drafted, in its thread. */
+  draft?: (draft: IssueDraftContent) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
 }) {
@@ -417,7 +421,13 @@ export function ThreadBlocks({
       case 'you':
         return (
           <Fragment key={block.id}>
-            <You at={block.at} delivery={block.delivery} {...(queued === undefined ? {} : { text: { queued } })}>
+            <You
+              at={block.at}
+              delivery={block.delivery}
+              {...(queued === undefined ? {} : { text: { queued } })}
+              // The images sent with it, each opening full size with the others.
+              {...(block.pictures.length === 0 ? {} : { attach: sentAttachments(block.pictures) })}
+            >
               {block.text}
             </You>
             {block.links.length > 0 && (
@@ -452,6 +462,8 @@ export function ThreadBlocks({
         )
       case 'run':
         return <Fragment key={block.id}>{run?.(block.run)}</Fragment>
+      case 'draft':
+        return <Fragment key={block.id}>{draft?.(block.draft)}</Fragment>
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')

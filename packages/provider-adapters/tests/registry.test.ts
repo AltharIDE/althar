@@ -43,6 +43,15 @@ describe('the agent registry', () => {
     assert.includeMembers(meta.claudeCode.options.settings.permissions.ask, ['Bash', 'Edit', 'Write'])
   })
 
+  it('lets a Claude Code lead listen on localhost in its sandbox, and a reader not', () => {
+    type Sandbox = { network?: { allowLocalBinding?: boolean } }
+    const sandboxOf = (role?: 'reader') =>
+      (agents['claude-code'].sessionMeta?.(role) as { claudeCode: { options: { settings: { sandbox: Sandbox } } } }).claudeCode.options
+        .settings.sandbox
+    assert.deepStrictEqual(sandboxOf().network, { allowLocalBinding: true })
+    assert.isUndefined(sandboxOf('reader').network)
+  })
+
   it('makes Claude Code a reader: its edits denied, and every command asking', () => {
     const meta = agents['claude-code'].sessionMeta?.('reader') as {
       claudeCode: {
@@ -54,6 +63,39 @@ describe('the agent registry', () => {
     assert.includeMembers(meta.claudeCode.options.settings.permissions.deny, ['Edit', 'Write'])
     assert.includeMembers(meta.claudeCode.options.settings.permissions.ask, ['Bash'])
     assert.isFalse(meta.claudeCode.options.settings.sandbox.autoAllowBashIfSandboxed)
+  })
+
+  it('in a Flatpak, a reader’s commands run without the sandbox and every one asks, as no sandbox can start there', () => {
+    const allows = () => {
+      const meta = agents['claude-code'].sessionMeta?.('reader') as {
+        claudeCode: { options: { settings: { sandbox: { allowUnsandboxedCommands: boolean } } } }
+      }
+      return meta.claudeCode.options.settings.sandbox.allowUnsandboxedCommands
+    }
+    const before = process.env.FLATPAK_ID
+    try {
+      delete process.env.FLATPAK_ID
+      assert.isFalse(allows())
+      process.env.FLATPAK_ID = 'dev.althar.app'
+      assert.isTrue(allows())
+    } finally {
+      if (before === undefined) delete process.env.FLATPAK_ID
+      else process.env.FLATPAK_ID = before
+    }
+  })
+
+  it('inherits CODEX_PATH and the bus address only in a Flatpak, so a person’s own CODEX_PATH never changes which Codex runs elsewhere', () => {
+    const inherits = () => agents.codex.launch('/usr/bin/node').inheritEnv
+    const before = process.env.FLATPAK_ID
+    try {
+      delete process.env.FLATPAK_ID
+      assert.deepStrictEqual(inherits(), ['CODEX_HOME'])
+      process.env.FLATPAK_ID = 'dev.althar.app'
+      assert.deepStrictEqual(inherits(), ['CODEX_HOME', 'CODEX_PATH', 'DBUS_SESSION_BUS_ADDRESS'])
+    } finally {
+      if (before === undefined) delete process.env.FLATPAK_ID
+      else process.env.FLATPAK_ID = before
+    }
   })
 
   it('never gives one option two meanings', () => {
