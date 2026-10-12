@@ -29,8 +29,16 @@ export class SecretsUnavailable extends Schema.TaggedError<SecretsUnavailable>()
   keyring: Schema.optional(Schema.Boolean),
 }) {}
 
-/** A secret that couldn't be kept or opened is tried this many times more, a moment apart, then twice that. */
-const AGAIN = { times: 2, schedule: Schedule.exponential(Duration.millis(200)) }
+/**
+ * A secret that couldn't be kept or opened is tried this many times more, a
+ * moment apart, then twice that; not where there is no keyring to keep it,
+ * which a moment doesn't change.
+ */
+const AGAIN = {
+  times: 2,
+  schedule: Schedule.exponential(Duration.millis(200)),
+  while: (error: SecretsUnavailable) => error.keyring !== true,
+}
 
 /** What seals a secret so that only Althar can open it, and opens it again: in the app, its main process. */
 export interface Sealer {

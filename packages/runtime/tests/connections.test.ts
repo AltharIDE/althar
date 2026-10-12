@@ -1013,14 +1013,22 @@ describe('where sign-ins are kept', () => {
     })
   })
 
-  it.live('tries again, a moment apart, when the app is too busy to seal or open one', () => {
+  it.live('tries again, a moment apart, when the app is too busy to seal or open one, but not where there is no keyring', () => {
     const folder = join(mkdtempSync(join(tmpdir(), 'althar-secrets-')), 'secrets')
-    // The app, busy for as many asks as the test says, then answering.
+    // The app, busy for as many asks as the test says, then answering; or with no keyring at all.
     let busy = 0
+    let keyring = true
+    let asked = 0
     const unanswered = () => Effect.fail(new SecretsUnavailable({ reason: 'Althar’s keychain didn’t answer.' }))
+    const none = () => Effect.fail(new SecretsUnavailable({ reason: 'Install and start a keyring.', keyring: true }))
+    const answer = <A>(then: () => Effect.Effect<A, SecretsUnavailable>) =>
+      Effect.suspend(() => {
+        asked += 1
+        return !keyring ? none() : busy-- > 0 ? unanswered() : then()
+      })
     const flaky: Sealer = {
-      seal: (value) => (busy-- > 0 ? unanswered() : sealer().seal(value)),
-      open: (sealed) => (busy-- > 0 ? unanswered() : sealer().open(sealed)),
+      seal: (value) => answer(() => sealer().seal(value)),
+      open: (sealed) => answer(() => sealer().open(sealed)),
     }
     return Effect.gen(function* () {
       const secrets = yield* Secrets
@@ -1031,6 +1039,11 @@ describe('where sign-ins are kept', () => {
       // Busy for longer than that, it says so.
       busy = 3
       assert.strictEqual((yield* Effect.flip(secrets.get('conn_1'))).reason, 'Althar’s keychain didn’t answer.')
+      // No keyring to keep it: asked once, and said at once.
+      keyring = false
+      asked = 0
+      assert.deepInclude(yield* Effect.flip(secrets.set('conn_2', 'x')), { reason: 'Install and start a keyring.', keyring: true })
+      assert.strictEqual(asked, 1)
     }).pipe(Effect.provide(Secrets.sealed(folder, flaky)))
   })
 
