@@ -248,7 +248,6 @@ const cardsOf = (projectId: string) =>
 describe('a plan that names models', () => {
   it.live('takes each model the best way there is, refuses one that can’t be used, and still takes an agent', () =>
     Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
       const { projectId, threadId } = yield* opened
       yield* known
       const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
@@ -364,7 +363,7 @@ describe('a plan that names models', () => {
         const [lead] = yield* until(
           sql<{ effort: string | null }>`
           SELECT s.effort FROM provider_sessions s JOIN threads t ON t.id = s.thread_id JOIN tasks k ON k.id = t.task_id
-          WHERE k.slug = 'rework-the-cache' AND t.kind = 'task'`,
+          WHERE k.slug = 'rework-the-cache' AND t.kind = 'task' AND s.state <> 'starting'`,
           (rows) => rows.length === 1,
         )
         assert.strictEqual(lead?.effort, 'high')
@@ -402,7 +401,7 @@ describe('a plan that names models', () => {
           until(
             sql<{ model: string | null; effort: string | null }>`
             SELECT s.model, s.effort FROM provider_sessions s JOIN threads t ON t.id = s.thread_id JOIN tasks k ON k.id = t.task_id
-            WHERE k.slug = ${slug} AND t.kind = 'task'`,
+            WHERE k.slug = ${slug} AND t.kind = 'task' AND s.state <> 'starting'`,
             (rows) => rows.length === 1,
           )
         // One its model doesn't offer drafts nothing.

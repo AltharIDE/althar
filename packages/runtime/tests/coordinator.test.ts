@@ -13,6 +13,7 @@ import { Coordinator, CoordinatorUnavailable } from '../src/Coordinator'
 import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
+import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -446,6 +447,29 @@ describe('the coordinator loop', () => {
         SELECT effort FROM provider_sessions WHERE agent_id = 'codex' AND project_id = ${projectId}`
       assert.isNotEmpty(reviewers)
       assert.isTrue(reviewers.every((reviewer) => reviewer.effort === 'low'))
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('plans a step at the effort the coordinator picks, which its card shows and its lead starts at', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const models = yield* Models
+      const { projectId, threadId } = yield* opened
+      // Once each agent has said what its models offer.
+      yield* models.catalog
+      yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
+      yield* say(threadId, 'Rework the cache. [coordinator:plan-effort] [coordinator:plan-no-review] [lead:finish]')
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards.length === 1)
+      assert.deepStrictEqual(card?.plan?.steps, [
+        { key: 'implement', agentId: 'claude-code', model: 'large', effort: 'high', skipped: false },
+      ])
+      // Its countdown over, its lead starts at it: what it is on is recorded once it has started.
+      const [lead] = yield* until(
+        sql<{ effort: string | null }>`
+          SELECT s.effort FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.kind = 'task' AND s.state <> 'starting'`,
+        (rows) => rows.length === 1,
+      )
+      assert.strictEqual(lead?.effort, 'high')
     }).pipe(Effect.provide(withQueries())),
   )
 
