@@ -2,13 +2,15 @@ import { Light } from '@althar/ui'
 import { type ReactNode, useEffect, useRef } from 'react'
 
 import { cx } from '../../../lib/cx'
+import { useRestAway } from './seen'
 import { Shot, type ShotProps } from './Shot'
 import s from './Slab.module.css'
 
 /*
  * A piece of the app as a slim slab held up at an angle: it shows its edge,
  * floats a little, and leans toward the pointer, a few degrees at most. Under
- * it, Althar's light. With a touch screen or reduced motion it holds still.
+ * it, Althar's light. With a touch screen or reduced motion it holds still,
+ * and out of sight it rests.
  */
 
 export function Slab({
@@ -19,6 +21,7 @@ export function Slab({
   ...shot
 }: Omit<ShotProps, 'frame' | 'children'> & { children: ReactNode; side?: 'left' | 'right'; light?: boolean }) {
   const stage = useRef<HTMLDivElement>(null)
+  useRestAway(stage)
   useEffect(() => {
     const el = stage.current
     if (!el || !window.matchMedia('(hover: hover) and (prefers-reduced-motion: no-preference)').matches) return

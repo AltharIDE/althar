@@ -9,6 +9,7 @@ import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Menu, MenuGroup, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
+import { WindowButtons } from '../WindowButtons/WindowButtons'
 import s from './ProjectTabs.module.css'
 
 /*
@@ -25,7 +26,9 @@ import s from './ProjectTabs.module.css'
  * the home's tab stays put; the others give way together, down to their
  * marks, and past that they scroll, by wheel too, fading at the side where
  * more are, with a menu of them all. On macOS the system draws the traffic
- * lights over its start, so it keeps their space.
+ * lights over its start, so it keeps their space; where the system draws
+ * none, the same three dots are the window's own buttons (close, minimize,
+ * maximize), and the app behind them does what they ask.
  */
 
 /** A project as its tab shows it. */
@@ -54,6 +57,11 @@ export interface ProjectTabsText {
   newProjectKbd: string
   /** The menu of every open project, when more are open than fit. */
   all: string
+  /** The window's own buttons, where the system draws none. */
+  closeWindow: string
+  minimizeWindow: string
+  maximizeWindow: string
+  restoreWindow: string
 }
 
 export const projectTabsText: ProjectTabsText = {
@@ -67,6 +75,10 @@ export const projectTabsText: ProjectTabsText = {
   newProject: 'New project',
   newProjectKbd: '⌘N',
   all: 'All open projects',
+  closeWindow: 'Close the window',
+  minimizeWindow: 'Minimize the window',
+  maximizeWindow: 'Maximize the window',
+  restoreWindow: 'Restore the window',
 }
 
 export type ProjectTabsProps = RootProps<
@@ -88,8 +100,15 @@ export type ProjectTabsProps = RootProps<
     onNewProject?: () => void
     /** At the far end: what the screen under the tabs puts in the bar. */
     end?: ReactNode
-    /** space: leave room for the system's lights. drawn: draw stand-ins. none: no room. */
+    /** space: leave room for the system's lights. drawn: draw the window's own buttons. none: no room. */
     lights?: 'space' | 'drawn' | 'none'
+    /** The window's own buttons, where the system draws none (lights='drawn'). */
+    onCloseWindow?: () => void
+    onMinimize?: () => void
+    /** Maximizes, or restores what it maximized. */
+    onToggleMaximize?: () => void
+    /** The window is maximized: the third button restores it. */
+    maximized?: boolean
     text?: Partial<ProjectTabsText>
   }
 >
@@ -116,6 +135,10 @@ export function ProjectTabs({
   onNewProject,
   end,
   lights = 'space',
+  onCloseWindow,
+  onMinimize,
+  onToggleMaximize,
+  maximized = false,
   className,
   text,
   ...rest
@@ -158,12 +181,22 @@ export function ProjectTabs({
   }, [current, tabs.length])
   return (
     <header className={cx(s.strip, className)} data-drag="" {...rest}>
-      {lights !== 'none' && (
-        <span className={cx(s.lights, lights === 'drawn' && s.drawn)} aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
+      {lights === 'drawn' ? (
+        <WindowButtons
+          onClose={onCloseWindow}
+          onMinimize={onMinimize}
+          onToggleMaximize={onToggleMaximize}
+          maximized={maximized}
+          text={{ close: t.closeWindow, minimize: t.minimizeWindow, maximize: t.maximizeWindow, restore: t.restoreWindow }}
+        />
+      ) : (
+        lights !== 'none' && (
+          <span className={s.lights} aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        )
       )}
       <nav className={s.nav} aria-label={t.label}>
         <ul className={s.pinned}>

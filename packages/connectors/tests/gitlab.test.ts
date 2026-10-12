@@ -825,4 +825,87 @@ describe('GitLab as a tracker', () => {
       assert.strictEqual((yield* Effect.flip(host.comment({ ...found, ref: 'MER-1' }, 'x'))).reason, 'not_found')
     }),
   )
+  it.effect('lists the projects it can file issues in, last active first, leaving out those without issues', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        [
+          'GET',
+          `${API}/projects?membership=true&min_access_level=10&archived=false&with_issues_enabled=true&order_by=last_activity_at&per_page=100&simple=true&page=1`,
+          {
+            json: [
+              {
+                id: 34675721,
+                name: 'api',
+                path_with_namespace: 'meridian/payments/api',
+                web_url: 'https://gitlab.com/meridian/payments/api',
+              },
+              { id: 34675722, path_with_namespace: 'meridian/wiki', issues_enabled: false },
+              { id: 34675723, path_with_namespace: 'you/notes', issues_enabled: true },
+            ],
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* host.containers(), [
+        { id: 'meridian/payments/api', key: 'meridian/payments/api', name: 'meridian/payments/api' },
+        { id: 'you/notes', key: 'you/notes', name: 'you/notes' },
+      ])
+      assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('follows the projects page after page until a page comes short', () =>
+    Effect.gen(function* () {
+      const projects = (page: number, count: number) =>
+        Array.from({ length: count }, (_, at) => ({ id: page * 100 + at, path_with_namespace: `meridian/project-${page}-${at}` }))
+      const listed = `${API}/projects?membership=true&min_access_level=10&archived=false&with_issues_enabled=true&order_by=last_activity_at&per_page=100&simple=true&page=`
+      const { host, sent } = gitlab([
+        ['GET', `${listed}1`, { json: projects(1, 100) }],
+        ['GET', `${listed}2`, { json: projects(2, 1) }],
+      ])
+      const found = yield* host.containers()
+      assert.lengthOf(found, 101)
+      assert.strictEqual(found.at(-1)?.id, 'meridian/project-2-0')
+      assert.deepStrictEqual(
+        sent.map((request) => request.url),
+        [`${listed}1`, `${listed}2`],
+      )
+    }),
+  )
+
+  it.effect('files an issue in a project, its labels as one list, or none', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        ['POST', `${API}/projects/meridian%2Fpayments%2Fapi/issues`, { status: 201, json: issue({ assignees: [] }) }],
+      ])
+      const filed = yield* host.create('meridian/payments/api', {
+        title: 'Rate-limit refunds like charges',
+        body: 'Refunds skip the limiter.',
+        labels: ['payments', 'type::bug'],
+      })
+      assert.deepStrictEqual([filed.ref, filed.labels, filed.assignees], ['meridian/payments/api#231', ['payments', 'type::bug'], []])
+      assert.deepStrictEqual(sent[0]?.body, {
+        title: 'Rate-limit refunds like charges',
+        description: 'Refunds skip the limiter.',
+        labels: 'payments,type::bug',
+      })
+      yield* host.create('meridian/payments/api', { title: 'Rate-limit refunds like charges', body: '', labels: [] })
+      assert.deepStrictEqual(sent[1]?.body, { title: 'Rate-limit refunds like charges', description: '' })
+    }),
+  )
+
+  it.effect('says what it was given isn’t a project, without asking, and when GitLab doesn’t find one', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        ['POST', `${API}/projects/meridian%2Fgone/issues`, { status: 404, json: { message: '404 Project Not Found' } }],
+      ])
+      for (const container of ['meridian', '', 'meridian/api#12', 'meridian//api'])
+        assert.deepStrictEqual(
+          (yield* Effect.flip(host.create(container, { title: 't', body: '', labels: [] }))).message,
+          `Not a GitLab project: ${container}`,
+        )
+      assert.lengthOf(sent, 0)
+      const gone = yield* Effect.flip(host.create('meridian/gone', { title: 't', body: '', labels: [] }))
+      assert.deepStrictEqual([gone.reason, gone.message], ['not_found', '404 Project Not Found'])
+    }),
+  )
 })

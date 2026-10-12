@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
 import { Effect } from 'effect'
@@ -13,8 +13,28 @@ import { GitFailed } from './errors'
  * prompt: a command that would ask for a password fails instead. They run
  * with the repository's hooks off (docs/architecture/07): adding a worktree
  * would otherwise run its `post-checkout` hook, code from the repository, on
- * the person's machine.
+ * the person's machine. A picked folder's path is the document portal's FUSE
+ * mount inside a Flatpak, where git's own getcwd fails — `git -C <portal>
+ * status` answers "unable to get current working directory" — so exactly
+ * there the git directory and work tree are named outright, and the child is
+ * given the app home as a known-existing cwd. Inheriting the app's cwd is not
+ * safe: it may itself be a document-portal path whose grant has gone away.
+ * Everywhere else the process starts in the folder, as it always has.
  */
+
+/** Where a picked folder is inside a Flatpak: the document portal's FUSE mount, where a cwd makes getcwd fail. */
+const PORTAL = '/run/flatpak/doc'
+
+/**
+ * How a git command runs in `cwd`: for the portal's FUSE mount, its git
+ * directory and work tree are named, and the child starts in the app home,
+ * never inheriting a possibly stale portal cwd; everywhere else it starts in
+ * the folder itself.
+ */
+export const gitIn = (cwd: string, args: ReadonlyArray<string>): { readonly args: ReadonlyArray<string>; readonly cwd?: string } =>
+  cwd === PORTAL || cwd.startsWith(`${PORTAL}/`)
+    ? { args: ['--git-dir', join(cwd, '.git'), '--work-tree', cwd, ...args], cwd: homedir() }
+    : { args, cwd }
 
 export const git = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> => gitWithin(60_000, cwd, ...args)
 
@@ -28,10 +48,16 @@ export const gitOutcome = (
   ...args: ReadonlyArray<string>
 ): Effect.Effect<{ readonly code: number; readonly stdout: string }> =>
   Effect.callback<{ readonly code: number; readonly stdout: string }>((resume) => {
+    const at = gitIn(cwd, ['-c', 'core.hooksPath=/dev/null', ...args])
     execFile(
       'git',
-      ['-c', 'core.hooksPath=/dev/null', ...args],
-      { cwd, timeout: 60_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' } },
+      [...at.args],
+      {
+        ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
+        timeout: 60_000,
+        maxBuffer: 16 * 1024 * 1024,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+      },
       (error, stdout) =>
         resume(Effect.succeed({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 128, stdout: stdout.trim() })),
     )
@@ -51,10 +77,16 @@ const run = (
   input?: string,
 ): Effect.Effect<string, GitFailed> =>
   Effect.callback<string, GitFailed>((resume) => {
+    const at = gitIn(cwd, ['-c', 'core.hooksPath=/dev/null', ...args])
     const child = execFile(
       'git',
-      ['-c', 'core.hooksPath=/dev/null', ...args],
-      { cwd, timeout, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...env } },
+      [...at.args],
+      {
+        ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
+        timeout,
+        maxBuffer: 16 * 1024 * 1024,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...env },
+      },
       (error, stdout, stderr) =>
         resume(
           error === null

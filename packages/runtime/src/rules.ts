@@ -190,6 +190,12 @@ const credentialReason = (words: ReadonlyArray<string>): string | undefined => {
   return (words[index] ?? '').startsWith('credential') ? CREDENTIALS_REFUSED : undefined
 }
 
+/** The Flatpak grants the app a broad host bridge; agents must not invoke it directly. */
+const deviceBridgeReason = (words: ReadonlyArray<string>): string | undefined =>
+  (words[0] ?? '').split('/').at(-1) === 'flatpak-spawn'
+    ? 'Agents do not run commands on the device through Flatpak; Althar uses that bridge only for commands it prepares.'
+    : undefined
+
 /** What `gh` and `glab` may do: their read-only commands, by command and subcommand. */
 const HOST_LOOKS: Readonly<Record<string, ReadonlySet<string>>> = {
   pr: new Set(['view', 'list', 'diff', 'checks', 'status']),
@@ -323,20 +329,38 @@ const REDIRECTS = ['>>', '&>', '2>', '>', '<']
 
 /** Splits a command line into commands and words, as a POSIX shell would for plain words, quotes and escapes. */
 export const parseCommandLine = (text: string): Parsed => {
+  const { commands, opaque } = splitCommandLine(text)
+  return expandShells(commands, opaque)
+}
+
+/** A command line's commands as written, with the separator that ends each ('' for the last). */
+const splitCommandLine = (text: string) => {
   const commands: Array<Array<string>> = []
+  const ends: Array<string> = []
+  /** For each command, which of its words are redirect operators, not arguments that look like them (`echo '>'`). */
+  const operators: Array<ReadonlySet<number>> = []
   let words: Array<string> = []
+  let operating = new Set<number>()
   let word = ''
   let inWord = false
+  /** The word in progress has a quoted or escaped part. */
+  let literal = false
   let opaque = false
   const endWord = () => {
     if (inWord) words.push(word)
     word = ''
     inWord = false
+    literal = false
   }
-  const endCommand = () => {
+  const endCommand = (separator = '') => {
     endWord()
-    if (words.length > 0) commands.push(words)
+    if (words.length > 0) {
+      commands.push(words)
+      ends.push(separator)
+      operators.push(operating)
+    }
     words = []
+    operating = new Set()
   }
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index] ?? ''
@@ -346,11 +370,13 @@ export const parseCommandLine = (text: string): Parsed => {
       const end = close === -1 ? text.length : close
       word += text.slice(index + 1, end)
       inWord = true
+      literal = true
       index = end
       continue
     }
     if (char === '"') {
       inWord = true
+      literal = true
       for (index += 1; index < text.length && text[index] !== '"'; index += 1) {
         const inner = text[index] ?? ''
         if (inner === '\\' && index + 1 < text.length && '"\\$`'.includes(text[index + 1] ?? '')) {
@@ -366,24 +392,32 @@ export const parseCommandLine = (text: string): Parsed => {
     if (char === '\\') {
       word += text[index + 1] ?? ''
       inWord = true
+      literal = true
       index += 1
       continue
     }
     if (char === '`' || (char === '$' && text[index + 1] === '(')) opaque = true
     const separator = SEPARATORS.find((candidate) => rest.startsWith(candidate))
     if (separator !== undefined && !(separator === '&' && rest.startsWith('&>'))) {
-      endCommand()
+      endCommand(separator)
       index += separator.length - 1
       continue
     }
     const redirect = REDIRECTS.find((candidate) => rest.startsWith(candidate))
     if (redirect !== undefined) {
+      // `1>file`: the descriptor belongs to the redirect, not to the arguments.
+      if (inWord && !literal && /^\d+$/.test(word) && ['>', '>>', '2>'].includes(redirect)) {
+        word = ''
+        inWord = false
+      }
       endWord()
+      operating.add(words.length)
       words.push(redirect)
       index += redirect.length - 1
       // `2>&1`, `>&2`: a redirect to another stream, not to a file.
       const stream = /^&[0-9-]+/.exec(text.slice(index + 1))
       if (stream !== null) {
+        operating.add(words.length)
         words.push(stream[0])
         index += stream[0].length
       }
@@ -397,7 +431,12 @@ export const parseCommandLine = (text: string): Parsed => {
     inWord = true
   }
   endCommand()
-  // A script handed to a shell is read as commands of its own.
+  return { commands, ends, operators, opaque }
+}
+
+/** Commands as the shell runs them: a script handed to a shell is read as commands of its own. */
+const expandShells = (commands: ReadonlyArray<ReadonlyArray<string>>, opaqueBefore: boolean): Parsed => {
+  let opaque = opaqueBefore
   const expanded = commands.flatMap((command): Array<ReadonlyArray<string>> => {
     const inner = unwrap(command)
     const [program, ...args] = inner
@@ -454,6 +493,59 @@ export const programOf = (text: string): string | undefined => {
     return next !== undefined && /^[a-z][a-z-]{0,22}[a-z0-9]?$/.test(next) ? `${name} ${next}` : name
   }
   return undefined
+}
+
+const OUTPUT_REDIRECTS = ['>>', '&>', '2>', '>']
+/** Programs that only trim or filter what a command printed, when it pipes into them. */
+const PLUMBING = ['tail', 'head', 'grep']
+const KEPT_BETWEEN: Readonly<Record<string, string>> = { '&&': ' && ', '||': ' || ', ';': '; ', '\n': '; ', '|': ' | ', '&': ' & ' }
+
+const sayWord = (word: string) => (word === '' ? "''" : /^[^\s'"\\;&|<>()`]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`)
+
+/** A command's words without where its output goes: `2>&1`, `> out.log`. */
+const withoutRedirects = (words: ReadonlyArray<string>, operators: ReadonlySet<number>): ReadonlyArray<string> =>
+  words.flatMap((word, index) => {
+    if (operators.has(index) && (OUTPUT_REDIRECTS.includes(word) || word.startsWith('&'))) return []
+    // The word a redirect writes to.
+    return operators.has(index - 1) && OUTPUT_REDIRECTS.includes(words[index - 1] ?? '') ? [] : [word]
+  })
+
+/**
+ * A command line as the person reads it at a glance: what it runs, without
+ * the `cd <dir> &&` an agent puts first, variable assignments, `timeout N`
+ * and the like, or the plumbing after it (`2>&1`, `| tail -20`). The line
+ * itself is never changed; this is only what to show of it. A line that only
+ * changes folder, or that has parts the shell works out when it runs, is
+ * shown as written.
+ */
+export const shortCommand = (text: string): string => {
+  const whole = text.trim()
+  const { commands, ends, operators, opaque } = splitCommandLine(whole)
+  if (opaque || whole.includes('<<')) return whole
+  const parts = commands.map((words, index) => ({ words, end: ends[index] ?? '', operators: operators[index] ?? new Set<number>() }))
+  // Leading `cd dir &&`, however many.
+  let first = 0
+  while (first < parts.length - 1) {
+    const part = parts[first]
+    if (part === undefined || !['cd', 'pushd'].includes(part.words[0] ?? '') || !['&&', ';', '\n'].includes(part.end)) break
+    first += 1
+  }
+  let kept = parts.slice(first)
+  // Trailing `| tail -20`, `| grep x`, only where something comes before the pipe.
+  while (kept.length > 1 && kept.at(-2)?.end === '|' && PLUMBING.includes(unwrap(kept.at(-1)?.words ?? [])[0] ?? ''))
+    kept = kept.slice(0, -1)
+  const said = kept
+    .map(({ words, end, operators }, index) => {
+      // Words dropped from the front by unwrap shift where the operators are.
+      const unwrapped = unwrap(words)
+      const dropped = words.length - unwrapped.length
+      const shown = withoutRedirects(unwrapped, new Set([...operators].map((at) => at - dropped)))
+      return shown.length === 0 ? '' : `${shown.map(sayWord).join(' ')}${index === kept.length - 1 ? '' : (KEPT_BETWEEN[end] ?? '; ')}`
+    })
+    .join('')
+    .trim()
+  // A line that is only a `cd`, or only plumbing, has nothing to shorten to.
+  return said === '' ? whole : said
 }
 
 // ---- Places ----------------------------------------------------------------
@@ -958,7 +1050,7 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   if (request.kind === 'execute' || request.kind === 'other') {
     // A code host is reached through Althar: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
     const refused = parseCommandLine(commandOf(request))
-      .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)))
+      .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
       .find((reason) => reason !== undefined)
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
     if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
@@ -1596,7 +1688,7 @@ export const decideReader = (request: PermissionRequest): ReaderVerdict => {
       if (command === undefined || command === '') return deny("Althar can't tell what this does, and this role only reads.")
       const reason =
         parseCommandLine(command)
-          .commands.map((words) => credentialReason(unwrap(words)))
+          .commands.map((words) => credentialReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
           .find((found) => found !== undefined) ?? readerCommandReason(command)
       return reason === undefined ? ALLOW : deny(reason)
     }

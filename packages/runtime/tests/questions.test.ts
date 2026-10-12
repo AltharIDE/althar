@@ -20,7 +20,7 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { transcript } from '../src/threads'
-import { items, repository, runtime, task, turns, until } from './support'
+import { items, notices, repository, runtime, task, turns, until } from './support'
 
 /*
  * Questions an agent asks the person (DEV-13): one waits in the thread and
@@ -249,6 +249,8 @@ describe('questions an agent asks the person', () => {
         const [attempt] = yield* sql<{ state: string }>`
           SELECT a.state FROM node_attempts a JOIN nodes n ON n.id = a.node_id WHERE n.node_key = 'implement'`
         assert.strictEqual(attempt?.state, 'waiting_attention')
+        // Not carried on by the restart either: the thread says nothing of it.
+        assert.isFalse((yield* notices(started.threadId)).some((notice) => /restarted/.test(notice.title ?? '')))
 
         const question = yield* openQuestion(started.threadId)
         const told = yield* answer(question.id, { question_0: { values: ['Postgres'] } })

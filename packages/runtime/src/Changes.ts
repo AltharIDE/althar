@@ -1002,13 +1002,15 @@ export class Changes extends Context.Service<
           yield* settle
           yield* sql`UPDATE repository_changes SET head_commit = ${head}, updated_at = ${yield* timestamp}, revision = revision + 1
             WHERE pull_request_url = ${snapshot.url} AND project_id = ${link.projectId}`
+          // The pull request's head is what was pushed, for the card to count from; the host's next look has the last word.
+          yield* saveSnapshot(link, { ...snapshot, headSha: head })
           // What the lead asked the person to push that went up: its request says so, and the lead hears it.
           yield* pushedAsked(link, snapshot.url, workspace.path, [seen, head]).pipe(
             Effect.catchCause((cause) => Effect.logWarning('Could not tell the lead what was pushed', cause)),
           )
           yield* news(taskId)
           wakeNow(taskId)
-          return { change: yield* summaryOf(link) }
+          return { change: yield* summaryOf({ ...link, snapshot: JSON.stringify({ ...snapshot, headSha: head }) }) }
         })
 
       const markReady = (taskId: string, url?: string) =>

@@ -31,6 +31,14 @@ const lastLine = (output: string): string =>
     .filter((line) => line !== '')
     .at(-1) ?? ''
 
+/**
+ * What to do when the sandbox cannot reach the device (a Flatpak's host):
+ * the permission, and how it is given. The same sentence the Codex bridge
+ * prints, so it reaches the person either way.
+ */
+const hostDenied =
+  'Althar can’t reach this computer from inside its Flatpak sandbox. Give the Flatpak permission to talk to org.freedesktop.Flatpak (flatpak override --user --talk-name=org.freedesktop.Flatpak dev.althar.app), then try again.'
+
 /** A sentence, with its full stop. */
 const sentence = (words: string): string => (/[.!?]$/.test(words) ? words : `${words}.`)
 
@@ -39,12 +47,17 @@ export const agentSaid = (error: unknown): string | undefined => {
   switch (tagOf(error)) {
     case 'AgentStartFailed': {
       const command = text(error, 'command')
-      return /ENOENT/.test(text(error, 'reason'))
+      const reason = text(error, 'reason')
+      // The person's own command, where the sandbox cannot reach the device: say what to put right, never "isn't installed".
+      if (command === 'flatpak-spawn' || /flatpak|org\.freedesktop\.Flatpak/i.test(reason)) return hostDenied
+      return /ENOENT/.test(reason)
         ? `${command} isn't installed, or isn't on this Mac's PATH.`
-        : sentence(`${command} wouldn't start: ${text(error, 'reason')}`)
+        : sentence(`${command} wouldn't start: ${reason}`)
     }
     case 'AgentExited': {
       const said = lastLine(text(error, 'stderr'))
+      // A bridge that started and then could not take the command out to the device says so; keep its sentence, not "the agent stopped".
+      if (/flatpak-spawn|org\.freedesktop\.Flatpak/i.test(said)) return hostDenied
       return said === '' ? 'The agent stopped.' : sentence(`The agent stopped: ${said}`)
     }
     case 'AgentRequestFailed':
@@ -198,10 +211,19 @@ export const words = (
         return `Althar isn't connected to ${productOf(text(error, 'product'))}. Connect it, then try again.`
       case 'NotAnIssue':
         return `That link is to a ${text(error, 'what')}, not an issue.`
+      case 'DraftClosed':
+        return draftClosed[text(error, 'state')] ?? 'That issue draft can’t change now.'
+      case 'DraftUntitled':
+        return 'An issue needs a title.'
       case 'OutwardUncertain':
         return "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again."
       case 'ConnectorFailed':
         return hostSaid(productOf(text(error, 'product')), text(error, 'reason'), text(error, 'message'))
+      // The keychain's own words, where main marked its refusal; anything else of its own — a file that won't write, a bad name, an empty reason — gets the generic sentence.
+      case 'SecretsUnavailable': {
+        const reason = text(error, 'reason')
+        return fieldOf(error, 'keyring') === true && reason !== '' ? reason : "Althar's runtime couldn't do that. Its log has the details."
+      }
       case 'CliSignedOut':
         return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this Mac.`
       case 'CliElsewhere':
@@ -272,9 +294,18 @@ const taskRefused = {
   abandoned: 'The task is abandoned. Reopen it to carry on.',
 } as const satisfies Record<TaskRefused['why'], string>
 
+/** Why an issue draft can't change, by where it stands. */
+const draftClosed: Readonly<Record<string, string>> = {
+  filed: 'That issue is filed already. Change it on its tracker.',
+  discarded: 'That issue draft was discarded.',
+  filing: 'That issue is being filed now.',
+}
+
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
   'LaunchRefused',
+  'DraftClosed',
+  'DraftUntitled',
   'ChangedSinceSeen',
   'CantMerge',
   'NoChangeToOpen',

@@ -3,13 +3,18 @@ import { Cause, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 import { camelToSnake, snakeToCamel } from 'effect/String'
 
-import { loaderFor, type Migration, migrations } from './migrations'
+import { BackupFailed, backUpBeforeMigrating, latestBackup, reasonOf } from './backups'
+import { loaderFor, type Migration, MIGRATIONS_TABLE, migrations } from './migrations'
+
+export { BackupFailed }
 
 export interface DatabaseOptions {
   /** A file path, or `:memory:` for tests. */
   readonly filename: string
   /** The migrations to run. Tests pass extra ones; the runtime never does. */
   readonly migrations?: ReadonlyArray<Migration>
+  /** Where the store copies itself before it migrates (the profile's `backups`); without it, no copy is made. */
+  readonly backups?: string
 }
 
 /** Another runtime has the database open. One runtime at a time writes a profile (docs/architecture/02). */
@@ -20,6 +25,20 @@ export class DatabaseInUse extends Schema.TaggedError<DatabaseInUse>()('Database
 /** Migrations left rows pointing at nothing. The database is not opened. */
 export class ForeignKeyViolations extends Schema.TaggedError<ForeignKeyViolations>()('ForeignKeyViolations', {
   tables: Schema.Array(Schema.String),
+  /** The newest copy from before migrations ran, where there is one. */
+  backup: Schema.NullOr(Schema.String),
+}) {}
+
+/**
+ * A migration didn't finish. The migrator runs every pending migration in one
+ * transaction, so none of them took effect, and the database is not opened.
+ */
+export class MigrationFailed extends Schema.TaggedError<MigrationFailed>()('MigrationFailed', {
+  filename: Schema.String,
+  /** The copy made before migrating; null where none was made, as for a new store. */
+  backup: Schema.NullOr(Schema.String),
+  /** What went wrong, as the migrator and SQLite said it. */
+  reason: Schema.String,
 }) {}
 
 /*
@@ -53,16 +72,38 @@ const beforeMigrations = (filename: string) =>
     }),
   )
 
-const afterMigrations = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient
-    const violations = yield* sql<{ table: string }>`PRAGMA foreign_key_check`
-    if (violations.length > 0) {
-      return yield* new ForeignKeyViolations({ tables: [...new Set(violations.map((violation) => violation.table))].toSorted() })
-    }
-    yield* sql`PRAGMA foreign_keys = ON`
-  }),
-)
+/*
+ * Before any pending migration runs, the store is copied into the profile's
+ * backups (backups.ts); a copy that can't be made stops it there, unmigrated.
+ * A migration that fails, or migrations that leave rows pointing at nothing,
+ * keep the database closed and say where the copy is, so whoever opened it
+ * never goes on with a store that isn't up to date.
+ */
+const migrate = (options: DatabaseOptions) =>
+  Layer.effectDiscard(
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const list = options.migrations ?? migrations
+      const backups = options.filename === ':memory:' ? undefined : options.backups
+      const copy = backups === undefined ? null : yield* backUpBeforeMigrating(backups, list)
+      yield* SqliteMigrator.run({ loader: loaderFor(list), table: MIGRATIONS_TABLE }).pipe(
+        Effect.catchCause((cause): Effect.Effect<never, MigrationFailed> =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.interrupt
+            : Effect.fail(new MigrationFailed({ filename: options.filename, backup: copy, reason: reasonOf(Cause.squash(cause)) })),
+        ),
+      )
+      const violations = yield* sql<{ table: string }>`PRAGMA foreign_key_check`
+      if (violations.length > 0) {
+        return yield* new ForeignKeyViolations({
+          tables: [...new Set(violations.map((violation) => violation.table))].toSorted(),
+          // On a later launch nothing is pending, so nothing is copied: the copy from before is the newest one.
+          backup: copy ?? (backups === undefined ? null : latestBackup(backups)),
+        })
+      }
+      yield* sql`PRAGMA foreign_keys = ON`
+    }),
+  )
 
 /**
  * The profile's database: one connection, which the runtime alone writes
@@ -74,10 +115,9 @@ export const layer = (
   options: DatabaseOptions,
 ): Layer.Layer<
   SqlClient.SqlClient | SqliteClient.SqliteClient,
-  SqliteMigrator.MigrationError | SqlError.SqlError | ForeignKeyViolations | DatabaseInUse
+  MigrationFailed | BackupFailed | SqlError.SqlError | ForeignKeyViolations | DatabaseInUse
 > =>
-  afterMigrations.pipe(
-    Layer.provideMerge(SqliteMigrator.layer({ loader: loaderFor(options.migrations ?? migrations), table: 'schema_migrations' })),
+  migrate(options).pipe(
     Layer.provideMerge(beforeMigrations(options.filename)),
     Layer.provideMerge(
       SqliteClient.layer({

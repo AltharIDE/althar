@@ -12,6 +12,11 @@ import s from './Nav.module.css'
  * download. It draws in to the mark and the download as you read, and opens
  * out again when pointed at or tabbed into. On a phone, Menu drops the
  * pages under it.
+ *
+ * Nothing in it changes size as it draws in, so it never lays itself out
+ * again: it is always as wide as it opens, its black is two halves that
+ * slide in from either end and overlap in the middle, and the mark and the
+ * way in ride in with them. Only transforms move, on the compositor.
  */
 
 const PAGES = [
@@ -71,6 +76,8 @@ export function Nav() {
           if (!e.currentTarget.contains(e.relatedTarget)) setFocused(false)
         }}
       >
+        <span className={cx(s.half, s.halfLeft)} aria-hidden="true" />
+        <span className={cx(s.half, s.halfRight)} aria-hidden="true" />
         <div className={s.islandBar}>
           <a className={s.islandMark} href="/" aria-label="Althar">
             <Logo size={18} />
