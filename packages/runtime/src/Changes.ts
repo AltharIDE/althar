@@ -11,7 +11,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import { coAuthorOn, creditBranch, type Memory, recallMade, rememberMade, withoutAgentCredit } from './credit'
 import { envelope } from './envelope'
-import { evidenceOf, unverifiedIn } from './evidence'
+import { evidenceOf, evidencePaths, unverifiedIn } from './evidence'
 import { CantMerge, ChangedSinceSeen, type GitFailed, NotFound, PushRefused } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
 import { forkOf } from './forks'
@@ -574,11 +574,8 @@ export class Changes extends Context.Service<
           // The repository as its host names it, not as the remote spells it: Bitbucket Data Center's has `scm/` in front.
           const path = repository.path
           // Althar pushes what the lead committed, never what it left lying in the worktree; a screenshot it handed as evidence isn't left.
-          const pictures = yield* sql<{ path: string }>`
-            SELECT DISTINCT json_extract(e.value, '$.path') AS path
-            FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind = 'task', json_each(i.content, '$.evidence') e
-            WHERE t.task_id = ${input.taskId} AND i.kind = 'step_result' AND json_extract(e.value, '$.path') IS NOT NULL`
-          const left = (yield* uncommittedFiles(task.path)).filter((file) => !pictures.some((picture) => picture.path === file))
+          const pictures = yield* evidencePaths(input.taskId)
+          const left = (yield* uncommittedFiles(task.path)).filter((file) => !pictures.has(file))
           const base = task.baseCommit ?? task.baseRef ?? own.defaultBranch
           if ((yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing', left } as const
           const [sent] = yield* sql<{ head: string | null }>`

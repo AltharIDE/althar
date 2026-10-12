@@ -36,7 +36,7 @@ import { questionTitle } from './Questions'
 import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
-import { evidenceOf, unverifiedIn } from './evidence'
+import { evidenceOf, evidencePaths, unverifiedIn } from './evidence'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { documentText, outputText } from './reading'
 import type { Artifacts } from './Artifacts'
@@ -855,6 +855,9 @@ export class Queries extends Context.Service<
                 SELECT count(*) || ':' || coalesce(sum(revision), 0) AS calls FROM thread_items
                 WHERE thread_id = (SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task') AND kind = 'tool_call'`
             : []
+          // A screenshot the lead handed as evidence, left uncommitted, isn't part of what it changed.
+          const pictures = wants.changed ? yield* evidencePaths(taskId) : new Set<string>()
+          const shown = (file: ChangedFile) => !(file.uncommitted && file.status === 'added' && pictures.has(file.path))
           const each = yield* Effect.forEach(
             worktrees,
             (worktree) =>
@@ -916,12 +919,12 @@ export class Queries extends Context.Service<
           return {
             files: each.flatMap(({ worktree, changed }) =>
               worktrees.length > 1
-                ? changed.files.map((file) => ({
+                ? changed.files.filter(shown).map((file) => ({
                     ...file,
                     path: `${worktree.slug}/${file.path}`,
                     from: file.from === null ? null : `${worktree.slug}/${file.from}`,
                   }))
-                : changed.files,
+                : changed.files.filter(shown),
             ),
             commits: each.reduce((sum, { changed }) => sum + changed.commits, 0),
             here: each.flatMap(({ here }) => here),

@@ -3,6 +3,7 @@ import { basename, isAbsolute, relative, resolve, sep } from 'node:path'
 
 import type { Evidence } from '@althar/contracts'
 import { Effect, Schema } from 'effect'
+import { SqlClient } from 'effect/sql'
 
 import { inside, keepPicture, type HandedPlace, type KeptPicture, PICTURE_KEPT, picturesOf } from './handed'
 import { ToolRefused } from './ToolServer'
@@ -135,6 +136,21 @@ export const readEvidence = (given: ReadonlyArray<EvidenceGiven>, worktrees: Rea
 /** The files evidence names, by worktree: left out of what must be committed. */
 export const evidenceFiles = (read: ReadonlyArray<{ readonly found: Found | null }>) =>
   read.flatMap((piece) => (piece.found === null ? [] : [{ worktree: piece.found.worktree, file: piece.found.file }]))
+
+/**
+ * The pictures a task's lead handed as evidence, by their paths in their
+ * worktrees: not committed, they are left out of what the task changed and
+ * of what it left uncommitted.
+ */
+export const evidencePaths = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ path: string }>`
+      SELECT DISTINCT json_extract(e.value, '$.path') AS path
+      FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind = 'task', json_each(i.content, '$.evidence') e
+      WHERE t.task_id = ${taskId} AND i.kind = 'step_result' AND json_extract(e.value, '$.path') IS NOT NULL`
+    return new Set(rows.map((row) => row.path))
+  })
 
 /** Keeps evidence read: its pictures in the artifact store, for the item they belong to; its texts to their ends. */
 export const keepEvidence = (place: HandedPlace, read: ReadonlyArray<{ readonly given: EvidenceGiven; readonly found: Found | null }>) =>

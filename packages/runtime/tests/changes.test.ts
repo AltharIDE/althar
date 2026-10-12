@@ -570,7 +570,11 @@ describe('a task that ends in a pull request', () => {
         dropped: 0,
       })
       assert.deepStrictEqual(implement.content.unverified, ['Not tried against the real payment provider: no sandbox account'])
-      // Its screenshot needn't be committed, and isn't pushed.
+      // Its screenshot needn't be committed, isn't pushed, and isn't part of what the task changed.
+      assert.deepStrictEqual(
+        thread.task.files.map((file) => file.path),
+        ['change.txt'],
+      )
       const published = thread.items.find((item) => item.kind === 'step_result' && item.content.step === 'publish')
       assert.strictEqual(published?.kind === 'step_result' ? published.content.summary : null, 'Opened draft pull request #1.')
       const sql = yield* SqlClient.SqlClient
