@@ -65,6 +65,8 @@ function Example(
     initial?: string
     recording?: boolean
     streaming?: boolean
+    /** The words the transcriber hears and writes on stopping (default: one sentence). */
+    transcript?: readonly string[]
     waiting?: (string | { text: string; attached: string })[]
     at?: number
     inputs?: readonly DictationInput[]
@@ -78,6 +80,7 @@ function Example(
     initial = '',
     recording = false,
     streaming = false,
+    transcript = SAID,
     waiting = [],
     at,
     inputs = INPUTS,
@@ -104,7 +107,7 @@ function Example(
     }
   }, [running])
   /* a streaming transcriber: a word every few ticks, until the sentence is out */
-  const heard = streaming ? SAID.slice(0, Math.min(SAID.length, 3 + Math.floor(tick / 4))).join(' ') : undefined
+  const heard = streaming ? transcript.slice(0, Math.min(transcript.length, 3 + Math.floor(tick / 4))).join(' ') : undefined
   return (
     <div style={{ maxWidth: 700, paddingTop: 60 }}>
       <Composer
@@ -151,7 +154,7 @@ function Example(
           onStart: () => setSeconds(0),
           onStop: () => {
             setSeconds(null)
-            setValue((v) => `${v ? `${v.trimEnd()} ` : ''}${SAID.join(' ')}`)
+            setValue((v) => `${v ? `${v.trimEnd()} ` : ''}${transcript.join(' ')}`)
           },
         }}
         queued={queue}
@@ -288,13 +291,14 @@ export const DictatingWordByWord: Story = { render: () => <Example recording str
 export const EnterEndsDictationAtItsSize: Story = {
   render: () => {
     const said = SAID.join(' ')
-    const long = Array.from({ length: 12 }, () => said).join(' ')
+    const longWords = Array.from({ length: 12 }, () => SAID).flat()
+    const long = longWords.join(' ')
     return (
       <>
         <div data-testid="dictated-short"><Example recording streaming /></div>
         <div data-testid="typed-short"><Example initial={said} /></div>
-        <div data-testid="dictated-long"><Example recording streaming initial={long} /></div>
-        <div data-testid="typed-long"><Example initial={`${long} ${said}`} /></div>
+        <div data-testid="dictated-long"><Example recording streaming transcript={longWords} /></div>
+        <div data-testid="typed-long"><Example initial={long} /></div>
       </>
     )
   },
@@ -304,6 +308,11 @@ export const EnterEndsDictationAtItsSize: Story = {
     const height = (id: string) => box(id).getBoundingClientRect().height
     for (const kind of ['short', 'long']) {
       const field = box(`dictated-${kind}`)
+      /* the long transcript is still arriving: stop with its faint words several rows tall over the field */
+      if (kind === 'long')
+        await waitFor(() => expect((field.previousElementSibling as HTMLElement).getBoundingClientRect().height).toBeGreaterThan(80), {
+          timeout: 10000,
+        })
       await userEvent.type(field, '{Enter}')
       await expect(within(c.getByTestId(`dictated-${kind}`)).queryByRole('button', { name: /^Stop dictating/ })).not.toBeInTheDocument()
       /* stopped, not sent: the words are in the field, and it is as tall as the same text typed */
