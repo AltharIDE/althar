@@ -21,7 +21,7 @@ describe('page meta', () => {
   const pages = Object.values(PAGE_META)
 
   it('has a page for the root and each route, keyed by its own path', () => {
-    expect(Object.keys(PAGE_META).sort()).toEqual(['/', '/docs', '/enterprise', '/shifts', '/thesis', '/wallpaper'])
+    expect(Object.keys(PAGE_META).sort()).toEqual(['/', '/docs', '/enterprise', '/shifts', '/thesis', '/train', '/wallpaper'])
     for (const [path, meta] of Object.entries(PAGE_META)) expect(meta.path).toBe(path)
   })
 
@@ -46,8 +46,8 @@ describe('page meta', () => {
     }
   })
 
-  it('keeps the docs placeholder and the enterprise page out of search', () => {
-    expect(pages.filter((p) => !p.index).map((p) => p.path)).toEqual(['/docs', '/enterprise'])
+  it('keeps the docs placeholder, the enterprise page and the train concept out of search', () => {
+    expect(pages.filter((p) => !p.index).map((p) => p.path)).toEqual(['/docs', '/enterprise', '/train'])
   })
 
   it('finds a page by path, ignoring a trailing slash; any other path is the page that isn’t there', () => {

@@ -72,6 +72,15 @@ export const PAGE_META = {
     image: '/og/home.png',
     index: false,
   },
+  /** A concept for the developer page's first screen, seen from a train: linked from nowhere, and kept out of search. */
+  '/train': {
+    path: '/train',
+    name: 'Althar, by train',
+    title: 'Althar · building software has never felt so fast',
+    description: 'A concept for Althar’s first screen: the view from a train that pulls away slowly and gathers speed.',
+    image: '/og/home.png',
+    index: false,
+  },
 } as const satisfies Record<string, PageMeta>
 
 export type PagePath = keyof typeof PAGE_META

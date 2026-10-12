@@ -1,0 +1,133 @@
+/* The first screen as a carriage: the scene on a canvas behind, the words
+   in the middle window over the sky, the lead on the wall below it. */
+
+.hero {
+  --wall: #17120f;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  height: clamp(680px, 100svh, 1060px);
+  background: var(--wall);
+  color: #fff;
+}
+
+.scene { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; }
+
+/* Film's grain over the whole, stepping as film does, and the corners falling dark as a lens has them. */
+.grain, .vignette { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.grain { inset: -64px; background-size: 128px 128px; opacity: 0.9; mix-blend-mode: overlay; }
+@media (prefers-reduced-motion: no-preference) { .grain { animation: grain 0.5s steps(6) infinite; } }
+@keyframes grain {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-37px, 22px); }
+  40% { transform: translate(18px, -41px); }
+  60% { transform: translate(-12px, 9px); }
+  80% { transform: translate(41px, 30px); }
+  100% { transform: translate(0, 0); }
+}
+.vignette { background: radial-gradient(ellipse 85% 80% at 50% 45%, transparent 55%, rgba(0, 0, 0, 0.42) 100%); }
+
+/* The middle window. The scene paints its frame and what's through it around this box, so this is where it stands. */
+.window {
+  position: absolute;
+  top: 92px;
+  bottom: clamp(132px, 17svh, 196px);
+  left: 50%;
+  width: min(68vw, 1180px, calc((100svh - 260px) * 1.75));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-radius: clamp(18px, 6vw, 74px);
+  /* Where the horizon stands, as a share of the window's height down from its top. */
+  --horizon: 0.64;
+}
+/* Until the scene is drawn, and without scripts, a plain sky stands in the window. */
+.hero:not([data-drawn]) .window { background: linear-gradient(#2246c9, #3d6ae0 30%, #77a0ef 62%, #bcd2f6 78%, #6f8f45 80%, #3c5a2a); }
+.scene { opacity: 0; transition: opacity 500ms ease; }
+.hero[data-drawn] .scene { opacity: 1; }
+
+/* The words wait for the train, as the launch has them. Crawlers read them in the HTML all the same. */
+@media (scripting: enabled) { .hero:not([data-ready]) .head, .hero:not([data-ready]) .foot { visibility: hidden; } }
+
+.head {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  padding: clamp(28px, 7%, 64px) 32px 0;
+  text-align: center;
+}
+/* A little shade on the glass behind the words, so they read over the brightest sky. */
+.head::before {
+  content: '';
+  position: absolute;
+  inset: -10% 4% -14%;
+  z-index: -1;
+  background: radial-gradient(ellipse 52% 48% at 50% 44%, rgba(12, 28, 90, 0.36), rgba(12, 28, 90, 0) 100%);
+  pointer-events: none;
+}
+
+.kicker {
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  font: 500 12.5px var(--font);
+  letter-spacing: 0.01em;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.h1 {
+  margin-top: clamp(14px, 2.2vh, 22px);
+  font-family: 'Inter Display', var(--display);
+  font-size: clamp(40px, 5.5vw, 92px);
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  text-shadow: 0 2px 28px rgba(8, 22, 80, 0.4);
+}
+.line { display: block; }
+.word { display: inline-block; }
+/* The last word comes with the speed: heavy, leaning into it. */
+.fast { display: inline-block; font-weight: 720; font-style: italic; letter-spacing: -0.055em; padding-right: 0.04em; }
+
+.short { display: none; }
+.ctas { margin-top: clamp(20px, 3.4vh, 30px); }
+.ctas > div { justify-content: center; }
+/* The outlined way in gets a pane of dark glass, so it reads over snow as over sky. */
+.ctas a:nth-child(2) { background: rgba(10, 24, 70, 0.34); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+
+/* On the wall under the window, between the passengers. */
+.foot {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: min(520px, 46vw);
+  height: clamp(132px, 17svh, 196px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+.lead { font-size: 15.5px; line-height: 1.5; letter-spacing: -0.005em; color: rgba(255, 244, 232, 0.86); }
+.fine { margin-top: 10px; font-size: 12.5px; color: rgba(255, 244, 232, 0.6); }
+
+@media (max-width: 760px) {
+  .window { top: 72px; bottom: 96px; width: calc(100vw - 24px); border-radius: 30px; --horizon: 0.76; }
+  .head { padding: 34px 18px 0; }
+  .h1 { font-size: clamp(38px, 11vw, 54px); line-height: 1.02; text-wrap: balance; }
+  /* On glass, as the kicker is, so it reads whatever drifts behind it. */
+  .short {
+    display: block; max-width: 320px; margin-top: 18px; padding: 10px 14px; border-radius: 14px;
+    background: rgba(10, 24, 70, 0.36); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+    font-size: 15.5px; line-height: 1.45; color: #fff;
+  }
+  .ctas { margin-top: 20px; }
+  .foot { display: none; }
+}

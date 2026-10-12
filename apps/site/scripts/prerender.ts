@@ -30,7 +30,11 @@ const entry = (await import(pathToFileURL(resolve(ssr, 'entry-server.js')).href)
  * up front, its prerendered words would show unstyled until the script
  * fetched them. Read from the client build's manifest.
  */
-const LAZY: Partial<Record<PagePath, string>> = { '/thesis': 'src/thesis/Thesis.tsx', '/enterprise': 'src/enterprise/Home.tsx' }
+const LAZY: Partial<Record<PagePath, string>> = {
+  '/thesis': 'src/thesis/Thesis.tsx',
+  '/enterprise': 'src/enterprise/Home.tsx',
+  '/train': 'src/train/Train.tsx',
+}
 type Manifest = Record<string, { file: string; css?: string[]; imports?: string[] }>
 const manifest = JSON.parse(await readFile(resolve(dist, '.vite/manifest.json'), 'utf8')) as Manifest
 const shell = await readFile(resolve(dist, 'index.html'), 'utf8')
