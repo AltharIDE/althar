@@ -94,15 +94,15 @@ provisional.
 | Tool | What it does | Kind |
 |---|---|---|
 | `project_overview` | Rules, repositories, notes | Read |
-| `list_tasks`, `read_task` | Status, plan, steps, lead, change | Read |
+| `list_tasks`, `read_task` | Status, plan, steps, lead, and how its pull request stands: draft or ready, checks, unpushed commits, merged or closed, read from the same data as the task's card (never asked of the host; said as last seen where it may be stale or unknown). A task whose pull requests are all merged reads as finished; a closed one is said as last seen, since nothing watches it for reopening | Read |
 | `read_thread` | Earlier turns of a task's thread or its own, by range | Read |
 | `read_change` | A task's diff and checks | Read |
 | `draft_task` | Creates a task in draft, with its repositories and intent: a title of a few words (at most 60 characters), and what the person last said to it kept as what they asked for, which the task's thread opens with and its lead reads | Command |
 | `read_issue`, `find_issues` | An issue on a connected tracker or in the project's repository, and the person's open ones | Read |
 | `draft_issue` | Drafts an issue on a connected tracker, as a card the person files, changes or discards; nothing is filed on its word ([06](06-integrations-and-skills.md#drafting-issues)) | Command |
-| `list_models` | The models it can use now, by maker, with their scores | Query |
-| `propose_plan` | Steps, a model per step, optional steps | Command |
-| `start_task` | Drafts a mini task and starts it at once: one lead, no review, nothing outside the project when it is done | Command |
+| `list_models` | The models it can use now, by maker, with their scores and each one's efforts: the ids a step takes, the one it starts at by itself, and the person's default where they set one | Query |
+| `propose_plan` | Steps, a model per step and, where it matters, an effort that model offers, optional steps. An effort it doesn't offer is refused with the ones it does; left out, the step starts at the person's default for the model, or else the model's own | Command |
+| `start_task` | Drafts a mini task and starts it at once: one lead, at an effort as `propose_plan` takes one, no review, nothing outside the project when it is done | Command |
 | `run_project` | Runs the project with no agent: the default branch in a copy of its own, or a task's worktree (ADR-023) | Command |
 | `set_run_command` | Keeps how the project runs, for Althar to run it; leads have it too (ADR-023) | Command |
 | `order_tasks` | Orders a batch | Command |

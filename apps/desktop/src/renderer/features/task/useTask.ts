@@ -84,6 +84,8 @@ export interface TaskModel {
   readonly stop: () => Promise<void>
   /** Carries the task on from the step it stopped on, with its last lead. */
   readonly resume: () => Promise<void>
+  /** Whether its lead resolves conflicts on its own, otherwise than its project says; null goes back to the project. */
+  readonly setResolveConflicts: (on: boolean | null) => Promise<void>
   /** Settles it without its change; its worktree and branch stay. Whether it was abandoned. */
   readonly abandon: () => Promise<boolean>
   /** Opens it again, once abandoned, on its worktree and branch. */
@@ -401,6 +403,7 @@ export const useTask = (threadId: string): TaskModel => {
       shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body, ...sentWith(images) }), images, false),
     stop: () => onTask((taskId) => client.stopTask(taskId)),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
+    setResolveConflicts: (on) => onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on })),
     abandon: async () => {
       let abandoned = false
       await onTask(async (taskId) => {

@@ -60,6 +60,7 @@ export type ArrivalContent = Extract<ThreadItem, { kind: 'arrival' }>['content']
 export type QuestionContent = Extract<ThreadItem, { kind: 'question' }>['content']
 export type RunContent = Extract<ThreadItem, { kind: 'run' }>['content']
 export type IssueDraftContent = Extract<ThreadItem, { kind: 'issue_draft' }>['content']
+export type SetupContent = Extract<ThreadItem, { kind: 'setup' }>['content']
 
 export type Block =
   | {
@@ -104,6 +105,8 @@ export type Block =
   | { readonly kind: 'run'; readonly id: string; readonly run: RunContent }
   /** An issue the coordinator drafted, filed only when the person says. */
   | { readonly kind: 'draft'; readonly id: string; readonly draft: IssueDraftContent }
+  /** Althar setting up the task's worktree, before its lead starts (ADR-023). */
+  | { readonly kind: 'setup'; readonly id: string; readonly setup: SetupContent }
 
 /** ACP's tool kinds, as the kit's. */
 /** The notice earlier versions left in a thread when Althar restarted under its lead. */
@@ -413,6 +416,9 @@ export const blocksOf = (
         continue
       case 'issue_draft':
         blocks.push({ kind: 'draft', id: item.id, draft: item.content })
+        continue
+      case 'setup':
+        blocks.push({ kind: 'setup', id: item.id, setup: item.content })
         continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.

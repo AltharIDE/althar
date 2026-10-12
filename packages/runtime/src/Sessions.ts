@@ -45,6 +45,7 @@ import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
 import { git } from './git'
 import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
+import { Setups } from './Setups'
 import type { InputImage } from './sentImages'
 import { evidenceForReview } from './evidence'
 import { defaultEffortOf } from './preferences'
@@ -226,6 +227,7 @@ type Store =
   | Accounts
   | Limits
   | Models
+  | Setups
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
 
 /** A turn's input was taken back while the turn was being made: it is made again from what still waits. */
@@ -330,6 +332,14 @@ export class Sessions extends Context.Service<
       /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
       readonly accountId?: string
     }): Effect.Effect<string, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
+    /**
+     * Starts the agent last on the thread again, on the model and effort it
+     * had, for what waits in its queue: false, and nothing started, where no
+     * agent has been on it.
+     */
+    startLast(
+      threadId: string,
+    ): Effect.Effect<boolean, SessionRunning | NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Accepts input into the thread's queue, and delivers it when the session can take it. */
     send(input: {
       readonly envelope: CommandEnvelope
@@ -407,6 +417,7 @@ export class Sessions extends Context.Service<
       const accounts = yield* Accounts
       const limits = yield* Limits
       const toolServer = yield* ToolServer
+      const setups = yield* Setups
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
@@ -672,6 +683,9 @@ export class Sessions extends Context.Service<
               Effect.catchCause((cause) => Effect.logWarning('Could not refresh the coordinator folder', cause)),
             )
           const brief = running.brief
+          // The lead is told how its worktrees were set up, in its brief.
+          const setUp = thread.role === 'task' && brief !== undefined ? yield* setups.told(thread.taskId) : null
+          const briefed = brief === undefined || setUp === null ? brief : { ...brief, text: `${brief.text}\n\n${setUp}` }
           // The coordinator is told what became of its plans in its models' names, which are read first: asking an agent may take a while.
           const named =
             thread.role === 'coordinator'
@@ -681,7 +695,7 @@ export class Sessions extends Context.Service<
                   ),
                 )
               : null
-          let prompt = promptFor(inputs, brief)
+          let prompt = promptFor(inputs, briefed)
           const turnId = yield* newId(Ids.turnDelivery)
           const [session] = yield* sql<{
             model: string | null
@@ -704,7 +718,7 @@ export class Sessions extends Context.Service<
                       Effect.as(Effect.logWarning('Could not read what changed for the coordinator', cause), null),
                     ),
                   )
-                  prompt = promptFor(inputs, brief, news)
+                  prompt = promptFor(inputs, briefed, news)
                 }
                 const at = yield* timestamp
                 yield* sql`INSERT INTO turn_deliveries ${sql.insert({
@@ -982,6 +996,9 @@ export class Sessions extends Context.Service<
         Effect.forever(
           Effect.gen(function* () {
             yield* Queue.take(running.wake)
+            // A lead's first turn waits for its worktrees to be set up (Setups.ts), and so has what was said meanwhile. It
+            // waits before it holds the turn, so the lead can be stopped meanwhile.
+            if (running.thread.role === 'task' && running.brief !== undefined) yield* setups.ready(running.thread.taskId)
             yield* running.delivering.withPermits(1)(
               Effect.gen(function* () {
                 while (!running.stopping && (yield* deliver(running))) {
@@ -1634,6 +1651,12 @@ export class Sessions extends Context.Service<
             ORDER BY b.created_at, b.rowid`
           const [plan] = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${thread.threadId} AND kind = 'plan' ORDER BY sequence DESC LIMIT 1`
+          // Whether the task, or else its project, has its lead resolve conflicts on its own: then Althar pushes that merge (ADR-030).
+          const [resolves] = yield* sql<{ resolves: number | null }>`
+            SELECT coalesce(
+              (SELECT resolve_conflicts FROM tasks WHERE id = ${thread.taskId}),
+              (SELECT json_extract(rules, '$.resolveConflicts') FROM policies WHERE project_id = ${thread.projectId} ORDER BY revision DESC LIMIT 1)
+            ) AS resolves`
           const entries =
             plan === undefined
               ? []
@@ -1677,6 +1700,11 @@ export class Sessions extends Context.Service<
             "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo or a version bump, a single note saying so is enough. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check.",
             // Althar reaches the code host for the task (ADR-011).
             "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: the person looks at your commits and pushes them to the pull request themselves. read_issue reads the issue the task came from, or any other.",
+            ...(resolves?.resolves === 1
+              ? [
+                  'This project has you resolve a conflict with the default branch on your own: Althar tells you when it finds one, and what to merge. On a pull request, Althar pushes that merge itself once you commit it, and then a fix you commit on top of it, as one commit, when Althar tells you its checks failed. Nothing else you commit is pushed for you, and you still never push.',
+                ]
+              : []),
             // Althar runs the project for the person itself (ADR-023): the lead keeps how, when it changes it.
             'Althar runs the project for the person, with no agent, from a command it works out from the repository or keeps for it. If you change how the project runs, such as its dev script, its port or what it needs installed first, keep it with set_run_command.',
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),
@@ -1706,8 +1734,8 @@ export class Sessions extends Context.Service<
             [
               "To get a change made, use Althar's tools:",
               `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
-              '- list_models, for the models you can give work to now, with how each scores and whether a plan pays for it.',
-              '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
+              '- list_models, for the models you can give work to now, with how each scores, whether a plan pays for it, and the efforts it takes.',
+              '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial; each with an effort where it matters. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
               "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built. It shows over the composer with where it answers. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command.",
               "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
               '- list_tasks, read_task and read_thread, to see what is under way and how it went.',
@@ -1721,6 +1749,14 @@ export class Sessions extends Context.Service<
               '- A small, well-scoped change, such as a rename, a copy fix or a version bump: a quicker, cheaper model is enough.',
               '- Prefer a model a plan pays for over one paid per use, when they would do the work as well.',
               "- Review with a model from a different maker than the lead's, where one can be used.",
+            ].join('\n'),
+            [
+              "How to set a step's effort: by what the step needs, as one of the efforts list_models gives for its model.",
+              '- Open-ended, risky or reasoning-heavy work: a higher effort.',
+              '- A small, well-scoped change: a low effort, or leave it out.',
+              '- A reviewer: usually leave it out.',
+              '- Follow what the person has said they prefer, such as an effort for prototypes.',
+              "- When unsure, leave it out: the step starts at the person's default for its model, or else at the model's own.",
             ].join('\n'),
             'Answer questions yourself; changes, and anything to try out, become tasks. Keep your replies short: the person sees each task as a card, so say in a sentence what you planned, and not the plan itself again.',
             ...(yield* threadSoFar(thread.threadId)),
@@ -1794,8 +1830,24 @@ export class Sessions extends Context.Service<
         ),
       )
 
+      const startLast = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
+            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${threadId} ORDER BY started_at DESC LIMIT 1`
+          if (last === undefined) return false
+          yield* start({
+            threadId,
+            agentId: last.agentId,
+            ...(last.model === null ? {} : { model: last.model }),
+            ...(last.effort === null ? {} : { effort: last.effort }),
+          })
+          return true
+        })
+
       return Sessions.of({
         start: (input) => run(start(input)),
+        startLast: (threadId) => run(startLast(threadId)),
         send: (input) => run(send(input)),
         takeBack: (input) => run(takeBack(input)),
         setModel: (input) => run(setModel(input)),

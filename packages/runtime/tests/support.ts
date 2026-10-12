@@ -14,7 +14,7 @@ import type { FakeService } from '@althar/connectors/testing'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
-import { Agents, type AgentEntry, Connectors, type RuntimeOptions, type StallOptions } from '../src/Config'
+import { Agents, type AgentEntry, Connectors, type RuntimeOptions, type SetupOptions, type StallOptions } from '../src/Config'
 import type { CliUnanswered } from '../src/errors'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
@@ -185,6 +185,8 @@ export const runtime = (
     readonly editors?: RuntimeOptions['editors']
     /** Where the artifact store keeps bytes; a folder of its own unless a test says (null: nowhere). */
     readonly artifactsRoot?: string | null
+    /** How worktrees are set up: in sh, rather than the person's own shell and its profile, unless a test says. */
+    readonly setups?: SetupOptions
     /** How this computer's load is read. */
     readonly load?: LoadOptions
     /** The device outside a sandbox, as for a Flatpak. */
@@ -210,6 +212,7 @@ export const runtime = (
     ...(more.permissionJudgeTimeout === undefined ? {} : { permissionJudgeTimeout: more.permissionJudgeTimeout }),
     ...(more.modelFacts === undefined ? {} : { modelFacts: more.modelFacts }),
     ...(more.editors === undefined ? {} : { editors: more.editors }),
+    setups: { shell: '/bin/sh', ...more.setups },
     ...(more.load === undefined ? {} : { load: more.load }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
   })

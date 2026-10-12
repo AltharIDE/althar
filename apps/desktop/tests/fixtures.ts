@@ -52,6 +52,7 @@ export const projectRules: ProjectRulesView = {
   alwaysAllow: [],
   commands: [],
   end: null,
+  resolveConflicts: false,
   usageLimit: 'move',
   rotateAccounts: false,
   onlyAccounts: null,
@@ -471,6 +472,20 @@ export const items = {
       ...content,
     },
   }),
+  /** Althar setting up the task's worktree, installing the dependencies its lockfile names, still running unless told otherwise. */
+  setup: (content: Partial<Extract<ThreadItem, { kind: 'setup' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'setup',
+    content: {
+      repository: 'meridian',
+      command: 'bun install --frozen-lockfile',
+      kept: false,
+      startedAt: NOW,
+      ended: null,
+      ...content,
+    },
+  }),
 }
 
 type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
@@ -510,6 +525,7 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   summary: null,
   lead: 'claude-code',
   leadModel: null,
+  leadEffort: null,
   branch: 'althar/add-a-retry',
   startedAt: null,
   waits: null,
@@ -599,6 +615,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     planId: null,
     runCommand: null,
     launches: [],
+    resolveConflicts: { task: null, project: false },
   },
   session: {
     id: 's1',
@@ -757,6 +774,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setCoAuthor: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
+    setTaskResolveConflicts: vi.fn(async () => {}),
     resumeTask: vi.fn(async () => {}),
     abandonTask: vi.fn(async () => {}),
     reopenTask: vi.fn(async () => {}),

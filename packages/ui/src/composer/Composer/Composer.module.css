@@ -50,6 +50,11 @@
   grid-area: 1 / 1;
 }
 
+/* Not stretched to the row: the words arriving can be taller than the text, and a stretched field measures itself as tall as they are, then keeps that height once they are gone. */
+.field > textarea {
+  align-self: start;
+}
+
 .interim {
   max-height: 200px;
   overflow: hidden;

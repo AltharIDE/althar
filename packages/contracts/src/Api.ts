@@ -338,6 +338,8 @@ export const ProjectRulesView = Schema.Struct({
   commands: Schema.Array(CommandRule),
   /** How a task ends when its plan doesn't say; null: a draft pull request where Althar is connected to the host, else its branch. */
   end: Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
+  /** Whether a task's lead resolves a conflict with its default branch on its own, without the person asking it. */
+  resolveConflicts: Schema.Boolean,
   usageLimit: UsageLimit,
   rotateAccounts: Schema.Boolean,
   onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
@@ -994,6 +996,8 @@ export const TaskCard = Schema.Struct({
   lead: Schema.NullOr(Schema.String),
   /** The model it leads on, by the agent's id for it: its latest session's, or the plan's; null for the agent's own. */
   leadModel: Schema.NullOr(Schema.String),
+  /** How hard its lead thinks, by the agent's id for the level: its latest session's, or the plan's until that has said; null where neither says. */
+  leadEffort: Schema.NullOr(Schema.String),
   branch: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.String),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
@@ -1072,6 +1076,38 @@ export const IssueDraftItem = Schema.Struct({
   content: IssueDraftCard,
 })
 
+/**
+ * Althar setting up a task's worktree before its lead starts (ADR-023), in
+ * the task's thread: the repository, what runs, and how it ended. Althar
+ * posts it and keeps it current; it stays as a record once the setup is over.
+ */
+export const SetupItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('setup'),
+  content: Schema.Struct({
+    /** The repository whose worktree it sets up, by name. */
+    repository: Schema.String,
+    command: Schema.String,
+    /** It is the setup kept for the repository, rather than the install Althar worked out from its lockfile. */
+    kept: Schema.Boolean,
+    startedAt: Schema.String,
+    /**
+     * How it ended: its exit code, 0 for done, null where it didn't end by
+     * itself; out of time; stopped because Althar quit; and the end of what
+     * it printed, where it failed. Null while it runs.
+     */
+    ended: Schema.NullOr(
+      Schema.Struct({
+        at: Schema.String,
+        code: Schema.NullOr(Schema.Number),
+        timedOut: Schema.Boolean,
+        stopped: Schema.Boolean,
+        last: Schema.NullOr(Schema.String),
+      }),
+    ),
+  }),
+})
+
 export const ThreadItem = Schema.Union([
   UserMessageItem,
   AgentTextItem,
@@ -1084,6 +1120,7 @@ export const ThreadItem = Schema.Union([
   QuestionItem,
   RunItem,
   IssueDraftItem,
+  SetupItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -1376,6 +1413,12 @@ export const ThreadSnapshot = Schema.Struct({
     runCommand: Schema.NullOr(Schema.String),
     /** What Althar runs of it, in its worktree. */
     launches: Schema.Array(Launch),
+    /**
+     * Whether its lead resolves a conflict with its default branch on its
+     * own, unasked: as the task says, or, where it says nothing (null), as
+     * its project's rules do, which `project` is.
+     */
+    resolveConflicts: Schema.Struct({ task: Schema.NullOr(Schema.Boolean), project: Schema.Boolean }),
   }),
   session: Schema.NullOr(SessionSummary),
   attention: Schema.Array(AttentionRequest),
@@ -1812,6 +1855,13 @@ export const Api = RpcGroup.make(
   /** Stops a task: every agent on it stops, and the step it was on waits until the person resumes it. */
   command('StopTask', { taskId: Schema.String }, Schema.Void),
   /**
+   * Whether a task's lead resolves a conflict with its default branch on its
+   * own, otherwise than its project's rules say; null goes back to them.
+   * Turned on, what already conflicts is resolved now, not at the next
+   * conflict.
+   */
+  command('SetTaskResolveConflicts', { taskId: Schema.String, resolveConflicts: Schema.NullOr(Schema.Boolean) }, Schema.Void),
+  /**
    * Carries a stopped task on from the step it was on: with its last lead,
    * or the agent and model given. What the person said before it waits in
    * its thread and is the lead's first word.
@@ -1965,6 +2015,8 @@ export const Api = RpcGroup.make(
       alwaysAllow: Schema.optional(Schema.Array(RuleKind)),
       commands: Schema.optional(Schema.Array(CommandRule)),
       end: Schema.optional(Schema.NullOr(Schema.Literals(['draft', 'ready', 'none']))),
+      /** Turned on, the project's tasks that already conflict are resolved now, not at their next conflict. */
+      resolveConflicts: Schema.optional(Schema.Boolean),
       usageLimit: Schema.optional(UsageLimit),
       rotateAccounts: Schema.optional(Schema.Boolean),
       onlyAccounts: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String)))),
