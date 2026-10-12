@@ -50,12 +50,7 @@ export function WindowButtons({ onClose, onMinimize, onToggleMaximize, maximized
           <path d="M3 8h10" />
         </svg>
       </button>
-      <button
-        type="button"
-        className={s.maximize}
-        aria-label={maximized ? t.restore : t.maximize}
-        onClick={onToggleMaximize}
-      >
+      <button type="button" className={s.maximize} aria-label={maximized ? t.restore : t.maximize} onClick={onToggleMaximize}>
         <svg className={s.glyph} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
           {maximized ? <path d="M5 3h8v8M3 5v8h8" /> : <rect x="3.5" y="3.5" width="9" height="9" rx="0.7" />}
         </svg>
