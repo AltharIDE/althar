@@ -1642,6 +1642,33 @@ export class Sessions extends Context.Service<
               return { changed: named(changed), status: named(status) }
             }),
           )
+          // Whether each branch is published, as Althar knows it, not as an unfetched remote says: its pull request's head, else a
+          // remote's copy of it here. A published branch takes the default branch in by merging; rewritten, it can't be pushed.
+          const published = yield* Effect.forEach(thread.repositories, (repository) =>
+            Effect.gen(function* () {
+              const [change] = yield* sql<{ url: string; head: string | null; seen: string | null }>`
+                SELECT c.pull_request_url AS url, c.head_commit AS head,
+                  (SELECT json_extract(l.snapshot, '$.headSha') FROM external_links l
+                    WHERE l.task_id = ${thread.taskId} AND l.kind = 'change' AND l.url = c.pull_request_url) AS seen
+                FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id
+                WHERE w.task_id = ${thread.taskId} AND w.path = ${repository.worktree} AND c.pull_request_url IS NOT NULL
+                ORDER BY c.updated_at DESC LIMIT 1`
+              const named = several ? `${repository.name}'s branch ${repository.branch}` : `The branch ${repository.branch}`
+              const at = change?.seen ?? change?.head ?? null
+              if (change !== undefined)
+                return `${named} is published: its pull request, ${change.url}, has it${at === null ? '' : ` at ${at.slice(0, 12)}`}.`
+              const remotes = yield* quiet(
+                git(repository.worktree, 'for-each-ref', '--format=%(refname:short) %(objectname)', 'refs/remotes'),
+              )
+              const copy = remotes
+                .split('\n')
+                .map((line) => line.split(' '))
+                .find(([name = '']) => name.endsWith(`/${repository.branch}`))
+              return copy === undefined
+                ? `${named} isn't published yet.`
+                : `${named} is published: ${copy[0]} has it at ${(copy[1] ?? '').slice(0, 12)}.`
+            }),
+          )
           const changed = states.flatMap((state) => (state.changed === '' ? [] : [state.changed])).join('\n')
           const status = states.flatMap((state) => (state.status === '' ? [] : [state.status])).join('\n')
           const where = (repository: TaskRepository) =>
@@ -1666,6 +1693,8 @@ export class Sessions extends Context.Service<
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
             // Althar reaches the code host for the task (ADR-011).
             "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: the person looks at your commits and pushes them to the pull request themselves. read_issue reads the issue the task came from, or any other.",
+            // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
+            `${published.join(' ')} Once a branch is published, or has a pull request, bring the default branch in by merging it, never by rebasing, and never amend or squash commits that were pushed: the pull request would no longer take your commits. Go by what Althar says here, not by git status or a remote you can't fetch.`,
             // Althar runs the project for the person itself (ADR-023): the lead keeps how, when it changes it.
             'Althar runs the project for the person, with no agent, from a command it works out from the repository or keeps for it. If you change how the project runs, such as its dev script, its port or what it needs installed first, keep it with set_run_command.',
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),

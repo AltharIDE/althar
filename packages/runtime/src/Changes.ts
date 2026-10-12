@@ -18,6 +18,7 @@ import {
   commitOf,
   commitsAhead,
   commitsOf,
+  fetchInto,
   gitOutcome,
   gitWithin,
   namedRemotes,
@@ -48,7 +49,7 @@ import {
   standing,
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
-import { Policies } from './Policies'
+import { Policies, ruleSetOf } from './Policies'
 import { Sessions } from './Sessions'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
@@ -230,6 +231,19 @@ export class Changes extends Context.Service<
      * that isn't on the branch any more isn't pushed.
      */
     push(taskId: string, head: string, url?: string): Effect.Effect<{ readonly change: ChangeSummary }, unknown>
+    /**
+     * Replaces the commits on the task's pull request with its branch here, up
+     * to the commit the person saw, after its published commits were rewritten:
+     * a force push, theirs to confirm, and only while the pull request is still
+     * at `replaces`, the head they saw it at.
+     */
+    replace(taskId: string, head: string, replaces: string, url?: string): Effect.Effect<{ readonly change: ChangeSummary }, unknown>
+    /**
+     * What to tell the lead so its branch takes the pull request's commits in
+     * by merging, and a plain push works again: the pull request's head is
+     * fetched here first.
+     */
+    mergeNote(taskId: string, url?: string): Effect.Effect<{ readonly note: string; readonly head: string }, unknown>
     /** Marks the task's draft pull request ready for review: the person's to do. */
     markReady(taskId: string, url?: string): Effect.Effect<void, unknown>
     /**
@@ -787,19 +801,25 @@ export class Changes extends Context.Service<
           yield* touchCard(link.taskId)
         })
 
-      const push = (taskId: string, seen: string, url?: string) =>
+      /**
+       * Where the task's pull request takes its commits from and goes to: its
+       * repository's worktree here (the task's first, where the record doesn't
+       * say), with its default branch, where a push of it goes on the host, and
+       * the commit Althar last pushed there.
+       */
+      const pushingTo = (taskId: string, url?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { link, snapshot, host, repository } = yield* current(taskId, url)
-          // The worktree of the repository this pull request is from; the task's first, where the record doesn't say.
-          const [workspace] = yield* sql<{ path: string; branch: string }>`
-            SELECT w.path, w.branch FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+          const [workspace] = yield* sql<{ path: string; branch: string; base: string; threadId: string }>`
+            SELECT w.path, w.branch, coalesce(b.default_base_ref, w.base_ref) AS base,
+              (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
             ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${snapshot.url} LIMIT 1) DESC,
               b.created_at, b.rowid
             LIMIT 1`
           if (workspace === undefined) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
-          // What the person saw, and nothing the lead committed after: one rewritten away since isn't pushed.
           // A pull request from a fork into the repository it was forked from takes its commits on the fork.
           const fork = yield* namedRemotes(workspace.path).pipe(
             Effect.map(forkOf),
@@ -809,24 +829,115 @@ export class Changes extends Context.Service<
           const to = into ? yield* host.repository(fork.fork.path) : repository
           const [sent] = yield* sql<{ head: string | null }>`
             SELECT head_commit AS head FROM repository_changes WHERE pull_request_url = ${snapshot.url} AND project_id = ${link.projectId} LIMIT 1`
-          const pushTarget = yield* host.pushTarget(to)
-          const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [
-            snapshot.headSha,
-            sent?.head ?? null,
-            yield* remoteTip(workspace.path, pushTarget, workspace.branch),
-          ])
-          // The commit seen, or what crediting made of it, is on the branch still.
-          if (!(yield* onHead(workspace.path, seen)) && !(yield* onHead(workspace.path, head)))
-            return yield* new ChangedSinceSeen({ taskId })
-          yield* pushTo(workspace.path, pushTarget, workspace.branch, head)
-          yield* settle
+          return { link, snapshot, workspace, pushTarget: yield* host.pushTarget(to), sent: sent?.head ?? null }
+        })
+
+      /** What the person saw, or what crediting made of it, still on the branch: one rewritten away since isn't pushed. */
+      const stillOnHead = (taskId: string, cwd: string, seen: string, head: string) =>
+        Effect.gen(function* () {
+          if (!(yield* onHead(cwd, seen)) && !(yield* onHead(cwd, head))) return yield* new ChangedSinceSeen({ taskId })
+        })
+
+      /** Pushed: the record and the pull request's head say so, for the card to count from; the host's next look has the last word. */
+      const pushedTo = (taskId: string, link: LinkRow, snapshot: Snapshot, head: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
           yield* sql`UPDATE repository_changes SET head_commit = ${head}, updated_at = ${yield* timestamp}, revision = revision + 1
             WHERE pull_request_url = ${snapshot.url} AND project_id = ${link.projectId}`
-          // The pull request's head is what was pushed, for the card to count from; the host's next look has the last word.
           yield* saveSnapshot(link, { ...snapshot, headSha: head })
           yield* news(taskId)
           wakeNow(taskId)
           return { change: yield* summaryOf({ ...link, snapshot: JSON.stringify({ ...snapshot, headSha: head }) }) }
+        })
+
+      const push = (taskId: string, seen: string, url?: string) =>
+        Effect.gen(function* () {
+          const { link, snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
+          const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [
+            snapshot.headSha,
+            sent,
+            yield* remoteTip(workspace.path, pushTarget, workspace.branch),
+          ])
+          yield* stillOnHead(taskId, workspace.path, seen, head)
+          // Refused, it says why in a sentence, not git's hint: the pull request has commits the branch doesn't.
+          yield* pushTo(workspace.path, pushTarget, workspace.branch, head).pipe(
+            Effect.catchTag('GitFailed', (failed) => refusal(taskId, nameOf(snapshot), failed)),
+          )
+          yield* settle
+          return yield* pushedTo(taskId, link, snapshot, head)
+        })
+
+      /**
+       * Replaces the commits on the task's pull request with its branch here,
+       * up to the commit the person saw, once its published commits were
+       * rewritten. A force push, which the project's rules keep for the
+       * person: their press, confirmed on the card, is their answer, and the
+       * record says so. Only while the pull request is still at `replaces`,
+       * the head they saw it at (`--force-with-lease`), so what anyone else
+       * pushed meanwhile is never lost. Where the rules never allow a force
+       * push, nothing is pushed.
+       */
+      const replace = (taskId: string, seen: string, replaces: string, url?: string) =>
+        Effect.gen(function* () {
+          if (!/^[0-9a-f]{40,64}$/.test(replaces)) return yield* new ChangedSinceSeen({ taskId })
+          const sql = yield* SqlClient.SqlClient
+          const { link, snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
+          const where = nameOf(snapshot)
+          const { rules } = yield* (yield* Policies).current(link.projectId)
+          if (ruleSetOf(rules).never.includes('force-push')) return yield* new PushRefused({ taskId, why: 'never', remote: where })
+          const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [replaces, sent])
+          yield* stillOnHead(taskId, workspace.path, seen, head)
+          yield* pushTo(workspace.path, pushTarget, workspace.branch, head, replaces).pipe(
+            Effect.catchTag('GitFailed', (failed) =>
+              /\(stale info\)/i.test(failed.stderr)
+                ? Effect.fail(new PushRefused({ taskId, why: 'moved', remote: where }))
+                : refusal(taskId, where, failed),
+            ),
+          )
+          yield* settle
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* change('external_links', link.id, { updatedAt: yield* timestamp })
+              yield* fact({
+                projectId: link.projectId,
+                aggregateType: 'external_link',
+                aggregateId: link.id,
+                revision,
+                type: 'external_link.force_pushed',
+                // The person's own press answers the force push the rules keep for them.
+                payload: { url: snapshot.url, replaced: replaces, head, rule: 'force-push', answeredBy: 'person' },
+                actorId: instance.personId,
+              })
+            }),
+          )
+          yield* addItem({ projectId: link.projectId, threadId: workspace.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `Replaced the commits on ${where} with the branch here.`,
+            description: `As you confirmed: a force push, only from ${replaces.slice(0, 12)}, where you saw it.`,
+          })
+          return yield* pushedTo(taskId, link, snapshot, head)
+        })
+
+      /**
+       * What the lead is told so its branch takes the pull request's commits
+       * in by merging, and a plain push works again. The pull request's head
+       * is fetched here first, since the lead can't reach the host. Where the
+       * lead rewrote what Althar pushed, it starts again from that and keeps
+       * its fixes; where someone else pushed, it merges what they pushed.
+       */
+      const mergeNote = (taskId: string, url?: string) =>
+        Effect.gen(function* () {
+          const { snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
+          const ref = `refs/althar/pull-request/${workspace.branch}`
+          const head = yield* fetchInto(workspace.path, pushTarget, workspace.branch, ref)
+          const where = nameOf(snapshot)
+          const short = head.slice(0, 12)
+          const rewritten = head === sent && !(yield* onHead(workspace.path, head))
+          const note = rewritten
+            ? `Your branch ${workspace.branch} was rewritten after it was pushed, so ${where} won't take a plain push of it: its commits are no longer under yours. ${where} is at ${short}. Put your work back on top of it, keeping your fixes: save where you are with \`git branch ${workspace.branch}-rewritten\`, reset to the pull request's head with \`git reset --hard ${head}\`, merge ${workspace.base} into it with \`git merge ${workspace.base}\`, and bring in any change of the rewritten commits that isn't there yet as new commits (\`git diff HEAD ${workspace.branch}-rewritten\` shows what differs). Merge, never rebase, amend or squash commits that are pushed. Run the checks, commit, and say so: Althar pushes it as a plain push.`
+            : `${where} has commits your branch ${workspace.branch} doesn't: someone pushed to it, such as with the host's "Update branch". Althar fetched them here as ${ref}, at ${short}. Merge them into your branch with \`git merge ${head}\`, settle any conflict so both sides' changes hold, run the checks, and commit the merge. Merge, never rebase. Then say so: Althar pushes it as a plain push.`
+          return { note, head }
         })
 
       const markReady = (taskId: string, url?: string) =>
@@ -1584,6 +1695,8 @@ export class Changes extends Context.Service<
       return Changes.of({
         publish: (input) => provide(publish(input)),
         push: (taskId, head, url) => provide(locked(taskId)(push(taskId, head, url))),
+        replace: (taskId, head, replaces, url) => provide(locked(taskId)(replace(taskId, head, replaces, url))),
+        mergeNote: (taskId, url) => provide(locked(taskId)(mergeNote(taskId, url))),
         markReady: (taskId, url) => provide(locked(taskId)(markReady(taskId, url))),
         exclusive: (taskId, effect) => locked(taskId)(effect),
         merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),
