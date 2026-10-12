@@ -212,6 +212,12 @@ describe('the coordinator loop', () => {
         yield* callTool(access, 'list_tasks', {}),
         /\(ready, led by .*\) — PR #106 closed, as last seen \(its host is not known\)/,
       )
+      // Merged while the task is still open: finished all the same, not ready for the person.
+      yield* change('merged')
+      assert.strictEqual(
+        yield* callTool(access, 'list_tasks', {}),
+        '- add-a-retry: Add a retry (finished, merged, led by Fake claude-code) — PR #106 merged',
+      )
       yield* sql`DELETE FROM external_links WHERE task_id = ${taskRow?.id ?? ''}`
       assert.match(task, /Branch \S+, in \S+\./)
       assert.match(task, /review \(changes_requested\): The heading needs fixing\.\n\nsettle: Fixed the heading\./)
@@ -232,6 +238,13 @@ describe('the coordinator loop', () => {
       )
       // What the person says to a task goes to its lead, not the coordinator.
       assert.instanceOf(yield* Effect.flip(say(ready?.threadId ?? '', 'Hello')), NotFound)
+      // Where its pull requests can't be read just now, the list says nothing of them and the task says so, rather than guessing.
+      yield* (yield* Coordinator).reading(() => Effect.succeed(undefined))
+      assert.match(yield* callTool(access, 'list_tasks', {}), /^- add-a-retry: Add a retry \([^)]*\)$/)
+      assert.match(
+        yield* callTool(access, 'read_task', { task: 'add-a-retry' }),
+        /\n\nPull request: Althar could not read its state just now\.$/,
+      )
     }).pipe(Effect.provide(withQueries())),
   )
 
