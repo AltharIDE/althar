@@ -275,7 +275,14 @@ export const useProject = (projectId: string): ProjectModel => {
           choice?.agentId === suggested.agentId &&
           choice.model === suggested.model &&
           choice.effort === suggested.effort
-        if (threadId !== null && coordinator?.session === null && choice !== null && !same)
+        // A recorded session the runtime no longer holds is no coordinator either: the choice starts it afresh.
+        if (
+          threadId !== null &&
+          coordinator !== undefined &&
+          (coordinator.session === null || !coordinator.session.held) &&
+          choice !== null &&
+          !same
+        )
           await client.startSession(startOf(threadId, choice))
         await send(body, 'after_current')
       }),
@@ -301,7 +308,8 @@ export const useProject = (projectId: string): ProjectModel => {
     choose: (choice) =>
       act(async () => {
         const session = coordinator?.session
-        if (threadId !== null && session != null) await moveTo(client, threadId, runningOn(session), choice)
+        // A session the runtime no longer holds can't be moved; the pick is applied when the person next says something.
+        if (threadId !== null && session != null && session.held) await moveTo(client, threadId, runningOn(session), choice)
       }),
     handOver: (choice, body) =>
       shown(

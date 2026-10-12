@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 
-import type { AlwaysScope, BoardTask } from '@althar/contracts'
+import { ApiError, type AlwaysScope, type BoardTask } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { useServices } from '../../data/services'
@@ -86,10 +86,16 @@ export const useWorkActions = (): WorkActions => {
           // The note is queued first, so a lead that starts reads it in its first turn rather than after one of its own.
           const head = await client.getThread(task.threadId, { limit: 0 })
           await client.send({ threadId: task.threadId, body: note, disposition: 'after_current' })
-          // A lead the runtime no longer holds can't take it — its recorded session may be stale or dead — so it starts again, on the agent that led it.
-          // One it holds takes the note itself: running, after the current turn; between turns, now. Only when nothing can start does the person see why.
-          if ((head.session === null || !head.session.held) && task.lead !== null)
+          // A thread the runtime no longer holds can't take it — its recorded session may be stale or dead — so the lead starts again on the agent that led it.
+          // A held thread takes the note itself: running, after the current turn; between turns, now. With no lead to start, the person is told why.
+          if (head.session === null || !head.session.held) {
+            if (task.lead === null)
+              throw new ApiError({
+                reason: 'NoLead',
+                message: 'This task has no lead to start. Pick an agent for it first.',
+              })
             await client.startSession({ threadId: task.threadId, agentId: task.lead })
+          }
         }),
       [busy, client],
     ),
