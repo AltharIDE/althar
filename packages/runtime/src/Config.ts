@@ -75,6 +75,16 @@ export interface RuntimeOptions {
   readonly load?: LoadOptions
   /** How a task's worktree is set up before its lead starts (`Setups.ts`). */
   readonly setups?: SetupOptions
+  /** When a lead that ended its turn counts as done, and how long a round waits for one that isn't (`leftRunning.ts`, `conflicts.ts`). */
+  readonly idle?: IdleOptions
+}
+
+/** Each is the default unless a test says otherwise. */
+export interface IdleOptions {
+  /** How long an agent must say nothing outside a turn, once what it left running ended, to be taken as done: 30 seconds. */
+  readonly quiet?: Duration.Duration
+  /** How long a round waits for a lead that is still at work before it judges the branch as it is: 45 minutes. */
+  readonly within?: Duration.Duration
 }
 
 export interface SetupOptions {

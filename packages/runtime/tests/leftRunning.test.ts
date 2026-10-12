@@ -1,7 +1,7 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Duration, Effect } from 'effect'
 
-import { commandOfCall, exitCodeIn, servingAt, tailOf } from '../src/leftRunning'
+import { commandOfCall, exitCodeIn, type InHand, servingAt, stillBusy, tailOf } from '../src/leftRunning'
 
 /*
  * What is read from a command left running: where it answers, as servers
@@ -48,4 +48,34 @@ describe('what a command left running says', () => {
       assert.strictEqual(yield* tailOf('/nonexistent/althar/output'), '')
     }),
   )
+})
+
+describe('whether an agent that ended its turn is still at work', () => {
+  const quiet = Duration.seconds(30)
+  const idle: InHand = { turnRunning: false, background: [], callsOpen: 0, workedAt: null }
+  const running = { ended: null, url: null }
+  const ended = { ended: { at: '2026-10-12T10:00:00.000Z', code: 0 }, url: null }
+
+  it('is done when it has nothing in hand', () => {
+    assert.isFalse(stillBusy(idle, 1_000, quiet))
+    // What it left running ended by itself, and long enough ago for it to have been woken and be done.
+    assert.isFalse(stillBusy({ ...idle, background: [ended], workedAt: 1_000 }, 40_000, quiet))
+  })
+
+  it('is at work in a turn, with a command it left running going, or in a call it has not finished', () => {
+    assert.isTrue(stillBusy({ ...idle, turnRunning: true }, 1_000, quiet))
+    assert.isTrue(stillBusy({ ...idle, background: [ended, running] }, 1_000, quiet))
+    assert.isTrue(stillBusy({ ...idle, callsOpen: 1 }, 1_000, quiet))
+  })
+
+  it('is not done until it has been quiet for a while since it spoke outside a turn or something it left running ended', () => {
+    assert.isTrue(stillBusy({ ...idle, background: [ended], workedAt: 10_000 }, 20_000, quiet))
+    assert.isTrue(stillBusy({ ...idle, background: [ended], workedAt: 10_000 }, 39_999, quiet))
+    assert.isFalse(stillBusy({ ...idle, background: [ended], workedAt: 10_000 }, 40_000, quiet))
+  })
+
+  it('does not wait for a server, which says where it answers and runs on as long as the agent wants it', () => {
+    assert.isFalse(stillBusy({ ...idle, background: [{ ended: null, url: 'http://localhost:5173/' }] }, 1_000, quiet))
+    assert.isTrue(stillBusy({ ...idle, background: [{ ended: null, url: 'http://localhost:5173/' }, running] }, 1_000, quiet))
+  })
 })

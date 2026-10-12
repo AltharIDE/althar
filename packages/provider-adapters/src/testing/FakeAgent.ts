@@ -420,9 +420,17 @@ const playStall = async (
  * `[lead:push]` commits what it has and asks the person to push it. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
- * of it; `[lead:resolve-fails]` can't, and says so; `[lead:resolve-wait]`
+ * of it in two commits; `[lead:resolve-fix]` commits one fix on top of the
+ * merge; `[lead:resolve-fails]` can't, and says so; `[lead:resolve-wait]`
  * works at it until it is interrupted or stopped, and `[lead:resolve-hold]`
- * does so once it has committed the merge. Asked to plan a
+ * does so once it has committed the merge. `[lead:resolve-forgets]` settles
+ * the merge but ends its turn without committing it, and commits it when
+ * told that is all that is left. `[lead:resolve-tests]` settles it, leaves
+ * the full tests running in the background and ends its turn with the merge
+ * uncommitted; when they end it is woken, as Claude Code wakes an agent, and
+ * commits the merge outside a turn; `[lead:resolve-tests-fix]` then commits
+ * a fix the tests found too, and `[lead:resolve-tests-hang]` has tests that
+ * never end. Asked to plan a
  * change with a link in it, the coordinator drafts the task from that issue.
  */
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
@@ -452,7 +460,101 @@ const resolveIn = (cwd: string, ref: string) => {
   }
 }
 
-const playRole = async (session: SessionState, text: string, serve: (exits: boolean) => Promise<void>): Promise<string | undefined> => {
+/** Merges a branch into the worktree's and settles each conflict as `resolveIn` does, but leaves the merge uncommitted: staged, with the merge under way. */
+const settleIn = (cwd: string, ref: string) => {
+  const git = (...args: Array<string>) =>
+    execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd, stdio: 'pipe' }).toString()
+  try {
+    git('merge', '-q', '--no-edit', '--no-commit', '--no-ff', ref)
+  } catch {
+    for (const file of git('diff', '--name-only', '--diff-filter=U')
+      .split('\n')
+      .filter((line) => line !== '')) {
+      const lines = readFileSync(join(cwd, file), 'utf8').split('\n')
+      writeFileSync(join(cwd, file), lines.filter((line) => !/^(<<<<<<<|=======|>>>>>>>)( |$)/.test(line)).join('\n'))
+    }
+  }
+  git('add', '-A')
+}
+
+/** Commits the merge settled under way. */
+const commitMergeIn = (cwd: string) =>
+  execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '--no-edit'], { cwd, stdio: 'pipe' })
+
+/**
+ * Leaves the full tests running in the background, as Claude Code reports a
+ * command it sends there. After `lasts` milliseconds they end (never, with
+ * no `lasts`), and Claude Code wakes the agent as it does: outside any
+ * prompt it speaks and makes a call, `then` done in it, and speaks again.
+ */
+const leaveTests = async (
+  sessionId: string,
+  session: SessionState,
+  client: acp.AgentContext,
+  plan: { readonly lasts?: number; readonly commits?: () => void },
+) => {
+  const notify = (update: Record<string, unknown>) =>
+    client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
+  session.served += 1
+  const id = `tests-${session.served}`
+  const toolCallId = `tests-call-${session.served}`
+  await notify({
+    sessionUpdate: 'tool_call',
+    toolCallId,
+    title: 'bun run test',
+    kind: 'execute',
+    status: 'in_progress',
+    rawInput: { command: 'bun run test' },
+  })
+  const folder = join(tmpdir(), 'althar-fake-agent')
+  mkdirSync(folder, { recursive: true })
+  const outputPath = join(folder, `${sessionId}-${id}.output`)
+  writeFileSync(outputPath, 'running the full tests\n')
+  session.background.set(id, { toolCallId, outputPath })
+  await notify({
+    sessionUpdate: 'async_task_spawned',
+    asyncTaskId: id,
+    name: 'Run the full tests',
+    description: 'Run the full tests',
+    taskType: 'shell',
+    showInTranscript: false,
+    canStop: true,
+    toolCallId,
+  })
+  await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
+  await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
+  if (plan.lasts === undefined) return
+  const timer = setTimeout(() => {
+    // Stopped meanwhile, they have ended already.
+    if (!session.background.delete(id)) return
+    appendFileSync(outputPath, 'all passed\n[exited with code 0]\n')
+    void (async () => {
+      await notify({ sessionUpdate: 'async_task_state_update', asyncTaskId: id, state: 'completed' })
+      if (plan.commits === undefined) return
+      const call = `${toolCallId}-woken`
+      await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'The tests finished. ' } })
+      await notify({
+        sessionUpdate: 'tool_call',
+        toolCallId: call,
+        title: 'git commit',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { command: 'git commit' },
+      })
+      plan.commits()
+      await notify({ sessionUpdate: 'tool_call_update', toolCallId: call, status: 'completed' })
+      await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Committed.' } })
+    })()
+  }, plan.lasts)
+  timer.unref()
+}
+
+const playRole = async (
+  session: SessionState,
+  text: string,
+  serve: (exits: boolean) => Promise<void>,
+  tests: (plan: { readonly lasts?: number; readonly commits?: () => void }) => Promise<void> = () => Promise.resolve(),
+): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
   const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ')
   if (session.tools === undefined || !asked) return undefined
@@ -550,13 +652,54 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         return 'Stopped before settling it.'
       }
       const more = session.markers.has('[lead:resolve-more]')
+      const fix = session.markers.has('[lead:resolve-fix]')
       const hold = session.markers.has('[lead:resolve-hold]')
-      if (merging !== undefined && (session.markers.has('[lead:resolve]') || more || hold)) {
+      if (merging !== undefined && (session.markers.has('[lead:resolve]') || more || fix || hold)) {
         resolveIn(session.cwd, merging)
         if (hold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        if (fix) {
+          commitIn(session.cwd, 'tests.txt', 'Fix what the tests found')
+          return 'Merged it, settled the conflict, committed the merge, and fixed what the tests found.'
+        }
         if (!more) return 'Merged it, settled the conflict, and committed the merge.'
         commitIn(session.cwd, 'more.txt', 'Tidy up while here')
+        commitIn(session.cwd, 'more-still.txt', 'Tidy up some more')
         return 'Merged it, settled the conflict, committed the merge, and tidied up while here.'
+      }
+      // Settled, but not committed: forgotten at first, committed once told that is all that is left.
+      const commitIt = /resolved but not committed: commit/.test(text)
+      if (session.markers.has('[lead:resolve-forgets]')) {
+        if (merging !== undefined) {
+          settleIn(session.cwd, merging)
+          return 'Merged it and settled the conflict.'
+        }
+        if (commitIt) {
+          commitMergeIn(session.cwd)
+          return 'Committed the merge.'
+        }
+      }
+      // Settled, with the full tests left running: the merge is committed once they end, by the agent they wake.
+      if (session.markers.has('[lead:resolve-tests-hang]')) {
+        if (merging !== undefined) {
+          settleIn(session.cwd, merging)
+          await tests({})
+          return "Merged it and settled the conflict. I'll wait for the tests."
+        }
+        if (commitIt) return 'Still waiting for the tests.'
+      }
+      const woken = session.markers.has('[lead:resolve-tests]') || session.markers.has('[lead:resolve-tests-fix]')
+      if (merging !== undefined && woken) {
+        settleIn(session.cwd, merging)
+        const fixes = session.markers.has('[lead:resolve-tests-fix]')
+        const cwd = session.cwd
+        await tests({
+          lasts: 400,
+          commits: () => {
+            commitMergeIn(cwd)
+            if (fixes) commitIn(cwd, 'tests.txt', 'Fix what the tests found')
+          },
+        })
+        return "Merged it and settled the conflict. I'll wait for the notification that the tests are done."
       }
       // Fixed and committed, for the person to push.
       const fixMore = session.markers.has('[lead:fix-more]')
@@ -958,7 +1101,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const told = /The person answered[^\n]*\n([\s\S]*)$/.exec(text)
       if (told?.[1] !== undefined) {
         await say(`told=${told[1].trim().split('\n').join(' | ')}`)
-        const after = await playRole(session, text, (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }))
+        const after = await playRole(
+          session,
+          text,
+          (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+          (plan) => leaveTests(params.sessionId, session, client, plan),
+        )
         if (after !== undefined) await say(after)
         return ended()
       }
@@ -974,7 +1122,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const stalled = await playStall(session, text, update)
       if (stalled !== undefined) return stalled
       // With Althar's tools, a marker in the prompt says which role to play.
-      const played = await playRole(session, text, (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }))
+      const played = await playRole(
+        session,
+        text,
+        (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+        (plan) => leaveTests(params.sessionId, session, client, plan),
+      )
       // Stopped while it played its part, the turn was cancelled, as an agent says.
       if (played !== undefined && session.cancelled) return { stopReason: 'cancelled' }
       if (played !== undefined) {

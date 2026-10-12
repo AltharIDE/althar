@@ -14,7 +14,23 @@ import {
   type SessionEvent,
   type StopReport,
 } from '@althar/provider-adapters'
-import { Cause, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
+import {
+  Cause,
+  Clock,
+  Context,
+  Crypto,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Queue,
+  Schema,
+  Scope,
+  Semaphore,
+  Stream,
+} from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
@@ -49,7 +65,18 @@ import { Setups } from './Setups'
 import type { InputImage } from './sentImages'
 import { defaultEffortOf } from './preferences'
 import { addItem, type OutputSoFar, recorder, toolItem, transcript } from './threads'
-import { commandOfCall, exitCodeIn, type LeftRunning, printedMore, servingAt, type ShownLeftRunning, shownOf, tailOf } from './leftRunning'
+import {
+  commandOfCall,
+  exitCodeIn,
+  type LeftRunning,
+  printedMore,
+  QUIET_FOR,
+  servingAt,
+  type ShownLeftRunning,
+  shownOf,
+  stillBusy,
+  tailOf,
+} from './leftRunning'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
@@ -194,7 +221,14 @@ interface Running {
   recording: { readonly outputOf: (itemId: string) => OutputSoFar | undefined } | undefined
   /** What it left running in the background, in the order it started them (leftRunning.ts). */
   readonly background: Map<string, LeftRunning>
+  /** Tool calls it began outside a turn Althar sent, as Claude Code does when something it left running ends, and hasn't finished. */
+  readonly callsOpen: Set<string>
+  /** When it last spoke outside a turn, or something it left running ended, in milliseconds; null if not since its last turn began. */
+  workedAt: number | null
 }
+
+/** How often, at most, a thread's agent is looked at while a round waits for it to be done. */
+const IDLE_EVERY = Duration.millis(250)
 
 /** How often, and for how long, what one left running is read for where it answers. */
 const SERVING_EVERY = Duration.millis(500)
@@ -403,6 +437,19 @@ export class Sessions extends Context.Service<
     >
     /** What a command on a thread has printed so far, while it runs: its last lines, and how many came before them. */
     outputSoFar(threadId: string, itemId: string): Effect.Effect<Option.Option<OutputSoFar>>
+    /**
+     * Whether the thread's agent is still at work, though its turn has ended:
+     * it left a command running, is in a call of its own, or spoke outside a
+     * turn Althar sent a moment ago, as Claude Code does once something it
+     * left running ends (leftRunning.ts, `stillBusy`). False where no
+     * session is.
+     */
+    busy(threadId: string): Effect.Effect<boolean>
+    /**
+     * Waits until the agent isn't (`idle`), or its session ends (`gone`), or
+     * it is still at work once `within` has passed (`late`).
+     */
+    untilIdle(threadId: string, within: Duration.Duration): Effect.Effect<'idle' | 'gone' | 'late'>
   }
 >()('@althar/runtime/Sessions') {
   static readonly layer: Layer.Layer<Sessions, never, Store> = Layer.effect(
@@ -418,6 +465,7 @@ export class Sessions extends Context.Service<
       const toolServer = yield* ToolServer
       const setups = yield* Setups
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
+      const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
@@ -495,6 +543,8 @@ export class Sessions extends Context.Service<
               case 'BackgroundEnded': {
                 const left = running.background.get(event.id)
                 if (left === undefined) return
+                // Claude Code may start a turn of its own now (ADR-022).
+                running.workedAt = yield* Clock.currentTimeMillis
                 // Stopped, it goes, whoever stopped it. Ended by itself, it stays, to say how.
                 if (event.end === 'stopped') running.background.delete(event.id)
                 else {
@@ -508,6 +558,33 @@ export class Sessions extends Context.Service<
             }
           }),
         ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not keep what an agent left running', cause)))
+
+      /**
+       * Keeps that the agent is at work outside a turn Althar sent, from an
+       * event it streamed between turns: it speaks, or makes a call and has
+       * not finished it. Nothing says when such a turn ends, so it is taken
+       * as over once the agent has said nothing for a while (`stillBusy`).
+       */
+      const heardWork = (running: Running, event: SessionEvent) =>
+        Effect.gen(function* () {
+          switch (event._tag) {
+            case 'AgentMessage':
+            case 'AgentContent':
+            case 'AgentThought':
+            case 'Plan':
+              break
+            case 'ToolCall':
+              if (event.status === 'pending' || event.status === 'in_progress') running.callsOpen.add(event.toolCallId)
+              else running.callsOpen.delete(event.toolCallId)
+              break
+            case 'ToolCallUpdate':
+              if (event.status === 'completed' || event.status === 'failed') running.callsOpen.delete(event.toolCallId)
+              break
+            default:
+              return
+          }
+          running.workedAt = yield* Clock.currentTimeMillis
+        })
 
       /** No agent starts, and nothing is said to one, in a project removed from Althar: a window that hadn't heard yet is told it's gone. */
       const inLiveProject = (threadId: string) =>
@@ -777,6 +854,9 @@ export class Sessions extends Context.Service<
           )
           running.brief = undefined
           running.turnRunning = true
+          // What it did outside a turn before is over with: this turn is what it is at.
+          running.callsOpen.clear()
+          running.workedAt = null
           // Images the agent doesn't get are said in the thread as well as to the agent, so none goes missing unsaid.
           const withheld = inputs.reduce((sum, input) => sum + (input.withheld ?? 0), 0)
           if (withheld > 0)
@@ -1270,6 +1350,8 @@ export class Sessions extends Context.Service<
             context: null,
             recording: undefined,
             background: new Map(),
+            callsOpen: new Set(),
+            workedAt: null,
           }
           threads.set(thread.threadId, running)
           yield* Effect.forkIn(run(deliveries(running)), scope)
@@ -1286,7 +1368,7 @@ export class Sessions extends Context.Service<
                       Effect.sync(() => heardContext(running, event)),
                       Effect.andThen(between.record(event), between.flush),
                     ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
-                    heardBackground(running, event),
+                    Effect.andThen(heardWork(running, event), heardBackground(running, event)),
                   ),
                   live.publish({ _tag: 'Agent', threadId: thread.threadId, event }),
                 ),
@@ -1326,6 +1408,23 @@ export class Sessions extends Context.Service<
             yield* Scope.close(running.scope, Exit.void)
           }
           yield* Deferred.await(running.ended)
+        })
+
+      /** Whether a thread's agent is still at work, though its turn may have ended (`Sessions.busy`). */
+      const busyNow = (threadId: string) =>
+        Effect.gen(function* () {
+          const running = threads.get(threadId)
+          if (running === undefined) return false
+          return stillBusy(
+            {
+              turnRunning: running.turnRunning,
+              background: [...running.background.values()],
+              callsOpen: running.callsOpen.size,
+              workedAt: running.workedAt,
+            },
+            yield* Clock.currentTimeMillis,
+            quietFor,
+          )
         })
 
       /** Start, switch and stop on one thread happen one at a time. */
@@ -1691,7 +1790,7 @@ export class Sessions extends Context.Service<
             "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. read_issue reads the issue the task came from, or any other.",
             ...(resolves?.resolves === 1
               ? [
-                  'This project has you resolve a conflict with the default branch on your own: Althar tells you when it finds one, and what to merge. On a pull request, Althar pushes that merge itself once you commit it, and then a fix you commit on top of it, as one commit, when Althar tells you its checks failed. Nothing else you commit is pushed for you, and you still never push.',
+                  "This project has you resolve a conflict with the default branch on your own: Althar tells you when it finds one, and what to merge. Commit the merge as soon as the conflicts are settled and the quick checks pass, and don't end your turn with it uncommitted or while you wait on something running in the background: Althar looks at the branch when your turn ends. If the full test suites then find something, fix it in one follow-up commit on top of the merge. On a pull request, Althar pushes that merge itself once you commit it, with that one fix if you made it, and then a fix you commit on top when Althar tells you its checks failed, as one commit. Nothing else you commit is pushed for you, and you still never push.",
                 ]
               : []),
             // Althar runs the project for the person itself (ADR-023): the lead keeps how, when it changes it.
@@ -1894,6 +1993,20 @@ export class Sessions extends Context.Service<
             yield* toldBackground(running)
           }),
         outputSoFar: (threadId, itemId) => Effect.sync(() => Option.fromNullishOr(threads.get(threadId)?.recording?.outputOf(itemId))),
+        busy: (threadId) => busyNow(threadId),
+        untilIdle: (threadId, within) =>
+          Effect.gen(function* () {
+            const give = Duration.toMillis(within)
+            const began = yield* Clock.currentTimeMillis
+            // In memory, and only while a round waits on it: looked at often enough that a short quiet is noticed.
+            const every = Duration.min(IDLE_EVERY, quietFor)
+            for (;;) {
+              if (!threads.has(threadId)) return 'gone' as const
+              if (!(yield* busyNow(threadId))) return 'idle' as const
+              if ((yield* Clock.currentTimeMillis) - began >= give) return 'late' as const
+              yield* Effect.sleep(every)
+            }
+          }),
       })
     }),
   )

@@ -1,6 +1,6 @@
 import { open } from 'node:fs/promises'
 
-import { Effect } from 'effect'
+import { Duration, Effect } from 'effect'
 
 import { commandIn, shortCommand } from './rules'
 
@@ -27,6 +27,37 @@ export interface LeftRunning {
   /** It ended by itself: when, and its exit code where its output says. */
   ended: { readonly at: string; readonly code: number | null } | null
 }
+
+/**
+ * How long an agent must say nothing outside a turn Althar sent, once
+ * something it left running ended, to be taken as done: Claude Code starts a
+ * turn of its own when that happens (ADR-022), and nothing says when it ends.
+ */
+export const QUIET_FOR = Duration.seconds(30)
+
+/** What an agent has in hand, for whether it is done: the turn Althar sent, what it left running, and what it does outside a turn. */
+export interface InHand {
+  readonly turnRunning: boolean
+  readonly background: ReadonlyArray<Pick<LeftRunning, 'ended' | 'url'>>
+  /** Tool calls it began outside a turn and hasn't finished. */
+  readonly callsOpen: number
+  /** When it last spoke outside a turn, or something it left running ended (milliseconds); null if not since its last turn began. */
+  readonly workedAt: number | null
+}
+
+/**
+ * Whether an agent is still at work: in a turn, with a command it left
+ * running still going, in a call it hasn't finished, or not yet quiet for
+ * `quiet` since it last spoke outside a turn or something it left running
+ * ended. A turn that ends with any of these isn't the end of its work.
+ * A command that says where it answers is a server, which runs on for as
+ * long as the agent wants it: nothing the agent waits for to end.
+ */
+export const stillBusy = (hand: InHand, now: number, quiet: Duration.Duration) =>
+  hand.turnRunning ||
+  hand.background.some((left) => left.ended === null && left.url === null) ||
+  hand.callsOpen > 0 ||
+  (hand.workedAt !== null && now - hand.workedAt < Duration.toMillis(quiet))
 
 /** How much of the end of a command's output is read for where it answers and how it ended. */
 const TAIL = 16_384

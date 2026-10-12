@@ -9,6 +9,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
 import { changeOf, type Conflict, fixNoteFor, noteFor, onlyTheFix, onlyTheResolution, unresolved, whereLine } from '../src/conflicts'
+import type { IdleOptions } from '../src/Config'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
@@ -33,9 +34,16 @@ import { fakeConnectors, HOST, hosted, items, notices, repository, runtime, turn
  * resolved at once.
  */
 
-const runtimeWith = (services: { readonly github?: FakeService } = {}) =>
+/** A lead that has left something running is done a moment after, not half a minute: a test doesn't wait that long. */
+const runtimeWith = (services: { readonly github?: FakeService } = {}, idle: IdleOptions = {}) =>
   Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors(services), listenEvery: Duration.millis(100) })),
+    Layer.provideMerge(
+      runtime(
+        ':memory:',
+        {},
+        { connectors: fakeConnectors(services), listenEvery: Duration.millis(100), idle: { quiet: Duration.millis(300), ...idle } },
+      ),
+    ),
   )
 
 const git = (cwd: string, ...args: Array<string>) =>
@@ -119,7 +127,7 @@ const asked = (threadId: string) =>
 
 /** What the lead's brief says Althar pushes for it, where the project has it resolve conflicts. */
 const PUSHED_FOR_IT =
-  'On a pull request, Althar pushes that merge itself once you commit it, and then a fix you commit on top of it, as one commit, when Althar tells you its checks failed. Nothing else you commit is pushed for you, and you still never push.'
+  "Commit the merge as soon as the conflicts are settled and the quick checks pass, and don't end your turn with it uncommitted or while you wait on something running in the background: Althar looks at the branch when your turn ends. If the full test suites then find something, fix it in one follow-up commit on top of the merge. On a pull request, Althar pushes that merge itself once you commit it, with that one fix if you made it, and then a fix you commit on top when Althar tells you its checks failed, as one commit. Nothing else you commit is pushed for you, and you still never push."
 
 /** The lead's brief: its first turn. */
 const briefOf = (threadId: string) => Effect.map(turns(threadId), (all) => all[0]?.prompt ?? '')
@@ -449,7 +457,9 @@ describe('a conflict its pull request’s host reports', () => {
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
       const [note] = yield* asked(threadId)
       assert.include(note, 'merge origin/main into it, which Althar has fetched')
-      assert.include(note, "Althar pushes that merge alone to PR #1. Don't push it yourself.")
+      assert.include(note, 'Commit the merge as soon as the conflicts are settled and the quick checks pass')
+      assert.include(note, "don't end your turn with the merge uncommitted, or while you wait on something running in the background")
+      assert.include(note, "Althar pushes the merge and that fix to PR #1. Don't push it yourself.")
       // Its brief says what Althar pushes for it, and that it never pushes itself.
       assert.include(yield* briefOf(threadId), PUSHED_FOR_IT)
       // The pull request has the merge, and conflicts no more.
@@ -930,7 +940,7 @@ describe('a conflict its pull request’s host reports', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
-  it.live('waits for the person to push a merge the lead committed other work on top of', () => {
+  it.live('waits for the person to push a merge the lead committed more than a fix on top of', () => {
     const { working, bare } = hosted()
     const github = hostOf(bare, () => PASSED)
     return Effect.gen(function* () {
@@ -944,7 +954,7 @@ describe('a conflict its pull request’s host reports', () => {
       assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), before)
       const [round] = yield* rounds(taskId)
       assert.deepStrictEqual([round?.state, round?.pushedHead], ['resolved', null])
-      const [waiting] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 3, Duration.seconds(20))
+      const [waiting] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 4, Duration.seconds(20))
       assert.strictEqual(waiting?.change?.localHead, git((yield* worktreeOf(taskId)).path, 'rev-parse', 'HEAD'))
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -966,6 +976,119 @@ describe('a conflict its pull request’s host reports', () => {
       assert.deepStrictEqual([round?.state, round?.pushedHead], ['resolved', null])
       const [waiting] = yield* until(cards(projectId), (all) => (all[0]?.change?.unpushed ?? 0) > 1, Duration.seconds(20))
       assert.strictEqual(waiting?.change?.localHead, git((yield* worktreeOf(taskId)).path, 'rev-parse', 'HEAD'))
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('waits for a lead that left the full tests running, then pushes the merge it commits once they end, asking it once', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests]')
+      moveHostMainOn(working, bare)
+      // Its turn ends with the merge settled and not committed, the tests still running: not yet judged.
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      // Asked once, with no retry used: the merge was committed after its turn, by the lead the tests woke.
+      const said = yield* given(threadId)
+      assert.strictEqual(said.filter((body) => body.includes('Bring the branch up to date')).length, 1)
+      assert.isFalse(said.some((body) => body.includes('Try once more') || body.includes('not committed: commit')))
+      assert.isFalse((yield* notices(threadId)).some((notice) => notice.title?.includes('isn’t resolved yet') === true))
+      const [round] = yield* rounds(taskId)
+      assert.deepStrictEqual([round?.state, round?.attempt], ['resolved', 1])
+      assert.strictEqual(round?.pushedHead, git(bare, 'rev-parse', 'althar/add-a-retry'))
+      // The merge went up as the lead committed it.
+      assert.strictEqual(git(bare, 'merge-base', '--is-ancestor', 'main', 'althar/add-a-retry'), '')
+      assert.isFalse(conflictsIn(bare, 'main', 'althar/add-a-retry'))
+      assert.strictEqual(git((yield* worktreeOf(taskId)).path, 'status', '--short'), '')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('pushes the merge with the one fix the lead committed after it, whether it made it at once or once the tests ended', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { taskId, threadId } = yield* opened(working, '[lead:resolve-fix]')
+      moveHostMainOn(working, bare)
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge and its fix to PR #1.')
+      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      const [round] = yield* rounds(taskId)
+      assert.deepStrictEqual(
+        [round?.state, round?.attempt, round?.pushedHead],
+        ['resolved', 1, git(bare, 'rev-parse', 'althar/add-a-retry')],
+      )
+      // Both went up, the fix on top of the merge.
+      const tip = git(bare, 'rev-parse', 'althar/add-a-retry')
+      assert.strictEqual(git(bare, 'log', '-1', '--format=%s', tip), 'Fix what the tests found')
+      assert.strictEqual(git(bare, 'merge-base', '--is-ancestor', 'main', tip), '')
+      assert.strictEqual(git((yield* worktreeOf(taskId)).path, 'rev-parse', 'HEAD'), tip)
+      assert.strictEqual((yield* given(threadId)).filter((body) => body.includes('Bring the branch up to date')).length, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('waits for the lead the tests woke to commit the merge and a fix for what they found, and pushes both', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-fix]')
+      moveHostMainOn(working, bare)
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge and its fix to PR #1.')
+      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      const tip = git(bare, 'rev-parse', 'althar/add-a-retry')
+      assert.strictEqual(git(bare, 'log', '-1', '--format=%s', tip), 'Fix what the tests found')
+      assert.strictEqual(git(bare, 'merge-base', '--is-ancestor', 'main', tip), '')
+      const [round] = yield* rounds(taskId)
+      assert.deepStrictEqual([round?.state, round?.attempt, round?.pushedHead], ['resolved', 1, tip])
+      assert.strictEqual((yield* given(threadId)).filter((body) => body.includes('Bring the branch up to date')).length, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live(
+    'judges the branch as it is once a lead has been at work as long as it waits, asks once more to commit, then gives it to the person',
+    () => {
+      const { working, bare } = hosted()
+      const github = hostOf(bare, () => PASSED)
+      return Effect.gen(function* () {
+        const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-hang]')
+        const before = git(bare, 'rev-parse', 'althar/add-a-retry')
+        moveHostMainOn(working, bare)
+        yield* titled(threadId, 'The lead couldn’t resolve the conflict with main, in change.txt')
+        // Judged as today: the merge isn't committed, so it is asked once more, saying only that, and then it is the person's.
+        const said = yield* given(threadId)
+        assert.strictEqual(said.filter((body) => body.includes('Bring the branch up to date')).length, 1)
+        const again = said.at(-1) ?? ''
+        assert.match(again, /^Your merge is resolved but not committed: commit it\. Don't end your turn with the merge uncommitted/)
+        assert.notInclude(again, 'Bring the branch up to date')
+        assert.deepStrictEqual(
+          (yield* rounds(taskId)).map((round) => [round.state, round.attempt]),
+          [['failed', 2]],
+        )
+        const failed = (yield* notices(threadId)).find((notice) => notice.title?.startsWith('The lead couldn’t resolve') === true)
+        assert.include(failed?.description, "The merge of origin/main isn't committed.")
+        // Nothing was pushed for it.
+        assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), before)
+      }).pipe(Effect.provide(runtimeWith({ github }, { within: Duration.seconds(1) })))
+    },
+  )
+
+  it.live('asks a lead that settled the merge and forgot to commit it just to commit it, and pushes it once it has', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { taskId, threadId } = yield* opened(working, '[lead:resolve-forgets]')
+      moveHostMainOn(working, bare)
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
+      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      const said = yield* given(threadId)
+      const notes = said.filter((body) => body.includes('Bring the branch up to date') || body.includes('resolved but not committed'))
+      assert.strictEqual(notes.length, 2)
+      assert.match(notes[1] ?? '', /^Your merge is resolved but not committed: commit it\./)
+      assert.notInclude(notes[1], 'Try once more')
+      assert.notInclude(notes[1], 'settle each conflict')
+      // The retry was the one more try: the merge it then committed is what went up.
+      const [round] = yield* rounds(taskId)
+      assert.deepStrictEqual([round?.state, round?.attempt], ['resolved', 2])
+      assert.strictEqual(round?.pushedHead, git(bare, 'rev-parse', 'althar/add-a-retry'))
+      assert.strictEqual(git(bare, 'merge-base', '--is-ancestor', 'main', 'althar/add-a-retry'), '')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -1014,25 +1137,29 @@ describe('a round’s words, and what git says of its branch', () => {
     }
   }
 
-  it.effect('says why each repository isn’t resolved yet, until it is', () =>
+  it.effect('says why each repository isn’t resolved yet, and when only committing the merge is left, until it is', () =>
     Effect.gen(function* () {
       const { root, conflict } = split()
-      assert.strictEqual(yield* unresolved(root, conflict), "main isn't merged into the branch.")
+      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: "main isn't merged into the branch.", uncommitted: false })
       mergeMain(root)
-      assert.strictEqual(yield* unresolved(root, conflict), 'a.txt, b.txt still conflict.')
+      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: 'a.txt, b.txt still conflict.', uncommitted: false })
       writeFileSync(join(root, 'b.txt'), 'task\nmain\n')
       git(root, 'add', 'b.txt')
-      assert.strictEqual(yield* unresolved(root, conflict), 'a.txt still conflicts.')
+      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: 'a.txt still conflicts.', uncommitted: false })
       git(root, 'add', 'a.txt')
-      assert.strictEqual(yield* unresolved(root, conflict), "The merge of main isn't committed.")
+      // Every file is settled: the merge is all that is left to do.
+      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: "The merge of main isn't committed.", uncommitted: true })
       // Committed with its markers in, the conflict is in the commit.
       writeFileSync(join(root, 'b.txt'), '<<<<<<< HEAD\ntask\n=======\nmain\n>>>>>>> main\n')
       git(root, 'add', '.')
       git(root, 'commit', '-q', '--no-edit')
-      assert.strictEqual(yield* unresolved(root, conflict), 'a.txt, b.txt still have conflict markers in them.')
+      assert.deepStrictEqual(yield* unresolved(root, conflict), {
+        why: 'a.txt, b.txt still have conflict markers in them.',
+        uncommitted: false,
+      })
       writeFileSync(join(root, 'a.txt'), 'task\nmain\n')
       git(root, 'commit', '-q', '-am', 'Settle a')
-      assert.strictEqual(yield* unresolved(root, conflict), 'b.txt still has conflict markers in it.')
+      assert.deepStrictEqual(yield* unresolved(root, conflict), { why: 'b.txt still has conflict markers in it.', uncommitted: false })
       writeFileSync(join(root, 'b.txt'), 'task\nmain\n')
       git(root, 'commit', '-q', '-am', 'Settle b')
       assert.isNull(yield* unresolved(root, conflict))
@@ -1046,7 +1173,7 @@ describe('a round’s words, and what git says of its branch', () => {
       writeFileSync(join(root, 'c.txt'), 'c\n')
       git(root, 'add', '.')
       git(root, 'commit', '-q', '-m', 'Other work')
-      assert.isFalse(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')))
+      assert.isNull(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')))
       // A merge of another branch isn't one of the branch it conflicted with.
       git(root, 'reset', '-q', '--hard', conflict.from)
       git(root, 'checkout', '-q', '-b', 'other', conflict.from)
@@ -1055,7 +1182,7 @@ describe('a round’s words, and what git says of its branch', () => {
       git(root, 'commit', '-q', '-m', 'Elsewhere')
       git(root, 'checkout', '-q', 'task')
       git(root, 'merge', '-q', '--no-ff', '--no-edit', 'other')
-      assert.isFalse(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')))
+      assert.isNull(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')))
       // The merge of main, settled, is.
       git(root, 'reset', '-q', '--hard', conflict.from)
       mergeMain(root)
@@ -1063,12 +1190,23 @@ describe('a round’s words, and what git says of its branch', () => {
       git(root, 'add', '.')
       git(root, 'commit', '-q', '--no-edit')
       const merge = git(root, 'rev-parse', 'HEAD')
-      assert.isTrue(yield* onlyTheResolution(root, conflict, merge))
-      // On top of it, one commit is a fix; two aren't.
+      assert.strictEqual(yield* onlyTheResolution(root, conflict, merge), 'merge')
+      // On top of it, one commit is a fix, for the full tests as for the checks; two aren't.
       git(root, 'commit', '-q', '--allow-empty', '-m', 'Fix')
       assert.isTrue(yield* onlyTheFix(root, merge, git(root, 'rev-parse', 'HEAD')))
+      assert.strictEqual(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')), 'merge and fix')
       git(root, 'commit', '-q', '--allow-empty', '-m', 'More')
       assert.isFalse(yield* onlyTheFix(root, merge, git(root, 'rev-parse', 'HEAD')))
+      assert.isNull(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')))
+      // The one commit must sit on the merge itself: a merge of other work in its place isn't a fix.
+      git(root, 'reset', '-q', '--hard', merge)
+      git(root, 'checkout', '-q', '-b', 'elsewhere', conflict.from)
+      writeFileSync(join(root, 'e.txt'), 'e\n')
+      git(root, 'add', '.')
+      git(root, 'commit', '-q', '-m', 'Elsewhere again')
+      git(root, 'checkout', '-q', 'task')
+      git(root, 'merge', '-q', '--no-ff', '--no-edit', 'elsewhere')
+      assert.isNull(yield* onlyTheResolution(root, conflict, git(root, 'rev-parse', 'HEAD')))
     }),
   )
 
@@ -1090,6 +1228,31 @@ describe('a round’s words, and what git says of its branch', () => {
     const note = noteFor([one, two], { change: null }, null)
     assert.include(note, 'in web, develop conflicts in README.md; in api, main conflicts in a.ts, b.ts.')
     assert.include(note, "Then say it's ready to merge again.")
+    // The lead is told to commit the merge before anything slow, and before its turn ends, whatever it conflicts in.
+    for (const text of [note, noteFor([one], { change: 'PR #1' }, null), noteFor([one], { change: null }, null)]) {
+      assert.include(text, 'Commit the merge as soon as the conflicts are settled and the quick checks pass')
+      assert.include(text, "don't end your turn with the merge uncommitted, or while you wait on something running in the background")
+      assert.include(text, 'If the full tests then find something, fix it in')
+    }
+    assert.include(noteFor([one], { change: 'PR #1' }, null), 'fix it in one follow-up commit on top of the merge')
+    assert.include(noteFor([one], { change: 'PR #1' }, null), "Althar pushes the merge and that fix to PR #1. Don't push it yourself.")
+    assert.notInclude(noteFor([one], { change: null }, null), 'Althar pushes')
+    // Asked once more where the merge was all that was left, it is told so, not asked to resolve it again.
+    const commit = noteFor([one], { change: 'PR #1' }, "The merge of origin/develop isn't committed.", [one])
+    assert.match(commit, /^Your merge is resolved but not committed: commit it\. Don't end your turn with the merge uncommitted/)
+    assert.notInclude(commit, 'Try once more')
+    assert.notInclude(commit, 'settle each conflict')
+    assert.include(commit, "Althar pushes the merge and that fix to PR #1. Don't push it yourself.")
+    assert.match(noteFor([one, two], { change: null }, 'web: …', [one]), /^Your merge in web is resolved but not committed: commit it\./)
+    assert.match(
+      noteFor([one, two], { change: null }, 'web: …', [one, two]),
+      /^Your merges in web and api are resolved but not committed: commit each\./,
+    )
+    // Anything else still left is asked as before.
+    assert.match(
+      noteFor([one], { change: null }, 'README.md still conflicts.'),
+      /^The conflict isn't resolved yet: README.md still conflicts\. Try once more\. /,
+    )
     assert.strictEqual(changeOf({ change: null }), 'the pull request')
     const fix = fixNoteFor({ change: null }, { failing: ['test'], logs: [] })
     assert.match(fix, /^Checks failed on the merge Althar pushed to the pull request: test\.\n\nFix what broke/)
