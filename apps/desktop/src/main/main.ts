@@ -3,7 +3,7 @@ import { stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-import { defaultProfile, defaultWorktrees } from '@althar/runtime/locations'
+import { locations as locationsOf } from './locations'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
 import { type AppPreferences, DEFAULT_PREFERENCES, isPreferenceKey } from './appPreferences'
@@ -31,6 +31,7 @@ import {
   clipboard,
   dialog,
   ipcMain,
+  Menu,
   MessageChannelMain,
   nativeImage,
   Notification,
@@ -42,6 +43,9 @@ import {
   type UtilityProcess,
   utilityProcess,
 } from 'electron'
+
+import { appMenu, windowOptions } from './windowOptions'
+import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -82,6 +86,8 @@ let dictation: ReturnType<typeof startDictation> | undefined
  * (ALTHAR_FAKE_SPEECH), and a microphone the system is never asked about
  * (ALTHAR_FAKE_MICROPHONE, and with the fake model), Chromium's own.
  */
+/* The end-to-end tests show the window's failure screen: the runtime isn't started, so no port ever comes. Packaged builds leave this out. */
+const noRuntime = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_NO_RUNTIME === '1'
 const fakeSpeech = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_SPEECH === '1'
 const fakeMicrophone = fakeSpeech || (__ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_MICROPHONE === '1')
 if (fakeMicrophone) {
@@ -102,8 +108,18 @@ const restarts: Array<number> = []
 /* The store an update couldn't move, once the runtime says so: every window shows it, and no runtime starts again. */
 let storeFailure: StoreFailure | undefined
 
-/** The profile and worktrees, as the command-line client has them, so both see the same projects. */
-const locations = () => ({ profile: defaultProfile(process.env, process.platform), worktrees: defaultWorktrees(process.env) })
+/** The profile and worktrees, as the command-line client has them: a Flatpak's home is a fresh empty one each run, so it keeps worktrees beside its profile (locations.ts). */
+const locations = () => locationsOf(process.env, process.platform, homedir())
+
+// Althar is the name windows, window managers and the desktop see, whichever way the app was started.
+app.setName('Althar')
+
+// Off a Mac Electron draws the application menu's bar at the top of every window, frameless or not; the menu is kept for its accelerators (appMenu), and its bar is hidden here (windowOptions.ts, ADR-019).
+if (process.platform !== 'darwin') app.on('browser-window-created', (_event, window) => window.setMenuBarVisibility(false))
+
+// Off a Mac, ask for a secret service where Electron would fall back to plain text (keyring.ts).
+const store = passwordStore(process.argv, process.env.XDG_CURRENT_DESKTOP, process.env.FLATPAK_ID !== undefined, process.platform)
+if (store !== null) app.commandLine.appendSwitch('password-store', store)
 
 /*
  * Where the window keeps what it remembers, its tabs and pinned models. A
@@ -243,8 +259,13 @@ const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
 const seal = (child: UtilityProcess, message: RuntimeMessage) => {
   if (message.requestId === undefined || typeof message.value !== 'string') return
   const { requestId, value } = message
+  // On Linux a keyring may be missing: Electron would fall back to plain text (basic_text), which is no seal at all, so it fails like a missing keychain would.
+  const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'keychain'
+  if (!safeStorage.isEncryptionAvailable() || !keyringIsSafe(process.platform, backend)) {
+    // Marked: these words are the person's — the window shows them verbatim, and nothing else from here (words.ts).
+    return child.postMessage({ type: 'sealed', requestId, error: keyringUnavailable(process.platform), keyring: true })
+  }
   try {
-    if (!safeStorage.isEncryptionAvailable()) throw new Error('The keychain Althar seals sign-ins with isn’t available.')
     child.postMessage({
       type: 'sealed',
       requestId,
@@ -354,6 +375,9 @@ const openOutside = (url: string) => {
   }
 }
 
+/** Althar's picture for the window's icon on Linux, at the size X11 takes: the full-size file would silently overflow the property and leave the window iconless. */
+const windowIcon = () => nativeImage.createFromPath(join(here, '../../resources/icons/cobalt.png')).resize({ width: 128, height: 128 })
+
 const openWindow = () => {
   const window = new BrowserWindow({
     width: 1280,
@@ -361,11 +385,8 @@ const openWindow = () => {
     minWidth: 880,
     minHeight: 600,
     show: false,
-    // The page's own paper, so nothing else shows before its first frame.
-    backgroundColor: '#f4f2ec',
-    titleBarStyle: 'hiddenInset',
-    // Centred in the window's tabs, 40 high.
-    trafficLightPosition: { x: 16, y: 14 },
+    // Off a Mac the window is frameless, its own strip is the chrome (windowOptions.ts), and on Linux it carries Althar's icon.
+    ...windowOptions(process.platform, windowIcon()),
     webPreferences: {
       preload: join(here, '../preload/preload.cjs'),
       sandbox: true,
@@ -380,6 +401,9 @@ const openWindow = () => {
     window.setIgnoreMouseEvents(true)
   }
   windows.add(window)
+  // The window's own buttons say maximize or restore by what the window is (windowOptions.ts).
+  window.on('maximize', () => window.webContents.send('althar:maximized', true))
+  window.on('unmaximize', () => window.webContents.send('althar:maximized', false))
   window.on('closed', () => {
     windows.delete(window)
     // Off a Mac, closing Althar's last window quits, as it did before the edge kept pages of its own open.
@@ -414,6 +438,21 @@ ipcMain.handle('althar:pick-folder', async (event, purpose: unknown) => {
   const result = window === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(window, options)
   const path = result.canceled ? undefined : result.filePaths[0]
   return path === undefined ? null : allowFolder(path)
+})
+
+// Whether the window is maximized, as its own buttons ask.
+ipcMain.handle('althar:maximized', (event) => BrowserWindow.fromWebContents(event.sender)?.isMaximized() ?? false)
+
+// The window's own buttons, from its strip: close, minimize, or maximize and back (windowOptions.ts names the chrome).
+ipcMain.on('althar:window', (event, action: unknown) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (window === null) return
+  if (action === 'close') window.close()
+  else if (action === 'minimize') window.minimize()
+  else if (action === 'toggle-maximize') {
+    if (window.isMaximized()) window.unmaximize()
+    else window.maximize()
+  }
 })
 
 // Folders for a new project, several at once: a grant for each, in the order chosen.
@@ -529,9 +568,7 @@ ipcMain.on('althar:edge-open', (_event, threadId: unknown) => {
 void app.whenReady().then(() => {
   // Quiet, Althar is never the active app and has no place on the Dock or in the app switcher.
   if (quiet) app.setActivationPolicy?.('accessory')
-  // The window asks for nothing but the microphone, to dictate, and to put what the person copies on the clipboard (dictation.ts holds
-  // both): no notifications, camera or anything else a page can ask for. Althar's own notifications come from here, as the runtime says
-  // something needs the person.
+  // The window asks for nothing but dictation's microphone and the clipboard token it requests while connecting; its notifications come from main.
   dictation = startDictation({
     script: join(here, '../speech/speech.js'),
     models: () => join(locations().profile, 'speech'),
@@ -547,14 +584,21 @@ void app.whenReady().then(() => {
   powerMonitor.on('on-ac', awake.powerChanged)
   // Linux may not say when the power source changes, so there it is looked at again each minute too.
   if (process.platform === 'linux') setInterval(awake.powerChanged, 60_000).unref()
-  startRuntime()
+  if (!noRuntime) startRuntime()
   // A packaged app looks for updates, and tells every window as one is ready.
-  if (app.isPackaged)
+  // electron-updater supports the Linux AppImage feed; deb/rpm use their package managers.
+  if (app.isPackaged && (process.platform === 'darwin' || (process.platform === 'linux' && process.env.APPIMAGE !== undefined)))
     updates = startUpdates((glance: UpdateGlance) => {
       for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('althar:update', glance)
     })
-  const checking = updates
-  setAppMenu({ name: app.name, ...(checking === undefined ? {} : { checkForUpdates: () => void checkNow(checking) }) })
+  // macOS keeps its system menu with the updater command; elsewhere the hidden app menu keeps zoom, full screen, quit and dev tools' accelerators.
+  if (process.platform === 'darwin') {
+    const checking = updates
+    setAppMenu({ name: app.name, ...(checking === undefined ? {} : { checkForUpdates: () => void checkNow(checking) }) })
+  } else {
+    const menu = appMenu(process.platform, !app.isPackaged)
+    if (menu !== null) Menu.setApplicationMenu(Menu.buildFromTemplate(menu))
+  }
   openWindow()
   edge = startEdge({
     profile: () => locations().profile,

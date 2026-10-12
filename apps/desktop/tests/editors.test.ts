@@ -58,6 +58,31 @@ describe('the editors here', () => {
     expect(await Effect.runPromise(start('/nowhere/althar-no-such-editor', ['/w'], 'linux'))).toBe(false)
   })
 
+  it('open the person’s own editor out on the device, where the sandbox has none, with paths as the device sees them', async () => {
+    const started: Array<{ command: string; args: ReadonlyArray<string> }> = []
+    const out = {
+      find: (name: string) => (name === 'code' ? '/usr/bin/code' : null),
+      start: (command: string, args: ReadonlyArray<string>) => {
+        started.push({ command, args })
+        return Effect.succeed(true)
+      },
+      path: (path: string) => path.replace('/run/flatpak/doc', '/run/user/1000/doc'),
+    }
+    expect(await Effect.runPromise(openInEditor('vscode', '/run/flatpak/doc/a/w', '/run/flatpak/doc/a/w/x.ts', 12, 'linux', out))).toBe(
+      true,
+    )
+    expect(started).toEqual([
+      { command: '/usr/bin/code', args: ['/run/user/1000/doc/a/w'] },
+      { command: '/usr/bin/code', args: ['-g', '/run/user/1000/doc/a/w/x.ts:12'] },
+    ])
+    // The file manager, too, is out there: the sandbox has no desktop of its own.
+    expect(await Effect.runPromise(openInEditor('files', '/run/flatpak/doc/a/w', '/run/flatpak/doc/a/w/x.ts', null, 'linux', out))).toBe(
+      true,
+    )
+    expect(started[2]).toEqual({ command: 'xdg-open', args: ['/run/user/1000/doc/a/w'] })
+    expect(await Effect.runPromise(openInEditor('emacs', '/w', null, null, 'linux', out))).toBe(false)
+  })
+
   it('refuse to hand a Windows shell a path it would read as more than a path', async () => {
     expect(await Effect.runPromise(start('C:\\x\\code.cmd', ['C:\\a "b"'], 'win32'))).toBe(false)
     expect(await Effect.runPromise(start('C:\\x\\code.cmd', ['%PATH%'], 'win32'))).toBe(false)

@@ -1,6 +1,6 @@
 import { useId } from 'react'
 
-import { TitleBar } from '../../chrome/TitleBar/TitleBar'
+import { TitleBar, type TitleBarWindow } from '../../chrome/TitleBar/TitleBar'
 import { Logo } from '../../foundations/Logo/Logo'
 import { Button } from '../../primitives/Button/Button'
 import s from './DataNotMoved.module.css'
@@ -48,10 +48,13 @@ export interface DataNotMovedProps {
   onShowBackup?: () => void
   /** Reports the problem. Without it, nothing offers to. */
   onReport?: () => void
+  /** Off a Mac, draw the window's own controls; on macOS the system draws its lights. */
+  lights?: 'space' | 'drawn'
+  window?: TitleBarWindow
   text?: Partial<DataNotMovedText>
 }
 
-export function DataNotMoved({ stopped, backup, reason, onShowBackup, onReport, text }: DataNotMovedProps) {
+export function DataNotMoved({ stopped, backup, reason, onShowBackup, onReport, lights = 'space', window, text }: DataNotMovedProps) {
   const t = { ...dataNotMovedText, ...text }
   const titleId = useId()
   const copyId = useId()
@@ -59,7 +62,9 @@ export function DataNotMoved({ stopped, backup, reason, onShowBackup, onReport, 
   const safe = stopped === 'copying' ? t.notCopied : backup === null ? t.untouched : t.copied
   return (
     <div className={s.screen}>
-      <TitleBar lights="space">{null}</TitleBar>
+      <TitleBar lights={lights} {...(window === undefined ? {} : { window })}>
+        {null}
+      </TitleBar>
       <main className={s.body} aria-labelledby={titleId}>
         <div className={s.page}>
           <Logo size={28} className={s.mark} />
