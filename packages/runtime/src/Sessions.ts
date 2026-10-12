@@ -403,6 +403,15 @@ export class Sessions extends Context.Service<
     >
     /** What a command on a thread has printed so far, while it runs: its last lines, and how many came before them. */
     outputSoFar(threadId: string, itemId: string): Effect.Effect<Option.Option<OutputSoFar>>
+    /**
+     * Every session on a task's threads, its lead's or a step's, with whether
+     * it is in a turn and whether something it left running still runs: what
+     * counts toward the agents at work on this machine (Busy.ts). Never the
+     * coordinator's.
+     */
+    readonly onTasks: Effect.Effect<
+      ReadonlyArray<{ readonly threadId: string; readonly taskId: string; readonly turnRunning: boolean; readonly background: boolean }>
+    >
   }
 >()('@althar/runtime/Sessions') {
   static readonly layer: Layer.Layer<Sessions, never, Store> = Layer.effect(
@@ -1894,6 +1903,20 @@ export class Sessions extends Context.Service<
             yield* toldBackground(running)
           }),
         outputSoFar: (threadId, itemId) => Effect.sync(() => Option.fromNullishOr(threads.get(threadId)?.recording?.outputOf(itemId))),
+        onTasks: Effect.sync(() =>
+          [...threads.values()].flatMap((running) =>
+            running.thread.role === 'coordinator'
+              ? []
+              : [
+                  {
+                    threadId: running.thread.threadId,
+                    taskId: running.thread.taskId,
+                    turnRunning: running.turnRunning,
+                    background: [...running.background.values()].some((left) => left.ended === null),
+                  },
+                ],
+          ),
+        ),
       })
     }),
   )

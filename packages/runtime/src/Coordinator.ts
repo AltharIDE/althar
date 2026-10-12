@@ -7,6 +7,7 @@ import { knownModelName } from '@althar/contracts'
 import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Busy } from './Busy'
 import { Changes } from './Changes'
 import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
@@ -78,6 +79,7 @@ type Store =
   | Models
   | ModelFacts
   | Limits
+  | Busy
   | Accounts
 
 const Drafted = Schema.Struct({
@@ -157,6 +159,7 @@ export class Coordinator extends Context.Service<
       const sessions = yield* Sessions
       const projects = yield* Projects
       const plans = yield* Plans
+      const busy = yield* Busy
       const toolServer = yield* ToolServer
       const changes = yield* Changes
       const issues = yield* Issues
@@ -422,7 +425,11 @@ export class Coordinator extends Context.Service<
             end: null,
             held: true,
           })
-          yield* plans.start(planId, instance.coordinatorId)
+          const started = yield* plans.start(planId, instance.coordinatorId)
+          if (started === 'waiting') {
+            const { busy: atWork, atOnce } = yield* busy.now
+            return `Started ${created.slug}, but it waits for a free agent: ${atWork} of the ${atOnce} this computer runs at once are busy. Its lead starts on it by itself when one is free, with no review, and nothing goes outside the project when it is done. The person sees it as a card, waiting; say in a sentence what it does, and that it waits its turn.`
+          }
           return `Started ${created.slug}: its lead is on it now, with no review, and nothing goes outside the project when it is done. The person sees it as a card; say in a sentence what it does.`
         })
 

@@ -18,7 +18,7 @@
 -- node_type: deterministic_action, agent, integration, human_decision, condition, bounded_map, join, verification, compensation, subworkflow, bounded_loop
 -- node_state: pending, ready, running, succeeded, failed, skipped, cancelled, uncertain
 -- node_attempt_state: ready, admitted, running, waiting_attention, verifying, succeeded, failed, cancelling, cancelled, uncertain, reconciling, held, superseded
--- hold_reason: usage_limit, agent_unavailable
+-- hold_reason: usage_limit, agent_unavailable, machine_busy
 -- thread_kind: coordinator, task, step
 -- thread_item_kind: user_message, agent_message, agent_thought, tool_call, plan, step_result, notice, task, arrival, question, run, issue_draft, setup, push_request
 -- input_disposition: after_current, interrupt_and_continue, supersede_pending, cancel_run
@@ -1050,7 +1050,7 @@ CREATE TABLE conflict_resolutions (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   settled_at TEXT CHECK (settled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), waiting TEXT CHECK (json_valid(waiting)),
   FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
   UNIQUE (id, project_id),
   CHECK ((state = 'failed') = (failure IS NOT NULL)),

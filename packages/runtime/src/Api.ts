@@ -46,6 +46,7 @@ import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
 import { Queries } from './Queries'
+import { Busy } from './Busy'
 import { timestamp } from './records'
 import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
@@ -147,6 +148,7 @@ export const handlers = Api.toLayer(
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
+    const busy = yield* Busy
     const envelope = (type: string, payload: unknown, commandId: string) =>
       Effect.provideContext(Runtime.envelope(type, payload, commandId), context)
     const agentName = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
@@ -594,10 +596,22 @@ export const handlers = Api.toLayer(
       SetModelBlocked: ({ commandId, agentId, model, blocked }) =>
         once(commandId, api(models.setModelBlocked({ agentId, model, blocked }))),
       GetSettings: () =>
-        api(Effect.map(coAuthorOn, (on) => ({ coAuthor: { on, line: coAuthorLine } }))).pipe(
-          Effect.provideService(SqlClient.SqlClient, sql),
-        ),
+        api(
+          Effect.gen(function* () {
+            const on = yield* coAuthorOn
+            const atOnce = yield* busy.atOnce
+            return {
+              coAuthor: { on, line: coAuthorLine },
+              agentsAtOnce: {
+                count: atOnce.count,
+                own: atOnce.own,
+                machine: { count: atOnce.machine.count, cores: atOnce.machine.cores, memory: atOnce.machine.memory },
+              },
+            }
+          }),
+        ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
       Interrupt: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
@@ -707,7 +721,7 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      StartPlan: ({ commandId, planId }) => once(commandId, api(plans.start(planId, instance.personId))),
+      StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
       ChangeIssueDraft: ({ commandId, draftId, title, body, labels }) =>

@@ -32,6 +32,7 @@ import {
 import { Context, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
+import { Busy } from './Busy'
 import { Agents, RuntimeConfig } from './Config'
 import { questionTitle } from './Questions'
 import { Changes } from './Changes'
@@ -525,7 +526,7 @@ export interface ThreadChange {
   readonly threadId: string | null
 }
 
-type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig | Artifacts | Launches
+type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig | Artifacts | Launches | Busy
 
 export class Queries extends Context.Service<
   Queries,
@@ -1168,15 +1169,22 @@ export class Queries extends Context.Service<
             firstSession: string | null
             starting: number
             held: string | null
+            heldFor: string | null
+            roundWaits: number
           }>`
             SELECT t.id AS thread_id, k.title, k.slug, k.state, w.branch,
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
               r.state AS run_state, r.created_at AS run_at,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
-              -- A step held until an agent's usage limit resets.
+              -- A step held until an agent's usage limit resets, or until a place among the agents at work here frees.
               (SELECT a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state = 'held' ORDER BY a.admitted_at DESC LIMIT 1) AS held,
+              (SELECT a.hold_reason FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+                WHERE e.run_id = r.id AND a.state = 'held' ORDER BY a.admitted_at DESC LIMIT 1) AS held_for,
+              -- A conflict, or the checks on one, its lead is to be asked about once it has a place.
+              (SELECT count(*) FROM conflict_resolutions c WHERE c.task_id = k.id AND c.state = 'resolving' AND c.waiting IS NOT NULL)
+                AS round_waits,
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') AS waiting,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
@@ -1206,13 +1214,15 @@ export class Queries extends Context.Service<
             task.starting > 0 ||
             Option.exists(lead, (session) => session.turnRunning) ||
             Option.exists(reviewer, (session) => session.turnRunning)
+          // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
+          const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0
           const phase = ((): TaskPhase => {
             if (task.state === 'done' || task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
             // A call waiting on the person, and work under way, come before being ready: work sent back isn't ready again
             // until its lead is done with the note.
             if (task.waiting > 0) return 'waiting'
-            if (task.runState === 'succeeded') return busy ? 'running' : 'ready'
+            if (task.runState === 'succeeded') return busy || queued ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
             return working || task.held !== null ? 'running' : 'stopped'
@@ -1264,7 +1274,8 @@ export class Queries extends Context.Service<
             leadEffort,
             branch: task.branch,
             startedAt: task.runAt ?? task.firstSession,
-            waits: waitsOf(task.held),
+            waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
+            queued: queued && task.state !== 'done' && task.state !== 'abandoned' ? yield* (yield* Busy).now : null,
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
 
@@ -1582,6 +1593,7 @@ export class Queries extends Context.Service<
               baseRef: head.baseRef,
               phase: card?.phase ?? null,
               waits: card?.waits ?? null,
+              queued: card?.queued ?? null,
               steps: card?.plan?.steps ?? [],
               lead: last ?? (planned === undefined ? null : { agentId: planned.agentId, model: planned.model, account: null }),
               step: card?.step ?? null,

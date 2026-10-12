@@ -17,6 +17,7 @@ import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Busy } from './Busy'
 import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
@@ -242,6 +243,7 @@ type Store =
   | Agents
   | Policies
   | Live
+  | Busy
 
 interface RoundRow {
   readonly id: string
@@ -257,7 +259,18 @@ interface RoundRow {
   readonly pushedHead: string | null
   readonly askedSequence: number | null
   readonly updatedAt: string
+  /** The ask it waits to put to the lead until a place among the agents at work on this machine frees; null once asked. */
+  readonly waiting: string | null
 }
+
+/** What a round keeps while it waits for a place to ask its lead: which attempt, what it asks and why, and since when. */
+const RoundWaiting = Schema.Struct({
+  attempt: Schema.Int,
+  body: Schema.String,
+  why: Schema.Record(Schema.String, Schema.Unknown),
+  since: Schema.String,
+})
+type RoundWaiting = typeof RoundWaiting.Type
 
 /** One of a task's repositories here: its worktree and branch, the default branch it merges into, and whether it has a pull request. */
 interface HereRow {
@@ -403,6 +416,7 @@ export class Changes extends Context.Service<
       const instance = yield* Instance
       const connections = yield* Connections
       const sessions = yield* Sessions
+      const busy = yield* Busy
       const toolServer = yield* ToolServer
       const agents = yield* Agents
       const live = yield* Live
@@ -1735,11 +1749,12 @@ export class Changes extends Context.Service<
       /* ---- A lead resolving a conflict on its own, where the project says to (conflicts.ts) ---- */
 
       const decodeConflicts = Schema.decodeUnknownEffect(Schema.fromJsonString(Conflicts))
+      const decodeWaiting = Schema.decodeUnknownEffect(Schema.fromJsonString(RoundWaiting))
       const decodeEnded = Schema.decodeUnknownEffect(Schema.fromJsonString(Ended))
 
       const roundColumns = (sql: SqlClient.SqlClient) =>
         sql`c.id, c.project_id, c.task_id, t.id AS thread_id, c.pull_request_url AS url, c.conflicts, c.attempt, c.state,
-            c.failure, c.ended, c.pushed_head, c.asked_sequence, c.updated_at`
+            c.failure, c.ended, c.pushed_head, c.asked_sequence, c.updated_at, c.waiting`
 
       /** The task's round under way, resolving or waiting for its checks: one at most. */
       const underWay = (taskId: string) =>
@@ -1760,7 +1775,7 @@ export class Changes extends Context.Service<
                   SELECT ${columns} FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task' WHERE c.id = ${where.id}`
               : yield* sql<RoundRow>`
                   SELECT ${columns} FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
-                  WHERE t.id = ${where.threadId} AND c.state = 'resolving'`
+                  WHERE t.id = ${where.threadId} AND c.state = 'resolving' AND c.waiting IS NULL`
           return round
         })
 
@@ -1855,7 +1870,12 @@ export class Changes extends Context.Service<
             body,
             quiet: true,
           })
-          yield* reviseRound(round, 'conflict_resolution.asked', { attempt, askedSequence: accepted.sequence }, { attempt, ...why })
+          yield* reviseRound(
+            round,
+            'conflict_resolution.asked',
+            { attempt, askedSequence: accepted.sequence, waiting: null },
+            { attempt, ...why },
+          )
           if (Option.isSome(yield* sessions.running(round.threadId))) return
           // Started apart, so what holds the task's pull request isn't held while an agent starts.
           yield* Effect.forkIn(
@@ -1872,7 +1892,11 @@ export class Changes extends Context.Service<
           )
         })
 
-      /** A conflict the lead is to resolve: recorded, said in the thread, and asked of it. */
+      /**
+       * A conflict the lead is to resolve: recorded, said in the thread, and
+       * asked of it, once the lead has a place among the agents at work on
+       * this machine; until then the round keeps its ask, and waits.
+       */
       const beginRound = (
         task: { readonly projectId: ProjectId; readonly taskId: string; readonly threadId: string },
         url: string | null,
@@ -1881,44 +1905,78 @@ export class Changes extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const id = yield* newId(Ids.conflictResolution)
-          yield* sql.withTransaction(
-            Effect.gen(function* () {
-              const at = yield* timestamp
-              yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
-                id,
-                projectId: task.projectId,
-                taskId: task.taskId,
-                pullRequestUrl: url,
-                conflicts: JSON.stringify(conflicts),
-                attempt: 1,
-                state: 'resolving',
-                createdAt: at,
-                updatedAt: at,
-              })}`
-              yield* fact({
-                projectId: task.projectId,
-                aggregateType: 'conflict_resolution',
-                aggregateId: id,
-                revision: 1,
-                type: 'conflict_resolution.started',
-                payload: { url, conflicts: conflicts.map((one) => ({ repository: one.repository, branch: one.branch, files: one.files })) },
-                actorId: instance.systemId,
-              })
-            }),
-          )
           const place = yield* placeOf(task.taskId, url)
+          const body = noteFor(conflicts, place, null)
+          const room = yield* busy.enter(task.taskId, (room) =>
+            sql.withTransaction(
+              Effect.gen(function* () {
+                const at = yield* timestamp
+                yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+                  id,
+                  projectId: task.projectId,
+                  taskId: task.taskId,
+                  pullRequestUrl: url,
+                  conflicts: JSON.stringify(conflicts),
+                  attempt: 1,
+                  state: 'resolving',
+                  waiting: room ? null : JSON.stringify({ attempt: 1, body, why: {}, since: at } satisfies RoundWaiting),
+                  createdAt: at,
+                  updatedAt: at,
+                })}`
+                yield* fact({
+                  projectId: task.projectId,
+                  aggregateType: 'conflict_resolution',
+                  aggregateId: id,
+                  revision: 1,
+                  type: 'conflict_resolution.started',
+                  payload: {
+                    url,
+                    conflicts: conflicts.map((one) => ({ repository: one.repository, branch: one.branch, files: one.files })),
+                    ...(room ? {} : { waiting: true }),
+                  },
+                  actorId: instance.systemId,
+                })
+                return room
+              }),
+            ),
+          )
           const [own] = yield* sql<{ resolveConflicts: number | null }>`SELECT resolve_conflicts FROM tasks WHERE id = ${task.taskId}`
+          const as = own?.resolveConflicts === 1 ? 'as you said for this task' : 'as the project’s rules say'
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
             title: `${place.change ?? 'It'} conflicts with ${whereLine(conflicts)}.`,
-            description:
-              own?.resolveConflicts === 1
-                ? 'Althar asked the lead to resolve it, as you said for this task.'
-                : 'Althar asked the lead to resolve it, as the project’s rules say.',
+            description: room
+              ? `Althar asked the lead to resolve it, ${as}.`
+              : `Althar asks the lead to resolve it, ${as}, once an agent is free on this computer.`,
           })
           yield* touchCard(task.taskId)
-          yield* askLead({ id, ...task }, 1, noteFor(conflicts, place, null))
+          if (room) yield* askLead({ id, ...task }, 1, body)
+        })
+
+      /** Every round that waits for a place to ask its lead, with since when, and what asks it once it has one. */
+      const roundsWaiting = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const rows = yield* sql<RoundRow>`
+          SELECT ${roundColumns(sql)} FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
+          JOIN tasks k ON k.id = c.task_id JOIN projects p ON p.id = c.project_id
+          WHERE c.state = 'resolving' AND c.waiting IS NOT NULL AND k.state = 'open' AND p.archived_at IS NULL`
+        return yield* Effect.forEach(rows, (round) =>
+          Effect.map(decodeWaiting(round.waiting ?? ''), (waited) => ({
+            taskId: round.taskId,
+            since: waited.since,
+            start: provide(locked(round.taskId)(askWaiting(round.id))),
+          })),
+        )
+      })
+
+      /** A round that waited for a place, asked of its lead now it has one; nothing where it no longer waits, as one the person stopped. */
+      const askWaiting = (id: string) =>
+        Effect.gen(function* () {
+          const round = yield* roundOf({ id })
+          if (round === undefined || round.state !== 'resolving' || round.waiting === null) return
+          const waited = yield* decodeWaiting(round.waiting)
+          yield* askLead(round, waited.attempt, waited.body, waited.why)
         })
 
       /** Changes a round's record, with its fact. */
@@ -2279,14 +2337,28 @@ export class Changes extends Context.Service<
             const log = yield* host.checkLog(repository, check).pipe(Effect.orElseSucceed(() => null))
             if (log !== null) logs.push(logOf(check.name, log))
           }
-          yield* reviseRound(round, 'conflict_resolution.checks_failed', { state: 'resolving' }, { failing: sum.failing })
+          // The lead takes a place among the agents at work on this machine to fix them, or the round keeps its ask and waits for one.
+          const body = fixNoteFor(place, { failing: sum.failing, logs })
+          const why = { failing: sum.failing }
+          const room = yield* busy.enter(round.taskId, (room) =>
+            Effect.gen(function* () {
+              const since = yield* timestamp
+              const waiting = room
+                ? {}
+                : { waiting: JSON.stringify({ attempt: round.attempt + 1, body, why, since } satisfies RoundWaiting) }
+              yield* reviseRound(round, 'conflict_resolution.checks_failed', { state: 'resolving', ...waiting }, why)
+              return room
+            }),
+          )
           yield* addItem(thread, 'notice', {
             source: 'runtime',
             severity: 'info',
             title: `The checks failed on what Althar pushed to ${where}: ${sum.failing.join(', ')}.`,
-            description: 'Althar asked the lead to fix them.',
+            description: room
+              ? 'Althar asked the lead to fix them.'
+              : 'Althar asks the lead to fix them once an agent is free on this computer.',
           })
-          yield* askLead(round, round.attempt + 1, fixNoteFor(place, { failing: sum.failing, logs }), { failing: sum.failing })
+          if (room) yield* askLead(round, round.attempt + 1, body, why)
           return true
         })
 
@@ -2375,12 +2447,14 @@ export class Changes extends Context.Service<
 
       yield* Effect.forkScoped(provide(Stream.runForEach(yield* live.subscribe, onLive)))
 
-      // A round an earlier launch left under way has no lead on it now: what the branch holds says how it ended.
+      // A round an earlier launch left under way has no lead on it now: what the branch holds says how it ended. One that waited
+      // for a place to ask its lead still waits, and is asked once it has one.
       yield* Effect.forkScoped(
         provide(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
-            const open = yield* sql<{ id: string; taskId: string }>`SELECT id, task_id FROM conflict_resolutions WHERE state = 'resolving'`
+            const open = yield* sql<{ id: string; taskId: string }>`
+              SELECT id, task_id FROM conflict_resolutions WHERE state = 'resolving' AND waiting IS NULL`
             for (const round of open)
               yield* locked(round.taskId)(settleRound(round.id, { why: 'Althar stopped while the lead was resolving it.' }))
             // Waiting for checks on a pull request no longer listened to, nothing would end it.
@@ -2392,6 +2466,8 @@ export class Changes extends Context.Service<
           }),
         ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look at the conflicts leads were resolving', cause))),
       )
+
+      yield* busy.queue(provide(roundsWaiting))
 
       // What an earlier launch was doing outside when it stopped is uncertain until read back or asked for again.
       yield* provide(reconcileOutward).pipe(

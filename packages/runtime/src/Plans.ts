@@ -41,8 +41,12 @@ export class Plans extends Context.Service<
       /** Held from the start: it waits until someone starts it, with no countdown. */
       readonly held?: boolean
     }): Effect.Effect<string, unknown>
-    /** Starts a proposed plan now. */
-    start(planId: string, actorId: ActorId): Effect.Effect<void, unknown>
+    /**
+     * Starts a proposed plan now: its first step is under way (`running`), or
+     * waits for a place among the agents at work on this machine (`waiting`);
+     * null where it no longer stood to start.
+     */
+    start(planId: string, actorId: ActorId): Effect.Effect<'running' | 'waiting' | null, unknown>
     /** Holds a proposed plan until someone starts it. */
     hold(planId: string, actorId: ActorId): Effect.Effect<void, unknown>
     /** Changes a proposed plan's steps (who does them, or which are skipped), and what happens when the work is done. */
@@ -166,7 +170,7 @@ export class Plans extends Context.Service<
             'task_plan.accepted',
             actorId,
           )
-          if (accepted) yield* runs.run(planId)
+          return accepted ? yield* runs.run(planId) : null
         })
 
       // The countdown: the next plan due starts when its time comes, or sooner if a plan changes.
