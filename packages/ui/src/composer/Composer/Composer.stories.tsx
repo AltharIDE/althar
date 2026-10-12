@@ -298,10 +298,18 @@ export const EnterEndsDictationAtItsSize: Story = {
     const long = longWords.join(' ')
     return (
       <>
-        <div data-testid="dictated-short"><Example recording streaming /></div>
-        <div data-testid="typed-short"><Example initial={said} /></div>
-        <div data-testid="dictated-long"><Example recording streaming transcript={longWords} pace={10} /></div>
-        <div data-testid="typed-long"><Example initial={long} /></div>
+        <div data-testid="dictated-short">
+          <Example recording streaming />
+        </div>
+        <div data-testid="typed-short">
+          <Example initial={said} />
+        </div>
+        <div data-testid="dictated-long">
+          <Example recording streaming transcript={longWords} pace={10} />
+        </div>
+        <div data-testid="typed-long">
+          <Example initial={long} />
+        </div>
       </>
     )
   },
