@@ -4,7 +4,21 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 
-import { Api, ApiError, CommandId, Load, NewProjectId, PAGE, Product, type SentImage, SentImages, ThreadItem, WatchEvent } from '../src/Api'
+import {
+  AgentsAtOnce,
+  Api,
+  ApiError,
+  AtOnceCount,
+  CommandId,
+  Load,
+  NewProjectId,
+  PAGE,
+  Product,
+  type SentImage,
+  SentImages,
+  ThreadItem,
+  WatchEvent,
+} from '../src/Api'
 import { MESSAGE_IMAGES } from '../src/pictures'
 import { clientProtocol, emitterPort, serverProtocol } from '../src/transport'
 
@@ -12,6 +26,20 @@ const at = '2026-09-29T12:00:00.000Z'
 const commandId = `cmd_${'a'.repeat(32)}`
 
 describe('the API', () => {
+  it('takes from one to sixteen agents at once, whole, and says why the default is what it is', () => {
+    const count = Schema.decodeUnknownSync(AtOnceCount)
+    assert.strictEqual(count(1), 1)
+    assert.strictEqual(count(16), 16)
+    for (const wrong of [0, 17, 2.5, '4', null]) assert.throws(() => count(wrong), undefined, undefined, String(wrong))
+    const settings = Schema.decodeUnknownSync(AgentsAtOnce)
+    assert.deepStrictEqual(settings({ count: 2, own: 2, machine: { count: 4, cores: 10, memory: 16 } }).machine, {
+      count: 4,
+      cores: 10,
+      memory: 16,
+    })
+    assert.throws(() => settings({ count: 4, own: 0, machine: { count: 4, cores: 10, memory: 16 } }))
+  })
+
   it('knows each kind of thread item by its content, and nothing else', () => {
     const decode = Schema.decodeUnknownSync(ThreadItem)
     const base = { id: 'i1', sequence: 1, agentId: 'codex', createdAt: at }
@@ -183,6 +211,7 @@ describe('the API', () => {
         branch: null,
         startedAt: null,
         waits: null,
+        queued: null,
       },
     })
     assert.strictEqual(task.kind === 'task' && task.content.plan?.steps.length, 2)
@@ -280,6 +309,7 @@ describe('the API', () => {
               SetModelBlocked: () => Effect.die('unused'),
               GetSettings: () => Effect.die('unused'),
               SetCoAuthor: () => Effect.die('unused'),
+              SetAgentsAtOnce: () => Effect.die('unused'),
               StartAccountSignIn: () => Effect.die('unused'),
               GetAccountSignIn: () => Effect.die('unused'),
               PasteAccountSignInCode: () => Effect.die('unused'),

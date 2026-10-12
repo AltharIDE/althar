@@ -548,6 +548,7 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   branch: 'althar/add-a-retry',
   startedAt: null,
   waits: null,
+  queued: null,
   ...overrides,
 })
 
@@ -618,6 +619,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     baseRef: 'main',
     phase: 'running',
     waits: null,
+    queued: null,
     steps: [],
     lead: null,
     step: null,
@@ -789,8 +791,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setModelBlocked: vi.fn(async () => {}),
     getSettings: vi.fn(async () => ({
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
+      agentsAtOnce: { count: 4, own: null, machine: { count: 4, cores: 10, memory: 16 } },
     })),
     setCoAuthor: vi.fn(async () => {}),
+    setAgentsAtOnce: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
     setTaskResolveConflicts: vi.fn(async () => {}),

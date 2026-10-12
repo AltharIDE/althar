@@ -202,6 +202,8 @@ export enum TaskStatus {
   Done = 'done',
   /** Held for a usage limit. */
   Paused = 'paused',
+  /** Waits for a free agent: every one this machine runs at once is busy. It starts on its own. */
+  Queued = 'queued',
   /** Stopped by you. */
   Stopped = 'stopped',
 }

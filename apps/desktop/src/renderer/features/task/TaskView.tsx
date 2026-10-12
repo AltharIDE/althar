@@ -30,7 +30,7 @@ import {
   TitleBar,
 } from '@althar/ui'
 
-import { waitsWords } from '../../shared/agents'
+import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { useDictation } from '../../shared/dictation/useDictation'
@@ -130,6 +130,7 @@ export const text = {
 /**
  * Where a task stands, for its header: the step it is on, by what it does
  * there; a step held for a usage limit says whom it waits for, and until when;
+ * one waiting for a free agent, that every agent this computer runs at once is busy;
  * ready, it waits on the person to accept it.
  */
 export const statusOf = (
@@ -137,8 +138,9 @@ export const statusOf = (
   agentName: (id: string) => string = (id) => id,
 ): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
-  const { waits, phase, step } = snapshot.task
+  const { waits, queued, phase, step } = snapshot.task
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
+  if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
   const doing = step === null ? undefined : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
   // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.

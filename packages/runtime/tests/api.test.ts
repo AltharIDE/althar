@@ -741,12 +741,6 @@ describe('settings, through the API', () => {
         yield* client.SetAgentsAtOnce({ commandId: commandId(), count: null })
         assert.deepStrictEqual((yield* client.GetSettings({})).agentsAtOnce, { count: 4, own: null, machine })
         assert.deepStrictEqual(yield* kept, [])
-        // Fewer than one, or more than Althar runs at once, isn't a number it takes.
-        for (const count of [0, 17, 2.5]) {
-          const refused = yield* Effect.flip(client.SetAgentsAtOnce({ commandId: commandId(), count }))
-          assert.isDefined(refused)
-        }
-        assert.strictEqual((yield* client.GetSettings({})).agentsAtOnce.count, 4)
       }),
     ),
   )

@@ -2456,16 +2456,20 @@ export class Runs extends Context.Service<
        * A step held for a usage limit runs again at the reset, on the agent,
        * account and model it was held for, once it has a place among the
        * agents at work on this machine; until then it waits for one.
+       * `placed`, it waited for a place after its reset, and has one now.
        */
-      const resumeHeld = (held: {
-        readonly taskId: string
-        readonly attemptId: string
-        readonly nodeKey: string
-        readonly iteration: number
-        readonly agentId: string
-        readonly accountId: string | null
-        readonly model: string | null
-      }) =>
+      const resumeHeld = (
+        held: {
+          readonly taskId: string
+          readonly attemptId: string
+          readonly nodeKey: string
+          readonly iteration: number
+          readonly agentId: string
+          readonly accountId: string | null
+          readonly model: string | null
+        },
+        placed = false,
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const current = yield* currentRun(held.taskId)
@@ -2475,7 +2479,7 @@ export class Runs extends Context.Service<
               Effect.gen(function* () {
                 // Stopped meanwhile, it waits for the person to resume it, not for the reset.
                 const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${held.attemptId}`
-                if (still?.state !== 'held') return false
+                if (still?.state !== (placed ? 'admitted' : 'held')) return false
                 if (!room) {
                   yield* waitForPlace(current, held.attemptId, {
                     how: 'reset',
@@ -2646,10 +2650,28 @@ export class Runs extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const current = yield* currentRun(row.taskId)
           if (current === undefined) return
-          // Read again: stopped since it was listed, it is the person's to resume.
-          const [still] = yield* sql<{ state: string; holdReason: string | null }>`
-            SELECT state, hold_reason FROM node_attempts WHERE id = ${row.attemptId}`
-          if (still?.state !== 'held' || still.holdReason !== 'machine_busy') return
+          // Its place taken in the store, read where it is written: stopped since it was listed, it is the person's to resume.
+          // Admitted from here on, a restart carries it on as any step a restart stopped, and needs the person where it
+          // stopped Althar again soon after.
+          const taken = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [still] = yield* sql<{ state: string; holdReason: string | null }>`
+                SELECT state, hold_reason FROM node_attempts WHERE id = ${row.attemptId}`
+              if (still?.state !== 'held' || still.holdReason !== 'machine_busy') return false
+              const revision = yield* change('node_attempts', row.attemptId, { state: 'admitted', holdReason: null, output: null })
+              yield* fact({
+                projectId: current.projectId,
+                aggregateType: 'node_attempt',
+                aggregateId: row.attemptId,
+                revision,
+                type: 'node_attempt.admitted',
+                payload: { node: row.nodeKey, iteration: row.iteration, placed: waited.place.how },
+                actorId: instance.systemId,
+              })
+              return true
+            }),
+          )
+          if (!taken) return
           const { place } = waited
           switch (place.how) {
             case 'start':
@@ -2668,7 +2690,7 @@ export class Runs extends Context.Service<
               return yield* touchCard(current.taskId)
             }
             case 'reset':
-              return yield* resumeHeld({ ...row, agentId: place.agentId, accountId: place.accountId, model: place.model })
+              return yield* resumeHeld({ ...row, agentId: place.agentId, accountId: place.accountId, model: place.model }, true)
           }
         })
 

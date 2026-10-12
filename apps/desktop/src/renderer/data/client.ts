@@ -132,6 +132,8 @@ export interface Client {
   readonly getSettings: () => Promise<AppSettings>
   /** Althar as co-author of the commits and pull requests it sends, or not. */
   readonly setCoAuthor: (on: boolean) => Promise<void>
+  /** How many agents work at once on this machine: the person's number, or null for the default again. */
+  readonly setAgentsAtOnce: (count: number | null) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
   /** Stops a task: every agent on it, and the step it was on waits until it is resumed. */
   readonly stopTask: (taskId: string) => Promise<void>
@@ -418,6 +420,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setModelBlocked: (input) => command((commandId) => api.SetModelBlocked({ commandId, ...input })),
     getSettings: () => settle(api.GetSettings({})),
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
+    setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
     setTaskResolveConflicts: (input) => command((commandId) => api.SetTaskResolveConflicts({ commandId, ...input })),

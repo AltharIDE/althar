@@ -122,9 +122,13 @@ Confirmed with the user on 1 October 2026:
   as marking it ready is.
 - **A task without a pull request** merges into its base locally, as the
   person's click.
-- **No limit on tasks at once,** and no queue: a cap would be arbitrary, so
+- ~~**No limit on tasks at once,** and no queue: a cap would be arbitrary, so
   no flow is designed around one (changed on 3 October 2026; it was three
-  per project).
+  per project).~~ Reversed on 13 October 2026, after six test runs at once
+  rebooted a MacBook: each machine runs as many tasks' agents at once as its
+  cores and memory allow, or the person's own number, and the rest wait
+  their turn, first come, first served
+  ([ADR-031](../decisions/031-agents-at-once-on-this-machine.md), DEV-58).
 - **Permission asks** are the lead's to answer within the project's rules;
   only the "always ask me" list reaches the person.
 - **A usage limit is handled as configured:** stop and wait for the reset, or
