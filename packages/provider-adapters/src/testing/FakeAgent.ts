@@ -128,6 +128,9 @@ export const HANDED_DOCUMENT = {
 
 export const USAGE_LIMIT_MESSAGE = 'Claude AI usage limit reached|1759075200'
 
+/** How many tokens its context holds, as it says when a prompt ends `[context:…]`. */
+export const CONTEXT_SIZE = 200_000
+
 /** The `_meta` Claude Code's adapter sends with a structured failure. */
 const failureMeta = (failure: {
   readonly category: string
@@ -819,7 +822,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       const session = sessionOf(params.sessionId)
       session.cancelled = false
-      const text = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
+      const prompted = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
+      // A prompt that ends `[context:85]` says its context is that full, in percent, before anything else; the rest plays as it
+      // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
+      // context that holds 4,000 tokens rather than CONTEXT_SIZE.
+      const filled = /\s*\[context(-later)?:(\d+)(?:\/(\d+))?\]$/.exec(prompted)
+      const text = filled === null ? prompted : prompted.slice(0, filled.index)
       const out = options.outOfUsage
       if (out !== undefined && (out.until === undefined || Date.now() < out.until))
         throw new acp.RequestError(
@@ -830,6 +838,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
+      if (filled !== null) {
+        const size = filled[3] === undefined ? CONTEXT_SIZE : Number(filled[3])
+        const usage = { sessionUpdate: 'usage_update' as const, used: Math.round((size * Number(filled[2])) / 100), size }
+        if (filled[1] === undefined) await update(usage)
+        else setTimeout(() => void update(usage), 300)
+      }
 
       // What images it was sent, in order, by what they are and how many bytes: said before anything else it does.
       const images = params.prompt.flatMap((block) => (block.type === 'image' ? [block] : []))

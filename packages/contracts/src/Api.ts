@@ -350,6 +350,20 @@ export const ProjectRulesView = Schema.Struct({
   conventions: Schema.Array(RepositoryConventions),
 })
 export type ProjectRulesView = typeof ProjectRulesView.Type
+
+/**
+ * One of a project's notes (ADR-031): a decision the person made in
+ * conversation that the code doesn't show, which every coordinator session
+ * starts with. The coordinator keeps them; the person sees them in the
+ * project's settings, and drops what no longer holds.
+ */
+export const ProjectNote = Schema.Struct({
+  id: Schema.String,
+  body: Schema.String,
+  createdAt: Schema.String,
+  keptBy: Schema.Literals(['coordinator', 'person']),
+})
+export type ProjectNote = typeof ProjectNote.Type
 export type ProjectList = typeof ProjectList.Type
 
 export const TaskSummary = Schema.Struct({
@@ -2018,6 +2032,10 @@ export const Api = RpcGroup.make(
   command('CancelAccountSignIn', { flowId: Schema.String }, Schema.Void),
   /** A project's rules. */
   call('GetProjectRules', { projectId: Schema.String }, ProjectRulesView),
+  /** A project's notes, oldest first: the decisions the coordinator keeps for it. */
+  call('GetProjectNotes', { projectId: Schema.String }, Schema.Array(ProjectNote)),
+  /** Drops one of a project's notes: it no longer holds, and no coordinator session starts with it. */
+  command('DropProjectNote', { projectId: Schema.String, noteId: Schema.String }, Schema.Void),
   /**
    * The names a project's code uses that have parts (`RefundLedger`,
    * `useEffect`, `charges-api.ts`), most used first, so dictation can write

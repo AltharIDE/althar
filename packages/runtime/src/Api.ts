@@ -16,7 +16,7 @@ import {
   type SentImage,
 } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
-import { Ledger } from '@althar/persistence-sqlite'
+import { Commands, Ledger } from '@althar/persistence-sqlite'
 import { Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
@@ -42,6 +42,7 @@ import { accountsOf, Policies, type ProjectRules, resolvesConflicts, ruleSetOf, 
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
+import { dropNote, notesOf } from './notes'
 import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
@@ -142,6 +143,8 @@ export const handlers = Api.toLayer(
     const instance = yield* Instance
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
+    // What writes a project's notes needs, as the services have it.
+    const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands>()
     const agents = yield* Agents
     const config = yield* RuntimeConfig
     const connections = yield* Connections
@@ -900,6 +903,24 @@ export const handlers = Api.toLayer(
             if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
             return yield* rulesView(projectId, yield* policies.current(project.id))
           }),
+        ),
+      GetProjectNotes: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const [project] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${projectId}`
+            if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+            return yield* notesOf(projectId)
+          }),
+        ),
+      DropProjectNote: ({ commandId, projectId, noteId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.note.drop', { projectId, noteId }, commandId)
+              yield* Effect.provideContext(dropNote({ envelope: said, projectId, noteId }), store)
+            }),
+          ),
         ),
       GetVocabulary: ({ projectId }) =>
         api(
