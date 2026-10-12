@@ -177,7 +177,7 @@ describe('schema', () => {
   it.effect('marks the worktrees of tasks that had a lead as set up already, leaving the rest to be set up', () =>
     withFile((filename) =>
       Effect.gen(function* () {
-        const before = migrations.findIndex((migration) => migration.key === '0021_worktree_setup')
+        const before = migrations.findIndex((migration) => migration.key === '0023_worktree_setup')
         const made = Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { projectId, deviceId, actorId, createdAt } = yield* seed

@@ -86,6 +86,7 @@ describe('the models every agent offers', () => {
       defaults: [],
       blocked: [],
       probing: false,
+      images: true,
     }
     const both = catalogOf([...models, offered], [...signedIn, opencode])
     const named = (id: string) => both.models.find((info) => info.id === id)

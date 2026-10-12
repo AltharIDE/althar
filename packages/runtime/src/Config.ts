@@ -7,7 +7,7 @@ import { available, type Fetch, type Product, type ProductInfo } from '@althar/c
 import { agents, type AgentDefinition, type Transport, usingLocated } from '@althar/provider-adapters'
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
-import { UnknownAgent } from './errors'
+import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
 import type { ModelFactsOptions } from './ModelFacts'
 
@@ -198,11 +198,12 @@ export type CliTool = 'gh' | 'glab'
 /**
  * The token a tool is signed in to a host with, read the way the tool itself
  * hands it out (from its config or the keychain it keeps it in), or null
- * where it isn't there or isn't signed in. Only the runtime reads it; it goes
+ * where it isn't there or says it isn't signed in. A tool that didn't get to
+ * say, timed out or never started, fails. Only the runtime reads it; it goes
  * to Althar's own keychain and never to an agent.
  */
-export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | null> =>
-  Effect.callback<string | null>((resume) => {
+export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | null, CliUnanswered> =>
+  Effect.callback<string | null, CliUnanswered>((resume) => {
     const args = tool === 'gh' ? ['auth', 'token', '--hostname', host] : ['config', 'get', 'token', '--host', host]
     // An app opened from the Finder has a short PATH: where Homebrew puts the tools is looked in too.
     const path = [process.env.PATH, '/opt/homebrew/bin', '/usr/local/bin']
@@ -214,7 +215,12 @@ export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | nu
       { timeout: 10_000, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
       (error, stdout) => {
         const token = stdout.trim()
-        resume(Effect.succeed(error === null && /^\S{20,400}$/.test(token) ? token : null))
+        if (error === null) return resume(Effect.succeed(/^\S{20,400}$/.test(token) ? token : null))
+        // It ran and said no, or isn't installed: it has no sign-in to give.
+        if (error.killed !== true && (typeof error.code === 'number' || error.code === 'ENOENT')) return resume(Effect.succeed(null))
+        resume(
+          Effect.fail(new CliUnanswered({ tool, message: `${tool} didn’t answer (${error.signal ?? error.code ?? 'no reason given'})` })),
+        )
       },
     )
   })
@@ -235,7 +241,7 @@ export class Connectors extends Context.Service<
     readonly clientIds: Partial<Record<Product, string>>
     readonly callbackPort: number
     readonly appSlug?: string
-    readonly cliToken: (tool: CliTool, host: string) => Effect.Effect<string | null>
+    readonly cliToken: (tool: CliTool, host: string) => Effect.Effect<string | null, CliUnanswered>
   }
 >()('@althar/runtime/Connectors') {
   /** The products with adapters, over the network. */
