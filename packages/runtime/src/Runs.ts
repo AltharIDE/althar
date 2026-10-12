@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 
 import type { LimitCall } from '@althar/contracts'
+import type { FieldAnswer } from '@althar/provider-adapters'
 import { type CommandEnvelope, Ids, newId, type ProjectId, type RunState, runLifecycle, transition } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
@@ -22,7 +23,7 @@ import { filesLine, templateAsk } from './pullRequestWords'
 import { snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
-import { Questions } from './Questions'
+import { type Answered, Questions } from './Questions'
 import { Sessions } from './Sessions'
 import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
@@ -280,6 +281,17 @@ export class Runs extends Context.Service<
     resume(input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly lead?: Lead }): Effect.Effect<void, unknown>
     /** Tells the person's answer to a question whose agent has gone since it asked: to the agent on its thread next, started for it. */
     answered(input: { readonly envelope: CommandEnvelope; readonly threadId: string; readonly body: string }): Effect.Effect<void, unknown>
+    /**
+     * The person's answer to a question a task's lead or reviewer asked:
+     * told to it once it has a place among the agents at work on this
+     * machine, and kept until then (Busy.ts); to an agent gone since it
+     * asked, as `answered`.
+     */
+    answer(input: {
+      readonly envelope: CommandEnvelope
+      readonly attentionId: string
+      readonly answers: Readonly<Record<string, FieldAnswer>>
+    }): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Runs') {
   static readonly layer: Layer.Layer<Runs, never, Store> = Layer.effect(
@@ -2847,6 +2859,30 @@ export class Runs extends Context.Service<
         answerStuck: (input) => provide(answerStuck(input)),
         resume: (input) => provide(resume(input)),
         answered: (input) => provide(answered(input)),
+        answer: (input) =>
+          provide(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const [on] = yield* sql<{ taskId: string | null; kind: string | null }>`
+                SELECT q.task_id, t.kind FROM attention_requests q LEFT JOIN threads t ON t.id = json_extract(q.payload, '$.threadId')
+                WHERE q.id = ${input.attentionId}`
+              const onward = (told: Answered) =>
+                told.told
+                  ? Effect.void
+                  : provide(
+                      Effect.gen(function* () {
+                        yield* answered({
+                          envelope: yield* envelope('thread.send', { threadId: told.threadId, answered: input.attentionId }),
+                          threadId: told.threadId,
+                          body: told.body,
+                        })
+                      }),
+                    )
+              const answering = (keep: boolean) => questions.answer({ ...input, keep })
+              if (on?.taskId == null) return yield* Effect.flatMap(answering(false), onward)
+              yield* busy.enter(on.taskId, (room) => answering(!room), { review: on.kind === 'step', next: onward })
+            }),
+          ),
       })
     }),
   )

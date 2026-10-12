@@ -42,7 +42,7 @@ import { accountsOf, Policies, type ProjectRules, resolvesConflicts, ruleSetOf, 
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
-import { type Answered, Questions } from './Questions'
+import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
 import { Queries } from './Queries'
@@ -746,33 +746,29 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              // A task's lead or reviewer carries on with the answer once it has a place among the agents at work on this
-              // machine: without one, the answer is kept, and told once one frees (Busy.ts).
-              const [on] = yield* sql<{ taskId: string | null; kind: string | null }>`
-                SELECT q.task_id, t.kind FROM attention_requests q LEFT JOIN threads t ON t.id = json_extract(q.payload, '$.threadId')
-                WHERE q.id = ${attentionId}`
               const said = yield* envelope('attention.answer_question', { attentionId, answers }, commandId)
-              const answering = (keep: boolean) => questions.answer({ envelope: said, attentionId, answers, keep })
-              // The agent that asked has gone: the answer is told to the one on its thread next, started for it.
-              const onward = (answered: Answered) =>
-                Effect.gen(function* () {
-                  if (answered.told) return
-                  const tell = {
-                    envelope: yield* Effect.provideContext(
-                      Runtime.envelope('thread.send', { threadId: answered.threadId, answered: attentionId }),
-                      context,
-                    ),
-                    threadId: answered.threadId,
-                    body: answered.body,
-                  }
-                  const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${answered.threadId}`
-                  if (thread?.kind === 'coordinator') yield* coordinator.say({ ...tell, disposition: 'after_current', quiet: true })
-                  else yield* runs.answered(tell)
-                })
+              const [on] = yield* sql<{ kind: string | null }>`
+                SELECT t.kind FROM attention_requests q LEFT JOIN threads t ON t.id = json_extract(q.payload, '$.threadId')
+                WHERE q.id = ${attentionId}`
+              // A task's lead or reviewer carries on with the answer once it has a place among the agents at work here (Runs).
               const answer =
-                on?.taskId == null || on.kind === 'coordinator'
-                  ? Effect.flatMap(answering(false), onward)
-                  : busy.enter(on.taskId, (room) => answering(!room), { review: on.kind === 'step', next: onward })
+                on?.kind === 'coordinator'
+                  ? Effect.gen(function* () {
+                      const answered = yield* questions.answer({ envelope: said, attentionId, answers })
+                      if (answered.told) return
+                      // The coordinator that asked has gone: the answer is told to the one on its thread next.
+                      yield* coordinator.say({
+                        envelope: yield* Effect.provideContext(
+                          Runtime.envelope('thread.send', { threadId: answered.threadId, answered: attentionId }),
+                          context,
+                        ),
+                        threadId: answered.threadId,
+                        body: answered.body,
+                        disposition: 'after_current',
+                        quiet: true,
+                      })
+                    })
+                  : runs.answer({ envelope: said, attentionId, answers })
               // A task's question is answered in the task's turn: stopping it comes first, and the question is withdrawn, or
               // after, and the agent the answer started stops.
               const [asked] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM attention_requests WHERE id = ${attentionId}`
