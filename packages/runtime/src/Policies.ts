@@ -138,6 +138,10 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 /** Whether a revision's rules have the lead resolve a conflict on its own: not unless the person turned it on. */
 export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts === true
 
+/** Whether a task's lead resolves a conflict on its own: as the task says (its `resolve_conflicts`), else as its project's rules do. */
+export const resolvesConflictsFor = (rules: ProjectRules, task: number | boolean | null): boolean =>
+  task === null ? resolvesConflicts(rules) : task === true || task === 1
+
 /** The project's rule for an agent's accounts: rotation, off unless the person turned it on, and the accounts it may use. */
 export type AccountRule = NonNullable<ProjectRules['accounts']>
 

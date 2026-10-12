@@ -331,6 +331,23 @@ rules can have its leads resolve a conflict with the default branch on their
 own, switched by "Resolve conflicts" in its settings. Off, a conflict waits
 for the person, as above.
 
+- **A task can say otherwise.** Its ⋯ menu offers "Resolve conflicts": as
+  the project says, the lead does unasked, or when the person asks. It is
+  kept on the task; where it differs from the project's, a quiet word beside
+  the menu says so, and otherwise nothing shows. Each conflict found goes by
+  what the task and its project say then, and the lead's brief by what they
+  said as it started.
+- **Turned on, it acts at once.** The project's switch going on, or a task's
+  menu where the task wasn't resolving its conflicts, has Althar look at
+  each open task with a branch here, rather than waiting for a new
+  conflict: its repositories merging here are merged with their default
+  branches without anything moving, whatever the person's own checkout
+  holds, and a conflict starts a round as a Merge pressed would; its
+  listened pull requests are asked about now, and one whose host says it
+  conflicts starts one as ever. The rules below hold for each: a run that
+  succeeded, one round at a time, and the same push. Turned off, a round
+  under way carries on; the next conflict waits for the person.
+
 - **Found either way, asked the same way.** A merge here that conflicts, or
   a pull request its host says conflicts, has Althar send the lead the note
   the person's press would, unasked: merge the default branch into the
@@ -343,8 +360,9 @@ for the person, as above.
   lead that isn't running is started, on the agent last on the thread.
 - **Only where the task is open and its run succeeded,** and one round at a
   time: not while the run runs, nor where the person stopped it, which an
-  agent starting would go against. The thread says Althar asked, and why. A
-  merge here pressed meanwhile says the lead is resolving it.
+  agent starting would go against. The thread says Althar asked, and why:
+  the project's rules, or the task's own say. A merge here pressed
+  meanwhile says the lead is resolving it.
 - **Althar looks at the branch, not at what the lead said,** once its turn
   is over: not while more waits for it, or while it asks the person
   something. Resolved means the branch it conflicted with is in it, nothing
@@ -382,8 +400,8 @@ for the person, as above.
   does the same, as it starts, for a round left waiting on a pull request it
   no longer listens to.
 - **The lead never pushes,** here as anywhere (Agents and the hosts, below).
-  Its brief says what Althar pushes for it where the project has it resolve
-  conflicts.
+  Its brief says what Althar pushes for it where the task, or else its
+  project, has it resolve conflicts.
 - **A round under way when Althar stopped** is looked at as it starts again,
   by what the branch holds, and is the person's if it isn't resolved.
 

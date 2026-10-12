@@ -1436,9 +1436,12 @@ export class Queries extends Context.Service<
             baseRef: string | null
             baseCommit: string | null
             settledAt: string | null
+            resolveConflicts: number | null
+            projectResolves: number | null
           }>`
             SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.request, k.slug, k.state,
-              k.settled_at, w.branch, w.path AS worktree, w.base_ref, w.base_commit
+              k.settled_at, w.branch, w.path AS worktree, w.base_ref, w.base_commit, k.resolve_conflicts,
+              (SELECT json_extract(r.rules, '$.resolveConflicts') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS project_resolves
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE t.id = ${threadId} AND t.kind = 'task'`
@@ -1511,6 +1514,10 @@ export class Queries extends Context.Service<
               planId: standing.planId,
               runCommand: yield* launches.commandFor(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => null)),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
+              resolveConflicts: {
+                task: head.resolveConflicts === null ? null : head.resolveConflicts === 1,
+                project: head.projectResolves === 1,
+              },
             },
             session,
             attention: attention.map(callOf),

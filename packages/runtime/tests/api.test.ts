@@ -1279,6 +1279,53 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
+  it.live('has the project’s leads resolve what already conflicts as soon as its rules say they do, and a task say otherwise', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const root = repository()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(root) })
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Retry',
+          description: '[lead:finish] [lead:edit] [lead:resolve]',
+          steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        })
+        yield* eventually(client.GetBoard({ projectId: project.id }), (board) =>
+          board.tasks.some((one) => one.taskId === task.id && one.phase === 'ready'),
+        )
+        // The default branch moves on, conflicting with what it changed; nobody merges, so nothing finds it.
+        const git = (...args: Array<string>) =>
+          execFileSync('git', ['-c', 'user.name=T', '-c', 'user.email=t@t.test', ...args], { cwd: root, stdio: 'pipe' })
+        writeFileSync(join(root, 'change.txt'), 'rate limits\n')
+        git('add', '.')
+        git('commit', '-q', '-m', 'Limit rates')
+        const resolvedIn = (thread: ThreadSnapshot) =>
+          thread.items.some(
+            (item) => item.kind === 'notice' && item.content.title?.startsWith('The lead resolved the conflict with main') === true,
+          )
+        const before = yield* client.GetThread({ threadId: task.threadId })
+        assert.deepStrictEqual(before.task.resolveConflicts, { task: null, project: false })
+        // The task says otherwise, then goes back to the project's say: neither asks the lead anything.
+        yield* client.SetTaskResolveConflicts({ commandId: commandId(), taskId: task.id, resolveConflicts: false })
+        assert.deepStrictEqual((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).task.resolveConflicts, {
+          task: false,
+          project: false,
+        })
+        yield* client.SetTaskResolveConflicts({ commandId: commandId(), taskId: task.id, resolveConflicts: null })
+        // The project turns its leads resolving conflicts on: the lead resolves it now, with no Merge pressed.
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, resolveConflicts: true })
+        const after = yield* eventually(
+          Effect.andThen(Effect.sleep('80 millis'), client.GetThread({ threadId: task.threadId })),
+          resolvedIn,
+        )
+        assert.deepStrictEqual(after.task.resolveConflicts, { task: null, project: true })
+        assert.isFalse(resolvedIn(before))
+      }),
+    ),
+  )
+
   it.live('stops, resumes, abandons and reopens a task', () =>
     Effect.scoped(
       Effect.gen(function* () {

@@ -602,6 +602,15 @@ export const handlers = Api.toLayer(
       // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
       StopSession: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })))),
+      SetTaskResolveConflicts: ({ commandId, taskId, resolveConflicts }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.set_conflicts', { taskId, resolveConflicts }, commandId), (said) =>
+              pullRequests.setResolveConflicts({ envelope: said, taskId, resolveConflicts }),
+            ),
+          ),
+        ),
       StopTask: ({ commandId, taskId }) =>
         once(
           commandId,
@@ -907,7 +916,8 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const now = accountsOf((yield* policies.current(projectId as ProjectId)).rules)
+              const was = (yield* policies.current(projectId as ProjectId)).rules
+              const now = accountsOf(was)
               const accounts =
                 rotateAccounts === undefined && onlyAccounts === undefined
                   ? {}
@@ -922,7 +932,10 @@ export const handlers = Api.toLayer(
               yield* policies.set(projectId, { ...change, ...accounts }, instance.personId, expectedRevision)
               // A call still waiting that the rules no longer keep for the person is answered by them.
               yield* permissions.reconsider(projectId)
-              return yield* rulesView(projectId, yield* policies.current(projectId as ProjectId))
+              const kept = yield* policies.current(projectId as ProjectId)
+              // Its leads newly resolving conflicts, what conflicts already is resolved now, not at the next (ADR-030).
+              if (!resolvesConflicts(was) && resolvesConflicts(kept.rules)) yield* pullRequests.resolveNow({ projectId })
+              return yield* rulesView(projectId, kept)
             }),
           ),
         ),

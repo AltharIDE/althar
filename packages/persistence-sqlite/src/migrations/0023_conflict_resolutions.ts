@@ -25,6 +25,10 @@ import {
  * pull request's checks on what it pushed, resolved, or given back to the
  * person with why. Where Althar pushed what resolved it, the commit it last
  * pushed.
+ *
+ * A task can say otherwise than its project: its lead resolves a conflict
+ * unasked (1), or waits for the person to ask it (0); null, as the project's
+ * rules say.
  */
 export const statements: ReadonlyArray<string> = [
   ...vocabulary('conflict_resolution_state', ['resolving', 'checking', 'resolved', 'failed']),
@@ -62,4 +66,5 @@ export const statements: ReadonlyArray<string> = [
     unique: true,
     where: "state IN ('resolving', 'checking')",
   }),
+  'ALTER TABLE tasks ADD COLUMN resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1))',
 ]

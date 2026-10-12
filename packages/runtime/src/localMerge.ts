@@ -67,6 +67,26 @@ export const planMerge = (root: string, branch: string, head: string, message: s
     return { ...merge, checkout } satisfies MergePlan
   })
 
+/**
+ * The files that conflict merging `head` into `branch` in the repository at
+ * `root`: none where it merges cleanly, has it already, or there's no such
+ * branch. Whatever the working tree that has the branch holds, since nothing
+ * moves, and no commit is made.
+ */
+export const conflictsOf = (root: string, branch: string, head: string) =>
+  Effect.gen(function* () {
+    const tip = yield* commitOf(root, `refs/heads/${branch}`).pipe(Effect.orElseSucceed(() => ''))
+    if (tip === '') return []
+    const merged = yield* gitOutcome(root, 'merge-tree', '--write-tree', '--name-only', '--no-messages', tip, head)
+    // 1 is git's word for a merge that conflicts; anything else, a merge it couldn't work out, says nothing of one.
+    return merged.code === 1
+      ? merged.stdout
+          .split('\n')
+          .slice(1)
+          .filter((line) => line !== '')
+      : []
+  })
+
 /** `head` merged onto `tip`: a fast-forward to it, or a merge commit made without a working tree; or the files that conflict. */
 const mergeOf = (root: string, tip: string, head: string, message: string) =>
   Effect.gen(function* () {

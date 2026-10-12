@@ -894,6 +894,37 @@ describe('a task', () => {
     await waitFor(() => expect(client.resumeTask).toHaveBeenCalledWith({ taskId: 't1' }))
   })
 
+  it('offers how its conflicts go, as its project says or otherwise, and nothing beside the menu while it goes by the project', async () => {
+    const { client } = await taskMenu({ resolveConflicts: { task: null, project: true } })
+    expect(screen.getByRole('menuitemradio', { name: /As the project says/ }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByText('Now: the lead does, unasked.')).toBeTruthy()
+    expect(screen.queryByText('Lead resolves conflicts')).toBeNull()
+    await userEvent.click(screen.getByRole('menuitemradio', { name: /When you ask the lead/ }))
+    await waitFor(() => expect(client.setTaskResolveConflicts).toHaveBeenCalledWith({ taskId: 't1', resolveConflicts: false }))
+  })
+
+  it('says beside its menu where its lead resolves conflicts otherwise than its project, and not where it is the same', async () => {
+    const shownFor = async (own: boolean, project: boolean) => {
+      const { client } = fakeClient({
+        getThread: vi.fn(async () => thread({ task: { ...thread().task, resolveConflicts: { task: own, project } } })),
+      })
+      const view = withServices(<Task />, client)
+      await screen.findByRole('button', { name: 'More for this task' })
+      const said = [screen.queryByText('Lead resolves conflicts'), screen.queryByText('Conflicts wait for you')].map((one) => one !== null)
+      view.unmount()
+      return said
+    }
+    expect(await shownFor(true, false)).toEqual([true, false])
+    expect(await shownFor(false, true)).toEqual([false, true])
+    expect(await shownFor(true, true)).toEqual([false, false])
+  })
+
+  it('offers no say on its conflicts once it settles', async () => {
+    const { offered } = await taskMenu({ phase: 'settled', state: 'done', actions: [] }, null)
+    expect(offered).toEqual(['Open in Zed'])
+    expect(screen.queryByRole('menuitemradio')).toBeNull()
+  })
+
   it('offers starting its plan now while it waits to start', async () => {
     const { client, offered } = await taskMenu({ phase: 'held', actions: ['start', 'abandon'], planId: 'pln1' }, null)
     expect(offered).toEqual(['Open in Zed', 'Start now', 'Abandon'])

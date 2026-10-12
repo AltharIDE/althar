@@ -10,7 +10,7 @@ import {
   type Product,
   type Repository,
 } from '@althar/connectors'
-import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
+import { type ActorId, type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -53,7 +53,7 @@ import {
 } from './git'
 import { Instance } from './Instance'
 import { Live, type LiveEvent } from './Live'
-import { applyMerges, planMerge } from './localMerge'
+import { applyMerges, conflictsOf, planMerge } from './localMerge'
 import { outward, reconcileOutward } from './outward'
 import {
   answerHint,
@@ -73,7 +73,7 @@ import {
   standing,
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
-import { Policies, resolvesConflicts } from './Policies'
+import { Policies, resolvesConflictsFor } from './Policies'
 import { Sessions } from './Sessions'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
@@ -242,6 +242,17 @@ interface RoundRow {
   readonly updatedAt: string
 }
 
+/** One of a task's repositories here: its worktree and branch, the default branch it merges into, and whether it has a pull request. */
+interface HereRow {
+  readonly slug: string
+  readonly name: string
+  readonly base: string
+  readonly root: string
+  readonly worktree: string
+  readonly branch: string
+  readonly opened: number
+}
+
 interface LinkRow {
   readonly id: string
   readonly projectId: ProjectId
@@ -325,6 +336,25 @@ export class Changes extends Context.Service<
      * Nothing more is pushed for it, and the lead isn't started again for it.
      */
     leadStopped(where: { readonly taskId: string } | { readonly threadId: string }): Effect.Effect<void, unknown>
+    /**
+     * Where a project's leads, or a task's, are newly to resolve conflicts on
+     * their own (ADR-030): each of its open tasks is looked at now, rather
+     * than at its next conflict, and one that already conflicts starts a
+     * round, as any conflict found would. Done apart: this returns before
+     * any is looked at.
+     */
+    resolveNow(where: { readonly projectId: string } | { readonly taskId: string }): Effect.Effect<void>
+    /**
+     * Whether a task's lead resolves a conflict on its own otherwise than its
+     * project's rules say, as the person says; null goes back to them. The
+     * next conflict found goes by it; turned on, what already conflicts is
+     * resolved now (`resolveNow`).
+     */
+    setResolveConflicts(input: {
+      readonly envelope: CommandEnvelope
+      readonly taskId: string
+      readonly resolveConflicts: boolean | null
+    }): Effect.Effect<void, unknown>
     /** Does something with a task's pull request as one action: one at a time with replying, pushing, marking ready and merging. */
     exclusive<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
     /**
@@ -947,6 +977,36 @@ export class Changes extends Context.Service<
           if (now !== undefined) yield* poll(now)
         })
 
+      /** The task's repositories here, each with its worktree and the default branch it merges into, in the order the project has them. */
+      const repositoriesHere = (taskId: string) =>
+        Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<HereRow>`
+            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch,
+              EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
+            FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+            ORDER BY b.created_at, b.rowid`,
+        )
+
+      /** A conflict merging a repository's branch here, for the lead to resolve: its default branch into its branch, each where it is now. */
+      const conflictHere = (repository: HereRow, files: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          const target = yield* commitOf(repository.root, `refs/heads/${repository.base}`)
+          const from = yield* commitOf(repository.worktree, 'HEAD')
+          return {
+            repository: repository.slug,
+            name: repository.name,
+            branch: repository.base,
+            ref: repository.base,
+            target,
+            from,
+            files,
+          } satisfies Conflict
+        })
+
       /**
        * Merges here the task's repositories that have no pull request, into
        * each one's default branch: all of them or none. Those with one merge
@@ -961,22 +1021,7 @@ export class Changes extends Context.Service<
           if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
           const cant = (why: CantMerge['why'], detail = '') => new CantMerge({ taskId, why, detail })
           if (task.state !== 'open') return yield* cant('settled')
-          const all = yield* sql<{
-            slug: string
-            name: string
-            base: string
-            root: string
-            worktree: string
-            branch: string
-            opened: number
-          }>`
-            SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree, w.branch,
-              EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
-            FROM workspaces w
-            JOIN repository_bindings b ON b.id = w.binding_id
-            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
-            ORDER BY b.created_at, b.rowid`
+          const all = yield* repositoriesHere(taskId)
           const repositories = all.filter((repository) => repository.opened === 0)
           if (repositories.length === 0) return yield* cant('pull_request')
           const several = all.length > 1
@@ -1003,20 +1048,7 @@ export class Changes extends Context.Service<
             if (asked === 'yes') {
               const found = yield* Effect.forEach(
                 plans.flatMap(({ repository, plan }) => (plan.kind === 'conflicts' ? [{ repository, files: plan.files }] : [])),
-                ({ repository, files }) =>
-                  Effect.gen(function* () {
-                    const target = yield* commitOf(repository.root, `refs/heads/${repository.base}`)
-                    const from = yield* commitOf(repository.worktree, 'HEAD')
-                    return {
-                      repository: repository.slug,
-                      name: repository.name,
-                      branch: repository.base,
-                      ref: repository.base,
-                      target,
-                      from,
-                      files,
-                    } satisfies Conflict
-                  }),
+                ({ repository, files }) => conflictHere(repository, files),
               )
               yield* beginRound({ projectId: task.projectId, taskId, threadId: task.threadId }, null, found)
               return yield* cant('resolving', conflicts.join('; '))
@@ -1561,20 +1593,22 @@ export class Changes extends Context.Service<
         })
 
       /**
-       * Whether a conflict is the lead's to resolve now, unasked: the project
-       * says so, the task is open with its run done (not running, nor stopped,
-       * where starting its lead would go against the person), and no round is
-       * under way. One the lead couldn't resolve stays the person's while its
-       * branches are as it left them.
+       * Whether a conflict is the lead's to resolve now, unasked: the task
+       * says so, or its project does where the task says nothing; the task is
+       * open with its run done (not running, nor stopped, where starting its
+       * lead would go against the person); and no round is under way. One the
+       * lead couldn't resolve stays the person's while its branches are as it
+       * left them.
        */
       const askable = (taskId: string, url: string | null) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [task] = yield* sql<{ projectId: ProjectId; state: string; run: string | null }>`
-            SELECT k.project_id, k.state, (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run
+          const [task] = yield* sql<{ projectId: ProjectId; state: string; resolveConflicts: number | null; run: string | null }>`
+            SELECT k.project_id, k.state, k.resolve_conflicts,
+              (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run
             FROM tasks k WHERE k.id = ${taskId}`
           if (task === undefined || task.state !== 'open' || task.run !== 'succeeded') return 'no' as const
-          if (!resolvesConflicts((yield* (yield* Policies).current(task.projectId)).rules)) return 'no' as const
+          if (!resolvesConflictsFor((yield* (yield* Policies).current(task.projectId)).rules, task.resolveConflicts)) return 'no' as const
           const [latest] = yield* sql<{ id: string; url: string | null; state: string; conflicts: string; ended: string | null }>`
             SELECT id, pull_request_url AS url, state, conflicts, ended FROM conflict_resolutions WHERE task_id = ${taskId}
             ORDER BY created_at DESC, rowid DESC LIMIT 1`
@@ -1687,11 +1721,15 @@ export class Changes extends Context.Service<
             }),
           )
           const place = yield* placeOf(task.taskId, url)
+          const [own] = yield* sql<{ resolveConflicts: number | null }>`SELECT resolve_conflicts FROM tasks WHERE id = ${task.taskId}`
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
             title: `${place.change ?? 'It'} conflicts with ${whereLine(conflicts)}.`,
-            description: 'Althar asked the lead to resolve it, as the project’s rules say.',
+            description:
+              own?.resolveConflicts === 1
+                ? 'Althar asked the lead to resolve it, as you said for this task.'
+                : 'Althar asked the lead to resolve it, as the project’s rules say.',
           })
           yield* touchCard(task.taskId)
           yield* askLead({ id, ...task }, 1, noteFor(conflicts, place, null))
@@ -2188,20 +2226,105 @@ export class Changes extends Context.Service<
               if (!listenDue({ now, polledAt: polledAt.get(link.id), newsAt: newsAt.get(link.taskId) ?? now, every })) continue
             }
             polledAt.set(link.id, now)
-            yield* locked(link.taskId)(poll(link)).pipe(
-              Effect.flatMap((happened) => (happened ? news(link.taskId) : Effect.void)),
-              Effect.catchCause((cause) =>
-                Effect.gen(function* () {
-                  const error = Option.getOrUndefined(Cause.findErrorOption(cause))
-                  if (error instanceof ConnectorFailed && error.reason === 'rate_limited' && error.retryAt !== undefined)
-                    waitUntil.set(link.id, Date.parse(error.retryAt))
-                  else waitUntil.set(link.id, now + Duration.toMillis(every) * 4)
-                  if (!(error instanceof ConnectorFailed) || error.reason === 'invalid_response')
-                    yield* Effect.logWarning('Could not listen to a pull request', cause)
-                }),
-              ),
-            )
+            yield* listenTo(link, now)
           }
+        })
+
+      /** Asks the host about one listened change now; one that can't be asked waits, as long as its service says or a while. */
+      const listenTo = (link: LinkRow, now: number) =>
+        locked(link.taskId)(poll(link)).pipe(
+          Effect.flatMap((happened) => (happened ? news(link.taskId) : Effect.void)),
+          Effect.catchCause((cause) =>
+            Effect.gen(function* () {
+              const error = Option.getOrUndefined(Cause.findErrorOption(cause))
+              if (error instanceof ConnectorFailed && error.reason === 'rate_limited' && error.retryAt !== undefined)
+                waitUntil.set(link.id, Date.parse(error.retryAt))
+              else waitUntil.set(link.id, now + Duration.toMillis(every) * 4)
+              if (!(error instanceof ConnectorFailed) || error.reason === 'invalid_response')
+                yield* Effect.logWarning('Could not listen to a pull request', cause)
+            }),
+          ),
+        )
+
+      /**
+       * A task's conflicts, looked for now where its lead is to resolve them
+       * (`askable`): its repositories here are merged with their default
+       * branches without anything moving, and those that conflict start a
+       * round, as pressing Merge would; then its listened pull requests are
+       * asked about, and one whose host says it conflicts starts one as ever.
+       * One round at a time, so a task conflicting both ways starts with what
+       * conflicts here.
+       */
+      const conflictsNow = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: ProjectId; threadId: string }>`
+            SELECT k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${taskId}`
+          if (task === undefined) return
+          yield* locked(taskId)(
+            Effect.gen(function* () {
+              if ((yield* askable(taskId, null)) !== 'yes') return
+              const found: Array<Conflict> = []
+              for (const repository of yield* repositoriesHere(taskId)) {
+                if (repository.opened !== 0) continue
+                const head = yield* commitOf(repository.worktree, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
+                const files = head === '' ? [] : yield* conflictsOf(repository.root, repository.base, head)
+                if (files.length > 0) found.push(yield* conflictHere(repository, files))
+              }
+              if (found.length > 0) yield* beginRound({ projectId: task.projectId, taskId, threadId: task.threadId }, null, found)
+            }),
+          )
+          const now = yield* Clock.currentTimeMillis
+          for (const link of yield* linksOf(taskId)) if (link.listening === 1) yield* listenTo(link, now)
+        })
+
+      /** Each open task with a branch here, of the project or the one task, looked at now for what already conflicts. */
+      const resolveNow = (where: { readonly projectId: string } | { readonly taskId: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const open = yield* sql<{ id: string }>`
+            SELECT k.id FROM tasks k WHERE k.state = 'open'
+              AND ${'taskId' in where ? sql`k.id = ${where.taskId}` : sql`k.project_id = ${where.projectId}`}
+              AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.device_id = ${instance.deviceId})
+            ORDER BY k.created_at, k.rowid`
+          for (const task of open)
+            yield* conflictsNow(task.id).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not look for a conflict to resolve', cause)),
+            )
+        })
+
+      /** The task's own say on its lead resolving conflicts, kept with its fact; turned on, as it was not, what conflicts now is resolved. */
+      const setResolveConflicts = (input: {
+        readonly envelope: CommandEnvelope
+        readonly taskId: string
+        readonly resolveConflicts: boolean | null
+      }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: ProjectId; resolveConflicts: number | null }>`
+            SELECT project_id, resolve_conflicts FROM tasks WHERE id = ${input.taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
+          const own = input.resolveConflicts === null ? null : input.resolveConflicts ? 1 : 0
+          if (own === task.resolveConflicts) return
+          const { rules } = yield* (yield* Policies).current(task.projectId)
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* change('tasks', input.taskId, { resolveConflicts: own })
+              yield* fact({
+                projectId: task.projectId,
+                aggregateType: 'task',
+                aggregateId: input.taskId,
+                revision,
+                type: 'task.conflicts_set',
+                payload: { resolveConflicts: input.resolveConflicts },
+                actorId: input.envelope.actorId,
+                commandId: input.envelope.commandId,
+              })
+            }),
+          )
+          yield* touchCard(input.taskId)
+          if (!resolvesConflictsFor(rules, task.resolveConflicts) && resolvesConflictsFor(rules, own))
+            yield* Effect.forkIn(provide(resolveNow({ taskId: input.taskId })), scope)
         })
 
       yield* Effect.forkScoped(
@@ -2343,6 +2466,8 @@ export class Changes extends Context.Service<
               if (task !== undefined) yield* locked(task.taskId)(leadStopped(where))
             }),
           ),
+        resolveNow: (where) => Effect.asVoid(Effect.forkIn(provide(resolveNow(where)), scope)),
+        setResolveConflicts: (input) => provide(setResolveConflicts(input)),
         // The person looking at the task counts as something happening on it.
         refresh: (taskId) =>
           Effect.andThen(

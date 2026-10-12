@@ -1354,6 +1354,12 @@ export const ThreadSnapshot = Schema.Struct({
     runCommand: Schema.NullOr(Schema.String),
     /** What Althar runs of it, in its worktree. */
     launches: Schema.Array(Launch),
+    /**
+     * Whether its lead resolves a conflict with its default branch on its
+     * own, unasked: as the task says, or, where it says nothing (null), as
+     * its project's rules do, which `project` is.
+     */
+    resolveConflicts: Schema.Struct({ task: Schema.NullOr(Schema.Boolean), project: Schema.Boolean }),
   }),
   session: Schema.NullOr(SessionSummary),
   attention: Schema.Array(AttentionRequest),
@@ -1790,6 +1796,13 @@ export const Api = RpcGroup.make(
   /** Stops a task: every agent on it stops, and the step it was on waits until the person resumes it. */
   command('StopTask', { taskId: Schema.String }, Schema.Void),
   /**
+   * Whether a task's lead resolves a conflict with its default branch on its
+   * own, otherwise than its project's rules say; null goes back to them.
+   * Turned on, what already conflicts is resolved now, not at the next
+   * conflict.
+   */
+  command('SetTaskResolveConflicts', { taskId: Schema.String, resolveConflicts: Schema.NullOr(Schema.Boolean) }, Schema.Void),
+  /**
    * Carries a stopped task on from the step it was on: with its last lead,
    * or the agent and model given. What the person said before it waits in
    * its thread and is the lead's first word.
@@ -1943,6 +1956,7 @@ export const Api = RpcGroup.make(
       alwaysAllow: Schema.optional(Schema.Array(RuleKind)),
       commands: Schema.optional(Schema.Array(CommandRule)),
       end: Schema.optional(Schema.NullOr(Schema.Literals(['draft', 'ready', 'none']))),
+      /** Turned on, the project's tasks that already conflict are resolved now, not at their next conflict. */
       resolveConflicts: Schema.optional(Schema.Boolean),
       usageLimit: Schema.optional(UsageLimit),
       rotateAccounts: Schema.optional(Schema.Boolean),

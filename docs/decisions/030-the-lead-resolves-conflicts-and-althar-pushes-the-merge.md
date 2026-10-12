@@ -18,6 +18,16 @@
     kept as a revision of the rules like any other
     ([ADR-013](013-project-rules.md)). App-wide defaults for new projects
     are DEV-15.
+  - **A task can say otherwise than its project,** from its ⋯ menu: as the
+    project says, on, or off. It is kept on the task, and shown beside the
+    menu only where it differs from the project's, so the task's window stays
+    quiet. Each conflict goes by what is said when it is found.
+  - **Turning it on resolves what already conflicts.** The project's switch
+    going on, or a task's say where its lead wasn't resolving conflicts, has
+    Althar look at once at each open task with a branch: a branch merging
+    here is merged with its default branch without anything moving, and a
+    listened pull request is asked about now. What conflicts starts a round
+    as a conflict found later would, under the same rules.
   - **On, a conflict is the lead's to resolve, unasked,** whether a merge
     here found it or the pull request's host said so. Althar sends the note
     the person's press sends, in the same words; for a pull request, the
@@ -55,6 +65,11 @@
   - **Merging stays the person's.** Nothing here merges a pull request or
     the default branch.
 - **Alternatives considered:**
+  - **A switch on the task's header.** Most tasks follow their project; a
+    control always in view would be noise for a choice rarely made.
+  - **Wait for the next conflict once it is turned on.** A conflict found
+    before would stay until something new happened, though turning it on is
+    when the person wants the board's conflicts gone.
   - **Let the lead push its own resolution.** It would need a way to the
     host, which is exactly what agents don't have. Althar pushing a commit
     it checked keeps the boundary.
@@ -71,6 +86,12 @@
     review on the host, are what stand between it and the default branch.
   - **A host that doesn't say a pull request conflicts** (Bitbucket Cloud)
     gets no help until the person merges here or asks.
+  - **Turning it on over a whole project may start several leads at once,**
+    one per task that conflicts. That is what the person asked for, and each
+    is a task already done, waiting to merge.
+  - **A lead's brief says what Althar pushes for it as its session starts.**
+    Changed afterwards, the note asking it to resolve a conflict says it
+    again, in the words that hold then.
   - **What counts as the resolution is read from git's history and the
     thread:** the merge alone, then the one commit made on top of it when the
     lead was asked to fix its checks, with nothing else asked of it. Other

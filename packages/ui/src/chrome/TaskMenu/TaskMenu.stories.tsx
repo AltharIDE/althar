@@ -49,6 +49,12 @@ export const LongWords: Story = {
     },
   },
 }
+/** Open, its lead resolves conflicts as its project says, which the choice says too. */
+export const Conflicts: Story = { args: { conflicts: { choice: 'project', project: false, onChange: fn() }, defaultOpen: true } }
+/** Where it goes otherwise than its project, a quiet word beside the button says so. */
+export const ConflictsOtherwise: Story = { args: { conflicts: { choice: 'on', project: false, onChange: fn() } } }
+/** The same choice as its project's, said for the task alone, shows nothing beside the button. */
+export const ConflictsAsTheProject: Story = { args: { conflicts: { choice: 'on', project: true, onChange: fn() } } }
 /** With nothing it can do, there is no menu at all. */
 export const NothingToDo: Story = { args: { onOpen: undefined, onStop: undefined, onAbandon: undefined } }
 
@@ -113,6 +119,19 @@ export const MarkingReady: Story = {
     const page = await opened(canvasElement)
     await userEvent.click(await page.findByRole('menuitem', { name: /Mark ready for review/ }))
     await expect(args.onMarkReady).toHaveBeenCalledOnce()
+  },
+}
+
+const changing = fn()
+/** Choosing how its conflicts go says which; the word beside the button shows only where it isn't the project's. */
+export const ChangingConflicts: Story = {
+  args: { conflicts: { choice: 'project', project: true, onChange: changing } },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).queryByText('Conflicts wait for you')).toBeNull()
+    const page = await opened(canvasElement)
+    await expect(await page.findByRole('menuitemradio', { name: /As the project says/ })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(await page.findByRole('menuitemradio', { name: /When you ask the lead/ }))
+    await expect(changing).toHaveBeenCalledWith('off')
   },
 }
 

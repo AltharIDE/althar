@@ -25,7 +25,9 @@ import { fakeConnectors, HOST, hosted, items, notices, repository, runtime, turn
  * as the person would ask it, unasked; what it resolves on a pull request,
  * Althar pushes, and only that. One it can't resolve is asked once more,
  * then is the person's. Without the rule, a conflict waits for the person,
- * as it always has.
+ * as it always has. A task can say otherwise than its project, and one that
+ * comes to say its lead resolves conflicts has what conflicts already
+ * resolved at once.
  */
 
 const runtimeWith = (services: { readonly github?: FakeService } = {}) =>
@@ -122,6 +124,13 @@ const briefOf = (threadId: string) => Effect.map(turns(threadId), (all) => all[0
 const titled = (threadId: string, start: string) =>
   until(notices(threadId), (all) => all.some((notice) => notice.title?.startsWith(start) === true), Duration.seconds(20))
 
+/** The task's own say on its lead resolving conflicts, as its menu sets it. */
+const taskSays = (taskId: string, resolveConflicts: boolean | null) =>
+  Effect.gen(function* () {
+    const envelope = yield* Runtime.envelope('task.set_conflicts', { taskId, resolveConflicts })
+    yield* (yield* Changes).setResolveConflicts({ envelope, taskId, resolveConflicts })
+  })
+
 describe('a conflict merging here', () => {
   it.live('waits for the person to ask the lead, as it always has, where the project doesn’t say', () => {
     const working = repository()
@@ -209,6 +218,65 @@ describe('a conflict merging here', () => {
   })
 })
 
+describe('a task that says otherwise than its project', () => {
+  it.live('has what conflicts already resolved by its lead once it says so, though its project doesn’t', () => {
+    const working = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
+        false,
+      )
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const taskId = task?.taskId ?? ''
+      const threadId = task?.threadId ?? ''
+      // The default branch moves on; nobody merges, so nothing has found it yet.
+      moveMainOn(working)
+      yield* Effect.sleep('300 millis')
+      assert.deepStrictEqual(yield* rounds(taskId), [])
+      // The task says its lead resolves conflicts: what conflicts now is resolved, with no Merge pressed.
+      yield* taskSays(taskId, true)
+      yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt')
+      const said = (yield* notices(threadId)).find((notice) => notice.title === 'It conflicts with main, in change.txt.')
+      assert.strictEqual(said?.description, 'Althar asked the lead to resolve it, as you said for this task.')
+      assert.deepStrictEqual(
+        (yield* rounds(taskId)).map((round) => [round.state, round.url]),
+        [['resolved', null]],
+      )
+      // Saying it again starts nothing more, and the person merges as ever.
+      yield* taskSays(taskId, true)
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      yield* mergeHere(taskId)
+      assert.strictEqual(git(working, 'show', 'main:change.txt'), 'change\nrate limits')
+      assert.strictEqual((yield* asked(threadId)).length, 1)
+    }).pipe(Effect.provide(runtimeWith()))
+  })
+
+  it.live('waits for the person where it says so, though its project has its leads resolve conflicts', () => {
+    const working = repository()
+    return Effect.gen(function* () {
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
+        true,
+      )
+      const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const taskId = task?.taskId ?? ''
+      yield* taskSays(taskId, false)
+      moveMainOn(working)
+      // The button, as ever: nothing is asked of the lead.
+      assert.deepStrictEqual(cantOf(yield* Effect.flip(mergeHere(taskId))), ['CantMerge', 'conflicts', 'change.txt'])
+      yield* Effect.sleep('300 millis')
+      assert.deepStrictEqual(yield* rounds(taskId), [])
+      assert.deepStrictEqual(yield* asked(task?.threadId ?? ''), [])
+      // Back to the project's say, the next conflict found goes by it.
+      yield* taskSays(taskId, null)
+      assert.deepStrictEqual(cantOf(yield* Effect.flip(mergeHere(taskId))), ['CantMerge', 'resolving', 'change.txt'])
+      yield* titled(task?.threadId ?? '', 'The lead resolved the conflict with main, in change.txt')
+    }).pipe(Effect.provide(runtimeWith()))
+  })
+})
+
 describe('a conflict its pull request’s host reports', () => {
   type Checks = ReadonlyArray<{ readonly name: string; readonly state: 'passed' | 'failed' | 'running'; readonly log?: string }>
   const PASSED: Checks = [{ name: 'test', state: 'passed' }]
@@ -237,7 +305,12 @@ describe('a conflict its pull request’s host reports', () => {
    * A GitHub whose pull request conflicts when the bare repository's `main`
    * and the task's branch do, with the checks it runs on each commit.
    */
-  const hostOf = (bare: string, checks: (sha: string) => Checks | undefined = () => undefined) => {
+  const hostOf = (
+    bare: string,
+    checks: (sha: string) => Checks | undefined = () => undefined,
+    /** Each time the host says the pull request conflicts. */
+    conflicting: () => void = () => {},
+  ) => {
     const tip = () => {
       try {
         return git(bare, 'rev-parse', 'althar/add-a-retry')
@@ -248,7 +321,12 @@ describe('a conflict its pull request’s host reports', () => {
     const github = makeFakeService({
       pushUrl: () => bare,
       headOf: tip,
-      conflictsOf: () => (tip() === null ? undefined : conflictsIn(bare, 'main', 'althar/add-a-retry')),
+      conflictsOf: () => {
+        if (tip() === null) return undefined
+        const conflicts = conflictsIn(bare, 'main', 'althar/add-a-retry')
+        if (conflicts) conflicting()
+        return conflicts
+      },
       checksFor: (_, sha) => checks(sha),
     })
     github.addRepository(['meridian', 'api'])
@@ -316,6 +394,31 @@ describe('a conflict its pull request’s host reports', () => {
       yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change?.unpushed === 0, Duration.seconds(20))
       // Asked once, though the host said so on every look until the merge was pushed.
       assert.strictEqual((yield* asked(threadId)).length, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('leaves it to the person where the task says so, though its project has its leads resolve conflicts', () => {
+    const { working, bare } = hosted()
+    let heard = 0
+    const github = hostOf(
+      bare,
+      () => PASSED,
+      () => void (heard += 1),
+    )
+    return Effect.gen(function* () {
+      const { taskId, threadId } = yield* opened(working, '[lead:resolve]')
+      const pushed = git(bare, 'rev-parse', 'althar/add-a-retry')
+      yield* taskSays(taskId, false)
+      moveHostMainOn(working, bare)
+      // Heard a few times over that it conflicts, nothing is asked of the lead, and nothing pushed.
+      yield* until(
+        Effect.sync(() => [heard]),
+        ([times]) => (times ?? 0) >= 3,
+        Duration.seconds(20),
+      )
+      assert.deepStrictEqual(yield* rounds(taskId), [])
+      assert.deepStrictEqual(yield* asked(threadId), [])
+      assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), pushed)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
