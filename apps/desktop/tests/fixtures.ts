@@ -825,6 +825,9 @@ const keptPreferences = (): Pick<Host, 'preferences' | 'setPreference'> => {
 export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   ...keptPreferences(),
   platform: 'darwin',
+  window: vi.fn(),
+  maximized: vi.fn(async () => false),
+  onMaximized: vi.fn(() => () => {}),
   sounds: vi.fn(async () => ['Basso', 'Glass', 'Ping', 'Purr']),
   editorPicture: vi.fn(async (id: string) => `data:image/png;base64,${id}`),
   playSound: vi.fn(async () => {}),
@@ -834,6 +837,8 @@ export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   findRepositories: vi.fn(async () => ({ lookedIn: [], repositories: [] })),
   grantFound: vi.fn(async (id: string) => `grant_${id}`),
   onOpen: vi.fn(() => () => {}),
+  onStoreFailed: vi.fn(() => () => {}),
+  showBackup: vi.fn(async () => {}),
   appIcon: vi.fn(async () => 'cobalt'),
   setAppIcon: vi.fn(async () => {}),
   edge: vi.fn(async () => ({ place: 'island', notch: true, platform: 'darwin', tray: true })),

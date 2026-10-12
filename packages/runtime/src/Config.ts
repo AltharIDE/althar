@@ -8,7 +8,7 @@ import { agents, type AgentDefinition, type Transport, usingLocated } from '@alt
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import { UnknownAgent } from './errors'
-import { Installs } from './Installs'
+import { Installs, type OnDevice } from './Installs'
 import type { ModelFactsOptions } from './ModelFacts'
 
 export interface RuntimeOptions {
@@ -24,6 +24,18 @@ export interface RuntimeOptions {
   readonly artifactsRoot?: string
   /** Where agents Althar downloads at the person's asking are kept (`Installs.ts`): `<root>/<agent>`. Without it, it downloads none. */
   readonly agentsRoot?: string
+  /**
+   * The device outside a sandbox that cannot see it (a Flatpak's host): the
+   * person's own commands are found and run out there (`Installs.ts`).
+   * Without it, everything is looked for and run here, as always.
+   */
+  readonly onDevice?: OnDevice
+  /**
+   * Where the models probe may start an agent whose copy lives outside the
+   * sandbox (a Flatpak): a folder the device sees at the same path too.
+   * Without it, the system's temporary folder (`Models.ts`).
+   */
+  readonly probeRoot?: string
   /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
   readonly openTerminal?: (line: string) => Effect.Effect<boolean>
   /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */

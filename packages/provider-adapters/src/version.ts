@@ -18,7 +18,10 @@ export const agentVersion = (agent: AgentDefinition, node: string = process.exec
   const spec = agent.version?.(node)
   if (spec === undefined) return Effect.succeed(null)
   return Effect.callback<string | null>((resume) => {
-    execFile(spec.command, [...spec.args], { timeout: 10_000, env: { ...process.env, ...asNode(spec) } }, (error, stdout) =>
+    const env = { ...process.env, ...asNode(spec) }
+    // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled.
+    const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
+    execFile(launched.command, [...launched.args], { timeout: 10_000, env }, (error, stdout) =>
       resume(Effect.succeed(error === null ? versionIn(stdout) : null)),
     )
   })

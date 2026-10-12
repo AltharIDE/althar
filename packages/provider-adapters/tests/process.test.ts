@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs'
+
 import { assert, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Exit, Fiber, Scope, Stream } from 'effect'
 
@@ -175,6 +177,38 @@ describe('the process transport', () => {
       yield* Effect.sleep('50 millis')
       yield* Scope.close(scope, Exit.void)
       assert.deepStrictEqual(yield* Deferred.await(owned.stopped), { signal: 'none', survivors: false })
+    }),
+  )
+
+  it.live('runs a spec where it says it lives, with the cwd and environment it assembled', () =>
+    Effect.gen(function* () {
+      const said: Array<{ cwd?: string; env: Readonly<Record<string, string | undefined>> }> = []
+      const spec = {
+        command: 'nowhere',
+        args: [] as ReadonlyArray<string>,
+        onDevice: (at: { cwd?: string; env: Readonly<Record<string, string | undefined>> }) => {
+          said.push(at)
+          return {
+            command: '/bin/sh',
+            args: ['-c', 'sleep 0.1; printf %s "$PWD|$SMOKE"'],
+            env: { SMOKE: 'yes' },
+            inheritEnv: ['DBUS_SESSION_BUS_ADDRESS'],
+          }
+        },
+      }
+      const scope = yield* Scope.make()
+      const owned = yield* Scope.provide(scope)(spawnOwned(spec, '/tmp'))
+      const reader = owned.stdout.getReader()
+      let text = ''
+      for (;;) {
+        const { done, value } = yield* Effect.promise(() => reader.read())
+        if (done) break
+        text += new TextDecoder().decode(value)
+      }
+      yield* Scope.close(scope, Exit.void)
+      assert.strictEqual(text, `${realpathSync('/tmp')}|yes`)
+      assert.strictEqual(said[0]?.cwd, '/tmp')
+      assert.strictEqual(said[0]?.env.SMOKE, undefined)
     }),
   )
 })

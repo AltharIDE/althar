@@ -165,6 +165,30 @@ describe('the runtime instance', () => {
     }),
   )
 
+  it.live('starts nothing on a store an update couldn’t migrate, and says where the copy from before it is', () =>
+    Effect.gen(function* () {
+      const file = database()
+      const backups = join(file, '..', 'backups')
+      const launches = Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ id: string }>`SELECT id FROM runtime_instances`)
+      yield* Effect.provide(launches, runtime(file))
+
+      const failing = { key: '9999_fails', statements: ['INSERT INTO no_such_table VALUES (1)'] }
+      const update = Runtime.layer({
+        database: file,
+        backups,
+        extraMigrations: [failing],
+        worktreeRoot: tmpdir(),
+        appVersion: '0.0.1',
+        deviceName: 'Test Mac',
+      })
+      const error = yield* Effect.flip(Effect.provide(Effect.void, update))
+      assert.strictEqual(error._tag, 'MigrationFailed')
+      assert.match(error._tag === 'MigrationFailed' ? (error.backup ?? '') : '', /\/backups\/althar-\d{4}-[\d-]+\.sqlite$/)
+      // The failed launch recorded nothing: only the first and this look at it did.
+      assert.lengthOf(yield* Effect.provide(launches, runtime(file)), 2)
+    }),
+  )
+
   it.live('uses the registry agents unless told otherwise', () =>
     Effect.gen(function* () {
       const instance = yield* Instance

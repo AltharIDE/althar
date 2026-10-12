@@ -185,6 +185,8 @@ export const runtime = (
     readonly artifactsRoot?: string | null
     /** How worktrees are set up: in sh, rather than the person's own shell and its profile, unless a test says. */
     readonly setups?: SetupOptions
+    /** The device outside a sandbox, as for a Flatpak. */
+    readonly onDevice?: RuntimeOptions['onDevice']
   } = {},
 ) =>
   Runtime.layer({
@@ -207,6 +209,7 @@ export const runtime = (
     ...(more.modelFacts === undefined ? {} : { modelFacts: more.modelFacts }),
     ...(more.editors === undefined ? {} : { editors: more.editors }),
     setups: { shell: '/bin/sh', ...more.setups },
+    ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
   })
 
 /** A GitHub instance that never answers: `.test` names nothing, so git's fetches fail at once, and the fake service stands in for its API. */

@@ -13,6 +13,7 @@ import { Select } from '../../primitives/Select/Select'
 import { AskAnswered, AskCard, AskFoot, AskNote } from '../../primitives/Ask/Ask'
 import s from './Permission.module.css'
 import { Rhythm } from '../../lib/rhythm'
+import { focusQuietly } from '../../lib/focusQuietly'
 
 /*
  * ACP permission requests carry options of four kinds: allow once, allow
@@ -255,7 +256,7 @@ function Card({
   const no = refuses(pick)
 
   useEffect(() => {
-    if (denying) noteField.current?.focus()
+    if (denying) focusQuietly(noteField.current)
   }, [denying])
 
   /* narrowest first: this command, then what the consumer says an always would cover; one that can't be kept by the scope picked keeps its narrowest */
