@@ -1,7 +1,7 @@
 import { Ids, newId, type ProjectId, type ThreadItemKind } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
 import { answerWords, type FieldAnswer, type Handed, type QuestionField, type SessionEvent } from '@althar/provider-adapters'
-import { Clock, Effect } from 'effect'
+import { Cause, Clock, Duration, Effect, Exit, Fiber, Scope, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import {
@@ -129,6 +129,8 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
     | {
         readonly kind: 'agent_message' | 'agent_thought'
         readonly id: string
+        /** The id the agent gave this message, where it gives one. */
+        messageId: string | undefined
         text: string
         written: number
         writtenAt: number
@@ -144,22 +146,40 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const folders = place.folders ?? []
   const where = (itemId: string) => ({ projectId: place.projectId, itemId, folders })
 
-  /** Writes the message being gathered; its item was placed when its first chunk arrived. */
+  /**
+   * Writes the message being gathered; its item was placed when its first chunk arrived.
+   * It is let go once written, or failed; a write cut short by interruption leaves it
+   * to be written again, as when a session ends while one is under way.
+   */
   const flush = Effect.gen(function* () {
     const open = gathering
-    gathering = undefined
-    if (open !== undefined) yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed))
+    if (open === undefined) return
+    yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed)).pipe(
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
+          ? Effect.void
+          : Effect.sync(() => {
+              if (gathering === open) gathering = undefined
+            }),
+      ),
+    )
   })
 
   /** The message being gathered, or a new one: what it hands back goes with its words. */
-  const gathered = (kind: 'agent_message' | 'agent_thought', text: string) =>
+  const gathered = (kind: 'agent_message' | 'agent_thought', text: string, messageId?: string) =>
     Effect.gen(function* () {
-      if (gathering !== undefined && gathering.kind !== kind) yield* flush
+      // A different kind, or a message id other than the open one's, starts a new item; without ids, chunks run on.
+      if (
+        gathering !== undefined &&
+        (gathering.kind !== kind || (messageId !== undefined && gathering.messageId !== undefined && messageId !== gathering.messageId))
+      )
+        yield* flush
       if (gathering !== undefined) return { open: gathering, fresh: false }
       // The item is placed when its first chunk arrives, so the thread keeps the order things happened in.
       const open = {
         kind,
         id: yield* addItem(place, kind, { text }),
+        messageId,
         text,
         written: text.length,
         writtenAt: yield* Clock.currentTimeMillis,
@@ -169,10 +189,11 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       return { open, fresh: true }
     })
 
-  const gather = (kind: 'agent_message' | 'agent_thought', text: string) =>
+  const gather = (kind: 'agent_message' | 'agent_thought', text: string, messageId?: string) =>
     Effect.gen(function* () {
-      const { open, fresh } = yield* gathered(kind, text)
+      const { open, fresh } = yield* gathered(kind, text, messageId)
       if (fresh) return
+      if (open.messageId === undefined && messageId !== undefined) open.messageId = messageId
       const now = yield* Clock.currentTimeMillis
       open.text += text
       // A long message is written as it grows, so a crash loses only its last few seconds.
@@ -184,9 +205,9 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
     })
 
   /** A picture or a file in what the agent says: kept with the message it is in, and written at once. */
-  const handedInMessage = (content: Handed) =>
+  const handedInMessage = (content: Handed, messageId?: string) =>
     Effect.gen(function* () {
-      const { open } = yield* gathered('agent_message', '')
+      const { open } = yield* gathered('agent_message', '', messageId)
       const now = yield* handedNow(where(open.id), content)
       if (now.pictures.length === 0 && now.files.length === 0) return
       open.handed = together(open.handed, now)
@@ -262,11 +283,11 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const record = (event: SessionEvent) => {
     switch (event._tag) {
       case 'AgentMessage':
-        return gather('agent_message', event.text)
+        return gather('agent_message', event.text, event.messageId)
       case 'AgentThought':
         return gather('agent_thought', event.text)
       case 'AgentContent':
-        return handedInMessage(event.content)
+        return handedInMessage(event.content, event.messageId)
       case 'ToolCall':
       case 'ToolCallUpdate':
         return Effect.gen(function* () {
@@ -335,6 +356,46 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
 
   return { record, flush, end, current, outputsSoFar, outputOf }
 }
+
+/** How long an agent has to be quiet between turns before the message it was saying is closed. */
+const QUIET_MILLIS = 3_000
+
+/**
+ * Records what an agent says on its own between turns, as a turn does: a
+ * message stays one item as it grows, and is closed once the agent goes quiet
+ * (there is no turn end to wait for), when something else arrives, or when
+ * `close` says the stream is handed on or ends: a prompted turn takes over, or
+ * the session does.
+ */
+export const betweenTurns = (
+  items: Pick<ReturnType<typeof recorder>, 'record' | 'flush'>,
+  scope: Scope.Scope,
+  quiet: Duration.Input = Duration.millis(QUIET_MILLIS),
+) =>
+  Effect.gen(function* () {
+    // Recording, the quiet close and `close` take turns, and the timer is only ever interrupted by one holding the lock, never mid-write.
+    const lock = yield* Semaphore.make(1)
+    let timer: Fiber.Fiber<void> | undefined
+    const stopTimer = Effect.suspend(() => {
+      const waiting = timer
+      timer = undefined
+      return waiting === undefined ? Effect.void : Fiber.interrupt(waiting)
+    })
+    const flush = items.flush.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent message', cause)))
+    const record = (event: SessionEvent) =>
+      lock.withPermits(1)(
+        Effect.gen(function* () {
+          yield* stopTimer
+          yield* items.record(event)
+          timer = yield* Effect.forkIn(Effect.andThen(Effect.sleep(quiet), lock.withPermits(1)(flush)), scope)
+        }),
+      )
+    const close = lock.withPermits(1)(Effect.andThen(stopTimer, flush))
+    // What it was saying when the scope ends is kept: the timer that would close it goes with the scope first, so this goes after.
+    const services = yield* Effect.context<Effect.Services<typeof items.flush>>()
+    yield* Scope.addFinalizer(scope, Effect.provideContext(close, services))
+    return { record, close }
+  })
 
 /** The thread as text, oldest first: what a new agent reads when it takes over (ADR-005). */
 export const transcript = (threadId: string, budget: number) =>

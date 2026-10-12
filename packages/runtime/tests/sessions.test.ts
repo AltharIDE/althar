@@ -459,6 +459,23 @@ describe('sessions', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('keeps what the agent says on its own whole, and apart from the next turn and the next time it wakes', () =>
+    Effect.gen(function* () {
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      const woken = (rows: ReadonlyArray<{ readonly kind: string; readonly content: { readonly text?: unknown } }>) =>
+        rows.filter((item) => item.kind === 'agent_message' && item.content.text === 'Verify finished.').length
+      yield* say(created.threadId, scenarios.wakesItself)
+      // Its first words open the item; the rest is written as it grows and when it closes.
+      yield* until(threadItems(created.threadId), (rows) => rows.some((item) => String(item.content.text ?? '').startsWith('Verify')))
+      // A prompted turn takes over before the agent has gone quiet; what it says next on its own starts a new item.
+      yield* say(created.threadId, scenarios.wakesItself)
+      yield* until(threadItems(created.threadId), (rows) => woken(rows) === 2)
+      const texts = (yield* threadItems(created.threadId)).filter((item) => item.kind !== 'user_message').map((item) => item.content.text)
+      assert.deepStrictEqual(texts, ['Done', 'Verify finished.', 'Done', 'Verify finished.'])
+    }).pipe(Effect.provide(runtime())),
+  )
+
   describe('what a lead leaves running', () => {
     /** What the thread's session has left running, as a client reads it. */
     const shown = (threadId: string) =>

@@ -449,13 +449,18 @@ export const blocksOf = (
         : { kind: 'message', id, text: streamed.text, pictures: [], files: [] },
     )
   }
-  // What an agent says after its step's result, closing its turn, folds with the work that led to it.
+  // What an agent says after its step's result, closing its turn, folds with the work that led to it. A run it starts on its own after, with tool calls or a plan, is work of its own: it folds under its own time, and its last message shows.
   const lastTurn = blocks.findLastIndex((block) => block.kind === 'turn')
   const merged: Array<Block> = []
   blocks.forEach((block, index) => {
     const step = merged.at(-1)
     const before = merged.at(-2)
-    const closing = block.kind === 'turn' && step?.kind === 'step' && before?.kind === 'turn' && before.agentId === block.agentId
+    const closing =
+      block.kind === 'turn' &&
+      step?.kind === 'step' &&
+      before?.kind === 'turn' &&
+      before.agentId === block.agentId &&
+      !block.parts.some((part) => part.kind === 'tool' || part.kind === 'plan')
     if (!closing || (turnRunning && index === lastTurn)) return void merged.push(block)
     const span = spans.get(before.id)
     const after = spans.get(block.id)
