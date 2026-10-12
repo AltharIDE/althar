@@ -62,7 +62,7 @@ export function useScrolled(past = 40) {
 
 /**
  * The phone menu: open and closed by its button, closed again by Escape (focus
- * back on the button) or by choosing a page.
+ * back on the button), by choosing a page, or by the window growing past a phone's.
  */
 export function useMenu() {
   const [open, setOpen] = useState(false)
@@ -74,8 +74,17 @@ export function useMenu() {
       setOpen(false)
       button.current?.focus()
     }
+    // Past the phone's width the menu's button is gone, so the menu closes rather than stay open with no way to close it.
+    const wide = window.matchMedia('(min-width: 901px)')
+    const onWide = () => {
+      if (wide.matches) setOpen(false)
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    wide.addEventListener('change', onWide)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      wide.removeEventListener('change', onWide)
+    }
   }, [open])
   return { open, button, toggle: () => setOpen((o) => !o), close: () => setOpen(false) }
 }

@@ -78,6 +78,11 @@
   .end { margin-left: auto; }
   .menuButton { display: inline-flex; align-items: center; }
 }
+/* The narrowest phones: the halftone mark alone stands for the name, and the capitals close up, so Download and Menu fit. */
+@media (max-width: 400px) {
+  .brand span { display: none; }
+  .download, .menuButton { padding: 0 10px; letter-spacing: 0.1em; }
+}
 @media (prefers-reduced-motion: reduce) {
   .screen, .sheet > nav { transition: none; }
 }
