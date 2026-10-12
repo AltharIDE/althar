@@ -4,6 +4,8 @@ import { expect, userEvent, waitFor, within } from 'storybook/test'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Delta } from '../../primitives/FileChanges/FileChanges'
 import { Tool, ToolGroup } from '../Tool/Tool'
+import { Prose, Turn } from '../Turn/Turn'
+import { OPUS } from '../../fixtures/models'
 import { WorkedFor } from './WorkedFor'
 import { routerFile } from '../../fixtures/meridian'
 import { useThreadShell } from '../Shell/Shell'
@@ -68,6 +70,24 @@ export const Working: Story = {
     await expect(row).toHaveAttribute('aria-busy', 'true')
     await expect(c.getByText('Reading src/refunds/router.ts')).toBeInTheDocument()
   },
+}
+/**
+ * A lead that woke itself, when a command it left running finished, folds its
+ * work like any turn; what it said last shows whole, not as its closing fragment.
+ */
+export const SelfStarted: Story = {
+  args: { took: '3m 40s', summary: '2 commands' },
+  render: (args) => (
+    <>
+      <WorkedFor {...args} />
+      <Turn model={OPUS} at="4m ago" bare>
+        <Prose>
+          The log isn’t where I expected; it was under the build output, which shows whether branch coverage clears 90%. It does: the verify
+          finished at 92% and the pull request is ready.
+        </Prose>
+      </Turn>
+    </>
+  ),
 }
 export const WithoutSummary: Story = { args: { summary: undefined } }
 
