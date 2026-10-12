@@ -284,7 +284,14 @@ const startRuntime = () => {
   const child = utilityProcess.fork(join(here, '../runtime/runtime.js'), [], {
     serviceName: 'Althar runtime',
     stdio: 'inherit',
-    env: { ...process.env, ALTHAR_PROFILE: profile, ALTHAR_WORKTREES: worktrees, ALTHAR_APP_VERSION: app.getVersion() },
+    env: {
+      ...process.env,
+      ALTHAR_PROFILE: profile,
+      ALTHAR_WORKTREES: worktrees,
+      ALTHAR_APP_VERSION: app.getVersion(),
+      // The Node the agent adapters run on (ADR-030): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
+      ...(app.isPackaged ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', 'node') } : {}),
+    },
   })
   child.on('message', (message: RuntimeMessage) => {
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)

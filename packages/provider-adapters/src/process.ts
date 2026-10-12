@@ -39,7 +39,20 @@ export const childEnvironment = (
   return { ...env, ...asNode(spec, underElectron), ...spec.env }
 }
 
-/** Under Electron, `node` is Electron's own binary, which runs as plain Node only when told to. */
+/**
+ * The Node the bundled adapters run on (ADR-030). The packaged app ships a
+ * Node of its own and names it in ALTHAR_NODE, since Althar's binary doesn't
+ * run as Node there (its `runAsNode` fuse is off). Without one, in dev and
+ * the tests, it is the binary this runs on: Electron's, run as Node (`asNode`),
+ * or the tests' own Node.
+ */
+export const adapterNode = (env: Readonly<Record<string, string | undefined>> = process.env): string =>
+  env.ALTHAR_NODE !== undefined && env.ALTHAR_NODE !== '' ? env.ALTHAR_NODE : process.execPath
+
+/**
+ * Under Electron, `node` is Electron's own binary, which runs as plain Node only when told to: in dev, where
+ * the `runAsNode` fuse is on. The packaged app's adapters run on the Node it ships, and need nothing.
+ */
 export const asNode = (spec: LaunchSpec, underElectron = process.versions.electron !== undefined): Record<string, string> =>
   underElectron && spec.command === process.execPath ? { ELECTRON_RUN_AS_NODE: '1' } : {}
 

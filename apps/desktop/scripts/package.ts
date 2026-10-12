@@ -1,11 +1,14 @@
 import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import { build } from 'electron-builder'
 
+import { entitlementsFor } from './entitlements.ts'
 import { refresh } from './feed.ts'
+import { fetchNode, NODE_IN_APP } from './node.ts'
 import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
 
 /*
@@ -21,13 +24,13 @@ import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
  * speech engine and the updater alone, with the packages that carry the agents' own binaries
  * pinned to the versions the workspace runs, so the app ships what dev and
  * CI tested. Electron comes from the copy already installed, at the version
- * the app is tested on.
+ * the app is tested on. The adapters run on a Node the app ships in its
+ * resources (ADR-030, scripts/node.ts), as Althar's binary doesn't run as
+ * Node: its `runAsNode` fuse is off.
  *
- * Signing: electron-builder signs every executable in the app on its own,
- * deepest first, with the hardened runtime and a secure timestamp: Althar's
- * binary with entitlements.mac.plist, everything else (Electron's helpers,
- * Claude Code's and Codex's binaries, the speech engine) with
- * entitlements.mac.inherit.plist. The identity is ALTHAR_MAC_IDENTITY;
+ * Signing: every executable in the app is signed on its own, deepest first,
+ * with the hardened runtime and a secure timestamp, and given only the
+ * entitlements it needs (scripts/entitlements.ts). The identity is ALTHAR_MAC_IDENTITY;
  * else, given CSC_LINK and CSC_KEY_PASSWORD (the certificate and its key as
  * a base64 .p12), the Developer ID electron-builder finds in the keychain of
  * its own it makes of them; else Althar's Developer ID where a keychain has
@@ -147,21 +150,26 @@ for (const [name, version] of Object.entries(pinned)) {
   if (staged !== version) throw new Error(`The package has ${name} ${staged}, but the workspace runs ${version}`)
 }
 
+// Kept beside the workspace's packages, so it is fetched once, not for every package.
+const node = await fetchNode(join(desktop, 'node_modules', '.cache', 'althar-node'))
+
 /*
- * Signed ad hoc, the binaries have no team for library validation to match,
- * so Althar's own binary couldn't load Electron's framework: there, it may
- * load what it likes, as electron-builder warns.
+ * electron-builder gives every executable but Althar's own binary the same
+ * entitlements. This signs as it would, with @electron/osx-sign, but gives
+ * each its own.
  */
-const entitlements = join(resources, 'entitlements.mac.plist')
-const mainEntitlements = adHoc ? join(out, 'entitlements.adhoc.plist') : entitlements
-if (adHoc)
-  writeFileSync(
-    mainEntitlements,
-    readFileSync(entitlements, 'utf8').replace(
-      '</dict>',
-      '  <key>com.apple.security.cs.disable-library-validation</key>\n    <true/>\n  </dict>',
-    ),
-  )
+const osxSign = createRequire(createRequire(require.resolve('electron-builder')).resolve('app-builder-lib')).resolve('@electron/osx-sign')
+type SignOptions = { readonly app: string; readonly optionsForFile?: (file: string) => Record<string, unknown> }
+const signEach = async (options: SignOptions) => {
+  const { signAsync } = (await import(pathToFileURL(osxSign).href)) as { signAsync: (options: SignOptions) => Promise<void> }
+  await signAsync({
+    ...options,
+    optionsForFile: (file) => ({
+      ...options.optionsForFile?.(file),
+      entitlements: [...entitlementsFor(relative(options.app, file), adHoc)],
+    }),
+  })
+}
 
 const electron = dirname(require.resolve('electron/package.json'))
 // Electron's own installer is idempotent: it fetches the binary where it is missing and leaves a complete install alone. It runs every time, because bun can install Electron without its postinstall, and a partial extraction can leave the metadata (path.txt, dist/version) without the executable.
@@ -184,12 +192,14 @@ await build({
     npmRebuild: false,
     nodeGypRebuild: false,
     /*
-     * Nothing may steer Althar's binary through NODE_OPTIONS or the inspector:
-     * the adapters use neither. Running as Node stays on, since that is how
-     * the runtime starts them (see the README's "The packaged app").
+     * Nothing may run Althar's binary as Node, or steer it through
+     * NODE_OPTIONS or the inspector (ADR-030): the adapters run on the Node
+     * the app ships, and need none of these.
      */
-    electronFuses: { enableNodeOptionsEnvironmentVariable: false, enableNodeCliInspectArguments: false },
+    electronFuses: { runAsNode: false, enableNodeOptionsEnvironmentVariable: false, enableNodeCliInspectArguments: false },
     files: ['**/*'],
+    // The Node the adapters run on, with its license: `resources/node/bin/node`, where the window's process names it to the runtime.
+    extraResources: [{ from: node, to: NODE_IN_APP, filter: ['bin/node', 'LICENSE'] }],
     // The provider written into app-update.yml and the platform's latest*.yml feed; publication itself stays in the release workflow.
     publish: [RELEASES],
     ...(mac
@@ -204,8 +214,7 @@ await build({
             ...(identity === undefined ? {} : { identity }),
             hardenedRuntime: true,
             gatekeeperAssess: false,
-            entitlements: mainEntitlements,
-            entitlementsInherit: join(resources, 'entitlements.mac.inherit.plist'),
+            sign: signEach,
             notarize: false,
             extendInfo: {
               NSMicrophoneUsageDescription:
