@@ -1,9 +1,11 @@
 /* A page's head: paper, the light standing up off its foot, white words in it. */
 
 .lit { position: relative; isolation: isolate; overflow: hidden; background: var(--n-2); color: #fff; }
-/* Taller than the head and standing on its floor: its strong part reaches above the words, its tops fade into the paper under the island. */
+/* Taller than the head and standing on its floor: its strong part reaches above the words, its tops fade into the paper under the nav. */
 .light { position: absolute; inset: 0; z-index: -1; }
 .glow { height: 150%; }
+/* The light stands strong right up under the nav: it is smoked glass over the whole head. */
+.under { top: 0; }
 
 .words { display: grid; justify-items: center; gap: 22px; max-width: 980px; margin: 0 auto; padding: 150px var(--gut) 110px; text-align: center; }
 /* White words in a light the script draws: they wait for the page to hydrate rather than show white on paper. Crawlers read them in the HTML all the same. */

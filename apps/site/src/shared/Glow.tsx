@@ -22,8 +22,8 @@ export function Glow({ heart = 0.5, className }: { heart?: number; className?: s
   const columns = useRef<Array<HTMLCanvasElement | null>>([])
   useLayoutEffect(() => {
     COLUMNS.forEach((column, i) => {
-      const context = columns.current[i]?.getContext('2d')
-      if (context) drawColumn(context, tonesOf(column.d, heart))
+      const canvas = columns.current[i]
+      if (canvas) drawColumn(canvas, tonesOf(column.d, heart))
     })
   }, [heart])
   return (

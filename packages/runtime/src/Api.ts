@@ -38,7 +38,7 @@ import { MachineLoad } from './MachineLoad'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
-import { accountsOf, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from './Policies'
+import { accountsOf, Policies, type ProjectRules, resolvesConflicts, ruleSetOf, usageLimitOf } from './Policies'
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
@@ -262,6 +262,7 @@ export const handlers = Api.toLayer(
         alwaysAllow: set.allow,
         commands: set.commands,
         end: rules.end ?? null,
+        resolveConflicts: resolvesConflicts(rules),
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
         onlyAccounts: accounts.only ?? null,
@@ -597,12 +598,29 @@ export const handlers = Api.toLayer(
           Effect.provideService(SqlClient.SqlClient, sql),
         ),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
-      Interrupt: ({ commandId, threadId }) => once(commandId, api(sessions.interrupt(threadId))),
-      StopSession: ({ commandId, threadId }) => once(commandId, api(sessions.stop(threadId))),
+      // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
+      Interrupt: ({ commandId, threadId }) =>
+        once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
+      // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
+      StopSession: ({ commandId, threadId }) =>
+        once(commandId, api(Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })))),
+      SetTaskResolveConflicts: ({ commandId, taskId, resolveConflicts }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.set_conflicts', { taskId, resolveConflicts }, commandId), (said) =>
+              pullRequests.setResolveConflicts({ envelope: said, taskId, resolveConflicts }),
+            ),
+          ),
+        ),
       StopTask: ({ commandId, taskId }) =>
         once(
           commandId,
-          api(Effect.flatMap(envelope('task.stop', { taskId }, commandId), (said) => tasks.stop({ envelope: said, taskId }))),
+          api(
+            Effect.flatMap(envelope('task.stop', { taskId }, commandId), (said) =>
+              Effect.andThen(tasks.stop({ envelope: said, taskId }), pullRequests.leadStopped({ taskId })),
+            ),
+          ),
         ),
       ResumeTask: ({ commandId, taskId, agentId, model, effort }) =>
         once(
@@ -900,7 +918,8 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const now = accountsOf((yield* policies.current(projectId as ProjectId)).rules)
+              const was = (yield* policies.current(projectId as ProjectId)).rules
+              const now = accountsOf(was)
               const accounts =
                 rotateAccounts === undefined && onlyAccounts === undefined
                   ? {}
@@ -915,7 +934,10 @@ export const handlers = Api.toLayer(
               yield* policies.set(projectId, { ...change, ...accounts }, instance.personId, expectedRevision)
               // A call still waiting that the rules no longer keep for the person is answered by them.
               yield* permissions.reconsider(projectId)
-              return yield* rulesView(projectId, yield* policies.current(projectId as ProjectId))
+              const kept = yield* policies.current(projectId as ProjectId)
+              // Its leads newly resolving conflicts, what conflicts already is resolved now, not at the next (ADR-030).
+              if (!resolvesConflicts(was) && resolvesConflicts(kept.rules)) yield* pullRequests.resolveNow({ projectId })
+              return yield* rulesView(projectId, kept)
             }),
           ),
         ),

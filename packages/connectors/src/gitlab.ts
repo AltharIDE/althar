@@ -81,6 +81,7 @@ const MergeAnswer = Schema.Struct({
   // A string, and "1000+" past a thousand files; said only when one merge request is read.
   changes_count: Schema.optional(Schema.NullOr(Schema.String)),
   detailed_merge_status: Schema.optional(Schema.String),
+  has_conflicts: Schema.optional(Schema.Boolean),
   head_pipeline: Schema.optional(Schema.NullOr(Pipeline)),
   updated_at: Schema.String,
 })
@@ -182,6 +183,9 @@ const filesOf = (count: string | null | undefined): number | null => {
   return Number.isNaN(files) ? null : files
 }
 
+/** The merge statuses GitLab gives while it is still working out whether a merge request can merge. */
+const CHECKING = new Set(['checking', 'unchecked', 'preparing', 'approvals_syncing'])
+
 const changeOf = (request: MergeAnswer): ChangeRequest => ({
   id: String(request.id),
   number: request.iid,
@@ -201,6 +205,12 @@ const changeOf = (request: MergeAnswer): ChangeRequest => ({
   deletions: null,
   changedFiles: filesOf(request.changes_count),
   updatedAt: request.updated_at,
+  // What its merge status says, once GitLab has worked it out; until then, `has_conflicts` may be from before the target moved.
+  ...(request.detailed_merge_status === 'conflict'
+    ? { conflicts: true }
+    : request.detailed_merge_status === undefined || CHECKING.has(request.detailed_merge_status)
+      ? {}
+      : { conflicts: request.has_conflicts === true }),
 })
 
 /**

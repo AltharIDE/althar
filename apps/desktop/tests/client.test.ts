@@ -253,6 +253,7 @@ describe('the client', () => {
           },
           StopSession: () => Effect.die('unused'),
           StopTask: () => Effect.die('unused'),
+          SetTaskResolveConflicts: () => Effect.die('unused'),
           ResumeTask: () => Effect.die('unused'),
           AbandonTask: () => Effect.die('unused'),
           ReopenTask: () => Effect.die('unused'),

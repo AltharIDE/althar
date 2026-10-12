@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -397,8 +397,9 @@ const playStall = async (
  * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task,
- * passing on the `[lead:…]` and `[review:…]` markers it was given, and
- * `[coordinator:start]` starts one at once, without a plan;
+ * passing on the `[lead:…]` and `[review:…]` markers it was given
+ * (`[coordinator:plan-effort]` puts its lead on the large model at high
+ * effort), and `[coordinator:start]` starts one at once, without a plan;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
  * it after; `[review:pass]` and `[review:findings]`
  * report a review. Settling findings, it writes a file and commits it, so
@@ -414,8 +415,15 @@ const playStall = async (
  * Told what people said on its pull
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
- * publishes it. Asked to plan a change with a link in it, the coordinator
- * drafts the task from that issue.
+ * publishes it, `[lead:fix-more]` commits other work after it, and
+ * `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
+ * `[lead:push]` commits what it has and asks the person to push it. Asked to bring its branch up to date, `[lead:resolve]`
+ * merges what it was told to, keeps both sides of each conflict and commits
+ * the merge; `[lead:resolve-more]` does too, then commits other work on top
+ * of it; `[lead:resolve-fails]` can't, and says so; `[lead:resolve-wait]`
+ * works at it until it is interrupted or stopped, and `[lead:resolve-hold]`
+ * does so once it has committed the merge. Asked to plan a
+ * change with a link in it, the coordinator drafts the task from that issue.
  */
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
 const commitIn = (cwd: string, file: string, message: string) => {
@@ -424,6 +432,24 @@ const commitIn = (cwd: string, file: string, message: string) => {
     execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd })
   git('add', '-A')
   git('commit', '-q', '-m', message)
+}
+
+/** Merges a branch into the worktree's, keeping both sides of each conflict, and commits the merge. */
+const resolveIn = (cwd: string, ref: string) => {
+  const git = (...args: Array<string>) =>
+    execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd, stdio: 'pipe' }).toString()
+  try {
+    git('merge', '-q', '--no-edit', ref)
+  } catch {
+    for (const file of git('diff', '--name-only', '--diff-filter=U')
+      .split('\n')
+      .filter((line) => line !== '')) {
+      const lines = readFileSync(join(cwd, file), 'utf8').split('\n')
+      writeFileSync(join(cwd, file), lines.filter((line) => !/^(<<<<<<<|=======|>>>>>>>)( |$)/.test(line)).join('\n'))
+    }
+    git('add', '-A')
+    git('commit', '-q', '--no-edit')
+  }
 }
 
 const playRole = async (session: SessionState, text: string, serve: (exits: boolean) => Promise<void>): Promise<string | undefined> => {
@@ -502,6 +528,11 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         rmSync(join(session.cwd, 'scratch.log'))
         return await finish()
       }
+      // Asked to push, it commits and asks the person to, as a lead does: it never pushes itself.
+      if (available.has('push_to_pull_request') && session.markers.has('[lead:push]') && /\bpush pls\b/i.test(text)) {
+        commitIn(session.cwd, 'pushed.txt', 'Tidy up before pushing')
+        return await call('push_to_pull_request', {})
+      }
       // What people said on the task's pull request, and its checks.
       if (available.has('reply_on_pull_request') && session.markers.has('[lead:answer]') && / commented on /.test(text)) {
         const thread = /\(thread (\S+)\)/.exec(text)?.[1]
@@ -510,10 +541,32 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
           ...(thread === undefined ? {} : { thread_id: thread }),
         })
       }
+      // Asked to resolve a conflict with the branch its own goes into: merged and settled, or not.
+      const merging = /Bring the branch up to date: merge (\S+) into it/.exec(text)?.[1]
+      if (merging !== undefined && session.markers.has('[lead:resolve-fails]'))
+        return "Couldn't settle the conflict: both sides change the same lines."
+      if (merging !== undefined && session.markers.has('[lead:resolve-wait]')) {
+        for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        return 'Stopped before settling it.'
+      }
+      const more = session.markers.has('[lead:resolve-more]')
+      const hold = session.markers.has('[lead:resolve-hold]')
+      if (merging !== undefined && (session.markers.has('[lead:resolve]') || more || hold)) {
+        resolveIn(session.cwd, merging)
+        if (hold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        if (!more) return 'Merged it, settled the conflict, and committed the merge.'
+        commitIn(session.cwd, 'more.txt', 'Tidy up while here')
+        return 'Merged it, settled the conflict, committed the merge, and tidied up while here.'
+      }
       // Fixed and committed, for the person to push.
-      if (session.markers.has('[lead:fix]') && text.startsWith('Checks failed')) {
+      const fixMore = session.markers.has('[lead:fix-more]')
+      const fixHold = session.markers.has('[lead:fix-hold]')
+      if ((session.markers.has('[lead:fix]') || fixMore || fixHold) && text.startsWith('Checks failed')) {
         commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
-        return 'Fixed the failing check, and committed it.'
+        if (fixHold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        if (!fixMore) return 'Fixed the failing check, and committed it.'
+        commitIn(session.cwd, 'more.txt', 'Tidy up while here')
+        return 'Fixed the failing check, committed it, and tidied up while here.'
       }
       // Works until it is stopped: for a lead that goes in the middle of its step.
       if (text.includes('[lead:wait]')) {
@@ -552,7 +605,12 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
       const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
       return await call('propose_plan', {
         task: slug,
-        lead: { agent: 'claude-code', reason: 'It knows the code.' },
+        lead: {
+          agent: 'claude-code',
+          // `[coordinator:plan-effort]`: on its large model, thinking hard.
+          ...(text.includes('[coordinator:plan-effort]') ? { model: 'large', effort: 'high' } : {}),
+          reason: 'It knows the code.',
+        },
         review: text.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
       })
     }

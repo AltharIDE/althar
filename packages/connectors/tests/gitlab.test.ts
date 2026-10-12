@@ -239,6 +239,7 @@ describe('GitLab as a code host', () => {
         deletions: null,
         changedFiles: null,
         updatedAt: '2026-10-07T16:41:00.548Z',
+        conflicts: false,
       })
       assert.deepStrictEqual(sent[0]?.body, {
         source_branch: 'althar/mer-231',
@@ -280,6 +281,26 @@ describe('GitLab as a code host', () => {
       const error = yield* Effect.flip(host.openChange(repository, { title: 't', body: '', source: 'x', target: 'main', draft: false }))
       assert.deepStrictEqual([error.reason, error.status], ['rejected', 409])
       assert.isNull(yield* host.findChange(repository, 'x'))
+    }),
+  )
+
+  it.effect('says when a merge request conflicts with its target, once GitLab has worked it out', () =>
+    Effect.gen(function* () {
+      const answers = [
+        request({ detailed_merge_status: 'conflict', has_conflicts: true }),
+        request({ detailed_merge_status: 'mergeable', has_conflicts: false }),
+        // Blocked for another reason, it still says whether it conflicts.
+        request({ detailed_merge_status: 'not_approved', has_conflicts: true }),
+        // Still checking: what it said before the target moved isn't taken.
+        request({ detailed_merge_status: 'checking', has_conflicts: false }),
+        request({ detailed_merge_status: undefined, has_conflicts: undefined }),
+      ]
+      const { host } = gitlab([['GET', `${PROJECT}/merge_requests/12`, () => ({ json: answers.shift() })]])
+      assert.isTrue((yield* host.change(repository, 12)).conflicts)
+      assert.isFalse((yield* host.change(repository, 12)).conflicts)
+      assert.isTrue((yield* host.change(repository, 12)).conflicts)
+      assert.notProperty(yield* host.change(repository, 12), 'conflicts')
+      assert.notProperty(yield* host.change(repository, 12), 'conflicts')
     }),
   )
 

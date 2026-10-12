@@ -173,9 +173,7 @@ export const sectionWords = (facts: PullRequestFacts): string => {
   return [
     `Pull request${several ? 's' : ''}:\n${sections.join('\n\n')}`,
     facts.unmerged > 0 ? `${unmergedWords(facts.unmerged)}: the task is not done.` : null,
-    finished === null
-      ? null
-      : `The task is finished (${finished === 'merged' ? 'merged' : 'closed without merging'}): nothing waits on the person.`,
+    finished === null ? null : `The task is finished (${finished}): nothing waits on the person.`,
   ]
     .filter((part): part is string => part !== null)
     .join('\n\n')

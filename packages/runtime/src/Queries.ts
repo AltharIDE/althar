@@ -24,6 +24,7 @@ import {
   type DocumentText,
   FieldAnswer,
   type OutputText,
+  PushRequestItem,
   QuestionField,
   type ThreadItem,
   type ThreadSnapshot,
@@ -285,6 +286,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
 const decodeDraft = Schema.decodeUnknownOption(IssueDraftCard)
+const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
 const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
@@ -479,6 +481,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return Option.match(decodeDraft(content), {
         onNone: () => undefined,
         onSome: (card) => ({ ...base, kind: 'issue_draft' as const, content: card }),
+      })
+    case 'push_request':
+      // Althar writes it whole, as the contract has it; one that doesn't read so is left out.
+      return Option.match(decodePushRequest(content), {
+        onNone: () => undefined,
+        onSome: (asked): ThreadItem => ({ ...base, kind: 'push_request', content: asked }),
       })
     case 'setup': {
       const ended = field(content, 'ended')
@@ -1197,6 +1205,7 @@ export class Queries extends Context.Service<
             review: string | null
             lead: string | null
             leadModel: string | null
+            leadEffort: string | null
             firstSession: string | null
             starting: number
             held: string | null
@@ -1213,6 +1222,7 @@ export class Queries extends Context.Service<
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
               (SELECT model FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_model,
+              (SELECT effort FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_effort,
               (SELECT min(started_at) FROM provider_sessions WHERE thread_id = t.id) AS first_session,
               -- A step admitted and not yet running, or a session still starting: its agent is on its way.
               (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
@@ -1252,14 +1262,21 @@ export class Queries extends Context.Service<
           const steps = field(parameters, 'steps')
           const planned = (Array.isArray(steps) ? steps : []).map((step) => {
             const model = field(step, 'model')
+            // Its effort, whoever chose it, so the card shows it and a change made there keeps it.
+            const effort = field(step, 'effort')
             return {
               key: text(step, 'key') === 'review' ? ('review' as const) : ('implement' as const),
               agentId: text(step, 'agentId'),
               model: typeof model === 'string' ? model : null,
+              ...(typeof effort === 'string' ? { effort } : {}),
               skipped: field(step, 'skipped') === true,
             }
           })
           const end = text(parameters, 'end')
+          // How hard its lead thinks: what its session is on, which it says once started; until then the plan's, while its lead is the plan's.
+          const implement = planned.find((step) => step.key === 'implement')
+          const onPlan = task.lead === null || (task.lead === implement?.agentId && task.leadModel === implement.model)
+          const leadEffort = task.leadEffort ?? (onPlan ? (implement?.effort ?? null) : null)
           const { issue, changes } = links ?? (yield* linksOf(taskId))
           return {
             taskId,
@@ -1282,9 +1299,10 @@ export class Queries extends Context.Service<
             change: changes.find((candidate) => candidate.state === 'open') ?? changes[0] ?? null,
             step: task.step,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
-            lead: task.lead ?? (planned.find((step) => step.key === 'implement')?.agentId || null),
+            lead: task.lead ?? (implement?.agentId || null),
             // Its session's model once one started; the plan's until then.
-            leadModel: task.lead === null ? (planned.find((step) => step.key === 'implement')?.model ?? null) : task.leadModel,
+            leadModel: task.lead === null ? (implement?.model ?? null) : task.leadModel,
+            leadEffort,
             branch: task.branch,
             startedAt: task.runAt ?? task.firstSession,
             waits: waitsOf(task.held),
@@ -1542,9 +1560,12 @@ export class Queries extends Context.Service<
             baseRef: string | null
             baseCommit: string | null
             settledAt: string | null
+            resolveConflicts: number | null
+            projectResolves: number | null
           }>`
             SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.request, k.slug, k.state,
-              k.settled_at, w.branch, w.path AS worktree, w.base_ref, w.base_commit
+              k.settled_at, w.branch, w.path AS worktree, w.base_ref, w.base_commit, k.resolve_conflicts,
+              (SELECT json_extract(r.rules, '$.resolveConflicts') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS project_resolves
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE t.id = ${threadId} AND t.kind = 'task'`
@@ -1617,6 +1638,10 @@ export class Queries extends Context.Service<
               planId: standing.planId,
               runCommand: yield* launches.commandFor(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => null)),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
+              resolveConflicts: {
+                task: head.resolveConflicts === null ? null : head.resolveConflicts === 1,
+                project: head.projectResolves === 1,
+              },
             },
             session,
             attention: attention.map(callOf),

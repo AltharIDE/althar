@@ -1171,6 +1171,27 @@ describe('Bitbucket Data Center as a code host', () => {
     }),
   )
 
+  it.effect('says when a pull request conflicts with its target, from the merge result Data Center keeps current', () =>
+    Effect.gen(function* () {
+      const result = (outcome: string, current?: boolean) => ({
+        properties: { mergeResult: { outcome, ...(current === undefined ? {} : { current }) } },
+      })
+      const { host } = center([
+        ['GET', `${MY}/pull-requests/1`, { json: pr({ id: 1, ...result('CONFLICTED', true) }) }],
+        ['GET', `${MY}/pull-requests/2`, { json: pr({ id: 2, ...result('CLEAN', true) }) }],
+        ['GET', `${MY}/pull-requests/3`, { json: pr({ id: 3, ...result('CONFLICTED', false) }) }],
+        ['GET', `${MY}/pull-requests/4`, { json: pr({ id: 4, ...result('UNKNOWN') }) }],
+        ['GET', PULL, { json: pr() }],
+      ])
+      assert.isTrue((yield* host.change(prj, 1)).conflicts)
+      assert.isFalse((yield* host.change(prj, 2)).conflicts)
+      // From before a branch moved, or not worked out: nothing is claimed.
+      assert.notProperty(yield* host.change(prj, 3), 'conflicts')
+      assert.notProperty(yield* host.change(prj, 4), 'conflicts')
+      assert.notProperty(yield* host.change(prj, 101), 'conflicts')
+    }),
+  )
+
   it.effect('marks a draft ready at the version it read, keeping its reviewers', () =>
     Effect.gen(function* () {
       const { host, sent } = center([
