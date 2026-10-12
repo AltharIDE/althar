@@ -43,6 +43,8 @@ const OPEN = 1900
 const REGION = { x: 1, y: 4.5, width: 22, height: 30 }
 /** The bar's height: the light stops short of it. */
 const BAR = 64
+/** How strongly the grain shows over the light, as the app's home has it (foundations/Light). */
+const GRAIN = 0.9
 
 const still = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(window.location.search).has('t')
 
@@ -160,10 +162,10 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
   useLayoutEffect(() => {
     const live = (root.current && getComputedStyle(root.current).getPropertyValue('--live').trim()) || undefined
     COLUMNS.forEach((column, i) => {
-      const context = columns.current[i]?.getContext('2d')
+      const canvas = columns.current[i]
       const tones = tonesOf(column.d, heart)
       // The middle's foot is the page's --live, as the mark's dots are.
-      if (context) drawColumn(context, tones[0] === '#2b3bff' && live ? [live, tones[1], tones[2]] : tones)
+      if (canvas) drawColumn(canvas, tones[0] === '#2b3bff' && live ? [live, tones[1], tones[2]] : tones)
     })
     const tile = document.createElement('canvas')
     tile.width = tile.height = 128
@@ -250,8 +252,8 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
       )
     })
     if (grain.current) {
-      if (fast || !first) grain.current.style.opacity = '0.5'
-      else runs.add(grain.current.animate([{ opacity: 0 }, { opacity: 0.5 }], { ...springEasing(1, 1), delay: 200, fill: 'both' }))
+      if (fast || !first) grain.current.style.opacity = String(GRAIN)
+      else runs.add(grain.current.animate([{ opacity: 0 }, { opacity: GRAIN }], { ...springEasing(1, 1), delay: 200, fill: 'both' }))
     }
 
     // The name's turn swells it, a breath up and back, most in the middle.
