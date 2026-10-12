@@ -11,7 +11,9 @@ import {
   ControlModule,
   type ControlPlace,
   ControlSheet,
+  ControlToggle,
   ControlWords,
+  Icon,
   ProjectIdentity,
   ProjectInk,
   projectIdentityText,
@@ -30,8 +32,10 @@ import type { ProjectSettingsModel } from './useProjectSettings'
  * whichever view is shown. A module for its name and colour opens out, to
  * change them in place; the others say where each thing stands and open
  * where it is changed: its repositories, its rules, and connecting the code
- * host and tracker it is on. Removing it from Althar is at the foot, and asks
- * first. Nothing in it says what is running.
+ * host and tracker it is on. Beside its rules, a switch has its leads
+ * resolve a conflict with the default branch unasked (ADR-027). Removing it
+ * from Althar is at the foot, and asks first. Nothing in it says what is
+ * running.
  */
 
 export const text = {
@@ -40,6 +44,9 @@ export const text = {
   identity: 'Name and colour',
   repositories: 'Repositories',
   rules: 'Rules',
+  conflicts: 'Resolve conflicts',
+  conflictsOn: 'The lead does, unasked',
+  conflictsOff: 'When you ask the lead',
   connectedAs: (login: string) => `Connected as ${login}`,
   notConnected: 'Not connected',
   connect: 'Connect',
@@ -179,9 +186,19 @@ export function ProjectSettings({
                   />
                 </ControlModule>
               )}
-              <ControlModule title={text.rules} onClick={leave(onRules)}>
+              <ControlModule title={text.rules} {...(model.rules === null ? {} : { place: LEFT })} onClick={leave(onRules)}>
                 {rules !== null && <ControlWords title={rules.policy} line={rules.asks} />}
               </ControlModule>
+              {model.rules !== null && (
+                <ControlToggle
+                  title={text.conflicts}
+                  line={model.ruleFailed ?? (model.rules.resolveConflicts ? text.conflictsOn : text.conflictsOff)}
+                  on={model.rules.resolveConflicts}
+                  onChange={model.setResolveConflicts}
+                  glyph={<Icon name="branch" size={16} />}
+                  place={RIGHT}
+                />
+              )}
             </ControlGrid>
             <ControlFoot>
               <Button size="small" variant="danger" icon="close" onClick={leave(model.askRemove)}>

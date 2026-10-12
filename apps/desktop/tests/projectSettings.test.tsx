@@ -147,6 +147,36 @@ describe('a project’s settings', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/projects/p1/rules'))
   })
 
+  it('has its leads resolve conflicts unasked from a switch beside its rules, off until turned on', async () => {
+    const { client } = windowAt('/projects/p1')
+    const panel = await openSettings()
+    const conflicts = panel.getByRole('switch', { name: 'Resolve conflicts' })
+    expect(conflicts.getAttribute('aria-checked')).toBe('false')
+    expect(panel.getByText('When you ask the lead')).toBeTruthy()
+    await userEvent.click(conflicts)
+    // On at once, and kept as a revision of the rules, with nothing else in it.
+    expect(conflicts.getAttribute('aria-checked')).toBe('true')
+    expect(panel.getByText('The lead does, unasked')).toBeTruthy()
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', resolveConflicts: true }))
+    await userEvent.click(conflicts)
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', resolveConflicts: false }))
+    expect(conflicts.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('puts the switch back and says why when the rules don’t take it', async () => {
+    const { client } = windowAt('/projects/p1', {
+      setProjectRules: vi.fn(async () => {
+        throw new ApiError({ reason: 'RulesChanged', message: 'The rules changed meanwhile.' })
+      }),
+    })
+    const panel = await openSettings()
+    const conflicts = panel.getByRole('switch', { name: 'Resolve conflicts' })
+    await userEvent.click(conflicts)
+    expect(await panel.findByText('The rules changed meanwhile.')).toBeTruthy()
+    expect(client.setProjectRules).toHaveBeenCalledOnce()
+    await waitFor(() => expect(conflicts.getAttribute('aria-checked')).toBe('false'))
+  })
+
   it('removes the project after saying what happens, and goes home; its tab goes', async () => {
     const { client, router } = windowAt('/projects/p1')
     await waitFor(() => expect(tabNamed('meridian')).toBeTruthy())
