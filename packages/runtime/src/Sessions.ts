@@ -190,6 +190,8 @@ interface Running {
   stopping: boolean
   /** How full the agent's context is, in tokens, as it last said; null until it says (ACP's usage updates). */
   context: { readonly used: number; readonly size: number } | null
+  /** Closes the message being said between turns. */
+  settleBetween: Effect.Effect<void, never, Store>
   /** What records its events now: its turn's, or the one between turns. */
   recording: { readonly outputOf: (itemId: string) => OutputSoFar | undefined } | undefined
   /** What it left running in the background, in the order it started them (leftRunning.ts). */
@@ -802,6 +804,8 @@ export class Sessions extends Context.Service<
             deliveryId: turnId,
             folders: foldersOf(thread),
           })
+          // What it was saying between turns ends here: what follows belongs after this turn's input.
+          yield* running.settleBetween
           running.recording = items
           let ended: Extract<SessionEvent, { _tag: 'TurnEnded' }> | undefined
           // A failure to record one event doesn't stop the runtime reading the rest of the turn.
@@ -1261,13 +1265,15 @@ export class Sessions extends Context.Service<
             stopping: false,
             context: null,
             recording: undefined,
+            settleBetween: Effect.void,
             background: new Map(),
           }
           threads.set(thread.threadId, running)
           yield* Effect.forkIn(run(deliveries(running)), scope)
           // What the agent says between turns, such as leaving plan mode, goes to the thread too.
           const between = recorder({ projectId: thread.projectId, threadId: thread.threadId, sessionId, folders: foldersOf(thread) })
-          const recordBetween = betweenTurns(between, scope)
+          const heard = yield* betweenTurns(between, scope)
+          running.settleBetween = heard.close
           // A turn that already started records itself; between turns, this one does.
           running.recording ??= between
           yield* Effect.forkIn(
@@ -1277,7 +1283,7 @@ export class Sessions extends Context.Service<
                   Effect.andThen(
                     Effect.andThen(
                       Effect.sync(() => heardContext(running, event)),
-                      recordBetween(event),
+                      heard.record(event),
                     ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
                     heardBackground(running, event),
                   ),

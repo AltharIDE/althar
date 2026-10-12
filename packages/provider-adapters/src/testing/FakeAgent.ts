@@ -70,6 +70,8 @@ export const scenarios = {
   leaveMode: 'leave-mode',
   /** Ends the turn, then sends an update between turns. */
   afterTurn: 'after-turn',
+  /** Ends the turn, then says a message in two chunks on its own, as an agent woken by a command that finished does. */
+  wakesItself: 'wakes-itself',
   /** Reports the session's mode and model. */
   settings: 'settings',
   /** The process exits mid-turn. Only when the agent runs as a process. */
@@ -1035,6 +1037,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         case scenarios.afterTurn:
           await say('Done')
           setTimeout(() => void update({ sessionUpdate: 'available_commands_update', availableCommands: [] }), 20)
+          return ended()
+        case scenarios.wakesItself:
+          await say('Done')
+          setTimeout(() => void say('Verify ').then(() => say('finished.')), 20)
           return ended()
         case scenarios.hello:
           await say('Hel')

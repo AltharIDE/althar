@@ -1,7 +1,7 @@
 import { Ids, newId, type ProjectId, type ThreadItemKind } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
 import { answerWords, type FieldAnswer, type Handed, type QuestionField, type SessionEvent } from '@althar/provider-adapters'
-import { Clock, Duration, Effect, Fiber, type Scope } from 'effect'
+import { Clock, Duration, Effect, Fiber, Scope, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import {
@@ -351,28 +351,39 @@ const QUIET_MILLIS = 3_000
 /**
  * Records what an agent says on its own between turns, as a turn does: a
  * message stays one item as it grows, and is closed once the agent goes quiet
- * (there is no turn end to wait for), or when something else arrives.
+ * (there is no turn end to wait for), when something else arrives, or when
+ * `close` says the stream is handed on or ends: a prompted turn takes over, or
+ * the session does.
  */
 export const betweenTurns = (
   items: Pick<ReturnType<typeof recorder>, 'record' | 'flush'>,
   scope: Scope.Scope,
   quiet: Duration.Input = Duration.millis(QUIET_MILLIS),
-) => {
-  let timer: Fiber.Fiber<void> | undefined
-  return (event: SessionEvent) =>
-    Effect.gen(function* () {
-      if (timer !== undefined) yield* Fiber.interrupt(timer)
+) =>
+  Effect.gen(function* () {
+    // Recording, the quiet close and `close` take turns, and the timer is only ever interrupted by one holding the lock, never mid-write.
+    const lock = yield* Semaphore.make(1)
+    let timer: Fiber.Fiber<void> | undefined
+    const stopTimer = Effect.suspend(() => {
+      const waiting = timer
       timer = undefined
-      yield* items.record(event)
-      timer = yield* Effect.forkIn(
-        Effect.andThen(
-          Effect.sleep(quiet),
-          items.flush.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent message', cause))),
-        ),
-        scope,
-      )
+      return waiting === undefined ? Effect.void : Fiber.interrupt(waiting)
     })
-}
+    const flush = items.flush.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent message', cause)))
+    const record = (event: SessionEvent) =>
+      lock.withPermits(1)(
+        Effect.gen(function* () {
+          yield* stopTimer
+          yield* items.record(event)
+          timer = yield* Effect.forkIn(Effect.andThen(Effect.sleep(quiet), lock.withPermits(1)(flush)), scope)
+        }),
+      )
+    const close = lock.withPermits(1)(Effect.andThen(stopTimer, flush))
+    // What it was saying when the scope ends is kept: the timer that would close it goes with the scope first, so this goes after.
+    const services = yield* Effect.context<Effect.Services<typeof items.flush>>()
+    yield* Scope.addFinalizer(scope, Effect.provideContext(close, services))
+    return { record, close }
+  })
 
 /** The thread as text, oldest first: what a new agent reads when it takes over (ADR-005). */
 export const transcript = (threadId: string, budget: number) =>

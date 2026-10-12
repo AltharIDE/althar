@@ -172,7 +172,7 @@ describe('what an agent says between turns', () => {
         Effect.gen(function* () {
           const where = yield* place
           const scope = yield* Scope.make()
-          const record = betweenTurns(recorder(where), scope)
+          const { record } = yield* betweenTurns(recorder(where), scope)
           const run = [
             ...chunks(tag, ['The log', " isn't", ' where I', ' expected.'], ids ? 'm1' : undefined),
             tool,
@@ -195,7 +195,7 @@ describe('what an agent says between turns', () => {
     Effect.gen(function* () {
       const where = yield* place
       const scope = yield* Scope.make()
-      const record = betweenTurns(recorder(where), scope)
+      const { record } = yield* betweenTurns(recorder(where), scope)
       for (const event of [...chunks('AgentMessage', ['One ', 'two.'], 'a'), ...chunks('AgentMessage', ['Three ', 'four.'], 'b')])
         yield* record(event)
       yield* until(texts(where.threadId, where.before), (rows) => rows.length === 2 && rows[1]?.[1] === 'Three four.')
@@ -211,7 +211,7 @@ describe('what an agent says between turns', () => {
     Effect.gen(function* () {
       const where = yield* place
       const scope = yield* Scope.make()
-      const record = betweenTurns(recorder(where), scope, '50 millis')
+      const { record } = yield* betweenTurns(recorder(where), scope, '50 millis')
       for (const event of chunks('AgentMessage', ['First ', 'part.'])) yield* record(event)
       yield* Effect.sleep('300 millis')
       for (const event of chunks('AgentMessage', ['Second.'])) yield* record(event)
@@ -221,6 +221,32 @@ describe('what an agent says between turns', () => {
         ['agent_message', 'Second.'],
       ])
       yield* Scope.close(scope, Exit.void)
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('keeps what was said when the scope ends before the agent goes quiet', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const scope = yield* Scope.make()
+      const { record } = yield* betweenTurns(recorder(where), scope)
+      for (const event of chunks('AgentMessage', ['Cut ', 'off ', 'soon.'])) yield* record(event)
+      yield* Scope.close(scope, Exit.void)
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [['agent_message', 'Cut off soon.']])
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('closes a message when the stream is handed on, so what comes next is a new item', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const scope = yield* Scope.make()
+      const { record, close } = yield* betweenTurns(recorder(where), scope)
+      for (const event of chunks('AgentMessage', ['Before ', 'the turn.'])) yield* record(event)
+      yield* close
+      for (const event of chunks('AgentMessage', ['After ', 'it.'])) yield* record(event)
+      yield* Scope.close(scope, Exit.void)
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [
+        ['agent_message', 'Before the turn.'],
+        ['agent_message', 'After it.'],
+      ])
     }).pipe(Effect.provide(runtime())),
   )
 })
