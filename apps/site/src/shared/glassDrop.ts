@@ -48,6 +48,8 @@ export function glassDrop(row: HTMLElement, drop: HTMLElement): GlassDrop {
   let items: Item[] = []
   let pointed: Element | null = null
   let focused: Element | null = null
+  // Which of the two moved last: it leads, and the other is where the drop goes back to once it lets go.
+  let lead: 'pointer' | 'focus' = 'pointer'
   // Where it is and is going: its centre and width in the row's box, how much it shows (0 to 1).
   let x = 0
   let w = 0
@@ -127,9 +129,9 @@ export function glassDrop(row: HTMLElement, drop: HTMLElement): GlassDrop {
     frame = requestAnimationFrame(tick)
   }
 
-  /** Go to what is pointed at, or else what is focused, or fade where it is. */
+  /** Go to what the input that moved last holds, or else what the other does, or fade where it is. */
   const aim = () => {
-    const el = pointed ?? focused
+    const el = lead === 'focus' ? (focused ?? pointed) : (pointed ?? focused)
     const item = el && items.find((i) => i.el === el)
     if (!item || !item.width) {
       toShown = 0
@@ -160,12 +162,14 @@ export function glassDrop(row: HTMLElement, drop: HTMLElement): GlassDrop {
     point(item) {
       if (item === pointed) return
       pointed = item
+      if (item) lead = 'pointer'
       if (item && !items.some((i) => i.el === item)) measure()
       aim()
     },
     focus(item) {
       if (item === focused) return
       focused = item
+      if (item) lead = 'focus'
       aim()
     },
     stop() {
