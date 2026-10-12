@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { Ids, newId } from '@althar/domain'
 import { assert, describe, expect, it } from '@effect/vitest'
 import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -11,7 +12,8 @@ import * as Database from '../src/Database'
 import { ForeignKeyViolations } from '../src/Database'
 import { migrations } from '../src/migrations'
 import { checksums } from '../src/migrations/checksums'
-import { InMemory } from './support'
+import { seed } from './fixtures'
+import { InMemory, WebCrypto } from './support'
 
 /** The schema as SQL, then each vocabulary's words, which live in rows. */
 const readableSchema = Effect.gen(function* () {
@@ -168,6 +170,68 @@ describe('schema', () => {
           after.map((row) => row.ink),
           ['clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber', 'clay'],
         )
+      }),
+    ),
+  )
+
+  it.effect('marks the worktrees of tasks that had a lead as set up already, leaving the rest to be set up', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const before = migrations.findIndex((migration) => migration.key === '0023_worktree_setup')
+        const made = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { projectId, deviceId, actorId, createdAt } = yield* seed
+          const bindingId = yield* newId(Ids.repositoryBinding)
+          yield* sql`INSERT INTO repository_bindings ${sql.insert({ id: bindingId, projectId, slug: 'meridian', role: 'other', displayName: 'meridian', createdAt })}`
+          const tasks: Array<string> = []
+          // One task whose lead started, one drafted whose lead never did, and one whose worktree failed.
+          for (const [slug, lead, state] of [
+            ['led', true, 'ready'],
+            ['drafted', false, 'ready'],
+            ['failed', true, 'failed'],
+          ] as const) {
+            const taskId = yield* newId(Ids.task)
+            const threadId = yield* newId(Ids.thread)
+            tasks.push(taskId)
+            yield* sql`INSERT INTO tasks ${sql.insert({ id: taskId, projectId, title: slug, slug, state: 'open', createdByActorId: actorId, createdAt })}`
+            yield* sql`INSERT INTO threads ${sql.insert({ id: threadId, projectId, kind: 'task', taskId, createdAt })}`
+            yield* sql`INSERT INTO workspaces ${sql.insert({
+              id: yield* newId(Ids.workspace),
+              projectId,
+              taskId,
+              bindingId,
+              deviceId,
+              access: 'write',
+              path: `/worktrees/meridian/${slug}/meridian`,
+              baseRef: 'main',
+              branch: `althar/${slug}`,
+              state,
+              createdAt,
+            })}`
+            if (lead)
+              yield* sql`INSERT INTO provider_sessions ${sql.insert({ id: yield* newId(Ids.providerSession), projectId, threadId, agentId: 'claude-code', state: 'completed', startedAt: createdAt })}`
+          }
+          return { tasks, createdAt }
+        }).pipe(Effect.provide(WebCrypto))
+        const { tasks, createdAt } = yield* Effect.provide(
+          made,
+          Layer.fresh(Database.layer({ filename, migrations: migrations.slice(0, before) })),
+        )
+        const read = Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) => sql<{ taskId: string; setup: string | null }>`SELECT task_id, setup FROM workspaces`,
+        )
+        const after = yield* Effect.provide(read, Layer.fresh(Database.layer({ filename })))
+        const setupOf = (taskId: string | undefined) => after.find((row) => row.taskId === taskId)?.setup ?? null
+        assert.deepStrictEqual(JSON.parse(setupOf(tasks[0]) ?? 'null'), {
+          at: createdAt,
+          command: null,
+          code: null,
+          timedOut: false,
+          last: null,
+        })
+        assert.isNull(setupOf(tasks[1]))
+        assert.isNull(setupOf(tasks[2]))
       }),
     ),
   )

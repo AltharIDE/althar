@@ -198,3 +198,9 @@ export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused'
   taskId: Schema.String,
   why: Schema.Literals(['merged', 'branch_gone', 'abandoned']),
 }) {}
+
+/** gh or glab didn't get to say whether it is signed in: it timed out, or couldn't be started. */
+export class CliUnanswered extends Schema.TaggedError<CliUnanswered>()('CliUnanswered', {
+  tool: Schema.String,
+  message: Schema.String,
+}) {}

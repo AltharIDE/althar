@@ -1062,6 +1062,38 @@ export const IssueDraftItem = Schema.Struct({
   content: IssueDraftCard,
 })
 
+/**
+ * Althar setting up a task's worktree before its lead starts (ADR-023), in
+ * the task's thread: the repository, what runs, and how it ended. Althar
+ * posts it and keeps it current; it stays as a record once the setup is over.
+ */
+export const SetupItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('setup'),
+  content: Schema.Struct({
+    /** The repository whose worktree it sets up, by name. */
+    repository: Schema.String,
+    command: Schema.String,
+    /** It is the setup kept for the repository, rather than the install Althar worked out from its lockfile. */
+    kept: Schema.Boolean,
+    startedAt: Schema.String,
+    /**
+     * How it ended: its exit code, 0 for done, null where it didn't end by
+     * itself; out of time; stopped because Althar quit; and the end of what
+     * it printed, where it failed. Null while it runs.
+     */
+    ended: Schema.NullOr(
+      Schema.Struct({
+        at: Schema.String,
+        code: Schema.NullOr(Schema.Number),
+        timedOut: Schema.Boolean,
+        stopped: Schema.Boolean,
+        last: Schema.NullOr(Schema.String),
+      }),
+    ),
+  }),
+})
+
 export const ThreadItem = Schema.Union([
   UserMessageItem,
   AgentTextItem,
@@ -1074,6 +1106,7 @@ export const ThreadItem = Schema.Union([
   QuestionItem,
   RunItem,
   IssueDraftItem,
+  SetupItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -1564,6 +1597,63 @@ export type OutputText = typeof OutputText.Type
 export const DocumentText = Schema.Struct({ path: Schema.String, body: Schema.String, bytes: Schema.Number, lines: Schema.Number })
 export type DocumentText = typeof DocumentText.Type
 
+/** A part of the whole, 0 to 1. */
+const Part = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
+/** A number of bytes. */
+const Bytes = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))
+
+/** How hard macOS works to find memory, in its own three levels: the honest sign memory is short, as a Mac keeps it full of cache on purpose. */
+export const MemoryPressure = Schema.Literals(['normal', 'warning', 'critical'])
+export type MemoryPressure = typeof MemoryPressure.Type
+
+/**
+ * Work Althar runs, and its part of this computer, with everything it
+ * started: a task's (its lead's agent, its steps' agents and its runs), a
+ * project's coordinator, or the project run on its default branch.
+ */
+export const LoadShare = Schema.Struct({
+  kind: Schema.Literals(['task', 'coordinator', 'run']),
+  projectId: Schema.String,
+  /** The project's name. */
+  project: Schema.String,
+  /** The task's id, its own thread, which opens it, and its title; null for a coordinator or the default branch. */
+  taskId: Schema.NullOr(Schema.String),
+  threadId: Schema.NullOr(Schema.String),
+  title: Schema.NullOr(Schema.String),
+  /** The agent leading it; null for a run of the default branch, which has none. */
+  agent: Schema.NullOr(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  /** Its part of all the CPU since the reading before. */
+  cpu: Part,
+  /** The memory its processes hold: what each has resident, added up. */
+  memory: Bytes,
+  processes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+})
+export type LoadShare = typeof LoadShare.Type
+
+/** A reading of how hard this computer works: the whole of it, and Althar's work's part. */
+export const LoadPoint = Schema.Struct({ cpu: Part, work: Part })
+export type LoadPoint = typeof LoadPoint.Type
+
+/**
+ * How hard this computer works, as the runtime read it a moment ago, for the
+ * window's bar: read only while a window asks, at most every few seconds,
+ * however many windows ask.
+ */
+export const Load = Schema.Struct({
+  /** All the CPU in use since the reading before, across every core. */
+  cpu: Part,
+  /** Memory in use and all of it. In use is as Activity Monitor counts it on a Mac: without what the system keeps as cache. */
+  memoryUsed: Bytes,
+  memoryTotal: Bytes,
+  /** Null where the system doesn't say: anywhere but a Mac. */
+  pressure: Schema.NullOr(MemoryPressure),
+  /** Althar's work, most CPU first; null where its processes can't be read, as on Windows. */
+  shares: Schema.NullOr(Schema.Array(LoadShare)),
+  /** The readings of the last two minutes, oldest first, the last of them this one's. A gap of more than a few readings starts them afresh. */
+  history: Schema.Array(LoadPoint),
+})
+export type Load = typeof Load.Type
+
 export const Disposition = Schema.Literals(['after_current', 'interrupt_and_continue'])
 
 const call = <const Tag extends string, P extends Schema.Struct.Fields, S extends Schema.Top>(tag: Tag, payload: P, success: S) =>
@@ -1953,6 +2043,8 @@ export const Api = RpcGroup.make(
   ),
   /** The editors on this device a task's files open in, by the name people know them. */
   call('ListEditors', {}, Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
+  /** How hard this computer works now, and Althar's work's part, for the window's bar while it shows it. */
+  call('GetLoad', {}, Load),
   /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */
   command('InstallAgent', { agentId: Schema.String }, Schema.Void),
   /** Opens a task's folder in an editor, at one of its files and a line where given; whether it could. The path is the task's, as its changes list it. */

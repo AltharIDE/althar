@@ -91,6 +91,8 @@ export const ThreadItemKind = Schema.Literals([
   'run',
   /** An issue the coordinator drafted, in its thread: the person files it, changes it or discards it there. Althar posts it. */
   'issue_draft',
+  /** Althar setting up a task's worktree, in the task's thread, before its lead starts. Althar posts it and keeps it current. */
+  'setup',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -203,6 +205,10 @@ export type ConnectionProduct = typeof ConnectionProduct.Type
 /** How a person signed in to a service: its device flow, its browser sign-in with PKCE, or a token they pasted. */
 export const ConnectionAuth = Schema.Literals(['device_flow', 'pkce', 'token'])
 export type ConnectionAuth = typeof ConnectionAuth.Type
+
+/** The command-line tool whose sign-in a connection's token was copied from, or none, where it was signed in otherwise. */
+export const ConnectionCli = Schema.Literals(['gh', 'glab', 'none'])
+export type ConnectionCli = typeof ConnectionCli.Type
 
 /** Whether a connection works: ready, needing its person to sign in again, or removed. */
 export const ConnectionState = Schema.Literals(['ready', 'reauth_required', 'removed'])

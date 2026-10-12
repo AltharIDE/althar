@@ -302,6 +302,8 @@ export class Changes extends Context.Service<
      * where their remotes name none it knows.
      */
     hostFor(projectId: string): Effect.Effect<Host | null>
+    /** Each host of a project's repositories, or of those a task changes: null for one on none Althar knows. */
+    hostsFor(projectId: string, taskId?: string): Effect.Effect<ReadonlyArray<Host | null>>
   }
 >()('@althar/runtime/Changes') {
   static readonly layer: Layer.Layer<Changes, never, Store> = Layer.effect(
@@ -562,7 +564,9 @@ export class Changes extends Context.Service<
           )
           const remotes =
             fork === null ? Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(Schema.String)))(task.remotes) : [fork.fork.url]
-          const found = yield* connections.hostOf(remotes)
+          // A connection there that needs signing in again, made with gh's or glab's sign-in, takes the tool's again where it can:
+          // publishing, and trying again after it couldn't, need no more of the person than that.
+          const found = yield* connections.hostOf(remotes, { fromCli: true })
           // In a project of several, one on no host Althar knows ends on its branch. A project of one needs its host, which may be
           // one Althar can't tell by its address until it's connected; so does one on a host it knows but isn't connected to.
           if (found === null) {
@@ -1738,6 +1742,7 @@ export class Changes extends Context.Service<
             }),
           ),
         hostFor: (projectId) => provide(hostFor(projectId)),
+        hostsFor: (projectId, taskId) => provide(hostsFor(projectId, taskId)).pipe(Effect.orElseSucceed(() => [])),
       })
     }),
   )

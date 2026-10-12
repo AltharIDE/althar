@@ -34,6 +34,7 @@ import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
+import { MachineLoad } from './MachineLoad'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
@@ -120,6 +121,7 @@ export const handlers = Api.toLayer(
     const projects = yield* Projects
     const sessions = yield* Sessions
     const launches = yield* Launches
+    const machine = yield* MachineLoad
     const permissions = yield* Permissions
     const questions = yield* Questions
     const queries = yield* Queries
@@ -932,6 +934,7 @@ export const handlers = Api.toLayer(
       PushHere: ({ commandId, taskId }) => once(commandId, api(Effect.asVoid(pullRequests.pushHere(taskId)))),
       PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
+      GetLoad: () => api(machine.now),
       // Done once the copy is ready; its version and its models are asked again, as it is a new one.
       InstallAgent: ({ agentId }) =>
         api(
