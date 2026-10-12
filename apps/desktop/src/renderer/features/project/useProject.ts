@@ -278,7 +278,7 @@ export const useProject = (projectId: string): ProjectModel => {
         // A recorded session the runtime no longer holds is no coordinator either: the choice starts it afresh.
         if (
           threadId !== null &&
-          coordinator !== undefined &&
+          coordinator !== null &&
           (coordinator.session === null || !coordinator.session.held) &&
           choice !== null &&
           !same
