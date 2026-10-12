@@ -19,7 +19,7 @@ import s from './Nav.module.css'
  * way in ride in with them. Only transforms move, on the compositor.
  */
 
-const PAGES = [
+export const PAGES = [
   { href: '/', name: 'Home' },
   { href: '/shifts', name: 'Shifts' },
   { href: '/thesis', name: 'Thesis' },

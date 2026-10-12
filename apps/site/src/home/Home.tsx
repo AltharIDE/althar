@@ -1,6 +1,7 @@
 import { DesktopBody } from './bodies/desktop/DesktopBody'
 import { Footer } from '../shared/footer/Footer'
-import { Nav, NavSpace } from '../shared/Nav'
+import { NavSpace } from '../shared/Nav'
+import { NavPick } from '../shared/NavPick'
 import { RunsOn } from './bodies/RunsOn'
 import s from './Home.module.css'
 import { Hero } from './Hero'
@@ -14,7 +15,7 @@ import { Hero } from './Hero'
 export function Home() {
   return (
     <div className={s.page} id="top">
-      <Nav />
+      <NavPick />
       <Hero nav={<NavSpace />} />
       <RunsOn />
       <DesktopBody />
