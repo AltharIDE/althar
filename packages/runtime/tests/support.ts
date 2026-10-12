@@ -20,6 +20,7 @@ import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { Secrets } from '../src/Secrets'
+import type { LoadOptions } from '../src/MachineLoad'
 import type { ModelFactsOptions } from '../src/ModelFacts'
 
 /** A git repository with one commit on `main`. */
@@ -186,6 +187,8 @@ export const runtime = (
     readonly artifactsRoot?: string | null
     /** How worktrees are set up: in sh, rather than the person's own shell and its profile, unless a test says. */
     readonly setups?: SetupOptions
+    /** How this computer's load is read. */
+    readonly load?: LoadOptions
     /** The device outside a sandbox, as for a Flatpak. */
     readonly onDevice?: RuntimeOptions['onDevice']
   } = {},
@@ -210,6 +213,7 @@ export const runtime = (
     ...(more.modelFacts === undefined ? {} : { modelFacts: more.modelFacts }),
     ...(more.editors === undefined ? {} : { editors: more.editors }),
     setups: { shell: '/bin/sh', ...more.setups },
+    ...(more.load === undefined ? {} : { load: more.load }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
   })
 

@@ -2,6 +2,7 @@ export { Agents, type AgentEntry, RuntimeConfig, type RuntimeOptions, type Setup
 export * from './errors'
 export { Instance, type InstanceInfo } from './Instance'
 export { Live, type LiveEvent } from './Live'
+export { type LoadOptions, MachineLoad } from './MachineLoad'
 export { Permissions } from './Permissions'
 export { Questions } from './Questions'
 export { CreatedTask, OpenedProject, Projects, slugify } from './Projects'

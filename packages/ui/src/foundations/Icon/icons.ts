@@ -1,4 +1,5 @@
 import {
+  Activity,
   Archive,
   ArrowDown,
   ArrowRight,
@@ -121,6 +122,8 @@ export const ICONS = {
   clock: Clock,
   /** Keeps the Mac awake while work runs. */
   cup: CoffeeCup,
+  /** How hard the computer works. */
+  load: Activity,
   /** Notifications. */
   bell: Bell,
   /** A sound, as a notification plays it. */
