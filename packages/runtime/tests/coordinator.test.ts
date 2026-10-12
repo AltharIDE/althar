@@ -707,6 +707,18 @@ describe('what the coordinator hears of its plans', () => {
       const counting = yield* draft('Counting down')
       const countingPlan = yield* propose(counting, { held: false, startsIn: Duration.minutes(5) })
       yield* plans.change(countingPlan, [{ key: 'implement', agentId: 'codex', model: 'mystery-9', skipped: false }], person)
+      // Only its effort changed: said, before and now. Only its ending changed: the effort, the same, isn't.
+      const harder = yield* draft('Think less')
+      const harderPlan = yield* propose(harder, {})
+      yield* plans.change(harderPlan, [{ key: 'implement', agentId: 'claude-code', model: 'small', effort: 'low', skipped: false }], person)
+      const pushed = yield* draft('Push it')
+      const pushedPlan = yield* propose(pushed, { end: 'draft' })
+      yield* plans.change(
+        pushedPlan,
+        [{ key: 'implement', agentId: 'claude-code', model: 'small', effort: 'high', skipped: false }],
+        person,
+        'none',
+      )
       // Started, then abandoned; and started, its work since merged.
       const spike = yield* draft('Spike the cache')
       const spikePlan = yield* propose(spike, {})
@@ -722,18 +734,26 @@ describe('what the coordinator hears of its plans', () => {
       assert.match(news, /^Since you last spoke, in Althar:\n/)
       assert.match(
         news,
-        /- retry-the-checkout-call \(Retry the checkout call\): The person changed its plan: you proposed Claude Small \(effort high\) leads, .+ reviews, and it ends as a draft pull request\. Now Large leads, no review, and it ends as a pull request ready for review\. The person is holding it: it waits until they start it\./,
+        /- retry-the-checkout-call \(Retry the checkout call\): The person changed its plan: you proposed Claude Small \(effort high\) leads, .+ reviews, and it ends as a draft pull request\. Now Large \(default effort\) leads, no review, and it ends as a pull request ready for review\. The person is holding it: it waits until they start it\./,
       )
       assert.match(
         news,
-        /- fix-the-docs \(Fix the docs\): The person changed its plan: it was Claude Small \(effort high\) leads, no review, and it ends with its branch pushed\. Now Claude Small leads, no review, and it ends on its branch, with nothing sent to the host\. It has started\./,
+        /- fix-the-docs \(Fix the docs\): The person changed its plan: it was Claude Small \(effort high\) leads, no review, and it ends with its branch pushed\. Now Claude Small \(default effort\) leads, no review, and it ends on its branch, with nothing sent to the host\. It has started\./,
       )
       assert.include(news, '- bump-the-sdk (Bump the SDK): It was declined: it won’t run.')
       assert.notInclude(news, 'Tidy the logs')
       assert.notInclude(news, 'Quiet one')
       assert.match(
         news,
-        /- counting-down \(Counting down\): The person changed its plan: you proposed .+\. Now mystery-9 leads, no review\.\n/,
+        /- counting-down \(Counting down\): The person changed its plan: you proposed .+\. Now mystery-9 \(default effort\) leads, no review\.\n/,
+      )
+      assert.include(
+        news,
+        '- think-less (Think less): The person changed its plan: you proposed Claude Small (effort high) leads, no review. Now Claude Small (effort low) leads, no review. The person is holding it: it waits until they start it.',
+      )
+      assert.include(
+        news,
+        '- push-it (Push it): The person changed its plan: you proposed Claude Small leads, no review, and it ends as a draft pull request. Now Claude Small leads, no review, and it ends with its branch pushed.',
       )
       assert.include(news, '- spike-the-cache (Spike the cache): It started, and the person abandoned it.')
       assert.include(news, '- ship-the-banner (Ship the banner): It has started and is done.')

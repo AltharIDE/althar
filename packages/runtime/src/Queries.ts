@@ -1211,10 +1211,13 @@ export class Queries extends Context.Service<
           const steps = field(parameters, 'steps')
           const planned = (Array.isArray(steps) ? steps : []).map((step) => {
             const model = field(step, 'model')
+            // Its effort, whoever chose it, so the card shows it and a change made there keeps it.
+            const effort = field(step, 'effort')
             return {
               key: text(step, 'key') === 'review' ? ('review' as const) : ('implement' as const),
               agentId: text(step, 'agentId'),
               model: typeof model === 'string' ? model : null,
+              ...(typeof effort === 'string' ? { effort } : {}),
               skipped: field(step, 'skipped') === true,
             }
           })
