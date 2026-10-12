@@ -284,6 +284,19 @@ export const SendingNow: Story = {
 export const Dictating: Story = { render: () => <Example recording /> }
 /** A transcriber that streams: the words arrive faint in the field as you say them. */
 export const DictatingWordByWord: Story = { render: () => <Example recording streaming initial="Keep the limiter where it is." /> }
+/** Enter while dictating stops without sending, and the field is the size the same text typed would be: one row for a short transcript. */
+export const EnterEndsDictationAtItsSize: Story = {
+  render: () => <Example recording streaming />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const field = c.getByRole('textbox') as HTMLTextAreaElement
+    await userEvent.type(field, '{Enter}')
+    await expect(c.queryByRole('button', { name: /^Stop dictating/ })).not.toBeInTheDocument()
+    /* stopped, not sent: what was said is still in the field */
+    await expect(field.value).not.toBe('')
+    await expect(Number.parseFloat(field.style.height)).toBeLessThanOrEqual(Math.max(field.scrollHeight, 22) + 1)
+  },
+}
 /** Which microphone it hears, from the menu beside it: the system's default first, then each the system names. */
 export const ChoosingTheMicrophone: Story = {
   render: () => <Example />,

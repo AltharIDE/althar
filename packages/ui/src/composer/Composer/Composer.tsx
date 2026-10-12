@@ -261,7 +261,8 @@ export function Composer({
     if (!el) return
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
-  }, [value, ref])
+    /* the words arriving draw over the field in its grid cell: measure again when they come and go, not only when the text changes */
+  }, [value, interim, ref])
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault()
