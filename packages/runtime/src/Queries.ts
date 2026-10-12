@@ -37,7 +37,7 @@ import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
-import { evidenceOf, evidencePaths, unverifiedIn } from './evidence'
+import { builtIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { documentText, outputText } from './reading'
 import type { Artifacts } from './Artifacts'
@@ -399,6 +399,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
               claim: text(finding, 'claim'),
             }
           }),
+          built: builtIn(field(content, 'built')),
           evidence: evidenceOf(field(content, 'evidence')),
           unverified: unverifiedIn(field(content, 'unverified')),
           agentId: agentId === '' ? null : agentId,

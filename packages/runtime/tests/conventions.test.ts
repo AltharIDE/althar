@@ -127,10 +127,18 @@ describe('the descriptions a lead gives', () => {
         sessionId: 'none',
         taskId: made.taskId,
       }
-      const elsewhere = yield* callTool(lead, 'finish_step', { summary: 'Did it.', descriptions: [{ repository: 'elsewhere', text: 'x' }] })
+      const elsewhere = yield* callTool(lead, 'finish_step', {
+        summary: 'Did it.',
+        built: 'A hello.',
+        descriptions: [{ repository: 'elsewhere', text: 'x' }],
+      })
       assert.match(elsewhere, /^Say which repository each description is for: /)
       // A task of one needn't name it.
-      const kept = yield* callTool(lead, 'finish_step', { summary: 'Did it.', descriptions: [{ text: '## Summary\n\nDid it.' }] })
+      const kept = yield* callTool(lead, 'finish_step', {
+        summary: 'Did it.',
+        built: 'A hello.',
+        descriptions: [{ text: '## Summary\n\nDid it.' }],
+      })
       assert.strictEqual(kept, 'Althar has your summary.')
       const [item] = yield* sql<{ content: string }>`
         SELECT content FROM thread_items WHERE thread_id = ${made.threadId} AND kind = 'step_result'`

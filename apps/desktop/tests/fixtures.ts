@@ -374,6 +374,7 @@ export const items = {
       summary: 'Added the retry.',
       verdict: null,
       findings: [],
+      built: null,
       evidence: [],
       unverified: null,
       agentId: null,

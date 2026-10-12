@@ -92,6 +92,7 @@ const result: StepResult = {
   change: null,
   verdict: null,
   findings: [],
+  built: null,
   evidence: [],
   unverified: null,
   agentId: null,

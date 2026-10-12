@@ -123,8 +123,8 @@ export const evidenceText = (evidence: ReadonlyArray<EvidenceLine>, unverified: 
 }
 
 /**
- * The pull request's description: the lead's summary, what it showed of
- * its change working, how review went, the issue it is for, and who opened
+ * The pull request's description: what the task built, as the lead last
+ * said it (else its last step's summary), what it showed of its change working, how review went, the issue it is for, and who opened
  * it, unless the person turned Althar's credit off. Where the repository has
  * a template, it's written in that: the lead's own description where it keeps the
  * template, with every box unticked, else the template with the lead's

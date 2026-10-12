@@ -3,6 +3,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Caret, Disclosure, DisclosureTrigger, Fold } from '../../primitives/Fold/Fold'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
+import { Markdown } from '../Markdown/Markdown'
 import type { ImageRef } from '../Shell/Shell'
 import { Shots, type ShotsText } from '../Shots/Shots'
 import { ExitShown } from '../Terminal/exitShown'
@@ -10,6 +11,8 @@ import { Terminal, type TerminalText } from '../Terminal/Terminal'
 import s from './Evidence.module.css'
 
 export interface EvidenceText {
+  /** What the task built, above its proof. */
+  built: string
   title: string
   /** What couldn't be shown, as its own list. */
   unverified: string
@@ -22,6 +25,7 @@ export interface EvidenceText {
 }
 
 export const evidenceText: EvidenceText = {
+  built: 'What it built',
   title: 'Evidence',
   unverified: 'Unverified',
   kinds: {
@@ -59,6 +63,8 @@ export type EvidencePiece = { id: string; kind: EvidenceKind; caption: string } 
 export type EvidenceProps = RootProps<
   'section',
   {
+    /** What the task built, as its lead last said it, in markdown: its summary, read before the proof. */
+    built?: string | null
     pieces: readonly EvidencePiece[]
     /** What the lead changed but couldn't show working, each in a line. */
     unverified?: readonly string[]
@@ -68,19 +74,28 @@ export type EvidenceProps = RootProps<
 >
 
 /**
- * What a lead showed of its change working, at the end of its step: the
+ * A task's finished view: what it built, as its lead last said it, then
+ * what the lead showed of its change working, at the end of its step: the
  * pictures together, each opening full size; each command or test run a
  * row saying what it shows and how it exited, opening to what it printed;
  * notes as they were said. Then what it couldn't show, plainly, so the
- * person knows what is still theirs to check. With neither, nothing shows.
+ * person knows what is still theirs to check. With none of them, nothing shows.
  */
-export function Evidence({ pieces, unverified = [], headingLevel = 3, text, className, ...rest }: EvidenceProps) {
+export function Evidence({ built = null, pieces, unverified = [], headingLevel = 3, text, className, ...rest }: EvidenceProps) {
   const t = { ...evidenceText, ...text, kinds: { ...evidenceText.kinds, ...text?.kinds } }
-  if (pieces.length === 0 && unverified.length === 0) return null
+  if (built === null && pieces.length === 0 && unverified.length === 0) return null
   const shots = pieces.flatMap((piece) => (piece.form === 'picture' ? [{ ...piece.shot, id: piece.id, label: piece.caption }] : []))
   const rows = pieces.filter((piece) => piece.form !== 'picture')
   return (
     <section className={cx(s.evidence, className)} {...rest}>
+      {built !== null && (
+        <>
+          <Heading level={headingLevel} className={s.label}>
+            {t.built}
+          </Heading>
+          <Markdown source={built} headingLevel={headingLevel === 6 ? 6 : ((headingLevel + 1) as HeadingLevel)} />
+        </>
+      )}
       {pieces.length > 0 && (
         <>
           <Heading level={headingLevel} className={s.label}>

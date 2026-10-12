@@ -897,6 +897,8 @@ export const StepResultItem = Schema.Struct({
     change: Schema.NullOr(ChangeSummary),
     verdict: Schema.NullOr(Schema.Literals(['pass', 'changes_requested'])),
     findings: Schema.Array(Finding),
+    /** For the lead's steps: what the task has built, as it stood then; the latest is the task's summary, which a step that changed the work says again. Null where it didn't say. */
+    built: Schema.NullOr(Schema.String),
     /** For the lead's steps: what it showed of its change working. */
     evidence: Schema.Array(Evidence),
     /** For the lead's steps: what it couldn't show, as it said it; null where it didn't say, so an earlier step's list stands. */

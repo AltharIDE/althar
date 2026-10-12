@@ -418,10 +418,10 @@ export class Changes extends Context.Service<
                 AND json_extract(content, '$.step') = 'review' ORDER BY sequence DESC LIMIT 1) AS verdict,
               (SELECT count(*) FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
                 AND json_extract(content, '$.step') = 'review') AS rounds`
-          // What the lead showed across its steps, and what it last said it couldn't.
-          const { evidence, unverified } = yield* taskShown(threadId)
+          // What the task built, at the top; then what the lead showed across its steps, and what it last said it couldn't.
+          const { built, evidence, unverified } = yield* taskShown(threadId)
           // An agent may sign its summary as it signs a commit; that stays here too.
-          const summary = lead?.summary ?? null
+          const summary = built ?? lead?.summary ?? null
           return bodyOf({
             lead: summary === null ? null : withoutAgentCredit(summary, agentNames),
             review: reviewed === undefined ? null : reviewed,

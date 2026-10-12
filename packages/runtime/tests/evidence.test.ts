@@ -6,7 +6,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { EVIDENCE_TEXT_KEPT, textKept } from '../src/evidence'
+import { builtAsk, EVIDENCE_TEXT_KEPT, taskShown, textKept } from '../src/evidence'
 import { evidenceText } from '../src/pullRequestWords'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, runtime, task } from './support'
@@ -41,6 +41,7 @@ describe('the evidence a lead hands', () => {
       mkdirSync(join(worktree, 'shots'), { recursive: true })
       writeFileSync(join(worktree, 'shots', 'after.png'), Buffer.from(SCREENSHOT_PNG, 'base64'))
       const answer = yield* callTool(lead, 'finish_step', {
+        built: 'A retry.',
         summary: 'Did it.',
         evidence: [
           { kind: 'screenshot', caption: ' The retry, after ', path: 'shots/after.png' },
@@ -85,7 +86,8 @@ describe('the evidence a lead hands', () => {
   it.live('refuses what it can’t keep, saying what to do', () =>
     Effect.gen(function* () {
       const { lead, worktree } = yield* started
-      const finish = (evidence: ReadonlyArray<Record<string, unknown>>) => callTool(lead, 'finish_step', { summary: 'Did it.', evidence })
+      const finish = (evidence: ReadonlyArray<Record<string, unknown>>) =>
+        callTool(lead, 'finish_step', { summary: 'Did it.', built: 'A hello.', evidence })
       assert.match(yield* finish([{ kind: 'note', caption: '  ' }]), /^Evidence 1 needs a caption/)
       assert.match(yield* finish([{ kind: 'screenshot', caption: 'After' }]), /give the picture’s path in the worktree/)
       assert.match(
@@ -108,6 +110,17 @@ describe('the evidence a lead hands', () => {
       assert.match(yield* finish([{ kind: 'screenshot', caption: 'Hosts', path: 'hosts.png' }]), /couldn’t find hosts\.png/)
       assert.match(yield* finish([{ kind: 'screenshot', caption: 'Hosts', path: '/etc/hosts' }]), /couldn’t find \/etc\/hosts/)
       assert.match(yield* finish(Array.from({ length: 25 }, () => ({ kind: 'note', caption: 'x' }))), /keeps up to 24/)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('asks what the task built before it ends, and keeps it as the task’s summary', () =>
+    Effect.gen(function* () {
+      const { lead, threadId } = yield* started
+      assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Did it.' }), builtAsk(false))
+      assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Did it.', built: '  ' }), builtAsk(false))
+      const built = 'A prototype of the retry screen. Open http://localhost:5173 to try it.'
+      assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Did it.', built: ` ${built}\n` }), 'Althar has your summary.')
+      assert.strictEqual((yield* taskShown(threadId)).built, built)
     }).pipe(Effect.provide(runtime())),
   )
 

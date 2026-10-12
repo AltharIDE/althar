@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { EvidenceKind } from '../src/foundations/vocabulary'
 import { SHOT_AFTER, SHOT_BEFORE, SHOT_NOT_KEPT } from '../src/fixtures/shots'
 import { Evidence, type EvidencePiece } from '../src/thread/Evidence/Evidence'
+import { Finished } from '../src/thread/Finished/Finished'
 import { Lightbox } from '../src/thread/Lightbox/Lightbox'
 import { ThreadShellProvider, type ImageRef } from '../src/thread/Shell/Shell'
 
@@ -79,5 +80,25 @@ describe('Evidence', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
     rerender(<Host pieces={[]} />)
     expect(container.querySelector('section')).toBeNull()
+  })
+})
+
+describe('what the task built', () => {
+  it('leads the finished view, above the proof and what is unverified', () => {
+    render(<Evidence built={'A retry button.\n\n- Try it offline.'} pieces={[RUN]} unverified={['Not in Safari']} />)
+    expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['What it built', 'Evidence', 'Unverified'])
+    expect(screen.getByText('Try it offline.')).toBeInTheDocument()
+  })
+
+  it('shows alone where nothing was shown', () => {
+    render(<Evidence built="A prototype at localhost:5173." pieces={[]} />)
+    expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['What it built'])
+  })
+
+  it('closes the task as a card of its own', () => {
+    render(<Finished built="A retry button." pieces={[RUN]} />)
+    const card = screen.getByRole('article', { name: 'What the task built' })
+    expect(within(card).getByText('Finished')).toBeInTheDocument()
+    expect(within(card).getByText('A retry button.')).toBeInTheDocument()
   })
 })
