@@ -1,7 +1,7 @@
 import { Ids, newId, type ProjectId, type ThreadItemKind } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
 import { answerWords, type FieldAnswer, type Handed, type QuestionField, type SessionEvent } from '@althar/provider-adapters'
-import { Clock, Duration, Effect, Fiber, Scope, Semaphore } from 'effect'
+import { Cause, Clock, Duration, Effect, Exit, Fiber, Scope, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import {
@@ -146,11 +146,23 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const folders = place.folders ?? []
   const where = (itemId: string) => ({ projectId: place.projectId, itemId, folders })
 
-  /** Writes the message being gathered; its item was placed when its first chunk arrived. */
+  /**
+   * Writes the message being gathered; its item was placed when its first chunk arrived.
+   * It is let go once written, or failed; a write cut short by interruption leaves it
+   * to be written again, as when a session ends while one is under way.
+   */
   const flush = Effect.gen(function* () {
     const open = gathering
-    gathering = undefined
-    if (open !== undefined) yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed))
+    if (open === undefined) return
+    yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed)).pipe(
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
+          ? Effect.void
+          : Effect.sync(() => {
+              if (gathering === open) gathering = undefined
+            }),
+      ),
+    )
   })
 
   /** The message being gathered, or a new one: what it hands back goes with its words. */
