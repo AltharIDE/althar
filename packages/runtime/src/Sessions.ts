@@ -48,7 +48,7 @@ import { reviewCopyOf } from './reviewCopy'
 import { Setups } from './Setups'
 import type { InputImage } from './sentImages'
 import { defaultEffortOf } from './preferences'
-import { addItem, type OutputSoFar, recorder, toolItem, transcript } from './threads'
+import { addItem, betweenTurns, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import { commandOfCall, exitCodeIn, type LeftRunning, printedMore, servingAt, type ShownLeftRunning, shownOf, tailOf } from './leftRunning'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
@@ -1267,6 +1267,7 @@ export class Sessions extends Context.Service<
           yield* Effect.forkIn(run(deliveries(running)), scope)
           // What the agent says between turns, such as leaving plan mode, goes to the thread too.
           const between = recorder({ projectId: thread.projectId, threadId: thread.threadId, sessionId, folders: foldersOf(thread) })
+          const recordBetween = betweenTurns(between, scope)
           // A turn that already started records itself; between turns, this one does.
           running.recording ??= between
           yield* Effect.forkIn(
@@ -1276,7 +1277,7 @@ export class Sessions extends Context.Service<
                   Effect.andThen(
                     Effect.andThen(
                       Effect.sync(() => heardContext(running, event)),
-                      Effect.andThen(between.record(event), between.flush),
+                      recordBetween(event),
                     ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
                     heardBackground(running, event),
                   ),

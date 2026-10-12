@@ -4,7 +4,7 @@ import type { ProjectId } from '@althar/domain'
 import type { SessionEvent } from '@althar/provider-adapters'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Exit, Layer, Stream } from 'effect'
+import { Effect, Exit, Layer, Scope, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents, WebCrypto } from '../src/Config'
@@ -13,7 +13,7 @@ import { currentBranch, defaultBranch, remoteUrls } from '../src/git'
 import { change } from '../src/records'
 import { Live } from '../src/Live'
 import { Sessions } from '../src/Sessions'
-import { addItem, recorder, transcript } from '../src/threads'
+import { addItem, betweenTurns, recorder, transcript } from '../src/threads'
 import { items, repository, runtime, task, turns, until } from './support'
 
 /** A thread with a session on it, for the recorder to write into. */
@@ -150,6 +150,77 @@ describe('long messages', () => {
       yield* writer.flush
       const [done] = (yield* items(where.threadId)).slice(where.before)
       assert.isTrue(String(done?.content.text).endsWith('x end'))
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('what an agent says between turns', () => {
+  const chunks = (tag: 'AgentMessage' | 'AgentThought', words: ReadonlyArray<string>, messageId?: string): ReadonlyArray<SessionEvent> =>
+    words.map((text) => ({ _tag: tag, text, ...(messageId === undefined || tag === 'AgentThought' ? {} : { messageId }) }) as SessionEvent)
+
+  const texts = (threadId: string, before: number) =>
+    items(threadId).pipe(Effect.map((all) => all.slice(before).map((item) => [item.kind, item.content.text ?? item.content.title])))
+
+  const tool: SessionEvent = { _tag: 'ToolCall', toolCallId: 'check', title: 'Run the check', kind: 'execute', status: 'in_progress' }
+
+  for (const [tag, kind] of [
+    ['AgentMessage', 'agent_message'],
+    ['AgentThought', 'agent_thought'],
+  ] as const) {
+    for (const ids of [false, true]) {
+      it.live(`keeps a ${kind} whole around a tool call, ${ids ? 'with' : 'without'} message ids`, () =>
+        Effect.gen(function* () {
+          const where = yield* place
+          const scope = yield* Scope.make()
+          const record = betweenTurns(recorder(where), scope)
+          const run = [
+            ...chunks(tag, ['The log', " isn't", ' where I', ' expected.'], ids ? 'm1' : undefined),
+            tool,
+            ...chunks(tag, ['Coverage ', 'clears ', '90%.'], ids ? 'm2' : undefined),
+          ]
+          for (const event of run) yield* record(event)
+          yield* until(texts(where.threadId, where.before), (rows) => rows.length === 3 && rows[2]?.[1] === 'Coverage clears 90%.')
+          assert.deepStrictEqual(yield* texts(where.threadId, where.before), [
+            [kind, "The log isn't where I expected."],
+            ['tool_call', 'Run the check'],
+            [kind, 'Coverage clears 90%.'],
+          ])
+          yield* Scope.close(scope, Exit.void)
+        }).pipe(Effect.provide(runtime())),
+      )
+    }
+  }
+
+  it.live('tells two messages apart by their ids, with nothing between them', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const scope = yield* Scope.make()
+      const record = betweenTurns(recorder(where), scope)
+      for (const event of [...chunks('AgentMessage', ['One ', 'two.'], 'a'), ...chunks('AgentMessage', ['Three ', 'four.'], 'b')])
+        yield* record(event)
+      yield* until(texts(where.threadId, where.before), (rows) => rows.length === 2 && rows[1]?.[1] === 'Three four.')
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [
+        ['agent_message', 'One two.'],
+        ['agent_message', 'Three four.'],
+      ])
+      yield* Scope.close(scope, Exit.void)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('closes a message once the agent goes quiet, and the next one is a new item', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const scope = yield* Scope.make()
+      const record = betweenTurns(recorder(where), scope, '50 millis')
+      for (const event of chunks('AgentMessage', ['First ', 'part.'])) yield* record(event)
+      yield* Effect.sleep('300 millis')
+      for (const event of chunks('AgentMessage', ['Second.'])) yield* record(event)
+      yield* until(texts(where.threadId, where.before), (rows) => rows.length === 2)
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [
+        ['agent_message', 'First part.'],
+        ['agent_message', 'Second.'],
+      ])
+      yield* Scope.close(scope, Exit.void)
     }).pipe(Effect.provide(runtime())),
   )
 })
