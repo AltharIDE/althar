@@ -251,8 +251,8 @@ service's model.
   says how many commits aren't on the pull request yet, and Push pushes up to
   the commit they saw, never one the lead made since. The lead has no tool to
   push. One exception (ADR-027): where the project has its leads resolve
-  conflicts, Althar pushes the merge that resolves one, and nothing with it
-  (Resolving a conflict, below).
+  conflicts, Althar pushes the merge that resolves one, and a fix for checks
+  that fail on it, and nothing with them (Resolving a conflict, below).
 - **Without a connection, the person pushes the task's branch with their own
   git** (ADR-016): to the remote that repository's work goes to (the one its
   default branch follows, else `origin`, else its only remote), under the
@@ -341,9 +341,10 @@ for the person, as above.
   the task's branch conflicts with it here too; one that merges cleanly is
   from before the target moved, or merged already and not yet pushed. A
   lead that isn't running is started, on the agent last on the thread.
-- **Only where the task is open and its run done,** and one round at a time.
-  The thread says Althar asked, and why. A merge here pressed meanwhile
-  says the lead is resolving it.
+- **Only where the task is open and its run succeeded,** and one round at a
+  time: not while the run runs, nor where the person stopped it, which an
+  agent starting would go against. The thread says Althar asked, and why. A
+  merge here pressed meanwhile says the lead is resolving it.
 - **Althar looks at the branch, not at what the lead said,** once its turn
   is over: not while more waits for it, or while it asks the person
   something. Resolved means the branch it conflicted with is in it, nothing
@@ -352,16 +353,27 @@ for the person, as above.
   person stopped it, it is the person's: the thread says why, the task is
   back in Needs you, and merging again offers the person's press, as before,
   until the branch moves.
-- **No review round.** The checks are enough: the lead runs them before it
-  commits the merge, and on a pull request the host's run on what is pushed,
-  a failure going back to the lead as any does.
+- **No review round.** The checks are enough: the lead runs them and fixes
+  what they find before it commits the merge, so the fix is in it; on a pull
+  request, the host's run on what Althar pushes.
 - **On a pull request, Althar pushes the resolution itself** with the
   connection, the one push of the lead's work that isn't the person's: the
-  merge, made on the branch as the pull request had it, and any commits on
-  top of it in the same round, such as a fix its checks needed. Where the
-  branch had other commits the pull request didn't, or anything else came
-  in, nothing is pushed: the thread says the merge waits, and the task's
-  Push sends it with the rest. Merging stays the person's.
+  merge alone, made on the branch as the pull request had it. Where the
+  branch had other commits the pull request didn't, the lead committed
+  anything after the merge, something else came in, or anyone else asked
+  the lead something meanwhile, nothing is pushed: the thread says the
+  merge waits, and the task's Push sends it with the rest. Merging stays
+  the person's.
+- **The round follows the checks on what Althar pushed.** Passed (or none
+  two minutes after the push), it is done, and the task is ready to merge.
+  Failed, the lead is asked to fix them within the round, not as failed
+  checks usually reach it: commits on top of the merge, nothing merged in,
+  and nobody else asking it anything meanwhile, are pushed in turn, and their
+  checks heard the same way. The fix counts as the lead's one more try, so
+  checks that fail after it, or on a merge that took two tries, make the
+  round the person's. Where the lead committed anything else since the push,
+  the pull request moved on past it, or it was merged or closed, the round
+  is over, and what comes after is as ever.
 - **The lead never pushes,** here as anywhere (Agents and the hosts, below).
   Its brief says what Althar pushes for it where the project has it resolve
   conflicts.

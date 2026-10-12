@@ -51,7 +51,7 @@
 -- repository_role: service, frontend, infrastructure, library, docs, other
 -- change_target: upstream, fork
 -- issue_draft_state: pending, filing, filed, failed, uncertain, discarded
--- conflict_resolution_state: resolving, resolved, failed
+-- conflict_resolution_state: resolving, checking, resolved, failed
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -1035,6 +1035,7 @@ CREATE TABLE conflict_resolutions (
   failure TEXT,
   ended TEXT CHECK (json_valid(ended)),
   pushed_head TEXT,
+  asked_sequence INTEGER CHECK (asked_sequence >= 1),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   settled_at TEXT CHECK (settled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
@@ -1042,9 +1043,10 @@ CREATE TABLE conflict_resolutions (
   FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id),
   UNIQUE (id, project_id),
   CHECK ((state = 'failed') = (failure IS NOT NULL)),
-  CHECK ((state = 'resolving') = (settled_at IS NULL))
+  CHECK ((state IN ('resolving', 'checking')) = (settled_at IS NULL)),
+  CHECK (state <> 'checking' OR pushed_head IS NOT NULL)
 ) STRICT;
 
 CREATE INDEX conflict_resolutions_by_project ON conflict_resolutions (project_id);
 
-CREATE UNIQUE INDEX conflict_resolutions_resolving ON conflict_resolutions (task_id) WHERE state = 'resolving';
+CREATE UNIQUE INDEX conflict_resolutions_under_way ON conflict_resolutions (task_id) WHERE state IN ('resolving', 'checking');

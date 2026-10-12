@@ -223,9 +223,11 @@ export type IssueDraftState = typeof IssueDraftState.Type
 
 /**
  * Where a lead resolving a conflict on its own stands (docs/architecture/06):
- * at it, done, or given back to the person, who settles it or asks again.
+ * at it (or at fixing the checks that failed on it), pushed and waiting for
+ * the pull request's checks, done, or given back to the person, who settles
+ * it or asks again.
  */
-export const ConflictResolutionState = Schema.Literals(['resolving', 'resolved', 'failed'])
+export const ConflictResolutionState = Schema.Literals(['resolving', 'checking', 'resolved', 'failed'])
 export type ConflictResolutionState = typeof ConflictResolutionState.Type
 
 /** What an artifact is, which decides how long it is kept: a command's output is a log, a picture an agent hands back an image. */

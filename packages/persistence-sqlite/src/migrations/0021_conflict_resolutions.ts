@@ -20,12 +20,14 @@ import {
  * keeps where the conflict is (the pull request's address, or none for
  * merging here), what conflicts in each repository with the branch it is
  * merged with and where each branch stood as it began, which attempt it is
- * on, and where it stands: the lead resolving it, resolved, or given back to
- * the person with why. Where Althar pushed what resolved it, the commit it
+ * on, which of the thread's inputs last asked the lead, and where it stands:
+ * the lead resolving it (or fixing what failed on it), Althar waiting for the
+ * pull request's checks on what it pushed, resolved, or given back to the
+ * person with why. Where Althar pushed what resolved it, the commit it last
  * pushed.
  */
 export const statements: ReadonlyArray<string> = [
-  ...vocabulary('conflict_resolution_state', ['resolving', 'resolved', 'failed']),
+  ...vocabulary('conflict_resolution_state', ['resolving', 'checking', 'resolved', 'failed']),
   "INSERT INTO vocab_aggregate_type (word) VALUES ('conflict_resolution')",
   table(
     'conflict_resolutions',
@@ -40,6 +42,7 @@ export const statements: ReadonlyArray<string> = [
       'failure TEXT',
       json('ended', { nullable: true }),
       'pushed_head TEXT',
+      'asked_sequence INTEGER CHECK (asked_sequence >= 1)',
       at('created_at'),
       at('updated_at'),
       at('settled_at', { nullable: true }),
@@ -49,10 +52,14 @@ export const statements: ReadonlyArray<string> = [
       sameProject('task_id', 'tasks'),
       referencedInProject,
       "CHECK ((state = 'failed') = (failure IS NOT NULL))",
-      "CHECK ((state = 'resolving') = (settled_at IS NULL))",
+      "CHECK ((state IN ('resolving', 'checking')) = (settled_at IS NULL))",
+      "CHECK (state <> 'checking' OR pushed_head IS NOT NULL)",
     ],
   ),
   index('conflict_resolutions_by_project', 'conflict_resolutions (project_id)'),
   // One round at a time on a task.
-  index('conflict_resolutions_resolving', 'conflict_resolutions (task_id)', { unique: true, where: "state = 'resolving'" }),
+  index('conflict_resolutions_under_way', 'conflict_resolutions (task_id)', {
+    unique: true,
+    where: "state IN ('resolving', 'checking')",
+  }),
 ]

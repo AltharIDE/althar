@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect'
+import { Duration, Effect, Schema } from 'effect'
 
 import { commitOf, git, gitOutcome } from './git'
 
@@ -13,10 +13,21 @@ import { commitOf, git, gitOutcome } from './git'
  * said: the branch it conflicted with is in it, nothing is left half merged,
  * and no file it conflicted in still has markers. One that isn't is asked
  * once more, with why; then it is the person's.
+ *
+ * What Althar pushes for it is the merge alone, made on the branch as the
+ * pull request had it; then, should the pull request's checks fail on it,
+ * the commits the lead makes on top of it when asked to fix them. Anything
+ * else on the branch is the person's to push.
  */
 
-/** How many times the lead is asked before a conflict goes back to the person. */
+/**
+ * How many times the lead is asked before a conflict goes back to the person:
+ * to resolve it, or to fix the checks that failed on what Althar pushed.
+ */
 export const ATTEMPTS = 2
+
+/** How long a pull request may have no checks on what Althar pushed before none are taken to be coming. */
+export const NO_CHECKS_AFTER = Duration.minutes(2)
 
 /** What conflicts in one of the task's repositories, and where things stood as the lead was asked. */
 export const Conflict = Schema.Struct({
@@ -71,11 +82,32 @@ export const noteFor = (conflicts: ReadonlyArray<Conflict>, place: Place, failur
   const after =
     place.change === null
       ? "Then say it's ready to merge again."
-      : `Althar pushes the merge to ${place.change} once it is committed, with any fix the checks needed: don't push it yourself.`
+      : `Fix what the checks find before you commit the merge, so it is all in the merge, and commit nothing else on top of it: Althar pushes that merge alone to ${place.change}. Don't push it yourself.`
   const stuck =
     "If you can't settle a conflict, or the checks fail and you can't fix them, don't commit the merge: undo it with git merge --abort, and say why."
   return [...(failure === null ? [] : [`The conflict isn't resolved yet: ${failure} Try once more.`]), asked, after, stuck].join(' ')
 }
+
+/**
+ * What the lead is asked when the pull request's checks fail on what Althar
+ * pushed for it: in the words failed checks always come in, saying what
+ * Althar pushes this time.
+ */
+export const fixNoteFor = (
+  place: Place,
+  failed: { readonly failing: ReadonlyArray<string>; readonly logs: ReadonlyArray<string> } | null,
+  failure: string | null,
+) =>
+  [
+    ...(failure === null ? [] : [`The checks aren't fixed yet: ${failure} Try once more.`]),
+    ...(failed === null
+      ? []
+      : [
+          `Checks failed on the merge Althar pushed to ${place.change ?? 'the pull request'}: ${failed.failing.join(', ')}.`,
+          ...failed.logs,
+        ]),
+    `Fix what broke and commit the fix on top of the merge, with nothing else: Althar pushes it to ${place.change ?? 'the pull request'} too. Don't push it yourself. If it isn't the task's to fix, commit nothing and say why.`,
+  ].join('\n\n')
 
 /** Why a repository's conflict isn't resolved, in a sentence; null where it is. */
 export const unresolved = (worktree: string, conflict: Conflict) =>
@@ -100,34 +132,41 @@ export const unresolved = (worktree: string, conflict: Conflict) =>
     return null
   })
 
+const linesOf = (text: string) => text.split('\n').filter((line) => line !== '')
+
+/** A commit's parents. */
+const parentsOf = (worktree: string, commit: string) =>
+  Effect.map(git(worktree, 'rev-list', '--parents', '-n', '1', commit), (text) => linesOf(text).join(' ').split(' ').slice(1))
+
 /**
  * Whether what the branch has over `from`, up to `head`, is the resolution
- * alone: the merge of the branch it conflicted with, made on `from`, then
- * any commits on top of it, such as a fix the checks needed. Anything else,
- * such as a commit of other work before the merge, or another branch merged
- * in, isn't Althar's to push.
+ * alone: one merge, made on `from`, of the branch it conflicted with, and
+ * nothing on top of it or before it. A fix the checks needed is in the merge,
+ * as the lead is asked. Anything else, such as a commit of other work after
+ * the merge, or another branch merged in, isn't Althar's to push.
  */
 export const onlyTheResolution = (worktree: string, conflict: Conflict, head: string) =>
   Effect.gen(function* () {
-    const lines = (text: string) => text.split('\n').filter((line) => line !== '')
-    const line = lines(yield* git(worktree, 'rev-list', '--first-parent', '--reverse', `${conflict.from}..${head}`))
-    const [merge, ...after] = line
-    if (merge === undefined) return false
-    const parents = lines(yield* git(worktree, 'rev-list', '--parents', '-n', '1', merge))
-      .join(' ')
-      .split(' ')
-      .slice(1)
+    const line = linesOf(yield* git(worktree, 'rev-list', '--first-parent', `${conflict.from}..${head}`))
+    if (line.length !== 1 || line[0] !== head) return false
+    const parents = yield* parentsOf(worktree, head)
     if (parents.length !== 2 || parents[0] !== conflict.from) return false
     // What it merged is the branch it conflicted with, as fetched: nothing of its own.
     if ((yield* gitOutcome(worktree, 'merge-base', '--is-ancestor', parents[1] ?? '', conflict.target)).code !== 0) return false
-    // The commits after it are the branch's own line alone, with no other merge.
-    for (const commit of after) {
-      const count = lines(yield* git(worktree, 'rev-list', '--parents', '-n', '1', commit))
-        .join(' ')
-        .split(' ').length
-      if (count !== 2) return false
-    }
-    // Nothing came in that isn't on the line or in the branch it conflicted with.
-    const brought = lines(yield* git(worktree, 'rev-list', `${conflict.from}..${head}`, '--not', conflict.target))
-    return brought.every((commit) => line.includes(commit))
+    // Nothing came in that isn't the merge or in the branch it conflicted with.
+    const brought = linesOf(yield* git(worktree, 'rev-list', `${conflict.from}..${head}`, '--not', conflict.target))
+    return brought.length === 1 && brought[0] === head
+  })
+
+/**
+ * Whether what the branch has over `base`, what Althar pushed, up to `head`
+ * is commits on top of it alone, one after another, with nothing merged in:
+ * a fix for checks that failed on it.
+ */
+export const onlyFixes = (worktree: string, base: string, head: string) =>
+  Effect.gen(function* () {
+    if (head === base || (yield* gitOutcome(worktree, 'merge-base', '--is-ancestor', base, head)).code !== 0) return false
+    const all = linesOf(yield* git(worktree, 'rev-list', `${base}..${head}`))
+    for (const commit of all) if ((yield* parentsOf(worktree, commit)).length !== 1) return false
+    return true
   })

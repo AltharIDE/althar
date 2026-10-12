@@ -28,16 +28,23 @@
     merged, and no conflicted file with markers left. Not resolved, the lead
     is asked once more with why; then it is the person's, in Needs you,
     where the button's flow would leave it.
-  - **No review round.** The checks the lead runs before committing the
-    merge, and the host's on what is pushed, are enough. A check that fails
-    on the pull request goes back to the lead, as any does.
+  - **No review round.** The lead runs the checks and fixes what they find
+    before it commits the merge, and the pull request's checks run on what
+    Althar pushes.
   - **Althar pushes the resolution itself:** the one exception to "after the
     first push, pushing is the person's". Only the merge, made on the branch
-    as the pull request had it, and commits on top of it in the same round,
-    such as a fix its checks needed. Where the branch had other commits the
-    pull request didn't, or something else came in, nothing is pushed, and
-    the task's Push card sends it all once the person has looked. It uses the
-    same push as that card, with the connection.
+    as the pull request had it, with nothing after it, and only where nobody
+    else asked the lead anything meanwhile. Where the branch had other
+    commits the pull request didn't, or anything else is on it, nothing is
+    pushed, and the task's Push card sends it all once the person has
+    looked. It uses the same push as that card, with the connection.
+  - **The round follows the checks on what Althar pushed.** Passed, the task
+    is ready to merge. Failed, the lead is asked to fix them within the
+    round, and the commits it makes on top of the merge for that, alone, are
+    pushed in turn. That fix is the lead's one more try: checks that fail
+    again are the person's, in Needs you.
+  - **Only once the task's run has succeeded.** A task the person stopped
+    isn't started again for a conflict.
   - **The lead still never pushes.** Its environment has no way to
     ([ADR-011](011-own-connectors-for-hosts-and-trackers.md)); its brief, and
     the rules' word when it tries `gh`, say Althar pushes this merge for it.
@@ -60,9 +67,14 @@
     review on the host, are what stand between it and the default branch.
   - **A host that doesn't say a pull request conflicts** (Bitbucket Cloud)
     gets no help until the person merges here or asks.
-  - **What counts as the resolution is read from git's history:** a lead
-    that commits other work after the merge, in the same round, has it
-    pushed with it.
+  - **What counts as the resolution is read from git's history and the
+    thread:** the merge alone, then commits made on top of it in the turn the
+    lead was asked to fix its checks, with nothing else asked of it. Other
+    work a lead slips into those very commits goes up with them; the checks,
+    and the pull request's review, are what catch it.
+  - **A fix the checks needed found before the merge is committed is in the
+    merge.** A lead that commits it after the merge instead leaves the merge
+    for the person to push.
 - **Revisit when:**
   - Althar runs a project's checks itself, rather than the lead: judge the
     resolution by them before pushing.

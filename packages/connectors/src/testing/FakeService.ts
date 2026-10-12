@@ -39,6 +39,8 @@ export interface FakeServiceOptions {
   readonly headOf?: (number: number) => string | null
   /** Whether a change conflicts with its target, as the host works it out now; without it, the host doesn't say. */
   readonly conflictsOf?: (number: number) => boolean | undefined
+  /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
+  readonly checksFor?: (number: number, sha: string) => ReadonlyArray<Pick<Check, 'name' | 'state'> & { readonly log?: string }> | undefined
 }
 
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
@@ -256,7 +258,15 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         const change =
           changes.find((candidate) => candidate.headSha === sha || options.headOf?.(candidate.number) === sha) ??
           changes.find((candidate) => `head-${candidate.number}` === sha)
-        return Effect.succeed(change === undefined ? [] : (checks.get(change.number) ?? []))
+        const ran = change === undefined ? undefined : options.checksFor?.(change.number, sha)
+        if (change === undefined || ran === undefined) return Effect.succeed(change === undefined ? [] : (checks.get(change.number) ?? []))
+        return Effect.succeed(
+          ran.map((check, index): Check => {
+            const id = `check-${change.number}-${sha}-${index}`
+            logs.set(id, check.log ?? null)
+            return { id, name: check.name, state: check.state, url: null, summary: null }
+          }),
+        )
       }),
     checkLog: (_repository, check) =>
       Effect.andThen(called('checkLog'), () => {
