@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
 import { Effect } from 'effect'
@@ -14,21 +14,27 @@ import { GitFailed } from './errors'
  * with the repository's hooks off (docs/architecture/07): adding a worktree
  * would otherwise run its `post-checkout` hook, code from the repository, on
  * the person's machine. A picked folder's path is the document portal's FUSE
- * mount inside a Flatpak, where a process cwd makes getcwd fail — a worktree
- * couldn't be added there — so exactly there the repository is given with
- * `-C`; everywhere else the process starts in it, as it always has.
+ * mount inside a Flatpak, where git's own getcwd fails — `git -C <portal>
+ * status` answers "unable to get current working directory" — so exactly
+ * there the git directory and work tree are named outright, and the child is
+ * given the app home as a known-existing cwd. Inheriting the app's cwd is not
+ * safe: it may itself be a document-portal path whose grant has gone away.
+ * Everywhere else the process starts in the folder, as it always has.
  */
 
 /** Where a picked folder is inside a Flatpak: the document portal's FUSE mount, where a cwd makes getcwd fail. */
 const PORTAL = '/run/flatpak/doc'
 
 /**
- * How a git command runs in `cwd`: with `-C` rather than as the process's own
- * working directory for the portal's FUSE mount, and as the process's own
- * working directory everywhere else.
+ * How a git command runs in `cwd`: for the portal's FUSE mount, its git
+ * directory and work tree are named, and the child starts in the app home,
+ * never inheriting a possibly stale portal cwd; everywhere else it starts in
+ * the folder itself.
  */
 export const gitIn = (cwd: string, args: ReadonlyArray<string>): { readonly args: ReadonlyArray<string>; readonly cwd?: string } =>
-  cwd === PORTAL || cwd.startsWith(`${PORTAL}/`) ? { args: ['-C', cwd, ...args] } : { args, cwd }
+  cwd === PORTAL || cwd.startsWith(`${PORTAL}/`)
+    ? { args: ['--git-dir', join(cwd, '.git'), '--work-tree', cwd, ...args], cwd: homedir() }
+    : { args, cwd }
 
 export const git = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> => gitWithin(60_000, cwd, ...args)
 

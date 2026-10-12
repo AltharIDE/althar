@@ -1,11 +1,13 @@
+import { homedir } from 'node:os'
+
 import { describe, expect, it } from 'vitest'
 
 import { gitIn } from '../src/git'
 
 /*
- * How a git command runs in a folder: with `-C` only where the folder is the
- * document portal's FUSE mount (inside a Flatpak), where a process cwd makes
- * getcwd fail; everywhere else the process starts in it, as it always has.
+ * How a git command runs in a folder: where it is the document portal's FUSE
+ * mount (inside a Flatpak), name the repository explicitly and use the stable
+ * app home as cwd; everywhere else the process starts in the folder itself.
  */
 
 describe('git in a folder', () => {
@@ -17,11 +19,15 @@ describe('git in a folder', () => {
     })
   })
 
-  it('gives the folder with -C where it is the document portal’s FUSE mount', () => {
+  it('names the git directory and the work tree where it is the document portal’s FUSE mount, so nothing chdirs into it', () => {
     expect(gitIn('/run/flatpak/doc/abc/project', ['-c', 'x=y', 'status'])).toEqual({
-      args: ['-C', '/run/flatpak/doc/abc/project', '-c', 'x=y', 'status'],
+      args: ['--git-dir', '/run/flatpak/doc/abc/project/.git', '--work-tree', '/run/flatpak/doc/abc/project', '-c', 'x=y', 'status'],
+      cwd: homedir(),
     })
-    expect(gitIn('/run/flatpak/doc', ['status'])).toEqual({ args: ['-C', '/run/flatpak/doc', 'status'] })
+    expect(gitIn('/run/flatpak/doc', ['status'])).toEqual({
+      args: ['--git-dir', '/run/flatpak/doc/.git', '--work-tree', '/run/flatpak/doc', 'status'],
+      cwd: homedir(),
+    })
     // A path that only begins like the portal is an ordinary folder.
     expect(gitIn('/run/flatpak/docx/project', ['status'])).toEqual({ args: ['status'], cwd: '/run/flatpak/docx/project' })
   })
