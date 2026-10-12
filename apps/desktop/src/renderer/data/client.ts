@@ -183,6 +183,14 @@ export interface Client {
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
+  /** Changes what an issue the coordinator drafted says, before it is filed. */
+  readonly changeIssueDraft: (
+    draftId: string,
+    edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
+  ) => Promise<void>
+  /** Files an issue the coordinator drafted, or one that wasn't filed, again: its card says how it went. */
+  readonly fileIssueDraft: (draftId: string) => Promise<void>
+  readonly discardIssueDraft: (draftId: string) => Promise<void>
   /** The connections on this Mac, and the code hosts and trackers a person can connect. */
   readonly listConnections: () => Promise<ConnectionList>
   /** Starts a service's own sign-in. */
@@ -420,6 +428,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     holdPlan: (planId) => command((commandId) => api.HoldPlan({ commandId, planId })),
     changePlan: (planId, steps, end) =>
       command((commandId) => api.ChangePlan({ commandId, planId, steps, ...(end === undefined ? {} : { end }) })),
+    changeIssueDraft: (draftId, edit) => command((commandId) => api.ChangeIssueDraft({ commandId, draftId, ...edit })),
+    fileIssueDraft: (draftId) => command((commandId) => api.FileIssueDraft({ commandId, draftId })),
+    discardIssueDraft: (draftId) => command((commandId) => api.DiscardIssueDraft({ commandId, draftId })),
     listConnections: () => settle(api.ListConnections()),
     startSignIn: (product, webUrl, connectionId) =>
       command((commandId) =>

@@ -11,6 +11,7 @@ import { useDragOver } from '../../lib/dragOver'
 import { useRefocus } from '../../lib/refocus'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Spinner } from '../../primitives/Spinner/Spinner'
+import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
 import s from './Composer.module.css'
 
 /* Bars at rest, for a transcriber that does not report levels. */
@@ -33,9 +34,24 @@ export interface Dictation {
   progress?: number
   /** The microphone's tray (`tray`) is open. */
   expanded?: boolean
+  /** The microphones to choose from, after the system's default, which always comes first. Empty until the system names them. */
+  inputs?: readonly DictationInput[]
+  /** The chosen microphone's id; null for the system's default. */
+  input?: string | null
+  /** Chooses the microphone dictation hears (null: the system's default). With it, a menu beside the microphone offers them, while dictating too. */
+  onChooseInput?: (id: string | null) => void
   onStart: () => void
   onStop: () => void
 }
+
+/** A microphone dictation can hear. */
+export interface DictationInput {
+  id: string
+  label: string
+}
+
+/* The menu's value for the system's default, which has no id of its own. */
+const SYSTEM_DEFAULT = ''
 
 /** Something you sent while the agent worked, waiting for it to finish what it is doing. */
 export interface QueuedMessage {
@@ -82,6 +98,14 @@ export interface ComposerText {
   /** The microphone while the speech model downloads. */
   dictateProgress: (percent: number) => string
   stopDictating: (elapsed: string) => string
+  /** The button beside the microphone that opens the list of microphones. */
+  chooseInput: string
+  /** The list's name and heading. */
+  inputs: string
+  /** The first choice: whichever microphone the system uses. */
+  systemDefault: string
+  /** Under the list, while the system names no microphones. */
+  inputsNote: string
   /** The field's placeholder while dictating. */
   listening: string
   queued: (n: number) => string
@@ -113,6 +137,10 @@ export const composerText: ComposerText = {
   dictateBusy: 'Writing down what you said',
   dictateProgress: (percent) => `Dictate. The speech model is downloading, ${percent}%`,
   stopDictating: (elapsed) => `Stop dictating, ${elapsed}`,
+  chooseInput: 'Choose the microphone',
+  inputs: 'Microphone',
+  systemDefault: 'System default',
+  inputsNote: 'Other microphones show here once Althar may use the microphone.',
   listening: 'Listening…',
   queued: (n) => (n === 1 ? 'Queued; the lead reads it next' : `${n} queued; the lead reads them in order`),
   editQueued: 'Edit',
@@ -433,10 +461,40 @@ export function Composer({
                 onClick={dictation.onStart}
               />
             ))}
+          {dictation?.onChooseInput && <InputMenu dictation={dictation} onChoose={dictation.onChooseInput} t={t} />}
           {action}
         </div>
       </form>
     </div>
+  )
+}
+
+/* Beside the microphone, idle or dictating: which microphone it hears. Choosing while dictating goes on from the new one. */
+function InputMenu({ dictation, onChoose, t }: { dictation: Dictation; onChoose: (id: string | null) => void; t: ComposerText }) {
+  const inputs = dictation.inputs ?? []
+  const chosen = dictation.input ?? SYSTEM_DEFAULT
+  return (
+    <Menu
+      label={t.inputs}
+      placement="above"
+      align="end"
+      width={260}
+      {...(inputs.length === 0 ? { note: t.inputsNote } : {})}
+      trigger={
+        <button type="button" className={s.inputs} aria-label={t.chooseInput}>
+          <Icon name="chevronD" size={10} />
+        </button>
+      }
+    >
+      <MenuRadioGroup label={t.inputs} value={chosen} onChange={(id) => onChoose(id === SYSTEM_DEFAULT ? null : id)}>
+        <MenuRadioItem value={SYSTEM_DEFAULT}>{t.systemDefault}</MenuRadioItem>
+        {inputs.map((input) => (
+          <MenuRadioItem key={input.id} value={input.id}>
+            {input.label}
+          </MenuRadioItem>
+        ))}
+      </MenuRadioGroup>
+    </Menu>
   )
 }
 

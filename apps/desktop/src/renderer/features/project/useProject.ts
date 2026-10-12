@@ -76,6 +76,12 @@ export interface ProjectModel {
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
   readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
+  readonly fileIssueDraft: (draftId: string) => Promise<void>
+  readonly changeIssueDraft: (
+    draftId: string,
+    edit: { readonly title: string; readonly body: string; readonly labels: ReadonlyArray<string> },
+  ) => Promise<void>
+  readonly discardIssueDraft: (draftId: string) => Promise<void>
   readonly dismissError: () => void
 }
 
@@ -337,6 +343,9 @@ export const useProject = (projectId: string): ProjectModel => {
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
     changePlan: (planId, steps, end) => act(() => client.changePlan(planId, steps, end)),
+    fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
+    changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),
+    discardIssueDraft: (draftId) => act(() => client.discardIssueDraft(draftId)),
     dismissError: () => setError(null),
   }
 }

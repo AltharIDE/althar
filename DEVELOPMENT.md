@@ -4,13 +4,21 @@ How to work in this repository. For what Althar is, see the [README](README.md);
 
 ## Set up
 
-You need Bun 1.3.5 and Node 24. The pinned versions are in `.bun-version` and `.node-version`.
+You need git, [Bun](https://bun.sh) 1.3.5 and Node 24. The pinned versions are in `.bun-version` and `.node-version`.
+
+```bash
+git clone https://github.com/AltharIDE/althar.git && cd althar
+```
 
 ```bash
 bun install --frozen-lockfile
 ```
 
-Installing also sets up the pre-commit hook (`.vite-hooks/pre-commit`), which formats and lints the files you stage and fixes what it can.
+Installing also sets up the pre-commit hook (`.vite-hooks/pre-commit`), which formats and lints the files you stage and fixes what it can. Then build the desktop app and open it:
+
+```bash
+bun --filter @althar/desktop dev
+```
 
 ## Commands
 
@@ -24,7 +32,8 @@ From the repository root:
 | `bun run check` | Format, type-aware lint and type checks, in every package |
 | `bun run fix` | The same, fixing what can be fixed |
 | `bun run test` | Unit and component tests, in every package |
-| `bun run verify` | Everything CI runs, in every package: checks, tests with coverage, builds, and end-to-end tests where a package has them |
+| `bun run verify` | Checks, tests with coverage and builds, in every package, and the pitch site's end-to-end tests |
+| `bun run test:e2e` | The end-to-end tests: the pitch site's, and the desktop app's, which run quietly on a Mac, at most three runs at once on the computer ([apps/desktop](apps/desktop#work-on-it)) |
 
 Each app and package has its own README with its own commands.
 
@@ -79,6 +88,24 @@ Start from [the overview](docs/architecture/README.md), then:
 6. [Integrations and skills](docs/architecture/06-integrations-and-skills.md)
 7. [Persistence, security and cloud](docs/architecture/07-persistence-security-and-cloud.md)
 8. [Precedents and validation](docs/architecture/08-precedents-and-validation.md)
+
+## Reviewing on Linux
+
+A Mac can't stand in for every Linux leg; these are run on a real
+distribution (the packaged app, not a dev build):
+
+| Leg | How | What it covers |
+| --- | --- | --- |
+| X11 | `apps/desktop/scripts/x11-smoke.sh` under a real X server and window manager (`DISPLAY=:0 ALTHAR_BIN=/usr/bin/althar`, with `ALTHAR_ARGS=--no-sandbox` where the desktop runs as root) | the window's identity, its own buttons, moving, resizing, maximizing, closing |
+| Wayland | run the packaged app on a GNOME or KDE Wayland session | the same through the compositor, and the window's own chrome under it |
+| packages | `bun run package` in `apps/desktop`, then install the deb and rpm on their real target distributions (or run the AppImage) | The AppImage build is covered in CI; `.deb` and `.rpm` installation, menu entry, icon and keyring still need later real-desktop checks. Track those follow-ups in `docs/plans/package-linux.md`. |
+| Flatpak | `apps/desktop/scripts/flatpak.sh`, then `apps/desktop/scripts/flatpak-smoke.sh` | the sandbox's own environment, the device's own tools, the keyring over the secret service (see [ADR-027](docs/decisions/027-what-the-flatpak-reaches.md); the Flatpak is experimental until a task has run under GNOME and KDE) |
+| keyring | a GNOME session (gnome-keyring) and a KDE one (KWallet 5.97+) | sealing a sign-in, and reopening it after a restart |
+
+CI runs the end-to-end suite with the fake agent under Xvfb instead; the legs
+above are for a real desktop, and what each covers is what the Linux packaging
+change promises.
+
 
 ## Changes and CI
 

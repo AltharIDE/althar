@@ -1,5 +1,5 @@
 /* The site's only global CSS, on top of @althar/ui's tokens and base:
-   page measures, the body, and the skip link. Each concept sets its own
+   page measures, the body, the skip link, and pictures resting off screen. Each concept sets its own
    ground and type in its module. */
 
 :root {
@@ -24,6 +24,8 @@ body {
   overflow-x: clip;
 }
 img, svg { display: block; }
+/* A picture of the app out of sight rests: what loops in it waits (kit/seen.ts: useRestAway). */
+[data-away] *, [data-away] *::before, [data-away] *::after { animation-play-state: paused !important; }
 h1, h2, h3, h4, p { margin: 0; }
 a { color: inherit; }
 

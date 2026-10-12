@@ -66,6 +66,10 @@ Make failures diagnosable without leaking private data. Use actionable errors an
 
 ## Documentation and decisions
 
+### The repository's README
+
+The repository's README is for people deciding whether to use Althar, and for those using it: what it is, why, how it works and how to get it. How to work on the code (setting up, building from source, the commands, testing) goes in [DEVELOPMENT.md](DEVELOPMENT.md), which the README links to. An app's or package's own README is for the people working on it, and is as technical as it needs to be.
+
 ### Local architecture documents
 
 Each `apps/*/ARCHITECTURE.md` and `packages/*/ARCHITECTURE.md` explains the component's purpose and owner, public API, dependency direction, state and data flow, trust boundaries, important failure modes, accessibility and performance constraints, and how its checks run. State the intended design and material implementation gaps with a path to convergence. Keep speculative proposals separate from the accepted target.

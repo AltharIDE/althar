@@ -1,4 +1,4 @@
-import { Commands, Database, Ledger } from '@althar/persistence-sqlite'
+import { Commands, Database, Ledger, type Migration, migrations } from '@althar/persistence-sqlite'
 import { Layer } from 'effect'
 
 import { Accounts } from './Accounts'
@@ -9,6 +9,7 @@ import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } fro
 import { Connections } from './Connections'
 import { Installs } from './Installs'
 import { Instance } from './Instance'
+import { IssueDrafts } from './IssueDrafts'
 import { Issues } from './Issues'
 import { Launches } from './Launches'
 import { Live } from './Live'
@@ -32,6 +33,10 @@ import { ToolServer } from './ToolServer'
 export interface RuntimeLayerOptions extends RuntimeOptions {
   /** The profile's database file, or `:memory:` for tests. */
   readonly database: string
+  /** Where the store copies itself before an update migrates it (`backupsIn(profile)`); without it, no copy is made. */
+  readonly backups?: string
+  /** Migrations a test adds after the store's own, such as one that fails. Never in a packaged app. */
+  readonly extraMigrations?: ReadonlyArray<Migration>
   /** The agents it may start. The registry's, unless a test gives others. */
   readonly agents?: Layer.Layer<Agents>
   /** Where secrets are kept: sealed by the app's main process, in memory for tests; without it, nowhere, as in the command-line client. */
@@ -42,13 +47,20 @@ export interface RuntimeLayerOptions extends RuntimeOptions {
 
 /**
  * The runtime, composed: the store, this launch, and the services clients
- * call. Building it opens and migrates the database and reconciles what an
- * earlier launch left; closing it stops every session and records the end of
- * the launch.
+ * call. Building it opens and migrates the database (copying it first, where
+ * a migration is pending) and reconciles what an earlier launch left; closing
+ * it stops every session and records the end of the launch. A store that
+ * can't be copied or migrated fails the build, so nothing runs on it.
  */
 export const layer = (options: RuntimeLayerOptions) => {
   const store = Layer.mergeAll(Ledger.layer, Commands.layer).pipe(
-    Layer.provideMerge(Database.layer({ filename: options.database })),
+    Layer.provideMerge(
+      Database.layer({
+        filename: options.database,
+        ...(options.backups === undefined ? {} : { backups: options.backups }),
+        ...(options.extraMigrations === undefined ? {} : { migrations: [...migrations, ...options.extraMigrations] }),
+      }),
+    ),
     Layer.provideMerge(WebCrypto),
   )
   const base = Layer.mergeAll(Instance.layer, Live.layer, ToolServer.layer, ModelFacts.layer, Artifacts.layer).pipe(
@@ -56,7 +68,7 @@ export const layer = (options: RuntimeLayerOptions) => {
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
     Layer.provideMerge(options.agents ?? Agents.registry),
     // Agents Althar downloads at the person's asking, where it keeps them; the registry's point at them where the person has none.
-    Layer.provideMerge(Installs.layer({ root: options.agentsRoot, fetch: options.fetch })),
+    Layer.provideMerge(Installs.layer({ root: options.agentsRoot, fetch: options.fetch, onDevice: options.onDevice })),
     Layer.provideMerge(options.secrets ?? Secrets.none('Althar keeps sign-ins in the app; it can open them, and this can’t.')),
     Layer.provideMerge(options.connectors ?? Connectors.live(options.clientIds, options.fetch, options.githubApp)),
   )
@@ -71,8 +83,10 @@ export const layer = (options: RuntimeLayerOptions) => {
   const core = Layer.mergeAll(Projects.layer, Sessions.layer, Launches.layer).pipe(
     Layer.provideMerge(Layer.mergeAll(Permissions.layer, Questions.layer).pipe(Layer.provideMerge(judging))),
   )
-  // A task's pull request and issue, through the person's connections to code hosts and trackers.
-  const linked = Layer.mergeAll(Changes.layer, Issues.layer).pipe(Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(core))))
+  // A task's pull request and issue, and the issues the coordinator drafts, through the person's connections to code hosts and trackers.
+  const linked = Layer.mergeAll(Changes.layer, Issues.layer, IssueDrafts.layer).pipe(
+    Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(core))),
+  )
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
   const work = Tasks.layer.pipe(Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))))
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).

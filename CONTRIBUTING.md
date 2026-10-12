@@ -27,10 +27,16 @@ Read, in this order:
 2. Write the test first for new behaviour. Each app and package keeps at least 90% line and branch coverage.
 3. Keep the interface accessible to WCAG 2.2 AA from the first version, not as a follow-up.
 4. If the change is a consequential decision, add an ADR in [`docs/decisions`](docs/decisions).
-5. Run what CI runs, in the packages you touched and the ones that depend on them:
+5. Run checks and tests in the packages you touched and the ones that depend on them:
 
    ```bash
    bun run verify
+   ```
+
+   If you changed the desktop app, run the end-to-end tests that cover your change, not the whole suite; CI runs all of them:
+
+   ```bash
+   bun --filter @althar/desktop test:e2e e2e/home.spec.ts
    ```
 
 6. Open a pull request to `main`. Its title says what the change does for someone using Althar, as a sentence: "Connect Trello, with the API key its token was made for", not "feat(connectors): trello". Its description says why, what you checked, and anything a reviewer should look at closely.

@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { doing, type Doing } from './actions'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
@@ -56,6 +57,8 @@ export interface TaskModel {
   readonly dismissConflict: () => void
   /** An action is on its way to the runtime. */
   readonly pending: boolean
+  /** Which of them, where it is one of the outputs' (see `doing`): the others wait, but aren't working. */
+  readonly doing: Doing | null
   /** Earlier items are on their way. */
   readonly loadingEarlier: boolean
   readonly loadEarlier: () => Promise<void>
@@ -139,6 +142,7 @@ export const useTask = (threadId: string): TaskModel => {
   const [failed, setError] = useState<string | null>(null)
   const error = failed ?? (thread.error === null ? null : messageOf(thread.error))
   const [pending, setPending] = useState(false)
+  const [acting, setActing] = useState<Doing | null>(null)
   const [conflict, setConflict] = useState<string | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -267,15 +271,17 @@ export const useTask = (threadId: string): TaskModel => {
 
   /** Runs an action, says what went wrong if it did, and reads the thread's head again. */
   const act = useCallback(
-    async (action: () => Promise<unknown>) => {
+    async (action: () => Promise<unknown>, which: Doing | null = null) => {
       setError(null)
       setPending(true)
+      setActing(which)
       try {
         await action()
       } catch (failure) {
         fail(failure)
       } finally {
         setPending(false)
+        setActing(null)
         await readHead()
       }
     },
@@ -338,6 +344,7 @@ export const useTask = (threadId: string): TaskModel => {
     conflict,
     dismissConflict: () => setConflict(null),
     pending,
+    doing: acting,
     loadingEarlier,
     loadEarlier,
     readFiles,
@@ -428,12 +435,13 @@ export const useTask = (threadId: string): TaskModel => {
         () => null,
         (failure: unknown) => messageOf(failure),
       ),
-    markReady: (url) => act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id, url))),
+    markReady: (url) =>
+      act(async () => (snapshot === null ? undefined : client.markReady(snapshot.task.id, url)), doing.markReady(url ?? '')),
     markAllReady: (urls) =>
       onTask(async (taskId) => {
         for (const url of urls) await client.markReady(taskId, url)
       }),
-    openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id))),
+    openChange: () => act(async () => (snapshot === null ? undefined : client.openChange(snapshot.task.id)), doing.openChange),
     mergeHere: () =>
       act(async () => {
         setConflict(null)
@@ -446,8 +454,8 @@ export const useTask = (threadId: string): TaskModel => {
             setConflict(failure.detail ?? '')
           throw failure
         }
-      }),
-    pushHere: () => act(async () => (snapshot === null ? undefined : client.pushHere(snapshot.task.id))),
+      }, doing.mergeHere),
+    pushHere: () => act(async () => (snapshot === null ? undefined : client.pushHere(snapshot.task.id)), doing.pushHere),
     pushBranch: () =>
       act(async () => {
         if (snapshot === null) return
@@ -456,13 +464,13 @@ export const useTask = (threadId: string): TaskModel => {
           repo.remote == null || repo.head === null ? [] : [{ repository: repo.repository, head: repo.head }],
         )
         await client.pushBranch(snapshot.task.id, heads)
-      }),
+      }, doing.pushBranch),
     accept: (changes) =>
       act(async () => {
         if (snapshot === null) return
         for (const change of changes) await client.merge(snapshot.task.id, change.head, change.url)
-      }),
-    push: (head, url) => act(async () => (snapshot === null ? undefined : client.push(snapshot.task.id, head, url))),
+      }, doing.accept),
+    push: (head, url) => act(async () => (snapshot === null ? undefined : client.push(snapshot.task.id, head, url)), doing.push(url ?? '')),
     stopListening: (url) => onTask((taskId) => client.stopListening(taskId, url)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),

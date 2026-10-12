@@ -39,6 +39,7 @@ import type { BoardModel } from '../board/useBoard'
 import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectDialog'
 import type { ConnectionsModel } from '../connections/useConnections'
 import { Card, type CardActions } from './Card'
+import { DraftCard, type DraftActions } from './DraftCard'
 import { lastSettledOf, partsOf, tasksOf, trackerOf } from './front'
 import { nextRoom, ProjectBar } from './ProjectBar'
 import { inkOf, ProjectSettings } from './ProjectSettings'
@@ -218,6 +219,11 @@ export function ProjectView({
     onHold: (planId) => void model.holdPlan(planId),
     onChange: (planId, steps, end) => void model.changePlan(planId, steps, end),
     onOpen: onTask,
+  }
+  const draftActions: DraftActions = {
+    onFile: (draftId) => void model.fileIssueDraft(draftId),
+    onChange: (draftId, edit) => model.changeIssueDraft(draftId, edit),
+    onDiscard: (draftId) => void model.discardIssueDraft(draftId),
   }
 
   // The agent what the person says goes to, and whether it takes images.
@@ -411,6 +417,7 @@ export function ProjectView({
                       threadId={coordinator.threadId}
                       session={session}
                       card={(card) => <Card card={card} actions={actions} />}
+                      draft={(draft) => <DraftCard draft={draft} actions={draftActions} />}
                       run={(run) => (
                         <RunOf
                           run={run}

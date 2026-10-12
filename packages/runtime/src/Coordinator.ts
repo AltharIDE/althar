@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { type CommandEnvelope, type ProjectId } from '@althar/domain'
 import type { Commands, Ledger } from '@althar/persistence-sqlite'
+import { ConnectorFailed } from '@althar/connectors'
 import { knownModelName } from '@althar/contracts'
 import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -12,6 +13,7 @@ import { Accounts } from './Accounts'
 import { Agents } from './Config'
 import { NotFound } from './errors'
 import { Instance } from './Instance'
+import { DraftUntitled, IssueDrafts, IssueTargetNeeded } from './IssueDrafts'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
@@ -70,6 +72,7 @@ type Store =
   | Crypto.Crypto
   | Changes
   | Issues
+  | IssueDrafts
   | Policies
   | Models
   | ModelFacts
@@ -83,6 +86,13 @@ const Drafted = Schema.Struct({
   repositories: Schema.optional(Schema.Array(Schema.String)),
 })
 const Asked = Schema.Struct({ issue: Schema.String })
+const DraftedIssue = Schema.Struct({
+  title: Schema.String,
+  description: Schema.optional(Schema.String),
+  tracker: Schema.optional(Schema.String),
+  container: Schema.optional(Schema.String),
+  labels: Schema.optional(Schema.Array(Schema.String)),
+})
 /* A step's model, as list_models names it; or, as plans once did, an agent and its own id for the model. */
 const StepPick = Schema.Struct({ model: Schema.optional(Schema.String), agent: Schema.optional(Schema.String) })
 const Proposed = Schema.Struct({
@@ -137,6 +147,7 @@ export class Coordinator extends Context.Service<
       const toolServer = yield* ToolServer
       const changes = yield* Changes
       const issues = yield* Issues
+      const issueDrafts = yield* IssueDrafts
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const nameOf = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
 
@@ -485,6 +496,65 @@ export class Coordinator extends Context.Service<
           return found.map((issue) => `- ${issue.key}: ${issue.title} (${issue.status.name}) ${issue.url}`).join('\n')
         })
 
+      /**
+       * Drafts an issue on a connected tracker, and files nothing: the person
+       * sees it as a card and files it, changes it or discards it there.
+       */
+      const draftIssue = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(DraftedIssue, input)
+          const card = yield* issueDrafts
+            .draft({
+              projectId: access.projectId as ProjectId,
+              threadId: access.threadId,
+              ...(asked.tracker === undefined ? {} : { tracker: asked.tracker }),
+              ...(asked.container === undefined ? {} : { container: asked.container }),
+              title: asked.title,
+              body: asked.description ?? '',
+              labels: asked.labels ?? [],
+              actorId: instance.coordinatorId,
+            })
+            .pipe(
+              Effect.catch((error) => {
+                if (error instanceof DraftUntitled) return Effect.fail(new ToolRefused({ message: 'Give the issue a title.' }))
+                if (error instanceof ConnectorFailed)
+                  return Effect.fail(new ToolRefused({ message: `Althar couldn't ask the tracker where issues go: ${error.message}` }))
+                if (!(error instanceof IssueTargetNeeded)) return Effect.fail(error)
+                const choices = error.choices.join(', ')
+                const where = error.tracker ?? 'that tracker'
+                switch (error.reason) {
+                  case 'no_tracker':
+                    return Effect.fail(
+                      new ToolRefused({
+                        message:
+                          'The person has no tracker connected to Althar, so there is nowhere to draft an issue. They connect one in Settings.',
+                      }),
+                    )
+                  case 'tracker_needed':
+                    return Effect.fail(new ToolRefused({ message: `Say which tracker it goes on, as tracker: ${choices}.` }))
+                  case 'unknown_tracker':
+                    return Effect.fail(
+                      new ToolRefused({ message: `No tracker called ${error.named ?? ''} is connected. Connected: ${choices}.` }),
+                    )
+                  case 'container_needed':
+                    return Effect.fail(new ToolRefused({ message: `Say where on ${where} it goes, as container: ${choices}.` }))
+                  case 'unknown_container':
+                    return Effect.fail(
+                      new ToolRefused({
+                        message:
+                          error.tracker === null
+                            ? `No connected tracker has anywhere called ${error.named ?? ''} for issues. They have: ${choices}.`
+                            : error.choices.length === 0
+                              ? `This account can't file issues anywhere on ${where}.`
+                              : `${where} has nowhere called ${error.named ?? ''} for issues. It has: ${choices}.`,
+                      }),
+                    )
+                }
+              }),
+            )
+          return `Drafted the issue “${card.title}” on ${card.tracker}, in ${card.container}. Nothing is filed until the person files it from its card, where they can change it or discard it; they see it there, so there's no need to repeat it. You'll hear what they decide.`
+        })
+
       const tool = (
         name: string,
         description: string,
@@ -553,6 +623,30 @@ export class Coordinator extends Context.Service<
           'The person’s open issues on the connected trackers, and in the project’s repository, newest change first.',
           nothing,
           (access) => findIssues(access),
+        ),
+        tool(
+          'draft_issue',
+          "Drafts an issue on one of the person's connected trackers, for something to track rather than do now: a bug found, follow-up work, an idea. It files nothing: the person sees it as a card, and files it, changes it or discards it. Give it a title and a description in Markdown with what whoever picks it up needs. Without tracker and container, it goes where the project's issues come from, or its repository's issues; when that isn't clear, Althar says what to name.",
+          {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              description: { type: 'string', description: 'Markdown.' },
+              tracker: {
+                type: 'string',
+                description:
+                  'The tracker, by name: Linear, Jira, Trello, GitHub, GitLab; where two connections share a name, as Althar names them, or by site.',
+              },
+              container: {
+                type: 'string',
+                description:
+                  "Where on the tracker: a Linear team's key, a Jira project's key, a Trello list as Board / List, a repository as owner/name.",
+              },
+              labels: { type: 'array', items: { type: 'string' }, description: 'Labels the tracker has; others are left off.' },
+            },
+            required: ['title'],
+          },
+          draftIssue,
         ),
         tool(
           'list_models',

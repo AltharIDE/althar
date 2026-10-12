@@ -16,7 +16,7 @@ const RATE = 16_000
 const recording = () => {
   let length = 0
   const peek = vi.fn((from: number): Recorded => ({ samples: new Float32Array(Math.max(0, length - from)), sampleRate: RATE }))
-  const fake: Recording = { peek, stop: () => peek(0), cancel: () => {} }
+  const fake: Recording = { peek, stop: () => peek(0), cancel: () => {}, use: async () => {} }
   return { fake, peek, grow: (seconds: number) => (length = Math.round(seconds * RATE)) }
 }
 

@@ -1,6 +1,4 @@
-import { LOGO_SECTION } from '@althar/ui'
-
-import { noise, seeded } from './parts'
+import { noise, seeded } from './random'
 
 /*
  * A landscape engraved in cobalt ink, drawn once for the size it is shown
@@ -13,7 +11,13 @@ import { noise, seeded } from './parts'
  * light stands the marks thin, so the hills behind it read lit, and
  * nothing tall reaches into the words. The light itself is drawn apart,
  * on every frame (drawLight), over this.
+ *
+ * Nothing here touches the page, so the landscape can be drawn off the
+ * main thread (landscape.worker.ts), on an OffscreenCanvas.
  */
+
+/** A 2D context, on the page or off it. */
+export type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
 export const INK = '#1f35c8'
 
@@ -86,7 +90,8 @@ interface Crown {
   r: number
 }
 
-export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: number, clear: ReadonlyArray<Clear>, paper: string): Ground {
+/** The landscape for a canvas `w` by `h` in CSS px, keeping clear of the words; `mark` is the path of Althar's mark, cut in the altar. */
+export function drawLandscape(ctx: Ctx, w: number, h: number, clear: ReadonlyArray<Clear>, paper: string, mark: string): Ground {
   const g = groundOf(w, h, clear)
   const { k, top, tall, water, ax, ground } = g
   const rand = seeded(7)
@@ -541,7 +546,7 @@ export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: numbe
     22 * k,
   )
 
-  drawAltar(ctx, g, paper)
+  drawAltar(ctx, g, paper, mark)
 
   // A few birds, high and small, near the light.
   ctx.beginPath()
@@ -566,7 +571,7 @@ export function drawLandscape(ctx: CanvasRenderingContext2D, w: number, h: numbe
 }
 
 /** The altar on the headland: steps, a block with Althar's mark cut in its face, a cornice and a table, shaded on the right. */
-function drawAltar(ctx: CanvasRenderingContext2D, g: Ground, paper: string) {
+function drawAltar(ctx: Ctx, g: Ground, paper: string, mark: string) {
   const { ax, ground, k } = g
   let y = ground + 2
   ctx.lineJoin = 'miter'
@@ -602,7 +607,7 @@ function drawAltar(ctx: CanvasRenderingContext2D, g: Ground, paper: string) {
       ctx.translate(ax - w * 0.08 - 12 * s, y + h * 0.04 + 1)
       ctx.scale(s, s)
       ctx.lineWidth = 0.9 / s
-      ctx.stroke(new Path2D(LOGO_SECTION))
+      ctx.stroke(new Path2D(mark))
       ctx.restore()
       // The cornice's shadow on the block.
       ctx.beginPath()
@@ -649,7 +654,14 @@ export function lightOf(g: Ground) {
   return { lines, ripples }
 }
 
-export function drawLight(ctx: CanvasRenderingContext2D, g: Ground, light: ReturnType<typeof lightOf>, t: number) {
+/** Where the light can reach across, in CSS px: its lines open out from the table, and its streak shimmers wider in the water. The light's own canvas is only this wide. */
+export function lightBox(g: Ground) {
+  const reach = Math.ceil(60 * g.k + 12)
+  const left = Math.max(0, Math.floor(g.ax - reach))
+  return { left, width: Math.min(g.w, Math.ceil(g.ax + reach)) - left }
+}
+
+export function drawLight(ctx: Ctx, g: Ground, light: ReturnType<typeof lightOf>, t: number) {
   const { w, h, ax, altarTop, water, k } = g
   ctx.clearRect(0, 0, w, h)
   ctx.lineCap = 'butt'

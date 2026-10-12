@@ -1,0 +1,67 @@
+.lights {
+  flex: none;
+  align-self: center;
+  display: flex;
+  gap: 4px;
+  width: 84px;
+  margin-right: 10px;
+  padding-left: 4px;
+}
+
+.lights button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: default;
+}
+
+.lights button::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: var(--traffic);
+  transition: background var(--base) var(--ease);
+}
+
+.glyph {
+  width: 8px;
+  height: 8px;
+  overflow: visible;
+  fill: none;
+  stroke: #4a3b33;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transition: opacity var(--base) var(--ease);
+}
+
+.lights:hover .glyph,
+.lights:focus-within .glyph,
+.lights button:focus-visible .glyph {
+  opacity: 1;
+}
+
+.lights:hover .close::before,
+.lights:focus-within .close::before {
+  background: #e0685c;
+}
+.lights:hover .minimize::before,
+.lights:focus-within .minimize::before {
+  background: #dfa53f;
+}
+.lights:hover .maximize::before,
+.lights:focus-within .maximize::before {
+  background: #62b04f;
+}
+
+.lights button:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
