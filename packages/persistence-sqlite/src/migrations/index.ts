@@ -15,12 +15,25 @@ import { statements as projectFolders } from './0010_project_folders'
 import { statements as home } from './0011_home'
 import { statements as withdrawnInput } from './0012_withdrawn_input'
 import { statements as projectChanges } from './0013_project_changes'
+import { statements as modelBlocks } from './0014_model_blocks'
+import { statements as taskRequests } from './0015_task_requests'
+import { statements as settings } from './0016_settings'
+import { statements as artifactImages } from './0017_artifact_images'
+import { statements as questions } from './0018_questions'
+import { statements as runCommands } from './0019_run_commands'
+import { statements as issueDrafts } from './0020_issue_drafts'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
   readonly key: string
   readonly statements: ReadonlyArray<string>
 }
+
+/** Where the migrator records each migration it ran, by number. */
+export const MIGRATIONS_TABLE = 'schema_migrations'
+
+/** A migration's number, as the migrator records it: 18 for `0018_questions`. */
+export const idOf = (migration: Migration) => Number.parseInt(migration.key, 10)
 
 /**
  * Every migration, in order. Migrations are append-only: once released, a
@@ -41,6 +54,13 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0011_home', statements: home },
   { key: '0012_withdrawn_input', statements: withdrawnInput },
   { key: '0013_project_changes', statements: projectChanges },
+  { key: '0014_model_blocks', statements: modelBlocks },
+  { key: '0015_task_requests', statements: taskRequests },
+  { key: '0016_settings', statements: settings },
+  { key: '0017_artifact_images', statements: artifactImages },
+  { key: '0018_questions', statements: questions },
+  { key: '0019_run_commands', statements: runCommands },
+  { key: '0020_issue_drafts', statements: issueDrafts },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

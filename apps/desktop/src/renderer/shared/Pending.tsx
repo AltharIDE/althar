@@ -1,11 +1,11 @@
-import { Skeleton, ThreadMeasure, ThreadSkeleton, TitleBar } from '@althar/ui'
+import { Skeleton, ThreadMeasure, ThreadSkeleton } from '@althar/ui'
 
 import s from './Pending.module.css'
 
 /*
  * What a place shows while what it shows is read, when that takes longer
- * than a glance (the router's `PENDING`): the window's bar, and the shape of
- * what is coming, never a spinner and never an empty screen that might read
+ * than a glance (the router's `PENDING`): under the window's bar, the shape
+ * of what is coming, never a spinner and never an empty screen that might read
  * as nothing there. Its words are for those who can't see it.
  */
 
@@ -19,7 +19,6 @@ export const pendingText = {
 export function ThreadPending() {
   return (
     <div className={s.window}>
-      <TitleBar lights="none">{null}</TitleBar>
       <div className={s.thread}>
         <ThreadMeasure>
           <ThreadSkeleton label={pendingText.thread} />
@@ -33,7 +32,6 @@ export function ThreadPending() {
 export function HomePending() {
   return (
     <div className={s.window}>
-      <TitleBar lights="none">{null}</TitleBar>
       <output className={s.home} aria-label={pendingText.home}>
         <div className={s.stream}>
           <Skeleton width="18%" />
@@ -56,7 +54,6 @@ export function HomePending() {
 export function PagePending() {
   return (
     <div className={s.window}>
-      <TitleBar lights="none">{null}</TitleBar>
       <output className={s.page} aria-label={pendingText.page}>
         <Skeleton width="32%" height={14} />
         <Skeleton width="90%" />

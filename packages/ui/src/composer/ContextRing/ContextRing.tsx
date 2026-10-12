@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import type { ModelInfo } from '../../foundations/Model/Model'
+import type { ModelInfo } from '../../primitives/Model/Model'
 import { HoverCard } from '../../primitives/HoverCard/HoverCard'
 import s from './ContextRing.module.css'
 

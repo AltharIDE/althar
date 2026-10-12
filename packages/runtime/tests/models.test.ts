@@ -104,6 +104,7 @@ describe('the models each agent offers', () => {
         model: 'small',
         effort: 'medium',
         defaults: [],
+        blocked: [],
         probing: false,
       })
       // Asking left nothing behind: no session was recorded for it.
@@ -125,13 +126,22 @@ describe('the models each agent offers', () => {
         model: 'large',
         effort: 'high',
         defaults: [],
+        blocked: [],
         probing: true,
       })
       const [asked] = yield* until(
         Effect.map(models.catalog, (all) => all.filter((agent) => agent.agentId === 'codex')),
         (found) => found[0]?.probing === false,
       )
-      assert.deepStrictEqual(asked, { agentId: 'codex', ...OFFERED, model: 'large', effort: 'high', defaults: [], probing: false })
+      assert.deepStrictEqual(asked, {
+        agentId: 'codex',
+        ...OFFERED,
+        model: 'large',
+        effort: 'high',
+        defaults: [],
+        blocked: [],
+        probing: false,
+      })
       // Changed while it runs, it says what it is on now.
       yield* sessions.setModel({ threadId, model: 'small' })
       yield* sessions.setEffort({ threadId, effort: 'low' })
@@ -159,7 +169,15 @@ describe('the models each agent offers', () => {
         Effect.map(models.catalog, (all) => all.filter((agent) => agent.agentId === 'codex')),
         (found) => found[0]?.probing === false,
       )
-      assert.deepStrictEqual(named, { agentId: 'codex', ...OFFERED, model: 'large', effort: 'high', defaults: [], probing: false })
+      assert.deepStrictEqual(named, {
+        agentId: 'codex',
+        ...OFFERED,
+        model: 'large',
+        effort: 'high',
+        defaults: [],
+        blocked: [],
+        probing: false,
+      })
     }).pipe(Effect.provide(runtime())),
   )
 
@@ -346,6 +364,20 @@ describe('how hard an agent thinks', () => {
       const other = yield* thread
       yield* sessions.start({ threadId: other, agentId: 'claude-code', model: 'large' })
       assert.strictEqual(yield* effortOf(other), 'medium')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('keeps the models the person switched off, and switches them on again', () =>
+    Effect.gen(function* () {
+      const models = yield* Models
+      const blockedOf = (agentId: string) => Effect.map(models.catalog, (all) => all.find((agent) => agent.agentId === agentId)?.blocked)
+      yield* models.setModelBlocked({ agentId: 'codex', model: 'small', blocked: true })
+      yield* models.setModelBlocked({ agentId: 'codex', model: 'small', blocked: true })
+      yield* models.setModelBlocked({ agentId: 'codex', model: 'large', blocked: true })
+      assert.deepStrictEqual(yield* blockedOf('codex'), ['large', 'small'])
+      assert.deepStrictEqual(yield* blockedOf('claude-code'), [])
+      yield* models.setModelBlocked({ agentId: 'codex', model: 'large', blocked: false })
+      assert.deepStrictEqual(yield* blockedOf('codex'), ['small'])
     }).pipe(Effect.provide(runtime())),
   )
 

@@ -309,6 +309,31 @@ describe('GitHub as a code host', () => {
     }),
   )
 
+  it.effect('reads a commit’s statuses alone where check runs are refused, as a fine-grained token’s are', () =>
+    Effect.gen(function* () {
+      const { host } = github([
+        [
+          'GET',
+          `${REPO}/commits/abc/check-runs?per_page=100`,
+          { status: 403, json: { message: 'Resource not accessible by personal access token' } },
+        ],
+        ['GET', `${REPO}/commits/abc/status`, { json: { statuses: [{ id: 3, context: 'ci/circle', state: 'success' }] } }],
+      ])
+      assert.deepStrictEqual(yield* host.checks(repository, 'abc'), [
+        { id: 'status:3', name: 'ci/circle', state: 'passed', url: null, summary: null },
+      ])
+      // Anything else that keeps check runs from being read still fails the checks.
+      const limited = github([
+        [
+          'GET',
+          `${REPO}/commits/abc/check-runs?per_page=100`,
+          { status: 403, headers: { 'x-ratelimit-remaining': '0' }, json: { message: 'API rate limit exceeded' } },
+        ],
+      ])
+      assert.strictEqual((yield* Effect.flip(limited.host.checks(repository, 'abc'))).reason, 'rate_limited')
+    }),
+  )
+
   it.effect('reads the end of a GitHub Actions job’s log, and nothing for other checks', () =>
     Effect.gen(function* () {
       const long = Array.from({ length: 400 }, (_, n) => `line ${n}`).join('\n')
@@ -561,6 +586,81 @@ describe('GitHub as a tracker', () => {
       yield* host.link(found, { url: 'https://x', title: 'x' })
       assert.lengthOf(sent, 1)
       assert.isFalse(host.capabilities.links)
+    }),
+  )
+  it.effect('lists the repositories it can file issues in, last pushed first, leaving out the archived and those without issues', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        [
+          'GET',
+          `${API}/user/repos?per_page=100&sort=pushed&page=1`,
+          {
+            json: [
+              { id: 7, full_name: 'meridian/api', has_issues: true, archived: false },
+              { id: 8, full_name: 'meridian/old', has_issues: true, archived: true },
+              { id: 9, full_name: 'meridian/docs', has_issues: false, archived: false },
+              { id: 10, full_name: 'you/dotfiles' },
+            ],
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* host.containers(), [
+        { id: 'meridian/api', key: 'meridian/api', name: 'meridian/api' },
+        { id: 'you/dotfiles', key: 'you/dotfiles', name: 'you/dotfiles' },
+      ])
+      assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('follows the repositories page after page until a page comes short, and stops at ten', () =>
+    Effect.gen(function* () {
+      const repositories = (page: number, count: number) =>
+        Array.from({ length: count }, (_, at) => ({ id: page * 100 + at, full_name: `meridian/repo-${page}-${at}` }))
+      const listed = `${API}/user/repos?per_page=100&sort=pushed&page=`
+      const { host, sent } = github([
+        ['GET', `${listed}1`, { json: repositories(1, 100) }],
+        ['GET', `${listed}2`, { json: repositories(2, 3) }],
+      ])
+      const found = yield* host.containers()
+      assert.lengthOf(found, 103)
+      assert.strictEqual(found.at(-1)?.id, 'meridian/repo-2-2')
+      assert.deepStrictEqual(
+        sent.map((request) => request.url),
+        [`${listed}1`, `${listed}2`],
+      )
+      // Every page full: ten are read, and no more.
+      const endless = github([['GET', /\/user\/repos\?per_page=100&sort=pushed&page=\d+$/, { json: repositories(0, 100) }]])
+      assert.lengthOf(yield* endless.host.containers(), 1000)
+      assert.lengthOf(endless.sent, 10)
+    }),
+  )
+
+  it.effect('files an issue in a repository, with its labels as they are, or none', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        ['POST', `${REPO}/issues`, { status: 201, json: issue({ assignees: [], labels: [{ name: 'payments' }] }) }],
+      ])
+      const filed = yield* host.create('meridian/api', {
+        title: 'Refunds ignore the rate limit',
+        body: 'They should not.',
+        labels: ['payments'],
+      })
+      assert.deepStrictEqual([filed.ref, filed.labels, filed.container], ['meridian/api#12', ['payments'], 'meridian/api'])
+      assert.deepStrictEqual(sent[0]?.body, { title: 'Refunds ignore the rate limit', body: 'They should not.', labels: ['payments'] })
+      yield* host.create('meridian/api', { title: 'Refunds ignore the rate limit', body: '', labels: [] })
+      assert.deepStrictEqual(sent[1]?.body, { title: 'Refunds ignore the rate limit', body: '' })
+    }),
+  )
+
+  it.effect('says what it was given isn’t a repository, without asking', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([])
+      for (const container of ['meridian', 'meridian/api/web', 'meridian/api#12', 'MER'])
+        assert.deepStrictEqual(
+          (yield* Effect.flip(host.create(container, { title: 't', body: '', labels: [] }))).message,
+          `Not a GitHub repository: ${container}`,
+        )
+      assert.lengthOf(sent, 0)
     }),
   )
 })

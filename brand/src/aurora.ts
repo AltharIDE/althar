@@ -1,17 +1,17 @@
 /*
  * What the Aurora wallpaper is drawn from: the launch's own light and dots
- * (packages/ui/src/screens/Launch), as the app draws them, and the page that
- * lays them out (wallpapers/aurora.html). The export hands this to the page,
- * and writes down what it drew from, so a test notices when the launch or the
- * page changes and the committed wallpapers don't.
+ * (the kit's Light and HalftoneMark), as the app draws them, and the page
+ * that lays them out (wallpapers/aurora.html). The export hands this to the
+ * page, and writes down what it drew from, so a test notices when the launch
+ * or the page changes and the committed wallpapers don't.
  */
 
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { BORE, DOTS, POINT_RADIUS } from '../../packages/ui/src/screens/Launch/halftone'
-import { COLUMNS } from '../../packages/ui/src/screens/Launch/light'
+import { BORE, DOTS, POINT_RADIUS } from '../../packages/ui/src/foundations/HalftoneMark/halftone'
+import { COLUMNS } from '../../packages/ui/src/foundations/Light/columns'
 import { COBALT } from './palette'
 
 /* Rounded to a millionth of a grid unit: engines differ in the last digits of Math.sin, and the export (Bun) and the tests (Node) must agree. */

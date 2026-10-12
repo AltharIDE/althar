@@ -1,24 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
-import { MenuItem } from '../../primitives/Menu/Menu'
 import { ProjectHead } from './ProjectHead'
-
-const menu = (
-  <>
-    <MenuItem icon="gear" onSelect={() => undefined}>
-      Project rules
-    </MenuItem>
-    <MenuItem icon="plus" onSelect={() => undefined}>
-      New task
-    </MenuItem>
-  </>
-)
 
 const meta = {
   title: 'Coordinator/ProjectHead',
   component: ProjectHead,
   parameters: { layout: 'fullscreen' },
-  args: { title: 'Prepare 2.14 for release', meta: 'Project intent · set 3 days ago', menu },
+  args: { title: 'Prepare 2.14 for release', meta: 'Project intent · set 3 days ago' },
   decorators: [
     (Story) => (
       <div style={{ background: 'var(--n-2)', paddingBottom: 40 }}>
@@ -48,6 +36,3 @@ export const Side: Story = {
   ],
   args: { side: true },
 }
-
-/** With nothing to do from it: no menu. */
-export const NoMenu: Story = { args: { menu: undefined } }

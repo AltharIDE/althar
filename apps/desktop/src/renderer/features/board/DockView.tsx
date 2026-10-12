@@ -6,8 +6,9 @@ import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, W
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { modelInfo, waitsWords } from '../../shared/agents'
-import { callKindOf } from '../../shared/calls'
+import { waitsWords } from '../../shared/agents'
+import { useModelNames } from '../../shared/modelNames'
+import { callKindOf, whereOf } from '../../shared/calls'
 import { checkOf } from '../../shared/checks'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
@@ -108,6 +109,7 @@ export function DockView({
   const task = target.kind === 'task' ? board?.tasks.find((candidate) => candidate.taskId === target.id) : undefined
   const head = useHead(task?.phase === 'ready' && task.change !== null ? task.threadId : null, board?.cursor ?? 0)
   useThreadAhead(call?.threadId ?? task?.threadId ?? null)
+  const named = useModelNames()
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   const open = (threadId: string) => (
     <div className={s.actions}>
@@ -120,8 +122,9 @@ export function DockView({
   if (call !== undefined) {
     const stuck = call.stuck
     return (
-      <Dock label={label} name={callKindOf(call)} sub={`${call.taskTitle} · ${ago(call.createdAt, new Date(now))}`} call onClose={onClose}>
-        {stuck === null ? (
+      <Dock label={label} name={callKindOf(call)} sub={`${whereOf(call)} · ${ago(call.createdAt, new Date(now))}`} call onClose={onClose}>
+        {/* A question is answered where it was asked: the task opens to it. */}
+        {call.kind === 'question' ? null : stuck === null ? (
           <PermissionCall request={call} project={project} onAnswer={model.answer} />
         ) : (
           <StuckCall
@@ -138,7 +141,7 @@ export function DockView({
   }
 
   if (task === undefined) return null
-  const lead = modelInfo({ id: task.lead ?? 'agent', name: name(task.lead) }, null)
+  const lead = named(task.lead, task.leadModel)
   // Its branch names it; a task without one, its slug.
   const sub = task.branch ?? task.slug
   const change = task.change

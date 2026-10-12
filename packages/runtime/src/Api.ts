@@ -1,5 +1,7 @@
-import { realpathSync } from 'node:fs'
-import { sep } from 'node:path'
+import { agentVersion } from '@althar/provider-adapters'
+import { lstatSync, realpathSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep } from 'node:path'
 
 import {
   type AccountStatus,
@@ -19,27 +21,35 @@ import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
+import { AccountSignIns } from './AccountSignIns'
 import { Changes } from './Changes'
 import { NotFound } from './errors'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
+import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
 import { Folders } from './Folders'
+import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
+import { Launches } from './Launches'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
 import { accountsOf, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from './Policies'
 import { Models } from './Models'
+import { Installs } from './Installs'
 import { Permissions } from './Permissions'
-import { Projects } from './Projects'
+import { Questions } from './Questions'
+import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
 import { Queries } from './Queries'
 import { timestamp } from './records'
 import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
+import { IssueDrafts } from './IssueDrafts'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
+import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
 import { anyOf, SignIns } from './SignIns'
 import { expected, words } from './words'
@@ -67,22 +77,61 @@ const realpathOf = (path: string) => {
   }
 }
 
+/** Whether something is at a path, a link to nothing included. */
+const isThere = (path: string) => {
+  try {
+    lstatSync(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Where a path really is, links followed: for one not there yet, its nearest
+ * folder that is, and the rest after it. A link to nothing is nowhere: the
+ * empty path, which is inside no folder.
+ */
+const realOf = (path: string): string => {
+  let at = path
+  const rest: string[] = []
+  while (!isThere(at) && dirname(at) !== at) {
+    rest.unshift(basename(at))
+    at = dirname(at)
+  }
+  try {
+    return join(realpathSync(at), ...rest)
+  } catch {
+    return ''
+  }
+}
+/** What the person asked for, as a task they made says it: what they wrote, or, from an issue, which the thread shows, what they added to it. */
+const requestOf = (title: string, description: string | undefined, issue: string | undefined): { readonly request?: string } => {
+  const words = issue === undefined ? [title, description ?? ''].filter((part) => part.trim() !== '').join('\n\n') : (description ?? '')
+  return words.trim() === '' ? {} : { request: words }
+}
 export const handlers = Api.toLayer(
   Effect.gen(function* () {
     const context = yield* Effect.context<Instance | Crypto.Crypto>()
     const projects = yield* Projects
     const sessions = yield* Sessions
+    const launches = yield* Launches
     const permissions = yield* Permissions
+    const questions = yield* Questions
     const queries = yield* Queries
     const folders = yield* Folders
     const live = yield* Live
     const signIns = yield* SignIns
     const accounts = yield* Accounts
     const limits = yield* Limits
+    const installs = yield* Installs
     const models = yield* Models
+    const accountSignIns = yield* AccountSignIns
     const policies = yield* Policies
     const plans = yield* Plans
+    const issueDrafts = yield* IssueDrafts
     const runs = yield* Runs
+    const tasks = yield* Tasks
     const coordinator = yield* Coordinator
     const instance = yield* Instance
     const sql = yield* SqlClient.SqlClient
@@ -139,12 +188,35 @@ export const handlers = Api.toLayer(
       state: info.state,
     })
 
+    /**
+     * A repository as its page shows it: where its work goes, from its
+     * remote, with the code host Althar knows there and who it is signed in
+     * as; a host it doesn't know by its address alone.
+     */
+    const repositoryOf = ({ remote, ...repository }: ProjectRepository) =>
+      Effect.gen(function* () {
+        const place = remote === null ? null : yield* Effect.orElseSucceed(connections.placeOf(remote), () => null)
+        const path = place?.path.join('/')
+        const host =
+          place === null || path === undefined
+            ? null
+            : {
+                product: place.code?.product ?? null,
+                name: place.code?.name ?? place.host,
+                instance: place.code === null || place.code.hosted ? null : place.host,
+                path,
+                url: place.url,
+                account: place.connection === null ? null : { login: place.connection.account.login, state: place.connection.state },
+              }
+        return { ...repository, host }
+      })
+
     /** The issue a task comes from, read before the task is made, so its key can go in the task's branch. */
     const issueFor = (projectId: string, issue: string | undefined) =>
       issue === undefined ? Effect.succeed(undefined) : issues.read(issue, projectId)
 
     /** A project's rules as its rules screen shows them, with what each of its repositories says on its default branch. */
-    const rulesView = (projectId: string, rules: ProjectRules) =>
+    const rulesView = (projectId: string, { rules, revision }: { readonly rules: ProjectRules; readonly revision: number }) =>
       Effect.gen(function* () {
         const repositories = yield* sql<{ name: string; path: string; base: string | null }>`
           SELECT b.display_name AS name, l.path, b.default_base_ref AS base FROM repository_bindings b
@@ -161,10 +233,10 @@ export const handlers = Api.toLayer(
             })),
           { concurrency: 4 },
         )
-        return { ...rulesFields(projectId, rules), conventions }
+        return { ...rulesFields(projectId, rules), revision, conventions }
       })
 
-    const rulesFields = (projectId: string, rules: ProjectRules): Omit<ProjectRulesView, 'conventions'> => {
+    const rulesFields = (projectId: string, rules: ProjectRules): Omit<ProjectRulesView, 'conventions' | 'revision'> => {
       const set = ruleSetOf(rules)
       const accounts = accountsOf(rules)
       return {
@@ -172,6 +244,7 @@ export const handlers = Api.toLayer(
         permissions: set.mode,
         alwaysAsk: set.ask,
         never: set.never,
+        alwaysAllow: set.allow,
         commands: set.commands,
         end: rules.end ?? null,
         usageLimit: usageLimitOf(rules),
@@ -198,17 +271,30 @@ export const handlers = Api.toLayer(
         } satisfies AccountStatus
       })
 
+    /* Each agent's version, asked of its CLI once a launch. */
+    const versions = new Map<string, string | null>()
+    const versionOf = (entry: AgentEntry) =>
+      versions.has(entry.definition.id)
+        ? Effect.succeed(versions.get(entry.definition.id) ?? null)
+        : agentVersion(entry.definition).pipe(Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))))
+
     /* An agent, with its accounts: each check starts the agent's own status command, in the account's home. */
     const signIn = (entry: AgentEntry, recheck: boolean) =>
       Effect.gen(function* () {
         const statuses = yield* Effect.forEach(yield* accounts.of(entry.definition.id), (account) => accountStatus(account, recheck), {
           concurrency: 'unbounded',
         })
+        const install = yield* installs.state(entry.definition)
         return {
           id: entry.definition.id,
           name: entry.definition.name,
+          installed: entry.definition.cli === undefined || install.located !== null,
+          kept: install.located?.whose === 'althar',
+          download: install.downloadable && install.size !== null ? { size: install.size, installing: install.installing } : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
+          version: yield* versionOf(entry),
+          ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
         } satisfies AgentStatus
       })
@@ -254,9 +340,15 @@ export const handlers = Api.toLayer(
                   agentId: event.agentId,
                   text: event.text,
                 })
-              : event._tag === 'Agent' && event.event._tag === 'ContextUsage'
-                ? Stream.make({ _tag: 'Context', threadId: event.threadId, used: event.event.used, size: event.event.size })
-                : Stream.empty,
+              : event._tag === 'Output'
+                ? Stream.make({ _tag: 'Output', threadId: event.threadId, itemId: event.itemId, text: event.text, dropped: event.dropped })
+                : event._tag === 'Agent' && event.event._tag === 'ContextUsage'
+                  ? Stream.make({ _tag: 'Context', threadId: event.threadId, used: event.event.used, size: event.event.size })
+                  : event._tag === 'Background'
+                    ? Stream.make({ _tag: 'Background', threadId: event.threadId, background: event.background })
+                    : event._tag === 'Launches'
+                      ? Stream.make({ _tag: 'Launches', projectId: event.projectId, launches: event.launches })
+                      : Stream.empty,
           ),
         ),
       ),
@@ -280,7 +372,7 @@ export const handlers = Api.toLayer(
             return { ...reading, repositories: [...reading.repositories] }
           }),
         ),
-      OpenProject: ({ commandId, grant, name, repositories }) =>
+      OpenProject: ({ commandId, grant, name, repositories, projectId, ink }) =>
         api(
           Effect.gen(function* () {
             const path = yield* folders.path(grant)
@@ -298,10 +390,12 @@ export const handlers = Api.toLayer(
                     }),
                   )
             const opened = yield* projects.open({
-              envelope: yield* envelope('project.open', { path }, commandId),
+              envelope: yield* envelope('project.open', projectId === undefined ? { path } : { path, projectId }, commandId),
               path,
               ...(name === undefined ? {} : { name }),
               ...(roots === undefined ? {} : { repositories: roots }),
+              ...(projectId === undefined ? {} : { projectId }),
+              ...(ink === undefined ? {} : { ink }),
             })
             const { projects: all } = yield* queries.projects
             const found = all.find((project) => project.id === opened.projectId)
@@ -337,6 +431,16 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      SetProjectInk: ({ commandId, projectId, ink }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.set_ink', { projectId, ink }, commandId)
+              yield* projects.setInk(projectId, ink, said.commandId)
+            }),
+          ),
+        ),
       RemoveProject: ({ commandId, projectId }) =>
         once(
           commandId,
@@ -349,7 +453,8 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      GetRepositories: ({ projectId }) => api(Effect.map(projects.repositories(projectId), (list) => [...list])),
+      GetRepositories: ({ projectId }) =>
+        api(Effect.flatMap(projects.repositories(projectId), (list) => Effect.forEach(list, repositoryOf))),
       AddRepositories: ({ commandId, projectId, grant }) =>
         once(
           commandId,
@@ -398,6 +503,7 @@ export const handlers = Api.toLayer(
               ...(description === undefined ? {} : { description }),
               ...(from === undefined ? {} : { issueKey: from.key }),
               ...(repositories === undefined ? {} : { repositories }),
+              ...requestOf(title, description, issue),
             })
             if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
             return yield* queries.task(created.taskId)
@@ -412,6 +518,8 @@ export const handlers = Api.toLayer(
           }),
         ),
       GetThreadItem: ({ threadId, itemId }) => api(queries.item(threadId, itemId)),
+      ReadOutput: ({ threadId, itemId }) => api(queries.output(threadId, itemId)),
+      ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       GetFileDiff: ({ taskId, path }) => api(queries.fileDiff(taskId, path)),
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
       GetHome: ({ since }) => api(queries.home(since)),
@@ -428,15 +536,34 @@ export const handlers = Api.toLayer(
             sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
           ),
         ),
-      SwitchAgent: ({ commandId, threadId, agentId, model, effort }) =>
+      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body }) =>
         once(
           commandId,
           api(
-            sessions.switchAgent({
-              threadId,
-              agentId,
-              ...(model === undefined ? {} : { model }),
-              ...(effort === undefined ? {} : { effort }),
+            Effect.gen(function* () {
+              // What the person said with it is said to the thread, under a command of its own.
+              const message =
+                body === undefined
+                  ? undefined
+                  : {
+                      // Its own command id, made from the switch's, so a retry of the switch is a retry of it too.
+                      envelope: yield* envelope(
+                        'thread.send',
+                        { threadId, body, disposition: 'after_current' },
+                        `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
+                      ),
+                      body,
+                    }
+              const sessionId = yield* sessions.switchAgent({
+                threadId,
+                agentId,
+                ...(model === undefined ? {} : { model }),
+                ...(effort === undefined ? {} : { effort }),
+                ...(message === undefined ? {} : { message }),
+              })
+              // Links in what the person said unfurl on their message, as when it is sent on its own.
+              if (message !== undefined) yield* Effect.forkDetach(issues.unfurlInput(message.envelope.commandId))
+              return sessionId
             }),
           ),
         ),
@@ -445,8 +572,44 @@ export const handlers = Api.toLayer(
       GetModels: () => api(models.catalog),
       SetDefaultEffort: ({ commandId, agentId, model, effort }) =>
         once(commandId, api(models.setDefaultEffort({ agentId, model, effort }))),
+      SetModelBlocked: ({ commandId, agentId, model, blocked }) =>
+        once(commandId, api(models.setModelBlocked({ agentId, model, blocked }))),
+      GetSettings: () =>
+        api(Effect.map(coAuthorOn, (on) => ({ coAuthor: { on, line: coAuthorLine } }))).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+        ),
+      SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       Interrupt: ({ commandId, threadId }) => once(commandId, api(sessions.interrupt(threadId))),
       StopSession: ({ commandId, threadId }) => once(commandId, api(sessions.stop(threadId))),
+      StopTask: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.stop', { taskId }, commandId), (said) => tasks.stop({ envelope: said, taskId }))),
+        ),
+      ResumeTask: ({ commandId, taskId, agentId, model, effort }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.resume', { taskId, agentId }, commandId), (said) =>
+              tasks.resume({
+                envelope: said,
+                taskId,
+                // The agent the person picked, else its last lead.
+                ...(agentId === undefined ? {} : { lead: { agentId, model: model ?? null, effort: effort ?? null } }),
+              }),
+            ),
+          ),
+        ),
+      AbandonTask: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.abandon', { taskId }, commandId), (said) => tasks.abandon({ envelope: said, taskId }))),
+        ),
+      ReopenTask: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
+        ),
       Send: ({ commandId, threadId, body, disposition }) =>
         api(
           Effect.gen(function* () {
@@ -486,6 +649,7 @@ export const handlers = Api.toLayer(
                 draft: true,
                 ...(from === undefined ? {} : { issueKey: from.key }),
                 ...(repositories === undefined ? {} : { repositories }),
+                ...requestOf(title, description, issue),
               })
               if (issue !== undefined) yield* issues.attach({ projectId: projectId as ProjectId, taskId: created.taskId, issue })
               // A task you start yourself is planned like any other, and starts at once; its card shows in the coordinator's thread.
@@ -506,6 +670,10 @@ export const handlers = Api.toLayer(
       StartPlan: ({ commandId, planId }) => once(commandId, api(plans.start(planId, instance.personId))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
+      ChangeIssueDraft: ({ commandId, draftId, title, body, labels }) =>
+        once(commandId, api(issueDrafts.change(draftId, { title, body, labels }, instance.personId))),
+      FileIssueDraft: ({ commandId, draftId }) => once(commandId, api(Effect.asVoid(issueDrafts.file(draftId, instance.personId)))),
+      DiscardIssueDraft: ({ commandId, draftId }) => once(commandId, api(issueDrafts.discard(draftId, instance.personId))),
       AnswerStuck: ({ commandId, attentionId, answer }) =>
         once(
           commandId,
@@ -519,14 +687,47 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      Answer: ({ commandId, attentionId, decision, reason }) =>
+      AnswerQuestion: ({ commandId, attentionId, answers }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const answer = Effect.gen(function* () {
+                const answered = yield* questions.answer({
+                  envelope: yield* envelope('attention.answer_question', { attentionId, answers }, commandId),
+                  attentionId,
+                  answers,
+                })
+                if (answered.told) return
+                // The agent that asked has gone: the answer is told to the one on its thread next, started for it.
+                const tell = {
+                  envelope: yield* Effect.provideContext(
+                    Runtime.envelope('thread.send', { threadId: answered.threadId, answered: attentionId }),
+                    context,
+                  ),
+                  threadId: answered.threadId,
+                  body: answered.body,
+                }
+                const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${answered.threadId}`
+                if (thread?.kind === 'coordinator') yield* coordinator.say({ ...tell, disposition: 'after_current', quiet: true })
+                else yield* runs.answered(tell)
+              })
+              // A task's question is answered in the task's turn: stopping it comes first, and the question is withdrawn, or
+              // after, and the agent the answer started stops.
+              const [asked] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM attention_requests WHERE id = ${attentionId}`
+              yield* asked === undefined || asked.taskId === null ? answer : tasks.inTurn(asked.taskId, answer)
+            }),
+          ),
+        ),
+      Answer: ({ commandId, attentionId, decision, reason, always }) =>
         api(
           Effect.gen(function* () {
             yield* permissions.answer({
-              envelope: yield* envelope('attention.answer', { attentionId, decision, reason }, commandId),
+              envelope: yield* envelope('attention.answer', { attentionId, decision, reason, always }, commandId),
               attentionId,
               decision,
               ...(reason === undefined ? {} : { reason }),
+              ...(always === undefined ? {} : { always }),
             })
           }),
         ),
@@ -542,6 +743,7 @@ export const handlers = Api.toLayer(
                 .filter((info) => info.make !== null)
                 .map((info) => ({
                   product: info.product,
+                  service: info.service,
                   name: info.name,
                   host: info.host,
                   tracker: info.tracker,
@@ -549,18 +751,29 @@ export const handlers = Api.toLayer(
                   selfHosted: info.selfHosted,
                   browserSignIn: info.browserSignIn,
                   tokenNeeds: info.token.needs,
-                  tokenHelp: info.token.help(info.hosted?.webUrl ?? ''),
+                  tokenPrefixes: info.token.prefixes,
                   tokenHelpForKey: info.token.helpForKey ?? null,
                   keyChecks: info.token.keyChecks ?? [],
                 })),
+              places: yield* connections.places,
             }
           }),
         ),
-      StartSignIn: ({ commandId, product, webUrl }) =>
-        once(commandId, api(connections.startSignIn({ product, actorId: instance.personId, ...(webUrl === undefined ? {} : { webUrl }) }))),
+      StartSignIn: ({ commandId, product, webUrl, connectionId }) =>
+        once(
+          commandId,
+          api(
+            connections.startSignIn({
+              product,
+              actorId: instance.personId,
+              ...(webUrl === undefined ? {} : { webUrl }),
+              ...(connectionId === undefined ? {} : { connectionId }),
+            }),
+          ),
+        ),
       GetSignIn: ({ flowId }) => api(connections.signIn(flowId)),
       CancelSignIn: ({ flowId }) => api(connections.cancelSignIn(flowId)),
-      ConnectToken: ({ commandId, product, webUrl, user, key, token }) =>
+      ConnectToken: ({ commandId, product, webUrl, user, key, token, connectionId }) =>
         once(
           commandId,
           api(
@@ -572,11 +785,30 @@ export const handlers = Api.toLayer(
                 ...(webUrl === undefined ? {} : { webUrl }),
                 ...(user === undefined ? {} : { user }),
                 ...(key === undefined ? {} : { key }),
+                ...(connectionId === undefined ? {} : { connectionId }),
               }),
               connectionOf,
             ),
           ),
         ),
+      GetConnectGuide: ({ service }) => api(connections.guide(service)),
+      FindServer: ({ service, webUrl }) => api(connections.findServer(service, webUrl)),
+      ConnectCli: ({ commandId, product, webUrl, connectionId }) =>
+        once(
+          commandId,
+          api(
+            Effect.map(
+              connections.connectCli({
+                product,
+                webUrl,
+                actorId: instance.personId,
+                ...(connectionId === undefined ? {} : { connectionId }),
+              }),
+              connectionOf,
+            ),
+          ),
+        ),
+      CheckConnection: ({ connectionId }) => api(connections.check(connectionId)),
       Disconnect: ({ commandId, connectionId }) => once(commandId, api(connections.remove(connectionId, instance.personId))),
       ListIssues: ({ projectId }) => api(Effect.map(issues.mine(projectId), (found) => ({ issues: found }))),
       MarkReady: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.markReady(taskId, url))),
@@ -616,16 +848,32 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
+      StartAccountSignIn: ({ commandId, accountId, way }) => once(commandId, api(accountSignIns.start({ accountId, way }))),
+      GetAccountSignIn: ({ flowId }) => accountSignIns.get(flowId),
+      PasteAccountSignInCode: ({ commandId, flowId, code }) => once(commandId, api(accountSignIns.paste(flowId, code))),
+      CancelAccountSignIn: ({ commandId, flowId }) => once(commandId, api(accountSignIns.cancel(flowId))),
       GetProjectRules: ({ projectId }) =>
         api(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
             const [project] = yield* sql<{ id: ProjectId }>`SELECT id FROM projects WHERE id = ${projectId}`
             if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
-            return yield* rulesView(projectId, (yield* policies.current(project.id)).rules)
+            return yield* rulesView(projectId, yield* policies.current(project.id))
           }),
         ),
-      SetProjectRules: ({ commandId, projectId, rotateAccounts, onlyAccounts, ...change }) =>
+      GetVocabulary: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${projectId}`
+            if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+            const repositories = yield* sql<{ name: string; path: string; within: string | null }>`
+              SELECT b.display_name AS name, l.path, b.folder AS within FROM repository_bindings b
+              JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+              WHERE b.project_id = ${projectId} AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid`
+            return [...(yield* vocabulary(project.name, repositories))]
+          }),
+        ),
+      SetProjectRules: ({ commandId, projectId, rotateAccounts, onlyAccounts, expectedRevision, ...change }) =>
         once(
           commandId,
           api(
@@ -642,8 +890,10 @@ export const handlers = Api.toLayer(
                           : { only: (onlyAccounts === undefined ? now.only : onlyAccounts) ?? {} }),
                       },
                     }
-              const rules = yield* policies.set(projectId, { ...change, ...accounts }, instance.personId)
-              return yield* rulesView(projectId, rules)
+              yield* policies.set(projectId, { ...change, ...accounts }, instance.personId, expectedRevision)
+              // A call still waiting that the rules no longer keep for the person is answered by them.
+              yield* permissions.reconsider(projectId)
+              return yield* rulesView(projectId, yield* policies.current(projectId as ProjectId))
             }),
           ),
         ),
@@ -655,11 +905,57 @@ export const handlers = Api.toLayer(
       Merge: ({ commandId, taskId, head, url }) => once(commandId, api(pullRequests.merge(taskId, head, url))),
       MergeHere: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.mergeHere(taskId, heads)))),
       Push: ({ commandId, taskId, head, url }) => once(commandId, api(Effect.asVoid(pullRequests.push(taskId, head, url)))),
+      PushHere: ({ commandId, taskId }) => once(commandId, api(Effect.asVoid(pullRequests.pushHere(taskId)))),
+      PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
+      ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
+      // Done once the copy is ready; its version and its models are asked again, as it is a new one.
+      InstallAgent: ({ agentId }) =>
+        api(
+          Effect.gen(function* () {
+            const entry = yield* agents.get(agentId)
+            yield* installs.install(entry.definition)
+            versions.delete(agentId)
+            yield* models.forget(agentId)
+          }),
+        ),
+      OpenInEditor: ({ taskId, editor, path, line }) =>
+        api(
+          Effect.gen(function* () {
+            const open = config.editors?.open
+            if (open === undefined) return false
+            // The task's folder: its worktree, or with several the folder that holds them, which its changes' paths start from.
+            const worktrees = yield* sql<{ path: string }>`
+              SELECT path FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} ORDER BY created_at, rowid`
+            const [first] = worktrees
+            if (first === undefined) return yield* new NotFound({ kind: 'task worktree', id: taskId })
+            const folder = yield* Effect.sync(() => realOf(worktrees.length > 1 ? dirname(first.path) : first.path))
+            // A path from the task's changes, never one that leaves its folder, by `..` or by a link.
+            const file = path === undefined ? null : yield* Effect.sync(() => realOf(resolve(folder, path)))
+            if (file !== null && !isInside(folder, file)) return false
+            return yield* open(editor, folder, file, line ?? null)
+          }),
+        ),
       RefreshTask: ({ taskId }) => pullRequests.refresh(taskId),
+      StopListening: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.stopListening(taskId, url))),
+      StopBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.stopBackground(threadId, id))),
+      ClearBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.clearBackground(threadId, id))),
+      RunProject: ({ commandId, projectId, taskId, threadId }) => once(commandId, api(launches.start({ projectId, taskId, threadId }))),
+      StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
+      ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
     })
   }),
 )
+
+/** Whether a file is in a folder, as this system writes paths (`C:\\…` on Windows): not the folder itself, nor out of it by `..`. */
+export const isInside = (
+  folder: string,
+  file: string,
+  paths: Pick<typeof posix, 'relative' | 'isAbsolute' | 'sep'> = { relative, isAbsolute, sep },
+) => {
+  const within = paths.relative(folder, file)
+  return within !== '' && within !== '..' && !within.startsWith(`..${paths.sep}`) && !paths.isAbsolute(within)
+}
 
 /** The runtime's services: the store, this launch, and everything the API calls. Built once per launch. */
 export const services = (options: Runtime.RuntimeLayerOptions) =>

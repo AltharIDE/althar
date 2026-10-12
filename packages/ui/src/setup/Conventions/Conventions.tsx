@@ -30,7 +30,7 @@ export interface NamingRuleText {
   found: (from: string, pattern: string) => string
   /** A repository whose docs say nothing: Althar's own pattern. */
   none: (pattern: string) => string
-  /** After either, with the person's own pattern set. */
+  /** After either, as a sentence of its own, with the person's own pattern set. */
   overridden: string
   /** Takes the person's pattern back. */
   clear: string
@@ -116,7 +116,7 @@ export function NamingRule({ value, onChange, error, exampleOf, fallback, reposi
           <span key={repository.id} className={s.note}>
             {several && <span className={s.name}>{repository.name}</span>}
             {repository.found === null ? t.none(fallback) : t.found(repository.found.from, repository.found.pattern)}
-            {value !== null && ` ${t.overridden}`}
+            {value !== null && `. ${t.overridden}`}
           </span>
         ))}
       </span>

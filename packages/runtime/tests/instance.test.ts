@@ -143,15 +143,12 @@ describe('the runtime instance', () => {
         }
       }).pipe(Effect.provide(runtime(file)))
 
-      // Each task whose lead the restart stopped says so in its thread.
+      // No thread says the restart stopped its lead: that is Althar's business, and the lead starts again when it is written to.
       const said = yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         return yield* sql<{ content: string }>`SELECT content FROM thread_items WHERE kind = 'notice' ORDER BY sequence`
       }).pipe(Effect.provide(runtime(file)))
-      assert.deepStrictEqual(
-        said.map((row) => (JSON.parse(row.content) as { title: string }).title),
-        ['Althar restarted.', 'Althar restarted.', 'Althar restarted.', 'Althar restarted.'],
-      )
+      assert.deepStrictEqual(said, [])
       assert.deepStrictEqual(after, {
         crashedEnded: true,
         sessions: ['lost', 'lost', 'failed', 'uncertain'],
@@ -165,6 +162,30 @@ describe('the runtime instance', () => {
       assert.isFalse(alive(sleeper.pid))
       // What the leaderless group's leader left running was stopped with it.
       assert.isFalse(alive(Number(readFileSync(leaderPidFile, 'utf8').trim())))
+    }),
+  )
+
+  it.live('starts nothing on a store an update couldn’t migrate, and says where the copy from before it is', () =>
+    Effect.gen(function* () {
+      const file = database()
+      const backups = join(file, '..', 'backups')
+      const launches = Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ id: string }>`SELECT id FROM runtime_instances`)
+      yield* Effect.provide(launches, runtime(file))
+
+      const failing = { key: '9999_fails', statements: ['INSERT INTO no_such_table VALUES (1)'] }
+      const update = Runtime.layer({
+        database: file,
+        backups,
+        extraMigrations: [failing],
+        worktreeRoot: tmpdir(),
+        appVersion: '0.0.1',
+        deviceName: 'Test Mac',
+      })
+      const error = yield* Effect.flip(Effect.provide(Effect.void, update))
+      assert.strictEqual(error._tag, 'MigrationFailed')
+      assert.match(error._tag === 'MigrationFailed' ? (error.backup ?? '') : '', /\/backups\/althar-\d{4}-[\d-]+\.sqlite$/)
+      // The failed launch recorded nothing: only the first and this look at it did.
+      assert.lengthOf(yield* Effect.provide(launches, runtime(file)), 2)
     }),
   )
 

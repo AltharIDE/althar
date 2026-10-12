@@ -20,3 +20,21 @@ export const openInTerminal = (line: string): Effect.Effect<boolean> =>
         chmodSync(script, 0o700)
         execFile('open', ['-a', 'Terminal', script], (error) => resume(Effect.succeed(error === null)))
       })
+
+/**
+ * Opens a page in the person's browser: an agent's sign-in that doesn't open
+ * one itself (Codex's). `open` on macOS; on Windows, the shell's own handler
+ * for links, which takes the address as it is, with no command line to quote
+ * it for; `xdg-open` elsewhere that has it.
+ */
+export const openInBrowser = (url: string, platform: NodeJS.Platform = process.platform): Effect.Effect<boolean> =>
+  !url.startsWith('https://')
+    ? Effect.succeed(false)
+    : Effect.callback<boolean>((resume) => {
+        const [command, ...args] = browserCommand(url, platform)
+        execFile(command ?? 'open', args, (error) => resume(Effect.succeed(error === null)))
+      })
+
+/** The command that opens a page on each system. */
+export const browserCommand = (url: string, platform: NodeJS.Platform): ReadonlyArray<string> =>
+  platform === 'darwin' ? ['open', url] : platform === 'win32' ? ['rundll32', 'url.dll,FileProtocolHandler', url] : ['xdg-open', url]

@@ -2,7 +2,7 @@ import { Accordion as A } from 'radix-ui'
 import type { ReactNode } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
-import { Model, type ModelInfo } from '../../foundations/Model/Model'
+import { Model, type ModelInfo } from '../../primitives/Model/Model'
 import { ToolState, unreachable } from '../../foundations/vocabulary'
 import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'

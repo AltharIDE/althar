@@ -7,7 +7,9 @@ import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Kbd } from '../../primitives/Kbd/Kbd'
 import { cssVars } from '../../lib/cssVars'
+import { useRefocus } from '../../lib/refocus'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
+import { Menu, MenuRadioGroup, MenuRadioItem } from '../../primitives/Menu/Menu'
 import s from './Composer.module.css'
 
 /* Bars at rest, for a transcriber that does not report levels. */
@@ -18,11 +20,36 @@ export interface Dictation {
   elapsed: string | null
   /** How loud you are, recent first-to-last, each from 0 to 1: drawn as bars while dictating. */
   levels?: readonly number[]
-  /** Words heard and not yet settled, shown faint after what is written. For a transcriber that streams. */
+  /** Words heard and not yet settled, shown faint where they will land (`at`), while listening and until they are written. For a transcriber that streams. */
   interim?: string
+  /** Where in what is written the words will land; the end when not given. */
+  at?: number
+  /** The shortcut that starts and stops dictating, shown in the microphone's tooltip; the consumer binds it. */
+  kbd?: string
+  /** Writing down what was said, or getting the speech model ready: the microphone turns. */
+  busy?: boolean
+  /** The speech model coming down, from 0 to 1: a ring fills round the microphone. */
+  progress?: number
+  /** The microphone's tray (`tray`) is open. */
+  expanded?: boolean
+  /** The microphones to choose from, after the system's default, which always comes first. Empty until the system names them. */
+  inputs?: readonly DictationInput[]
+  /** The chosen microphone's id; null for the system's default. */
+  input?: string | null
+  /** Chooses the microphone dictation hears (null: the system's default). With it, a menu beside the microphone offers them, while dictating too. */
+  onChooseInput?: (id: string | null) => void
   onStart: () => void
   onStop: () => void
 }
+
+/** A microphone dictation can hear. */
+export interface DictationInput {
+  id: string
+  label: string
+}
+
+/* The menu's value for the system's default, which has no id of its own. */
+const SYSTEM_DEFAULT = ''
 
 /** Something you sent while the agent worked, waiting for it to finish what it is doing. */
 export interface QueuedMessage {
@@ -48,7 +75,19 @@ export interface ComposerText {
   sendNowKey: string
   newlineNote: string
   dictate: string
+  /** The microphone while what was said is written down, or the speech model is made ready. */
+  dictateBusy: string
+  /** The microphone while the speech model downloads. */
+  dictateProgress: (percent: number) => string
   stopDictating: (elapsed: string) => string
+  /** The button beside the microphone that opens the list of microphones. */
+  chooseInput: string
+  /** The list's name and heading. */
+  inputs: string
+  /** The first choice: whichever microphone the system uses. */
+  systemDefault: string
+  /** Under the list, while the system names no microphones. */
+  inputsNote: string
   /** The field's placeholder while dictating. */
   listening: string
   queued: (n: number) => string
@@ -69,7 +108,13 @@ export const composerText: ComposerText = {
   sendNowKey: '⌘↵',
   newlineNote: 'Shift+Enter for a new line',
   dictate: 'Dictate',
+  dictateBusy: 'Writing down what you said',
+  dictateProgress: (percent) => `Dictate. The speech model is downloading, ${percent}%`,
   stopDictating: (elapsed) => `Stop dictating, ${elapsed}`,
+  chooseInput: 'Choose the microphone',
+  inputs: 'Microphone',
+  systemDefault: 'System default',
+  inputsNote: 'Other microphones show here once Althar may use the microphone.',
   listening: 'Listening…',
   queued: (n) => (n === 1 ? 'Queued; the lead reads it next' : `${n} queued; the lead reads them in order`),
   editQueued: 'Edit',
@@ -103,6 +148,8 @@ export interface ComposerProps {
   hint?: string
   /** What floats on the composer's top edge: what the agent listens to, what it left running. */
   above?: ReactNode
+  /** What is joined to the composer's top edge, in the flow: a DictationTray. The field stays usable under it. */
+  tray?: ReactNode
   inputRef?: RefObject<HTMLTextAreaElement | null>
   className?: string
   text?: Partial<ComposerText>
@@ -130,6 +177,7 @@ export function Composer({
   onUnqueue,
   hint,
   above,
+  tray,
   inputRef,
   className,
   text,
@@ -139,8 +187,16 @@ export function Composer({
   const ref = inputRef ?? own
   const hintId = useId()
   const elapsed = dictation?.elapsed ?? null
-  const interim = elapsed !== null ? (dictation?.interim ?? '') : ''
+  const interim = dictation?.interim ?? ''
+  /* While words arrive or are written down, the field is the dictation's: typing would land where they are about to. */
+  const dictating = elapsed !== null || dictation?.busy === true
+  const overlay = useRef<HTMLDivElement>(null)
+  const at = Math.max(0, Math.min(value.length, dictation?.at ?? value.length))
+  const before = value.slice(0, at)
+  const after = value.slice(at)
   const drafted = value.trim() !== ''
+  /* the microphone takes focus back when its tray closes with focus inside it */
+  const mic = useRefocus<HTMLButtonElement>(tray != null)
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -181,90 +237,146 @@ export function Composer({
     return null
   })()
 
+  /* One shape whether or not a tray shows, so the field is never rebuilt under the cursor as one comes and goes. What floats sits above the tray, not over it. */
   return (
-    <form className={cx(s.composer, elapsed !== null && s.recording, className)} onSubmit={submit}>
+    <div className={s.stack} data-tray-host="">
       {above && <div className={s.above}>{above}</div>}
-      {queued.length > 0 && (
-        <section className={s.queue} aria-label={t.queued(queued.length)}>
-          <span className={s.queueHead}>
-            <Icon name="clock" size={11} />
-            {t.queued(queued.length)}
-          </span>
-          <ol className={s.queueList}>
-            {queued.map((q) => (
-              <li key={q.id} className={s.queued}>
-                <span className={s.queuedText}>{q.text}</span>
-                {onEditQueued && (
-                  <LinkButton className={s.queuedEdit} onClick={() => onEditQueued(q.id)}>
-                    {t.editQueued}
-                  </LinkButton>
-                )}
-                {onUnqueue && <IconButton icon="close" size="small" label={t.unqueue(q.text)} onClick={() => onUnqueue(q.id)} />}
-              </li>
+      {tray != null && <div className={s.tray}>{tray}</div>}
+      <form className={cx(s.composer, elapsed !== null && s.recording, className)} onSubmit={submit}>
+        {queued.length > 0 && (
+          <section className={s.queue} aria-label={t.queued(queued.length)}>
+            <span className={s.queueHead}>
+              <Icon name="clock" size={11} />
+              {t.queued(queued.length)}
+            </span>
+            <ol className={s.queueList}>
+              {queued.map((q) => (
+                <li key={q.id} className={s.queued}>
+                  <span className={s.queuedText}>{q.text}</span>
+                  {onEditQueued && (
+                    <LinkButton className={s.queuedEdit} onClick={() => onEditQueued(q.id)}>
+                      {t.editQueued}
+                    </LinkButton>
+                  )}
+                  {onUnqueue && <IconButton icon="close" size="small" label={t.unqueue(q.text)} onClick={() => onUnqueue(q.id)} />}
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+        <div className={s.field}>
+          {/* the words still arriving, faint where they will land; while they show, this draws what is written too, and the field's own text goes clear */}
+          {interim && (
+            <div ref={overlay} className={s.interim} aria-hidden="true">
+              <span className={s.written}>{before}</span>
+              {before && !/\s$/.test(before) ? ' ' : ''}
+              {interim}
+              {after && !/^\s/.test(after) ? ' ' : ''}
+              <span className={s.written}>{after}</span>
+            </div>
+          )}
+          <textarea
+            ref={ref}
+            rows={1}
+            value={value}
+            className={cx(interim && s.under)}
+            readOnly={dictating}
+            onScroll={(e) => {
+              if (overlay.current) overlay.current.scrollTop = e.currentTarget.scrollTop
+            }}
+            placeholder={shownPlaceholder}
+            aria-label={placeholder}
+            aria-describedby={note ? hintId : undefined}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+              if ((e.metaKey || e.ctrlKey) && canSendNow) {
+                e.preventDefault()
+                sendNow()
+                return
+              }
+              submit(e)
+            }}
+          />
+        </div>
+        <div className={s.bar}>
+          {picker}
+          <span className={s.space} />
+          {note && (
+            <span id={hintId} className={s.note}>
+              {note}
+            </span>
+          )}
+          {canSendNow && (
+            <Tooltip label={t.sendNowNote}>
+              <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey}>
+                {t.sendNow}
+              </ActionButton>
+            </Tooltip>
+          )}
+          {meter}
+          {dictation &&
+            (elapsed !== null ? (
+              <button type="button" className={s.recButton} onClick={dictation.onStop} aria-label={t.stopDictating(elapsed)}>
+                <span className={s.wave} aria-hidden="true">
+                  {(dictation.levels ?? QUIET).map((l, i) => (
+                    <i key={i} style={cssVars({ '--l': Math.max(0, Math.min(1, l)) })} />
+                  ))}
+                </span>
+                {elapsed}
+                <Icon name="square" size={11} />
+              </button>
+            ) : (
+              <IconButton
+                ref={mic}
+                icon="mic"
+                label={micLabel(dictation, t)}
+                {...(dictation.kbd === undefined ? {} : { kbd: dictation.kbd })}
+                busy={dictation.busy}
+                progress={dictation.busy ? undefined : dictation.progress}
+                aria-expanded={dictation.expanded}
+                onClick={dictation.onStart}
+              />
             ))}
-          </ol>
-        </section>
-      )}
-      <div className={s.field}>
-        {/* the words still arriving, faint after what is written; the field's own text shows through clear */}
-        {interim && (
-          <div className={s.interim} aria-hidden="true">
-            <span className={s.written}>{value}</span>
-            {value && !/\s$/.test(value) ? ' ' : ''}
-            {interim}
-          </div>
-        )}
-        <textarea
-          ref={ref}
-          rows={1}
-          value={value}
-          placeholder={shownPlaceholder}
-          aria-label={placeholder}
-          aria-describedby={note ? hintId : undefined}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
-            if ((e.metaKey || e.ctrlKey) && canSendNow) {
-              e.preventDefault()
-              sendNow()
-              return
-            }
-            submit(e)
-          }}
-        />
-      </div>
-      <div className={s.bar}>
-        {picker}
-        <span className={s.space} />
-        {note && (
-          <span id={hintId} className={s.note}>
-            {note}
-          </span>
-        )}
-        {canSendNow && (
-          <Tooltip label={t.sendNowNote}>
-            <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey}>
-              {t.sendNow}
-            </ActionButton>
-          </Tooltip>
-        )}
-        {meter}
-        {dictation &&
-          (elapsed !== null ? (
-            <button type="button" className={s.recButton} onClick={dictation.onStop} aria-label={t.stopDictating(elapsed)}>
-              <span className={s.wave} aria-hidden="true">
-                {(dictation.levels ?? QUIET).map((l, i) => (
-                  <i key={i} style={cssVars({ '--l': Math.max(0, Math.min(1, l)) })} />
-                ))}
-              </span>
-              {elapsed}
-              <Icon name="square" size={11} />
-            </button>
-          ) : (
-            <IconButton icon="mic" label={t.dictate} onClick={dictation.onStart} />
-          ))}
-        {action}
-      </div>
-    </form>
+          {dictation?.onChooseInput && <InputMenu dictation={dictation} onChoose={dictation.onChooseInput} t={t} />}
+          {action}
+        </div>
+      </form>
+    </div>
   )
+}
+
+/* Beside the microphone, idle or dictating: which microphone it hears. Choosing while dictating goes on from the new one. */
+function InputMenu({ dictation, onChoose, t }: { dictation: Dictation; onChoose: (id: string | null) => void; t: ComposerText }) {
+  const inputs = dictation.inputs ?? []
+  const chosen = dictation.input ?? SYSTEM_DEFAULT
+  return (
+    <Menu
+      label={t.inputs}
+      placement="above"
+      align="end"
+      width={260}
+      {...(inputs.length === 0 ? { note: t.inputsNote } : {})}
+      trigger={
+        <button type="button" className={s.inputs} aria-label={t.chooseInput}>
+          <Icon name="chevronD" size={10} />
+        </button>
+      }
+    >
+      <MenuRadioGroup label={t.inputs} value={chosen} onChange={(id) => onChoose(id === SYSTEM_DEFAULT ? null : id)}>
+        <MenuRadioItem value={SYSTEM_DEFAULT}>{t.systemDefault}</MenuRadioItem>
+        {inputs.map((input) => (
+          <MenuRadioItem key={input.id} value={input.id}>
+            {input.label}
+          </MenuRadioItem>
+        ))}
+      </MenuRadioGroup>
+    </Menu>
+  )
+}
+
+function micLabel(d: Dictation, t: ComposerText): string {
+  if (d.busy) return t.dictateBusy
+  if (d.progress !== undefined) return t.dictateProgress(Math.round(Math.max(0, Math.min(1, d.progress)) * 100))
+  return t.dictate
 }

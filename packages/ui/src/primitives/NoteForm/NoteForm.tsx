@@ -15,7 +15,7 @@ import s from './NoteForm.module.css'
 export interface NoteFormText {
   /** What to write, as the field's placeholder and name. */
   placeholder: string
-  /** The button that sends it: Send back. */
+  /** The button that sends it: Send to the lead. */
   submit: string
   cancel: string
   /** Said when it is sent empty. */

@@ -1,6 +1,6 @@
 import type { WorkNeed } from '@althar/ui'
 
-import { kindWords } from '../../shared/calls'
+import { kindWords, whereOf } from '../../shared/calls'
 import { callCardOf } from './BoardView'
 import type { Lanes } from './lanes'
 
@@ -24,7 +24,7 @@ export const needsOf = (
       id: call.id,
       kind: card.kind,
       title: card.title,
-      meta: call.taskTitle,
+      meta: whereOf(call),
       at: card.at,
       ...(call.threadId === here ? { here: true } : {}),
       onOpen: () => onTask(call.threadId),

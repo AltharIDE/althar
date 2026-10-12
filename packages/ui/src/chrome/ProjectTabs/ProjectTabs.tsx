@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { Logo } from '../../foundations/Logo/Logo'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
@@ -12,18 +12,20 @@ import { ChromeButton } from '../ChromeButton/ChromeButton'
 import s from './ProjectTabs.module.css'
 
 /*
- * The top of the window: a tab for the home, then one for each project the
- * person keeps open, so going from one project to another is one press.
- * Each project's tab carries its mark, with the running arc while work runs
- * there, and a violet dot after its name while anything there waits on you; the home's has the dot while anything waits in any project. How many is
- * read out, not shown. The tab that has the window
- * joins the screen's own bar below it. A project's tab closes from its ×,
- * and the + opens one of the other projects, or a folder as a new one.
- * However many are open, the home's tab stays put; the others give way
- * together, down to their marks, and past that they scroll, by wheel too,
- * fading at the side where more are, with a menu of them all. On
- * macOS the system draws the traffic lights over its start, so it keeps
- * their space, as the TitleBar does when it is the top.
+ * The top of the window, and its one bar: a tab for the home, then one for
+ * each project the person keeps open, so going from one project to another
+ * is one press; at the other end, what the screen under it puts there (its
+ * views, what waits on you, its menu). Each project's tab carries its mark,
+ * with the running arc while work runs there, and a violet dot after its
+ * name while anything there waits on you; the home's has the dot while
+ * anything waits in any project. How many is read out, not shown. Each tab
+ * is as wide as its name; the × shows on the one pointed at. The + opens one
+ * of the other projects, or a new project in a tab of its own; with no other
+ * project to open, it opens the new one at once. However many are open,
+ * the home's tab stays put; the others give way together, down to their
+ * marks, and past that they scroll, by wheel too, fading at the side where
+ * more are, with a menu of them all. On macOS the system draws the traffic
+ * lights over its start, so it keeps their space.
  */
 
 /** A project as its tab shows it. */
@@ -48,7 +50,8 @@ export interface ProjectTabsText {
   running: string
   open: string
   others: string
-  openFolder: string
+  newProject: string
+  newProjectKbd: string
   /** The menu of every open project, when more are open than fit. */
   all: string
 }
@@ -61,7 +64,8 @@ export const projectTabsText: ProjectTabsText = {
   running: 'work running',
   open: 'Open a project',
   others: 'Other projects',
-  openFolder: 'Open a folder…',
+  newProject: 'New project',
+  newProjectKbd: '⌘N',
   all: 'All open projects',
 }
 
@@ -80,8 +84,10 @@ export type ProjectTabsProps = RootProps<
     others?: readonly ProjectTab[]
     /** Gives one of the others a tab. Without it, the + offers none of them. */
     onOpen?: (id: string) => void
-    /** Opens a folder as a new project. Without it or any others to open, there is no +. */
-    onOpenFolder?: () => void
+    /** Starts a new project, in a tab of its own. Without it or any others to open, there is no +. */
+    onNewProject?: () => void
+    /** At the far end: what the screen under the tabs puts in the bar. */
+    end?: ReactNode
     /** space: leave room for the system's lights. drawn: draw stand-ins. none: no room. */
     lights?: 'space' | 'drawn' | 'none'
     text?: Partial<ProjectTabsText>
@@ -107,7 +113,8 @@ export function ProjectTabs({
   yours = 0,
   others = [],
   onOpen,
-  onOpenFolder,
+  onNewProject,
+  end,
   lights = 'space',
   className,
   text,
@@ -201,31 +208,33 @@ export function ProjectTabs({
             ))}
           </Menu>
         )}
-        {(offered.length > 0 || onOpenFolder) && (
+        {offered.length === 0 && onNewProject && (
+          <ChromeButton icon="plus" label={t.newProject} kbd={t.newProjectKbd} compact className={s.plus} onClick={onNewProject} />
+        )}
+        {offered.length > 0 && (
           <Menu label={t.open} align="start" width={260} trigger={<ChromeButton icon="plus" label={t.open} compact className={s.plus} />}>
-            {offered.length > 0 && (
-              <MenuGroup label={t.others}>
-                {offered.map((other) => (
-                  <MenuItem
-                    key={other.id}
-                    lead={<ProjectMark seed={other.seed} ink={other.ink} size={15} running={other.running} />}
-                    hint={other.yours > 0 ? <Yours n={other.yours} text={t} /> : undefined}
-                    onSelect={() => onOpen?.(other.id)}
-                  >
-                    {other.name}
-                  </MenuItem>
-                ))}
-              </MenuGroup>
-            )}
-            {offered.length > 0 && onOpenFolder && <MenuSeparator />}
-            {onOpenFolder && (
-              <MenuItem icon="folder" onSelect={onOpenFolder}>
-                {t.openFolder}
+            <MenuGroup label={t.others}>
+              {offered.map((other) => (
+                <MenuItem
+                  key={other.id}
+                  lead={<ProjectMark seed={other.seed} ink={other.ink} size={15} running={other.running} />}
+                  hint={other.yours > 0 ? <Yours n={other.yours} text={t} /> : undefined}
+                  onSelect={() => onOpen?.(other.id)}
+                >
+                  {other.name}
+                </MenuItem>
+              ))}
+            </MenuGroup>
+            {onNewProject && <MenuSeparator />}
+            {onNewProject && (
+              <MenuItem icon="plus" kbd={t.newProjectKbd} onSelect={onNewProject}>
+                {t.newProject}
               </MenuItem>
             )}
           </Menu>
         )}
       </nav>
+      {end !== undefined && <div className={s.end}>{end}</div>}
     </header>
   )
 }

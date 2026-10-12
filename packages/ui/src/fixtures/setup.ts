@@ -1,11 +1,15 @@
 import { useState } from 'react'
 
 import { Brand } from '../foundations/brands/brands'
-import { ConnectKind, RuntimeState, SourceOrigin } from '../foundations/vocabulary'
+import { ChangeTarget, HostReach, RepositoryRole, RuntimeState, SourceOrigin } from '../foundations/vocabulary'
 import type { SelectOption } from '../primitives/Select/Select'
 import type { AccountEntry, FoundFolder } from '../setup/Accounts/Accounts'
-import type { ConnectOption } from '../setup/ConnectAgent/ConnectAgent'
+import type { AgentTab } from '../setup/AgentTabs/AgentTabs'
+import type { CoAuthorCommit } from '../setup/CoAuthor/CoAuthor'
 import type { ServiceConnection, ServiceOption } from '../setup/Connections/Connections'
+import type { AgentGlance, MarkGlance } from '../setup/ControlCenter/ControlCenter'
+import type { SwitchedModel } from '../setup/ModelSwitches/ModelSwitches'
+import type { MapHost, MapRepository } from '../setup/RepositoryMap/RepositoryMap'
 import type { RuntimeEntry } from '../setup/Runtimes/Runtimes'
 import type { SourceEntry } from '../setup/SourceMap/SourceMap'
 
@@ -34,17 +38,6 @@ export const EVERY_STATE: RuntimeEntry[] = [
   { ...GEMINI_CLI, state: RuntimeState.SignedOut, waiting: 2 },
   { ...OLLAMA, state: RuntimeState.Outdated, version: '0.3.2', needs: '0.5' },
   { id: 'aider', name: 'Aider', state: RuntimeState.Checking },
-]
-
-/* The other ways to connect an agent, as this Mac finds them. */
-export const CONNECT: ConnectOption[] = [
-  { id: 'cursor', name: 'Cursor', brand: Brand.Cursor, kind: ConnectKind.App, state: 'Not installed' },
-  { id: 'copilot', name: 'GitHub Copilot', brand: Brand.GitHubCopilot, kind: ConnectKind.App, state: 'Not installed' },
-  { id: 'anthropic', name: 'Anthropic API', brand: Brand.Anthropic, kind: ConnectKind.Key },
-  { id: 'openai', name: 'OpenAI API', brand: Brand.OpenAI, kind: ConnectKind.Key },
-  { id: 'openrouter', name: 'OpenRouter', brand: Brand.OpenRouter, kind: ConnectKind.Key },
-  { id: 'ollama', name: 'Ollama', brand: Brand.Ollama, kind: ConnectKind.Local, state: 'Running · 3 models', ready: true },
-  { id: 'lm-studio', name: 'LM Studio', brand: Brand.LMStudio, kind: ConnectKind.Local, state: 'Not running' },
 ]
 
 export const ROLES: SelectOption<string>[] = [
@@ -206,68 +199,41 @@ export function useSourceMap(initial: readonly SourceEntry[]) {
 }
 
 /* The code hosts and trackers a person can connect: GitHub signs in in the browser; Linear, Trello and Jira take a token here. */
+/** The six services, as Settings lists them for Meridian on GitHub and Halyard on a company's GitLab. */
 export const SERVICES: ServiceOption[] = [
-  {
-    id: 'github',
-    name: 'GitHub',
-    brand: Brand.GitHub,
-    what: 'Pull requests and issues',
-    hostedUrl: 'https://github.com',
-    selfHosted: true,
-    browserSignIn: true,
-    tokenHelp: 'https://github.com/settings/personal-access-tokens/new',
-  },
-  {
-    id: 'linear',
-    name: 'Linear',
-    brand: Brand.Linear,
-    what: 'Issues',
-    hostedUrl: 'https://linear.app',
-    selfHosted: false,
-    browserSignIn: false,
-    tokenHelp: 'https://linear.app/settings/account/security',
-  },
-  {
-    id: 'trello',
-    name: 'Trello',
-    brand: Brand.Trello,
-    what: 'Issues',
-    hostedUrl: 'https://trello.com',
-    selfHosted: false,
-    browserSignIn: false,
-    tokenNeeds: 'key',
-    tokenHelp: 'https://trello.com/power-ups/admin',
-    tokenHelpForKey: 'https://trello.com/1/authorize?expiration=never&name=Althar&scope=read,write&response_type=token&key={key}',
-    keyChecks: [
-      { pattern: '^[0-9a-fA-F]{64}$', says: 'That’s the Power-Up’s secret; paste its API key' },
-      { pattern: '^(?![0-9a-fA-F]{32}$)', says: 'An API key is 32 characters' },
-    ],
-  },
-  {
-    id: 'jira_cloud',
-    name: 'Jira',
-    brand: Brand.Jira,
-    what: 'Issues',
-    hostedUrl: null,
-    selfHosted: false,
-    browserSignIn: false,
-    tokenNeeds: 'email',
-    tokenHelp: 'https://id.atlassian.com/manage-profile/security/api-tokens',
-    instanceExample: 'https://your-site.atlassian.net',
-  },
+  { id: 'github', name: 'GitHub', brand: Brand.GitHub, what: 'Meridian’s code is here', selfHosted: true },
+  { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab, what: 'Halyard’s code is on git.halyard.dev', selfHosted: true },
+  { id: 'bitbucket', name: 'Bitbucket', brand: Brand.Bitbucket, selfHosted: true },
+  { id: 'linear', name: 'Linear', brand: Brand.Linear },
+  { id: 'jira', name: 'Jira', brand: Brand.Jira, selfHosted: true },
+  { id: 'trello', name: 'Trello', brand: Brand.Trello },
 ]
 
-/* Signed in to GitHub twice, on github.com and a company's own server; Linear's token stopped working. */
+/** Signed in to GitHub, and to a company's own GitHub; Jira's token stopped working. */
 export const CONNECTED: ServiceConnection[] = [
   { id: 'conn_1', service: 'github', account: 'you' },
   { id: 'conn_2', service: 'github', account: 'you', instance: 'https://git.meridian.dev' },
-  { id: 'conn_3', service: 'linear', account: 'You', needsSignIn: true },
+  { id: 'conn_3', service: 'jira', account: 'you@meridian.dev', instance: 'https://meridian.atlassian.net', needsSignIn: true },
 ]
 
-/** Codex with four accounts: its usual folder, one Althar made, one codex-profiles made that is out of usage, and one signed out. */
+/** Codex with five accounts: its usual folder, one Althar made, one codex-profiles made that is out of usage, one signed out, and a key, billed per use, last. */
 export const ACCOUNTS: AccountEntry[] = [
-  { id: 'acc_usual', name: 'main', place: { kind: 'usual' }, state: { kind: 'ready', paid: 'plan' } },
-  { id: 'acc_work', name: 'work', place: { kind: 'own' }, state: { kind: 'ready', paid: 'plan' } },
+  {
+    id: 'acc_usual',
+    name: 'Personal',
+    place: { kind: 'usual' },
+    state: { kind: 'ready', paid: 'plan' },
+    who: 'you@meridian.dev',
+    plan: 'ChatGPT Pro',
+  },
+  {
+    id: 'acc_work',
+    name: 'Northwind',
+    place: { kind: 'own' },
+    state: { kind: 'ready', paid: 'plan' },
+    who: 'dana@northwind.io',
+    plan: 'ChatGPT Team',
+  },
   {
     id: 'acc_client',
     name: 'Client',
@@ -275,6 +241,7 @@ export const ACCOUNTS: AccountEntry[] = [
     state: { kind: 'out', back: '14:00' },
   },
   { id: 'acc_side', name: 'side', place: { kind: 'own' }, state: { kind: 'signedOut' } },
+  { id: 'acc_key', name: 'API key', place: { kind: 'own' }, state: { kind: 'ready', paid: 'key' }, who: 'OpenAI key ····4f2a' },
 ]
 
 /** Folders account switchers keep Codex accounts in, not added yet. */
@@ -282,3 +249,95 @@ export const FOUND: FoundFolder[] = [
   { id: 'grant_personal', name: 'personal', folder: '~/.codex-personal', from: 'codex-profiles' },
   { id: 'grant_side', name: 'side', folder: '~/.local/share/codex-accounts/accounts/side', from: 'codex-account-switcher' },
 ]
+
+/** The agents on this Mac, as Settings shows them one at a time. */
+export const AGENT_TABS: AgentTab[] = [
+  { ...CLAUDE_CODE, line: 'Anthropic · 2.4.1' },
+  { ...CODEX, line: 'OpenAI · 0.159.3', yours: true },
+  { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, line: 'Any provider · 1.4.0' },
+]
+
+/** The same agents at a glance, in the Control Center's Agents module: one word each on where it stands. */
+export const AGENT_GLANCES: AgentGlance[] = [
+  { ...CLAUDE_CODE, line: 'Acme out until 14:20', tone: 'quiet' },
+  { ...CODEX, line: 'Northwind signed out', tone: 'yours' },
+  { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode, line: '1 account' },
+]
+
+/** Code hosts and trackers at a glance: faint where not connected, a dot where one needs signing in again. */
+export const MARK_GLANCES: MarkGlance[] = [
+  { id: 'github', name: 'GitHub', brand: Brand.GitHub },
+  { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab, faint: true },
+  { id: 'bitbucket', name: 'Bitbucket', brand: Brand.Bitbucket, faint: true },
+  { id: 'linear', name: 'Linear', brand: Brand.Linear, yours: true },
+  { id: 'jira', name: 'Jira', brand: Brand.Jira, faint: true },
+  { id: 'trello', name: 'Trello', brand: Brand.Trello, faint: true },
+]
+
+/** Codex's models. */
+export const CODEX_MODELS: SwitchedModel[] = [
+  { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' },
+  { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex' },
+  { id: 'gpt-5-mini', name: 'GPT-5 mini' },
+]
+
+/** The line each commit gets while Althar is co-author: its GitHub account's private address, so GitHub shows its picture. */
+export const CO_AUTHOR_TRAILER = 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>'
+
+/* Meridian's repositories after it is made: two on GitHub, connected, and its infrastructure on GitLab, which isn't. */
+export const MAP_HOSTS: MapHost[] = [
+  { id: 'github', name: 'GitHub', brand: Brand.GitHub, reach: HostReach.Connected, account: 'balazs' },
+  { id: 'gitlab', name: 'GitLab', brand: Brand.GitLab, reach: HostReach.NotConnected },
+]
+
+export const MAP_MERIDIAN: MapRepository[] = [
+  {
+    id: 'app',
+    name: 'meridian-app',
+    where: '~/code/meridian-app',
+    branch: 'main',
+    role: RepositoryRole.Frontend,
+    tasks: 2,
+    remote: { host: 'github', path: 'meridian/app', href: 'https://github.com/meridian/app' },
+  },
+  {
+    id: 'api',
+    name: 'meridian-api',
+    where: '~/code/meridian-api',
+    branch: 'refunds-v2',
+    role: RepositoryRole.Service,
+    tasks: 1,
+    remote: { host: 'github', path: 'meridian/api', href: 'https://github.com/meridian/api' },
+  },
+  {
+    id: 'infra',
+    name: 'meridian-infra',
+    where: '~/code/meridian-infra',
+    branch: 'trunk',
+    role: RepositoryRole.Infrastructure,
+    tasks: 0,
+    remote: { host: 'gitlab', path: 'meridian-ops/infra', href: 'https://gitlab.com/meridian-ops/infra' },
+  },
+]
+
+/* Halyard's one repository: a fork, pushing to yours, its pull requests opening on theirs. */
+export const MAP_HALYARD: MapRepository[] = [
+  {
+    id: 'halyard',
+    name: 'halyard-api',
+    where: '~/code/halyard-api',
+    branch: 'main',
+    role: RepositoryRole.Service,
+    tasks: 1,
+    remote: { host: 'github', path: 'balazs/halyard-api', href: 'https://github.com/balazs/halyard-api' },
+    fork: { upstream: 'halyard/api', target: ChangeTarget.Upstream },
+  },
+]
+
+/** A commit as it went to GitHub this afternoon, from Meridian's task, to show the line on. */
+export const CO_AUTHOR_COMMIT: CoAuthorCommit = {
+  subject: 'Retry the checkout call with backoff',
+  body: 'Wraps the upstream call in a jittered retry, three tries at most,\nand only for 502, 503 and timeouts.',
+  sha: '4e1c07a',
+  when: 'committed 12 minutes ago',
+}

@@ -6,7 +6,7 @@ import { refOf } from '../home/HomeView'
 /*
  * The window's tabs, worked out: which projects have one, where in each the
  * person last was, and which has the window, from where the window is. The
- * home has the first tab, with settings under it; every other place belongs
+ * home has the first tab, with settings in its bar; every other place belongs
  * to a project. A task's address names only its thread, so its project is
  * learnt when the task is read.
  */
@@ -18,9 +18,10 @@ export type Place =
   | { readonly kind: 'repositories' }
   | { readonly kind: 'thread'; readonly threadId: string }
 
-/** Where the window is, as the tabs see it. */
+/** Where the window is, as the tabs see it: a new project has a tab of its own. */
 export type Where =
   | { readonly kind: 'home' }
+  | { readonly kind: 'new' }
   | { readonly kind: 'project'; readonly projectId: string; readonly place: Place }
   | { readonly kind: 'thread'; readonly threadId: string }
 
@@ -42,6 +43,7 @@ export const whereOf = (pathname: string): Where => {
     }
   const thread = /^\/threads\/([^/]+)\/?$/.exec(pathname)
   if (thread?.[1] !== undefined) return { kind: 'thread', threadId: decodeURIComponent(thread[1]) }
+  if (/^\/new\/?$/.test(pathname)) return { kind: 'new' }
   return { kind: 'home' }
 }
 

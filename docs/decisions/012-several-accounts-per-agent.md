@@ -21,8 +21,16 @@
     with one sign-in sees no change. Althar starts each session with its
     account's home in the agent's environment, and records which account
     each session ran on.
-  - **Adding an account** makes a home and opens the agent's own sign-in in
-    it, in a terminal, for the person. Althar never sees the credential.
+  - **Adding an account** makes a home and runs the agent's own sign-in in
+    it. Where the agent lets it, Althar runs that login itself and shows its
+    steps in the window: Claude Code's `claude auth login`, which opens the
+    browser and reads a code pasted back; Codex's app-server, which gives the
+    page to open, or a one-time code for another device, and says when it is
+    done and who as. Elsewhere, and always as a choice, the login opens in a
+    terminal for the person. Either way the agent keeps the credential; a
+    pasted code only passes through Althar to the agent, and Althar never
+    reads its credential store. Codex's login waits on one port, so an agent
+    signs in one account at a time.
     A home Althar made holds that account's sign-in and the agent's own
     history. What of the agent's usual folder isn't the account's own is
     linked into it, again as each session starts, so every account works the

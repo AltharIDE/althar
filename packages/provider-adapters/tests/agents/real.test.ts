@@ -81,6 +81,23 @@ const command: Record<AgentId, string> = {
   opencode: 'Run the shell command `git log --oneline` here, then tell me in one line what it printed.',
 }
 
+/**
+ * How each agent asks the person something. Claude Code's AskUserQuestion
+ * comes as a form Althar answers. Codex offers request_user_input only in
+ * its Plan mode, which a lead isn't in, and OpenCode keeps its question tool
+ * off over ACP, so both ask in their own words.
+ */
+const asks: Record<AgentId, ContractSubject['asks']> = { 'claude-code': 'form', codex: 'words', opencode: 'words' }
+
+/** A question each agent asks: with its question tool, where it has one. */
+const question: Record<AgentId, string> = {
+  'claude-code':
+    'Before anything else, use your AskUserQuestion tool to ask me one question: which colour the button should be, with the options Red and Blue. Then reply with only the colour I chose.',
+  codex: 'Ask me one question: whether the button should be red or blue. Reply with only that question.',
+  opencode:
+    'I need to choose which colour the button should be, red or blue. Ask me which one I want: with your question tool if you have it, otherwise as a question in your reply. Do nothing else.',
+}
+
 const only = process.env.ALTHAR_AGENTS?.split(',')
 
 for (const agent of Object.values(agents)) {
@@ -103,7 +120,9 @@ for (const agent of Object.values(agents)) {
       short: 'Reply with exactly the word ok, and nothing else.',
       long: 'Count from 1 to 400, one number per line, with no other text.',
       command: command[agent.id],
+      question: question[agent.id],
     },
+    asks: asks[agent.id],
   }
   contract(subject)
 

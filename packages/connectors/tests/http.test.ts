@@ -295,6 +295,23 @@ describe('a GraphQL call', () => {
     }),
   )
 
+  it.effect('classifies a service failing as it worked as unreachable, not refused: a 5xx, or an internal error', () =>
+    Effect.gen(function* () {
+      const reasonOf = (answer: Parameters<typeof graphql>[0]) =>
+        Effect.map(
+          Effect.exit(graphql(answer).http.graphql(Schema.Unknown, 'https://api.test/graphql', 'mutation')),
+          (exit) => failure(exit)?.reason,
+        )
+      assert.strictEqual(yield* reasonOf({ status: 500, json: { errors: [{ message: 'Internal error' }] } }), 'unreachable')
+      assert.strictEqual(
+        yield* reasonOf({ status: 200, json: { errors: [{ message: 'Oops', extensions: { code: 'INTERNAL_SERVER_ERROR' } }] } }),
+        'unreachable',
+      )
+      // A refusal in a 5xx is still the service failing: a mutation may have gone through.
+      assert.strictEqual(yield* reasonOf({ status: 503, json: { errors: [{ message: 'Bad input' }] } }), 'unreachable')
+    }),
+  )
+
   it.effect('fails as HTTP does when the answer is not GraphQL', () =>
     Effect.gen(function* () {
       const { http } = graphql({ status: 401, text: 'Unauthorized' })

@@ -8,7 +8,8 @@ import { useServices } from './services'
 /*
  * The models each agent offers, read once for the window and shared by
  * every picker in it: read again when a picker appears, shortly after while
- * an agent is still being asked, and when the person sets a default effort.
+ * an agent is still being asked, and when the person sets a default effort
+ * or switches a model off or on.
  */
 
 /** How soon an agent still being asked is read again. */
@@ -85,6 +86,23 @@ export const useSetDefaultEffort = () => {
         () => read(client, storeOf(client), true),
         // Not set: every picker still shows the one there was.
         () => undefined,
+      ),
+    [client],
+  )
+}
+
+/** Switches one of an agent's models off, or on again, then reads the models again, so every picker and plan leaves it out or offers it. */
+export const useSetModelBlocked = () => {
+  const { client } = useServices()
+  return useCallback(
+    (input: { readonly agentId: string; readonly model: string; readonly blocked: boolean }) =>
+      // Whether it was switched; either way every picker shows the runtime's word once it is read again.
+      client.setModelBlocked(input).then(
+        () => {
+          read(client, storeOf(client), true)
+          return true
+        },
+        () => false,
       ),
     [client],
   )

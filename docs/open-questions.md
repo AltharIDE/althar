@@ -9,6 +9,106 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## Questions agents ask, 10 October
+
+- [x] **What a question waits on.** The thread, not the session: it outlives
+  a restart, the agent going and a switch of agent, and its answer is told
+  to the agent on the thread next ([ADR-021](decisions/021-a-question-outlives-its-session.md)).
+- [x] **Which steps may ask.** The lead and the coordinator; a reviewer is
+  given no way to (ADR-021).
+- [x] **Answering from the home or the edge.** Not on its line: the home
+  stays calm, a question's line says what it asks and Answer takes the person
+  to it in the task, its first choice focused so a key picks and Enter
+  answers (settled with the person, 10 October).
+- [ ] **Codex and OpenCode ask in words.** Codex offers request_user_input
+  only in its Plan mode; told to use it in the default mode, it once ended
+  its turn with nothing said. OpenCode keeps its question tool off over ACP.
+  A lead that asks in words ends its turn, is reminded to report, and then
+  its step needs the person. Should Althar turn Codex's tool on
+  (`tools.experimental_request_user_input`), or read a question out of a
+  lead's last words?
+- [ ] **Writing while a question waits.** A message the person queues waits
+  behind the question, since the turn is blocked on it. Should what they
+  write answer it, in their own words?
+- [ ] **An answer whose agent has gone, when Althar stops in between.** The
+  answer is kept, then queued for the thread, then an agent is started for
+  it: three steps, not one. Althar going down between them leaves the
+  answer kept but untold until the person next writes in the thread.
+  Should the answer and its telling be one record that recovery picks up?
+
+## What runs behind a task, 10 October
+
+- [x] **Showing what a lead left running, and the pull requests a task
+  listens to.** Over the composer, as the kit's pills, each stoppable
+  (ADR-022).
+- [ ] **Claude Code's sandbox and dev servers.** Its sandbox refuses a
+  server's port, so a lead's `bun dev` fails unless it asks to run outside
+  the sandbox. `sandbox.network.allowLocalBinding` would let it listen on
+  this machine's ports only (macOS).
+- [ ] **Listening again.** A pull request stopped listening to stays quiet
+  until it is published again. A way to listen again, from its outputs,
+  may be wanted.
+- [ ] **Where a server answers, for sure.** Read from what it prints, for
+  two minutes; a server that holds its output back never says. Ports from
+  the process tree would say for every agent, OpenCode too.
+- [ ] **The lead, told.** Claude Code tells its model when the person stops
+  something it left running; Codex doesn't say. Whether Althar should tell
+  the lead itself.
+- [ ] **A turn of the agent's own.** Claude Code starts a turn when
+  something it left running ends, which costs usage and shows in the
+  thread. Whether to say so, or to keep it quieter.
+
+## Mini tasks, 11 October
+
+- [x] **Starting a task without the countdown.** For something small, such as
+  trying something out, the coordinator starts a mini task at once: one lead, no review, nothing outside the project when it is
+  done (docs/architecture/04, `start_task`).
+- [ ] **What a mini task looks like.** It shows as any task does, on its
+  card and on the board. Whether it should look lighter, and settle by itself
+  once nothing it started is left running.
+- [ ] **Turning one into a full task.** One that ends up changing things is
+  on its branch. Whether the person, or the coordinator, can give it a review
+  and a pull request after the fact.
+- [x] **Running the project without an agent.** Althar keeps how each
+  repository runs, works it out until then, and runs it itself (ADR-023).
+- [ ] **Several processes that run together.** A web app and its API, or a
+  server and a worker, are one command line today.
+- [ ] **Two runs on one port.** A task's run and the default branch's may
+  want the same port; the second says so in what it prints. Whether Althar
+  should give each its own port where the command takes one.
+- [ ] **A run per repository in a project of several.** The first that says
+  how it runs is run; others need naming, as the coordinator can.
+- [ ] **A picture of what a run shows.** The run card has the address, not
+  the page. Whether Althar should open it once it answers, take a picture,
+  and keep it on the card.
+
+## Dictation, 10 October
+
+- [x] **Where speech is turned into text.** On this machine only, with a
+  model downloaded on the first press; never a hosted service or the
+  person's own key (ADR-017).
+- [x] **Code words.** The project's names are spelt as its code spells
+  them, from what the runtime reads in git; biasing the model itself broke
+  more than it fixed (ADR-017).
+- [ ] **Names the model mishears as other words.** "Althar" comes out as
+  "Alpha", "Halyard" as "Halliod". Respelling only joins words into names.
+  A sound-alike match against the project's and people's names could catch
+  these, at the risk of changing real words.
+- [x] **Words as you speak.** Written down about once a second while the
+  person talks, settled at pauses, and all of it once more when they stop
+  (ADR-017). A streaming model stays a later option.
+- [ ] **Removing the model.** It stays in the profile once downloaded
+  (670 MB). Settings has no way to see or remove it yet. Leaning: a line
+  under a Dictation section, in the calm Settings style: its size, and
+  Remove.
+- [x] **A shortcut to dictate.** ⌘⇧D starts and stops it; held, letting go
+  stops it (ADR-017).
+- [ ] **Dictating from anywhere.** The shortcut works while Althar's window
+  is in front. A global one, from another app into a task, would need the
+  window to come forward first, or the island to take it.
+- [ ] **Windows on Arm.** sherpa-onnx has no prebuilt binary for it yet;
+  the microphone would not show there until it does.
+
 ## A project's menu, 8 October
 
 - [ ] **A project's intent.** The older Rooms prototype's project menu had
@@ -64,14 +164,28 @@ Decided in [ADR-013](decisions/013-project-rules.md).
   the repository, shared with the team, applying them once the folder is
   trusted.
   - Leaning: with the cloud, alongside rules an organisation manages.
-- [ ] **An allowlist for "Ask me".** Asking about everything, a person will
+- [x] **An allowlist for "Ask me".** Asking about everything, a person will
   want some commands let through, as Cursor's and Roo's allowlists do.
-- [ ] **The lead decides.** Other tools' modes with a model as judge, such as
-  Claude Code's auto, Codex's auto-review and VS Code's Assisted, are this
-  row. Whether the lead answers or a separate cheaper model does is still
-  open (05).
+  Settled on 10 October 2026 in
+  [ADR-018](decisions/018-allow-always-keeps-a-rule.md) (DEV-21): allow
+  rules by kind, by how a command starts, or exactly, kept by Allow always
+  on a call and said in the rules screen's "Go ahead" sentence, where each
+  can be taken out. What always asks or is never allowed still wins, and
+  an allow rule answers before the coordinator is asked to judge.
+- [x] **Who judges permission requests.** The coordinator, using its agent
+  and model in a fresh read-only session, with task context and human fallback.
+  Decided in [ADR-019](decisions/019-coordinator-judges-permissions.md). It
+  judges only what no rule answers: never, what always asks and the allow
+  rules all come first (ADR-018).
 - [ ] **The network.** Rules on domains, as Codex's network proxy and Claude
   Code's `WebFetch(domain:…)` have.
+- [ ] **A kind on more than one list.** The rules screen reads the rules as
+  sentences, and each kind of request sits in one: moving it writes it on
+  one list and takes it off the others (11 October). The runtime still keeps
+  what it is given, so a kind put on two lists some other way reads as the
+  first of them a request meets, Never before Ask me before Go ahead.
+  - Leaning: the runtime keeps a kind on one list as it saves, the screen's
+    way, so the rules as kept and as read never differ.
 
 ## Several accounts, 3 October
 
@@ -179,6 +293,29 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   that led to the step's result.
 - [x] **A ready task's header.** Settled on 30 September 2026 in the review of
   #15: the header reads the run, as the card does, and says Ready.
+
+## Releases and updates, 11 October
+
+Decided in ADR-024 for the first testers: Developer ID signing, notarytool,
+one stable track from GitHub Releases, restart only at the person's word and
+never under running work.
+
+- [ ] **A beta channel.** Testers and everyone else share one track for now.
+  Leaning: a `beta` channel (electron-updater's `latest`/`beta` files) once
+  there are more than friends testing, chosen in Settings.
+- [ ] **Rolling back.** An update that breaks something is fixed by the next;
+  a migration can't be undone. Keep the previous app and a copy of the store
+  before migrating, or make every migration reversible?
+- [ ] **Adapters over the air** (DEV-46). Today a new adapter means an app
+  release. Shipping adapter bundles alone needs them verified before they
+  run as Althar's identity.
+- [ ] **One entitlements file for every helper.** electron-builder gives all
+  of them the agents' entitlements (JIT, unsigned executable memory, no
+  library validation). Leaning: sign the agents' binaries apart once the
+  adapters leave Electron's binary (the runAsNode question below).
+- [ ] **A download link that stays the same.** The site and the README link
+  the Releases page. A fixed asset name (`Althar-arm64.dmg`) would let
+  `releases/latest/download/…` start the download directly.
 
 ## The desktop app, 29 September
 
@@ -317,10 +454,14 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 - [x] **Stop, interrupt and cancel are one square today.** Settled as the
   leaning: the composer's square interrupts the lead's turn and keeps the task
   ("Interrupted by you"); ⌘Enter or Send now interrupts and continues; the
-  task menu stops, resumes, abandons or reopens the task, and only Stop sets
-  "Stopped", drawn as a pause and never as a square. Decided in the kit
-  (Composer, You, Furniture, TaskMenu, TaskGlyph) and the prototype's task
-  view. Supersede-pending has no control yet.
+  task menu offers, each only where it applies, Start now, Mark ready for
+  review, Stop, Resume, Abandon (asked first) and Reopen (an abandoned task
+  only, never a merged one), and only Stop sets "Stopped", drawn as a pause
+  and never as a square. Decided in the kit (Composer, You, Furniture,
+  TaskMenu, AbandonTask, TaskGlyph) and the prototype's task view; built on
+  10 October (DEV-31), with what each does in
+  [Architecture 05](architecture/05-workflow-engine.md#task-and-run-lifecycle).
+  Supersede-pending has no control yet.
 - [x] **What a stuck task looks like.** Settled: a violet call in the thread
   (kit `thread/Stuck`): what it tried, why as the lead reads it, the failing
   output, then Tell the lead, Try another agent or Abandon. On the board it is
@@ -347,6 +488,11 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 
 ## Before a project: first run and sources
 
+- [ ] **Repositories found twice off a Mac.** The first screen and a new
+  project list each repository found once, by where it is on disk. On
+  Windows one folder has more than one name (its case, a drive's letter),
+  which that hasn't been tried against, so one may be listed twice. Left
+  until Althar runs on Windows (DEV-71).
 - [ ] **One way in, not two.** "Open a repository" and "New project" read as
   the same thing. Leaning, now in the kit and the prototype: one entrance,
   New project, which opens the folder picker (several folders, or cancel for
@@ -384,13 +530,14 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 - [ ] **What an agent row offers once it is ready.** Today a ready row says who
   it is signed in as, and nothing else. Does it need "use for this project",
   a default model, or a sign-out that hands off to the agent's own?
-- [ ] **API keys and local models.** "Connect another" now opens a panel
-  (kit `setup/ConnectAgent`): apps Althar can run but didn't find, APIs that
-  take a key (typed once, hidden, into the Keychain), model servers on this
-  Mac, and any agent that speaks ACP by its command. Leaning: keys and local
-  models run through OpenCode, so Althar still calls no model API itself
-  ([ADR-002](decisions/002-acp-for-every-agent.md)). Open: which apps and APIs
-  are listed at launch, and how a connected key shows in the agent list.
+- [ ] **API keys and local models.** Adding another agent (apps Althar can
+  run but didn't find, APIs that take a key, model servers on this Mac, any
+  agent that speaks ACP by its command) has no screen since the unused
+  `ConnectAgent` panel was removed. Leaning: keys and local models run
+  through OpenCode, so Althar still calls no model API itself
+  ([ADR-002](decisions/002-acp-for-every-agent.md)). Open: where adding one
+  lives in Settings, which apps and APIs are listed at launch, and how a
+  connected key shows in the agent list.
 - [ ] **Choosing subpaths in a workspace.** The map offers "only these
   folders" as one suggested choice. Choosing folders freely needs a tree
   picker, which doesn't exist yet.
@@ -410,23 +557,14 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   and ask less as you agree with the lead's calls? Open: what counts as
   agreement, whether it is per project or per kind of decision, and how you see
   where it stands ("6 of 10 so far"). We don't yet know how to build it.
-- [ ] **Permissions: who answers.** Leaning: the lead answers permission
-  requests from its steps, inside the project's rules. Only what the rules keep
-  for you arrives as a card. Open:
-  - Does the lead answer, or a separate cheap judge model? The lead is busy and
-    expensive; a judge has no task context.
-  - ~~How does this map onto ACP?~~ Settled: every session starts in a mode
-    that asks, and Althar answers `session/request_permission` from the
-    rules. In the MVP the lead doesn't answer yet.
-    [ADR-007](decisions/007-permission-requests-reach-althar.md).
-  - ~~What goes on the default always-ask list?~~ Settled for now: pushes to
-    the default branch, force pushes, merges, deploy commands, and writes
-    outside the task's worktree.
-  *Prototype:* Project → "Project rules", and "Allowed without you".
-- [ ] **Project rules: when and where they are set.** Leaning, as mocked in
-  the kit's NewProject: creating a project asks one thing, who answers when
-  agents need a yes (default "The agent in charge decides"), and every other rule starts
-  at its default. Can a task tighten the rules but never loosen them? Where
+- [x] **Permissions: who answers.** The coordinator answers requests outside
+  explicit always-ask and never rules when its mode is selected. Its failures
+  and uncertainty reach the person; readers remain read-only. See
+  [ADR-019](decisions/019-coordinator-judges-permissions.md).
+- [ ] **Project rules: when and where they are set.** Leaning: creating a
+  project asks only its name, its colour and its folders, and every rule
+  starts at its default; who answers when agents need a yes is the first a
+  person changes, on the rules screen. Can a task tighten the rules but never loosen them? Where
   are they stored? (See Memory below.)
 - [ ] **Kinds of permission.** Commands, web fetches, MCP tools, writes
   outside the workspace, spending, messages to people. Should each kind have
@@ -437,10 +575,18 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   allow and deny lists, protection for dotfiles and deletions), Project rules
   covered who answers and what asks. It now also has a **Never** list: hard
   refusals that hold even with everything allowed. Still open:
-  - **Allow rules.** Under "Ask me", nothing is pre-approved, so `bun test`
-    would ask every time. Leaning: one rule list where each rule is allow,
-    ask or never, and "Allow always" on a permission card (ACP's
-    `allow_always`) writes an allow rule into it.
+  - ~~**Allow rules.** Under "Ask me", nothing is pre-approved, so `bun test`
+    would ask every time.~~ Settled in
+    [ADR-018](decisions/018-allow-always-keeps-a-rule.md): command rules
+    carry allow beside ask and never, and kinds can be always allowed;
+    Allow always on a card writes one (Althar's own, never the agent's
+    `allow_always`).
+  - **Rules from the coordinator's answers.** Where the coordinator decides,
+    an allow rule answers before it (ADR-018, ADR-019), but the coordinator
+    keeps none itself and judges each request afresh. When it allows the same
+    command again and again, should Althar offer the person the allow rule
+    that would spare those judgments? Leaning: a quiet suggestion on the
+    rules screen, kept only by the person.
   - **Patterns.** Rules are plain sentences now. Leaning: each rule has a
     kind and a pattern (command prefix, path glob, domain, MCP server and
     tool), with the sentence as its label.
@@ -490,10 +636,14 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   which the person sets on the plan's card; the coordinator proposes neither,
   so a step starts on the agent's own. Does the coordinator recommend effort
   per step, or always start at the model's default?
-- [ ] **Allow all, with always-ask items in the stack.** "Allow all 7"
+- [x] **Allow all, with always-ask items in the stack.** "Allow all 7"
   currently covers pushing to main too. Should items the rules keep for you
   be left out of Allow all?
   *Prototype:* Permissions → "Many at once".
+  Settled for now on 10 October 2026 (DEV-21,
+  [ADR-018](decisions/018-allow-always-keeps-a-rule.md)): Allow all allows
+  every card in the stack once, the always-ask ones too, since each was kept
+  for the person and they see the count. It never keeps a rule.
 - [x] **Pasted links.** Settled on 1 October 2026: issues and pull requests
   from the connected code hosts and trackers unfurl, through Althar's own
   connectors, not MCP servers
@@ -550,10 +700,25 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
 
 ## Chat primitives
 
-- [ ] **What agents can hand back.** Images are covered (screenshots side by
-  side, full size on click). Still open: screen recordings of a UI flow,
-  generated PDFs, and larger outputs (logs, data files). Do those get the file
-  card, or their own viewers?
+- [ ] **What agents can hand back.** Images, markdown documents, other files
+  (the file card), tables and command output are built (ADR-020). Still
+  open: screen recordings of a UI flow, and generated PDFs. Do those get the
+  file card, or their own viewers?
+- [ ] **How long what agents hand back is kept.** Pictures and command output
+  are kept in the artifact store, by digest, with nothing swept yet (ADR-020).
+  How long does each kind stay: for the task's life, a set time, or until the
+  profile is cleaned? Leaning: mark-and-sweep from the thread items, with
+  logs going first, once a task is settled.
+- [ ] **Which written files are handed back.** A markdown document a lead
+  writes whole stands under its turn as a card; a file it points at gets the
+  file card; other files it writes are the task's change, with no card.
+  Should an edited document (a README) stand too? Leaning: no, it is part of
+  the change.
+- [ ] **Pictures outside the worktree.** A picture a link points at is read
+  only from inside the folders the agent works in; a browser tool that saves
+  its screenshots in a temporary folder hands back a link that isn't
+  followed. Leaning: allow the system's temporary folder for pictures only,
+  if it comes up.
 - [ ] **"Every finding" mode.** Each open finding waits for you, with Have it
   fixed / Say what to do / Dismiss, plus "Leave them to the lead". Does the
   lead start on the findings you've answered, or wait for the whole list?

@@ -43,6 +43,15 @@ describe('the agent registry', () => {
     assert.includeMembers(meta.claudeCode.options.settings.permissions.ask, ['Bash', 'Edit', 'Write'])
   })
 
+  it('lets a Claude Code lead listen on localhost in its sandbox, and a reader not', () => {
+    type Sandbox = { network?: { allowLocalBinding?: boolean } }
+    const sandboxOf = (role?: 'reader') =>
+      (agents['claude-code'].sessionMeta?.(role) as { claudeCode: { options: { settings: { sandbox: Sandbox } } } }).claudeCode.options
+        .settings.sandbox
+    assert.deepStrictEqual(sandboxOf().network, { allowLocalBinding: true })
+    assert.isUndefined(sandboxOf('reader').network)
+  })
+
   it('makes Claude Code a reader: its edits denied, and every command asking', () => {
     const meta = agents['claude-code'].sessionMeta?.('reader') as {
       claudeCode: {
@@ -62,5 +71,22 @@ describe('the agent registry', () => {
       const ids = [...rejectAndContinue, ...rejectAndStop, ...Object.keys(allowScopes)]
       assert.strictEqual(new Set(ids).size, ids.length, agent.id)
     }
+  })
+
+  it('removes all Claude judge tools and user hooks, separately from reader sessions', () => {
+    assert.deepStrictEqual(agents['claude-code'].permissionJudge?.sessionMeta, {
+      claudeCode: {
+        options: {
+          tools: [],
+          settingSources: [],
+          allowDangerouslySkipPermissions: false,
+          strictMcpConfig: true,
+          settings: { disableAllHooks: true },
+        },
+      },
+    })
+    // Neither provider's read-only mode is proof that it cannot read the rest of the disk.
+    assert.isUndefined(agents.codex.permissionJudge)
+    assert.isUndefined(agents.opencode.permissionJudge)
   })
 })

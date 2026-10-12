@@ -352,6 +352,44 @@ describe('sessions', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('hands the thread over with what the person said: the new lead takes it first, after its brief, and the old one never does', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const sessions = yield* Sessions
+      const { task: created } = yield* task('Add the retry helper')
+      const first = yield* begin(created.threadId, 'claude-code')
+      yield* say(created.threadId, scenarios.hello)
+      yield* ended(created.threadId, 1)
+      const body = 'Use the helper we already have'
+      const second = yield* sessions.switchAgent({
+        threadId: created.threadId,
+        agentId: 'opencode',
+        model: 'large',
+        message: { envelope: yield* Runtime.envelope('thread.send', { threadId: created.threadId, body }), body },
+      })
+      yield* settled(created.threadId, 3)
+      // What the person said is in the thread, and was given to the new lead alone, with its brief and in place of carrying on.
+      const items = yield* threadItems(created.threadId)
+      assert.deepStrictEqual(
+        items.filter((item) => item.kind === 'user_message').map((item) => item.content.text),
+        [scenarios.hello, body],
+      )
+      const given = yield* sql<{ sessionId: string; prompt: string }>`
+        SELECT d.provider_session_id AS session_id, d.prompt FROM turn_deliveries d JOIN turn_delivery_inputs di ON di.delivery_id = d.id
+        JOIN user_inputs u ON u.id = di.user_input_id WHERE u.body = ${body}`
+      assert.deepStrictEqual(
+        given.map((turn) => turn.sessionId),
+        [second],
+      )
+      assert.include(given[0]?.prompt, 'You are taking over a task from Fake claude-code')
+      assert.isTrue(given[0]?.prompt.endsWith(body))
+      assert.notInclude(given[0]?.prompt, 'Carry on with the task from where it stands.')
+      assert.notStrictEqual(first, second)
+      // It is on the model asked for from the moment it starts.
+      assert.strictEqual((yield* session(second))?.model, 'large')
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('records a usage limit against the account, with when it resets', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -420,6 +458,98 @@ describe('sessions', () => {
       assert.deepStrictEqual(Option.getOrUndefined(running)?.context, { used: 1200, size: 200_000 })
     }).pipe(Effect.provide(runtime())),
   )
+
+  describe('what a lead leaves running', () => {
+    /** What the thread's session has left running, as a client reads it. */
+    const shown = (threadId: string) =>
+      Effect.flatMap(Queries, (queries) =>
+        Effect.map(Effect.orDie(queries.thread(threadId, { limit: 0 })), (thread) => thread.session?.background ?? []),
+      )
+
+    it.live(
+      'keeps a command left running, by its command, with where it answers, until it is stopped; and one that ended by itself, to say how',
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions
+          const { task: created } = yield* task()
+          yield* begin(created.threadId, 'claude-code')
+          yield* say(created.threadId, scenarios.background)
+          yield* ended(created.threadId, 1)
+          // By its tool call's command, not by what the call says it does; where it answers, from what it printed, colours and all.
+          const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+          assert.deepInclude(serving, { command: 'bun dev', url: 'http://localhost:5173/', ended: null })
+          // Background work that isn't a command isn't kept.
+          assert.lengthOf(yield* shown(created.threadId), 1)
+          yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+          assert.lengthOf(yield* shown(created.threadId), 0)
+          // Gone already, there is nothing more to stop.
+          yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+
+          // One that ends by itself stays, with its exit code, until it is cleared.
+          yield* say(created.threadId, '[lead:serve-exits]')
+          yield* ended(created.threadId, 2)
+          const [exited] = yield* until(shown(created.threadId), (all) => all[0]?.ended != null)
+          assert.strictEqual(exited?.ended?.code, 1)
+          yield* sessions.clearBackground(created.threadId, exited?.id ?? '')
+          assert.lengthOf(yield* shown(created.threadId), 0)
+        }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live(
+      'keeps commands an agent starts of its own by their names; one that ended by itself says how, with or without a code; one it stopped goes',
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions
+          const { task: created } = yield* task()
+          yield* begin(created.threadId, 'claude-code')
+          yield* say(created.threadId, scenarios.backgroundOwn)
+          yield* ended(created.threadId, 1)
+          const all = yield* until(shown(created.threadId), (all) => all.length === 3)
+          // Output for a call or a command it never named changes nothing.
+          assert.deepStrictEqual(
+            all.map((left) => [left.command, left.url, left.ended?.code]),
+            [
+              ['npm run watch', null, undefined],
+              ['npm test', null, 0],
+              ['npm run lint', null, null],
+            ],
+          )
+          const [watch, test] = all
+          // Only one that ended is cleared; Stop on one that ended asks the agent nothing, and it goes.
+          yield* sessions.clearBackground(created.threadId, watch?.id ?? '')
+          assert.lengthOf(yield* shown(created.threadId), 3)
+          yield* sessions.stopBackground(created.threadId, test?.id ?? '')
+          assert.deepStrictEqual(
+            (yield* shown(created.threadId)).map((left) => left.command),
+            ['npm run watch', 'npm run lint'],
+          )
+        }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live('keeps one Codex left running, with where it answers from its tool call’s output after the turn', () =>
+      Effect.gen(function* () {
+        const { task: created } = yield* task()
+        yield* begin(created.threadId, 'codex')
+        yield* say(created.threadId, scenarios.backgroundCodex)
+        yield* ended(created.threadId, 1)
+        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+        assert.deepInclude(serving, { command: 'bun dev', url: 'http://localhost:5173/' })
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live('lets go of everything it left running when the session stops', () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        yield* begin(created.threadId, 'claude-code')
+        yield* say(created.threadId, scenarios.background)
+        yield* ended(created.threadId, 1)
+        yield* until(shown(created.threadId), (all) => all.length === 1)
+        yield* sessions.stop(created.threadId)
+        assert.lengthOf(yield* shown(created.threadId), 0)
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+  })
 
   describe('edges', () => {
     it.live('starts a first agent from a brief too, with input already waiting', () =>

@@ -69,9 +69,13 @@ span.you {
   font-weight: 400;
   color: var(--t-3);
 }
+/* One line: what a check said in full is where it ran. */
 .detail {
+  overflow: hidden;
   font-size: 11.5px;
   color: var(--t-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .running .detail {
   color: var(--live);

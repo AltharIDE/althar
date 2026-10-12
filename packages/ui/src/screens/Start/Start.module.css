@@ -1,96 +1,461 @@
+/* The whole window: two halves over one field, the mark's on the left and the sheet on the right. */
 .start {
-  container-type: inline-size;
-  display: flex;
-  flex-direction: column;
-  gap: 36px;
-  width: 100%;
-  max-width: 560px;
-  margin: 0 auto;
-}
-.title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0;
-  font-size: 20px;
-  font-weight: 650;
-  letter-spacing: -0.015em;
-  color: var(--t-1);
-}
-.section {
-  display: flex;
-  flex-direction: column;
-}
-.label {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--t-1);
-}
-.note {
-  margin: 3px 0 6px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--t-3);
-}
-.none {
-  margin: 6px 0 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--t-2);
-}
-.way {
+  position: relative;
   display: grid;
-  grid-template-columns: 15px minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
-  column-gap: 10px;
-  row-gap: 3px;
-  margin-top: 8px;
-  padding: 14px 14px 15px;
-  border-radius: var(--r-lg);
-  background: var(--paper);
-  box-shadow: inset 0 0 0 1px var(--line-2);
-  text-align: left;
-  transition:
-    box-shadow var(--fast) var(--ease),
-    background var(--fast) var(--ease);
-}
-.way:hover {
-  box-shadow: inset 0 0 0 1px var(--line-3);
-}
-.way:active {
+  grid-template-columns: minmax(340px, 1fr) minmax(400px, 0.95fr);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   background: var(--n-2);
 }
-.wayIcon {
-  grid-row: 1;
-  margin-top: 1px;
-  color: var(--t-2);
+
+/* A printed halo round the mark, and the light rising behind it. */
+.field {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
-.wayTitle {
-  grid-row: 1;
+.halo {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--t-1) 0.75px, transparent 1.25px);
+  background-size: 9px 9px;
+  opacity: 0.16;
+  mask-image: radial-gradient(ellipse 34% 46% at 26% 40%, #000 0%, rgb(0 0 0 / 0.35) 45%, transparent 100%);
+  animation: halo 9s ease-in-out infinite alternate;
+}
+@keyframes halo {
+  to {
+    opacity: 0.1;
+    transform: scale(1.02);
+  }
+}
+.glow {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 64%;
+  mask-image:
+    linear-gradient(to top, #000 0%, #000 40%, rgb(0 0 0 / 0.5) 70%, transparent 96%),
+    linear-gradient(to right, #000 0%, #000 56%, transparent 86%);
+  mask-composite: intersect;
+}
+
+.left {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  padding: 44px clamp(28px, 4vw, 72px) 56px;
+}
+
+/* The mark in its own light, and the agents on the ring under it. */
+.stage {
+  position: relative;
+  flex: none;
+  width: min(400px, 40vh, 100%);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  transition: transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.forming .stage {
+  transform: scale(0.8) translateY(6%);
+}
+.mark {
+  position: relative;
+  transform-origin: 50% 70%;
+  transition: transform 900ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.over .mark {
+  transform: scale(1.06);
+}
+.orbit {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+/* Drawn round once as the looking starts. */
+.ring {
+  fill: none;
+  stroke: var(--t-1);
+  stroke-width: 0.28;
+  stroke-opacity: 0.2;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transform: rotate(90deg);
+  transform-origin: 50% 50%;
+  animation: draw 1600ms cubic-bezier(0.22, 1, 0.36, 1) 200ms forwards;
+}
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+/* Where an agent landed, the light gathers on the ring under it. */
+.gather {
+  fill: var(--paper);
+  opacity: 0.55;
+  filter: blur(6px);
+  animation: rise 600ms ease both;
+}
+.gatherOff {
+  opacity: 0.2;
+}
+.agent {
+  position: absolute;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  translate: -50% -50%;
+  animation: land 620ms cubic-bezier(0.34, 1.32, 0.64, 1) both;
+}
+@keyframes land {
+  from {
+    opacity: 0;
+    scale: 0.6;
+  }
+}
+.chip {
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--lift-card);
+}
+.agentOff {
+  opacity: 0.45;
+}
+.agentName {
+  font-size: 11px;
+  font-weight: 560;
+  color: var(--t-2);
+  white-space: nowrap;
+}
+
+.say {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  margin-top: 30px;
+  text-align: center;
+}
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(28px, 2.8vw, 38px);
+  font-weight: 650;
+  line-height: 1.1;
+  letter-spacing: -0.028em;
+  color: var(--t-1);
+  text-wrap: balance;
+}
+.note {
+  margin: 12px auto 0;
+  max-width: 400px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--t-2);
+  text-wrap: balance;
+}
+.error {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+/* The project taking shape under the mark. */
+.project {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  animation: rise 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.projectLabel {
+  font-size: 11.5px;
+  font-weight: 560;
+  color: var(--t-3);
+}
+.projectName {
+  min-width: 4ch;
+  max-width: 100%;
+  field-sizing: content;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--t-1);
+  font: 650 30px/1.1 var(--font-display);
+  letter-spacing: -0.028em;
+  text-align: center;
+  outline: none;
+  transition: background var(--fast) var(--ease);
+}
+.projectName:hover,
+.projectName:focus-visible {
+  background: color-mix(in oklab, var(--paper) 70%, transparent);
+}
+.card {
+  width: 100%;
+  margin-top: 4px;
+  border-radius: var(--r-lg);
+  background: color-mix(in oklab, var(--paper) 92%, transparent);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--lift-card);
+}
+.chosen {
+  display: grid;
+  max-height: 200px;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  list-style: none;
+}
+.chosenRepo {
+  display: grid;
+  grid-template-columns: 16px auto minmax(0, 1fr) 22px;
+  align-items: center;
+  column-gap: 10px;
+  padding: 7px 8px;
+  text-align: left;
+  animation: rise 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.chosenIcon {
+  color: var(--t-3);
+}
+.chosenName {
   font-size: 13px;
   font-weight: 600;
   color: var(--t-1);
 }
-.wayKbd {
-  grid-row: 1;
-}
-.drop {
-  margin: 8px 0 0;
-  font-size: 11.5px;
+.chosenWhere {
+  overflow: hidden;
+  font: 11.5px/1.4 var(--mono);
   color: var(--t-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
-.wayNote {
-  grid-column: 2 / -1;
+.leaveOut {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--t-3);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.chosenRepo:hover .leaveOut,
+.leaveOut:focus-visible {
+  opacity: 1;
+}
+.leaveOut:hover {
+  background: var(--n-3);
+  color: var(--t-1);
+}
+.ways {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 10px 10px 16px;
+  box-shadow: inset 0 1px 0 var(--line);
+}
+.more {
   font-size: 12px;
-  line-height: 1.45;
   color: var(--t-3);
+  text-align: left;
+}
+
+/* What it found, on a sheet over the light. */
+.right {
+  position: relative;
+  min-height: 0;
+  padding: 18px 18px 18px 0;
+}
+.sheet {
+  height: 100%;
+  overflow-y: auto;
+  padding: 48px clamp(24px, 3.4vw, 52px) 40px;
+  border-radius: 18px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line),
+    var(--lift-dialog);
+  transition: opacity 420ms var(--ease);
+}
+/* While a folder is held over the window, the sheet steps back for it. */
+.over .sheet {
+  opacity: 0.32;
+}
+.label {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.labelNote {
+  overflow: hidden;
+  font-weight: 400;
+  color: var(--t-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.waiting {
+  display: grid;
+  gap: 8px;
+}
+.repos {
+  margin-top: 34px;
+}
+.quiet {
+  margin: 0;
+  padding: 10px 0;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.pick {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  animation: rise 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.pick li + li .repo {
+  box-shadow: inset 0 1px 0 var(--line);
+}
+.repo {
+  display: grid;
+  grid-template-columns: 18px auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  width: 100%;
+  padding: 11px 8px;
+  border-radius: 8px;
+  text-align: left;
+  transition: background var(--fast) var(--ease);
+}
+.pick li + li .repo:hover,
+.repo:hover {
+  background: var(--n-3);
+  box-shadow: none;
+}
+.repo {
+  cursor: default;
+}
+.repo:focus-visible,
+.repo:has(:focus-visible) {
+  outline: 2px solid var(--live);
+  outline-offset: -2px;
+}
+.tick:focus-visible {
+  outline: none;
+}
+.tickMark {
+  display: grid;
+  place-items: center;
+}
+.tick {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1.5px var(--line-2);
+  color: var(--on-ink);
+  transition:
+    background var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+.tick[data-state='checked'] {
+  background: var(--t-1);
+  box-shadow: none;
+}
+.tickAdd {
+  color: var(--t-3);
+}
+.repoName {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.add .repoName {
+  font-weight: 500;
+  color: var(--t-2);
+}
+.repoWhere {
+  overflow: hidden;
+  font: 11.5px/1.4 var(--mono);
+  color: var(--t-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.add .repoWhere {
+  font-family: inherit;
+  font-size: 12px;
+}
+.repoFacts {
+  font-size: 12px;
+  color: var(--t-3);
+  white-space: nowrap;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* A narrow window: the mark above, smaller, and the sheet under it; the page scrolls. The screen is
+   the window, so the window's width says; a query on its own container couldn't change the screen itself. */
+@media (max-width: 760px) {
+  .start {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+  }
+  .left {
+    padding: 56px 24px 24px;
+  }
+  .stage {
+    width: min(260px, 70%);
+  }
+  .glow {
+    width: 100%;
+  }
+  .right {
+    padding: 0 16px 16px;
+  }
+  .sheet {
+    height: auto;
+    padding: 28px 20px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .way {
+  .halo,
+  .ring,
+  .gather,
+  .agent,
+  .project,
+  .chosenRepo,
+  .pick {
+    animation: none;
+  }
+  .ring {
+    stroke-dashoffset: 0;
+  }
+  .stage,
+  .mark,
+  .sheet {
     transition: none;
   }
 }

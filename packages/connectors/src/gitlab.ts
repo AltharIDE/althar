@@ -1,8 +1,9 @@
-import { Effect, Schema } from 'effect'
+import { Clock, Effect, Schema } from 'effect'
 
+import { type Access, type AccessLine, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
-import { makeHttp } from './http'
+import { makeHttp, paged } from './http'
 import { tail } from './github'
 import type {
   Account,
@@ -12,6 +13,7 @@ import type {
   CheckState,
   CodeHost,
   Comment,
+  Container,
   Issue,
   MergeMethod,
   Person,
@@ -20,6 +22,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
+import { answered, failedOf, probe, type Reached, reachLine, readAs, refusalOf, seenOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
  * GitLab, on gitlab.com or a company's own server: a code host of merge
@@ -611,5 +614,156 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       }),
     // GitLab's issues link only to issues: the merge request's "Closes #12" links the two.
     link: () => Effect.void,
+    // The projects the account is a member of, Guest or above (a Guest may open issues), not archived, with issues on; last active first.
+    containers: () =>
+      Effect.map(
+        // A page short of a hundred is the last.
+        paged(1, (page) =>
+          Effect.map(
+            http.json(
+              Schema.Array(Schema.Struct({ path_with_namespace: Schema.String, issues_enabled: Schema.optional(Schema.Boolean) })),
+              'GET',
+              `${api}/projects?membership=true&min_access_level=10&archived=false&with_issues_enabled=true&order_by=last_activity_at&per_page=100&simple=true&page=${page}`,
+            ),
+            (projects) => ({ items: projects, next: projects.length < 100 ? undefined : page + 1 }),
+          ),
+        ),
+        (projects) =>
+          projects
+            .filter((found) => found.issues_enabled !== false)
+            .map((found): Container => ({
+              id: found.path_with_namespace,
+              key: found.path_with_namespace,
+              name: found.path_with_namespace,
+            })),
+      ),
+    create: (container, issue) =>
+      /^[^/\s#]+(\/[^/\s#]+)+$/.test(container)
+        ? Effect.map(
+            // GitLab makes a project label for any it lacks, so every label is sent as it is.
+            http.json(IssueAnswer, 'POST', `${project(container.split('/'))}/issues`, {
+              title: issue.title,
+              description: issue.body,
+              ...(issue.labels.length === 0 ? {} : { labels: issue.labels.join(',') }),
+            }),
+            (filed) => issueOf(filed, container),
+          )
+        : Effect.fail(new ConnectorFailed({ product, reason: 'not_found', message: `Not a GitLab project: ${container}` })),
   }
 }
+
+/*
+ * What a GitLab connection can do. A personal access token says its own
+ * scopes and when it runs out; an OAuth token says them at the server's
+ * token info. The account's role in each project is the project's to say,
+ * and the least of them decides: a Developer pushes, opens and merges.
+ */
+
+const TokenSelf = Schema.Struct({ scopes: Schema.Array(Schema.String), expires_at: Schema.optional(Schema.NullOr(Schema.String)) })
+const TokenInfo = Schema.Struct({ scope: Schema.Array(Schema.String), expires_in: Schema.optional(Schema.NullOr(Schema.Number)) })
+
+/** GitLab's refusal of a token without the scope a call needs. */
+const ScopeRefused = Schema.Struct({ error: Schema.Literal('insufficient_scope') })
+
+/** GitLab's roles, by their access level. */
+const ROLES: ReadonlyMap<number, string> = new Map([
+  [0, 'No access'],
+  [5, 'Minimal Access'],
+  [10, 'Guest'],
+  [15, 'Planner'],
+  [20, 'Reporter'],
+  [30, 'Developer'],
+  [40, 'Maintainer'],
+  [50, 'Owner'],
+])
+
+/** A role's name, by its access level; a level GitLab adds later by its number. */
+export const roleOf = (level: number): string => ROLES.get(level) ?? `Level ${level}`
+
+/** A personal access token's last day, as the moment it runs out: its start, in UTC. */
+const dayOf = (day: string | null | undefined): string | null => {
+  if (day == null) return null
+  const at = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(day) ? `${day}T00:00:00Z` : day)
+  return Number.isNaN(at) ? null : new Date(at).toISOString()
+}
+
+export const accessGitLab: Access = (input) =>
+  Effect.gen(function* () {
+    const api = input.apiUrl.replace(/\/+$/, '')
+    const web = input.webUrl.replace(/\/+$/, '')
+    const ask = (url: string) => probe(input, url)
+    const scope = (name: string): AccessReason => ({ kind: 'scope', scope: name, url: `${web}/-/user_settings/personal_access_tokens` })
+    const lines: Array<AccessLine> = []
+
+    const me = yield* ask(`${api}/user`)
+    // A company's own server: whether it answers at all comes first.
+    if (!input.hosted) {
+      lines.push(serverLine('server', web, me))
+      if (me.status === 0) return stopped(lines)
+    }
+    if (!answered(me))
+      return stopped([
+        ...lines,
+        line('account', 'no', { reason: me.status === 403 && readAs(ScopeRefused, me) !== undefined ? scope('read_user') : refusalOf(me) }),
+      ])
+    const user = readAs(User, me)
+    if (user === undefined) return stopped([...lines, line('account', 'no', { reason: UNREADABLE })])
+    lines.push(line('account', 'ok', { fact: user.username }))
+
+    // A personal access token says its own scopes; an OAuth token, or one an older server won't say, at the token info.
+    const own = yield* ask(`${api}/personal_access_tokens/self`)
+    const self = answered(own) ? readAs(TokenSelf, own) : undefined
+    const info = self === undefined ? yield* ask(`${web}/oauth/token/info`) : null
+    const told = info !== null && answered(info) ? readAs(TokenInfo, info) : undefined
+    const now = yield* Clock.currentTimeMillis
+    const token =
+      self !== undefined
+        ? { scopes: self.scopes, expiresAt: dayOf(self.expires_at) }
+        : told !== undefined
+          ? { scopes: told.scope, expiresAt: told.expires_in == null ? null : new Date(now + told.expires_in * 1000).toISOString() }
+          : { scopes: null, expiresAt: null }
+    const { scopes } = token
+    const lacks = (...any: ReadonlyArray<string>) => scopes !== null && !any.some((name) => scopes.includes(name))
+
+    const reached = yield* Effect.forEach(
+      input.repositories,
+      (path) =>
+        Effect.map(ask(`${api}/projects/${encodeURIComponent(path.join('/'))}`), (answer): Reached<number> => {
+          if (answered(answer)) {
+            const found = readAs(ProjectAnswer, answer)
+            return found === undefined
+              ? { path, missed: UNREADABLE }
+              : {
+                  path,
+                  seen: Math.max(found.permissions?.project_access?.access_level ?? 0, found.permissions?.group_access?.access_level ?? 0),
+                }
+          }
+          if (answer.status === 404) return { path, missed: { kind: 'unseen', names: [path.join('/')], url: null } }
+          if (answer.status === 403 && readAs(ScopeRefused, answer) !== undefined) return { path, missed: scope('read_api') }
+          return { path, missed: failedOf(answer) }
+        }),
+      { concurrency: 4 },
+    )
+    const levels = seenOf(reached)
+    // The least role among the projects it sees decides for them all.
+    const level = levels.length === 0 ? null : Math.min(...levels)
+    if (reached.length > 0) lines.push(reachLine(reached, level === null ? null : roleOf(level)))
+    const below: AccessReason | null = level !== null && level < DEVELOPER ? { kind: 'role', role: roleOf(level) } : null
+
+    // Without its scopes, what the token may do isn't known: only the account's role can say no.
+    // A missing scope is named as the one to make a token with: the least that does it.
+    const given = (need: AccessLine['need'], named: string, ...any: ReadonlyArray<string>) =>
+      scopes === null
+        ? line(need, 'unknown', { reason: { kind: 'unreadable' } })
+        : lacks(...any)
+          ? line(need, 'no', { reason: scope(named) })
+          : line(need, 'ok')
+    lines.push(
+      below !== null ? line('push', 'no', { reason: below }) : given('push', 'api', 'api', 'write_repository'),
+      below !== null ? line('changes', 'no', { reason: below }) : given('changes', 'api', 'api'),
+      given('checks', 'read_api', 'api', 'read_api'),
+      given('issues', 'api', 'api'),
+    )
+
+    return { account: { id: String(user.id), login: user.username, name: user.name ?? null }, lines, ...token }
+  })

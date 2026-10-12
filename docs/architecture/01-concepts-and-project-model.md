@@ -153,6 +153,20 @@ The fast path must not create a hidden “single repository project” subtype.
 
 ### Create a project
 
+The deliberate path opens a tab of its own, as a browser opens a new tab,
+and starts with the name: the project is named first, then given its
+folders. The window makes the project's id before the project exists, so its
+mark, drawn from the id, is the one it keeps; the runtime refuses an id
+already taken. Its colour is offered as the runtime would pick it, and can
+be changed. Folders come from the system's picker, several at once, dropped
+on the window, or, one press away, from the repositories found where people
+keep code, those named like the project first. Each is read as it is added,
+and what reading them found is said before anything is made: the code host
+each is on and whether Althar is connected to it, as whom, and any already
+in another project. A project made on purpose is new even where its first
+folder is another project's; that folder stays the other project's to find.
+Closing the tab makes nothing.
+
 The deliberate path lets a user:
 
 - name the outcome or body of work;
@@ -192,15 +206,27 @@ Tasks, evidence, and decisions remain readable when a source is unavailable.
 
 ### Changing a project after it is made
 
-A project's menu renames it, opens its repositories and its rules, and removes
-it. Each change is recorded as a fact of the project, so every window reads
-the project again.
+A project's settings, opened from the top of its screen, rename it and change
+the ink its mark is drawn in, open its repositories and its rules, connect
+its code host, and remove it. Each change is recorded as a fact of the
+project, so every window reads the project again.
 
 - **Renaming** changes its name only. Its slug, and so the folders its tasks'
   worktrees are in, stays, and so does its mark, drawn from its id.
-- **Adding** a folder binds the repositories at it, as opening it would find
-  them: the one it is or is in, whole, or those directly inside it. One left
-  out before comes back with its role and slug.
+- **Its ink** is picked for it when it is made, the first no other project
+  has, and kept; the person can pick another of the eight, even one another
+  project has. The drawing, from its id, stays.
+- **Adding** a folder, picked or dropped, binds the repositories at it, as
+  opening it would find them: the one it is or is in, whole, or those
+  directly inside it. One left out before comes back with its role and slug.
+- **Where a repository's work goes** is read from its remote (`origin`, else
+  its first; as it was added where this device has no clone): the code host
+  it is on, its path there, and whether the person is connected there, and
+  as whom, from the connections on this device. Nothing is asked of the
+  host. A host Althar doesn't know is named by its address; a repository
+  with no remote, or one that is a folder, keeps its work on this device.
+  The Repositories screen draws each folder wired to where its work goes,
+  and reads it again when a connection is made or stops working.
 - **Leaving a repository out** sets its binding's `detached_at`. New tasks
   can't require it and the coordinator stops reading it; tasks made with it
   keep their requirement and their worktree. The last binding stays, since a
@@ -404,8 +430,8 @@ same source location, while each run still receives its own managed workspace.
 | `CoordinatorThread` | The project is created (later, one per member) | Archived with the project; never truncated |
 | `RepositoryBinding` | Source identity joins a project | Detached/tombstoned |
 | `RepositoryLocation` | A host maps or clones a binding | Remapped, unavailable, or removed |
-| `Task` | Desired work is recorded | Completed, cancelled, or archived |
-| `Run` | A task is submitted under a workflow and policy | Logical outcome chosen |
+| `Task` | Desired work is recorded | Done once merged, for good; abandoned, which can be reopened; or archived with its project ([05](05-workflow-engine.md#task-and-run-lifecycle)) |
+| `Run` | A task is submitted under a workflow and policy | Logical outcome chosen; suspended meanwhile while its task is stopped or abandoned |
 | `RunAttempt` | Execution or retry is admitted | Succeeded, failed, cancelled, interrupted |
 | `Workspace` | A task's first run is admitted on a device | Retained, published, or cleaned with the task |
 | `WorkspaceSnapshot` | A node attempt starts or ends, a switch, an interrupt | Immutable |
@@ -550,8 +576,9 @@ live beneath a project while keeping the MVP product coherent.
    unrelated task.
 7. A user asks the coordinator for a small change. It drafts a task and a plan
    and hands the task to a lead; it does not edit the repository itself.
-8. The user switches a task's lead to another agent mid-task. The new agent
-   continues in the same workspace, from a brief, and the task's history keeps
+8. The user switches a task's lead to another agent mid-task. Nothing changes
+   until they next write to it; then the new agent continues in the same
+   workspace, from a brief with what they wrote, and the task's history keeps
    both sessions.
 
 ## Explicit non-goals

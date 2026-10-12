@@ -30,6 +30,35 @@ export const Wide: Story = {
   },
 }
 
+/** Each column sits as its values read best: numbers to the right. */
+export const Aligned: Story = { args: { align: [null, 'right', 'center', 'left'] } }
+/** Sentences in cells wrap, each column kept wide enough to read. */
+export const Sentences: Story = {
+  args: {
+    caption: undefined,
+    rowHeaders: false,
+    wrap: true,
+    head: ['Finding', 'What to do'],
+    rows: [
+      ['Refunds skip the partner budget when the idempotency key repeats', 'Check the key before the budget, and answer 409'],
+      ['Retry-After is an HTTP date in the v1 handler', 'Leave v1 alone; refunds never go through it'],
+    ],
+  },
+}
+/** A head and no rows. */
+export const Empty: Story = { args: { rows: [] } }
+/** Many rows: it grows with them, and the thread scrolls. */
+export const Long: Story = {
+  args: {
+    rows: Array.from({ length: 24 }, (_, i) => [
+      `GET /refunds/${1000 + i}`,
+      String(600 - i * 10),
+      '1 min',
+      i % 3 === 0 ? '429 · Retry-After' : '—',
+    ]),
+  },
+}
+
 export const AllStates: Story = {
   parameters: statesOn({ hover: '[role="region"]', focus: '[role="region"]', pressed: '[role="region"]' }),
   render: (args) => (
@@ -39,6 +68,21 @@ export const AllStates: Story = {
         { state: 'with caption', node: <Table {...args} /> },
         { state: 'no caption', node: <Table {...args} caption={undefined} /> },
         { state: 'one row', node: <Table {...args} rows={args.rows.slice(0, 1)} /> },
+        { state: 'aligned', node: <Table {...args} align={[null, 'right', 'center', 'left']} /> },
+        { state: 'no rows', node: <Table {...args} rows={[]} /> },
+        {
+          state: 'sentences wrap',
+          node: (
+            <Table
+              head={['Finding', 'What to do']}
+              rows={[
+                ['Refunds skip the partner budget when the idempotency key repeats', 'Check the key before the budget, and answer 409'],
+              ]}
+              rowHeaders={false}
+              wrap
+            />
+          ),
+        },
         { state: 'focus', node: <Table {...args} /> },
       ]}
     />

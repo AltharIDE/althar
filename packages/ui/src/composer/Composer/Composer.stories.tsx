@@ -1,14 +1,16 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { useEffect, useState } from 'react'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { useEffect, useRef, useState } from 'react'
+import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { MODEL_LIST, model, useModelPrefs } from '../../fixtures/models'
 import { Brand } from '../../foundations/brands/brands'
+import { DictationSetup } from '../../foundations/vocabulary'
 import { ContextRing } from '../ContextRing/ContextRing'
+import { DictationTray, type DictationState } from '../DictationTray/DictationTray'
 import { Listening } from '../Listening/Listening'
 import { Running } from '../Running/Running'
 import { ModelPick } from '../ModelPick/ModelPick'
-import { Composer, type ComposerProps } from './Composer'
+import { Composer, type ComposerProps, type DictationInput } from './Composer'
 import { States, statesOn } from '../../storybook/States'
 
 const clock = (n: number) => `0:${String(n).padStart(2, '0')}`
@@ -41,10 +43,26 @@ function Picker() {
 /* What a voice looks like to the bars: a slow swell with some grain, the same on every run. */
 const voice = (t: number) => Array.from({ length: 12 }, (_, i) => Math.abs(Math.sin((t + i) * 0.7) * Math.cos((t - i) * 0.31)))
 const SAID = 'Also check the webhook retry path while you are in there.'.split(' ')
+/* The microphones a Mac with a headset and a USB microphone names. */
+const INPUTS: readonly DictationInput[] = [
+  { id: 'built-in', label: 'MacBook Pro Microphone' },
+  { id: 'airpods', label: 'AirPods Pro' },
+  { id: 'usb', label: 'Shure MV7' },
+]
 
-function Example(props: Partial<ComposerProps> & { initial?: string; recording?: boolean; streaming?: boolean; waiting?: string[] }) {
-  const { initial = '', recording = false, streaming = false, waiting = [], onSendNow = () => {}, ...rest } = props
+function Example(
+  props: Partial<ComposerProps> & {
+    initial?: string
+    recording?: boolean
+    streaming?: boolean
+    waiting?: string[]
+    at?: number
+    inputs?: readonly DictationInput[]
+  },
+) {
+  const { initial = '', recording = false, streaming = false, waiting = [], at, inputs = INPUTS, onSendNow = () => {}, ...rest } = props
   const [value, setValue] = useState(initial)
+  const [input, setInput] = useState<string | null>(null)
   const [queue, setQueue] = useState(waiting.map((text, i) => ({ id: `q${i}`, text })))
   const [seconds, setSeconds] = useState<number | null>(recording ? 4 : null)
   const [tick, setTick] = useState(0)
@@ -77,6 +95,11 @@ function Example(props: Partial<ComposerProps> & { initial?: string; recording?:
           elapsed: seconds === null ? null : clock(seconds),
           levels: voice(tick),
           interim: heard,
+          ...(at === undefined ? {} : { at }),
+          kbd: '⌘⇧D',
+          inputs,
+          input,
+          onChooseInput: setInput,
           onStart: () => setSeconds(0),
           onStop: () => {
             setSeconds(null)
@@ -94,6 +117,81 @@ function Example(props: Partial<ComposerProps> & { initial?: string; recording?:
         onSendNow={(text) => {
           onSendNow(text)
           setValue('')
+        }}
+      />
+    </div>
+  )
+}
+
+/*
+ * A host standing in for the app: no speech model at first, so the
+ * microphone opens the tray; Download brings one down (here in about a
+ * second), it listens, and what was said lands at the cursor.
+ */
+function FirstTime({ onSubmit }: { onSubmit: (text: string) => void }) {
+  const [value, setValue] = useState('')
+  const [open, setOpen] = useState(false)
+  const [got, setGot] = useState<number | null>(null)
+  const [seconds, setSeconds] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
+  const at = useRef(0)
+  const ready = got === 480
+  const downloading = got !== null && got < 480
+  useEffect(() => {
+    if (!downloading) return
+    const t = window.setInterval(() => {
+      at.current = Math.min(480, at.current + 60)
+      setGot(at.current)
+      /* landed while you waited at the tray: it listens */
+      if (at.current === 480) {
+        setOpen(false)
+        setSeconds(0)
+      }
+    }, 100)
+    return () => window.clearInterval(t)
+  }, [downloading])
+  const tray: DictationState | null = !open
+    ? null
+    : downloading
+      ? { kind: DictationSetup.Downloading, got: `${got} MB`, size: '480 MB', progress: (got ?? 0) / 480 }
+      : { kind: DictationSetup.Offer, size: '480 MB' }
+  return (
+    <div style={{ maxWidth: 700, paddingTop: 60 }}>
+      <Composer
+        value={value}
+        onChange={setValue}
+        onSubmit={onSubmit}
+        placeholder="Tell the lead"
+        tray={
+          tray && (
+            <DictationTray
+              state={tray}
+              onDownload={() => {
+                at.current = 0
+                setGot(0)
+              }}
+              onCancel={() => {
+                setGot(null)
+                setOpen(false)
+              }}
+              onDismiss={() => setOpen(false)}
+            />
+          )
+        }
+        dictation={{
+          elapsed: seconds === null ? null : clock(seconds),
+          busy,
+          expanded: open,
+          progress: downloading && !open ? (got ?? 0) / 480 : undefined,
+          onStart: () => (ready ? setSeconds(0) : setOpen((o) => !o)),
+          onStop: () => {
+            setSeconds(null)
+            setBusy(true)
+            window.setTimeout(() => {
+              setBusy(false)
+              setValue((v) => `${v ? `${v.trimEnd()} ` : ''}${SAID.join(' ')}`)
+            }, 300)
+          },
         }}
       />
     </div>
@@ -138,6 +236,112 @@ export const SendingNow: Story = {
 export const Dictating: Story = { render: () => <Example recording /> }
 /** A transcriber that streams: the words arrive faint in the field as you say them. */
 export const DictatingWordByWord: Story = { render: () => <Example recording streaming initial="Keep the limiter where it is." /> }
+/** Which microphone it hears, from the menu beside it: the system's default first, then each the system names. */
+export const ChoosingTheMicrophone: Story = {
+  render: () => <Example />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Choose the microphone' }))
+    const menu = await screen.findByRole('menu', { name: 'Microphone' })
+    const items = within(menu).getAllByRole('menuitemradio')
+    await expect(items.map((item) => item.textContent)).toEqual(['System default', ...INPUTS.map((i) => i.label)])
+    await expect(within(menu).getByRole('menuitemradio', { name: 'System default' })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(within(menu).getByRole('menuitemradio', { name: 'Shure MV7' }))
+    await userEvent.click(c.getByRole('button', { name: 'Choose the microphone' }))
+    const again = await screen.findByRole('menu', { name: 'Microphone' })
+    await expect(within(again).getByRole('menuitemradio', { name: 'Shure MV7' })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.keyboard('{Escape}')
+  },
+}
+/** Before the system names its microphones, only its default can be chosen, and a note says when the others come. */
+export const ChoosingTheMicrophoneFirstTime: Story = {
+  render: () => <Example inputs={[]} />,
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Choose the microphone' }))
+    const menu = await screen.findByRole('menu', { name: 'Microphone' })
+    await expect(within(menu).getAllByRole('menuitemradio')).toHaveLength(1)
+    await expect(within(menu).getByText(/Other microphones show here/)).toBeInTheDocument()
+  },
+}
+/** Another microphone, chosen while you talk: it goes on from that one, and what you said before stays. */
+export const ChoosingTheMicrophoneWhileDictating: Story = {
+  render: () => <Example recording />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Choose the microphone' }))
+    const menu = await screen.findByRole('menu', { name: 'Microphone' })
+    await userEvent.click(within(menu).getByRole('menuitemradio', { name: 'AirPods Pro' }))
+    await expect(c.getByRole('button', { name: /^Stop dictating/ })).toBeInTheDocument()
+  },
+}
+/** The first press, with no speech model yet: a tray on the composer's top offers it. */
+export const DictationOffer: Story = {
+  render: () => (
+    <Example
+      tray={<DictationTray state={{ kind: DictationSetup.Offer, size: '480 MB' }} onDownload={() => {}} onDismiss={() => {}} />}
+      dictation={{ elapsed: null, expanded: true, onStart: () => {}, onStop: () => {} }}
+    />
+  ),
+}
+/** The speech model coming down: the tray's edge is the bar, and the field stays yours to type in. */
+export const DictationDownloading: Story = {
+  render: () => (
+    <Example
+      initial="Before the PR, "
+      tray={
+        <DictationTray
+          state={{ kind: DictationSetup.Downloading, got: '198 MB', size: '480 MB', left: 'about 20 s', progress: 198 / 480 }}
+          onCancel={() => {}}
+          onDismiss={() => {}}
+        />
+      }
+      dictation={{ elapsed: null, expanded: true, onStart: () => {}, onStop: () => {} }}
+    />
+  ),
+}
+/** The tray hidden while it downloads: a ring round the microphone says how far it has come. */
+export const DictationDownloadingHidden: Story = {
+  render: () => <Example dictation={{ elapsed: null, progress: 0.41, onStart: () => {}, onStop: () => {} }} />,
+}
+/** Writing down what was said: the microphone turns. */
+export const DictationWriting: Story = {
+  render: () => <Example dictation={{ elapsed: null, busy: true, onStart: () => {}, onStop: () => {} }} />,
+}
+/** What floats on the edge sits above the tray, not over it. */
+export const DictationTrayAndListening: Story = {
+  render: () => (
+    <Example
+      busy
+      above={<Listening sources={[{ id: 'pr', mark: Brand.GitHub, label: 'PR 1206', what: 'review comments and checks' }]} />}
+      tray={<DictationTray state={{ kind: DictationSetup.Denied }} onOpenSettings={() => {}} onDismiss={() => {}} />}
+      dictation={{ elapsed: null, expanded: true, onStart: () => {}, onStop: () => {} }}
+    />
+  ),
+}
+/** The whole first time, quickly: offer, download, listening, and the words at the cursor. Never sent. */
+export const DictationFirstTime: Story = {
+  args: { onSubmit: fn() },
+  render: (args) => <FirstTime onSubmit={args.onSubmit} />,
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Dictate' }))
+    await expect(c.getByRole('button', { name: 'Download' })).toHaveFocus()
+    await userEvent.click(c.getByRole('button', { name: 'Download' }))
+    await expect(c.getByRole('progressbar', { name: 'Speech model download' })).toBeInTheDocument()
+    await userEvent.click(await c.findByRole('button', { name: /^Stop dictating/ }, { timeout: 4000 }))
+    await waitFor(() => expect(c.getByRole('textbox', { name: 'Tell the lead' })).toHaveValue(SAID.join(' ')), { timeout: 3000 })
+    await expect(args.onSubmit).not.toHaveBeenCalled()
+  },
+}
+/** Words arriving in the middle of what is written: faint where they will land, the text after them moved along. */
+export const DictatingMidSentence: Story = {
+  render: () => <Example recording streaming initial="Before the PR, run it again." at={14} />,
+  play: async ({ canvasElement }) => {
+    const field = within(canvasElement).getByRole('textbox', { name: 'Tell the lead' })
+    // While words arrive, the field is the dictation's.
+    await expect(field).toHaveAttribute('readonly')
+  },
+}
 /** Sent while the lead worked: it waits until the lead is done with what it is doing, and can be taken back or out. */
 export const Queued: Story = {
   render: () => <Example busy onStopAgent={() => {}} waiting={['Also check the webhook retry path.']} />,

@@ -3,8 +3,80 @@
   flex-direction: column;
   gap: 8px;
 }
+/* a walk in, in place of the list, under the way back to it */
+.here {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+.card {
+  justify-self: stretch;
+  max-width: 440px;
+  width: 100%;
+  margin: 0 auto;
+}
+/* while the ways in are found: their shapes */
+.reading {
+  display: grid;
+  gap: 8px;
+}
+/* beside a project's work: the card at a sign-in's width, in the panel's middle */
+.sideBody {
+  padding-top: 18px;
+}
+.side {
+  max-width: 420px;
+  margin: 8px auto 0;
+}
 .error {
   margin: 0;
   font-size: 12.5px;
   color: var(--danger);
+}
+/* Code hosts beside trackers, as settings shows them: a hairline between. */
+.columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 18px 6px;
+}
+.column:first-child {
+  padding-left: 2px;
+}
+.column + .column {
+  box-shadow: inset 1px 0 var(--line);
+}
+.columnTitle {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.columnNote {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+@media (max-width: 640px) {
+  .columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+  .column {
+    padding: 0;
+  }
+  .column + .column {
+    box-shadow: none;
+  }
+}
+
+/* Opened over a project's view, its repositories or a new project: the services' two columns, or a walk in at a card's width. */
+.dialog {
+  top: 10vh;
+  max-height: 80vh;
 }

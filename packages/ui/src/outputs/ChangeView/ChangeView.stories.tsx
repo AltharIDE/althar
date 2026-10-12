@@ -2,7 +2,11 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { DiffLineKind } from '../../foundations/vocabulary'
 import { ROUTER_DIFF } from '../../fixtures/meridian'
+import { Button } from '../../primitives/Button/Button'
+import { Menu, MenuItem } from '../../primitives/Menu/Menu'
+import type { DiffLine } from '../../thread/Diff/Diff'
 import { ChangeView, type ChangeViewProps, type FileView, type ViewedFile } from './ChangeView'
 
 const FILES: ViewedFile[] = [
@@ -69,6 +73,102 @@ export const Changes: Story = {
 }
 
 const at = (selected: string, view: FileView) => ({ selected, view })
+
+/* A whole file's diff, as the runtime reads it: one change in the middle of sixty lines. */
+const WHOLE: DiffLine[] = [
+  { kind: DiffLineKind.Hunk, text: '@@ -1,60 +1,61 @@' },
+  ...Array.from({ length: 30 }, (_, i): DiffLine => ({ kind: DiffLineKind.Context, old: i + 1, new: i + 1, text: `  // line ${i + 1}` })),
+  { kind: DiffLineKind.Removed, old: 31, text: '  const response = await fetch(endpoint)', changed: ['fetch(endpoint)'] },
+  {
+    kind: DiffLineKind.Added,
+    new: 31,
+    text: '  const response = await withRetry(() => fetch(endpoint))',
+    changed: ['withRetry(() => fetch(endpoint))'],
+  },
+  { kind: DiffLineKind.Added, new: 32, text: '  if (!response.ok) throw new CheckoutError(response.status)' },
+  ...Array.from({ length: 29 }, (_, i): DiffLine => ({
+    kind: DiffLineKind.Context,
+    old: i + 32,
+    new: i + 33,
+    text: `  // line ${i + 32}`,
+  })),
+]
+
+/** A whole file: what didn't change folds away, but for three lines beside the change, and opens in place. */
+export const WholeFile: Story = {
+  args: at('src/charges/limit.ts', { state: 'ready', lines: WHOLE }),
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(body.getByRole('button', { name: 'Show 27 unchanged lines' })).toBeInTheDocument()
+    await expect(body.getByRole('button', { name: 'Show 26 unchanged lines' })).toBeInTheDocument()
+    await expect(body.queryByText('@@ -1,60 +1,61 @@')).toBeNull()
+    await expect(body.queryByText('// line 1')).toBeNull()
+    await userEvent.click(body.getByRole('button', { name: 'Show 27 unchanged lines' }))
+    await expect(body.getByText('// line 1')).toBeInTheDocument()
+    await expect(body.queryByRole('button', { name: 'Show 27 unchanged lines' })).toBeNull()
+  },
+}
+
+/** A file too long to read whole comes in hunks: where it skips lines, a quiet line names the function, never the raw header. */
+export const InHunks: Story = {
+  args: at('src/charges/limit.ts', {
+    state: 'ready',
+    lines: [
+      { kind: DiffLineKind.Hunk, text: '@@ -120,4 +120,4 @@ export function limit()' },
+      { kind: DiffLineKind.Context, old: 120, new: 120, text: '  const max = 3' },
+      { kind: DiffLineKind.Removed, old: 121, text: '  const wait = 100' },
+      { kind: DiffLineKind.Added, new: 121, text: '  const wait = 250' },
+      { kind: DiffLineKind.Hunk, text: '@@ -900,3 +900,3 @@ function backoff(at: number)' },
+      { kind: DiffLineKind.Removed, old: 900, text: '  return wait * at' },
+      { kind: DiffLineKind.Added, new: 900, text: '  return wait * 2 ** at' },
+    ],
+  }),
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(body.getByText('export function limit()')).toBeInTheDocument()
+    await expect(body.getByText('function backoff(at: number)')).toBeInTheDocument()
+    await expect(body.queryByText(/^@@/)).toBeNull()
+  },
+}
+
+/** What a tool made goes last, under its own word, its diff folded until asked for. */
+export const Generated: Story = {
+  args: {
+    files: [{ path: 'bun.lock', status: 'modified', add: 812, del: 640, generated: true }, ...FILES.slice(0, 2)],
+    selected: 'bun.lock',
+    view: { state: 'ready', lines: ROUTER_DIFF },
+  },
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    const list = within(body.getByRole('navigation', { name: 'Changed files' }))
+    const names = list.getAllByRole('button').map((button) => button.textContent ?? '')
+    await expect(names.at(-1)).toMatch(/bun\.lock/)
+    await expect(list.getByText('Generated')).toBeInTheDocument()
+    await expect(body.getByText(/Made by a tool, not written: 812 lines added, 640 removed/)).toBeInTheDocument()
+    await userEvent.click(body.getByRole('button', { name: 'Show the diff' }))
+    await expect(body.getByRole('group', { name: 'bun.lock' })).toBeInTheDocument()
+  },
+}
+
+/** What else opens it, beside Close: an editor, at the file. Its menu's arrows are its own, not the list of files'. */
+export const WithActions: Story = {
+  args: {
+    actions: (
+      <Menu trigger={<Button size="small">Open in another editor</Button>} label="Open in another editor">
+        <MenuItem onSelect={() => {}}>Open in Zed</MenuItem>
+        <MenuItem onSelect={() => {}}>Show in Finder</MenuItem>
+      </Menu>
+    ),
+  },
+  play: async ({ args, canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(body.getByRole('button', { name: /Close/ })).toBeInTheDocument()
+    await userEvent.click(body.getByRole('button', { name: 'Open in another editor' }))
+    await expect(await body.findByRole('menuitem', { name: 'Open in Zed' })).toBeInTheDocument()
+    await userEvent.keyboard('{ArrowDown}')
+    await expect(args.onSelect).not.toHaveBeenCalled()
+  },
+}
 
 /** Being read. */
 export const Loading: Story = { args: at('src/charges/limit.ts', { state: 'loading' }) }

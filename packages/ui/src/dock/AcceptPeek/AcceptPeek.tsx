@@ -3,7 +3,7 @@ import { useState, type ReactNode } from 'react'
 import { Icon } from '../../foundations/Icon/Icon'
 import type { CodeHost } from '../../foundations/codeHost'
 import { BrandMark } from '../../foundations/Marks/Marks'
-import { Model, type ModelInfo } from '../../foundations/Model/Model'
+import { Model, type ModelInfo } from '../../primitives/Model/Model'
 import { useRefocus } from '../../lib/refocus'
 import { safeHref } from '../../lib/safeHref'
 import { Button } from '../../primitives/Button/Button'
@@ -32,8 +32,11 @@ export interface AcceptPeekText {
   files: string
   checks: string
   accept: string
+  /** Opens a note to the lead about what should change. */
   sendBack: string
   sendBackPlaceholder: string
+  /** Sends that note; the lead takes the work up again with it. */
+  sendNote: string
   cancel: string
   /** Said in place of Accept while any check has not passed. */
   checksFirst: string
@@ -52,8 +55,9 @@ export const acceptPeekText: AcceptPeekText = {
   files: 'Files',
   checks: 'Checks',
   accept: 'Accept and merge',
-  sendBack: 'Send back',
+  sendBack: 'Ask for changes',
   sendBackPlaceholder: 'What should change?',
+  sendNote: 'Send to the lead',
   cancel: 'Cancel',
   checksFirst: 'It can be accepted once its checks pass',
   noChecks: 'No checks ran on it.',
@@ -85,7 +89,7 @@ export interface AcceptPeekProps {
   onOpenFile?: (path: string) => void
   /** Accepting is under way: Accept shows it and ignores presses. */
   accepting?: boolean
-  /** The note is on its way back: Send back shows it and ignores presses. */
+  /** The note is on its way to the lead: Ask for changes shows it and ignores presses. */
   sendingBack?: boolean
   /** Why the last answer did not go through, said in the foot. */
   error?: ReactNode
@@ -163,7 +167,7 @@ export function AcceptPeek({
       <PeekFoot>
         {sending ? (
           <NoteForm
-            text={{ placeholder: t.sendBackPlaceholder, submit: t.sendBack, cancel: t.cancel }}
+            text={{ placeholder: t.sendBackPlaceholder, submit: t.sendNote, cancel: t.cancel }}
             defaultValue={draft}
             onSubmit={(note) => {
               /* kept, so a send that fails can be tried again without writing it twice */

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 
 import { LINKS } from '../content/facts'
 import { cx } from '../lib/cx'
+import { useHere } from '../lib/pathname'
 import s from './Nav.module.css'
 
 /*
@@ -11,6 +12,11 @@ import s from './Nav.module.css'
  * download. It draws in to the mark and the download as you read, and opens
  * out again when pointed at or tabbed into. On a phone, Menu drops the
  * pages under it.
+ *
+ * Nothing in it changes size as it draws in, so it never lays itself out
+ * again: it is always as wide as it opens, its black is two halves that
+ * slide in from either end and overlap in the middle, and the mark and the
+ * way in ride in with them. Only transforms move, on the compositor.
  */
 
 const PAGES = [
@@ -19,8 +25,6 @@ const PAGES = [
   { href: '/thesis', name: 'Thesis' },
   { href: '/docs', name: 'Docs' },
 ]
-
-const here = (href: string) => typeof window !== 'undefined' && (window.location.pathname.replace(/\/+$/, '') || '/') === href
 
 /** Whether the page has scrolled past `past` px. */
 function useScrolled(past = 40) {
@@ -36,6 +40,7 @@ function useScrolled(past = 40) {
 
 /** The phone's menu: the pages as a sheet under the island, opened by its button. */
 function PhoneMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const here = useHere()
   return (
     <div className={cx(s.sheet, open && s.sheetOpen)} aria-hidden={!open}>
       <nav aria-label="Site">
@@ -54,6 +59,7 @@ function PhoneMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
 }
 
 export function Nav() {
+  const here = useHere()
   const scrolled = useScrolled(120)
   const [pointed, setPointed] = useState(false)
   const [focused, setFocused] = useState(false)
@@ -70,6 +76,8 @@ export function Nav() {
           if (!e.currentTarget.contains(e.relatedTarget)) setFocused(false)
         }}
       >
+        <span className={cx(s.half, s.halfLeft)} aria-hidden="true" />
+        <span className={cx(s.half, s.halfRight)} aria-hidden="true" />
         <div className={s.islandBar}>
           <a className={s.islandMark} href="/" aria-label="Althar">
             <Logo size={18} />

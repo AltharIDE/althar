@@ -1,36 +1,53 @@
-.checks {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 3px;
+.rules {
+  min-width: 0;
 }
-.add {
-  align-self: flex-start;
-  margin-left: 4px;
-}
-.rule {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 4px 0 0 4px;
-}
-.label {
-  font-size: 12px;
-  color: var(--t-2);
-}
-.ruleRow {
+
+/* the title and what the page is, with how to read it on the right */
+.head {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 40px;
+  margin: 0 0 36px;
 }
-.pattern {
-  flex: 1 1 200px;
+.headText {
   min-width: 0;
-  font-family: var(--mono);
 }
-.note {
-  font-size: 11.5px;
-  line-height: 1.5;
+.title {
+  margin: 0;
+  font: 640 27px/1.1 var(--font-display);
+  letter-spacing: -0.026em;
+  color: var(--t-1);
+}
+.lede {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--t-2);
+}
+.key {
+  flex: none;
+}
+
+/* what a name or a description opens: its name, what it is, then the setting */
+.popLabel {
+  display: block;
+  margin: 1px 0 3px;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--t-3);
+}
+.popNote {
+  display: block;
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+
+/* a sentence's last thing stays on one line with its full stop and its + */
+.keep {
+  white-space: nowrap;
 }

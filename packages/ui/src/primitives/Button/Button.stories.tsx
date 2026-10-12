@@ -18,9 +18,11 @@ export const Signal: Story = { args: { variant: 'signal', children: 'Allow', kbd
 export const Quiet: Story = { args: { variant: 'quiet', children: 'Hold' } }
 /** Red words, for the one press that ends or throws something away, as a dialog's last word. */
 export const Danger: Story = { args: { variant: 'danger', children: 'Remove project' } }
+export const Ink: Story = { args: { variant: 'ink', children: 'Put Althar back on your commits' } }
 /** Inside a row of a thread or a card, beside 11–12px text. */
 export const Small: Story = { args: { size: 'small', children: 'Undo' } }
-export const WithIcon: Story = { args: { icon: 'arrow', children: 'Open task' } }
+export const WithIcon: Story = { args: { icon: 'plus', children: 'New task' } }
+export const WithTrailingIcon: Story = { args: { trailingIcon: 'arrow', children: 'Open task' } }
 export const WithShortcut: Story = { args: { kbd: '↵', children: 'Send' } }
 export const Disabled: Story = { args: { disabled: true } }
 export const Busy: Story = {
@@ -65,6 +67,7 @@ export const AllStates: Story = {
       <States cells={every({ variant: 'signal', children: 'Allow', kbd: '↵' })} />
       <States cells={every({ variant: 'quiet', children: 'Hold' })} />
       <States cells={every({ variant: 'danger', children: 'Remove project' })} />
+      <States cells={every({ variant: 'ink', children: 'Put Althar back on your commits' })} />
       <States cells={every({ size: 'small', children: 'Undo' })} />
       <States cells={every({ size: 'small', variant: 'quiet', children: 'Hold' })} />
     </div>

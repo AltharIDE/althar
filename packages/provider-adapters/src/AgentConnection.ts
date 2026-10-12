@@ -3,9 +3,25 @@ import type { ToolKind } from '@althar/domain'
 import { Cause, Data, DateTime, Deferred, Duration, Effect, Exit, Option, PubSub, Queue, Ref, Scope, Stream } from 'effect'
 
 import { AgentExited, AgentRequestFailed, type AgentStartFailed, OptionUnavailable, TurnInProgress } from './errors'
-import { type ConfigOption, normalize, normalizeOptions, normalizeUsage, type PermissionScope, type SessionEvent } from './events'
+import {
+  type ConfigOption,
+  normalize,
+  normalizeOptions,
+  normalizeUsage,
+  type PermissionScope,
+  type SessionEvent,
+  terminalOutputCapability,
+} from './events'
 import { type Classified, classify, structuredFailure, structuredFailureCapability } from './failures'
+import {
+  asyncTasksCapability,
+  type BackgroundEvent,
+  stopBackgroundMethod,
+  type StopBackgroundResponse,
+  takingBackground,
+} from './background'
 import { type CapturedFrame, type OwnedProcess, type ProcessExit, spawnOwned, type StopReport } from './process'
+import { type Question, type QuestionAnswer, questionFields } from './questions'
 import type { LaunchSpec, PermissionMeanings } from './registry'
 
 /*
@@ -47,10 +63,11 @@ export interface PermissionRequest {
   readonly options: ReadonlyArray<PermissionOption>
 }
 
-/** Althar's decision on a permission request, from the project's rules. `reason` is told to the agent when a rejection stops its turn. */
+/** Althar's permission decision. Coordinator denials are explained at the next turn boundary, even when the provider's rejection carries on. */
 export interface PermissionDecision {
   readonly decision: 'allow' | 'reject'
   readonly reason?: string
+  readonly decidedBy?: 'coordinator'
 }
 
 /** What was sent back for a decision: an option (and how far it reaches), or a cancelled request. */
@@ -97,19 +114,6 @@ export const answerFor = (
     ? { optionId: null, scope: null, stopsTurn: true }
     : { optionId: chosen.optionId, scope: 'once', stopsTurn: chosen === stopping }
 }
-
-/** A question the agent asks the person, such as Claude's AskUserQuestion, with the fields of the answer it wants. */
-export interface Question {
-  readonly sessionId?: string
-  readonly message: string
-  readonly fields: Readonly<Record<string, unknown>>
-  readonly required: ReadonlyArray<string>
-}
-
-export type QuestionAnswer =
-  | { readonly action: 'accept'; readonly content: Readonly<Record<string, string | number | boolean | ReadonlyArray<string>>> }
-  | { readonly action: 'decline' }
-  | { readonly action: 'cancel' }
 
 export interface AgentInfo {
   readonly name: string
@@ -169,6 +173,8 @@ export interface AgentSession {
   readonly interrupt: Effect.Effect<void, Failure>
   /** Sets a config option, such as the model, and returns every option as the agent now reports it. */
   setOption(configId: string, value: string): Effect.Effect<ReadonlyArray<ConfigOption>, Failure | OptionUnavailable>
+  /** Stops a command it left running (background.ts); whether there was one to stop. Closing the session stops them all. */
+  stopBackground(id: string): Effect.Effect<boolean, Failure>
 }
 
 export interface ProcessInfo {
@@ -195,7 +201,12 @@ export interface ConnectOptions {
   readonly onPermission: (request: PermissionRequest) => Effect.Effect<PermissionDecision>
   /** What the agent's permission options mean: the registry's `permissions`. */
   readonly permissions?: PermissionMeanings
-  /** Answers a question the agent asks the person. Without it, questions are cancelled. */
+  /**
+   * Answers a question the agent asks the person. Without it the agent is
+   * offered no way to ask (no form elicitation), so it asks in what it says
+   * or decides for itself. It is interrupted if the agent withdraws the
+   * question or Althar cancels the turn.
+   */
   readonly onQuestion?: (question: Question) => Effect.Effect<QuestionAnswer>
 }
 
@@ -238,9 +249,10 @@ const mcpServer = (server: McpServer): acp.McpServer =>
 interface Turn {
   readonly queue: Queue.Queue<SessionEvent, Failure | Cause.Done>
   readonly done: Deferred.Deferred<void>
-  /** Set when a rejection stopped the turn: the reason it is resumed with. */
+  /** A stopping rejection or coordinator denial to explain at the next turn boundary. */
   resumeWith: string | undefined
   resumes: number
+  cancelled: boolean
   failure: Classified | undefined
 }
 
@@ -280,7 +292,17 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       else if (starting > 0) early.set(sessionId, [...(early.get(sessionId) ?? []), inbound])
     }
 
-    /** Permission requests waiting for a decision, by session: each entry drops its request. */
+    /** The commands each session left running, as the agent last said, so closing it can stop them. */
+    const leftRunning = new Map<string, Set<string>>()
+    const heardBackground = (sessionId: string, event: BackgroundEvent) => {
+      const running = leftRunning.get(sessionId) ?? new Set<string>()
+      leftRunning.set(sessionId, running)
+      if (event._tag === 'BackgroundStarted') running.add(event.id)
+      if (event._tag === 'BackgroundEnded') running.delete(event.id)
+      receive(sessionId, { _tag: 'Event', event })
+    }
+
+    /** Permission requests and questions waiting for an answer, by session: each entry drops its request. */
     const waiting = new Map<string, Set<() => void>>()
     const waitingIn = (sessionId: string) => {
       const found = waiting.get(sessionId) ?? new Set<() => void>()
@@ -314,13 +336,13 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         settled = true
         const { decision, reason } = decided
         const chosen = answerFor(request.options, decision, options.permissions)
-        const stops = chosen.stopsTurn && decision === 'reject'
+        const explain = decision === 'reject' && (chosen.stopsTurn || decided.decidedBy === 'coordinator')
         receive(params.sessionId, {
           _tag: 'Event',
           event: { _tag: 'PermissionAnswered', toolCallId: request.toolCallId, decision, ...chosen },
-          ...(stops
+          ...(explain
             ? {
-                resumeWith: `${request.title} was not allowed by the project's rules${reason === undefined ? '' : `: ${reason}`}. Carry on without it.`,
+                resumeWith: `${request.title} was not allowed by ${decided.decidedBy === 'coordinator' ? 'the coordinator' : "the project's rules"}${reason === undefined ? '' : `: ${reason}`}. Carry on without it.`,
               }
             : {}),
         })
@@ -337,26 +359,51 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         })
     }
 
-    const askQuestion = (params: acp.CreateElicitationRequest): Promise<acp.CreateElicitationResponse> => {
-      if (options.onQuestion === undefined || params.mode !== 'form' || !('requestedSchema' in params))
-        return Promise.resolve({ action: 'cancel' })
-      const schema = params.requestedSchema as {
-        readonly properties?: Record<string, unknown>
-        readonly required?: ReadonlyArray<string> | null
-      }
+    /**
+     * Asks the person through the caller. The question is dropped, and
+     * answered `cancel`, when the agent withdraws it or Althar cancels the
+     * turn, as a permission request is. The agent going is not the agent
+     * withdrawing it: the question still waits, and the caller lets it go
+     * when the session ends (ADR-021).
+     */
+    const askQuestion = (params: acp.CreateElicitationRequest, fromAgent: AbortSignal): Promise<acp.CreateElicitationResponse> => {
+      const ask = options.onQuestion
+      if (ask === undefined || params.mode !== 'form' || !('requestedSchema' in params)) return Promise.resolve({ action: 'cancel' })
+      const sessionId = 'sessionId' in params && typeof params.sessionId === 'string' ? params.sessionId : undefined
+      const toolCallId = 'toolCallId' in params && typeof params.toolCallId === 'string' ? params.toolCallId : undefined
+      // What it said just before: since its last tool call, or else the last it said before that, in this turn.
+      const heard = sessionId === undefined ? undefined : said.get(sessionId)
+      const before = heard?.current.trim() || heard?.last.trim() || ''
       const question: Question = {
-        ...('sessionId' in params && typeof params.sessionId === 'string' ? { sessionId: params.sessionId } : {}),
+        ...(sessionId === undefined ? {} : { sessionId }),
+        ...(toolCallId === undefined ? {} : { toolCallId }),
         message: params.message,
-        fields: schema.properties ?? {},
-        required: schema.required ?? [],
+        fields: questionFields(params.requestedSchema, params.message),
+        ...(before === '' ? {} : { said: before }),
       }
-      return Effect.runPromiseWith(context)(options.onQuestion(question)).then(
-        (answer): acp.CreateElicitationResponse =>
-          answer.action === 'accept'
-            ? { action: 'accept', content: answer.content as Record<string, string | number | boolean | Array<string>> }
-            : { action: answer.action },
-        (): acp.CreateElicitationResponse => ({ action: 'cancel' }),
-      )
+      const dropped = new AbortController()
+      const drop = () => dropped.abort()
+      // The connection closing aborts every request still open on it, before the agent could say anything.
+      const withdrawn = () => {
+        if (!connection.signal.aborted) drop()
+      }
+      const pending = sessionId === undefined ? undefined : waitingIn(sessionId)
+      pending?.add(drop)
+      fromAgent.addEventListener('abort', withdrawn, { once: true })
+      return Effect.runPromiseWith(context)(ask(question), { signal: dropped.signal })
+        .then(
+          (answer): acp.CreateElicitationResponse =>
+            dropped.signal.aborted
+              ? { action: 'cancel' }
+              : answer.action === 'accept'
+                ? { action: 'accept', content: { ...answer.content } as Record<string, string | number | boolean | Array<string>> }
+                : { action: answer.action },
+          (): acp.CreateElicitationResponse => ({ action: 'cancel' }),
+        )
+        .finally(() => {
+          pending?.delete(drop)
+          fromAgent.removeEventListener('abort', withdrawn)
+        })
     }
 
     /*
@@ -365,6 +412,22 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
      * it asks about said both when it began, so the request takes them from it.
      */
     const calls = new Map<string, { title?: string; kind?: string; rawInput?: unknown }>()
+    /**
+     * What the agent has said in its turn, by session: its words since its
+     * last tool call, and the last it said before that. A question it asks
+     * carries them, as what it said before asking.
+     */
+    const said = new Map<string, { current: string; last: string }>()
+    const hear = (sessionId: string, update: acp.SessionUpdate) => {
+      const heard = said.get(sessionId) ?? { current: '', last: '' }
+      if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') heard.current += update.content.text
+      else if (update.sessionUpdate === 'tool_call' && heard.current.trim() !== '') {
+        heard.last = heard.current
+        heard.current = ''
+      } else if (update.sessionUpdate === 'tool_call') heard.current = ''
+      said.set(sessionId, heard)
+    }
+
     const remember = (sessionId: string, update: acp.SessionUpdate) => {
       if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return
       const key = `${sessionId}\u0000${update.toolCallId}`
@@ -396,10 +459,11 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       .client({ name: 'althar' })
       .onNotification(acp.methods.client.session.update, ({ params }) => {
         remember(params.sessionId, params.update)
+        hear(params.sessionId, params.update)
         receive(params.sessionId, { _tag: 'Update', update: params.update })
       })
       .onRequest(acp.methods.client.session.requestPermission, (request) => answerPermission(described(request.params), request.signal))
-      .onRequest(acp.methods.client.elicitation.create, (request) => askQuestion(request.params))
+      .onRequest(acp.methods.client.elicitation.create, (request) => askQuestion(request.params, request.signal))
 
     let owned: OwnedProcess | undefined
     let connection: acp.ClientConnection
@@ -409,9 +473,16 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         options.transport.cwd,
         options.transport.capture === undefined ? {} : { capture: options.transport.capture },
       )
-      connection = app.connect(acp.ndJsonStream(owned.stdin, owned.stdout))
+      connection = app.connect(takingBackground(acp.ndJsonStream(owned.stdin, owned.stdout), heardBackground))
     } else {
-      connection = app.connect(options.transport.agent.app)
+      // In process, over a pair of streams, so what it leaves running is taken off them as a process's would be.
+      const toAgent = new TransformStream<acp.AnyMessage, acp.AnyMessage>()
+      const toClient = new TransformStream<acp.AnyMessage, acp.AnyMessage>()
+      const peer = options.transport.agent.app.connect({ readable: toAgent.readable, writable: toClient.writable })
+      const client = app.connect(takingBackground({ readable: toClient.readable, writable: toAgent.writable }, heardBackground))
+      void client.closed.then(() => peer.close())
+      void peer.closed.then(() => client.close())
+      connection = client
     }
     yield* Effect.addFinalizer(() => Effect.sync(() => connection.close()))
 
@@ -449,7 +520,21 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
     const init = yield* call('initialize', () =>
       connection.agent.request(acp.methods.agent.initialize, {
         protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: { elicitation: { form: {} }, _meta: structuredFailureCapability },
+        clientCapabilities: {
+          // A way to ask only where someone answers: without it Claude Code turns AskUserQuestion off.
+          ...(options.onQuestion === undefined ? {} : { elicitation: { form: {} } }),
+          // What the agent says of itself, such as a command stopped, as a notice rather than in its own words.
+          session: { notices: {} },
+          _meta: {
+            jetbrains: {
+              air: {
+                ...structuredFailureCapability.jetbrains.air,
+                capabilities: [...structuredFailureCapability.jetbrains.air.capabilities, asyncTasksCapability],
+              },
+            },
+            ...terminalOutputCapability,
+          },
+        },
       }),
     )
     const capabilities = init.agentCapabilities ?? {}
@@ -465,6 +550,15 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       mcp: { http: capabilities.mcpCapabilities?.http === true, sse: capabilities.mcpCapabilities?.sse === true },
       authMethods: (init.authMethods ?? []).map((method) => method.id),
     }
+
+    /** Asks the agent to stop a command a session left running; whether it did. */
+    const stopBackground = (sessionId: string, id: string) =>
+      Effect.map(
+        call(stopBackgroundMethod, () =>
+          connection.agent.request<StopBackgroundResponse>(stopBackgroundMethod, { sessionId, asyncTaskId: id }),
+        ),
+        (response) => response.stopped === true,
+      )
 
     const startSession = (sessionOptions: NewSessionOptions): Effect.Effect<AgentSession, Failure | OptionUnavailable, Scope.Scope> =>
       Effect.gen(function* () {
@@ -500,6 +594,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           ),
           (response) =>
             Effect.gen(function* () {
+              // What it left running is stopped first: it runs in a process group of its own, which stopping the agent's misses.
+              for (const id of leftRunning.get(response.sessionId) ?? []) {
+                if (connection.signal.aborted) break
+                yield* Effect.ignore(stopBackground(response.sessionId, id).pipe(Effect.timeout(Duration.seconds(2))))
+              }
+              leftRunning.delete(response.sessionId)
               sessions.delete(response.sessionId)
               waiting.delete(response.sessionId)
               yield* Queue.shutdown(state.inbox)
@@ -607,10 +707,10 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
             )
           })
 
-        /** A prompt has stopped: resume it if a rejection stopped it, or end the turn. */
+        /** Explain pending refusals before ending the turn. ACP's permission response has no portable reason field. */
         const stopped = (turn: Turn, response: acp.PromptResponse) =>
           Effect.gen(function* () {
-            if (turn.resumeWith !== undefined && turn.resumes < MAX_RESUMES) {
+            if (!turn.cancelled && turn.resumeWith !== undefined && turn.resumes < MAX_RESUMES) {
               const reason = turn.resumeWith
               turn.resumeWith = undefined
               turn.resumes += 1
@@ -644,7 +744,11 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                   for (const event of yield* interpret(inbound.update)) yield* deliver(event)
                   return
                 case 'Event':
-                  if (turn !== undefined && inbound.resumeWith !== undefined) turn.resumeWith = inbound.resumeWith
+                  if (turn !== undefined && inbound.resumeWith !== undefined)
+                    turn.resumeWith = [turn.resumeWith, inbound.resumeWith]
+                      .filter((line) => line !== undefined)
+                      .join('\n')
+                      .slice(0, 8000)
                   return yield* deliver(inbound.event)
                 case 'Stopped':
                   if (turn !== undefined) yield* stopped(turn, inbound.response)
@@ -667,23 +771,26 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                 done: yield* Deferred.make<void>(),
                 resumeWith: undefined,
                 resumes: 0,
+                cancelled: false,
                 failure: undefined,
               }
               const idle = yield* Ref.modify(state.current, (running) =>
                 Option.isSome(running) ? [false, running] : [true, Option.some(turn)],
               )
               if (!idle) return yield* new TurnInProgress({ sessionId })
+              // A new turn: what it says before a question is of this turn only.
+              said.delete(sessionId)
               yield* send(text)
               return Stream.fromQueue(turn.queue)
             }),
           )
 
-        const cancel = Effect.andThen(
-          call('session/cancel', () => connection.agent.notify(acp.methods.agent.session.cancel, { sessionId })),
-          Effect.sync(() => {
-            for (const drop of waiting.get(sessionId) ?? []) drop()
-          }),
-        )
+        const cancel = Effect.gen(function* () {
+          const turn = yield* Ref.get(state.current)
+          if (Option.isSome(turn)) turn.value.cancelled = true
+          yield* call('session/cancel', () => connection.agent.notify(acp.methods.agent.session.cancel, { sessionId }))
+          for (const drop of waiting.get(sessionId) ?? []) drop()
+        })
 
         const interrupt = Effect.gen(function* () {
           const turn = yield* Ref.get(state.current)
@@ -701,6 +808,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           cancel,
           interrupt,
           setOption,
+          stopBackground: (id) => stopBackground(sessionId, id),
         } satisfies AgentSession
       })
 

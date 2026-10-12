@@ -76,6 +76,23 @@
   /* shadows are neutral and short: paper lifting off paper, never a glow */
   --traffic: #d0cbc0;
 
+  /* ---- Frost --------------------------------------------------------------
+     A panel the page shows through, the way the Mac's Control Center is:
+     frosted paper, with lighter sheets on it that grow whiter as they are
+     chosen. Only for a panel that opens over everything.                     */
+  --frost: rgba(250, 248, 243, 0.8);
+  --frost-blur: blur(28px) saturate(1.5);
+  --frost-faint: rgba(255, 255, 255, 0.36); /* a sheet at rest that is one of several */
+  --frost-sheet: rgba(255, 255, 255, 0.66); /* a sheet on the panel */
+  --frost-raised: rgba(255, 255, 255, 0.8); /* what an opened sheet holds */
+  --frost-hover: rgba(255, 255, 255, 0.92);
+  --frost-well: rgba(20, 20, 28, 0.08); /* a round switch, off */
+  --frost-well-hover: rgba(20, 20, 28, 0.12);
+  --frost-ring: 0 0 0 0.5px rgba(20, 20, 28, 0.08);
+  --lift-frost:
+    0 0 0 0.5px rgba(20, 16, 10, 0.2), inset 0 0.5px 0 rgba(255, 255, 255, 0.9), 0 18px 48px -14px rgba(40, 32, 20, 0.34),
+    0 4px 12px -6px rgba(40, 32, 20, 0.16);
+
   /* ---- On ink -------------------------------------------------------------
      What sits on an ink fill (--t-1) or a dark terminal. Washes on ink are
      white at low alpha, written where they are used.                         */
@@ -114,6 +131,15 @@
   --add-ink-2: #2f6a40;
   --del-ink: #5b1d15;
   --del-ink-2: #94463b;
+  /* a diff's lines: clearly green and clearly red, the changed words stronger, the gutter between */
+  --add-line: #e3f9e8;
+  --add-gutter: #cdf3d6;
+  --add-word: #a9e9b8;
+  --add-sign: #1f8a3c;
+  --del-line: #fdecea;
+  --del-gutter: #fadad6;
+  --del-word: #f6b8b1;
+  --del-sign: #c93a2b;
   --signal-peek: #efe7ff; /* the edge of the next ask, under the one showing */
 
   /* ---- Radius ------------------------------------------------------------*/

@@ -51,6 +51,8 @@
 }
 
 .interim {
+  max-height: 200px;
+  overflow: hidden;
   padding: 1px 4px 0 1px;
   font-size: 13.5px;
   line-height: 1.55;
@@ -60,8 +62,14 @@
   pointer-events: none;
 }
 
+/* what is written, drawn here while words arrive, since the field's own text goes clear under it */
 .written {
+  color: var(--t-1);
+}
+
+.composer textarea.under {
   color: transparent;
+  caret-color: var(--t-1);
 }
 
 /* what you sent while it worked, above the field, in order */
@@ -116,6 +124,18 @@
   flex: none;
 }
 
+/* the composer with what sits on its top edge: what floats over the thread, and a tray joined to it in the flow */
+.stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* a tray is inset a little, so the composer reads as what it belongs to */
+.tray {
+  margin: 0 10px;
+}
+
 /* floats on the top edge, over the end of the thread */
 .above {
   position: absolute;
@@ -153,6 +173,29 @@
 /* the other way to send while the agent works: quieter than the button, beside the note that explains it */
 .sendNow {
   margin-right: 6px;
+}
+
+/* beside the microphone, narrow: which one it hears */
+.inputs {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 28px;
+  margin-left: -4px;
+  border-radius: 6px;
+  color: var(--t-3);
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.inputs:hover {
+  background: var(--n-2);
+  color: var(--t-1);
+}
+.inputs[aria-expanded='true'] {
+  background: var(--n-4);
+  color: var(--t-1);
 }
 
 /* dictating is you talking, not a warning: ink, with your voice drawn as bars */

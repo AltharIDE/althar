@@ -8,3 +8,9 @@
   flex: 1;
   min-height: 0;
 }
+/* the screen's own controls, at the end of the bar */
+.end {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}

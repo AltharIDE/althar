@@ -14,6 +14,7 @@ import { type PlanStep, Runs, type TaskEnd } from './Runs'
  * A task's plan before it runs (docs/architecture/04): its steps and who does
  * them, and when it starts. The coordinator proposes it; its card shows in
  * the coordinator's thread with the time left; leaving it alone starts it.
+ * Held, it waits until the person starts it.
  * The runtime keeps the countdown, so a plan starts with the window closed.
  * A plan whose time came while Althar wasn't running is held, not started
  * unannounced at the next launch.
@@ -37,6 +38,8 @@ export class Plans extends Context.Service<
       readonly startsIn?: Duration.Duration
       /** What happens when the work is done: a pull request, the branch pushed, or nothing outside. */
       readonly end?: TaskEnd | null
+      /** Held from the start: it waits until someone starts it, with no countdown. */
+      readonly held?: boolean
     }): Effect.Effect<string, unknown>
     /** Starts a proposed plan now. */
     start(planId: string, actorId: ActorId): Effect.Effect<void, unknown>
@@ -107,7 +110,8 @@ export class Plans extends Context.Service<
             const planId = yield* newId(Ids.taskPlan)
             const workflowVersionId = yield* runs.workflowVersion
             const at = yield* timestamp
-            const startsAt = new Date(Date.parse(at) + Duration.toMillis(input.startsIn ?? countdownOf)).toISOString()
+            const startsAt =
+              input.held === true ? null : new Date(Date.parse(at) + Duration.toMillis(input.startsIn ?? countdownOf)).toISOString()
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 // A task has one plan waiting: a new proposal replaces the one before.

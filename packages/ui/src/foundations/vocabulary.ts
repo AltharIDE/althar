@@ -112,6 +112,16 @@ export enum StuckAnswer {
   Abandoned = 'abandoned',
 }
 
+/** What you told work a usage limit paused to do. */
+export enum LimitAnswer {
+  /** Moved it to another model now. */
+  Moved = 'moved',
+  /** Kept its place until the reset. */
+  Waiting = 'waiting',
+  /** Tried the same agent again, as one that didn't say when it resets may be back. */
+  Again = 'again',
+}
+
 /** A step of a task's graph. */
 export enum StepState {
   Started = 'started',
@@ -196,6 +206,16 @@ export enum TaskStatus {
   Stopped = 'stopped',
 }
 
+/** What a task has going, for what stops when it is abandoned. */
+export enum TaskActivity {
+  /** Agents are on it, or its run waits on a step. */
+  Working = 'working',
+  /** Its plan waits to start. */
+  Planned = 'planned',
+  /** Nothing runs or waits to start. */
+  Still = 'still',
+}
+
 /** What a task does with its work when it is done. */
 export enum TaskEnd {
   DraftPr = 'draft',
@@ -208,8 +228,8 @@ export enum TaskEnd {
 export enum PermissionPolicy {
   /** What no rule keeps is allowed: the always-ask list waits for you, the never list is refused. */
   Rules = 'rules',
-  /** The lead allows what the task needs and passes the rest to you. */
-  Lead = 'lead',
+  /** The coordinator decides within the project’s rules and asks you when unsure. */
+  Coordinator = 'coordinator',
   /** Nothing asks; every request is still recorded. */
   AllowAll = 'all',
   /** Anything no rule covers waits for you. */
@@ -223,6 +243,37 @@ export enum LimitPolicy {
   /** Keep its place and resume after the reset. */
   Wait = 'wait',
   Ask = 'ask',
+}
+
+/** A kind of request a project's rules know by what it does, whatever the command (ADR-013). */
+export enum RuleKind {
+  DefaultBranch = 'default-branch',
+  ForcePush = 'force-push',
+  /** Every branch, tags, or a pattern of branches. */
+  ManyBranches = 'many-branches',
+  /** A branch that isn't the task's own. */
+  DeleteBranch = 'delete-branch',
+  Deploy = 'deploy',
+  /** Writing outside the task's worktree. */
+  Outside = 'outside',
+}
+
+/** Where a project's rules put a kind of request or a command, in the order a request meets them. */
+export enum RulePlace {
+  /** Refused outright, whoever would answer. */
+  Never = 'never',
+  /** Held for the person, whoever would answer. */
+  Ask = 'ask',
+  /** Let through without asking, short of the two before it. */
+  Allow = 'allow',
+  /** Left to what the project says of everything else. A command is never here. */
+  Rest = 'rest',
+}
+
+/** How a command rule meets a command: by how it starts, or as the whole line. */
+export enum CommandMatch {
+  Prefix = 'prefix',
+  Exact = 'exact',
 }
 
 /** An issue's workflow state, as issue trackers name them. */
@@ -241,6 +292,17 @@ export enum IssuePriority {
   High = 'high',
   Medium = 'medium',
   Low = 'low',
+}
+
+/** Where an issue the coordinator drafted stands. */
+export enum IssueDraftState {
+  Pending = 'pending',
+  Filing = 'filing',
+  Filed = 'filed',
+  Failed = 'failed',
+  /** Perhaps filed: the tracker's answer was lost, so it is looked at before filing it again. */
+  Uncertain = 'uncertain',
+  Discarded = 'discarded',
 }
 
 /** An entry of the agent's plan. */
@@ -319,16 +381,6 @@ export enum BoardLane {
 }
 
 /** Why a planned task has not started. */
-/** The home's sections, in the order you deal with them. */
-export enum HomeLane {
-  /** Calls across every project that wait on you. */
-  Yours = 'you',
-  /** Tasks running in every project. */
-  Running = 'running',
-  /** What the loop did since you last looked: pull requests opened, limits moved, stalls restarted. */
-  Since = 'since',
-}
-
 export enum Wait {
   /** It starts after another task. */
   After = 'after',
@@ -395,6 +447,8 @@ export enum RuntimeState {
   OutOfUsage = 'out-of-usage',
   /** Not installed here. */
   Missing = 'missing',
+  /** Althar is downloading it, at the person's asking, and checking it before it runs. */
+  Installing = 'installing',
   /** Older than the versions Althar works with. */
   Outdated = 'outdated',
 }
@@ -427,12 +481,80 @@ export enum ChangeTarget {
   Fork = 'fork',
 }
 
-/** How another agent would be connected. */
-export enum ConnectKind {
-  /** Installed as its own app or command line, signed in through it. */
-  App = 'app',
-  /** An API, with a key kept in the system keychain. */
+/** Whether Althar reaches the code host a repository's work goes to, as the person's sign-in there stands. */
+export enum HostReach {
+  /** Signed in: Althar opens the pull requests there, and brings their checks and reviews back. */
+  Connected = 'connected',
+  /** A host Althar connects to, not connected: branches push with the person's own git. */
+  NotConnected = 'not-connected',
+  /** Connected once; its sign-in stopped working, and it needs signing in again. */
+  SignInAgain = 'sign-in-again',
+  /** A host Althar doesn't know, so it can't be connected: branches push with the person's own git. */
+  Unknown = 'unknown',
+}
+
+/** A way an agent's account signs in. */
+export enum SignInWay {
+  /** The agent's own sign-in, opened in the browser on this machine, which comes back to it by itself. */
+  Browser = 'browser',
+  /** The agent's own sign-in command, run in a terminal, which may open the browser itself. */
+  Terminal = 'terminal',
+  /** A one-time code, approved in any browser, profile or device. */
+  Code = 'code',
+  /** An API key, billed per use to the key's account. */
   Key = 'key',
-  /** A model server running on this machine. */
-  Local = 'local',
+  /** The provider's console account, signed in through the browser and billed per use. */
+  Console = 'console',
+  /** A folder the agent already signed in with: one an account switcher made, or one the person chooses. */
+  Folder = 'folder',
+}
+
+/** Whether a connection can do something Althar needs of it, as its check found. */
+export enum CanState {
+  Can = 'can',
+  Cannot = 'cannot',
+  /** The service doesn't say, and only writing would tell. */
+  Unknown = 'unknown',
+  /** Being asked now. */
+  Checking = 'checking',
+  /** Not asked yet. */
+  Waiting = 'waiting',
+}
+
+/** What stands between pressing the microphone and dictating, the first time or when something is in the way. */
+export enum DictationSetup {
+  /** No speech model on this machine yet: it offers to download one. */
+  Offer = 'offer',
+  /** The system is asking whether Althar may use the microphone. */
+  Asking = 'asking',
+  /** The speech model is coming down. */
+  Downloading = 'downloading',
+  /** It has come down and is being checked and loaded. */
+  Preparing = 'preparing',
+  /** The download stopped partway; it carries on from there. */
+  Stopped = 'stopped',
+  /** There isn't room on the disk for the speech model. */
+  NoRoom = 'noRoom',
+  /** The microphone was refused; only the system's settings can change that. */
+  Denied = 'denied',
+  /** There is no microphone to listen with. */
+  NoMicrophone = 'noMicrophone',
+  /** What was said couldn't be written down; the recording is kept to try again. */
+  Failed = 'failed',
+}
+
+/** Where Althar shows while the person works in another app, as the system it runs on has room for it. */
+export enum EdgeSpot {
+  /** Round a Mac's notch, as an island. */
+  Island = 'island',
+  /** Its mark in the menu bar of a Mac with a notch, which it leaves alone. */
+  MenuBesideNotch = 'menuBesideNotch',
+  /** Its mark in the menu bar of a Mac without a notch. */
+  MenuBar = 'menuBar',
+  /** Its mark in Windows' system tray, beside the clock. */
+  WindowsTray = 'windowsTray',
+  /** Its mark in the tray at the end of a Linux desktop's top bar. */
+  LinuxTray = 'linuxTray',
+  /** Nowhere but its own window: a desktop with no tray. */
+  WindowOnly = 'windowOnly',
 }

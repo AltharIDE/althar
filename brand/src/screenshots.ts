@@ -14,7 +14,14 @@ export interface Screenshot {
   height: number
   /** What it shows, for the README table. */
   shows: string
+  /** Cut to what the story paints, with a margin of the ground round it, rather than the whole viewport: for a piece of a screen. */
+  crop?: boolean
+  /** In the framed copy, a window bar above it, for a screen that doesn't draw the window's own. */
+  bar?: boolean
 }
+
+/** The wallpaper the framed copies stand on: Aurora at night, its light rising behind each window. */
+export const FRAME_WALLPAPER = 'wallpaper/aurora-dark-display.jpg'
 
 export const SCREENSHOTS: readonly Screenshot[] = [
   {
@@ -26,6 +33,7 @@ export const SCREENSHOTS: readonly Screenshot[] = [
   },
   {
     file: 'board',
+    bar: true,
     story: 'board-board--default',
     width: 1440,
     height: 900,
@@ -33,6 +41,7 @@ export const SCREENSHOTS: readonly Screenshot[] = [
   },
   {
     file: 'project-rules',
+    bar: true,
     story: 'screens-projectrules--default',
     width: 1440,
     height: 900,
@@ -40,10 +49,27 @@ export const SCREENSHOTS: readonly Screenshot[] = [
   },
   {
     file: 'first-run',
-    story: 'screens-start--first-run',
+    bar: true,
+    story: 'screens-start--found',
     width: 1440,
     height: 900,
     shows: 'First run: the agents on this Mac, and a first project',
+  },
+  {
+    file: 'plan',
+    story: 'coordinator-tasklaunch--in-the-conversation',
+    width: 960,
+    height: 900,
+    shows: "What you asked, the coordinator's answer, and its plan: who does each step, starting on its own unless you change it",
+    crop: true,
+  },
+  {
+    file: 'review',
+    story: 'thread-review--settled-open',
+    width: 960,
+    height: 900,
+    shows: 'A review settled: what the reviewers found, and what the lead fixed or set aside',
+    crop: true,
   },
 ]
 

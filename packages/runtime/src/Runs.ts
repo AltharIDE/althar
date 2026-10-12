@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 
-import { type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
+import type { LimitCall } from '@althar/contracts'
+import { type CommandEnvelope, Ids, newId, type ProjectId, type RunState, runLifecycle, transition } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -9,9 +10,9 @@ import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Changes, type Published } from './Changes'
 import { NotConnected } from './Connections'
-import { AttentionClosed, NoChangeToOpen, NotFound } from './errors'
+import { AttentionClosed, NoChangeToOpen, NotFound, NothingToWaitFor } from './errors'
 import { Instance } from './Instance'
-import { Limits, outWords } from './Limits'
+import { Limits, outWords, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
 import { Policies, usageLimitOf } from './Policies'
 import { conventionsAt } from './conventions'
@@ -171,13 +172,40 @@ export interface StuckInfo {
   readonly open: number
   /** What Althar did about it before asking, where it did something. */
   readonly tried?: ReadonlyArray<Tried>
+  /** For a usage limit: whose account, when it resets where it said, and who could take the step over. */
+  readonly limit?: LimitCall
 }
 
-/** The person's answer: tell the step's agent what to do, hand the step to an agent, or abandon it (a review is gone on without). */
+/**
+ * The person's answer: tell the step's agent what to do, hand the step to an
+ * agent (on the account and model they picked, where they did), or abandon
+ * it (a review is gone on without). A step a usage limit stopped can wait for
+ * the reset, where it is known.
+ */
 export type StuckAnswer =
   | { readonly kind: 'tell'; readonly note: string }
-  | { readonly kind: 'retry'; readonly agentId: string }
+  | { readonly kind: 'retry'; readonly agentId: string; readonly accountId?: string | undefined; readonly model?: string | undefined }
+  | { readonly kind: 'wait' }
   | { readonly kind: 'abandon' }
+
+/** The run was stopped or abandoned as a step was on its way: nothing more starts on it until it is resumed. */
+class RunStopped extends Schema.TaggedError<RunStopped>()('RunStopped', { runId: Schema.String }) {}
+
+/** Nothing, where the run was stopped as a step was on its way. */
+const unlessStopped = <A, E, R>(effect: Effect.Effect<A, E | RunStopped, R>) =>
+  effect.pipe(
+    Effect.catchIf(
+      (error): error is RunStopped => error instanceof RunStopped,
+      () => Effect.succeed(undefined),
+    ),
+  )
+
+/** Who leads a task's thread: an agent, on a model and effort, or its own where null. */
+export interface Lead {
+  readonly agentId: string
+  readonly model: string | null
+  readonly effort: string | null
+}
 
 export class Runs extends Context.Service<
   Runs,
@@ -198,6 +226,14 @@ export class Runs extends Context.Service<
       readonly attentionId: string
       readonly answer: StuckAnswer
     }): Effect.Effect<void, unknown>
+    /**
+     * Carries on the run a task's stop suspended, from the step it was on:
+     * with its last lead, or the one given. Nothing happens to a run that
+     * isn't suspended.
+     */
+    resume(input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly lead?: Lead }): Effect.Effect<void, unknown>
+    /** Tells the person's answer to a question whose agent has gone since it asked: to the agent on its thread next, started for it. */
+    answered(input: { readonly envelope: CommandEnvelope; readonly threadId: string; readonly body: string }): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Runs') {
   static readonly layer: Layer.Layer<Runs, never, Store> = Layer.effect(
@@ -275,6 +311,52 @@ export class Runs extends Context.Service<
           end: parameters.end ?? null,
         }))
 
+      /**
+       * Whether the run is still the one this was read from: running, on the
+       * same run attempt. A stop suspends it and interrupts that attempt, and
+       * resuming makes another, so whatever read it before either can't write
+       * to it any more. Inside the caller's transaction.
+       */
+      const going = (run: RunRow) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ n: number }>`
+            SELECT count(*) AS n FROM runs r JOIN run_attempts a ON a.run_id = r.id
+            WHERE r.id = ${run.runId} AND r.state = 'running' AND a.id = ${run.runAttemptId} AND a.state = 'active'`
+          return (row?.n ?? 0) > 0
+        })
+
+      /**
+       * Whether a step's report can still be kept: its run is going, on the
+       * attempt it was read from, and the step's attempt still waits for it.
+       * One that can't is kept out of the run and said in the record, as
+       * from an agent that worked on while the task was stopped and resumed.
+       * Inside the caller's transaction.
+       */
+      const keeps = (run: RunRow, attemptId: string, report: unknown) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [attempt] = yield* sql<{
+            state: string
+            output: string | null
+          }>`SELECT state, output FROM node_attempts WHERE id = ${attemptId}`
+          if ((yield* going(run)) && ['admitted', 'running', 'waiting_attention'].includes(attempt?.state ?? '')) return true
+          const revision = yield* change('node_attempts', attemptId, { output: attempt?.output ?? null })
+          yield* fact({
+            projectId: run.projectId,
+            aggregateType: 'node_attempt',
+            aggregateId: attemptId,
+            revision,
+            type: 'node_attempt.report_dropped',
+            payload: report,
+            actorId: instance.systemId,
+          })
+          return false
+        })
+
+      /** What a step whose report was dropped is told. */
+      const dropped = new ToolRefused({ message: 'That step was stopped, so Althar keeps nothing of this report.' })
+
       /** Adds a node for a step, for a round of the review loop, and admits an attempt at it. */
       const admit = (
         run: RunRow,
@@ -285,6 +367,8 @@ export class Runs extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // Nothing new starts on a run its task's stop suspended, or for whatever read it before it was resumed.
+          if (!(yield* going(run))) return yield* new RunStopped({ runId: run.runId })
           const at = yield* timestamp
           const [existing] = yield* sql<{ id: string }>`
             SELECT id FROM nodes WHERE execution_id = ${run.executionId} AND node_key = ${key} AND iteration = ${iteration}`
@@ -329,14 +413,25 @@ export class Runs extends Context.Service<
           return { nodeId, attemptId }
         })
 
-      /** An attempt now runs in a session. */
-      const started = (run: RunRow, attemptId: string, sessionId: string) =>
+      /**
+       * An attempt now runs in a session, unless it can't any more: its run
+       * was stopped or abandoned while its agent started (`stopped`: the
+       * caller stops that agent), or it ended meanwhile, as one whose agent
+       * reported in its first turn (`past`: it stays as it ended). `fresh`
+       * clears what it had said, for one reminded afresh.
+       */
+      const started = (run: RunRow, attemptId: string, sessionId: string, fresh = false) =>
         Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [now] = yield* sql<{ attempt: string }>`SELECT state AS attempt FROM node_attempts WHERE id = ${attemptId}`
+          if (now === undefined || now.attempt === 'cancelled' || !(yield* going(run))) return 'stopped' as const
+          if (!['admitted', 'running', 'waiting_attention', 'held'].includes(now.attempt)) return 'past' as const
           const revision = yield* change('node_attempts', attemptId, {
             state: 'running',
             holdReason: null,
             providerSessionId: sessionId,
             startedAt: yield* timestamp,
+            ...(fresh ? { output: null } : {}),
           })
           yield* fact({
             projectId: run.projectId,
@@ -346,9 +441,18 @@ export class Runs extends Context.Service<
             type: 'node_attempt.running',
             actorId: instance.systemId,
           })
-          const sql = yield* SqlClient.SqlClient
           const [session] = yield* sql<{ threadId: string }>`SELECT thread_id FROM provider_sessions WHERE id = ${sessionId}`
           if (session !== undefined) yield* freshen(session.threadId)
+          return 'running' as const
+        })
+
+      /** Marks an attempt running in a session, and stops that agent where the run was stopped meanwhile. Whether it runs. */
+      const begin = (run: RunRow, attemptId: string, sessionId: string, threadId: string, fresh = false) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const now = yield* sql.withTransaction(started(run, attemptId, sessionId, fresh))
+          if (now === 'stopped') yield* Effect.ignore(sessions.stop(threadId))
+          return now !== 'stopped'
         })
 
       /** Ends an attempt and its node, with what it reported. */
@@ -393,23 +497,26 @@ export class Runs extends Context.Service<
       const finish = (run: RunRow, state: 'succeeded' | 'failed' | 'cancelled') =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          yield* sql.withTransaction(
-            Effect.gen(function* () {
-              const at = yield* timestamp
-              yield* change('run_attempts', run.runAttemptId, { state, endedAt: at })
-              yield* change('workflow_executions', run.executionId, { state, endedAt: at })
-              const revision = yield* change('runs', run.runId, { state, endedAt: at })
-              yield* fact({
-                projectId: run.projectId,
-                aggregateType: 'run',
-                aggregateId: run.runId,
-                revision,
-                type: `run.${state}`,
-                actorId: instance.systemId,
-              })
-            }),
-          )
+          yield* sql.withTransaction(ends(run, state))
           yield* touchCard(run.taskId)
+        })
+
+      /** The run ends, inside the caller's transaction: unless its task's stop suspended it meanwhile, when it waits to be resumed. */
+      const ends = (run: RunRow, state: 'succeeded' | 'failed' | 'cancelled') =>
+        Effect.gen(function* () {
+          if (!(yield* going(run))) return
+          const at = yield* timestamp
+          yield* change('run_attempts', run.runAttemptId, { state, endedAt: at })
+          yield* change('workflow_executions', run.executionId, { state, endedAt: at })
+          const revision = yield* change('runs', run.runId, { state, endedAt: at })
+          yield* fact({
+            projectId: run.projectId,
+            aggregateType: 'run',
+            aggregateId: run.runId,
+            revision,
+            type: `run.${state}`,
+            actorId: instance.systemId,
+          })
         })
 
       /** What a step that Althar does itself reported, in a line. */
@@ -509,20 +616,26 @@ export class Runs extends Context.Service<
             yield* onBranch(run)
             return yield* finish(run, 'succeeded')
           }
-          const { nodeId, attemptId } = yield* sql.withTransaction(admit(run, 'publish', 0, { end }))
-          yield* sql.withTransaction(
-            Effect.gen(function* () {
-              const revision = yield* change('node_attempts', attemptId, { state: 'running', startedAt: yield* timestamp })
-              yield* fact({
-                projectId: run.projectId,
-                aggregateType: 'node_attempt',
-                aggregateId: attemptId,
-                revision,
-                type: 'node_attempt.running',
-                actorId: instance.systemId,
-              })
-            }),
+          // Admitted and under way in one transaction, which a stop can't come between: once it is running, publishing has begun.
+          const admitted = yield* unlessStopped(
+            sql.withTransaction(
+              Effect.gen(function* () {
+                const admission = yield* admit(run, 'publish', 0, { end })
+                const revision = yield* change('node_attempts', admission.attemptId, { state: 'running', startedAt: yield* timestamp })
+                yield* fact({
+                  projectId: run.projectId,
+                  aggregateType: 'node_attempt',
+                  aggregateId: admission.attemptId,
+                  revision,
+                  type: 'node_attempt.running',
+                  actorId: instance.systemId,
+                })
+                return admission
+              }),
+            ),
           )
+          if (admitted === undefined) return
+          const { nodeId, attemptId } = admitted
           yield* touchCard(run.taskId)
           const published = yield* Effect.exit(changes.publish({ projectId: run.projectId, taskId: run.taskId, runId: run.runId, end }))
           if (published._tag === 'Failure') {
@@ -543,17 +656,18 @@ export class Runs extends Context.Service<
           }
           yield* sql.withTransaction(
             Effect.gen(function* () {
+              const said = { step: 'publish', round: 0, summary: publishedSummary(published.value, end), ...openedOf(published.value) }
+              // Stopped or abandoned while it published, what it did on the host is said, and the run waits: publishing again, as resuming
+              // does, adopts what is there.
+              const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attemptId}`
+              if (still?.state !== 'running' || !(yield* going(run))) return yield* result(run, said)
               yield* ended(run, { id: attemptId, nodeId }, 'succeeded', published.value)
               yield* unstuck(run)
-              yield* result(run, {
-                step: 'publish',
-                round: 0,
-                summary: publishedSummary(published.value, end),
-                ...openedOf(published.value),
-              })
+              yield* result(run, said)
+              yield* ends(run, 'succeeded')
             }),
           )
-          yield* finish(run, 'succeeded')
+          yield* touchCard(run.taskId)
         })
 
       /**
@@ -569,6 +683,10 @@ export class Runs extends Context.Service<
               const [open] = yield* sql<{ id: string }>`
                 SELECT id FROM attention_requests WHERE task_id = ${run.taskId} AND kind = 'stuck' AND state = 'open'`
               if (open !== undefined) return false
+              // A run its task's stop suspended, or a step it cut short, asks nothing of the person: they stopped it.
+              const [now] = yield* sql<{ attempt: string | null }>`
+                SELECT (SELECT state FROM node_attempts WHERE id = ${attempt?.id ?? ''}) AS attempt`
+              if (!(yield* going(run)) || now?.attempt === 'cancelled') return false
               if (attempt !== null) {
                 const revision = yield* change('node_attempts', attempt.id, { state: 'waiting_attention' })
                 yield* fact({
@@ -608,6 +726,17 @@ export class Runs extends Context.Service<
           if (opened) yield* touchCard(run.taskId)
         })
 
+      /** The model a step's agent last ran on, on the step's own thread: the one it carries on with at a reset. */
+      const modelOnStep = (taskId: string, step: StuckInfo['step'], agentId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [last] = yield* sql<{ model: string | null }>`
+            SELECT s.model FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+            WHERE t.task_id = ${taskId} AND t.kind = ${step === 'review' ? 'step' : 'task'} AND s.agent_id = ${agentId}
+            ORDER BY s.started_at DESC, s.rowid DESC LIMIT 1`
+          return last?.model ?? null
+        })
+
       /** A step that reported after all no longer needs the person: its call is withdrawn. */
       const unstuck = (run: RunRow) =>
         Effect.gen(function* () {
@@ -625,6 +754,16 @@ export class Runs extends Context.Service<
               actorId: instance.systemId,
             })
           }
+        })
+
+      /** Whether an agent on the thread asked the person a question they haven't answered. */
+      const asking = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [open] = yield* sql<{ id: string }>`
+            SELECT id FROM attention_requests
+            WHERE kind = 'question' AND state = 'open' AND json_extract(payload, '$.threadId') = ${threadId} LIMIT 1`
+          return open !== undefined
         })
 
       /** Review findings of the run the lead hasn't settled. */
@@ -702,6 +841,8 @@ export class Runs extends Context.Service<
           if (event._tag === 'SessionEnded') {
             // Another agent took the thread over: the step carries on there.
             if (event.state === 'superseded' || Option.isSome(yield* sessions.running(event.threadId))) return
+            // It went while it asked the person something: their answer starts it again, so the question is the call.
+            if (yield* asking(event.threadId)) return
             return yield* stuck(on.run, { id: on.attemptId }, info('session_ended', null))
           }
           // A turn of a session another agent has taken over from is that session's last, not the step's.
@@ -753,7 +894,7 @@ export class Runs extends Context.Service<
        * another the person picked. The reviewer's thread spans the rounds. A
        * reviewer that can't start leaves the step needing the person.
        */
-      const review = (run: RunRow, round: number, settled?: string, reviewer?: string, model?: string | null) =>
+      const review = (run: RunRow, round: number, settled?: string, reviewer?: string, model?: string | null, accountId?: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { review: planned } = yield* stepsOf(run)
@@ -768,8 +909,10 @@ export class Runs extends Context.Service<
                   ? planned
                   : { ...planned, model }
                 : { ...planned, agentId: reviewer, model: model ?? null }
-          const { nodeId, attemptId } = yield* sql.withTransaction(admit(run, 'review', round, step))
-          const begun = yield* Effect.exit(reviewRound(run, round, settled, step, attemptId))
+          const admitted = yield* unlessStopped(sql.withTransaction(admit(run, 'review', round, step)))
+          if (admitted === undefined) return undefined
+          const { nodeId, attemptId } = admitted
+          const begun = yield* Effect.exit(reviewRound(run, round, settled, step, attemptId, accountId))
           if (begun._tag === 'Failure')
             yield* stuck(
               run,
@@ -803,8 +946,15 @@ export class Runs extends Context.Service<
           (digests) => digests.join(' '),
         )
 
-      /** A round of review's copy, thread and session: its reviewer reads the work as it stands. */
-      const reviewRound = (run: RunRow, round: number, settled: string | undefined, step: PlanStep, attemptId: string) =>
+      /** A round of review's copy, thread and session: its reviewer reads the work as it stands, on the account picked, where one was. */
+      const reviewRound = (
+        run: RunRow,
+        round: number,
+        settled: string | undefined,
+        step: PlanStep,
+        attemptId: string,
+        accountId?: string,
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           // The round reads a copy of the work as it stands now, in each repository, and the record keeps which code that was (ADR-008).
@@ -834,12 +984,18 @@ export class Runs extends Context.Service<
               nodeKey: 'review',
               createdAt: yield* timestamp,
             })}`
-          // Handed to another agent, the round starts that one afresh.
-          const running = yield* sessions.running(threadId)
-          // Handed to another agent, or its account out of usage, the round starts afresh, on another account where it is.
+          // Handed to another agent, the round starts that one afresh; one being stopped isn't carried on with.
+          const running = Option.filter(yield* sessions.running(threadId), (session) => !session.stopping)
+          // Handed to another agent or account, or its account out of usage, the round starts afresh, on another account where it is.
           const spent = Option.isSome(running) && Option.isSome(yield* limits.outAccount(running.value.accountId))
-          if (Option.isSome(running) && (spent || running.value.agentId !== step.agentId)) yield* Effect.ignore(sessions.stop(threadId))
-          const live = Option.filter(running, (session) => !spent && session.agentId === step.agentId)
+          const elsewhere = (session: { readonly agentId: string; readonly accountId: string }) =>
+            session.agentId !== step.agentId || (accountId !== undefined && session.accountId !== accountId)
+          if (Option.isSome(running) && (spent || elsewhere(running.value))) yield* Effect.ignore(sessions.stop(threadId))
+          const onIt = Option.filter(running, (session) => !spent && !elsewhere(session))
+          // Kept for another round, the reviewer is on the model its step names; one that won't move starts afresh.
+          const kept = Option.isSome(onIt) && (yield* onModel(threadId, onIt.value.sessionId, step.model))
+          if (Option.isSome(onIt) && !kept) yield* Effect.ignore(sessions.stop(threadId))
+          const live = kept ? onIt : Option.none()
           const sessionId = Option.isSome(live)
             ? live.value.sessionId
             : yield* sessions.start({
@@ -847,6 +1003,7 @@ export class Runs extends Context.Service<
                 agentId: step.agentId,
                 ...(step.model === null ? {} : { model: step.model }),
                 ...(step.effort == null ? {} : { effort: step.effort }),
+                ...(accountId === undefined ? {} : { accountId }),
               })
           if (Option.isSome(live) || round > 0)
             yield* sessions.send({
@@ -855,7 +1012,7 @@ export class Runs extends Context.Service<
               body: `Round ${round + 1}. The lead settled your findings:\n\n${settled ?? ''}\n\nYour copy now holds the settled work. Review the change again. Check that the fixes hold, and don't raise again what the lead set aside unless you have new evidence; then say which finding you repeat, and why.`,
               quiet: true,
             })
-          yield* sql.withTransaction(started(run, attemptId, sessionId))
+          yield* begin(run, attemptId, sessionId, threadId)
           yield* touchCard(run.taskId)
         })
 
@@ -865,7 +1022,9 @@ export class Runs extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const before = yield* digestAll(run.taskId)
           const { implement } = yield* stepsOf(run)
-          const { attemptId } = yield* sql.withTransaction(admit(run, 'settle', round, implement ?? {}, { before }))
+          const admitted = yield* unlessStopped(sql.withTransaction(admit(run, 'settle', round, implement ?? {}, { before })))
+          if (admitted === undefined) return
+          const { attemptId } = admitted
           const begun = yield* Effect.exit(
             Effect.gen(function* () {
               const sessionId = yield* leadOn(run)
@@ -875,7 +1034,7 @@ export class Runs extends Context.Service<
                 body: settling(findings),
                 quiet: true,
               })
-              yield* sql.withTransaction(started(run, attemptId, sessionId))
+              yield* begin(run, attemptId, sessionId, run.threadId)
             }),
           )
           if (begun._tag === 'Failure')
@@ -898,21 +1057,57 @@ export class Runs extends Context.Service<
       const settling = (findings: ReadonlyArray<Finding & { readonly id: string }>) =>
         `The review found:\n\n${findingsText(findings)}\n\nSettle each: fix what holds, and set aside what doesn't, with a reason. Then call finish_step with a summary, and in \`findings\` what became of each, by its id: fixed, or set_aside with the reason.`
 
-      /** The lead's session: the one running, or the plan's lead (or another the person picked) started. */
-      const leadOn = (run: RunRow, agentId?: string, model?: string | null, said?: string) =>
+      /**
+       * Whether a session kept for a step is on the model the step asks for,
+       * put there where it was on another of its agent's. One the agent won't
+       * move isn't kept: the step starts afresh on its model instead.
+       */
+      const onModel = (threadId: string, sessionId: string, model: string | null | undefined) =>
+        Effect.gen(function* () {
+          if (model == null) return true
+          const sql = yield* SqlClient.SqlClient
+          const [on] = yield* sql<{ model: string | null }>`SELECT model FROM provider_sessions WHERE id = ${sessionId}`
+          if (on?.model === model) return true
+          const moved = yield* sessions.setModel({ threadId, model }).pipe(
+            Effect.as(true),
+            Effect.catchCause((cause) =>
+              Effect.as(Effect.logWarning('A kept session wouldn’t move to its step’s model; starting afresh', cause), false),
+            ),
+          )
+          if (!moved) return false
+          // Moved, it is on what the agent says it took, which may not be what was asked for.
+          const [now] = yield* sql<{ model: string | null }>`SELECT model FROM provider_sessions WHERE id = ${sessionId}`
+          return now?.model === model
+        })
+
+      /** The lead's session: the one running, or the plan's lead (or another the person picked, on the account they picked) started. */
+      const leadOn = (run: RunRow, agentId?: string, model?: string | null, said?: string, effort?: string | null, accountId?: string) =>
         Effect.gen(function* () {
           const { implement } = yield* stepsOf(run)
           const wanted = agentId ?? implement?.agentId ?? 'claude-code'
-          const live = yield* sessions.running(run.threadId)
+          // One being stopped isn't carried on with: a new one starts once it has gone.
+          const live = Option.filter(yield* sessions.running(run.threadId), (session) => !session.stopping)
           // One on an account that is out of usage hands over, to the same agent's next account where it has one (ADR-012).
           const spent = Option.isSome(live) && Option.isSome(yield* limits.outAccount(live.value.accountId))
-          if (Option.isSome(live) && !spent && (agentId === undefined || live.value.agentId === agentId)) return live.value.sessionId
+          if (
+            Option.isSome(live) &&
+            !spent &&
+            (agentId === undefined || live.value.agentId === agentId) &&
+            (accountId === undefined || live.value.accountId === accountId)
+          ) {
+            // Kept, it moves to a model asked for now; the plan's, or one the person set on it since, stays. One that won't move starts afresh.
+            if (yield* onModel(run.threadId, live.value.sessionId, model)) return live.value.sessionId
+            yield* Effect.ignore(sessions.stop(run.threadId))
+            return yield* sessions.start({ threadId: run.threadId, agentId: live.value.agentId, ...(model == null ? {} : { model }) })
+          }
           if (Option.isSome(live))
             return yield* sessions.switchAgent({
               threadId: run.threadId,
               agentId: wanted,
               ...(model == null ? {} : { model }),
+              ...(effort == null ? {} : { effort }),
               ...(said === undefined ? {} : { said, about: 'limit' as const }),
+              ...(accountId === undefined ? {} : { accountId }),
             })
           if (said !== undefined) yield* sayOut(run.threadId, run.projectId, said)
           // The plan's lead, unless it is out of usage and the project moves on: the next free agent instead.
@@ -920,12 +1115,13 @@ export class Runs extends Context.Service<
           // The plan's model and effort are for the plan's lead; another starts on the model chosen for it, or its own.
           const planned = agentId === undefined && instead === undefined
           const chosen = instead?.model ?? (planned ? (implement?.model ?? null) : (model ?? null))
-          const effort = planned ? (implement?.effort ?? null) : null
+          const thinks = planned ? (implement?.effort ?? null) : (effort ?? null)
           return yield* sessions.start({
             threadId: run.threadId,
             agentId: instead?.agentId ?? wanted,
             ...(chosen === null ? {} : { model: chosen }),
-            ...(effort === null ? {} : { effort }),
+            ...(thinks === null ? {} : { effort: thinks }),
+            ...(accountId === undefined ? {} : { accountId }),
           })
         })
 
@@ -983,8 +1179,9 @@ export class Runs extends Context.Service<
       /**
        * A step's agent is out of usage (docs/architecture/05). Where the
        * project moves on and an agent is free, the step goes to it, as when the
-       * person hands it over; otherwise it is held until the reset, or, with no
-       * reset known, it needs the person.
+       * person hands it over; otherwise it is held until the reset. Where the
+       * project asks, or with no reset known, it needs the person, with who
+       * could take it over and when the agent is back.
        */
       const outOfUsage = (on: NonNullable<Effect.Success<ReturnType<typeof stepOn>>>, agentId: string, accountId: string | null) =>
         Effect.gen(function* () {
@@ -1000,10 +1197,12 @@ export class Runs extends Context.Service<
             Effect.gen(function* () {
               // Its reset; one already past still waits an hour, so nothing brings the step back mid-handover.
               const until = out?.until ?? new Date(Date.parse(yield* timestamp) + Duration.toMillis(Duration.hours(1))).toISOString()
+              // The account and model it was on, so it carries on there at the reset, after a restart too.
+              const model = yield* modelOnStep(on.run.taskId, on.step, agentId)
               const revision = yield* change('node_attempts', on.attemptId, {
                 state: 'held',
                 holdReason: 'usage_limit',
-                output: JSON.stringify({ heldFor: agentId, until }),
+                output: JSON.stringify({ heldFor: agentId, until, account: accountId, model }),
               })
               yield* fact({
                 projectId: on.run.projectId,
@@ -1016,8 +1215,9 @@ export class Runs extends Context.Service<
               })
             }),
           )
-          if ((yield* usageLimitOfRun(on.run)) === 'move') {
-            const other = yield* otherStepOf(on.run, on.step === 'review' ? 'review' : 'implement')
+          const policy = yield* usageLimitOfRun(on.run)
+          const other = yield* otherStepOf(on.run, on.step === 'review' ? 'review' : 'implement')
+          if (policy === 'move') {
             // The same agent's next account first, on the same model, where the project turned that on; then the next free agent.
             const next = (yield* nextAccount(agentId, on.run.projectId))
               ? agentId
@@ -1036,7 +1236,15 @@ export class Runs extends Context.Service<
               return yield* carryOn(on.run, on.attemptId, info, { kind: 'retry', agentId: next }, handing, model, said)
             }
           }
-          if (out === null || resetsAt === null) return yield* stuck(on.run, { id: on.attemptId }, info)
+          if (policy === 'ask' || out === null || resetsAt === null) {
+            const choices = yield* limits.choices({
+              accountId,
+              projectId: on.run.projectId,
+              rather: other === undefined ? [] : [other],
+              ...(planned === undefined ? {} : { planned }),
+            })
+            return yield* stuck(on.run, { id: on.attemptId }, { ...info, limit: { accountId, resetsAt, choices } })
+          }
           yield* hold
           yield* sayOut(on.run.threadId, on.run.projectId, outWords({ from, resetsAt, waits: 'step' }))
           yield* touchCard(on.run.taskId)
@@ -1099,6 +1307,10 @@ export class Runs extends Context.Service<
               if (live === undefined) return yield* new NotFound({ kind: 'project', id: plan.projectId })
               const at = yield* timestamp
               const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${plan.taskId}`
+              // Abandoned as its plan was accepted, it gets no run; nor does a plan declined meanwhile.
+              if (task?.state === 'abandoned' || task?.state === 'done') return
+              const [still] = yield* sql<{ state: string }>`SELECT state FROM task_plans WHERE id = ${planId}`
+              if (still?.state !== 'accepted') return
               if (task?.state === 'draft') {
                 const revision = yield* change('tasks', plan.taskId, { state: 'open' })
                 yield* fact({
@@ -1162,7 +1374,9 @@ export class Runs extends Context.Service<
           )
           const current = yield* currentRun(plan.taskId)
           if (current === undefined) return
-          const { attemptId } = yield* sql.withTransaction(admit(current, 'implement', 0, implement))
+          const admitted = yield* unlessStopped(sql.withTransaction(admit(current, 'implement', 0, implement)))
+          if (admitted === undefined) return
+          const { attemptId } = admitted
           // A lead that can't start leaves Implement needing the person, who can hand it to another agent.
           const begun = yield* Effect.exit(leadOn(current))
           if (begun._tag === 'Failure')
@@ -1178,7 +1392,7 @@ export class Runs extends Context.Service<
                 open: 0,
               },
             )
-          yield* sql.withTransaction(started(current, attemptId, begun.value))
+          yield* begin(current, attemptId, begun.value, current.threadId)
           yield* touchCard(plan.taskId)
         })
 
@@ -1289,16 +1503,20 @@ export class Runs extends Context.Service<
             }
           }
           givenBefore.delete(access.threadId)
-          yield* sql.withTransaction(
+          const taken = yield* sql.withTransaction(
             Effect.gen(function* () {
+              // Read before the looks at git above: stopped and resumed meanwhile, the report is dropped.
+              if (!(yield* keeps(current, attempt.id, { step, summary }))) return false
               yield* ended(current, attempt, 'succeeded', { summary })
               yield* result(current, { step, round: attempt.iteration, summary, ...descriptions })
               // What became of each finding, as the lead says: the input to the next round, and to what reviews learn.
               if (step === 'settle') yield* settleFindings(current, attempt.id, settled)
               // A step that needed the person and reported after all no longer does.
               yield* unstuck(current)
+              return true
             }),
           )
+          if (!taken) return yield* dropped
           if (step === 'implement') {
             const next = yield* review(current, 0)
             return next === undefined
@@ -1372,6 +1590,8 @@ export class Runs extends Context.Service<
           if (current === undefined || attempt === undefined) return yield* new ToolRefused({ message: 'No review is waiting on you.' })
           const recorded = yield* sql.withTransaction(
             Effect.gen(function* () {
+              if (!(yield* keeps(current, attempt.id, { step: 'review', verdict: reviewed.verdict, summary: reviewed.summary })))
+                return undefined
               yield* unstuck(current)
               const ids: Array<Finding & { readonly id: string }> = []
               for (const finding of findings) {
@@ -1405,6 +1625,7 @@ export class Runs extends Context.Service<
               return ids
             }),
           )
+          if (recorded === undefined) return yield* dropped
           if (reviewed.verdict === 'pass' || findings.length === 0) {
             yield* conclude(current)
             return 'Althar has your review. The change passes.'
@@ -1507,9 +1728,11 @@ export class Runs extends Context.Service<
       /**
        * The person's answer to a step that needs them. Telling sends their
        * words to the step's agent, started again if it went. Handing the step
-       * over runs it again on that agent: the lead's steps in its thread, a
-       * review as a new round. Abandoning stops the run; for a review, the
-       * task goes on without it and is ready.
+       * over runs it again on that agent, on the account and model picked
+       * where one was: the lead's steps in its thread, a review as a new
+       * round. Waiting holds a step a usage limit stopped until the reset.
+       * Abandoning stops the run; for a review, the task goes on without it
+       * and is ready.
        */
       const answerStuck = (input: { readonly envelope: CommandEnvelope; readonly attentionId: string; readonly answer: StuckAnswer }) =>
         Effect.gen(function* () {
@@ -1522,6 +1745,15 @@ export class Runs extends Context.Service<
                 WHERE id = ${input.attentionId} AND kind = 'stuck'`
               if (row === undefined) return yield* new NotFound({ kind: 'attention_request', id: input.attentionId })
               if (row.state !== 'open') return yield* new AttentionClosed({ attentionId: input.attentionId })
+              // Only a reset that is known can be waited for.
+              if (answer.kind === 'wait' && (JSON.parse(row.payload) as StuckInfo).limit?.resetsAt == null)
+                return yield* new NothingToWaitFor({ attentionId: input.attentionId })
+              // An account picked is one of the agent's own, still there; otherwise the call stays open.
+              if (answer.kind === 'retry' && answer.accountId !== undefined) {
+                const [owner] = yield* sql<{ agentId: string }>`
+                  SELECT agent_id FROM agent_accounts WHERE id = ${answer.accountId} AND removed_at IS NULL`
+                if (owner?.agentId !== answer.agentId) return yield* new NotFound({ kind: 'account', id: answer.accountId })
+              }
               const at = yield* timestamp
               const revision = yield* change('attention_requests', input.attentionId, { state: 'answered', answeredAt: at })
               yield* fact({
@@ -1540,7 +1772,14 @@ export class Runs extends Context.Service<
                 projectId: row.projectId,
                 attentionRequestId: input.attentionId,
                 outcome: 'answer',
-                reason: answer.kind === 'tell' ? answer.note : answer.kind === 'retry' ? `Hand the step to ${answer.agentId}` : 'Abandon',
+                reason:
+                  answer.kind === 'tell'
+                    ? answer.note
+                    : answer.kind === 'retry'
+                      ? `Hand the step to ${answer.agentId}`
+                      : answer.kind === 'wait'
+                        ? 'Wait for the reset'
+                        : 'Abandon',
                 decidedByActorId: input.envelope.actorId,
                 decidedAt: at,
               })}`
@@ -1560,7 +1799,56 @@ export class Runs extends Context.Service<
           const current = yield* currentRun(call.taskId)
           if (current === undefined) return
           const info = JSON.parse(call.payload) as StuckInfo
+          if (answer.kind === 'wait') return yield* waitForReset(current, call.attemptId, info, input.envelope)
           yield* carryOn(current, call.attemptId, info, answer, input.envelope)
+        })
+
+      /**
+       * A step a usage limit stopped, held until the reset as the person said:
+       * at it, the same agent carries it on, as for a project that waits. A
+       * reset already past by the answer carries it on now.
+       */
+      const waitForReset = (current: RunRow, attemptId: string | null, info: StuckInfo, envelope: CommandEnvelope) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const until = info.limit?.resetsAt
+          if (attemptId === null || info.agentId === null || until == null) return
+          if (Date.parse(until) <= Date.parse(yield* timestamp))
+            return yield* carryOn(current, attemptId, info, { kind: 'retry', agentId: info.agentId }, envelope)
+          const agentId = info.agentId
+          const from = (yield* limits.named(agentId, null, info.limit?.accountId)).agent
+          const model = yield* modelOnStep(current.taskId, info.step, agentId)
+          const held = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              // Stopped since the answer, the step waits for the person to resume it, not for the reset.
+              const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attemptId}`
+              if (still?.state !== 'waiting_attention' || !(yield* going(current))) return false
+              const revision = yield* change('node_attempts', attemptId, {
+                state: 'held',
+                holdReason: 'usage_limit',
+                output: JSON.stringify({ heldFor: agentId, until, account: info.limit?.accountId ?? null, model }),
+              })
+              yield* fact({
+                projectId: current.projectId,
+                aggregateType: 'node_attempt',
+                aggregateId: attemptId,
+                revision,
+                type: 'node_attempt.held',
+                payload: { reason: 'usage_limit', agentId, until },
+                actorId: envelope.actorId,
+              })
+              return true
+            }),
+          )
+          if (!held) return
+          // The person's doing, so not one the home lists as the loop's.
+          yield* addItem({ projectId: current.projectId, threadId: current.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `The step waits until ${whenWords(until)}, when ${from} is back.`,
+          })
+          yield* touchCard(current.taskId)
+          yield* Queue.offer(holdsChanged, undefined)
         })
 
       /**
@@ -1572,11 +1860,13 @@ export class Runs extends Context.Service<
         current: RunRow,
         attemptId: string | null,
         info: StuckInfo,
-        answer: StuckAnswer,
+        answer: Exclude<StuckAnswer, { readonly kind: 'wait' }>,
         envelope: CommandEnvelope,
         model?: string | null,
         /** Why it carries on so, where Althar says: in place of the thread's own line for a switch. */
         said?: string,
+        /** How hard the agent it is handed to thinks, where the person picked. */
+        effort?: string | null,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1588,13 +1878,12 @@ export class Runs extends Context.Service<
                   nodeId: string
                   state: string
                 }>`SELECT id, node_id, state FROM node_attempts WHERE id = ${attemptId}`
-          /** The waiting attempt runs again, reminded afresh. */
+          // The account and model the person picked, where they did; a model Althar chose comes first.
+          const accountId = answer.kind === 'retry' ? answer.accountId : undefined
+          const on = model ?? (answer.kind === 'retry' ? answer.model : undefined)
+          /** The waiting attempt runs again, reminded afresh; whether it does, its run not stopped meanwhile. */
           const resume = (sessionId: string) =>
-            attempt === undefined
-              ? Effect.void
-              : sql.withTransaction(
-                  Effect.andThen(change('node_attempts', attempt.id, { output: null }), started(current, attempt.id, sessionId)),
-                )
+            attempt === undefined ? Effect.succeed(true) : begin(current, attempt.id, sessionId, current.threadId, true)
           const endAttempt = (state: 'failed' | 'cancelled', output: unknown) =>
             attempt === undefined
               ? Effect.void
@@ -1641,7 +1930,8 @@ export class Runs extends Context.Service<
               info.round,
               info.why === 'round_limit' ? last?.summary : undefined,
               answer.kind === 'retry' ? answer.agentId : undefined,
-              model,
+              on,
+              accountId,
             )
             if (answer.kind === 'tell') {
               const [thread] = yield* sql<{
@@ -1657,8 +1947,8 @@ export class Runs extends Context.Service<
             return yield* finish(current, 'cancelled')
           }
           // The lead's step: its agent (or the one picked) on the task's thread, told again what the step is.
-          const sessionId = yield* leadOn(current, answer.kind === 'retry' ? answer.agentId : undefined, model, said)
-          yield* resume(sessionId)
+          const sessionId = yield* leadOn(current, answer.kind === 'retry' ? answer.agentId : undefined, on, said, effort, accountId)
+          if (!(yield* resume(sessionId))) return
           if (answer.kind === 'tell') yield* sessions.send({ envelope: envelope, threadId: current.threadId, body: answer.note })
           else
             yield* sessions.send({
@@ -1684,6 +1974,179 @@ export class Runs extends Context.Service<
           yield* touchCard(current.taskId)
         })
 
+      /** Who leads the task's thread: the last agent on it, on its model and effort, else the plan's lead. */
+      const lastLead = (run: RunRow) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
+            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${run.threadId} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+          if (last !== undefined) return last satisfies Lead
+          const { implement } = yield* stepsOf(run)
+          return { agentId: implement?.agentId ?? 'claude-code', model: implement?.model ?? null, effort: implement?.effort ?? null }
+        })
+
+      /**
+       * Carries on a run its task's stop suspended (docs/architecture/05,
+       * "Task and run lifecycle"): it runs again, on an attempt of its own,
+       * from the step stopping cut short. The lead's step runs again on the
+       * lead given, or its last, told to carry on (or to settle what is still
+       * open); a review starts its round again on its reviewer; publishing is
+       * tried again. Stopped between two steps, the lead carries its own on.
+       * What the person said meanwhile waits in the lead's thread: beside a
+       * review or publishing the lead starts too, so it is read now.
+       */
+      /**
+       * Tells an answer to a question whose agent has gone since it asked
+       * (DEV-13): queued for the thread, quietly, and read by the agent on it,
+       * or by one started for it. A run's lead step that waited on the answer
+       * carries on, its lead started as a stuck step's is when told what to do;
+       * otherwise the agent last on the thread starts again.
+       */
+      const answered = (input: { readonly envelope: CommandEnvelope; readonly threadId: string; readonly body: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          // Queued first, so the agent that starts reads it in its first turn.
+          yield* sessions.send({ envelope: input.envelope, threadId: input.threadId, body: input.body, quiet: true })
+          if (Option.isSome(yield* sessions.running(input.threadId))) return
+          const [step] = yield* sql<{ taskId: string; attemptId: string }>`
+            SELECT r.task_id, a.id AS attempt_id FROM threads t
+            JOIN runs r ON r.task_id = t.task_id AND r.state = 'running'
+            JOIN workflow_executions e ON e.run_id = r.id
+            JOIN nodes n ON n.execution_id = e.id AND n.node_key IN ('implement', 'settle')
+            JOIN node_attempts a ON a.node_id = n.id AND a.state IN ('running', 'waiting_attention')
+            WHERE t.id = ${input.threadId} AND t.kind = 'task'
+            ORDER BY a.admitted_at DESC LIMIT 1`
+          const current = step === undefined ? undefined : yield* currentRun(step.taskId)
+          if (step !== undefined && current !== undefined) {
+            const sessionId = yield* leadOn(current)
+            yield* begin(current, step.attemptId, sessionId, current.threadId, true)
+            return
+          }
+          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
+            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${input.threadId} ORDER BY started_at DESC LIMIT 1`
+          if (last === undefined) return
+          yield* sessions.start({
+            threadId: input.threadId,
+            agentId: last.agentId,
+            ...(last.model === null ? {} : { model: last.model }),
+            ...(last.effort === null ? {} : { effort: last.effort }),
+          })
+        })
+
+      const resume = (input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly lead?: Lead }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const resumed = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [last] = yield* sql<{ id: string; projectId: ProjectId; state: RunState }>`
+                SELECT id, project_id, state FROM runs WHERE task_id = ${input.taskId} ORDER BY created_at DESC LIMIT 1`
+              if (last === undefined || last.state !== 'suspended') return false
+              // Read where it is written: a task abandoned meanwhile stays as it is.
+              const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${input.taskId}`
+              if (task?.state !== 'open' && task?.state !== 'draft') return false
+              const state = yield* transition(runLifecycle, last.state, 'running')
+              const at = yield* timestamp
+              const [attempts] = yield* sql<{ n: number }>`SELECT max(attempt_number) AS n FROM run_attempts WHERE run_id = ${last.id}`
+              // A new attempt at the run: the one stopping interrupted stays as it ended.
+              yield* sql`INSERT INTO run_attempts ${sql.insert({
+                id: yield* newId(Ids.runAttempt),
+                projectId: last.projectId,
+                runId: last.id,
+                attemptNumber: (attempts?.n ?? 0) + 1,
+                deviceId: instance.deviceId,
+                controllerGeneration: 1,
+                controllerInstanceId: instance.id,
+                state: 'active',
+                startedAt: at,
+              })}`
+              const revision = yield* change('runs', last.id, { state })
+              yield* fact({
+                projectId: last.projectId,
+                aggregateType: 'run',
+                aggregateId: last.id,
+                revision,
+                type: 'run.resumed',
+                actorId: input.envelope.actorId,
+                commandId: input.envelope.commandId,
+              })
+              return true
+            }),
+          )
+          if (!resumed) return
+          const current = yield* currentRun(input.taskId)
+          if (current === undefined) return
+          const lead = input.lead ?? (yield* lastLead(current))
+          // The run's latest attempt: the one stopping cut short, unless it stopped between two steps; with the agent it ran on,
+          // where it started one, since a step handed to another agent keeps its node's first.
+          const [latest] = yield* sql<{
+            nodeKey: string
+            iteration: number
+            config: string
+            input: string
+            state: string
+            stopped: number | null
+            ranOn: string | null
+            ranModel: string | null
+          }>`
+            SELECT n.node_key, n.iteration, n.config, a.input, a.state, json_extract(a.output, '$.stopped') AS stopped,
+              s.agent_id AS ran_on, s.model AS ran_model
+            FROM node_attempts a JOIN nodes n ON n.id = a.node_id LEFT JOIN provider_sessions s ON s.id = a.provider_session_id
+            WHERE n.execution_id = ${current.executionId} ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1`
+          const cut = latest !== undefined && latest.state === 'cancelled' && latest.stopped === 1 ? latest : undefined
+          const step = cut === undefined ? undefined : stepOf(cut.nodeKey)
+          const config = JSON.parse(cut?.config ?? '{}') as { agentId?: string; model?: string | null }
+          if (cut !== undefined && step === 'review') {
+            // Its round again, on its reviewer, with what the lead settled before it, after the first.
+            const [settled] = yield* sql<{ summary: string }>`
+              SELECT json_extract(content, '$.summary') AS summary FROM thread_items
+              WHERE thread_id = ${current.threadId} AND kind = 'step_result' AND json_extract(content, '$.step') = 'settle'
+              ORDER BY sequence DESC LIMIT 1`
+            const reviewer =
+              cut.ranOn === null ? { agentId: config.agentId, model: config.model ?? null } : { agentId: cut.ranOn, model: cut.ranModel }
+            yield* review(current, cut.iteration, cut.iteration > 0 ? settled?.summary : undefined, reviewer.agentId, reviewer.model)
+          } else if (cut !== undefined && step === 'publish') yield* conclude(current)
+          else {
+            // The lead's step: the one cut short, else the lead's latest, else Implement.
+            const [own] =
+              cut === undefined
+                ? yield* sql<{ nodeKey: string; iteration: number; config: string; input: string }>`
+                    SELECT n.node_key, n.iteration, n.config, a.input FROM node_attempts a JOIN nodes n ON n.id = a.node_id
+                    WHERE n.execution_id = ${current.executionId} AND n.node_key IN ('implement', 'settle')
+                    ORDER BY a.admitted_at DESC, a.rowid DESC LIMIT 1`
+                : [cut]
+            const { implement } = yield* stepsOf(current)
+            const key = own?.nodeKey === 'settle' ? 'settle' : 'implement'
+            const iteration = own?.iteration ?? 0
+            const { attemptId } = yield* sql.withTransaction(
+              admit(current, key, iteration, JSON.parse(own?.config ?? JSON.stringify(implement ?? {})), JSON.parse(own?.input ?? '{}')),
+            )
+            const info: StuckInfo = { step: key, why: 'restarted', detail: null, agentId: lead.agentId, round: iteration, open: 0 }
+            const carried = yield* Effect.exit(
+              carryOn(
+                current,
+                attemptId,
+                info,
+                { kind: 'retry', agentId: lead.agentId },
+                input.envelope,
+                lead.model,
+                undefined,
+                lead.effort,
+              ),
+            )
+            // A lead that can't start leaves its step needing the person, as when a plan starts.
+            if (carried._tag === 'Failure')
+              yield* stuck(current, { id: attemptId }, { ...info, why: 'failed_to_start', detail: summarize(carried.cause) || null })
+            return yield* touchCard(current.taskId)
+          }
+          // Beside a review or publishing, what the person said is read now: the lead starts for it.
+          const [waiting] = yield* sql<{ id: string }>`
+            SELECT i.id FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
+            WHERE i.thread_id = ${current.threadId} AND i.state = 'queued' AND a.kind = 'person' LIMIT 1`
+          if (waiting !== undefined && Option.isNone(yield* sessions.running(current.threadId)))
+            yield* Effect.ignore(leadOn(current, lead.agentId, lead.model, undefined, lead.effort))
+          yield* touchCard(current.taskId)
+        })
+
       // A step running when Althar stopped can't be trusted to carry on on its own: each needs the person.
       yield* provide(
         Effect.gen(function* () {
@@ -1696,6 +2159,20 @@ export class Runs extends Context.Service<
           for (const step of left) {
             const current = yield* currentRun(step.taskId)
             if (current === undefined) continue
+            // A lead that asked the person a question still waits on them: their answer carries the step on.
+            if (step.nodeKey !== 'review' && (yield* asking(current.threadId))) {
+              const revision = yield* change('node_attempts', step.attemptId, { state: 'waiting_attention' })
+              yield* fact({
+                projectId: current.projectId,
+                aggregateType: 'node_attempt',
+                aggregateId: step.attemptId,
+                revision,
+                type: 'node_attempt.waiting_attention',
+                payload: { question: true },
+                actorId: instance.systemId,
+              })
+              continue
+            }
             const agent = (JSON.parse(step.config) as { agentId?: string }).agentId ?? null
             yield* stuck(
               current,
@@ -1713,13 +2190,15 @@ export class Runs extends Context.Service<
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not mark the steps a restart stopped', cause))),
       )
 
-      /** A step held for a usage limit runs again at the reset, on the agent it was held for. */
+      /** A step held for a usage limit runs again at the reset, on the agent, account and model it was held for. */
       const resumeHeld = (held: {
         readonly taskId: string
         readonly attemptId: string
         readonly nodeKey: string
         readonly iteration: number
         readonly agentId: string
+        readonly accountId: string | null
+        readonly model: string | null
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1747,7 +2226,18 @@ export class Runs extends Context.Service<
             open: 0,
           }
           const resuming = yield* envelope('thread.send', { threadId: current.threadId, resumed: held.attemptId })
-          yield* carryOn(current, held.attemptId, info, { kind: 'retry', agentId: held.agentId }, resuming)
+          yield* carryOn(
+            current,
+            held.attemptId,
+            info,
+            {
+              kind: 'retry',
+              agentId: held.agentId,
+              ...(held.accountId === null ? {} : { accountId: held.accountId }),
+              ...(held.model === null ? {} : { model: held.model }),
+            },
+            resuming,
+          )
         })
 
       /** A message that waited for an agent's reset goes to it then: to its session, or, after a restart, to one started for it. */
@@ -1782,12 +2272,22 @@ export class Runs extends Context.Service<
             JOIN turn_deliveries d ON d.id = (SELECT id FROM turn_deliveries WHERE thread_id = t.id ORDER BY requested_at DESC LIMIT 1)
             JOIN provider_sessions s ON s.id = d.provider_session_id
             WHERE t.kind IN ('coordinator', 'task') AND d.error_class = 'usage_limit'
-              AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.state = 'running')
+              AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = t.task_id AND r.state IN ('running', 'suspended'))
+              AND NOT EXISTS (SELECT 1 FROM tasks k WHERE k.id = t.task_id AND k.state IN ('done', 'abandoned'))
               AND EXISTS (SELECT 1 FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
                 WHERE i.thread_id = t.id AND i.state = 'queued' AND a.kind = 'person')`
           const due: Array<{ readonly at: number; readonly run: Effect.Effect<void, unknown, Store> }> = held.map((step) => {
-            const { heldFor, until } = JSON.parse(step.output) as { heldFor: string; until: string }
-            return { at: Date.parse(until), run: resumeHeld({ ...step, agentId: heldFor }) }
+            // Held before Althar kept the account and model, it carries on as the agent picks.
+            const { heldFor, until, account, model } = JSON.parse(step.output) as {
+              heldFor: string
+              until: string
+              account?: string | null
+              model?: string | null
+            }
+            return {
+              at: Date.parse(until),
+              run: resumeHeld({ ...step, agentId: heldFor, accountId: account ?? null, model: model ?? null }),
+            }
           })
           for (const message of messages) {
             if (given.has(message.turnId)) continue
@@ -1858,6 +2358,8 @@ export class Runs extends Context.Service<
         workflowVersion: provide(workflowVersion),
         publish: (taskId) => provide(publish(taskId)),
         answerStuck: (input) => provide(answerStuck(input)),
+        resume: (input) => provide(resume(input)),
+        answered: (input) => provide(answered(input)),
       })
     }),
   )

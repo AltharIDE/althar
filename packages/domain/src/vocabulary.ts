@@ -34,7 +34,7 @@ export type TaskState = typeof TaskState.Type
 export const PlanState = Schema.Literals(['proposed', 'accepted', 'replaced', 'declined'])
 export type PlanState = typeof PlanState.Type
 
-/** A run's logical state. `suspended` is Stopped on screen; `cancelled` is Abandon. */
+/** A run's logical state. `suspended` is Stopped on screen, and what an abandoned task's run was on stays suspended, for reopening. */
 export const RunState = Schema.Literals(['admitted', 'running', 'suspended', 'succeeded', 'failed', 'cancelled'])
 export type RunState = typeof RunState.Type
 
@@ -85,6 +85,12 @@ export const ThreadItemKind = Schema.Literals([
   'task',
   /** Something heard from outside, written by someone else: a comment on the task's pull request, its checks. */
   'arrival',
+  /** A question an agent asks the person, answered where it is. */
+  'question',
+  /** A run of the project Althar started, in the thread it was asked for in. Althar posts it and keeps it current. */
+  'run',
+  /** An issue the coordinator drafted, in its thread: the person files it, changes it or discards it there. Althar posts it. */
+  'issue_draft',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -111,7 +117,7 @@ export type AccountState = typeof AccountState.Type
 export const AccountStatusSource = Schema.Literals(['error', 'side_channel'])
 export type AccountStatusSource = typeof AccountStatusSource.Type
 
-export const ProcessPurpose = Schema.Literals(['agent', 'verify', 'setup', 'git', 'other', 'probe'])
+export const ProcessPurpose = Schema.Literals(['agent', 'verify', 'setup', 'git', 'other', 'probe', 'run'])
 export type ProcessPurpose = typeof ProcessPurpose.Type
 
 /** `launching` is written before the process is spawned, so a crash in between still leaves a trace to reconcile. */
@@ -206,7 +212,28 @@ export type ConnectionState = typeof ConnectionState.Type
 export const ExternalKind = Schema.Literals(['issue', 'change'])
 export type ExternalKind = typeof ExternalKind.Type
 
-export const ArtifactKind = Schema.Literals(['brief', 'message', 'transcript', 'patch', 'log', 'report', 'findings', 'summary', 'other'])
+/**
+ * Where an issue the coordinator drafted stands: waiting on the person, being
+ * filed, filed, not filed for a reason the tracker gave, perhaps filed (its
+ * answer was lost, so the tracker is looked at before filing it again), or
+ * discarded.
+ */
+export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
+export type IssueDraftState = typeof IssueDraftState.Type
+
+/** What an artifact is, which decides how long it is kept: a command's output is a log, a picture an agent hands back an image. */
+export const ArtifactKind = Schema.Literals([
+  'brief',
+  'message',
+  'transcript',
+  'patch',
+  'log',
+  'report',
+  'findings',
+  'summary',
+  'other',
+  'image',
+])
 export type ArtifactKind = typeof ArtifactKind.Type
 
 export const Sensitivity = Schema.Literals(['normal', 'may_contain_secrets'])
@@ -240,5 +267,6 @@ export const AggregateType = Schema.Literals([
   'external_link',
   'policy',
   'agent_account',
+  'issue_draft',
 ])
 export type AggregateType = typeof AggregateType.Type

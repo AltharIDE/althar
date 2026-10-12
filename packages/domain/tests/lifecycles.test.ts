@@ -10,12 +10,17 @@ import {
   nodeAttemptLifecycle,
   ProviderSessionState,
   providerSessionLifecycle,
+  runLifecycle,
+  taskLifecycle,
   transition,
 } from '../src/lifecycles'
+import { RunState, TaskState } from '../src/vocabulary'
 
 const lifecycles = [
   { lifecycle: nodeAttemptLifecycle as Lifecycle<string>, states: NodeAttemptState.literals as ReadonlyArray<string> },
   { lifecycle: providerSessionLifecycle as Lifecycle<string>, states: ProviderSessionState.literals as ReadonlyArray<string> },
+  { lifecycle: taskLifecycle as Lifecycle<string>, states: TaskState.literals as ReadonlyArray<string> },
+  { lifecycle: runLifecycle as Lifecycle<string>, states: RunState.literals as ReadonlyArray<string> },
 ]
 
 describe('lifecycles', () => {
@@ -66,6 +71,22 @@ describe('lifecycles', () => {
     assert.isTrue(canTransition(nodeAttemptLifecycle, 'held', 'running'))
     assert.isTrue(canTransition(nodeAttemptLifecycle, 'held', 'superseded'))
     assert.isFalse(canTransition(nodeAttemptLifecycle, 'held', 'succeeded'))
+  })
+
+  it('reopens an abandoned task, and never a merged one', () => {
+    assert.isTrue(canTransition(taskLifecycle, 'open', 'abandoned'))
+    assert.isTrue(canTransition(taskLifecycle, 'abandoned', 'open'))
+    // Its pull request merged on the host after all, it is done.
+    assert.isTrue(canTransition(taskLifecycle, 'abandoned', 'done'))
+    assert.isTrue(isTerminal(taskLifecycle, 'done'))
+    assert.isFalse(canTransition(taskLifecycle, 'done', 'open'))
+  })
+
+  it('suspends a stopped run until it runs again or is cancelled', () => {
+    assert.isTrue(canTransition(runLifecycle, 'running', 'suspended'))
+    assert.isTrue(canTransition(runLifecycle, 'suspended', 'running'))
+    assert.isFalse(canTransition(runLifecycle, 'suspended', 'succeeded'))
+    assert.isFalse(canTransition(runLifecycle, 'cancelled', 'running'))
   })
 
   it('reconciles an uncertain attempt before deciding its outcome', () => {

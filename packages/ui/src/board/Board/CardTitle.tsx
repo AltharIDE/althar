@@ -9,9 +9,16 @@ import s from './Board.module.css'
  * Internal to the board's cards.
  */
 export function CardTitle({ onOpen, className, children }: { onOpen?: () => void; className?: string; children: ReactNode }) {
-  if (!onOpen) return <span className={cx(s.cardTitle, className)}>{children}</span>
+  // At most two lines show; the whole title is said on hover.
+  const whole = typeof children === 'string' ? children : undefined
+  if (!onOpen)
+    return (
+      <span className={cx(s.cardTitle, className)} title={whole}>
+        {children}
+      </span>
+    )
   return (
-    <button type="button" className={cx(s.cardTitle, s.open, className)} onClick={onOpen}>
+    <button type="button" className={cx(s.cardTitle, s.open, className)} title={whole} onClick={onOpen}>
       {children}
     </button>
   )

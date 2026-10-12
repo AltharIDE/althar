@@ -1,21 +1,22 @@
 import { randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
 import { AgentExited, AgentRequestFailed, AgentStartFailed, OptionUnavailable, TurnInProgress } from '@althar/provider-adapters'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Cause, Context, Duration, Effect, Fiber, Layer, Stream } from 'effect'
+import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
-import { connection, services } from '../src/Api'
+import { connection, isInside, services } from '../src/Api'
 import {
   ChangedSinceSeen,
   CantMerge,
+  PushRefused,
   EffortUnchanged,
   GitFailed,
   NoChangeToOpen,
@@ -24,14 +25,16 @@ import {
   NotAnIssue,
   RepositoriesNeeded,
   NotFound,
+  NothingToWaitFor,
   OutwardUncertain,
   SessionFailed,
+  TaskRefused,
 } from '../src/errors'
 import { NotConnected } from '../src/Connections'
 import { Folders } from '../src/Folders'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
-import { Connectors } from '../src/Config'
+import { Connectors, type RuntimeOptions } from '../src/Config'
 import { Secrets } from '../src/Secrets'
 import { ConnectorFailed, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
@@ -51,6 +54,8 @@ const connected = (
     readonly connectors?: Layer.Layer<Connectors>
     /** Where the app can't open Terminal, as the command-line client. */
     readonly noTerminal?: boolean
+    /** The editors a task's files open in, and what opening one does. */
+    readonly editors?: RuntimeOptions['editors']
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -66,10 +71,12 @@ const connected = (
         secrets: Secrets.memory(),
         connectors: options.connectors ?? fakeConnectors({}),
         accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
+        artifactsRoot: mkdtempSync(join(tmpdir(), 'althar-artifacts-')),
         ...(options.noTerminal === true
           ? {}
           : { openTerminal: (line: string) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(true)) }),
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
+        ...(options.editors === undefined ? {} : { editors: options.editors }),
       }),
     )
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
@@ -95,6 +102,107 @@ const idle = (thread: ThreadSnapshot) => thread.session !== null && !thread.sess
 const texts = (thread: ThreadSnapshot) => thread.items.map((item) => ('text' in item.content ? item.content.text : item.kind))
 
 describe('the API', () => {
+  it.live('reads what a running command has printed so far, and what it printed once its turn was stopped', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Run the server' })
+        yield* client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'codex' })
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.streams, disposition: 'after_current' })
+        const running = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) =>
+          thread.items.some((item) => item.kind === 'tool_call' && item.content.command === 'npm run dev'),
+        )
+        const run = running.items.find((item) => item.kind === 'tool_call' && item.content.command === 'npm run dev')
+        // A window that opens now reads what it printed before it looked.
+        const soFar = yield* eventually(client.ReadOutput({ threadId: task.threadId, itemId: run?.id ?? '' }), (read) =>
+          read.text.includes('ready in 3 ms'),
+        )
+        assert.isTrue(soFar.text.startsWith('ready in 1 ms'))
+        yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
+        const stopped = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) =>
+          thread.items.some((item) => item.id === run?.id && item.kind === 'tool_call' && item.content.output !== null),
+        )
+        const ended = stopped.items.find((item) => item.id === run?.id)
+        const lines = ended?.kind === 'tool_call' ? (ended.content.output?.lines ?? 0) : 0
+        assert.isAtLeast(lines, 3)
+        const kept = yield* client.ReadOutput({ threadId: task.threadId, itemId: run?.id ?? '' })
+        assert.strictEqual(kept.text.split('\n').filter((line) => line !== '').length, lines)
+      }),
+    ),
+  )
+
+  it.live('streams a command’s output, then reads what it printed and the document the agent wrote', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Hand it back' })
+        const outputs = yield* Effect.forkChild(
+          Stream.runCollect(
+            Stream.take(
+              Stream.filter(client.Watch({}), (event) => event._tag === 'Output' && event.threadId === task.threadId),
+              // At most one every 50 ms: a command that ends sooner may stream once, and the rest is read from what was kept.
+              1,
+            ),
+          ),
+        )
+        yield* Effect.sleep('50 millis')
+        yield* client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'codex' })
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.handsBack, disposition: 'after_current' })
+        const thread = yield* eventually(
+          client.GetThread({ threadId: task.threadId }),
+          (value) => idle(value) && value.items.some((item) => item.kind === 'agent_message' && item.content.text.includes('charges')),
+        )
+        const streamed = (yield* Fiber.join(outputs)) as ReadonlyArray<WatchEvent>
+        assert.isTrue(streamed.every((event) => event._tag === 'Output' && event.text.startsWith(' ✓ charges/limit')))
+        const tools = thread.items.flatMap((item) => (item.kind === 'tool_call' ? [item] : []))
+        const ran = tools.find((item) => item.content.command === 'npm test')
+        const printed = ' ✓ charges/limit (14)\n ✓ refunds/router (38)\n 52 passed\n'
+        assert.deepStrictEqual(
+          [ran?.content.exit, ran?.content.output],
+          [0, { kept: true, lines: 3, bytes: Buffer.byteLength(printed), dropped: 0, error: null }],
+        )
+        assert.deepStrictEqual(yield* client.ReadOutput({ threadId: task.threadId, itemId: ran?.id ?? '' }), { text: printed, dropped: 0 })
+        const lint = tools.find((item) => item.content.command === 'npm run lint')
+        assert.deepStrictEqual([lint?.content.status, lint?.content.exit, lint?.content.output?.lines], ['failed', 1, 3])
+        // The screenshot, by its digest and size; the document by its path.
+        const shot = tools.find((item) => item.content.pictures.length > 0)
+        assert.deepInclude(shot?.content.pictures[0], { mediaType: 'image/png', width: 480, height: 300, unkept: null })
+        const wrote = tools.find((item) => item.content.files.some((file) => file.how === 'wrote'))
+        const path = wrote?.content.files[0]?.path ?? ''
+        assert.isTrue(path.endsWith('/docs/notes.md'))
+        const document = yield* client.ReadDocument({ threadId: task.threadId, path })
+        assert.deepStrictEqual([document.lines, document.body.startsWith('# Notes')], [8, true])
+        assert.deepStrictEqual((yield* client.ReadDocument({ threadId: task.threadId, path: 'docs/notes.md' })).body, document.body)
+        // What the message handed back: a file it points at, and a picture.
+        const said = thread.items.findLast((item) => item.kind === 'agent_message')
+        assert.deepStrictEqual(
+          said?.kind === 'agent_message' ? [said.content.files.map((file) => file.how), said.content.pictures.length] : [],
+          [['linked'], 1],
+        )
+        // Only markdown, only inside the worktree, and only what is there.
+        const refused = (asked: string) =>
+          Effect.map(Effect.flip(client.ReadDocument({ threadId: task.threadId, path: asked })), (error) => error.message)
+        assert.strictEqual(yield* refused('report.csv'), 'Only markdown documents open here. Open the file in your editor.')
+        assert.strictEqual(yield* refused('/etc/../etc/hosts.md'), "That document isn't there any more.")
+        assert.strictEqual(yield* refused('docs/gone.md'), "That document isn't there any more.")
+        assert.strictEqual(
+          (yield* Effect.flip(client.ReadOutput({ threadId: task.threadId, itemId: shot?.id ?? '' }))).message,
+          "That output isn't there any more.",
+        )
+        // The coordinator writes no documents.
+        const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+        assert.strictEqual(
+          (yield* Effect.flip(client.ReadDocument({ threadId: coordinator.threadId, path: 'docs/notes.md' }))).reason,
+          'NotFound',
+        )
+      }),
+    ),
+  )
+
   it.live('opens a project by its grant, runs a task, and says what changes after a cursor', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -116,8 +224,10 @@ describe('the API', () => {
         assert.strictEqual(project.tasks, 0)
         // The same command again is a retry: the first one's result, and no second project.
         assert.deepStrictEqual(yield* client.OpenProject(opening), project)
-        // What it does when an agent is out of usage: moves on, until the person says it waits.
+        // What it does when an agent is out of usage: moves on, until the person says it asks them, or waits.
         assert.strictEqual(project.usageLimit, 'move')
+        yield* client.SetUsageLimit({ commandId: commandId(), projectId: project.id, policy: 'ask' })
+        assert.strictEqual((yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.usageLimit, 'ask')
         yield* client.SetUsageLimit({ commandId: commandId(), projectId: project.id, policy: 'wait' })
         assert.strictEqual((yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)?.usageLimit, 'wait')
         const creating = { commandId: commandId(), projectId: project.id, title: 'Say hello', description: 'Briefly.' }
@@ -199,7 +309,7 @@ describe('the API', () => {
         )
         assert.isEmpty((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).items)
         const reply = yield* client.GetThreadItem({ threadId: task.threadId, itemId: newest.items[0]?.id ?? '' })
-        assert.deepStrictEqual(reply.content, { text: 'Hello' })
+        assert.deepStrictEqual(reply.content, { text: 'Hello', pictures: [], files: [] })
 
         // A tool call keeps what the thread shows: the files it touched, not its raw input and output.
         yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.tool, disposition: 'after_current' })
@@ -214,6 +324,10 @@ describe('the API', () => {
           command: null,
           locations: [{ path: 'hello.txt' }],
           declined: false,
+          pictures: [],
+          files: [],
+          output: null,
+          exit: null,
         })
 
         const choosing = { commandId: commandId(), threadId: task.threadId, model: 'large' }
@@ -230,6 +344,10 @@ describe('the API', () => {
         yield* client.SetDefaultEffort({ commandId: commandId(), agentId: 'codex', model: 'large', effort: 'high' })
         const codex = (yield* client.GetModels({})).find((agent) => agent.agentId === 'codex')
         assert.deepStrictEqual(codex?.defaults, [{ model: 'large', effort: 'high' }])
+        yield* client.SetModelBlocked({ commandId: commandId(), agentId: 'codex', model: 'large', blocked: true })
+        assert.deepStrictEqual((yield* client.GetModels({})).find((agent) => agent.agentId === 'codex')?.blocked, ['large'])
+        yield* client.SetModelBlocked({ commandId: commandId(), agentId: 'codex', model: 'large', blocked: false })
+        assert.deepStrictEqual((yield* client.GetModels({})).find((agent) => agent.agentId === 'codex')?.blocked, [])
 
         // How full the agent's context is reaches a client as the agent says it, and its session says it after.
         const contexts = yield* Effect.forkChild(
@@ -269,6 +387,30 @@ describe('the API', () => {
         yield* Fiber.join(heard)
         // The fallback read is a second away; the signal brings it far sooner.
         assert.isBelow(Date.now() - started, 500)
+      }),
+    ),
+  )
+
+  it.live('hands a thread to another agent with what the person said, through the API', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Retry' })
+        yield* client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'large' })
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        const switching = { commandId: commandId(), threadId: task.threadId, agentId: 'opencode', body: 'Take it from here' }
+        yield* client.SwitchAgent(switching)
+        // Sent again, it is the same switch: the message isn't said twice.
+        yield* client.SwitchAgent(switching)
+        const after = yield* eventually(
+          client.GetThread({ threadId: task.threadId }),
+          (thread) => idle(thread) && thread.session?.agentId === 'opencode',
+        )
+        assert.deepStrictEqual(
+          after.items.filter((item) => item.kind === 'user_message').map((item) => item.content.text),
+          ['Take it from here'],
+        )
       }),
     ),
   )
@@ -314,6 +456,55 @@ describe('the API', () => {
     ),
   )
 
+  it.live('keeps an always answer as a rule, and a call the rules screen now covers is answered by it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, permissions: 'ask' })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Look' })
+        yield* client.SwitchAgent({ commandId: commandId(), threadId: task.threadId, agentId: 'codex', model: 'large' })
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.items.length > 0)
+        const run = (command: string) =>
+          client.Send({ commandId: commandId(), threadId: task.threadId, body: `${scenarios.run}${command}`, disposition: 'after_current' })
+
+        yield* run('git status')
+        const waiting = yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
+        assert.deepStrictEqual(waiting.attention[0]?.always?.allow, ['exact', 'prefix'])
+        yield* client.Answer({ commandId: commandId(), attentionId: waiting.attention[0]?.id ?? '', decision: 'allow', always: 'prefix' })
+        const rules = yield* client.GetProjectRules({ projectId: project.id })
+        assert.deepStrictEqual(rules.commands, [{ pattern: 'git status', decision: 'allow' }])
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => idle(thread) && thread.attention.length === 0)
+
+        // Taken off on the rules screen, the next asks; put back there, the call waiting is answered by it.
+        yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, commands: [] })
+        yield* run('git status -s')
+        yield* eventually(client.GetThread({ threadId: task.threadId }), (thread) => thread.attention.length === 1)
+        yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          commands: [{ pattern: 'git status -s', decision: 'allow', match: 'exact' }],
+        })
+        const after = yield* eventually(
+          client.GetThread({ threadId: task.threadId }),
+          (thread) =>
+            idle(thread) && thread.attention.length === 0 && thread.items.filter((item) => item.kind === 'tool_call').length === 2,
+        )
+        const last = after.items.filter((item) => item.kind === 'tool_call').at(-1)
+        assert.deepStrictEqual(last?.kind === 'tool_call' ? last.content.allowedBy : undefined, {
+          pattern: 'git status -s',
+          match: 'exact',
+        })
+        assert.deepStrictEqual((yield* client.GetProjectRules({ projectId: project.id })).alwaysAllow, [])
+        // An always that wasn't offered says so in words.
+        const refused = yield* Effect.flip(
+          client.Answer({ commandId: commandId(), attentionId: 'att_missing', decision: 'allow', always: 'kind' }),
+        )
+        assert.strictEqual(refused.reason, 'NotFound')
+      }),
+    ),
+  )
+
   it.live('reads a folder the person chose, and opens the repositories they kept in it, never a path outside what they chose', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -339,6 +530,19 @@ describe('the API', () => {
         })
         assert.deepStrictEqual([project.name, project.repository, project.repositories], ['Meridian', folder, ['web']])
         assert.deepStrictEqual((yield* client.ReadFolder({ grant: chosen })).project, { id: project.id, name: 'Meridian' })
+        // Made on purpose, under the window's id and in the ink it showed, from the same folder: a project of its own.
+        const projectId = `proj_${'2'.repeat(32)}`
+        const made = yield* client.OpenProject({
+          commandId: commandId(),
+          grant: chosen,
+          name: 'Northwind',
+          repositories: [{ grant: chosen, path: join(folder, 'api') }],
+          projectId,
+          ink: 'umber',
+        })
+        assert.deepStrictEqual([made.id, made.name, made.ink, made.repositories], [projectId, 'Northwind', 'umber', ['api']])
+        const taken = yield* Effect.flip(client.OpenProject({ commandId: commandId(), grant: chosen, projectId }))
+        assert.strictEqual(taken.reason, 'ProjectRefused')
       }),
     ),
   )
@@ -446,6 +650,73 @@ describe('accounts, through the API', () => {
   )
 })
 
+describe('a project’s vocabulary, through the API', () => {
+  it.live('says the names its code uses that have parts, its files’ among them, and not plain words', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const repo = repository()
+        mkdirSync(join(repo, 'src'))
+        writeFileSync(
+          join(repo, 'src', 'RefundLedger.ts'),
+          'export class RefundLedger {\n  idempotency_key = MAX_RETRIES\n  useEffect() { return this.idempotency_key }\n}\nconst a-b = plain\n',
+        )
+        writeFileSync(join(repo, 'src', 'charges-api.ts'), 'export const settleCharge = () => handleCharge()\n')
+        writeFileSync(join(repo, 'image.png'), Buffer.from([0, 1, 2, 3]))
+        const run = (...args: Array<string>) =>
+          execFileSync('git', args, {
+            cwd: repo,
+            env: {
+              ...process.env,
+              GIT_AUTHOR_NAME: 'T',
+              GIT_AUTHOR_EMAIL: 't@a.test',
+              GIT_COMMITTER_NAME: 'T',
+              GIT_COMMITTER_EMAIL: 't@a.test',
+            },
+          })
+        run('add', '.')
+        run('commit', '-q', '-m', 'Ledger')
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repo) })
+        const words = yield* client.GetVocabulary({ projectId: project.id })
+        for (const word of [
+          'RefundLedger',
+          'RefundLedger.ts',
+          'idempotency_key',
+          'useEffect',
+          'MAX_RETRIES',
+          'settleCharge',
+          'handleCharge',
+          'charges-api',
+          'charges-api.ts',
+        ])
+          assert.include(words, word)
+        for (const word of ['README', 'plain', 'export', 'image.png', 'a-b']) assert.notInclude(words, word)
+        // Used most, said first.
+        assert.isBelow(words.indexOf('RefundLedger'), words.indexOf('settleCharge'))
+
+        const missing = yield* Effect.flip(client.GetVocabulary({ projectId: 'proj_missing' }))
+        assert.strictEqual(missing.reason, 'NotFound')
+      }),
+    ),
+  )
+})
+
+describe('settings, through the API', () => {
+  it.live('has Althar as co-author until the person turns it off, and keeps that', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        const line = 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>'
+        assert.deepStrictEqual(yield* client.GetSettings({}), { coAuthor: { on: true, line } })
+        yield* client.SetCoAuthor({ commandId: commandId(), on: false })
+        assert.deepStrictEqual(yield* client.GetSettings({}), { coAuthor: { on: false, line } })
+        yield* client.SetCoAuthor({ commandId: commandId(), on: true })
+        assert.isTrue((yield* client.GetSettings({})).coAuthor.on)
+      }),
+    ),
+  )
+})
+
 describe('project rules, through the API', () => {
   it.live('reads a project’s rules, and changes them in part as the person', () =>
     Effect.scoped(
@@ -455,9 +726,11 @@ describe('project rules, through the API', () => {
         const { conventions, ...rules } = yield* client.GetProjectRules({ projectId: project.id })
         assert.deepStrictEqual(rules, {
           projectId: project.id,
+          revision: 1,
           permissions: 'rules',
           alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
           never: [],
+          alwaysAllow: [],
           commands: [],
           end: null,
           usageLimit: 'move',
@@ -508,6 +781,46 @@ describe('project rules, through the API', () => {
         assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
         const missing = yield* Effect.flip(client.GetProjectRules({ projectId: 'proj_missing' }))
         assert.strictEqual(missing.reason, 'NotFound')
+      }),
+    ),
+  )
+
+  it.live('refuses a list changed against rules that moved on since, and an allow over what comes first', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const seen = yield* client.GetProjectRules({ projectId: project.id })
+        const changed = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          commands: [{ pattern: 'bun test', decision: 'never' }],
+          expectedRevision: seen.revision,
+        })
+        assert.strictEqual(changed.revision, seen.revision + 1)
+        // The same list again, as read before that change: refused, and what changed is kept.
+        const stale = yield* Effect.flip(
+          client.SetProjectRules({ commandId: commandId(), projectId: project.id, commands: [], expectedRevision: seen.revision }),
+        )
+        assert.strictEqual(stale.reason, 'RulesChanged')
+        const allowed = yield* Effect.flip(
+          client.SetProjectRules({
+            commandId: commandId(),
+            projectId: project.id,
+            commands: [{ pattern: 'bun test', decision: 'allow' }],
+            expectedRevision: changed.revision,
+          }),
+        )
+        assert.deepStrictEqual(
+          [allowed.reason, allowed.message],
+          [
+            'RuleOnAnotherList',
+            'Commands starting “bun test” are on “Never”, which comes first, so nothing changed. Take them off “Never” first.',
+          ],
+        )
+        assert.deepStrictEqual((yield* client.GetProjectRules({ projectId: project.id })).commands, [
+          { pattern: 'bun test', decision: 'never' },
+        ])
       }),
     ),
   )
@@ -567,8 +880,49 @@ const asLeft = (folder: string) =>
     .map((path) => `${path}:${readFileSync(path).toString('hex')}`)
     .join('\n')
 
+describe('editors, through the API', () => {
+  it('tells a file in a task’s folder from one out of it, as Windows writes paths too', () => {
+    assert.isTrue(isInside('/w/api', '/w/api/src/a.ts'))
+    assert.isTrue(isInside('C:\\w\\api', 'C:\\w\\api\\src\\a.ts', win32))
+    assert.isTrue(isInside('C:\\w\\api', 'C:\\w\\api\\..notes', win32))
+    for (const out of ['C:\\w\\api', 'C:\\w\\api-2\\a.ts', 'C:\\w\\a.ts', 'D:\\w\\api\\a.ts'])
+      assert.isFalse(isInside('C:\\w\\api', out, win32))
+  })
+
+  it.live('lists the editors here, and opens one on a task’s folder at its file, never a path outside it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const opens: Array<[string, string, string | null, number | null]> = []
+        const { client, grant } = yield* connected({
+          editors: {
+            list: () => [{ id: 'zed', name: 'Zed' }],
+            open: (editor, folder, file, line) => Effect.sync(() => void opens.push([editor, folder, file, line])).pipe(Effect.as(true)),
+          },
+        })
+        assert.deepStrictEqual(yield* client.ListEditors({}), [{ id: 'zed', name: 'Zed' }])
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.CreateTask({ commandId: commandId(), projectId: project.id, title: 'Edit' })
+        const worktree = realpathSync((yield* client.GetThread({ threadId: task.threadId })).task.worktree ?? '')
+        assert.isTrue(yield* client.OpenInEditor({ commandId: commandId(), taskId: task.id, editor: 'zed', path: 'src/a.ts', line: 12 }))
+        assert.isTrue(yield* client.OpenInEditor({ commandId: commandId(), taskId: task.id, editor: 'zed' }))
+        assert.isFalse(yield* client.OpenInEditor({ commandId: commandId(), taskId: task.id, editor: 'zed', path: '../../etc/passwd' }))
+        // Nor out by a link inside it.
+        symlinkSync(tmpdir(), join(worktree, 'out'))
+        assert.isFalse(yield* client.OpenInEditor({ commandId: commandId(), taskId: task.id, editor: 'zed', path: 'out/anything.txt' }))
+        // Nor by a link to a folder that isn't there yet.
+        symlinkSync(join(tmpdir(), `althar-nowhere-${Date.now()}`), join(worktree, 'gone'))
+        assert.isFalse(yield* client.OpenInEditor({ commandId: commandId(), taskId: task.id, editor: 'zed', path: 'gone/new.ts' }))
+        assert.deepStrictEqual(opens, [
+          ['zed', worktree, join(worktree, 'src/a.ts'), 12],
+          ['zed', worktree, null, null],
+        ])
+      }),
+    ),
+  )
+})
+
 describe('a project’s menu, through the API', () => {
-  it.live('renames a project, and adds, leaves out and changes its repositories', () =>
+  it.live('renames a project, draws it in another ink, and adds, leaves out and changes its repositories', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
@@ -583,6 +937,25 @@ describe('a project’s menu, through the API', () => {
         assert.strictEqual(
           (yield* Effect.flip(client.RenameProject({ commandId: commandId(), projectId: project.id, name: ' ' }))).message,
           'Give the project a name.',
+        )
+
+        // Its mark is drawn in the ink the person picks, which stays; the drawing, from its id, is the same.
+        const other = named?.ink === 'rose' ? 'umber' : 'rose'
+        const { cursor } = yield* client.ListProjects()
+        yield* client.SetProjectInk({ commandId: commandId(), projectId: project.id, ink: other })
+        const inked = (yield* client.ListProjects()).projects.find((summary) => summary.id === project.id)
+        assert.deepStrictEqual([inked?.ink, inked?.name], [other, 'Refunds v2'])
+        // Every window hears the project changed, and reads it again.
+        const heard = yield* Stream.runHead(
+          Stream.filter(client.Watch({ since: cursor }), (event) => event._tag === 'Changed' && event.aggregateType === 'project'),
+        )
+        assert.deepStrictEqual(
+          Option.map(heard, (event) => (event._tag === 'Changed' ? [event.aggregateId, event.projectId] : [])),
+          Option.some([project.id, project.id]),
+        )
+        assert.strictEqual(
+          (yield* Effect.flip(client.SetProjectInk({ commandId: commandId(), projectId: 'project_gone', ink: 'teal' }))).message,
+          "That project isn't there any more.",
         )
 
         // Each repository has a role, suggested by its name, which the person can change.
@@ -651,7 +1024,16 @@ describe('a project’s menu, through the API', () => {
         )
         const docs = again[2]
         assert.deepStrictEqual(docs?.fork, { fork: 'you/refund-docs', upstream: 'meridian/refund-docs', target: 'fork' })
-        assert.strictEqual(docs?.remote, 'git@github.com:you/refund-docs.git')
+        // Its work goes to GitHub, which Althar knows but isn't connected to; one with no remote stays here.
+        assert.deepStrictEqual(docs?.host, {
+          product: 'github',
+          name: 'GitHub',
+          instance: null,
+          path: 'you/refund-docs',
+          url: 'https://github.com/you/refund-docs',
+          account: null,
+        })
+        assert.isNull(again[0]?.host)
         yield* client.SetRepository({
           commandId: commandId(),
           projectId: project.id,
@@ -871,6 +1253,55 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
+  it.live('stops, resumes, abandons and reopens a task', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected({ countdown: Duration.minutes(5) })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const task = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Retry',
+          description: '[lead:wait]',
+          steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        })
+        const working = yield* eventually(
+          client.GetThread({ threadId: task.threadId, limit: 0 }),
+          (thread) => thread.session?.turnRunning === true,
+        )
+        assert.deepStrictEqual([working.task.actions, working.task.planId], [['stop', 'abandon'], null])
+        const stopping = { commandId: commandId(), taskId: task.id }
+        yield* client.StopTask(stopping)
+        // Sent again by a retry, it is one stop.
+        yield* client.StopTask(stopping)
+        const stopped = yield* client.GetThread({ threadId: task.threadId, limit: 0 })
+        assert.deepStrictEqual([stopped.task.phase, stopped.task.actions, stopped.session], ['stopped', ['resume', 'abandon'], null])
+        yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'codex', model: 'large', effort: 'high' })
+        const resumed = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
+        assert.strictEqual(resumed.session?.agentId, 'codex')
+        yield* client.AbandonTask({ commandId: commandId(), taskId: task.id })
+        const abandoned = yield* client.GetThread({ threadId: task.threadId, limit: 0 })
+        assert.deepStrictEqual([abandoned.task.state, abandoned.task.phase, abandoned.task.actions], ['abandoned', 'settled', ['reopen']])
+        yield* client.ReopenTask({ commandId: commandId(), taskId: task.id })
+        const reopened = yield* client.GetThread({ threadId: task.threadId, limit: 0 })
+        assert.deepStrictEqual([reopened.task.state, reopened.task.actions], ['open', ['resume', 'abandon']])
+        // Resumed with its last lead.
+        yield* client.ResumeTask({ commandId: commandId(), taskId: task.id })
+        const again = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
+        assert.strictEqual(again.session?.agentId, 'codex')
+        // On an agent picked with no model or effort of its own, as the window sends one: its own.
+        yield* client.StopTask({ commandId: commandId(), taskId: task.id })
+        yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'claude-code', model: null, effort: null })
+        const picked = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
+        assert.strictEqual(picked.session?.agentId, 'claude-code')
+        assert.strictEqual(
+          (yield* Effect.flip(client.AbandonTask({ commandId: commandId(), taskId: 'task_missing' }))).message,
+          "That task isn't there any more.",
+        )
+      }),
+    ),
+  )
+
   it.live('shows a step that needs the person as a call, and takes their answer', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -892,7 +1323,7 @@ describe('the coordinator, through the API', () => {
         const board = yield* client.GetBoard({ projectId: project.id })
         assert.deepStrictEqual(
           board.calls.map((waits) => [waits.id, waits.kind, waits.taskTitle, waits.threadId]),
-          [[call?.id, 'stuck', 'Nobody home', task.threadId]],
+          [[call?.id ?? '', 'stuck', 'Nobody home', task.threadId]],
         )
         assert.deepInclude(board.tasks[0], { taskId: task.id, phase: 'waiting', state: 'open', changed: null })
         const answering = { commandId: commandId(), attentionId: call?.id ?? '', answer: { kind: 'retry' as const, agentId: 'codex' } }
@@ -986,14 +1417,22 @@ describe('code hosts and trackers, through the API', () => {
 
         const offered = yield* client.ListConnections()
         assert.deepStrictEqual(
-          offered.products.map((product) => [product.product, product.browserSignIn, product.selfHosted, product.hostedUrl]),
+          offered.products.map((product) => [
+            product.product,
+            product.service,
+            product.browserSignIn,
+            product.selfHosted,
+            product.hostedUrl,
+          ]),
           [
-            ['github', false, true, 'https://github.com'],
-            ['linear', false, false, 'https://linear.app'],
-            ['trello', false, false, 'https://trello.com'],
-            ['jira_dc', false, true, null],
+            ['github', 'github', false, true, 'https://github.com'],
+            ['linear', 'linear', false, false, 'https://linear.app'],
+            ['trello', 'trello', false, false, 'https://trello.com'],
+            ['jira_dc', 'jira', false, true, null],
           ],
         )
+        assert.deepStrictEqual(offered.products[0]?.tokenPrefixes, ['github_pat_', 'ghp_'])
+        assert.deepStrictEqual(offered.places, [])
         // Trello's token goes with an API key: where a token is made for one, and what a key is checked against.
         assert.deepInclude(offered.products[0], { tokenNeeds: null, tokenHelpForKey: null, keyChecks: [] })
         const trello = offered.products.find((product) => product.product === 'trello')
@@ -1026,6 +1465,42 @@ describe('code hosts and trackers, through the API', () => {
         assert.lengthOf((yield* client.ListConnections()).connections, 3)
 
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(working) })
+        // Where its code is, as the list and connecting say it: on the GitHub its remote names.
+        assert.deepStrictEqual((yield* client.ListConnections()).places, [
+          { product: 'github', webUrl: HOST, project: project.name, remote: null, repositories: ['meridian/api'] },
+        ])
+        const guide = yield* client.GetConnectGuide({ service: 'github' })
+        assert.deepStrictEqual(guide.places, [
+          { product: 'github', webUrl: HOST, project: project.name, remote: 'origin', repositories: ['meridian/api'] },
+        ])
+        assert.deepStrictEqual(guide.clis, [])
+        // A token is made on each instance it knows, filled in for its places: a classic one on a company's own server.
+        assert.deepStrictEqual(
+          guide.tokenPages.map((page) => page.webUrl),
+          ['https://github.com', HOST],
+        )
+        assert.strictEqual(
+          guide.tokenPages.find((page) => page.webUrl === HOST)?.url,
+          `${HOST}/settings/tokens/new?description=Althar&scopes=repo%2Cworkflow`,
+        )
+        // What the connection can do there, as the service says.
+        const can = yield* client.CheckConnection({ connectionId: signedIn.id })
+        assert.deepStrictEqual(
+          can.lines.map((line) => [line.need, line.state]),
+          [
+            ['account', 'ok'],
+            ['reach', 'ok'],
+            ['push', 'ok'],
+            ['changes', 'ok'],
+            ['checks', 'ok'],
+            ['issues', 'ok'],
+          ],
+        )
+        // gh isn't signed in here; and a server that doesn't answer is said to be one.
+        const noCli = yield* Effect.flip(client.ConnectCli({ commandId: commandId(), product: 'github', webUrl: HOST }))
+        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', "gh isn't signed in to github.test on this Mac."])
+        const server = yield* client.FindServer({ service: 'jira', webUrl: 'jira.meridian.dev' })
+        assert.deepStrictEqual(server, { product: null, webUrl: 'https://jira.meridian.dev', reason: 'unreachable', tokenPage: null })
         const { issues } = yield* client.ListIssues({ projectId: project.id })
         assert.sameMembers(
           issues.map((issue) => issue.key),
@@ -1065,6 +1540,11 @@ describe('code hosts and trackers, through the API', () => {
         assert.deepInclude(ready, { phase: 'ready', changed: null })
         assert.strictEqual(ready?.change?.number, 1)
         yield* client.RefreshTask({ commandId: commandId(), taskId: started.id })
+        // The person stops listening to it.
+        const listened = thread.task.changes[0]
+        assert.isTrue(listened?.listening)
+        yield* client.StopListening({ commandId: commandId(), taskId: started.id, url: listened?.url ?? '' })
+        assert.isFalse((yield* client.GetThread({ threadId: started.threadId })).task.changes[0]?.listening)
         // It has its pull request already: there is none to open.
         const opened = yield* Effect.flip(client.OpenChange({ commandId: commandId(), taskId: started.id }))
         assert.deepStrictEqual([opened.reason, opened.message], ['NoChangeToOpen', 'The task already has its pull request.'])
@@ -1108,6 +1588,10 @@ describe('words', () => {
       'The project has no repository called mobile. It has api, web.',
     )
     assert.strictEqual(said(new NotFound({ kind: 'attention_request', id: 'a' })), "That call isn't there any more.")
+    assert.strictEqual(
+      said(new NothingToWaitFor({ attentionId: 'a' })),
+      "The agent didn't say when its limit resets, so there's no time to wait for. Pick another model, or try it again.",
+    )
     assert.strictEqual(said(new NotFound({ kind: 'something new', id: 'a' })), "That thing isn't there any more.")
     assert.strictEqual(said({ _tag: 'UnknownAgent', agentId: 'cursor' }), 'Althar has no agent called cursor.')
     assert.strictEqual(said({ _tag: 'SessionRunning' }), 'An agent is already working on this task.')
@@ -1182,6 +1666,41 @@ describe('words', () => {
       said({ _tag: 'NoChangeToOpen', why: 'something new' }),
       "The task's work isn't done yet. Its pull request opens when it is.",
     )
+    // A push the remote refused says how to put it right.
+    assert.deepStrictEqual(
+      (['behind', 'denied'] as const).map((why) => said(new PushRefused({ taskId: 't', why, remote: 'origin/main' }))),
+      [
+        'origin/main has commits that aren’t here yet, so it didn’t take the push. Pull them in, then push again.',
+        'git couldn’t sign in to push to origin/main. Push once from a terminal so your sign-in is kept, then push again here.',
+      ],
+    )
+    assert.strictEqual(
+      said(new PushRefused({ taskId: 't', why: 'refused', remote: 'origin/main', said: 'protected branch hook declined' })),
+      'origin/main refused the push: protected branch hook declined.',
+    )
+    // Nowhere to push a branch to.
+    assert.strictEqual(
+      said(new NotFound({ kind: 'remote', id: 't' })),
+      'Its repositories have no remote to push to. Add one with git, then push again.',
+    )
+    // Refused without a word why: just that it was.
+    assert.strictEqual(said(new PushRefused({ taskId: 't', why: 'refused', remote: 'origin/main' })), 'origin/main refused the push.')
+    // A task's course: a merged task stays done, and one whose worktree and branch went can't be reopened.
+    assert.strictEqual(said(new TaskRefused({ taskId: 't', why: 'merged' })), 'The task is merged, so it stays done.')
+    assert.strictEqual(
+      said(new TaskRefused({ taskId: 't', why: 'branch_gone' })),
+      'The task’s worktree and its branch are both gone, so it can’t be reopened on them.',
+    )
+    assert.strictEqual(said(new TaskRefused({ taskId: 't', why: 'abandoned' })), 'The task is abandoned. Reopen it to carry on.')
+    // One with a reason these words don't know says only that it can't be done.
+    assert.strictEqual(said({ _tag: 'TaskRefused', why: 'something new' }), "Althar can't change the task that way.")
+    // A merge that conflicts carries its files, for the window to have the lead settle them.
+    assert.deepStrictEqual(words(new CantMerge({ taskId: 't', why: 'conflicts', detail: 'README.md' }), name), {
+      reason: 'CantMerge',
+      message: 'It conflicts with the default branch, in README.md. Tell the lead to bring its branch up to date, then merge again.',
+      why: 'conflicts',
+      detail: 'README.md',
+    })
     assert.deepStrictEqual(words(new Error('boom'), name), {
       reason: 'Unknown',
       message: "Althar's runtime couldn't do that. Its log has the details.",
@@ -1286,6 +1805,10 @@ describe('thread items', () => {
       command: "bash -lc 'make test'",
       locations: [{ path: '/w/a', line: 2 }],
       declined: true,
+      pictures: [],
+      files: [],
+      output: null,
+      exit: null,
     })
     assert.deepStrictEqual(itemOf(row('plan', { entries: 'none' }))?.content, { entries: [] })
     assert.deepStrictEqual(itemOf(row('notice', { source: 'agent', severity: 'loud', title: 'Hm' }))?.content, {
@@ -1294,7 +1817,7 @@ describe('thread items', () => {
       title: 'Hm',
       description: null,
     })
-    assert.deepStrictEqual(itemOf({ ...row('agent_message', null), content: 'not json' })?.content, { text: '' })
+    assert.deepStrictEqual(itemOf({ ...row('agent_message', null), content: 'not json' })?.content, { text: '', pictures: [], files: [] })
     assert.isUndefined(itemOf(row('something_new', {})))
     assert.deepStrictEqual(
       itemOf(

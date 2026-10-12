@@ -194,8 +194,9 @@ service's model.
 | Checks | Check runs and commit statuses; Actions logs | The head pipeline's jobs, with logs | Build statuses; Pipelines step logs | Build statuses; Code Insights reports | A check: name, state, link; logs as a capability |
 | Listening, polling | ETags (a "not modified" reply is free) | ETags too; a merge request's threads are read whole, having no `updated_after` | `updated_on` | The pull request's activities | A cursor per thing listened to |
 
-- **Pushing is git,** with the connection's token, never the person's
-  credential helper. Althar pushes what the lead committed and commits
+- **Pushing is git** (ADR-016). Where the host is connected, Althar's own
+  steps push with the connection's token, never the person's credential
+  helper. Althar pushes what the lead committed and commits
   nothing itself; a step that ends in a push isn't done while the worktree
   has uncommitted files, so the lead commits what belongs to the task and
   clears away the rest. The record keeps the commit pushed.
@@ -209,6 +210,40 @@ service's model.
   template with the lead's summary in its place for one. Templates kept
   elsewhere (an organisation's `.github` repository, a host's settings)
   aren't read yet.
+- **What leaves the Mac is credited to the person, and to Althar.** Agents
+  sign their commits in their own ways (a `Co-authored-by` trailer, a
+  "Generated with" footer), and only Althar sees every agent's commits on
+  their way out, so it is Althar that takes those lines out, whichever agent
+  made them.
+  - Before each push, and before a merge here, the branch's own commits that
+    are nowhere else yet are made again with the agents' lines out. Nowhere
+    else means: on no other branch, tag or remote here, not on the remote's
+    branch (Althar asks the remote, since it pushes by address and keeps no
+    remote branches), and not sent by Althar before. Only the branch's own
+    line is made again, and only the person's commits on it: agents commit
+    as the person, so a commit made as anyone else came from elsewhere and
+    keeps its credit. Where one of those would have to move, the branch goes
+    as it is.
+  - Unless the person turned it off in Settings, Althar's own trailer goes
+    in: its GitHub account, by that account's private address, so the host
+    shows its picture. The person stays the author, and the pull request's
+    description says Althar opened it only while that is on.
+  - An agent's line is known by name and address together: a name like an
+    agent's or a model's at a machine's address. On GitHub's private
+    addresses the account decides, so a person called Claude keeps their
+    credit there too.
+  - Althar remembers each commit it makes again, and what from, as it makes
+    it: what it made is never made again, and the same commit always goes
+    the same way, signed or not, whatever the setting says by then. A commit
+    is made again from its tree, parents, people, dates and message, and
+    signed where the person has git sign their commits, or where it was
+    signed. One that making again would spoil (a message in another
+    encoding, a signed tag merged) leaves the branch as it is.
+  - The branch moves onto the new commits only once they are pushed or
+    merged, only from where it was, and never while a rebase, merge or
+    cherry-pick is under way in the worktree. Where an agent committed meanwhile, its commits are credited
+    onto what was sent. The commit the person saw counts as seen in either
+    form.
 - **After the first push, pushing is the person's.** When a plan's steps are
   done, Althar pushes the branch and opens the pull request. What the lead
   commits after, answering the person, a review or failed checks, waits on the
@@ -216,6 +251,18 @@ service's model.
   says how many commits aren't on the pull request yet, and Push pushes up to
   the commit they saw, never one the lead made since. The lead has no tool to
   push.
+- **Without a connection, the person pushes the task's branch with their own
+  git** (ADR-016): to the remote that repository's work goes to (the one its
+  default branch follows, else `origin`, else its only remote), under the
+  branch's name, up to the commit they saw, never forced, a prompt for a
+  password failing rather than waiting. The task says whether the remote has
+  the branch and how many commits it doesn't have, and links to the host's
+  page for a new pull request from it where that can be told (GitHub, GitLab,
+  Bitbucket; a GitLab, Gitea or Forgejo of a team's own by its name). Once
+  something is pushed to a host Althar knows but isn't connected to, the task
+  says what connecting would add: the pull request opened by Althar, its
+  checks and reviews back to the lead, the merge on accept. Nothing is said
+  of connecting before then; the project's settings always have Connect.
 - **A repository without a pull request merges here, as the person says.**
   Where a task ended on its branch (no host Althar knows, a host not
   connected, or "push the branch only"), the person can merge it into each
@@ -231,7 +278,15 @@ service's model.
   - Refs move first and checkouts last. A checkout that refuses anyway
     (something written there since) puts back what moved, so it is all or
     none.
-  - Nothing is pushed.
+  - Nothing is pushed by the merge. Once merged, the task says whether each
+    default branch's remote has it yet, and Push sends it there with the
+    person's own git sign-in (their keychain or SSH agent), as they would from
+    a terminal; a prompt for a password fails rather than waits. A remote that
+    has moved on refuses, and the task says to pull first.
+  - A conflict with the default branch offers to have the lead resolve it: a
+    note to the lead naming the files, sent as the person's own message, to
+    merge the default branch into its branch, settle each conflict, and
+    commit. The person merges again after.
 - **A task is done once each of its repositories is merged:** its pull
   request merged, or, where it has none, its branch in its default branch
   here. A pull request closed without merging keeps the task open. Until
@@ -273,6 +328,7 @@ service's model.
 | Text | Markdown | ADF (Cloud), wiki markup (Data Center) | Markdown | Markdown | Markdown; the Jira adapters convert |
 | Status | The team's states, typed: triage, backlog, unstarted, started, completed, canceled | Statuses in To Do, In Progress, Done; changed by a transition, which may need fields | The card's list | Open or closed with a reason; GitLab's statuses in five categories | The tracker's name, and a category: triage, backlog, to do, started, done, cancelled |
 | Linking a PR | An attachment; Linear's Git integration links branches named with the key | A remote link; the development panel needs Jira's own Git apps, by key | An attachment | A reference | A link, and the key in the branch and the PR's title |
+| Filing an issue | `issueCreate` in a team; labels by name, the team's or the workspace's | `POST /issue` in a project, as its Task type (else the first that isn't a sub-task); labels without spaces | A card on a list, with the board's labels by name | An issue on a repository; the host makes labels it lacks (GitHub only for someone who can push) | `create` in a container from `containers`; labels the tracker can't take are left off |
 
 - **Status by category.** Althar asks for a category, and the adapter
   picks the tracker's state. A Jira transition that needs fields becomes a
@@ -281,6 +337,59 @@ service's model.
 - **The key goes in the branch and the PR's title,** so the trackers' own
   Git integrations link them. Field ownership (above) decides whether
   Althar also moves a status those integrations move.
+
+### Drafting issues
+
+The coordinator can draft an issue on any connected tracker with
+`draft_issue` ([04](04-coordinator.md)): something to track rather than do
+now. Nothing reaches the tracker on its word:
+
+- **A draft is a card** in the coordinator's thread: the tracker, where it
+  goes there (a container), its title, body and labels. The person files it,
+  changes it first, or discards it. There is no countdown: a draft left
+  alone files nothing.
+- **Where it goes** is what the coordinator names, a tracker by its name and
+  a container by its id, key or name; or, without them, where the project's
+  issues already come from (the newest issue a task came from, or a draft
+  filed), then its repository's issues, then the one tracker or container
+  there is. Where none of that decides, the tool says what to name.
+- **Two connections of one tracker** (two Jira sites, two GitLab servers,
+  two accounts) are told apart by site, and by account where they share
+  one: `Jira (acme.atlassian.net)`. The coordinator names one so, or by its
+  site's address; a container named without a tracker, or with a name
+  several share, is looked for on each, and one found on more than one is
+  asked about, never guessed. The card names the tracker the same way.
+  Containers are read page by page, up to ten pages.
+- **Drafts are kept** (`issue_drafts`), so they outlast a restart. Filing
+  marks the draft as being filed before the tracker is asked, in the same
+  transaction that checks it is still open, so a second press files nothing
+  more. A tracker that refuses (signed out, not allowed, not there, too many
+  calls, the request as it stands) leaves the card not filed, with its
+  words, to file again; one that needs signing in again isn't asked. Where
+  it may have taken the issue without Althar hearing so (no answer in time,
+  one Althar couldn't read, or Althar closed in the middle), the draft is
+  uncertain, never confidently unfiled: the card says to look on the tracker
+  before filing it again, and it is never filed again unasked. An adapter
+  whose tracker took the issue succeeds, even where reading it back after
+  fails (Jira's and Trello's do): it falls back to what it knows, the key
+  and link included. A tracker that says it filed one without saying which
+  (Linear's `success` with no issue), or fails inside as it works (a 5xx,
+  or a GraphQL error of its own internals), leaves it uncertain too; only
+  what it refuses is not filed. A draft discarded after it was uncertain is
+  told to the coordinator as perhaps on the tracker, not as never filed.
+- **The same title for the same place** in the same thread is the same
+  draft, for a coordinator unsure its first call worked; for another place,
+  it is another draft.
+- **The coordinator hears** what became of each draft the next time it
+  speaks, as it hears of its plans: filed (with its key and link), changed,
+  discarded, not filed and why, or perhaps filed. A filed issue's key reads through the
+  connection that filed it, so a task drafted from it later links it as
+  any task's issue is linked.
+
+Creating an issue needs a sign-in that may write: Linear's sign-in asks to
+read and write, GitLab's for `api`, Trello's token for `read,write`; a Jira
+token files where the account has Create Issues, and Althar's GitHub App
+needs Issues: Read and write, which is set on the app itself.
 
 ### Signing in
 
@@ -297,7 +406,26 @@ whether it gives a token without one:
 | Trello | Althar's Power-Up key, and a user token from Trello's authorize page | n/a |
 
 A pasted token is the fallback everywhere, including for an organisation
-that won't install the GitHub App. A connection belongs to the person on
+that won't install the GitHub App.
+
+Connecting is a walk, one step at a time (ADR-026). It offers only the ways
+that work on this device: the service's own browser sign-in where Althar's
+app is set up for it; gh's or glab's sign-in where the tool is signed in to
+that instance, whose token the runtime copies to its own keychain, out of
+agents' reach, and sends only over HTTPS to that instance (the hosted
+service at its own address, or a server connected or found from a remote);
+and a token made on the service's page, opened filled in
+where the page takes it (GitHub's fine-grained token: its name, owner, 90
+days and permissions; GitLab's name and `api` scope), noticed on the
+clipboard as the window comes back, or pasted. A company's own server is
+asked for first, filled in from the projects' remotes, each asked without
+signing in which product answers there. A remote is read as its code
+host's, under that instance's own path, whatever tracker shares its server. Every connection is then checked
+by reads alone: who it signs in as, whether it reaches the projects'
+repositories, each thing Althar does there, and when its token runs out
+where the service says. What only a write would tell is said not to be
+known. Signing a connection in again keeps its address, and the email or
+key its token went with. A connection belongs to the person on
 this device. Its token is sealed by the app with Electron's `safeStorage`,
 whose key the system keychain keeps for the signed app alone, and kept in a
 file of its own in the profile; the store keeps only a reference to it.
@@ -315,10 +443,21 @@ Agents reach code hosts and trackers only through Althar:
 - **Althar's tools** let agents read a pull request (comments, reviews,
   checks with their logs) and an issue, and reply on a pull request. They
   reach only the task's own repository, and every call is recorded.
+- **The coordinator drafts issues,** and the person files them: no agent
+  files an issue, or anything else on a tracker, on its own word.
 - **Agents run without the person's ways into a host:** `gh` and `glab`
   signed out, git's credential helpers reset (`credential.helper` empty, in
   git's environment), git's prompts off, and no SSH agent. Althar pushes
   for them. The environment is the boundary.
+- **Nor with the MCP servers the person set up for them** (ADR-016). Claude
+  Code loads only the servers it is given. Codex and OpenCode load every one
+  their config names, so each of the person's is switched off by name as the
+  agent starts: Codex's through `CODEX_CONFIG`, OpenCode's in the config it
+  takes from `OPENCODE_CONFIG_CONTENT`. The names are read from each file
+  the agent itself reads: its global and home config, and the project's,
+  from the repository's root down to the session's folder. Codex refuses a
+  server it can't reach, so each is switched off with its own command or
+  URL beside it.
 - **The rules refuse** `gh` and `glab` commands that change a host, with a
   reason that names Althar's tool; and, for every role, the ways to
   credentials a shell still has: the keychain's `security`, and git's helpers

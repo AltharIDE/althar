@@ -1,0 +1,260 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -80 120 112" width="240" height="224" role="img" aria-label="step"><style>/* Your crew: no frame, drawn on the page in isometric. A trunk joins the
+   coordinator to the lead, and forks from the lead to its steps. */
+
+.Crew-module__crew__foHo { --tree: rgba(20, 20, 28, 0.18); position: relative; padding: 4px 0 8px; text-align: center; }
+.Crew-module__tier__Q9WG { display: flex; justify-content: center; }
+
+/* ---- a member ---- */
+.Crew-module__member__Kx0K { display: flex; flex-direction: column; align-items: center; max-width: 230px; margin: 0 auto; }
+.Crew-module__scene__-zDE { display: block; width: var(--w); max-width: 100%; height: auto; aspect-ratio: 104 / 96; overflow: visible; }
+.Crew-module__member__Kx0K[data-size='lg'] .Crew-module__scene__-zDE { --w: 216px; }
+.Crew-module__member__Kx0K[data-size='md'] .Crew-module__scene__-zDE { --w: 196px; }
+.Crew-module__member__Kx0K[data-size='sm'] .Crew-module__scene__-zDE { --w: 184px; }
+.Crew-module__name__9fpi { margin-top: 6px; font-size: 15px; font-weight: 650; letter-spacing: -0.012em; color: #141417; }
+.Crew-module__member__Kx0K[data-size='lg'] .Crew-module__name__9fpi { font-size: 16.5px; }
+.Crew-module__member__Kx0K[data-size='sm'] .Crew-module__name__9fpi { font-size: 14px; }
+.Crew-module__member__Kx0K[data-id='own'] .Crew-module__name__9fpi { color: #6f6f77; }
+.Crew-module__soon__9esD { margin-left: 7px; font: 500 10.5px 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace; letter-spacing: 0.06em; text-transform: uppercase; color: #9a99a0; }
+.Crew-module__role__SKwG { margin-top: 3px; font-size: 13px; line-height: 1.45; color: #6f6f77; text-wrap: balance; }
+
+/* ---- the plinths ---- */
+.Crew-module__plinth__qXvX path,
+.Crew-module__plinthFaint__NhKk path { stroke: rgba(20, 20, 28, 0.11); stroke-width: 0.6; stroke-linejoin: round; }
+.Crew-module__plinthTop__-XRf { fill: #fcfbf8; }
+.Crew-module__plinthLeft__ptce { fill: #e9e5dc; }
+.Crew-module__plinthRight__aMvq { fill: #ddd8cd; }
+.Crew-module__plinthFaint__NhKk { opacity: 0.6; }
+.Crew-module__plinth__qXvX .Crew-module__shadow__HdNc,
+.Crew-module__plinthFaint__NhKk .Crew-module__shadow__HdNc { fill: rgba(30, 26, 18, 0.08); stroke: none; }
+
+/* ---- the solids ---- */
+.Crew-module__cobaltTop__Z9vW, .Crew-module__cobaltTopFill__UoWD { fill: #6672ff; }
+.Crew-module__cobaltLeft__njHW { fill: #2b3bff; }
+.Crew-module__cobaltRight__S3wC { fill: #1d2acc; }
+.Crew-module__cobaltFill__zuQO { fill: #2b3bff; }
+.Crew-module__cobaltLine__7e3i { stroke: #2b3bff; stroke-width: 1.1; stroke-linecap: round; }
+.Crew-module__bezel__8OB6 { fill: #1622b8; }
+.Crew-module__glassHi__XSD7 { stop-color: #5866ff; }
+.Crew-module__glassLo__m5pp { stop-color: #3343fa; }
+.Crew-module__glare__dmjP { fill: none; stroke: #fff; stroke-opacity: 0.5; stroke-width: 1.2; stroke-linecap: round; }
+.Crew-module__grille__mm60 { stroke: #1622b8; stroke-width: 1.4; stroke-linecap: round; }
+.Crew-module__power__BGrL { fill: #7ef0a8; }
+.Crew-module__dialRim__Clf9 { fill: #121da6; }
+.Crew-module__dialCap__J6RP { fill: #5a67ff; }
+.Crew-module__dialTick__Ff-C { stroke: #fff; stroke-width: 0.9; stroke-linecap: round; }
+.Crew-module__happy__Ubde { fill: none; stroke: #fff; stroke-width: 1.9; stroke-linecap: round; }
+.Crew-module__antenna__lAhP { stroke: #1d2acc; stroke-width: 1.6; stroke-linecap: round; }
+.Crew-module__shine__3e5F { fill: #fff; opacity: 0.6; }
+.Crew-module__signal__nNLv path { fill: none; stroke: #2b3bff; stroke-width: 1.3; stroke-linecap: round; }
+
+.Crew-module__inkHi__fnju { stop-color: #3a3a42; }
+.Crew-module__inkLo__lD5d { stop-color: #08080a; }
+.Crew-module__inkTop__EX5i { fill: #4a4a53; stroke: rgba(255, 255, 255, 0.1); stroke-width: 0.6; }
+.Crew-module__inkShine__1etz { stroke: #fff; stroke-opacity: 0.1; stroke-width: 2.4; stroke-linecap: round; }
+.Crew-module__inkFill__GfU4 { fill: #141417; }
+.Crew-module__pencilEnd__jeN2 { fill: #c9c4b8; }
+.Crew-module__pencilWood__KwRI { fill: #e8d3b0; }
+.Crew-module__eraser__i5q0 { fill: #f2a89b; }
+.Crew-module__band__4nPp { fill: #2b3bff; }
+.Crew-module__bandHi__Jv7b { fill: #6672ff; }
+.Crew-module__bandKnot__Qz9a { fill: #1d2acc; }
+
+.Crew-module__paperHi__CPjc { stop-color: #ffffff; }
+.Crew-module__paperLo__VcZx { stop-color: #ebe7de; }
+.Crew-module__paperTop__tWLJ { fill: #ffffff; }
+.Crew-module__paperRight__yBFR { fill: #e2ded4; }
+.Crew-module__outline__oY50 { stroke: #141417; stroke-width: 1.3; stroke-linejoin: round; }
+.Crew-module__outlineThin__Lnxk { stroke: #141417; stroke-width: 1; stroke-linejoin: round; }
+.Crew-module__coffee__7aay { fill: #6b4a2e; }
+.Crew-module__handle__phgJ { fill: none; stroke: #141417; stroke-width: 2.6; stroke-linecap: round; }
+.Crew-module__steam__BvmT path { fill: none; stroke: #9a99a0; stroke-width: 1; stroke-linecap: round; }
+
+/* ---- arms and shoes ---- */
+.Crew-module__limb__CCZ5 path { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.Crew-module__limbEdge__7fYy { stroke: #141417; }
+.Crew-module__limb__CCZ5[data-tone='paper'] .Crew-module__limbFill__1l06 { stroke: #fff; }
+.Crew-module__limb__CCZ5[data-tone='cobalt'] .Crew-module__limbEdge__7fYy { stroke: #1622b8; }
+.Crew-module__limb__CCZ5[data-tone='cobalt'] .Crew-module__limbFill__1l06 { stroke: #5260ff; }
+.Crew-module__limb__CCZ5[data-tone='ink'] .Crew-module__limbFill__1l06 { stroke: #1e1e23; }
+.Crew-module__shoeTop__egjn { fill: #3a3a42; }
+.Crew-module__shoeFront__Scgb { fill: #1e1e23; }
+.Crew-module__shoeSide__tyH3 { fill: #0b0b0d; }
+
+/* ---- faces ---- */
+.Crew-module__sclera__yRry { fill: #fff; }
+.Crew-module__pupil__7618 { fill: #141417; }
+.Crew-module__glint__847m { fill: #fff; }
+.Crew-module__smileWhite__xKZv { fill: none; stroke: #fff; stroke-width: 1.4; stroke-linecap: round; }
+.Crew-module__browWhite__UsOP { stroke: #fff; stroke-opacity: 0.9; stroke-width: 1.5; stroke-linecap: round; }
+.Crew-module__brow__fDNz { stroke: #141417; stroke-width: 1.25; stroke-linecap: round; fill: none; }
+.Crew-module__browThick__cuKk { stroke: #141417; stroke-width: 1.9; stroke-linecap: round; }
+.Crew-module__lid__LqNR { stroke: #050506; stroke-width: 2.6; stroke-linecap: round; }
+.Crew-module__led__vq6g { fill: #fff; }
+.Crew-module__screenBlush__EGGD { fill: #ff9ec4; opacity: 0.55; }
+.Crew-module__blush__vZ76 { fill: #f2a093; opacity: 0.5; }
+.Crew-module__tongue__cIgp { fill: #f2a093; }
+.Crew-module__bowKnot__mVL1 { fill: #1d2acc; }
+.Crew-module__lens__sZp7 { fill: #dfe2ff; stroke: #141417; stroke-width: 1.3; }
+.Crew-module__target__L4tP { fill: #fff; stroke: #141417; stroke-width: 1.1; }
+.Crew-module__bridge__w7TB { stroke: #141417; stroke-width: 1.3; }
+.Crew-module__gleam__OpJC { fill: #fff; opacity: 0.75; }
+.Crew-module__waveLines__s5-H { fill: none; stroke: #6f6f77; stroke-width: 1.1; stroke-linecap: round; }
+.Crew-module__antennaThin__5ffP { stroke: #141417; stroke-width: 1.3; stroke-linecap: round; }
+.Crew-module__radio__APMb { fill: #141417; stroke: #fff; stroke-width: 0.8; }
+.Crew-module__led2__nzSZ { fill: #2b3bff; }
+.Crew-module__grill__EpDS { stroke: #6f6f77; stroke-width: 0.7; stroke-linecap: round; }
+.Crew-module__cord__dD00 { fill: none; stroke: #141417; stroke-width: 0.8; stroke-linecap: round; stroke-linejoin: round; }
+.Crew-module__mouth__9EVg { stroke: #141417; stroke-width: 1.2; stroke-linecap: round; fill: none; }
+.Crew-module__vents__l9a0 { stroke: rgba(255, 255, 255, 0.28); stroke-width: 1.2; stroke-linecap: round; }
+.Crew-module__monocle__LAAn { fill: rgba(255, 255, 255, 0.16); stroke: #141417; stroke-width: 1.1; }
+.Crew-module__glass__QtlD { fill: none; stroke: #fff; stroke-width: 1; stroke-linecap: round; }
+.Crew-module__chain__LPCr { fill: none; stroke: #6f6f77; stroke-width: 0.8; stroke-dasharray: 1.2 1; stroke-linecap: round; }
+.Crew-module__keyhole__4oBU { fill: #fff; }
+.Crew-module__keyholeStem__PtyH { stroke: #fff; stroke-width: 1; stroke-linecap: round; }
+.Crew-module__shackleSm__vwiD { fill: none; stroke: #141417; stroke-width: 1.2; }
+
+/* ---- what they carry ---- */
+.Crew-module__sheet__lW5H { fill: #ffffff; stroke: #141417; stroke-width: 0.9; }
+.Crew-module__sheetLines__pEr6 { stroke: #6f6f77; stroke-width: 0.9; stroke-linecap: round; }
+.Crew-module__wire__LgGL { fill: none; stroke: #9a99a0; stroke-width: 1.2; stroke-dasharray: 2.4 2; stroke-linejoin: round; }
+/* the project's drawers, clock, ruler and folders; the task's ticks and sapling */
+.Crew-module__drawer__kB8L { fill: #f6f3ec; stroke: #141417; stroke-width: 0.9; }
+.Crew-module__label__MpNO { fill: #fff; stroke: #6f6f77; stroke-width: 0.5; }
+.Crew-module__folderTab__h1zj { stroke: #fff; stroke-opacity: 0.7; stroke-width: 1.2; stroke-linecap: round; }
+.Crew-module__clockFace__7XtC { fill: #fff; stroke: #141417; stroke-width: 1.1; }
+.Crew-module__clockMark__wW-r { stroke: #6f6f77; stroke-width: 0.8; stroke-linecap: round; }
+.Crew-module__clockHand__8xP4 { stroke: #141417; stroke-width: 1.3; stroke-linecap: round; }
+.Crew-module__clockHandThin__EPEr { stroke: #2b3bff; stroke-width: 0.9; stroke-linecap: round; }
+.Crew-module__ruler__7h4A { fill: #2b3bff; stroke: #1622b8; stroke-width: 0.6; }
+.Crew-module__rulerTick__A4z8 { stroke: #fff; stroke-width: 0.6; stroke-linecap: round; }
+.Crew-module__tickBox__Civd { fill: #fff; stroke: #141417; stroke-width: 0.8; }
+.Crew-module__tick__vww1 { fill: none; stroke: #2b3bff; stroke-width: 1.1; stroke-linecap: round; stroke-linejoin: round; }
+.Crew-module__stem__ZIDS { fill: none; stroke: #141417; stroke-width: 1.2; stroke-linecap: round; }
+.Crew-module__node__RQwh { fill: #fff; stroke: #141417; stroke-width: 1; }
+.Crew-module__leaf__0KpH { fill: #7fc79a; stroke: #141417; stroke-width: 0.8; stroke-linejoin: round; }
+.Crew-module__pot__0nfH { fill: #2b3bff; stroke: #1622b8; stroke-width: 0.8; stroke-linejoin: round; }
+.Crew-module__potRim__fn6o { fill: #6672ff; stroke: #1622b8; stroke-width: 0.8; }
+.Crew-module__soil__CeVt { fill: #4a3a2a; }
+.Crew-module__sketch__rwQM { fill: none; stroke: #9a99a0; stroke-width: 1.1; stroke-linecap: round; }
+.Crew-module__sketchDot__tG6Q { fill: #9a99a0; }
+.Crew-module__wireFar__eHkJ { fill: none; stroke: #9a99a0; stroke-width: 0.9; stroke-dasharray: 1 2.2; opacity: 0.6; }
+.Crew-module__plus__YSku { stroke: #6f6f77; stroke-width: 1.6; stroke-linecap: round; }
+.Crew-module__sparkles__u129 path { fill: #9a99a0; }
+
+/* ---- now and then: everyone blinks, and each has a habit ---- */
+.Crew-module__eyes__gWIk { transform-box: fill-box; transform-origin: center; animation: blink 6.5s infinite; }
+.Crew-module__member__Kx0K[data-id='lead'] .Crew-module__eyes__gWIk { animation-delay: 1.8s; }
+.Crew-module__member__Kx0K[data-id='reviewer'] .Crew-module__eyes__gWIk { animation-delay: 3.1s; }
+.Crew-module__member__Kx0K[data-id='tester'] .Crew-module__eyes__gWIk { animation-delay: 4.4s; }
+.Crew-module__signal__nNLv path { animation: signal 2.4s ease-out infinite; }
+.Crew-module__signal__nNLv path:nth-child(2) { animation-delay: 0.3s; }
+.Crew-module__ear-left__wBak { animation: ear-left 5s ease-in-out infinite; }
+.Crew-module__ear-right__t6Dp { animation: ear-right 5s ease-in-out infinite; }
+.Crew-module__ledEyes__NOXL { animation: led 3.6s infinite; }
+.Crew-module__happy__Ubde { opacity: 0; animation: happy 3.6s infinite; }
+.Crew-module__power__BGrL { animation: power 2.6s ease-in-out infinite; }
+.Crew-module__glance__TPuE { animation: glance 7s ease-in-out infinite; }
+.Crew-module__offer__vRoI { animation: offer 3.6s ease-in-out infinite; }
+.Crew-module__tails__LwgM { animation: flutter 1.4s ease-in-out infinite; }
+.Crew-module__wiggle__F0m4 { animation: wiggle 2.4s ease-in-out infinite; }
+.Crew-module__reading__WwD7 { animation: read 6s ease-in-out infinite; }
+.Crew-module__hmm__Yk-M { animation: hmm 6s ease-in-out infinite; }
+.Crew-module__twitch__uXe6 { transform-box: fill-box; transform-origin: center; animation: twitch 6s ease-in-out infinite; }
+.Crew-module__hop__T03r { animation: hop 3.2s infinite; }
+.Crew-module__hop-shadow__CiBj { transform-box: fill-box; transform-origin: center; animation: hop-shadow 3.2s infinite; }
+.Crew-module__wave__YEOU { animation: wave 3.2s ease-in-out infinite; }
+.Crew-module__gleam__OpJC { animation: gleam 5s ease-in-out infinite; }
+.Crew-module__wire__LgGL { animation: march 3s linear infinite; }
+.Crew-module__steam__BvmT path { animation: steam 2.8s ease-out infinite; }
+.Crew-module__steam__BvmT path:nth-child(2) { animation-delay: 1.4s; }
+.Crew-module__sparkles__u129 path { transform-box: fill-box; transform-origin: center; animation: twinkle 3s ease-in-out infinite; }
+.Crew-module__sparkles__u129 path:nth-child(2) { animation-delay: 1s; }
+.Crew-module__sparkles__u129 path:nth-child(3) { animation-delay: 2s; }
+.Crew-module__sway__k2Hx { animation: sway 4.2s ease-in-out infinite; }
+.Crew-module__sweep__h0-0 { animation: sweep 8s linear infinite; }
+@keyframes blink { 0%, 93%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.12); } }
+@keyframes signal { 0%, 100% { opacity: 0.15; } 30% { opacity: 1; } }
+@keyframes ear-left { 0%, 70%, 86%, 100% { transform: rotate(0deg); } 76% { transform: rotate(-9deg); } 81% { transform: rotate(3deg); } }
+@keyframes ear-right { 0%, 72%, 88%, 100% { transform: rotate(0deg); } 78% { transform: rotate(9deg); } 83% { transform: rotate(-3deg); } }
+@keyframes led { 0%, 38%, 66%, 100% { opacity: 1; } 42%, 62% { opacity: 0; } }
+@keyframes happy { 0%, 38%, 66%, 100% { opacity: 0; } 42%, 62% { opacity: 1; } }
+@keyframes power { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes glance { 0%, 30%, 100% { transform: translate(0, 0); } 36%, 62% { transform: translate(2px, 0.4px); } 68%, 90% { transform: translate(-0.6px, 0); } }
+@keyframes offer { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-4deg); } }
+@keyframes flutter { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(7deg); } }
+@keyframes wiggle { 0%, 100% { transform: rotate(-5deg); } 25% { transform: rotate(4deg); } 50% { transform: rotate(-3deg); } 75% { transform: rotate(6deg); } }
+@keyframes read { 0%, 100% { transform: translateX(-1px); } 45%, 55% { transform: translateX(1px); } }
+@keyframes hmm { 0%, 60%, 80%, 100% { transform: translateY(0); } 66%, 74% { transform: translateY(-1.6px); } }
+@keyframes twitch { 0%, 64%, 72%, 100% { transform: scaleX(1); } 67% { transform: scaleX(1.12) translateY(-0.4px); } 69% { transform: scaleX(0.96); } }
+@keyframes hop { 0%, 62%, 100% { transform: translateY(0); } 70% { transform: translateY(-6px); } 78% { transform: translateY(0); } 82% { transform: translateY(-1.6px); } 86% { transform: translateY(0); } }
+@keyframes hop-shadow { 0%, 62%, 78%, 86%, 100% { transform: scale(1); opacity: 1; } 70% { transform: scale(0.78); opacity: 0.55; } }
+@keyframes wave { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(10deg); } }
+@keyframes gleam { 0%, 55% { transform: translateX(-4px); } 80%, 100% { transform: translateX(26px); } }
+@keyframes steam { 0% { opacity: 0; transform: translateY(1.5px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translateY(-2.5px); } }
+@keyframes march { to { stroke-dashoffset: -8.8; } }
+@keyframes sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(5deg); } }
+@keyframes sweep { to { transform: rotate(360deg); } }
+@keyframes twinkle { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.6); opacity: 0.4; } }
+
+/* ---- the lines between them ---- */
+.Crew-module__link__5Dgg { position: relative; height: 40px; }
+.Crew-module__link__5Dgg::before { content: ''; position: absolute; left: 50%; top: 4px; bottom: 6px; border-left: 1.5px solid var(--tree); }
+.Crew-module__link__5Dgg span {
+  position: absolute;
+  left: calc(50% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  font: 500 11px 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  color: #6f6f77;
+  white-space: nowrap;
+}
+.Crew-module__link__5Dgg[data-fork] { height: 34px; }
+.Crew-module__link__5Dgg[data-fork]::before { bottom: 0; }
+
+.Crew-module__steps__is2y {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0 12px;
+  margin: 0;
+  padding: 18px 0 0;
+  list-style: none;
+}
+.Crew-module__steps__is2y::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: calc((100% - 36px) / 8);
+  right: calc((100% - 36px) / 8);
+  border-top: 1.5px solid var(--tree);
+}
+.Crew-module__steps__is2y li { position: relative; }
+.Crew-module__steps__is2y li::before { content: ''; position: absolute; left: 50%; top: -18px; height: 12px; border-left: 1.5px solid var(--tree); }
+.Crew-module__steps__is2y li:last-child::before { border-left-style: dashed; }
+
+/* ---- any role, any agent ---- */
+.Crew-module__anyAgent__2fXw {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 30px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(20, 20, 28, 0.07);
+  font-size: 13px;
+  color: #6f6f77;
+}
+.Crew-module__marks__JDKy { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; }
+.Crew-module__mark__Y-rt { display: inline-flex; align-items: center; gap: 5px; color: #45454c; }
+
+@media (max-width: 560px) {
+  .Crew-module__steps__is2y { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 22px; }
+  .Crew-module__steps__is2y::before { left: 25%; right: 25%; }
+  .Crew-module__steps__is2y li:nth-child(n + 3)::before { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .Crew-module__eyes__gWIk, .Crew-module__signal__nNLv path, .Crew-module__ear-left__wBak, .Crew-module__ear-right__t6Dp, .Crew-module__ledEyes__NOXL, .Crew-module__happy__Ubde, .Crew-module__power__BGrL, .Crew-module__glance__TPuE, .Crew-module__offer__vRoI, .Crew-module__tails__LwgM, .Crew-module__wiggle__F0m4, .Crew-module__reading__WwD7, .Crew-module__hmm__Yk-M, .Crew-module__twitch__uXe6, .Crew-module__hop__T03r, .Crew-module__hop-shadow__CiBj, .Crew-module__wave__YEOU, .Crew-module__wire__LgGL, .Crew-module__steam__BvmT path, .Crew-module__sparkles__u129 path, .Crew-module__sway__k2Hx, .Crew-module__sweep__h0-0 { animation: none; }
+  .Crew-module__gleam__OpJC { animation: none; transform: translateX(6px); }
+}
+</style><defs><radialGradient id="pool" cx="0.5" cy="0.62" r="0.5"><stop offset="0" stop-color="#f4f2ec"/><stop offset="0.72" stop-color="#f4f2ec" stop-opacity="0.92"/><stop offset="1" stop-color="#f4f2ec" stop-opacity="0"/></radialGradient></defs><ellipse cx="0" cy="-26" rx="58" ry="56" fill="url(#pool)"/><defs><linearGradient id="step-paper" x1="0" y1="0" x2="1" y2="0.6"><stop offset="0" class="Crew-module__paperHi__CPjc"></stop><stop offset="1" class="Crew-module__paperLo__VcZx"></stop></linearGradient></defs><g class="Crew-module__plinth__qXvX"><path d="M-41.57 -4.00 L0 20.00 L0 24.00 L-41.57 0 Z" class="Crew-module__plinthLeft__ptce"></path><path d="M41.57 -4.00 L0 20.00 L0 24.00 L41.57 0 Z" class="Crew-module__plinthRight__aMvq"></path><path d="M0 -28.00 L41.57 -4.00 L0 20.00 L-41.57 -4.00 Z" class="Crew-module__plinthTop__-XRf"></path><g><ellipse cx="2.5" cy="-2" rx="17" ry="10.64" class="Crew-module__shadow__HdNc"></ellipse></g></g><g><g><ellipse cx="-5.8" cy="3.6" rx="5" ry="3.1" class="Crew-module__shoeSide__tyH3"></ellipse><ellipse cx="-5.8" cy="2.2" rx="5" ry="3.1" class="Crew-module__shoeTop__egjn"></ellipse></g><g><ellipse cx="5.8" cy="3.6" rx="5" ry="3.1" class="Crew-module__shoeSide__tyH3"></ellipse><ellipse cx="5.8" cy="2.2" rx="5" ry="3.1" class="Crew-module__shoeTop__egjn"></ellipse></g></g><path d="M-17.15 -38.00 L-17.15 -8.00 A17.15 9.90 0 0 0 17.15 -8.00 L17.15 -38.00 A17.15 9.90 0 0 1 -17.15 -38.00 Z" fill="url(#step-paper)" class="Crew-module__outline__oY50"></path><ellipse cx="0" cy="-38" rx="17.146428199482244" ry="9.899494936611665" class="Crew-module__paperTop__tWLJ Crew-module__outline__oY50"></ellipse><path d="M0 -3.6 L-5.4 -6.8 Q-6.3 -3.6 -5.4 -0.4 Z M0 -3.6 L5.4 -6.8 Q6.3 -3.6 5.4 -0.4 Z" class="Crew-module__cobaltFill__zuQO"></path><rect x="-1.5" y="-5.3" width="3" height="3.4" rx="1" class="Crew-module__bowKnot__mVL1"></rect><path d="M-9.4 -21.6 L-2.4 -22.5" class="Crew-module__brow__fDNz"></path><g class="Crew-module__hmm__Yk-M"><path d="M1.8 -24.4 Q5.6 -27.4 9.6 -24.8" class="Crew-module__brow__fDNz"></path></g><g class="Crew-module__reading__WwD7"><g class="Crew-module__eyes__gWIk"><path d="M-7.9 -18 A2.1 2.5 0 0 0 -3.7 -18 Z" class="Crew-module__pupil__7618"></path><circle cx="5.2" cy="-18" r="2.4" class="Crew-module__pupil__7618"></circle><circle cx="6.1" cy="-19" r="0.85" class="Crew-module__glint__847m"></circle></g><path d="M-8.7 -18.2 H-2.9" class="Crew-module__brow__fDNz"></path><circle cx="5.6" cy="-18" r="5.1" class="Crew-module__monocle__LAAn"></circle><path d="M1.7 -20.6 A5.1 5.1 0 0 1 6.9 -23" class="Crew-module__glass__QtlD"></path></g><path d="M10.6 -16.4 Q13.4 -9.4 1.8 -4" class="Crew-module__chain__LPCr"></path><g class="Crew-module__twitch__uXe6"><path d="M0.4 -12.8 C-1.6 -14.4 -5.6 -14.3 -7.6 -12 C-8.5 -11 -9.8 -11.1 -10.3 -12.5 C-10.6 -10 -8.4 -8.7 -6 -9.4 C-3.8 -10 -1.6 -10.9 0.4 -10.3 Z" class="Crew-module__inkFill__GfU4"></path><path d="M0.4 -12.8 C-1.6 -14.4 -5.6 -14.3 -7.6 -12 C-8.5 -11 -9.8 -11.1 -10.3 -12.5 C-10.6 -10 -8.4 -8.7 -6 -9.4 C-3.8 -10 -1.6 -10.9 0.4 -10.3 Z" class="Crew-module__inkFill__GfU4" transform="scale(-1 1)"></path></g><g transform="matrix(0.87 -0.5 0 1 -30.2 -27)"><rect x="0" y="0" width="12" height="15" rx="1.5" class="Crew-module__sheet__lW5H"></rect><path d="M2.5 3.5 H9.5 M2.5 6.5 H9.5 M2.5 9.5 H7.5" class="Crew-module__sheetLines__pEr6"></path><path d="M2.5 6.5 H5.5" class="Crew-module__cobaltLine__7e3i"></path></g><g class="Crew-module__limb__CCZ5" data-tone="paper"><path d="M-15.6 -14 Q-28 -8.5 -25 -17" class="Crew-module__limbEdge__7fYy" stroke-width="6.4"></path><path d="M-15.6 -14 Q-28 -8.5 -25 -17" class="Crew-module__limbFill__1l06" stroke-width="4"></path></g></svg>

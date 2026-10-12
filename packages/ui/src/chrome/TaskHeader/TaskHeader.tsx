@@ -1,9 +1,8 @@
-import { Fragment, useId, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 
-import { Model, type ModelInfo } from '../../foundations/Model/Model'
-import { TaskStatus } from '../../foundations/vocabulary'
+import type { TaskStatus } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
-import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
+import type { ModelInfo } from '../../primitives/Model/Model'
 import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segmented'
 import { StepTrack, type TrackItem } from '../../primitives/StepTrack/StepTrack'
@@ -12,29 +11,26 @@ import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './TaskHeader.module.css'
 
 /*
- * The head of a task that has the window: its number and title, where it
- * stands, a line of facts (its kind, lead, branch, how long, what it cost
- * at API prices), its steps as a track, and the switch between its faces,
- * the conversation and what it made. What else it can open, like its graph
- * or its code, sits at the right, the consumer's buttons.
+ * The head of a task that has the window, as it sits in the window's bar,
+ * after the way back and the task's title (BackCrumb): where it stands, its
+ * steps as a small track, the switch between its faces, the conversation and
+ * what it made, and what else it opens, the consumer's buttons. Who leads
+ * it, its branch, how long it has run and what it cost are on hover over
+ * where it stands, and said to a screen reader with it.
  */
 
 export interface TaskHeaderText {
   faces: string
   noBranch: string
-  /** What the cost is, beside it for a screen reader and on hover. */
-  costNote: string
 }
 
 export const taskHeaderText: TaskHeaderText = {
   faces: 'Face',
   noBranch: 'no branch',
-  costNote: 'estimated at API prices',
 }
 
 export interface TaskHeaderProps<F extends string> {
-  /** Its number, when it has one. */
-  task?: string
+  /** Which task, for a screen reader: the bar shows it beside the way back. */
   title: string
   status: TaskStatus
   /** Where it stands, in words: Security review, Ready for you. */
@@ -50,22 +46,17 @@ export interface TaskHeaderProps<F extends string> {
   /** What it cost at API prices, subscription or not: $4.10. */
   cost?: string
   steps?: readonly TrackItem[]
-  /** Its faces, with their keys. With one or none, no switch. */
+  /** Its faces, with their keys: always both, so the switch is always where it is. */
   faces?: readonly SegmentedOption<F>[]
   face?: F
   onFace?: (face: F) => void
-  /** Said where the switch would be, when there is only one face. */
-  facesNote?: string
-  /** What else it opens, at the right: ChromeButtons. */
+  /** What else it opens, at the end: ChromeButtons. */
   actions?: ReactNode
-  /** The title's rank in the page's outline. The task has the window, so by default it is the page's title. */
-  headingLevel?: HeadingLevel
   className?: string
   text?: Partial<TaskHeaderText>
 }
 
 export function TaskHeader<F extends string>({
-  task,
   title,
   status,
   state,
@@ -79,59 +70,26 @@ export function TaskHeader<F extends string>({
   faces,
   face,
   onFace,
-  facesNote,
   actions,
-  headingLevel = 1,
   className,
   text,
 }: TaskHeaderProps<F>) {
   const t = { ...taskHeaderText, ...text }
-  const titleId = useId()
-  const facts: ReactNode[] = [
-    kind,
-    <Model key="lead" model={lead} short />,
-    branch ?? t.noBranch,
-    since,
-    elapsed,
-    cost && (
-      <Tooltip key="cost" label={t.costNote}>
-        <span className={s.cost}>
-          {cost}
-          <VisuallyHidden>, {t.costNote}</VisuallyHidden>
-        </span>
-      </Tooltip>
-    ),
-  ].filter(Boolean)
-  const switchable = faces && faces.length > 1 && face !== undefined && onFace
+  const said = [kind, lead.name, branch ?? t.noBranch, since, elapsed, cost].filter(Boolean).join(' · ')
   return (
-    <header className={cx(s.header, s[status], className)} aria-labelledby={titleId}>
-      <div className={s.titleLine}>
-        {task && <span className={s.task}>{task}</span>}
-        <Heading level={headingLevel} id={titleId} className={s.title}>
-          {title}
-        </Heading>
+    <header className={cx(s.header, s[status], className)} aria-label={title}>
+      <Tooltip label={said}>
         <span className={s.state}>
           <TaskGlyph status={status} />
-          {state}
+          <span>{state}</span>
+          <VisuallyHidden>, {said}</VisuallyHidden>
         </span>
-      </div>
-      <p className={s.facts}>
-        {facts.map((f, i) => (
-          <Fragment key={i}>
-            {i > 0 && <i className={s.dot} aria-hidden="true" />}
-            {f}
-          </Fragment>
-        ))}
-      </p>
+      </Tooltip>
       {steps && steps.length > 0 && <StepTrack steps={steps} status={status} className={s.track} />}
-      <div className={s.row}>
-        {switchable ? (
-          <Segmented label={t.faces} options={[...faces]} value={face} onChange={onFace} className={s.faces} />
-        ) : (
-          facesNote && <p className={s.note}>{facesNote}</p>
-        )}
-        {actions && <div className={s.actions}>{actions}</div>}
-      </div>
+      {faces && faces.length > 1 && face !== undefined && onFace && (
+        <Segmented label={t.faces} options={[...faces]} value={face} onChange={onFace} className={s.faces} />
+      )}
+      {actions && <div className={s.actions}>{actions}</div>}
     </header>
   )
 }

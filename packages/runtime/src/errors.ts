@@ -24,7 +24,7 @@ export class RepositoriesNeeded extends Schema.TaggedError<RepositoriesNeeded>()
  * that isn't one, or a pull request target for a repository that isn't a fork.
  */
 export class ProjectRefused extends Schema.TaggedError<ProjectRefused>()('ProjectRefused', {
-  reason: Schema.Literals(['no_name', 'last_repository', 'no_role', 'not_a_fork']),
+  reason: Schema.Literals(['no_name', 'last_repository', 'no_role', 'not_a_fork', 'id_taken']),
 }) {}
 
 /** Something the caller named does not exist. */
@@ -76,6 +76,37 @@ export class AttentionClosed extends Schema.TaggedError<AttentionClosed>()('Atte
   attentionId: Schema.String,
 }) {}
 
+/** An answer to a question that leaves one of its questions unanswered: no option picked and no words. */
+export class QuestionUnanswered extends Schema.TaggedError<QuestionUnanswered>()('QuestionUnanswered', {
+  attentionId: Schema.String,
+  field: Schema.String,
+}) {}
+
+/** An allow rule for words the project's rules ask about or never allow, which come first (ADR-018): it would replace them, or do nothing. */
+export class RuleOnAnotherList extends Schema.TaggedError<RuleOnAnotherList>()('RuleOnAnotherList', {
+  pattern: Schema.String,
+  exact: Schema.Boolean,
+  list: Schema.Literals(['ask', 'never']),
+}) {}
+
+/** A change made against rules that have moved on since it was read: another change came first, and would be lost. */
+export class RulesChanged extends Schema.TaggedError<RulesChanged>()('RulesChanged', {
+  projectId: Schema.String,
+  revision: Schema.Number,
+  expected: Schema.Number,
+}) {}
+
+/** An "always" answer by a scope the request wasn't offered: no rule of it would hold (ADR-018). */
+export class AlwaysNotOffered extends Schema.TaggedError<AlwaysNotOffered>()('AlwaysNotOffered', {
+  attentionId: Schema.String,
+  scope: Schema.String,
+}) {}
+
+/** Waiting for a reset, for a call that has none to wait for: only a step a usage limit stopped, where its reset is known, can wait. */
+export class NothingToWaitFor extends Schema.TaggedError<NothingToWaitFor>()('NothingToWaitFor', {
+  attentionId: Schema.String,
+}) {}
+
 /** The message went to the agent before it could be taken back, or was taken back already. */
 export class AlreadyDelivered extends Schema.TaggedError<AlreadyDelivered>()('AlreadyDelivered', {
   itemId: Schema.String,
@@ -108,6 +139,20 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
   detail: Schema.String,
 }) {}
 
+/**
+ * A default branch merged here that its remote won't take: it has commits
+ * this one doesn't (`behind`), git couldn't sign in there (`denied`), or the
+ * remote itself said no, such as a protected branch (`refused`, with what it said).
+ */
+export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused', {
+  taskId: Schema.String,
+  why: Schema.Literals(['behind', 'denied', 'refused']),
+  /** The branch it follows: origin/main. */
+  remote: Schema.String,
+  /** What the remote said, for one it refused. */
+  said: Schema.optional(Schema.String),
+}) {}
+
 /** A link given for an issue points at something else on its host: `what` is it, in the host's words ("pull request", "merge request"). */
 export class NotAnIssue extends Schema.TaggedError<NotAnIssue>()('NotAnIssue', {
   link: Schema.String,
@@ -117,4 +162,24 @@ export class NotAnIssue extends Schema.TaggedError<NotAnIssue>()('NotAnIssue', {
 /** The pull request moved on since the person looked: accepting it would merge what they didn't see. */
 export class ChangedSinceSeen extends Schema.TaggedError<ChangedSinceSeen>()('ChangedSinceSeen', {
   taskId: Schema.String,
+}) {}
+
+/**
+ * A document the window asked for that Althar won't read: a file that isn't
+ * markdown, one outside the task's worktrees, or one too large to show.
+ */
+export class DocumentRefused extends Schema.TaggedError<DocumentRefused>()('DocumentRefused', {
+  path: Schema.String,
+  reason: Schema.Literals(['not_markdown', 'outside', 'too_large']),
+}) {}
+
+/**
+ * A task that can't take that turn in its course: a merged task is done for
+ * good, so it is never abandoned or reopened; one whose worktree went with
+ * its branch can't be reopened on it; and an abandoned one has no agent on
+ * it until it is reopened.
+ */
+export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
+  taskId: Schema.String,
+  why: Schema.Literals(['merged', 'branch_gone', 'abandoned']),
 }) {}

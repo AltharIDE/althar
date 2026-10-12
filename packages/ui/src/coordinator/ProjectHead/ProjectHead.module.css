@@ -9,6 +9,9 @@
 }
 
 .measure {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   width: 100%;
   max-width: var(--measure);
   margin: 0 auto;
@@ -17,19 +20,6 @@
 .side .measure {
   max-width: none;
   padding: 0 20px;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.words {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
 }
 
 .title {
@@ -45,13 +35,6 @@
 }
 .side .title {
   font-size: 13.5px;
-}
-
-/* The prototype's menu button: full size, and darker under the pointer than the page it sits on. */
-.row .menu:hover:not(:disabled),
-.row .menu[aria-expanded='true'] {
-  background: var(--n-4);
-  color: var(--t-1);
 }
 
 /* Quiet, as the prototype has it; what it says is never the only way to know it. */

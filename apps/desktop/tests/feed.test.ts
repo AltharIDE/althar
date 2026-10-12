@@ -81,6 +81,15 @@ describe('the window’s watch', () => {
     expect(client.listConnections).toHaveBeenCalledTimes(2)
   })
 
+  it('reads the connections again when a project changes, which says where its code is', async () => {
+    const { client, cache, emit, read } = opened()
+    await cache.fetchQuery(read.connections())
+    // Repositories added or left out, a rename, a removal: each is a project's change.
+    emit(changed('project', 'p1', null, 'p1'))
+    await settle()
+    expect(client.listConnections).toHaveBeenCalledTimes(2)
+  })
+
   it('reads the home again for a permission the rules answered only while it shows; off screen, on its next visit', async () => {
     const { client, cache, emit, read } = opened()
     await cache.fetchQuery(read.home())
@@ -134,7 +143,7 @@ describe('the window’s watch', () => {
     expect(marks(changed('thread_item', 'i1', 'th9', 'p1'))).toBe(false)
   })
 
-  it('reads a project’s repositories again only while they show, and marks its threads when it is renamed', async () => {
+  it('reads a project’s repositories again only while they show, as a connection changes too, and marks its threads when it is renamed', async () => {
     const { client, cache, emit, read } = opened()
     // A task on screen reads its project's new name at once.
     const onScreen = new QueryObserver(cache, read.thread('th1'))
@@ -160,12 +169,31 @@ describe('the window’s watch', () => {
     await settle()
     expect(cache.getQueryState(keys.thread('th1'))?.isInvalidated).toBe(false)
     expect(client.getRepositories).toHaveBeenCalledTimes(2)
+    // A code host connected, which no project names, says where any project's work goes.
+    emit(changed('connection', 'c1', null, null))
+    await settle()
+    expect(client.getRepositories).toHaveBeenCalledTimes(3)
     stop()
     // Off screen, a task made in it marks them for the next visit.
     emit(changed('task', 't1', 'th1', 'p1'))
     await settle()
-    expect(client.getRepositories).toHaveBeenCalledTimes(2)
+    expect(client.getRepositories).toHaveBeenCalledTimes(3)
     expect(cache.getQueryState(keys.repositories('p1'))?.isInvalidated).toBe(true)
+  })
+
+  it('reads a project’s rules again when they change, as an answer kept as a rule changes them, only while they show', async () => {
+    const { client, cache, emit, read } = opened()
+    await cache.fetchQuery(read.rules('p1'))
+    const showing = new QueryObserver(cache, read.rules('p1'))
+    const stop = showing.subscribe(() => undefined)
+    emit(changed('policy', 'pol1', null, 'p1'))
+    await settle()
+    expect(client.getProjectRules).toHaveBeenCalledTimes(2)
+    stop()
+    emit(changed('policy', 'pol2', null, 'p1'))
+    await settle()
+    expect(client.getProjectRules).toHaveBeenCalledTimes(2)
+    expect(cache.getQueryState(keys.rules('p1'))?.isInvalidated).toBe(true)
   })
 
   it('reads once more what was being read when a change touched it', async () => {
@@ -197,6 +225,21 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.thread('th1'))?.isInvalidated).toBe(true)
   })
 
+  it('tells whoever asks each time the watch listens again', () => {
+    const { feed, rewatch } = opened()
+    const again = vi.fn()
+    const unlisten = feed.rewatched(again)
+    rewatch()
+    expect(again).toHaveBeenCalledOnce()
+    unlisten()
+    rewatch()
+    expect(again).toHaveBeenCalledOnce()
+    feed.rewatched(again)
+    feed.stop()
+    rewatch()
+    expect(again).toHaveBeenCalledOnce()
+  })
+
   it('stops watching when told to', () => {
     const { feed, listeners } = opened()
     expect(listeners.size).toBe(1)
@@ -224,11 +267,15 @@ describe('the window’s reads', () => {
   it('starts over from the new page when an earlier one holds something that may have moved since', () => {
     const at = (item: ThreadSnapshot['items'][number], sequence: number) => ({ ...item, id: `i${sequence}`, sequence })
     const with_ = (first: ThreadSnapshot['items'][number]) => snapshot({ items: [at(first, 1), at(items.says('#2'), 2)], earlier: true })
-    // A tool call still running, a message still queued: the earlier page goes, to be read again.
-    for (const unsettled of [items.tool({ status: 'in_progress' }), items.you('Wait', { state: 'queued', interrupting: false })])
+    // A tool call still running, a message still queued, an issue draft not yet filed: the earlier page goes, to be read again.
+    for (const unsettled of [
+      items.tool({ status: 'in_progress' }),
+      items.you('Wait', { state: 'queued', interrupting: false }),
+      items.draft({ state: 'failed', error: 'No.' }),
+    ])
       expect(sequences(continued(with_(unsettled), page([2, 3], true)))).toEqual([2, 3])
-    // Done and delivered: kept.
-    for (const done of [items.tool({ status: 'completed' }), items.you('Hi')])
+    // Done and delivered, filed or discarded: kept.
+    for (const done of [items.tool({ status: 'completed' }), items.you('Hi'), items.draft({ state: 'discarded' })])
       expect(sequences(continued(with_(done), page([2, 3], false)))).toEqual([1, 2, 3])
     // What the new page holds is its own, settled or not.
     expect(

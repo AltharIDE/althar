@@ -71,6 +71,34 @@ span.you {
   font-size: 12px;
   color: var(--t-3);
 }
+/* On its branch: where its remote has it, pushing it, and its pull request's page once it is there. */
+.away {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 26px;
+  font-size: 12px;
+}
+.where {
+  color: var(--t-2);
+}
+.there {
+  color: var(--t-1);
+}
+.newPr {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--signal);
+  text-decoration: none;
+}
+.newPr:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .by {
   display: flex;
   flex-wrap: wrap;

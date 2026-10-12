@@ -32,6 +32,8 @@ export interface MenuProps {
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
+  /** Whether closing gives focus back to the trigger: not where what was chosen took it on, such as a field to type in. */
+  returnFocus?: () => boolean
   className?: string
 }
 
@@ -46,6 +48,7 @@ export function Menu({
   open,
   defaultOpen,
   onOpenChange,
+  returnFocus,
   className,
 }: MenuProps) {
   const noteId = useId()
@@ -63,6 +66,9 @@ export function Menu({
           sideOffset={6}
           collisionPadding={8}
           loop
+          onCloseAutoFocus={(event) => {
+            if (returnFocus !== undefined && !returnFocus()) event.preventDefault()
+          }}
           className={cx('ch-root', s.menu, className)}
           style={width ? { width } : undefined}
         >
@@ -209,6 +215,46 @@ export function MenuRadioItem({ value, lead, children, hint, description, kbd, d
         </M.ItemIndicator>
       </span>
     </M.RadioItem>
+  )
+}
+
+export interface MenuCheckboxItemProps extends ItemBase {
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+}
+
+/** A choice that is on or off by itself, among others that may be on too. It carries a check while on. */
+export function MenuCheckboxItem({
+  checked,
+  onCheckedChange,
+  children,
+  hint,
+  description,
+  kbd,
+  disabled,
+  keepOpen,
+}: MenuCheckboxItemProps) {
+  const { ids, aria } = useItemIds(hint, description)
+  return (
+    <M.CheckboxItem
+      checked={checked}
+      onCheckedChange={onCheckedChange}
+      className={cx(s.item, description != null && s.tall)}
+      disabled={disabled}
+      {...aria}
+      onSelect={(e) => {
+        if (keepOpen) e.preventDefault()
+      }}
+    >
+      <Parts hint={hint} description={description} kbd={kbd} ids={ids}>
+        {children}
+      </Parts>
+      <span className={s.check}>
+        <M.ItemIndicator>
+          <Icon name="check" size={12} />
+        </M.ItemIndicator>
+      </span>
+    </M.CheckboxItem>
   )
 }
 

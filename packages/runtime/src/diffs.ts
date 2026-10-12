@@ -48,8 +48,15 @@ export interface FileDiff {
   readonly truncated: boolean
 }
 
-/** How many lines a file's diff shows before it is cut short, how much of a new file is read, and how many new files are read to count their lines. */
+/**
+ * How many lines a file's diff shows before it is cut short, how much of a
+ * new file is read, and how many new files are read to count their lines.
+ * A diff holds its whole file, the unchanged lines too, so the window can
+ * fold them away and open them in place, up to WHOLE_LINES; a longer one is
+ * read in hunks instead, so its changes are never lost behind its context.
+ */
 const LINES_SHOWN = 4_000
+const WHOLE_LINES = 20_000
 const READ_AT_MOST = 2 * 1024 * 1024
 const NEW_FILES_COUNTED = 50
 
@@ -296,18 +303,26 @@ export const fileDiff = (worktree: string, base: string, path: string): Effect.E
       return { file, ...parseDiff(`@@ -0,0 +1,${all.length} @@\n${all.map((line) => `+${line}`).join('\n')}`) }
     }
     if (known.binary) return { file: known, lines: [], truncated: false }
-    const text = yield* gitExactly(
-      worktree,
-      '--literal-pathspecs',
-      'diff',
-      '--no-color',
-      '--no-ext-diff',
-      '--no-textconv',
-      '-U3',
-      '-M',
-      base,
-      '--',
-      ...(known.from === null ? [path] : [known.from, path]),
+    const diff = (context: string) =>
+      gitExactly(
+        worktree,
+        '--literal-pathspecs',
+        'diff',
+        '--no-color',
+        '--no-ext-diff',
+        '--no-textconv',
+        context,
+        '-M',
+        base,
+        '--',
+        ...(known.from === null ? [path] : [known.from, path]),
+      )
+    // The whole file, unchanged lines and all: the window folds them, and opens them without asking again.
+    const whole = yield* diff('-U1000000').pipe(
+      Effect.map((text) => parseDiff(text, WHOLE_LINES)),
+      Effect.orElseSucceed(() => null),
     )
-    return { file: known, ...parseDiff(text) }
+    if (whole !== null && !whole.truncated) return { file: known, ...whole }
+    // Too long to read whole: its hunks, as git gives them, so every change is there.
+    return { file: known, ...parseDiff(yield* diff('-U3')) }
   })

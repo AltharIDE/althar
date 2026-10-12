@@ -2,15 +2,18 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { _electron as electron, expect, test } from '@playwright/test'
+import { _electron as electron, expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
+import { mainWindow, say } from './support'
 
 /*
  * The app with a real agent, as a process started from the runtime's utility
  * process: the path the fake agent, which runs in the runtime's own process,
- * never takes. It uses the agent's own sign-in on this machine, so it runs
- * only when asked: ALTHAR_REAL_AGENT=claude-code (or codex).
+ * never takes. The agent coordinates, told in plain words what to plan, and
+ * leads the task it planned. It uses the agent's own sign-in on this
+ * machine, so it runs only when asked: ALTHAR_REAL_AGENT=claude-code (or
+ * codex).
  */
 
 const agent = process.env.ALTHAR_REAL_AGENT
@@ -18,36 +21,48 @@ const names: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Co
 
 test.skip(agent === undefined, 'Set ALTHAR_REAL_AGENT to run it against a real agent')
 
-test('a real agent leads a task and answers', async () => {
-  test.setTimeout(180_000)
+/** The agent's first model, from every model, by agent, in the picker whose button `picker` names. */
+const firstModelOf = async (page: Page, picker: RegExp, name: string) => {
+  await page.getByRole('button', { name: picker }).click()
+  await page.getByRole('button', { name: /All models/ }).click()
+  const models = page.getByRole('dialog')
+  await models.getByRole('radio', { name: new RegExp(`^${name}`) }).click()
+  await models.getByRole('button', { name: /^Use / }).first().click()
+}
+
+test('a real agent plans a task, leads it and answers', async () => {
+  test.setTimeout(300_000)
   const name = names[agent ?? ''] ?? agent ?? ''
   const home = mkdtempSync(join(tmpdir(), 'althar-real-'))
   const repo = repository(home)
   const { ALTHAR_FAKE_AGENTS: _, ...env } = process.env
   const app = await electron.launch({
     args: [join(import.meta.dirname, '..')],
-    env: { ...env, ALTHAR_PROFILE: join(home, 'profile'), ALTHAR_WORKTREES: join(home, 'worktrees') },
+    env: { ...env, ALTHAR_PROFILE: join(home, 'profile'), ALTHAR_WORKTREES: join(home, 'worktrees'), ALTHAR_CODE_HOME: home },
   })
   try {
     await app.evaluate(({ dialog }, chosen) => {
       dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [chosen] })) as typeof dialog.showOpenDialog
     }, repo)
-    const page = await app.firstWindow()
-    await page.getByRole('button', { name: /Open a folder/ }).click()
-    await page.getByRole('button', { name: 'New task' }).click()
-    await page.getByLabel('What should change').fill('Say hello')
-    await page
-      .getByLabel('Anything the lead should know')
-      .fill('Reply with the single word "ready" and nothing else. Do not run any tools.')
-    // The agent's first model, from every model, by agent.
-    await page.getByRole('button', { name: /^Lead:/ }).click()
-    await page.getByRole('button', { name: /All models/ }).click()
-    const models = page.getByRole('dialog')
-    await models.getByRole('radio', { name: new RegExp(`^${name}`) }).click()
-    await models.getByRole('button', { name: /^Use / }).first().click()
-    await page.getByRole('button', { name: /^Review:/ }).click()
-    await page.getByRole('button', { name: 'No review' }).click()
-    await page.getByRole('button', { name: 'Start the task' }).click()
+    const page = await mainWindow(app)
+    await page.getByRole('button', { name: /Add a folder/ }).click()
+    await page.getByRole('button', { name: /Make the project/ }).click()
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+
+    // The coordinator on the agent, from the composer, told in plain words what to plan.
+    await firstModelOf(page, /^Coordinator:/, name)
+    await say(
+      page,
+      'Plan a task titled "Say hello", with no review. Its lead should reply with the single word "ready" and nothing else, and not run any tools or change any files.',
+    )
+
+    // Its plan, held to be looked at: led by the same agent, and with no review, should the coordinator have planned one.
+    await page.getByRole('button', { name: 'Hold' }).click({ timeout: 120_000 })
+    await firstModelOf(page, /^Lead for this task:/, name)
+    const skip = page.getByRole('button', { name: 'Skip', exact: true })
+    if ((await skip.count()) > 0) await skip.first().click()
+    await page.getByRole('button', { name: 'Start', exact: true }).click()
+
     await page.getByRole('button', { name: /Open task/ }).click()
     await expect(page.getByRole('heading', { name: 'Say hello', level: 1 })).toBeVisible()
     await expect(page.getByText(/^ready\.?$/i)).toBeVisible({ timeout: 120_000 })

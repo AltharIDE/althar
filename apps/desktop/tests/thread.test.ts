@@ -42,14 +42,14 @@ describe('a thread as blocks', () => {
       items.notice({ source: 'runtime', severity: 'warning', title: 'Althar restarted.', description: 'The lead stopped with it.' }, null),
     ]
     const blocks = blocksOf(source(thread), new Map(), at)
-    expect(blocks.map((block) => block.kind)).toEqual(['you', 'turn', 'divider', 'turn', 'divider'])
-    const [you, first, divider, second, restarted] = blocks
+    // The restart an earlier version noted isn't shown.
+    expect(blocks.map((block) => block.kind)).toEqual(['you', 'turn', 'divider', 'turn'])
+    const [you, first, divider, second] = blocks
     expect(you).toMatchObject({ text: 'Add a retry', delivery: Delivery.Delivered, at: 'just now' })
     if (first?.kind !== 'turn' || second?.kind !== 'turn') throw new Error('Expected turns')
     expect(first.parts.map((part) => part.kind)).toEqual(['thought', 'tool', 'message'])
     expect(first.parts[1]).toMatchObject({ toolKind: ToolKind.Read, verb: 'Read', target: 'src/checkout.ts', state: ToolState.Done })
     expect(divider).toMatchObject({ text: 'Codex takes over.' })
-    expect(restarted).toMatchObject({ text: 'Althar restarted. The lead stopped with it.' })
     expect(second.parts.map((part) => (part.kind === 'notice' ? [part.tone, part.text] : part.kind))).toEqual([
       'message',
       'plan',
@@ -261,5 +261,18 @@ describe('tool calls', () => {
     expect(targetOf(tool({ title: 'Run command', toolKind: 'execute' }), '/w')).toBe('command')
     expect(targetOf(tool({ title: 'Read file', toolKind: 'read' }), '/w')).toBe('file')
     expect(targetOf(tool({ title: 'List files', toolKind: 'search' }), '/w')).toBe('files')
+  })
+
+  it('carries the rule that let a call through without asking, and nothing where none did', () => {
+    const [turn] = blocksOf(
+      source([
+        items.tool({ command: 'git status --short', toolKind: 'execute', allowedBy: { pattern: 'git status', match: 'prefix' } }),
+        items.tool({ command: 'ls', toolKind: 'execute' }),
+      ]),
+      new Map(),
+      at,
+    )
+    const tools = turn?.kind === 'turn' ? turn.parts.flatMap((part) => (part.kind === 'tool' ? [part.allowedBy ?? null] : [])) : []
+    expect(tools).toEqual([{ pattern: 'git status', match: 'prefix' }, null])
   })
 })

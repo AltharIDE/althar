@@ -1,0 +1,50 @@
+/* The agent's mark, then what is missing and the way to have it. */
+.install {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  column-gap: 16px;
+  align-items: start;
+  padding: 18px 4px;
+}
+.chip {
+  opacity: 0.55;
+}
+.words {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.title {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.note {
+  max-width: 52ch;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--t-2);
+}
+.ways {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.busy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--t-2);
+}
+.failed {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--danger);
+}

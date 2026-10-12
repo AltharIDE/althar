@@ -4,7 +4,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 
-import { Api, ApiError, CommandId, PAGE, Product, ThreadItem, WatchEvent } from '../src/Api'
+import { Api, ApiError, CommandId, NewProjectId, PAGE, Product, ThreadItem, WatchEvent } from '../src/Api'
 import { clientProtocol, emitterPort, serverProtocol } from '../src/transport'
 
 const at = '2026-09-29T12:00:00.000Z'
@@ -18,7 +18,7 @@ describe('the API', () => {
       decode({ ...base, kind: 'user_message', content: { text: 'Hi', links: [] }, input: { state: 'queued', interrupting: false } }).kind,
       'user_message',
     )
-    assert.strictEqual(decode({ ...base, kind: 'agent_thought', content: { text: 'Hmm' } }).kind, 'agent_thought')
+    assert.strictEqual(decode({ ...base, kind: 'agent_thought', content: { text: 'Hmm', pictures: [], files: [] } }).kind, 'agent_thought')
     const tool = decode({
       ...base,
       kind: 'tool_call',
@@ -29,9 +29,44 @@ describe('the API', () => {
         command: null,
         locations: [{ path: '/w/a.ts', line: 3 }],
         declined: false,
+        pictures: [],
+        files: [],
+        output: null,
+        exit: null,
       },
     })
     assert.deepStrictEqual(tool.kind === 'tool_call' && tool.content.locations, [{ path: '/w/a.ts', line: 3 }])
+    // What a command printed and the pictures it handed back come with it; a picture not kept says why.
+    const ran = decode({
+      ...base,
+      kind: 'tool_call',
+      content: {
+        title: 'npm test',
+        toolKind: 'execute',
+        status: 'failed',
+        command: 'npm test',
+        locations: [],
+        declined: false,
+        pictures: [
+          { digest: null, mediaType: 'image/png', bytes: 30_000_000, width: null, height: null, name: 'big.png', unkept: 'too_large' },
+        ],
+        files: [{ path: '/w/docs/plan.md', how: 'wrote', mediaType: null, bytes: null, title: null }],
+        output: { kept: true, lines: 12, bytes: 420, dropped: 0, error: 'Interrupted' },
+        exit: 1,
+      },
+    })
+    assert.deepStrictEqual(ran.kind === 'tool_call' && [ran.content.exit, ran.content.output?.lines], [1, 12])
+    assert.throws(() =>
+      decode({
+        ...base,
+        kind: 'agent_message',
+        content: {
+          text: 'Look',
+          pictures: [{ digest: 'a', mediaType: 'image/png', bytes: 1, width: 1, height: 1, name: null, unkept: 'lost' }],
+          files: [],
+        },
+      }),
+    )
     assert.strictEqual(decode({ ...base, kind: 'plan', content: { entries: [{ content: 'Test it', status: 'pending' }] } }).kind, 'plan')
     assert.strictEqual(
       decode({ ...base, kind: 'notice', content: { source: 'runtime', severity: 'info', title: 'Codex takes over.', description: null } })
@@ -123,6 +158,7 @@ describe('the API', () => {
         step: null,
         summary: null,
         lead: null,
+        leadModel: null,
         branch: null,
         startedAt: null,
         waits: null,
@@ -135,6 +171,9 @@ describe('the API', () => {
   it('takes a command id only in its own shape, and a change with its cursor', () => {
     assert.strictEqual(Schema.decodeUnknownSync(CommandId)(commandId), commandId)
     assert.throws(() => Schema.decodeUnknownSync(CommandId)('cmd_nope'))
+    // A new project's id, made by the window, is a project's id in its own shape, and nothing else's.
+    assert.strictEqual(Schema.decodeUnknownSync(NewProjectId)(`proj_${'0'.repeat(32)}`), `proj_${'0'.repeat(32)}`)
+    assert.throws(() => Schema.decodeUnknownSync(NewProjectId)(commandId))
     assert.throws(() =>
       Schema.decodeUnknownSync(WatchEvent)({ _tag: 'Changed', aggregateType: 'task', aggregateId: 't', projectId: null, threadId: null }),
     )
@@ -163,25 +202,47 @@ describe('the API', () => {
               Merge: () => Effect.die('unused'),
               Push: () => Effect.die('unused'),
               MergeHere: () => Effect.die('unused'),
+              PushHere: () => Effect.die('unused'),
+              PushBranch: () => Effect.die('unused'),
+              ListEditors: () => Effect.die('unused'),
+              InstallAgent: () => Effect.die('unused'),
+              OpenInEditor: () => Effect.die('unused'),
               SetEffort: () => Effect.die('unused'),
               GetModels: () => Effect.die('unused'),
               SetDefaultEffort: () => Effect.die('unused'),
+              SetModelBlocked: () => Effect.die('unused'),
+              GetSettings: () => Effect.die('unused'),
+              SetCoAuthor: () => Effect.die('unused'),
+              StartAccountSignIn: () => Effect.die('unused'),
+              GetAccountSignIn: () => Effect.die('unused'),
+              PasteAccountSignInCode: () => Effect.die('unused'),
+              CancelAccountSignIn: () => Effect.die('unused'),
               GetThreadItem: () => Effect.die('unused'),
+              ReadOutput: () => Effect.die('unused'),
+              ReadDocument: () => Effect.die('unused'),
               GetCoordinator: () => Effect.die('unused'),
               StartTask: () => Effect.die('unused'),
               StartPlan: () => Effect.void,
               HoldPlan: () => Effect.void,
               ChangePlan: () => Effect.void,
+              ChangeIssueDraft: () => Effect.void,
+              FileIssueDraft: () => Effect.void,
+              DiscardIssueDraft: () => Effect.void,
               AnswerStuck: () => Effect.void,
               StartSession: ({ commandId: id }) => Effect.succeed(id),
               SwitchAgent: () => Effect.die('unused'),
               SetModel: () => Effect.void,
               Interrupt: () => Effect.void,
               StopSession: () => Effect.void,
+              StopTask: () => Effect.void,
+              ResumeTask: () => Effect.void,
+              AbandonTask: () => Effect.void,
+              ReopenTask: () => Effect.void,
               Send: () => Effect.void,
               TakeBack: () => Effect.die('unused'),
+              AnswerQuestion: () => Effect.void,
               Answer: () => Effect.void,
-              ListConnections: () => Effect.succeed({ cursor: 0, connections: [], products: [] }),
+              ListConnections: () => Effect.succeed({ cursor: 0, connections: [], products: [], places: [] }),
               StartSignIn: ({ commandId: id }) =>
                 Effect.succeed({ flowId: id, kind: 'browser' as const, url: 'https://linear.app/oauth/authorize' }),
               GetSignIn: () => Effect.succeed({ state: 'waiting' as const }),
@@ -196,12 +257,18 @@ describe('the API', () => {
                   auth: 'token' as const,
                   state: 'ready' as const,
                 }),
+              GetConnectGuide: () => Effect.die('unused'),
+              FindServer: () => Effect.die('unused'),
+              ConnectCli: () => Effect.die('unused'),
+              CheckConnection: () => Effect.die('unused'),
               Disconnect: () => Effect.void,
               ListIssues: () => Effect.succeed({ issues: [] }),
               MarkReady: () => Effect.void,
               SetUsageLimit: () => Effect.void,
               GetProjectRules: () => Effect.die('unused'),
+              GetVocabulary: () => Effect.die('unused'),
               RenameProject: () => Effect.die('unused'),
+              SetProjectInk: () => Effect.die('unused'),
               RemoveProject: () => Effect.die('unused'),
               GetRepositories: () => Effect.die('unused'),
               AddRepositories: () => Effect.die('unused'),
@@ -217,6 +284,12 @@ describe('the API', () => {
               SignInAccount: () => Effect.succeed({ line: 'codex login', opened: false }),
               OpenChange: () => Effect.void,
               RefreshTask: () => Effect.void,
+              StopListening: () => Effect.void,
+              StopBackground: () => Effect.void,
+              ClearBackground: () => Effect.void,
+              RunProject: () => Effect.die('unused'),
+              StopLaunch: () => Effect.void,
+              ClearLaunch: () => Effect.void,
               Watch: ({ since }) =>
                 Stream.make({
                   _tag: 'Changed' as const,

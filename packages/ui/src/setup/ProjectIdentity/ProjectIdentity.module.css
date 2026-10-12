@@ -1,0 +1,61 @@
+/* The mark beside its name and its colour, each under a quiet label. */
+.identity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.words {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+.label {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.name {
+  margin-bottom: 6px;
+  font-weight: 560;
+}
+
+/* the inks, each a small square of its colour; the project's own ringed (its tooltip has the data-state) */
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 2px 0;
+}
+.swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: var(--swatch);
+  cursor: pointer;
+  transition: transform var(--fast) var(--ease);
+}
+.swatch:hover {
+  transform: scale(1.08);
+}
+.swatch[aria-checked='true'] {
+  box-shadow:
+    0 0 0 2px var(--paper),
+    0 0 0 3.5px var(--t-1);
+}
+.swatch:focus-visible {
+  outline-offset: 3px;
+}
+
+.error {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  color: var(--danger);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swatch {
+    transition: none;
+  }
+}

@@ -24,9 +24,15 @@ export const keys = {
   /** A task's head alone, as the board stood at `version`: what the dock shows of a ready task. */
   head: (threadId: string, version: number) => ['head', threadId, version] as const,
   rules: (projectId: string) => ['rules', projectId] as const,
+  vocabulary: (projectId: string) => ['vocabulary', projectId] as const,
   /** A project's repositories, as this Mac has them: read again whenever the project changes. */
   repositories: (projectId: string) => ['repositories', projectId] as const,
   connections: ['connections'] as const,
+  settings: ['settings'] as const,
+  /** What a command printed: kept once it ended, so it never changes. */
+  output: (threadId: string, itemId: string) => ['output', threadId, itemId] as const,
+  /** A document an agent wrote, as it was after the thread's last call that touched it (`version`). */
+  document: (threadId: string, path: string, version: string) => ['document', threadId, path, version] as const,
 }
 
 /**
@@ -100,9 +106,20 @@ export const reads = (client: Client) => ({
   head: (threadId: string, version: number) =>
     queryOptions({ queryKey: keys.head(threadId, version), queryFn: () => client.getThread(threadId, { limit: 0 }), gcTime: 60_000 }),
   rules: (projectId: string) => queryOptions({ queryKey: keys.rules(projectId), queryFn: () => client.getProjectRules(projectId) }),
+  // Read once a window, as someone first dictates in the project: the names change slowly, and nothing on the feed says when.
+  vocabulary: (projectId: string) => queryOptions({ queryKey: keys.vocabulary(projectId), queryFn: () => client.getVocabulary(projectId) }),
   repositories: (projectId: string) =>
     queryOptions({ queryKey: keys.repositories(projectId), queryFn: () => client.getRepositories(projectId) }),
   connections: () => queryOptions({ queryKey: keys.connections, queryFn: () => client.listConnections() }),
+  settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
+  output: (threadId: string, itemId: string) =>
+    queryOptions({ queryKey: keys.output(threadId, itemId), queryFn: () => client.readOutput(threadId, itemId), gcTime: 5 * 60_000 }),
+  document: (threadId: string, path: string, version: string) =>
+    queryOptions({
+      queryKey: keys.document(threadId, path, version),
+      queryFn: () => client.readDocument(threadId, path),
+      gcTime: 5 * 60_000,
+    }),
 })
 
 export type Reads = ReturnType<typeof reads>

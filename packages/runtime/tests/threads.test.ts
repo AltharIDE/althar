@@ -4,7 +4,7 @@ import type { ProjectId } from '@althar/domain'
 import type { SessionEvent } from '@althar/provider-adapters'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Exit, Stream } from 'effect'
+import { Effect, Exit, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents, WebCrypto } from '../src/Config'
@@ -97,6 +97,8 @@ describe('the thread recorder', () => {
         status: 'completed',
         rawInput: { file_path: '/w/.env' },
         cut: ['content', 'output'],
+        // The file it wrote whole, by its path alone.
+        files: [{ path: '/w/.env', how: 'wrote', mediaType: null, bytes: null, title: null }],
       })
       const sql = yield* SqlClient.SqlClient
       const stored = yield* sql<{ content: string }>`SELECT content FROM thread_items WHERE thread_id = ${where.threadId}`
@@ -183,7 +185,7 @@ describe('the runtime helpers', () => {
       assert.strictEqual(codex.definition.name, 'Codex')
       assert.strictEqual(codex.transport('/tmp')._tag, 'Process')
       assert.instanceOf(yield* Effect.flip(agents.get('gemini')), UnknownAgent)
-    }).pipe(Effect.provide(Agents.registry)),
+    }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
   )
 
   it.live('lets a client subscribe before anything happens, and miss nothing', () =>

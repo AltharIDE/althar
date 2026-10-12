@@ -4,7 +4,7 @@ import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { Button } from '../Button/Button'
-import { Menu, MenuGroup, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator, type MenuProps } from './Menu'
+import { Menu, MenuCheckboxItem, MenuGroup, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator, type MenuProps } from './Menu'
 import { States, statesParameters } from '../../storybook/States'
 
 const EFFORTS = ['Low', 'Medium', 'High', 'Max']
@@ -110,6 +110,46 @@ export const WithGroups: Story = {
   ),
 }
 
+function AccountsMenu(props: Partial<MenuProps>) {
+  const [on, setOn] = useState(['Personal', 'Work'])
+  const toggle = (account: string, checked: boolean) =>
+    setOn((now) => (checked ? [...now, account] : now.filter((each) => each !== account)))
+  return (
+    <Menu label="Accounts" width={240} trigger={<Button>Accounts: {on.join(', ')}</Button>} {...props}>
+      <MenuGroup label="Works on">
+        {['Personal', 'Work', 'Client'].map((account) => (
+          <MenuCheckboxItem
+            key={account}
+            checked={on.includes(account)}
+            /* the last one on stays on */
+            disabled={on.length === 1 && on.includes(account)}
+            onCheckedChange={(checked) => toggle(account, checked)}
+            keepOpen
+          >
+            {account}
+          </MenuCheckboxItem>
+        ))}
+      </MenuGroup>
+    </Menu>
+  )
+}
+
+/** Choices that are each on or off: picking one leaves the menu open, and the last one on can't be turned off. */
+export const Checkboxes: Story = {
+  render: () => <AccountsMenu />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('button', { name: 'Accounts: Personal, Work' }))
+    const work = await page.findByRole('menuitemcheckbox', { name: 'Work' })
+    await expect(work).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(work)
+    await expect(work).toHaveAttribute('aria-checked', 'false')
+    await expect(page.getByRole('menuitemcheckbox', { name: 'Personal' })).toHaveAttribute('aria-disabled', 'true')
+    await expect(c.getByRole('button', { name: 'Accounts: Personal' })).toBeInTheDocument()
+  },
+}
+
 /** At the bottom right of the screen, it opens upward and inward to stay visible. */
 export const AtTheEdge: Story = {
   parameters: { layout: 'fullscreen' },
@@ -166,6 +206,13 @@ export const AllStates: Story = {
               With a description
             </MenuRadioItem>
           </MenuRadioGroup>
+          <MenuSeparator />
+          <MenuCheckboxItem checked onCheckedChange={() => {}}>
+            Checked
+          </MenuCheckboxItem>
+          <MenuCheckboxItem checked={false} onCheckedChange={() => {}}>
+            Not checked
+          </MenuCheckboxItem>
           <MenuSeparator />
           <MenuItem icon="copy" kbd="⌘C" onSelect={() => {}}>
             With a shortcut

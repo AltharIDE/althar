@@ -1,5 +1,6 @@
 import { cx } from '../../lib/cx'
 import { Brand, BRANDS } from '../brands/brands'
+import { Icon } from '../Icon/Icon'
 import s from './Marks.module.css'
 
 /*
@@ -31,5 +32,23 @@ export function BrandMark({ brand, size = 14, className }: BrandMarkProps) {
         <path key={i} d={p.d} opacity={p.opacity} />
       ))}
     </svg>
+  )
+}
+
+export interface BrandChipProps {
+  /** Its mark; without one, a plug, as for an agent of the person's own. */
+  brand?: Brand
+  /** The tile's side, in pixels; the mark is half of it. */
+  size?: number
+  className?: string
+}
+
+/** A mark on a small paper tile, for a product named beside it: an agent, a code host. */
+export function BrandChip({ brand, size = 32, className }: BrandChipProps) {
+  const mark = Math.round(size / 2)
+  return (
+    <span className={cx(s.chip, className)} style={{ width: size, height: size, borderRadius: Math.round(size * 0.28) }} aria-hidden="true">
+      {brand === undefined ? <Icon name="plug" size={mark} /> : <BrandMark brand={brand} size={mark} />}
+    </span>
   )
 }

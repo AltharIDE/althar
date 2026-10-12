@@ -4,22 +4,28 @@
  * screen are the glossary's (lead, call, notes), never worker or session.
  */
 
-const REPO = 'https://github.com/thetastemakers/althar'
+/** The site's public origin. A build can serve it from another with SITE_URL (scripts/prerender.ts). */
+export const SITE = 'https://althar.ai'
+
+const ORG = 'https://github.com/AltharIDE'
+const REPO = `${ORG}/althar`
 
 export const LINKS = {
+  org: ORG,
   repo: REPO,
   thesis: `${REPO}/blob/main/THESIS.md`,
   architecture: `${REPO}/tree/main/docs/architecture`,
   issues: `${REPO}/issues`,
   components: `${REPO}/tree/main/packages/ui`,
   releases: `${REPO}/releases`,
+  acp: 'https://agentclientprotocol.com',
 } as const
 
 /** How to install it. Not published yet: the release, the cask and the clone URL are placeholders until it ships. */
 export const INSTALL = {
   brew: 'brew install --cask althar',
-  clone: 'git clone github.com/thetastemakers/althar',
-  platforms: 'macOS first. Linux and Windows after.',
+  clone: 'git clone github.com/AltharIDE/althar',
+  platforms: 'For macOS, Windows and Linux.',
 } as const
 
 export const LINE = {
@@ -88,7 +94,7 @@ export const STATUS: readonly Milestone[] = [
 export const EARLY = {
   title: 'Very early. Come and shape it.',
   body: 'There is no runnable Althar yet. The repository holds the thesis, the architecture, the interface primitives and the brief. The model, and the words for it, will change as we prototype, which makes now the time to have a say.',
-  licence: 'Meant to be open source. The licence is still to be chosen.',
+  licence: 'Open source, under the Apache License 2.0.',
 } as const
 
 /** Ways in, for someone who wants to help. */

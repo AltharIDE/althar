@@ -1,0 +1,314 @@
+/* The folders on the left, where their work goes on the right, the wires between. The gap
+   holds the wires: wide where there is room, narrower at the window's least width. */
+.map {
+  position: relative;
+  display: grid;
+  grid-template-columns: clamp(270px, 32%, 330px) minmax(0, 1fr);
+  column-gap: clamp(112px, calc(50% - 272px), 250px);
+  align-items: start;
+}
+
+/* ---- the wires ---- */
+.wires {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.wires path {
+  fill: none;
+  stroke: var(--wire-live);
+  stroke-width: 1.2;
+  transition: stroke var(--base) var(--ease);
+}
+.wires circle {
+  fill: var(--n-2);
+  stroke: var(--wire-live);
+  stroke-width: 1.2;
+}
+/* To a host Althar isn't connected to: dashed, fainter. */
+.dashed path {
+  stroke: var(--wire);
+  stroke-dasharray: 4 4;
+}
+.dashed circle {
+  stroke: var(--wire);
+}
+/* A wire that arrives after the map is drawn, as a folder is added, draws itself from the folder out. */
+.fresh path {
+  stroke-dasharray: 1;
+  animation: draw 520ms var(--ease) both;
+}
+.fresh.dashed path {
+  stroke-dasharray: 4 4;
+  animation: arrive var(--slow) var(--ease) both;
+}
+.fresh circle {
+  animation: arrive var(--slow) var(--ease) both;
+}
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes arrive {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fresh path,
+  .fresh circle {
+    animation: none;
+  }
+}
+.wireLabel {
+  position: absolute;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--n-2);
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--t-3);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ---- the columns ---- */
+.column {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.columnHead {
+  margin: 0 0 -2px;
+  font: 600 10.5px/1 var(--font-label);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+
+/* ---- a folder on this device ---- */
+.repositories {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.repository {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 10px 10px 16px;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-card);
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  height: 22px;
+}
+.folder {
+  flex: none;
+  color: var(--t-3);
+}
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 620;
+  letter-spacing: -0.008em;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.more {
+  flex: none;
+}
+.where {
+  min-width: 0;
+  overflow: hidden;
+  padding-left: 23px;
+  font: 450 11.5px/1.4 var(--mono);
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.elsewhere {
+  font-family: var(--font);
+  font-size: 12px;
+}
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+  margin-top: 8px;
+  padding: 8px 0 0 23px;
+  border-top: 1px solid var(--line);
+}
+.branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--t-2);
+}
+.branch code {
+  overflow: hidden;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.role {
+  flex: none;
+  margin-left: auto;
+}
+
+/* A folder being read: an outline, until its repositories are known. */
+.reading {
+  background: transparent;
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.readingNote {
+  padding: 8px 0 2px 23px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+.worktrees {
+  margin: 4px 0 0 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.worktrees code {
+  font-family: var(--mono);
+  color: var(--t-2);
+}
+
+/* ---- where the work goes ---- */
+.hosts {
+  gap: 18px;
+}
+.host {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.hostHead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 0 2px 2px;
+}
+.hostMark {
+  flex: none;
+  color: var(--t-1);
+}
+.hostName {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 620;
+  color: var(--t-1);
+}
+.instance {
+  font: 450 11.5px/1.4 var(--mono);
+  color: var(--t-3);
+}
+.reach {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: var(--r);
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.node code {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--t-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nodeNote {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+/* A host Althar doesn't reach, and the folders whose work stays here: outlined, not raised. */
+.away .node {
+  background: transparent;
+}
+.away .hostMark {
+  color: var(--t-3);
+}
+.target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 0 2px;
+  font-size: 12px;
+  color: var(--t-3);
+}
+.targetSelect {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.what {
+  margin: 0;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.off {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.off .what {
+  flex: 1 1 220px;
+}

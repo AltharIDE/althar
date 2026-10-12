@@ -1,4 +1,5 @@
 import { Icon } from '../../foundations/Icon/Icon'
+import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { Kbd } from '../../primitives/Kbd/Kbd'
 import s from './BackCrumb.module.css'
 
@@ -24,10 +25,12 @@ export interface BackCrumbProps {
   /** Where you are now: the task's number. */
   task?: string
   title?: string
+  /** The title as the page's heading, at this rank, where the bar is all the head the page has. */
+  titleLevel?: HeadingLevel
   text?: Partial<BackCrumbText>
 }
 
-export function BackCrumb({ to, onBack, kbd, task, title, text }: BackCrumbProps) {
+export function BackCrumb({ to, onBack, kbd, task, title, titleLevel, text }: BackCrumbProps) {
   const t = { ...backCrumbText, ...text }
   return (
     <nav className={s.crumb} aria-label={t.label}>
@@ -43,7 +46,15 @@ export function BackCrumb({ to, onBack, kbd, task, title, text }: BackCrumbProps
           </span>
           <span className={s.here} aria-current="page">
             {task && <span className={s.task}>{task}</span>}
-            {title && <span className={s.title}>{title}</span>}
+            {title &&
+              (titleLevel === undefined ? (
+                <span className={s.title}>{title}</span>
+              ) : (
+                // One line, however long it was written: the whole of it on hover.
+                <Heading level={titleLevel} className={s.title} title={title}>
+                  {title}
+                </Heading>
+              ))}
           </span>
         </>
       )}

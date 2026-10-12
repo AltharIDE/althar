@@ -221,6 +221,8 @@ export const makeStallWatch = (limits: StallLimits) => {
 
   /** What happened, at `now`: what to do about it. */
   const observe = (event: LiveEvent, now: number): ReadonlyArray<StallAction> => {
+    // What Althar runs of a project itself is no thread's, and no turn's work.
+    if (event._tag === 'Launches') return []
     const watch = watchOf(event.threadId, now)
     switch (event._tag) {
       case 'TurnStarted': {
@@ -250,6 +252,8 @@ export const makeStallWatch = (limits: StallLimits) => {
         watch.turn = null
         watch.running.clear()
         watch.stopAskedAt = null
+        // What it asked waits on the person no longer through it: a question outlives its session (ADR-021), but the next one's turns aren't waiting.
+        watch.asking.clear()
         return []
       case 'AttentionNeeded':
         watch.asking.add(event.attentionId)
@@ -260,7 +264,11 @@ export const makeStallWatch = (limits: StallLimits) => {
         watch.lifeAt = now
         return []
       case 'Streaming':
+      case 'Output':
         if (watch.turn !== null) watch.lifeAt = now
+        return []
+      // What it left running isn't the turn at work (docs/architecture/05).
+      case 'Background':
         return []
       case 'Agent': {
         if (watch.turn === null) return []

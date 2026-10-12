@@ -179,6 +179,91 @@ Failure policy is node-specific:
 - fallback provider/tool;
 - verification and compensation requirements.
 
+## Task and run lifecycle
+
+A task's course is the person's to steer, from its menu. Each action is
+offered only where it applies, and the runtime works that out in one place
+(`Tasks.actionsOf`), for the menu and for the commands alike, so a command
+that no longer applies does nothing and two presses are one. A task's
+commands run one at a time, through stopping its agents and starting them,
+so a Resume pressed while a Stop waits for its agents runs once they have
+gone, and an agent on its way out is never carried on with. Both lifecycles
+are data in `@althar/domain` (`taskLifecycle`, `runLifecycle`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> draft
+    draft --> open: its run starts
+    draft --> abandoned
+    open --> done: every repository merged
+    open --> abandoned
+    abandoned --> open: reopened
+    abandoned --> draft: reopened, its plan never started
+    abandoned --> done: its pull requests merged on the host after all
+    done --> [*]
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> admitted
+    admitted --> running
+    admitted --> cancelled
+    running --> suspended: stopped, or its task abandoned
+    suspended --> running: resumed
+    suspended --> cancelled: its project removed
+    running --> succeeded
+    running --> failed
+    running --> cancelled
+    succeeded --> [*]
+    failed --> [*]
+    cancelled --> [*]
+```
+
+- **Start now** applies while the task's plan waits to start, counting down
+  or held.
+- **Stop** applies while the task's run runs or an agent is on any of its
+  threads. It suspends the run in one transaction: each node attempt it was
+  on ends `cancelled`, marked as stopped; its run attempt ends `interrupted`;
+  the call a step waited on is withdrawn. Then every agent on the task stops,
+  its lead's and its steps', so no step takes an agent going as one that
+  went. Nothing new is admitted on a suspended run, an agent a step was
+  starting as it stopped is stopped once it is up, a step's report that
+  arrives from before the stop (and a resume) is dropped and said in the
+  record, since what may write to a run is fenced by its run attempt, and
+  publishing Althar had
+  begun on the host says what it did there when it ends, without ending the
+  run or asking the person anything. Nothing runs, and nothing waits on the
+  person, until it is resumed; publishing again then adopts what is there.
+- **Resume** applies while the run is suspended. The run runs again on a new
+  run attempt, from the step stopping cut short: the lead's step (Implement,
+  or settling a review) on a new attempt, on its last lead or the agent the
+  person picked, told to carry on; a review's round again, on its reviewer;
+  publishing, tried again. A step handed to another agent resumes on that
+  agent. Stopped between two steps, the lead carries its
+  own step on. Writing to a stopped task resumes it the same way, with what
+  the person wrote as the lead's first word; beside a review, the lead
+  starts too, so it is read now. Resume never starts an agent with nothing
+  to do: there is always the step to carry on.
+- **Abandon** applies to any task not yet settled, and asks first. In one
+  transaction its plan, if still waiting, or accepted with no run made of
+  it yet, is declined; its calls are
+  withdrawn; its run, if it runs, is suspended as by Stop; the task becomes
+  `abandoned` and settles. Then every agent on it stops. Its worktree and its
+  branch stay where they are: Althar never removes the person's worktrees
+  for them ([01](01-concepts-and-project-model.md)), and nothing is pushed,
+  deleted or closed on the host. A pull request it opened stays open there,
+  and should every one merge there after all, the task is done.
+- **Reopen** applies only to an abandoned task, never to a merged one: a task
+  is `done` once every repository is merged, for good, abandoned or not. It opens the task
+  again, on the same worktree and branch, without replaying the plan: a
+  worktree whose folder went is put back from its branch first (and with the
+  branch gone too, it can't be reopened). Where its run was cut short, the
+  run is still suspended, so it resumes like a stopped one; a run that had
+  passed is ready again; a task abandoned before its plan started is a
+  draft again, its plan proposed anew and held. Nothing starts on its own.
+  While a task is abandoned no agent starts on it; writing to it reopens it
+  first, refused as Reopen is, and what was written is the lead's first word.
+
 ## Dynamic graph evolution
 
 Dynamic work is necessary: an agent may discover another repository, a new
@@ -425,23 +510,29 @@ reviewers get the context.
 **Permissions are answered below the user where possible.** Althar is the
 ACP client that answers `session/request_permission`, and every session starts
 in a mode that asks, so it can answer from policy before anything reaches a
-person ([03](03-agent-runtime-and-auth.md), Permission routing). The leaning:
+person ([03](03-agent-runtime-and-auth.md), Permission routing).
 
-- project rules answer first;
-- the lead answers requests from its steps that the rules don't cover;
-- only what the project's always-ask list reserves (production, staging,
-  pushes to main, spending over a threshold, and similar) becomes an attention
-  request;
-- everything allowed without the user is recorded on the task and shown as one
-  quiet line.
+With **The coordinator decides** selected, the coordinator answers requests
+outside the explicit always-ask and never rules in a fresh session, after
+routine reads, searches and own-file edits pass through without a judgment
+([ADR-019](../decisions/019-coordinator-judges-permissions.md)). The project's
+allow rules answer before it: what one covers is let through by the rule,
+with no judgment, and a call the coordinator leaves to the person offers Allow
+always, so the next one needs no judgment either
+([ADR-018](../decisions/018-allow-always-keeps-a-rule.md)). It uses the
+coordinator's agent and model, with the task's recent context, only where the
+registry has verified settings that remove its tools (currently Claude Code).
+Other agents fall back to the person. At most two judgments run at once, and
+none waits for the coordinator's conversation to become idle. Readers
+remain read-only. Invalid, uncertain, failed or timed-out judgments go to the
+person. Each answer records its reason, cost when reported, token usage and
+latency; the thread shows who decided, and the home counts coordinator answers.
 
-Open: whether the lead or a separate cheap judge model answers. For now a
-project's rules answer ([ADR-013](../decisions/013-project-rules.md)):
-- a mode for what no rule keeps (allowed, asked about, or everything allowed);
-- the kinds that always ask and those never allowed;
-- commands the person named by how they start.
-
-The lead does not answer yet.
+Existing modes remain: allow what no rule keeps, ask the person, or allow
+everything subject to never rules ([ADR-013](../decisions/013-project-rules.md)).
+Existing projects keep their mode. The project's rules are checked again before
+a coordinator decision is committed, so a rule changed while it thinks wins,
+an allow rule kept meanwhile included.
 
 **Usage limits pause an account, not an agent.** A limit belongs to one of an
 agent's accounts ([ADR-012](../decisions/012-several-accounts-per-agent.md)),
@@ -455,8 +546,13 @@ Under the default project rule, the paused work moves on, in this order:
 
 Either way the new session takes the work over from a brief in the same
 workspace (03, Switching model or agent), and the thread shows one line per
-move. Otherwise a single attention request names everything paused and moves
-it together.
+move. Under the wait rule the work is held until the reset. Under the ask
+rule, or when the agent didn't say when it resets, the work needs the person:
+an attention request names whose limit it is, when it resets, and each
+account that could take the work over, with the model it would run. The
+window marks which of them are free as it asks. The person moves the work to
+one, waits for the reset, or, where the reset isn't known, tries the agent
+again. Each task the limit paused asks once.
 
 **Typed step results.** Each step type declares its output schema, for example:
 
@@ -487,9 +583,10 @@ attention request. Parallel writers wait for per-branch workspaces and an
 explicit merge or select step.
 
 **Lead recommendation.** The coordinator ([04](04-coordinator.md)) recommends
-a lead model per task. It
-weighs the kind of work, past outcomes on similar tasks, runtime availability
-and usage limits, and cost. The user can override it. The recommendation and
+a lead model per task, never an agent: an agent is only a way to a model
+([ADR-015](../decisions/015-coordinator-picks-models.md)). It
+weighs the kind of work, each model's scores, past outcomes on similar tasks,
+runtime availability and usage limits, and cost. The user can override it. The recommendation and
 its reasons are recorded on the task.
 
 ## Implementing, verifying, and reviewing
@@ -523,8 +620,9 @@ run only read-only commands (diff, search, log). Running tests belongs to
 verification: tests write caches and snapshots into the workspace, and would
 duplicate it.
 
-**The default reviewer** runs on a different provider from the lead when one is
-available, on that provider's strongest available model. The plan shows the
+**The default reviewer** runs on a model from a different maker than the
+lead's when one can be used, picked by what the review needs
+([ADR-015](../decisions/015-coordinator-picks-models.md)). The plan shows the
 choice, and it can be changed. If the lead and reviewer end up the same model,
 the thread says so quietly.
 

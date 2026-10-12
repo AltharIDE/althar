@@ -1,11 +1,14 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
+import { type AppPreferences, holds, type PreferenceKey, preferencesIn } from './appPreferences'
+
 /*
  * The desktop app's own preferences, kept in the profile beside its database
- * as desktop.json, so a test's profile keeps its own: the app's icon, and
- * where Althar shows while you work in another app. Each is a key of its
- * own; writing one keeps the rest, one write at a time.
+ * as desktop.json, so a test's profile keeps its own: the app's icon,
+ * where Althar shows while you work in another app, and the app's own
+ * preferences (appPreferences.ts). Each is a key of its own; writing one
+ * keeps the rest, one write at a time.
  */
 
 const fileIn = (profile: string) => join(profile, 'desktop.json')
@@ -32,4 +35,14 @@ export const writePreference = (profile: string, key: string, value: unknown): P
   })
   writing = write.catch(() => undefined)
   return write
+}
+
+/** The app's own preferences (appPreferences.ts), each as kept or where it starts. */
+export const readAppPreferences = async (profile: string): Promise<AppPreferences> => preferencesIn(await readPreferences(profile))
+
+/** Keeps one of the app's preferences, refusing a value its key can't hold. */
+export const writeAppPreference = async <K extends PreferenceKey>(profile: string, key: K, value: unknown): Promise<AppPreferences[K]> => {
+  if (!holds(key, value)) throw new Error(`Althar's ${key} can't be ${JSON.stringify(value)}.`)
+  await writePreference(profile, key, value)
+  return value
 }

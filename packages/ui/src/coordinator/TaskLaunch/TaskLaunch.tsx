@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
-import type { ModelInfo } from '../../foundations/Model/Model'
+import type { ModelInfo } from '../../primitives/Model/Model'
 import { TaskEnd } from '../../foundations/vocabulary'
 import { taskEndText, type ChoiceWords } from '../../foundations/vocabularyText'
 import { useControlled } from '../../lib/controlled'

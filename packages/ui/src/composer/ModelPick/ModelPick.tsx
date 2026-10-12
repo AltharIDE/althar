@@ -2,7 +2,7 @@ import { RadioGroup } from 'radix-ui'
 import { useEffect, useRef } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
-import { Model, type ModelInfo } from '../../foundations/Model/Model'
+import { Model, type ModelInfo } from '../../primitives/Model/Model'
 import { cx } from '../../lib/cx'
 import { useControlled } from '../../lib/controlled'
 import { Button } from '../../primitives/Button/Button'

@@ -2,7 +2,7 @@ import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
 import type { AccountRefused } from './Accounts'
-import type { CantMerge, NoChangeToOpen, ProjectRefused } from './errors'
+import type { CantMerge, DocumentRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
 
 /*
  * What went wrong, in words a person reads in the window. The runtime's
@@ -91,10 +91,15 @@ const kinds: Readonly<Record<string, string>> = {
   folder: 'folder',
   account: 'account',
   repository: 'repository',
+  output: 'output',
+  document: 'document',
 }
 
 /** What went wrong, for the window: the error's tag as its reason, and words for the person. */
-export const words = (error: unknown, agentName: (agentId: string) => string): { readonly reason: string; readonly message: string } => {
+export const words = (
+  error: unknown,
+  agentName: (agentId: string) => string,
+): { readonly reason: string; readonly message: string; readonly why?: string; readonly detail?: string } => {
   const reason = tagOf(error)
   const message = ((): string => {
     switch (reason) {
@@ -110,13 +115,19 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
       case 'ProjectRefused':
         return projectRefused[text(error, 'reason') as ProjectRefused['reason']] ?? "Althar can't change the project that way."
       case 'NotFound':
+        // A push with nowhere to go: none of its repositories has a remote.
+        if (text(error, 'kind') === 'remote') return 'Its repositories have no remote to push to. Add one with git, then push again.'
         return `That ${kinds[text(error, 'kind')] ?? 'thing'} isn't there any more.`
       case 'UnknownAgent':
         return `Althar has no agent called ${text(error, 'agentId')}.`
+      case 'DocumentRefused':
+        return documentRefused[text(error, 'reason') as DocumentRefused['reason']] ?? 'Althar can’t show that file here.'
       case 'SessionRunning':
         return 'An agent is already working on this task.'
       case 'NoSession':
         return 'No agent is working on this task.'
+      case 'InstallFailed':
+        return text(error, 'summary')
       case 'SessionFailed': {
         const summary = text(error, 'summary')
         return `${agentName(text(error, 'agentId'))} couldn't start.${summary === '' ? '' : ` ${summary}`}`
@@ -133,6 +144,19 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
         return `${text(error, 'agentName')} isn't signed in, so the coordinator can't start on it. Pick another agent for the coordinator, or sign in with its own tool.`
       case 'AttentionClosed':
         return 'That call was already answered, or the agent took it back.'
+      case 'RuleOnAnotherList': {
+        const words = fieldOf(error, 'exact') === true ? `“${text(error, 'pattern')}”` : `Commands starting “${text(error, 'pattern')}”`
+        const list = text(error, 'list') === 'never' ? '“Never”' : '“Always ask me”'
+        return `${words} ${fieldOf(error, 'exact') === true ? 'is' : 'are'} on ${list}, which comes first, so nothing changed. Take ${fieldOf(error, 'exact') === true ? 'it' : 'them'} off ${list} first.`
+      }
+      case 'RulesChanged':
+        return "The project's rules changed meanwhile, so that change wasn't made. They're shown as they are now: make it again if it's still wanted."
+      case 'AlwaysNotOffered':
+        return "That can't be kept as a rule for this request. Answer it once instead."
+      case 'QuestionUnanswered':
+        return 'Answer each question: pick an option, or write your own.'
+      case 'NothingToWaitFor':
+        return "The agent didn't say when its limit resets, so there's no time to wait for. Pick another model, or try it again."
       case 'AlreadyDelivered':
         return "The agent already has that message, so it can't be taken back."
       case 'GitFailed': {
@@ -144,12 +168,24 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
         return 'That request was already used for something else. Try again.'
       case 'DatabaseInUse':
         return 'Another copy of Althar is using this profile.'
+      case 'PushRefused': {
+        const remote = text(error, 'remote')
+        const why = text(error, 'why')
+        if (why === 'behind')
+          return `${remote} has commits that aren’t here yet, so it didn’t take the push. Pull them in, then push again.`
+        if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
+        return `git couldn’t sign in to push to ${remote}. Push once from a terminal so your sign-in is kept, then push again here.`
+      }
       case 'CantMerge': {
         const detail = text(error, 'detail')
         return cantMerge[text(error, 'why') as CantMerge['why']]?.(detail) ?? `Althar couldn't merge it. ${detail}`
       }
       case 'NoChangeToOpen':
         return noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working
+      case 'LaunchRefused':
+        return text(error, 'message')
+      case 'TaskRefused':
+        return taskRefused[text(error, 'why') as TaskRefused['why']] ?? "Althar can't change the task that way."
       case 'SignOutFailed':
         return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on this Mac any more, remove it anyway; its sign-in may stay behind.`
       case 'AccountRefused':
@@ -160,14 +196,28 @@ export const words = (error: unknown, agentName: (agentId: string) => string): {
         return `Althar isn't connected to ${productOf(text(error, 'product'))}. Connect it, then try again.`
       case 'NotAnIssue':
         return `That link is to a ${text(error, 'what')}, not an issue.`
+      case 'DraftClosed':
+        return draftClosed[text(error, 'state')] ?? 'That issue draft can’t change now.'
+      case 'DraftUntitled':
+        return 'An issue needs a title.'
       case 'OutwardUncertain':
         return "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again."
       case 'ConnectorFailed':
         return hostSaid(productOf(text(error, 'product')), text(error, 'reason'), text(error, 'message'))
+      case 'CliSignedOut':
+        return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this Mac.`
+      case 'CliElsewhere':
+        return `Althar only gives ${text(error, 'tool')}'s sign-in to a server it knows, over HTTPS. ${text(error, 'address')} isn't one.`
+      case 'OtherAccount':
+        return `This token is ${text(error, 'login')}'s. Make one as ${text(error, 'expected')}, or connect ${text(error, 'login')} as well from the list.`
       default:
         return agentSaid(error) ?? "Althar's runtime couldn't do that. Its log has the details."
     }
   })()
+  // A merge that conflicts says in which files, for the window to have the lead settle them.
+  if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
+  // A service's refusal says which, for the window to say it where it happened: a token it didn't take, as against one it took and limits.
+  if (reason === 'ConnectorFailed') return { reason, message, why: text(error, 'reason') }
   return { reason, message }
 }
 
@@ -217,24 +267,58 @@ const noChangeToOpen = {
   opened: 'The task already has its pull request.',
 } as const satisfies Record<NoChangeToOpen['why'], string>
 
+/** Why a task can't be abandoned or reopened, by reason. */
+const taskRefused = {
+  merged: 'The task is merged, so it stays done.',
+  branch_gone: 'The task’s worktree and its branch are both gone, so it can’t be reopened on them.',
+  abandoned: 'The task is abandoned. Reopen it to carry on.',
+} as const satisfies Record<TaskRefused['why'], string>
+
+/** Why an issue draft can't change, by where it stands. */
+const draftClosed: Readonly<Record<string, string>> = {
+  filed: 'That issue is filed already. Change it on its tracker.',
+  discarded: 'That issue draft was discarded.',
+  filing: 'That issue is being filed now.',
+}
+
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
+  'LaunchRefused',
+  'DraftClosed',
+  'DraftUntitled',
   'ChangedSinceSeen',
   'CantMerge',
   'NoChangeToOpen',
+  'TaskRefused',
   'NotConnected',
+  'CliSignedOut',
+  'CliElsewhere',
+  'OtherAccount',
   'NotAnIssue',
   'NotARepository',
   'RepositoriesNeeded',
   'ProjectRefused',
+  'DocumentRefused',
   'NotFound',
   'UnknownAgent',
   'SessionRunning',
   'NoSession',
   'AttentionClosed',
+  'AlwaysNotOffered',
+  'QuestionUnanswered',
+  'NothingToWaitFor',
+  'RuleOnAnotherList',
+  'RulesChanged',
   'AlreadyDelivered',
   'CommandIdReused',
 ])
+
+/** Why a document isn't shown, by reason. */
+const documentRefused: Readonly<Record<DocumentRefused['reason'], string>> = {
+  not_markdown: 'Only markdown documents open here. Open the file in your editor.',
+  outside: 'This file isn’t in the task’s worktree, so Althar doesn’t show it.',
+  too_large: 'This document is too large to show here. Open it in your editor.',
+}
 
 /** Why a project can't be changed so, by reason. */
 const projectRefused = {
@@ -242,6 +326,7 @@ const projectRefused = {
   last_repository: 'The project needs a repository for its tasks to work in. Add another before leaving this one out.',
   no_role: "That isn't a role a repository can have.",
   not_a_fork: "That repository isn't a fork, so its pull requests open on it.",
+  id_taken: "Althar couldn't make the project under the id its mark was drawn from. Close the tab and start again.",
 } as const satisfies Record<ProjectRefused['reason'], string>
 
 /** Why an account can't be added, renamed or removed, by reason. */

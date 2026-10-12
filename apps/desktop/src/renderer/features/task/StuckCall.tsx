@@ -2,7 +2,9 @@ import type { AgentStatus, AttentionRequest, StuckStep } from '@althar/contracts
 import { Stuck, type StuckAttempt } from '@althar/ui'
 
 import type { StuckAnswer } from '../../data/client'
-import { modelInfo } from '../../shared/agents'
+import { useModelNames } from '../../shared/modelNames'
+import { clock } from '../../shared/time'
+import { LimitCall, limitText } from './LimitCall'
 
 /*
  * A step of the task's plan that needs the person (docs/architecture/05):
@@ -30,7 +32,7 @@ export const text = {
       case 'not_connected':
         return "Althar isn't connected to this repository's host, so it can't push the branch or open the pull request. Connect it, then try again."
       case 'usage_limit':
-        return `${agent} reached its usage limit and didn't say when it resets.`
+        return limitText.what(agent, stuck.limit?.resetsAt == null ? null : clock(stuck.limit.resetsAt))
       case 'stalled':
         return `${agent} stopped showing any sign of work on this step.`
       case 'looping':
@@ -95,7 +97,21 @@ export function StuckCall({
   agentName: (id: string | null) => string
   onAnswer: (attentionId: string, answer: StuckAnswer) => void
 }) {
+  const named = useModelNames()
   const agent = agentName(stuck.agentId) || 'The agent'
+  // A usage limit that says who could take over asks with them; one raised before it did asks as any stuck step.
+  if (stuck.why === 'usage_limit' && stuck.limit !== undefined)
+    return (
+      <LimitCall
+        request={request}
+        step={text.step[stuck.step]}
+        agentId={stuck.agentId}
+        limit={stuck.limit}
+        agents={agents}
+        agentName={agentName}
+        onAnswer={onAnswer}
+      />
+    )
   const tried: ReadonlyArray<StuckAttempt> =
     stuck.why === 'no_report'
       ? [{ id: 'reminded', ...text.reminded }]
@@ -124,9 +140,7 @@ export function StuckCall({
       step={text.step[stuck.step]}
       what={text.what(stuck, agent)}
       tried={tried}
-      agents={others
-        .filter((candidate) => !out || candidate.id !== stuck.agentId)
-        .map((candidate) => ({ model: modelInfo({ id: candidate.id, name: candidate.name }, null) }))}
+      agents={others.filter((candidate) => !out || candidate.id !== stuck.agentId).map((candidate) => ({ model: named(candidate.id) }))}
       {...(review || out ? {} : { onTell: (note: string) => onAnswer(request.id, { kind: 'tell', note }) })}
       {...((out || (again !== undefined && !review)) && stuck.agentId !== null
         ? { onAgain: () => onAnswer(request.id, { kind: 'retry', agentId: stuck.agentId ?? '' }) }

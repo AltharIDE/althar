@@ -1,0 +1,22 @@
+/* A link preview: 1200×630, the footer's print, the words in cobalt ink over the engraving. */
+
+.all { display: grid; gap: 32px; padding: 32px; }
+
+.card { position: relative; width: 1200px; height: 630px; overflow: hidden; isolation: isolate; background: var(--n-2); color: #1f35c8; }
+/* Wider than the card, so the altar stands at 80% of it (see Card.tsx). */
+.canvas { position: absolute; left: 0; top: 0; width: 1500px; height: 100%; pointer-events: none; }
+
+.words { position: relative; z-index: 1; display: grid; justify-items: start; gap: 22px; padding: 52px 64px 0; }
+.sign { margin: 0; display: inline-flex; align-items: center; gap: 11px; font-weight: 650; font-size: 22px; letter-spacing: -0.02em; }
+/* Kept left of the altar's light, so it rises to the top of the card. */
+.title {
+  margin: 0;
+  max-width: 840px;
+  font-family: 'Inter Display', var(--display);
+  font-weight: 200;
+  font-size: 62px;
+  line-height: 0.98;
+  letter-spacing: -0.05em;
+}
+.title b { font-weight: 720; letter-spacing: -0.056em; }
+.lead { margin: -4px 0 0; max-width: 640px; font-size: 21px; line-height: 1.4; letter-spacing: -0.012em; text-wrap: pretty; }
