@@ -19,6 +19,7 @@ import {
   Running,
   TaskFace,
   TaskHeader,
+  type TaskConflicts,
   TaskMenu,
   TaskStatus,
   Thread,
@@ -208,6 +209,9 @@ const typing = (event: KeyboardEvent) => {
 }
 
 const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', efforts: [] }
+
+/** The task's own say on its lead resolving conflicts, as its menu offers it: none goes by the project. */
+const conflictsChoice = (own: boolean | null): TaskConflicts => (own === null ? 'project' : own ? 'on' : 'off')
 
 /** The line of a file's first change, where its diff is read: for an editor to open at. */
 const firstChange = (view: FileView): number | undefined => {
@@ -474,6 +478,16 @@ export function TaskView({
             }
           : {})}
         {...(can('reopen') ? { onReopen: () => void model.reopen() } : {})}
+        // Whether its lead resolves a conflict unasked, until it settles: as its project says, or otherwise.
+        {...(snapshot.task.phase !== 'settled'
+          ? {
+              conflicts: {
+                choice: conflictsChoice(snapshot.task.resolveConflicts.task),
+                project: snapshot.task.resolveConflicts.project,
+                onChange: (choice: TaskConflicts) => void model.setResolveConflicts(choice === 'project' ? null : choice === 'on'),
+              },
+            }
+          : {})}
         // Its folder opens in the editor files open in, once it has a worktree.
         {...(snapshot.task.branch === null || editor === undefined
           ? {}

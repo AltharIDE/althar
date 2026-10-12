@@ -52,6 +52,7 @@ export const projectRules: ProjectRulesView = {
   alwaysAllow: [],
   commands: [],
   end: null,
+  resolveConflicts: false,
   usageLimit: 'move',
   rotateAccounts: false,
   onlyAccounts: null,
@@ -611,6 +612,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     planId: null,
     runCommand: null,
     launches: [],
+    resolveConflicts: { task: null, project: false },
   },
   session: {
     id: 's1',
@@ -769,6 +771,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setCoAuthor: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
+    setTaskResolveConflicts: vi.fn(async () => {}),
     resumeTask: vi.fn(async () => {}),
     abandonTask: vi.fn(async () => {}),
     reopenTask: vi.fn(async () => {}),

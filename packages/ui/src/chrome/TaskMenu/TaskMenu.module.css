@@ -1,0 +1,8 @@
+/* A quiet word beside the button, where the task resolves conflicts otherwise than its project. */
+.hint {
+  flex: none;
+  margin-right: 4px;
+  font-size: 11px;
+  color: var(--t-3);
+  white-space: nowrap;
+}

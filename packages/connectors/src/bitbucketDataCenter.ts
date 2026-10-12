@@ -100,9 +100,21 @@ const PullAnswer = Schema.Struct({
   author: Schema.optional(Schema.NullOr(Schema.Struct({ user: UserAnswer }))),
   reviewers: Schema.optional(Schema.Array(Schema.Struct({ user: UserAnswer }))),
   links: Schema.optional(Schema.Struct({ self: Schema.optional(Schema.Array(Schema.Struct({ href: Schema.String }))) })),
+  // Whether it would merge cleanly, as Data Center last worked it out: `current` false is from before a branch moved.
+  properties: Schema.optional(
+    Schema.Struct({
+      mergeResult: Schema.optional(Schema.Struct({ outcome: Schema.String, current: Schema.optional(Schema.Boolean) })),
+    }),
+  ),
   updatedDate: Schema.Number,
 })
 type PullAnswer = typeof PullAnswer.Type
+
+/** Whether a pull request's merge result says it conflicts with its target: nothing where it is out of date or unknown. */
+const conflictsOf = (result: { readonly outcome: string; readonly current?: boolean | undefined } | undefined) =>
+  result === undefined || result.current === false || (result.outcome !== 'CONFLICTED' && result.outcome !== 'CLEAN')
+    ? {}
+    : { conflicts: result.outcome === 'CONFLICTED' }
 
 const Mergeability = Schema.Struct({
   canMerge: Schema.Boolean,
@@ -321,6 +333,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
     deletions: null,
     changedFiles: null,
     updatedAt: iso(answer.updatedDate),
+    ...conflictsOf(answer.properties?.mergeResult),
   })
 
   /** Whether this repository is the one a ref is in. */
