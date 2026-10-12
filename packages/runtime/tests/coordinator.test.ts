@@ -171,6 +171,48 @@ describe('the coordinator loop', () => {
       const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
       assert.strictEqual(yield* callTool(access, 'list_tasks', {}), '- add-a-retry: Add a retry (ready, led by Fake claude-code)')
       const task = yield* callTool(access, 'read_task', { task: 'add-a-retry' })
+      // Its pull request, as last seen: a merged one finishes a done task, whatever its last run said; an open one on no known host says so.
+      const [taskRow] = yield* sql<{ id: string; projectId: string }>`SELECT id, project_id FROM tasks WHERE slug = 'add-a-retry'`
+      const at = new Date().toISOString()
+      const change = (state: string, snapshot: Record<string, unknown> = {}) =>
+        sql`UPDATE external_links SET snapshot = ${JSON.stringify({ number: 106, title: 'Add a retry', url: 'https://github.com/acme/app/pull/106', state, draft: false, words: {}, repository: ['acme', 'app'], ...snapshot })} WHERE task_id = ${taskRow?.id ?? ''}`
+      yield* sql`INSERT INTO external_links ${sql.insert({
+        id: `xlink_${'2'.repeat(32)}`,
+        projectId: taskRow?.projectId ?? '',
+        taskId: taskRow?.id ?? '',
+        connectionId: null,
+        product: 'github',
+        kind: 'change',
+        externalId: '106',
+        ref: '106',
+        key: '106',
+        url: 'https://github.com/acme/app/pull/106',
+        snapshot: '{}',
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      yield* change('open', { draft: true })
+      assert.match(
+        yield* callTool(access, 'list_tasks', {}),
+        /\(ready, led by Fake claude-code\) — PR #106 draft, as last seen \(its host is not known\)/,
+      )
+      yield* change('merged')
+      yield* sql`UPDATE tasks SET state = 'done' WHERE id = ${taskRow?.id ?? ''}`
+      assert.strictEqual(
+        yield* callTool(access, 'list_tasks', {}),
+        '- add-a-retry: Add a retry (finished, merged, led by Fake claude-code) — PR #106 merged',
+      )
+      const finished = yield* callTool(access, 'read_task', { task: 'add-a-retry' })
+      assert.match(finished, /Pull request:\nPR #106 merged: Add a retry\nURL: https:\/\/github\.com\/acme\/app\/pull\/106\nMerged/)
+      assert.match(finished, /The task is finished \(merged\): nothing waits on the person\./)
+      yield* change('closed')
+      yield* sql`UPDATE tasks SET state = 'open' WHERE id = ${taskRow?.id ?? ''}`
+      // Closed on a host Althar can't tell, it may have been reopened: not finished.
+      assert.match(
+        yield* callTool(access, 'list_tasks', {}),
+        /\(ready, led by .*\) — PR #106 closed, as last seen \(its host is not known\)/,
+      )
+      yield* sql`DELETE FROM external_links WHERE task_id = ${taskRow?.id ?? ''}`
       assert.match(task, /Branch \S+, in \S+\./)
       assert.match(task, /review \(changes_requested\): The heading needs fixing\.\n\nsettle: Fixed the heading\./)
       assert.match(yield* callTool(access, 'read_thread', { task: 'add-a-retry' }), /\[review, pass\] The change holds\./)

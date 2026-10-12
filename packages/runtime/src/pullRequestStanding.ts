@@ -12,6 +12,14 @@ import type { ChangeSummary } from '@althar/contracts'
 export interface SeenChange {
   readonly change: ChangeSummary
   readonly seenAt: string | null
+  /** The host this pull request is on, and whether Althar is connected to it; null where that can't be told. */
+  readonly host: Host | null
+}
+
+/** A code host, and whether Althar is connected to it. */
+export interface Host {
+  readonly name: string
+  readonly connected: boolean
 }
 
 /** A repository merged into its default branch on this Mac, with no pull request. */
@@ -22,12 +30,12 @@ export interface MergedHere {
   readonly ahead: number
 }
 
-/** A task's pull requests, and where its repositories are hosted. */
+/** A task's pull requests, and the repositories with work that is in neither a pull request nor merged. */
 export interface PullRequestFacts {
   readonly changes: ReadonlyArray<SeenChange>
   readonly merged: ReadonlyArray<MergedHere>
-  /** The project's host, and whether Althar is connected to it; null where its remotes name none it knows. */
-  readonly host: { readonly name: string; readonly connected: boolean } | null
+  /** How many repositories hold work of the task that is neither merged nor in a pull request: the task isn't done while any does. */
+  readonly unmerged: number
 }
 
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`
@@ -45,17 +53,25 @@ const checksWords = (change: ChangeSummary) => {
   return 'checks failing'
 }
 
-/** Why an open pull request's state may not be today's: its host isn't connected, or nothing is asking it for news. */
-const staleWords = (change: ChangeSummary, host: PullRequestFacts['host']) => {
-  if (change.state !== 'open') return null
-  if (host !== null && !host.connected) return `${host.name} is not connected`
+/**
+ * Why a pull request's state may not be today's: its host isn't connected or
+ * isn't known, nothing asks it for news, or it was closed, which stops that
+ * (it can be reopened). A merged one doesn't change again.
+ */
+const staleWords = (seen: SeenChange) => {
+  const { change, host } = seen
+  if (change.state === 'merged') return null
+  if (host === null) return 'its host is not known'
+  if (!host.connected) return `${host.name} is not connected`
+  if (change.state === 'closed') return null
   if (!change.listening) return 'not being watched'
   return null
 }
 
 /** One pull request in a few words: `PR #113 draft, checks passing, 2 unpushed`. */
-export const changeWords = (change: ChangeSummary, host: PullRequestFacts['host'], several: boolean): string => {
-  const stale = staleWords(change, host)
+export const changeWords = (seen: SeenChange, several: boolean): string => {
+  const { change } = seen
+  const stale = staleWords(seen)
   const parts = [
     change.state === 'open' ? (change.draft ? 'draft' : 'ready for review') : change.state,
     checksWords(change),
@@ -71,23 +87,27 @@ const mergedWords = (merged: MergedHere, several: boolean) =>
     merged.remote !== null && merged.ahead > 0 ? `; ${plural(merged.ahead, 'commit')} not on ${merged.remote} yet` : ''
   }`
 
+const unmergedWords = (n: number) => `${n === 1 ? '1 repository' : `${n} repositories`} with work not merged or in a pull request yet`
+
 /** Everything a task's pull requests come to, for its line in the list; empty for a task with none. */
 export const listWords = (facts: PullRequestFacts): string => {
   const several = facts.changes.length + facts.merged.length > 1
-  return [
-    ...facts.changes.map(({ change }) => changeWords(change, facts.host, several)),
-    ...facts.merged.map((merged) => mergedWords(merged, several)),
-  ].join('; ')
+  const words = [...facts.changes.map((seen) => changeWords(seen, several)), ...facts.merged.map((merged) => mergedWords(merged, several))]
+  if (words.length === 0) return ''
+  return [...words, ...(facts.unmerged > 0 ? [unmergedWords(facts.unmerged)] : [])].join('; ')
 }
 
 /**
  * How a task whose pull requests have all been merged or closed ends, so
  * `ready` doesn't suggest it still waits on the person; none while any is
- * open, or when it has none.
+ * open, while a repository's work is in none, when it has none, or when a
+ * closed one may have been reopened since (its host isn't connected).
  */
 export const finishedBy = (facts: PullRequestFacts): 'merged' | 'closed' | null => {
+  if (facts.unmerged > 0) return null
   const states = [...facts.changes.map(({ change }) => change.state), ...facts.merged.map(() => 'merged' as const)]
   if (states.length === 0 || states.includes('open')) return null
+  if (facts.changes.some(({ change, host }) => change.state === 'closed' && host?.connected !== true)) return null
   return states.includes('merged') ? 'merged' : 'closed'
 }
 
@@ -106,15 +126,17 @@ const checkSection = (change: ChangeSummary): string | null => {
   return `Checks: passing (${checks.passed} of ${checks.total}).`
 }
 
-const changeSection = (seen: SeenChange, host: PullRequestFacts['host'], several: boolean): string => {
+const changeSection = (seen: SeenChange, several: boolean): string => {
   const { change } = seen
-  const stale = staleWords(change, host)
+  const stale = staleWords(seen)
+  const when = seen.seenAt === null ? '' : `; last updated ${seen.seenAt}`
   return [
-    `${changeWords(change, host, several)}${change.title === '' ? '' : `: ${change.title}`}`,
+    `${changeWords(seen, several)}${change.title === '' ? '' : `: ${change.title}`}`,
     change.url === '' ? null : `URL: ${change.url}`,
-    change.state === 'open'
-      ? null
-      : `${change.state === 'merged' ? 'Merged' : 'Closed without merging'}${seen.seenAt === null ? '' : `; last updated ${seen.seenAt}`}. The task is finished on the host: nothing waits on the person.`,
+    change.state === 'merged' ? `Merged${when}.` : null,
+    change.state === 'closed'
+      ? `Closed without merging${when}. Althar stopped watching it then, so it may have been reopened since.`
+      : null,
     checkSection(change),
     change.state === 'open' && change.unpushed > 0
       ? `${plural(change.unpushed, 'commit')} on the task's branch ${change.unpushed === 1 ? 'is' : 'are'} not on the ${change.noun} yet; the person pushes them.`
@@ -131,8 +153,18 @@ const changeSection = (seen: SeenChange, host: PullRequestFacts['host'], several
 export const sectionWords = (facts: PullRequestFacts): string => {
   const several = facts.changes.length + facts.merged.length > 1
   const sections = [
-    ...facts.changes.map((seen) => changeSection(seen, facts.host, several)),
+    ...facts.changes.map((seen) => changeSection(seen, several)),
     ...facts.merged.map((merged) => mergedWords(merged, several)),
   ]
-  return sections.length === 0 ? '' : `Pull request${several ? 's' : ''}:\n${sections.join('\n\n')}`
+  if (sections.length === 0) return ''
+  const finished = finishedBy(facts)
+  return [
+    `Pull request${several ? 's' : ''}:\n${sections.join('\n\n')}`,
+    facts.unmerged > 0 ? `${unmergedWords(facts.unmerged)}: the task is not done.` : null,
+    finished === null
+      ? null
+      : `The task is finished (${finished === 'merged' ? 'merged' : 'closed without merging'}): nothing waits on the person.`,
+  ]
+    .filter((part): part is string => part !== null)
+    .join('\n\n')
 }

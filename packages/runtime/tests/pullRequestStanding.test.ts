@@ -4,6 +4,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { finishedBy, listWords, type PullRequestFacts, sectionWords } from '../src/pullRequestStanding'
 
 const connected = { name: 'GitHub', connected: true }
+const offline = { name: 'GitHub', connected: false }
 const checks = (more: Partial<ChecksSummary> = {}): ChecksSummary => ({
   outcome: 'passed',
   passed: 2,
@@ -36,12 +37,13 @@ const change = (more: Partial<ChangeSummary> = {}): ChangeSummary => ({
   unpushed: 0,
   ...more,
 })
-const facts = (changes: ReadonlyArray<ChangeSummary>, more: Partial<PullRequestFacts> = {}): PullRequestFacts => ({
-  changes: changes.map((one) => ({ change: one, seenAt: '2026-10-01T10:00:00Z' })),
-  merged: [],
-  host: connected,
-  ...more,
-})
+const facts = (
+  changes: ReadonlyArray<ChangeSummary>,
+  more: Partial<PullRequestFacts> & { host?: { name: string; connected: boolean } | null } = {},
+): PullRequestFacts => {
+  const { host = connected, ...rest } = more
+  return { changes: changes.map((one) => ({ change: one, seenAt: '2026-10-01T10:00:00Z', host })), merged: [], unmerged: 0, ...rest }
+}
 
 describe('how a task’s pull request is told to the coordinator', () => {
   it('says a draft with passing checks and unpushed commits in a few words', () => {
@@ -62,7 +64,7 @@ describe('how a task’s pull request is told to the coordinator', () => {
 
   it('says a merged or closed pull request plainly, and the task finished', () => {
     const merged = facts([change({ number: 106, state: 'merged', draft: false, unpushed: 3 })])
-    const closed = facts([change({ number: 108, state: 'closed' })])
+    const closed = facts([change({ number: 108, state: 'closed', listening: false })])
     assert.strictEqual(listWords(merged), 'PR #106 merged')
     assert.strictEqual(listWords(closed), 'PR #108 closed')
     assert.strictEqual(finishedBy(merged), 'merged')
@@ -75,7 +77,11 @@ describe('how a task’s pull request is told to the coordinator', () => {
   })
 
   it('says a task merged here with no pull request, and the commits the remote lacks', () => {
-    const merged = { changes: [], merged: [{ name: 'app', branch: 'main', remote: 'origin/main', ahead: 2 }], host: null }
+    const merged: PullRequestFacts = {
+      changes: [],
+      merged: [{ name: 'app', branch: 'main', remote: 'origin/main', ahead: 2 }],
+      unmerged: 0,
+    }
     assert.strictEqual(listWords(merged), 'merged locally into main, no pull request; 2 commits not on origin/main yet')
     assert.strictEqual(finishedBy(merged), 'merged')
   })
@@ -94,12 +100,12 @@ describe('how a task’s pull request is told to the coordinator', () => {
 
   it('says when the host is not connected or nothing watches the pull request, rather than guessing', () => {
     assert.strictEqual(
-      listWords(facts([change()], { host: { name: 'GitHub', connected: false } })),
+      listWords(facts([change()], { host: offline })),
       'PR #113 draft, checks passing, as last seen (GitHub is not connected)',
     )
     assert.strictEqual(listWords(facts([change({ listening: false })])), 'PR #113 draft, checks passing, as last seen (not being watched)')
     // A finished one doesn't change again.
-    assert.strictEqual(listWords(facts([change({ state: 'merged' })], { host: { name: 'GitHub', connected: false } })), 'PR #113 merged')
+    assert.strictEqual(listWords(facts([change({ state: 'merged' })], { host: offline })), 'PR #113 merged')
   })
 
   it('reads one task’s section: URL, checks, unpushed commits and what is not known', () => {
@@ -123,13 +129,48 @@ describe('how a task’s pull request is told to the coordinator', () => {
   })
 
   it('reads a merged or closed task as finished, with when it was last updated', () => {
-    assert.match(sectionWords(facts([change({ state: 'merged' })])), /Merged; last updated 2026-10-01T10:00:00Z\. The task is finished/)
-    assert.match(sectionWords(facts([change({ state: 'closed' })])), /Closed without merging; last updated 2026-10-01T10:00:00Z\./)
+    assert.match(sectionWords(facts([change({ state: 'merged' })])), /Merged; last updated 2026-10-01T10:00:00Z\./)
+    assert.match(sectionWords(facts([change({ state: 'merged' })])), /The task is finished \(merged\)/)
+    const closed = sectionWords(facts([change({ state: 'closed', listening: false })]))
+    assert.match(closed, /Closed without merging; last updated 2026-10-01T10:00:00Z\. .*may have been reopened since\./)
+    assert.match(closed, /The task is finished \(closed without merging\)/)
+  })
+
+  it('does not call a closed pull request finished where it may have been reopened unseen', () => {
+    const unseen = facts([change({ state: 'closed', listening: false })], { host: offline })
+    assert.strictEqual(listWords(unseen), 'PR #113 closed, as last seen (GitHub is not connected)')
+    assert.strictEqual(finishedBy(unseen), null)
+    assert.notMatch(sectionWords(unseen), /The task is finished/)
+    assert.strictEqual(finishedBy(facts([change({ state: 'closed' })], { host: null })), null)
+  })
+
+  it('does not call a task finished while a repository holds work in no pull request', () => {
+    const mixed = facts([change({ slug: 'api', number: 7, state: 'merged' })], { unmerged: 1 })
+    assert.strictEqual(finishedBy(mixed), null)
+    assert.strictEqual(listWords(mixed), 'PR #7 merged; 1 repository with work not merged or in a pull request yet')
+    const section = sectionWords(mixed)
+    assert.match(section, /1 repository with work not merged or in a pull request yet: the task is not done\./)
+    assert.notMatch(section, /The task is finished/)
+  })
+
+  it('judges each pull request by its own host', () => {
+    const both: PullRequestFacts = {
+      changes: [
+        { change: change({ slug: 'web', number: 9 }), seenAt: null, host: connected },
+        { change: change({ slug: 'api', number: 7, product: 'gitlab' }), seenAt: null, host: { name: 'GitLab', connected: false } },
+      ],
+      merged: [],
+      unmerged: 0,
+    }
+    assert.strictEqual(
+      listWords(both),
+      'web: PR #9 draft, checks passing; api: PR #7 draft, checks passing, as last seen (GitLab is not connected)',
+    )
   })
 
   it('says a stale open pull request may be out of date', () => {
     assert.match(
-      sectionWords(facts([change()], { host: { name: 'GitHub', connected: false } })),
+      sectionWords(facts([change()], { host: offline })),
       /Possibly out of date: GitHub is not connected, so this is as last seen\./,
     )
   })

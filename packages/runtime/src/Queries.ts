@@ -1059,12 +1059,12 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
-          if (task === undefined) return { changes: [], merged: [], host: null }
+          if (task === undefined) return { changes: [], merged: [], unmerged: 0 }
           const [links, said, host, seen] = yield* Effect.all(
             [
               linksOf(taskId),
               gitOf(taskId, { changed: false, here: true }),
-              hostOf(task.projectId),
+              Effect.flatMap(Changes, (changes) => changes.hostsFor(task.projectId, taskId)),
               sql<{
                 url: string
                 updatedAt: string
@@ -1072,10 +1072,25 @@ export class Queries extends Context.Service<
             ],
             { concurrency: 'unbounded' },
           )
+          const known = host.flatMap((one) => (one === null ? [] : [one]))
+          // Each pull request's own host: the one whose address it is at, else the only one of its product; none where that can't be told.
+          const hostOfChange = (change: ChangeSummary) => {
+            const there = known.find((one) => change.url.startsWith(one.webUrl.replace(/\/$/, '') + '/'))
+            if (there !== undefined) return there
+            const same = known.filter((one) => one.product === change.product)
+            return same.length === 1 ? same[0] : undefined
+          }
           return {
-            changes: links.changes.map((change) => ({ change, seenAt: seen.find((link) => link.url === change.url)?.updatedAt ?? null })),
+            changes: links.changes.map((change) => {
+              const one = hostOfChange(change)
+              return {
+                change,
+                seenAt: seen.find((link) => link.url === change.url)?.updatedAt ?? null,
+                host: one === undefined ? null : { name: one.name, connected: one.connected },
+              }
+            }),
             merged: said.merged.map(({ name, branch, remote, ahead }) => ({ name, branch, remote, ahead })),
-            host: host === null ? null : { name: host.name, connected: host.connected },
+            unmerged: said.here.length,
           }
         })
 

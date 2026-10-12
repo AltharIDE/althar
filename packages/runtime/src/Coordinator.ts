@@ -153,7 +153,7 @@ export class Coordinator extends Context.Service<
       const issueDrafts = yield* IssueDrafts
       /* How a task's pull requests stand: set by Queries, which can read them (it needs this service, so this can't need it). */
       let pullRequests: (taskId: string) => Effect.Effect<PullRequestFacts | undefined> = () =>
-        Effect.succeed({ changes: [], merged: [], host: null })
+        Effect.succeed({ changes: [], merged: [], unmerged: 0 })
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       const nameOf = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
 
@@ -268,9 +268,10 @@ export class Coordinator extends Context.Service<
           const facts = yield* Effect.forEach(tasks, (task) => pullRequests(task.id), { concurrency: 4 })
           return tasks
             .map((task, at) => {
-              const found = facts[at]
-              // Whose pull requests are all merged or closed is finished, whatever its last run said.
-              const finished = task.state === 'open' && found !== undefined ? finishedBy(found) : null
+              // A done task was settled as merged, so no repository of it is left out.
+              const found = task.state === 'done' && facts[at] !== undefined ? { ...facts[at], unmerged: 0 } : facts[at]
+              // Whose pull requests are all merged (or closed, as far as Althar can tell) is finished, whatever its last run said.
+              const finished = task.state === 'done' ? 'merged' : task.state === 'open' && found !== undefined ? finishedBy(found) : null
               const state =
                 task.state === 'draft'
                   ? 'planned'
@@ -295,7 +296,8 @@ export class Coordinator extends Context.Service<
           const workspaces = yield* sql<{ branch: string; path: string; name: string }>`
             SELECT w.branch, w.path, b.display_name AS name FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${task.id} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
-          const found = yield* pullRequests(task.id)
+          const seen = yield* pullRequests(task.id)
+          const found = task.state === 'done' && seen !== undefined ? { ...seen, unmerged: 0 } : seen
           return [
             `${task.slug}: ${task.title}`,
             task.description === '' ? '' : task.description,
