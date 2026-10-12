@@ -3,7 +3,8 @@
  * page or GitHub being pointed at, or tabbed to. It glides from one to the
  * next on a spring, settling with a breath past its mark, stretched a
  * little along the way it moves and squashed a little across it; it
- * gathers in where it first appears and fades out when nothing is held.
+ * gathers in where it first appears and, once nothing is held, leaves
+ * sooner than it arrived, where it is, without coasting on.
  * What passes under it is magnified, by as much as it is covered.
  *
  * It is one piece of glass, never clipped. Aimed somewhere, it takes that
@@ -20,9 +21,9 @@
 /** The glide's spring, per unit mass: about a third of a second, at a damping ratio of 0.75, so it settles just past and back. */
 const STIFF = 300
 const DAMP = 26
-/** How fast it gathers in and fades out, in ms. */
+/** How fast it gathers in, and how fast it leaves, in ms. It leaves sooner than it arrives, so it is gone once the pointer is. */
 const IN = 90
-const OUT = 160
+const OUT = 70
 /** How much bigger what is fully under it shows. */
 const MAGNIFY = 0.07
 /** At most how far it stretches along its way and squashes across, at its quickest. */
@@ -128,6 +129,8 @@ export function glassDrop(row: HTMLElement, drop: HTMLElement): GlassDrop {
     const item = el && items.find((i) => i.el === el)
     if (!item || !item.width) {
       toShown = 0
+      // A drop still travelling as it fades reads as a slow exit. It leaves where it is.
+      vx = vw = 0
       return run()
     }
     toX = item.centre

@@ -211,7 +211,7 @@
   transition: color var(--turn), background-color var(--turn), border-color var(--turn), fill var(--turn);
 }
 .sheet a {
-  position: relative; isolation: isolate; display: flex; -webkit-tap-highlight-color: transparent; align-items: center; gap: 10px; padding: 9px 12px;
+  position: relative; isolation: isolate; display: flex; -webkit-tap-highlight-color: transparent; align-items: center; justify-content: center; gap: 10px; padding: 9px 12px;
   font: 560 15px/1.2 var(--font); letter-spacing: -0.011em; color: var(--nav-ink-2); text-decoration: none;
 }
 .sheet a + a { border-top: 0.5px solid color-mix(in srgb, var(--nav-ink) 14%, transparent); }
