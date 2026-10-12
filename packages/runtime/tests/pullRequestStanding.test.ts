@@ -35,6 +35,7 @@ const change = (more: Partial<ChangeSummary> = {}): ChangeSummary => ({
   listening: true,
   localHead: 'abc',
   unpushed: 0,
+  diverged: null,
   ...more,
 })
 const facts = (
@@ -117,6 +118,23 @@ describe('how a task’s pull request is told to the coordinator', () => {
     assert.match(section, /Checks: failing \(lint\); 1 of 2 passed\./)
     assert.match(section, /1 commit on the task's branch is not on the pull request yet/)
     assert.match(section, /Conflicts with the base: not known/)
+  })
+
+  it('says a branch that parted from its pull request, rewritten here or moved on there, and what the person can do', () => {
+    const rewritten = facts([change({ diverged: { kind: 'rewritten', local: 5, onPullRequest: 4 } })])
+    assert.strictEqual(listWords(rewritten), 'PR #113 draft, checks passing, diverged from PR')
+    assert.match(
+      sectionWords(rewritten),
+      /The task's branch was rewritten since it was pushed: 5 commits in place of 4 commits on the pull request, so it takes no plain push\. The person replaces its commits from the task's outputs, or has the lead merge instead\./,
+    )
+    const moved = facts([change({ diverged: { kind: 'moved', local: 0, onPullRequest: null } })])
+    assert.strictEqual(listWords(moved), 'PR #113 draft, checks passing, diverged from PR')
+    assert.match(sectionWords(moved), /The pull request has commits pushed from elsewhere that the task's branch doesn't/)
+    // A finished one has nothing to push.
+    assert.strictEqual(
+      listWords(facts([change({ state: 'merged', diverged: { kind: 'moved', local: 0, onPullRequest: null } })])),
+      'PR #113 merged',
+    )
   })
 
   it('reads checks pending, none and never fetched', () => {
