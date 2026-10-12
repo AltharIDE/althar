@@ -63,7 +63,8 @@ const staleWords = (seen: SeenChange) => {
   if (change.state === 'merged') return null
   if (host === null) return 'its host is not known'
   if (!host.connected) return `${host.name} is not connected`
-  if (change.state === 'closed') return null
+  // Althar stops asking after it sees a pull request closed, connected or not: a reopened one wouldn't show.
+  if (change.state === 'closed') return 'not watched since it closed'
   if (!change.listening) return 'not being watched'
   return null
 }
@@ -100,15 +101,16 @@ export const listWords = (facts: PullRequestFacts): string => {
 /**
  * How a task whose pull requests have all been merged or closed ends, so
  * `ready` doesn't suggest it still waits on the person; none while any is
- * open, while a repository's work is in none, when it has none, or when a
- * closed one may have been reopened since (its host isn't connected).
+ * open, while a repository's work is in none, when it has none, or when any
+ * is closed, which may have been reopened since without Althar seeing it.
  */
-export const finishedBy = (facts: PullRequestFacts): 'merged' | 'closed' | null => {
+export const finishedBy = (facts: PullRequestFacts): 'merged' | null => {
   if (facts.unmerged > 0) return null
   const states = [...facts.changes.map(({ change }) => change.state), ...facts.merged.map(() => 'merged' as const)]
   if (states.length === 0 || states.includes('open')) return null
-  if (facts.changes.some(({ change, host }) => change.state === 'closed' && host?.connected !== true)) return null
-  return states.includes('merged') ? 'merged' : 'closed'
+  // A closed one may have been reopened, and nothing watches it any more: not finished.
+  if (facts.changes.some(({ change }) => change.state === 'closed')) return null
+  return 'merged'
 }
 
 const checkSection = (change: ChangeSummary): string | null => {

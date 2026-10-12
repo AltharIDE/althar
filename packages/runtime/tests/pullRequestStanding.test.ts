@@ -62,13 +62,13 @@ describe('how a task’s pull request is told to the coordinator', () => {
     )
   })
 
-  it('says a merged or closed pull request plainly, and the task finished', () => {
+  it('says a merged pull request plainly and its task finished, and a closed one as last seen', () => {
     const merged = facts([change({ number: 106, state: 'merged', draft: false, unpushed: 3 })])
     const closed = facts([change({ number: 108, state: 'closed', listening: false })])
     assert.strictEqual(listWords(merged), 'PR #106 merged')
-    assert.strictEqual(listWords(closed), 'PR #108 closed')
+    assert.strictEqual(listWords(closed), 'PR #108 closed, as last seen (not watched since it closed)')
     assert.strictEqual(finishedBy(merged), 'merged')
-    assert.strictEqual(finishedBy(closed), 'closed')
+    assert.strictEqual(finishedBy(closed), null)
   })
 
   it('is not finished while any of its pull requests is open, or when it has none', () => {
@@ -128,17 +128,22 @@ describe('how a task’s pull request is told to the coordinator', () => {
     assert.match(sectionWords(facts([change({ checks: null })])), /Checks: not fetched yet\./)
   })
 
-  it('reads a merged or closed task as finished, with when it was last updated', () => {
+  it('reads a merged task as finished and a closed one as possibly reopened, with when it was last updated', () => {
     assert.match(sectionWords(facts([change({ state: 'merged' })])), /Merged; last updated 2026-10-01T10:00:00Z\./)
     assert.match(sectionWords(facts([change({ state: 'merged' })])), /The task is finished \(merged\)/)
     const closed = sectionWords(facts([change({ state: 'closed', listening: false })]))
     assert.match(closed, /Closed without merging; last updated 2026-10-01T10:00:00Z\. .*may have been reopened since\./)
-    assert.match(closed, /The task is finished \(closed without merging\)/)
+    assert.notMatch(closed, /The task is finished/)
   })
 
   it('does not call a closed pull request finished where it may have been reopened unseen', () => {
     const unseen = facts([change({ state: 'closed', listening: false })], { host: offline })
     assert.strictEqual(listWords(unseen), 'PR #113 closed, as last seen (GitHub is not connected)')
+    // Connected, it is no fresher: Althar stopped asking when it saw it closed, so a reopening wouldn't show.
+    const connectedClosed = facts([change({ state: 'closed', listening: false })])
+    assert.strictEqual(listWords(connectedClosed), 'PR #113 closed, as last seen (not watched since it closed)')
+    assert.strictEqual(finishedBy(connectedClosed), null)
+    assert.notMatch(sectionWords(connectedClosed), /The task is finished/)
     assert.strictEqual(finishedBy(unseen), null)
     assert.notMatch(sectionWords(unseen), /The task is finished/)
     assert.strictEqual(finishedBy(facts([change({ state: 'closed' })], { host: null })), null)

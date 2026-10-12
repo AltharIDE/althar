@@ -276,7 +276,7 @@ export class Coordinator extends Context.Service<
                 task.state === 'draft'
                   ? 'planned'
                   : finished !== null
-                    ? `finished, ${finished === 'merged' ? 'merged' : 'closed without merging'}`
+                    ? 'finished, merged'
                     : task.run === 'succeeded'
                       ? 'ready'
                       : task.state
