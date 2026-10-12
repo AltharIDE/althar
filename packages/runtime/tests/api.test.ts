@@ -11,6 +11,7 @@ import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
+import { SqlClient } from 'effect/sql'
 
 import { connection, isInside, services } from '../src/Api'
 import {
@@ -85,7 +86,9 @@ const connected = (
     const client = yield* RpcClient.make(Api).pipe(Effect.provideContext(protocol))
     /** A folder the person chose, as the app's main process allows it. */
     const grant = (path: string) => Context.get(context, Folders).allow(path)
-    return { client, grant }
+    /** Reads or writes the runtime's store directly, for what no client does. */
+    const store = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) => effect.pipe(Effect.provideContext(context))
+    return { client, grant, store }
   })
 
 const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
@@ -1263,7 +1266,7 @@ describe('the coordinator, through the API', () => {
   it.live('stops, resumes, abandons and reopens a task', () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const { client, grant } = yield* connected({ countdown: Duration.minutes(5) })
+        const { client, grant, store } = yield* connected({ countdown: Duration.minutes(5) })
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
         const task = yield* client.StartTask({
           commandId: commandId(),
@@ -1277,12 +1280,39 @@ describe('the coordinator, through the API', () => {
           (thread) => thread.session?.turnRunning === true,
         )
         assert.deepStrictEqual([working.task.actions, working.task.planId], [['stop', 'abandon'], null])
+        // A conflict whose checks Althar waits for, as one its lead resolved leaves it: stopping hands it to the person (ADR-027).
+        const waiting = () =>
+          store(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const id = `cres_${randomBytes(16).toString('hex')}`
+              const at = new Date().toISOString()
+              yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+                id,
+                projectId: project.id,
+                taskId: task.id,
+                pullRequestUrl: 'https://github.test/meridian/api/pull/1',
+                conflicts: '[]',
+                state: 'checking',
+                pushedHead: 'a'.repeat(40),
+                createdAt: at,
+                updatedAt: at,
+              })}`
+              return id
+            }),
+          )
+        const stateOf = (id: string) =>
+          store(
+            Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ state: string }>`SELECT state FROM conflict_resolutions WHERE id = ${id}`),
+          )
+        const checking = yield* waiting()
         const stopping = { commandId: commandId(), taskId: task.id }
         yield* client.StopTask(stopping)
         // Sent again by a retry, it is one stop.
         yield* client.StopTask(stopping)
         const stopped = yield* client.GetThread({ threadId: task.threadId, limit: 0 })
         assert.deepStrictEqual([stopped.task.phase, stopped.task.actions, stopped.session], ['stopped', ['resume', 'abandon'], null])
+        assert.deepStrictEqual(yield* stateOf(checking), [{ state: 'resolved' }])
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'codex', model: 'large', effort: 'high' })
         const resumed = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
         assert.strictEqual(resumed.session?.agentId, 'codex')
@@ -1296,6 +1326,10 @@ describe('the coordinator, through the API', () => {
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id })
         const again = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
         assert.strictEqual(again.session?.agentId, 'codex')
+        // So does stopping its lead alone.
+        const checkingAgain = yield* waiting()
+        yield* client.StopSession({ commandId: commandId(), threadId: task.threadId })
+        assert.deepStrictEqual(yield* stateOf(checkingAgain), [{ state: 'resolved' }])
         // On an agent picked with no model or effort of its own, as the window sends one: its own.
         yield* client.StopTask({ commandId: commandId(), taskId: task.id })
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'claude-code', model: null, effort: null })

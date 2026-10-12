@@ -40,11 +40,15 @@
     looked. It uses the same push as that card, with the connection.
   - **The round follows the checks on what Althar pushed.** Passed, the task
     is ready to merge. Failed, the lead is asked to fix them within the
-    round, and the commits it makes on top of the merge for that, alone, are
-    pushed in turn. That fix is the lead's one more try: checks that fail
-    again are the person's, in Needs you.
-  - **Only once the task's run has succeeded.** A task the person stopped
-    isn't started again for a conflict.
+    round, as one commit on top of the merge, and that commit alone is
+    pushed in turn; anything after it waits for the person's Push. That fix
+    is the lead's one more try: checks that fail again are the person's, in
+    Needs you.
+  - **Only once the task's run has succeeded, and only until the person
+    stops it.** A task the person stopped isn't started again for a
+    conflict, and stopping the lead or the task mid-round makes the round
+    theirs: nothing more is pushed, and failed checks don't restart the lead.
+    Stopping listening to the pull request ends its round as well.
   - **The lead still never pushes.** Its environment has no way to
     ([ADR-011](011-own-connectors-for-hosts-and-trackers.md)); its brief, and
     the rules' word when it tries `gh`, say Althar pushes this merge for it.
@@ -68,10 +72,11 @@
   - **A host that doesn't say a pull request conflicts** (Bitbucket Cloud)
     gets no help until the person merges here or asks.
   - **What counts as the resolution is read from git's history and the
-    thread:** the merge alone, then commits made on top of it in the turn the
+    thread:** the merge alone, then the one commit made on top of it when the
     lead was asked to fix its checks, with nothing else asked of it. Other
-    work a lead slips into those very commits goes up with them; the checks,
-    and the pull request's review, are what catch it.
+    work a lead slips into that very commit goes up with it; the checks, and
+    the pull request's review, are what catch it. A fix split over several
+    commits waits for the person.
   - **A fix the checks needed found before the merge is committed is in the
     merge.** A lead that commits it after the merge instead leaves the merge
     for the person to push.

@@ -367,13 +367,20 @@ for the person, as above.
 - **The round follows the checks on what Althar pushed.** Passed (or none
   two minutes after the push), it is done, and the task is ready to merge.
   Failed, the lead is asked to fix them within the round, not as failed
-  checks usually reach it: commits on top of the merge, nothing merged in,
-  and nobody else asking it anything meanwhile, are pushed in turn, and their
-  checks heard the same way. The fix counts as the lead's one more try, so
-  checks that fail after it, or on a merge that took two tries, make the
-  round the person's. Where the lead committed anything else since the push,
-  the pull request moved on past it, or it was merged or closed, the round
-  is over, and what comes after is as ever.
+  checks usually reach it: one commit on top of the merge, with nobody else
+  asking it anything meanwhile, is pushed in turn, and its checks heard the
+  same way. More than one, such as other work after the fix, waits for the
+  person's Push. The fix counts as the lead's one more try, so checks that
+  fail after it, or on a merge that took two tries, make the round the
+  person's. Where the lead committed anything else since the push, the pull
+  request moved on past it, or it was merged or closed, the round is over,
+  and what comes after is as ever.
+- **Stopping is the person's say.** Where the person stops the lead or the
+  task, a round under way is theirs: nothing more is pushed for it, and
+  checks that fail after don't start the lead again. Stopping listening to
+  the pull request ends its round too, since nothing there is heard; Althar
+  does the same, as it starts, for a round left waiting on a pull request it
+  no longer listens to.
 - **The lead never pushes,** here as anywhere (Agents and the hosts, below).
   Its brief says what Althar pushes for it where the project has it resolve
   conflicts.

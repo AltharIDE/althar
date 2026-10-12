@@ -16,8 +16,8 @@ import { commitOf, git, gitOutcome } from './git'
  *
  * What Althar pushes for it is the merge alone, made on the branch as the
  * pull request had it; then, should the pull request's checks fail on it,
- * the commits the lead makes on top of it when asked to fix them. Anything
- * else on the branch is the person's to push.
+ * the one commit the lead makes on top of it when asked to fix them.
+ * Anything else on the branch is the person's to push.
  */
 
 /**
@@ -106,7 +106,7 @@ export const fixNoteFor = (
           `Checks failed on the merge Althar pushed to ${place.change ?? 'the pull request'}: ${failed.failing.join(', ')}.`,
           ...failed.logs,
         ]),
-    `Fix what broke and commit the fix on top of the merge, with nothing else: Althar pushes it to ${place.change ?? 'the pull request'} too. Don't push it yourself. If it isn't the task's to fix, commit nothing and say why.`,
+    `Fix what broke and commit the fix as one commit on top of the merge, with nothing else: Althar pushes it to ${place.change ?? 'the pull request'} too. Don't push it yourself. If it isn't the task's to fix, commit nothing and say why.`,
   ].join('\n\n')
 
 /** Why a repository's conflict isn't resolved, in a sentence; null where it is. */
@@ -160,13 +160,14 @@ export const onlyTheResolution = (worktree: string, conflict: Conflict, head: st
 
 /**
  * Whether what the branch has over `base`, what Althar pushed, up to `head`
- * is commits on top of it alone, one after another, with nothing merged in:
- * a fix for checks that failed on it.
+ * is the fix alone: one commit, made on it, as the lead is asked to fix the
+ * checks that failed there. More than one, such as other work after the fix,
+ * isn't Althar's to push.
  */
-export const onlyFixes = (worktree: string, base: string, head: string) =>
+export const onlyTheFix = (worktree: string, base: string, head: string) =>
   Effect.gen(function* () {
-    if (head === base || (yield* gitOutcome(worktree, 'merge-base', '--is-ancestor', base, head)).code !== 0) return false
     const all = linesOf(yield* git(worktree, 'rev-list', `${base}..${head}`))
-    for (const commit of all) if ((yield* parentsOf(worktree, commit)).length !== 1) return false
-    return true
+    if (all.length !== 1 || all[0] !== head) return false
+    const parents = yield* parentsOf(worktree, head)
+    return parents.length === 1 && parents[0] === base
   })

@@ -581,11 +581,17 @@ export const handlers = Api.toLayer(
         ),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       Interrupt: ({ commandId, threadId }) => once(commandId, api(sessions.interrupt(threadId))),
-      StopSession: ({ commandId, threadId }) => once(commandId, api(sessions.stop(threadId))),
+      // Stopped by the person, a conflict its lead was resolving is theirs (ADR-027): the lead isn't started again for it.
+      StopSession: ({ commandId, threadId }) =>
+        once(commandId, api(Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })))),
       StopTask: ({ commandId, taskId }) =>
         once(
           commandId,
-          api(Effect.flatMap(envelope('task.stop', { taskId }, commandId), (said) => tasks.stop({ envelope: said, taskId }))),
+          api(
+            Effect.flatMap(envelope('task.stop', { taskId }, commandId), (said) =>
+              Effect.andThen(tasks.stop({ envelope: said, taskId }), pullRequests.leadStopped({ taskId })),
+            ),
+          ),
         ),
       ResumeTask: ({ commandId, taskId, agentId, model, effort }) =>
         once(

@@ -410,7 +410,7 @@ const playStall = async (
  * Told what people said on its pull
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
- * publishes it. Asked to bring its branch up to date, `[lead:resolve]`
+ * publishes it, and `[lead:fix-more]` commits other work after it. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
  * of it; `[lead:resolve-fails]` can't, and says so. Asked to plan a
@@ -539,9 +539,12 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         return 'Merged it, settled the conflict, committed the merge, and tidied up while here.'
       }
       // Fixed and committed, for the person to push.
-      if (session.markers.has('[lead:fix]') && text.startsWith('Checks failed')) {
+      const fixMore = session.markers.has('[lead:fix-more]')
+      if ((session.markers.has('[lead:fix]') || fixMore) && text.startsWith('Checks failed')) {
         commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
-        return 'Fixed the failing check, and committed it.'
+        if (!fixMore) return 'Fixed the failing check, and committed it.'
+        commitIn(session.cwd, 'more.txt', 'Tidy up while here')
+        return 'Fixed the failing check, committed it, and tidied up while here.'
       }
       // Works until it is stopped: for a lead that goes in the middle of its step.
       if (text.includes('[lead:wait]')) {
