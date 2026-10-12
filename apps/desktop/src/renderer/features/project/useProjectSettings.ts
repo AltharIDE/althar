@@ -13,7 +13,9 @@ import { useServices } from '../../data/services'
  * goes to the runtime one change after another; the tabs and the home hear
  * it through the change feed, and the projects are read again at once too,
  * so it shows everywhere before the feed is heard. One that didn't hold goes
- * back, and says why. Removing it from Althar is asked in a dialog first.
+ * back, and says why. Whether its tasks move their issues to In Progress is
+ * switched in place, a rule like the others. Removing it from Althar is asked
+ * in a dialog first.
  */
 
 export interface ProjectSettingsModel {
@@ -28,6 +30,8 @@ export interface ProjectSettingsModel {
   /** Why the last new name or ink didn't hold. */
   readonly failed: string | null
   readonly rules: ProjectRulesView | null
+  /** Moves a task's issue to In Progress as the task starts, or stops doing so: shown at once, and read back where it didn't hold. */
+  readonly setMoveIssues: (on: boolean) => void
   /** Asking whether to remove it from Althar. */
   readonly removing: boolean
   readonly askRemove: () => void
@@ -92,6 +96,20 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     [change, client, projectId],
   )
 
+  const setMoveIssues = useCallback(
+    (on: boolean) => {
+      const key = keys.rules(projectId)
+      cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, moveIssues: on }))
+      queue.current = queue.current.then(() =>
+        client.setProjectRules({ projectId, moveIssues: on }).then(
+          (kept) => cache.setQueryData(key, kept),
+          () => cache.invalidateQueries({ queryKey: key }),
+        ),
+      )
+    },
+    [cache, client, projectId],
+  )
+
   const taken: Partial<Record<ProjectInk, string>> = {}
   for (const other of listed?.projects ?? []) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
 
@@ -132,6 +150,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     setInk,
     failed: failed?.message ?? null,
     rules,
+    setMoveIssues,
     removing,
     askRemove,
     closeRemove,

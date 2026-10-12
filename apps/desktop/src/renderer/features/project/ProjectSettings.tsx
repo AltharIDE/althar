@@ -11,7 +11,9 @@ import {
   ControlModule,
   type ControlPlace,
   ControlSheet,
+  ControlToggle,
   ControlWords,
+  Icon,
   ProjectIdentity,
   ProjectInk,
   projectIdentityText,
@@ -30,8 +32,9 @@ import type { ProjectSettingsModel } from './useProjectSettings'
  * whichever view is shown. A module for its name and colour opens out, to
  * change them in place; the others say where each thing stands and open
  * where it is changed: its repositories, its rules, and connecting the code
- * host and tracker it is on. Removing it from Althar is at the foot, and asks
- * first. Nothing in it says what is running.
+ * host and tracker it is on. Beside the tracker, a switch for whether a task's
+ * issue moves to In Progress as the task starts. Removing it from Althar is
+ * at the foot, and asks first. Nothing in it says what is running.
  */
 
 export const text = {
@@ -40,6 +43,9 @@ export const text = {
   identity: 'Name and colour',
   repositories: 'Repositories',
   rules: 'Rules',
+  moveIssues: 'Move issues to In Progress when their task starts',
+  on: 'On',
+  off: 'Off',
   connectedAs: (login: string) => `Connected as ${login}`,
   notConnected: 'Not connected',
   connect: 'Connect',
@@ -50,6 +56,7 @@ export const text = {
 /** Where a module sits beside another, in the grid's four columns: the left half, or the right. */
 const LEFT: ControlPlace = { column: [1, 3] }
 const RIGHT: ControlPlace = { column: [3, 5] }
+const ACROSS: ControlPlace = { column: [1, 5] }
 
 const INK: Readonly<Record<ProjectInk, ProjectSummary['ink']>> = {
   [ProjectInk.Clay]: 'clay',
@@ -168,7 +175,7 @@ export function ProjectSettings({
               {tracker !== null && (
                 <ControlModule
                   title={productName(tracker.product)}
-                  {...(host === null ? { place: RIGHT } : {})}
+                  place={host === null ? RIGHT : LEFT}
                   {...(trackerLogin === null ? { aside: text.connect } : {})}
                   onClick={leave(() => onConnect(tracker.product, tracker.at))}
                 >
@@ -178,6 +185,17 @@ export function ProjectSettings({
                     line={frontText.issues(tracker.key)}
                   />
                 </ControlModule>
+              )}
+              {model.rules !== null && (
+                <ControlToggle
+                  title={text.moveIssues}
+                  line={model.rules.moveIssues ? text.on : text.off}
+                  on={model.rules.moveIssues}
+                  onChange={model.setMoveIssues}
+                  glyph={<Icon name="play" size={16} />}
+                  // Beside the tracker where the code host sits above it; across the panel where it would be alone.
+                  place={host !== null && tracker !== null ? RIGHT : ACROSS}
+                />
               )}
               <ControlModule title={text.rules} onClick={leave(onRules)}>
                 {rules !== null && <ControlWords title={rules.policy} line={rules.asks} />}

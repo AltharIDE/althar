@@ -240,9 +240,11 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   (started, in review, done). Althar could move it; the tracker's own Git
   integration may already move it, by the key in the branch (Linear does,
   Jira's apps link it); or the person does. Two of them moving the same field
-  fight. A product question to try out before deciding. For now Althar
-  puts the key in the branch and the pull request's title and moves no
-  status.
+  fight. A product question to try out before deciding. Althar puts the key
+  in the branch and the pull request's title. Since 12 October it moves the
+  issue to In Progress as its task's first step starts, once, on Linear and
+  Jira, unless the project's rules turn it off; it never moves one back from
+  further along. In review and done are still open.
 - [ ] **What reaches the lead from a pull request.** Settled on 1 October,
   after review: failed checks, and what the person and the repository's own
   people (those who can write to it) say. Anyone else, as on a public

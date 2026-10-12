@@ -57,6 +57,7 @@ export const projectRules: ProjectRulesView = {
   onlyAccounts: null,
   branchPattern: null,
   titlePattern: null,
+  moveIssues: true,
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
 }
 

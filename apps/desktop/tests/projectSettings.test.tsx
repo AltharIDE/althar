@@ -147,6 +147,30 @@ describe('a project’s settings', () => {
     await waitFor(() => expect(router.state.location.pathname).toBe('/projects/p1/rules'))
   })
 
+  it('moves a task’s issue to In Progress as it starts unless switched off, a rule kept at once', async () => {
+    const { client } = windowAt('/projects/p1')
+    const panel = await openSettings()
+    const move = await panel.findByRole('switch', { name: 'Move issues to In Progress when their task starts' })
+    expect(move.getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(move)
+    // Off at once, before the runtime has said so.
+    expect(move.getAttribute('aria-checked')).toBe('false')
+    expect(panel.getByText('Off')).toBeTruthy()
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', moveIssues: false }))
+    expect(move.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('switches back where the rule didn’t hold', async () => {
+    windowAt('/projects/p1', {
+      setProjectRules: vi.fn(async () => {
+        throw new ApiError({ reason: 'NotFound', message: "That project isn't there any more." })
+      }),
+    })
+    const move = await (await openSettings()).findByRole('switch', { name: 'Move issues to In Progress when their task starts' })
+    await userEvent.click(move)
+    await waitFor(() => expect(move.getAttribute('aria-checked')).toBe('true'))
+  })
+
   it('removes the project after saying what happens, and goes home; its tab goes', async () => {
     const { client, router } = windowAt('/projects/p1')
     await waitFor(() => expect(tabNamed('meridian')).toBeTruthy())
