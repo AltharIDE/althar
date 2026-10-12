@@ -2,22 +2,30 @@
   flex: none;
   align-self: center;
   display: flex;
-  gap: 9px;
-  width: 66px;
+  gap: 4px;
+  width: 84px;
   margin-right: 10px;
   padding-left: 4px;
 }
 
 .lights button {
+  position: relative;
   display: grid;
   place-items: center;
-  width: 12px;
-  height: 12px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: none;
-  border-radius: 99px;
-  background: var(--traffic);
+  background: transparent;
   cursor: default;
+}
+
+.lights button::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: var(--traffic);
   transition: background var(--base) var(--ease);
 }
 
@@ -40,16 +48,16 @@
   opacity: 1;
 }
 
-.lights:hover .close,
-.lights:focus-within .close {
+.lights:hover .close::before,
+.lights:focus-within .close::before {
   background: #e0685c;
 }
-.lights:hover .minimize,
-.lights:focus-within .minimize {
+.lights:hover .minimize::before,
+.lights:focus-within .minimize::before {
   background: #dfa53f;
 }
-.lights:hover .maximize,
-.lights:focus-within .maximize {
+.lights:hover .maximize::before,
+.lights:focus-within .maximize::before {
   background: #62b04f;
 }
 
