@@ -15,7 +15,7 @@ import s from './Nav.module.css'
  * GitHub, the download, and on a phone a Menu that drops the pages. Over
  * paper it is paper with a rim; once a head's light is under it
  * (useLightUnder) it takes the light's cobalt as smoked glass and its words
- * turn white.
+ * turn white, and over a dark section it is smoked graphite, white on it.
  *
  * Pointed at or tabbed through, the pages and GitHub have a drop of the
  * same glass under them, gliding from one to the next (glassDrop). It comes
@@ -59,7 +59,7 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
   const button = useRef<HTMLButtonElement>(null)
   const sheet = useId()
   const scrolled = useScrolled(8)
-  const lit = useLightUnder(bar)
+  const under = useLightUnder(bar)
   const [open, setOpen] = useState(false)
   // The hero's opening starts once the page's script runs; so does the nav's entrance, timed to follow it. Held still, it is simply there.
   const opened = useHydrated()
@@ -100,7 +100,15 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
   const close = () => setOpen(false)
   return (
     <div
-      className={cx(s.wrap, opening && s.opening, held && s.still, scrolled && s.scrolled, lit && s.lit, open && s.open)}
+      className={cx(
+        s.wrap,
+        opening && s.opening,
+        held && s.still,
+        scrolled && s.scrolled,
+        under && s.lit,
+        under === 'ink' && s.ink,
+        open && s.open,
+      )}
       data-opened={opened ? '' : undefined}
       // Tabbed on out of the menu into the page it covers, it closes.
       onBlur={(e) => {
@@ -110,6 +118,7 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
       <header ref={bar} className={s.bar} onPointerLeave={() => lens.current?.point(null)}>
         <span className={s.glass} aria-hidden="true" />
         <span className={s.tint} aria-hidden="true" />
+        <span className={s.graphite} aria-hidden="true" />
         <div
           ref={row}
           className={s.row}
