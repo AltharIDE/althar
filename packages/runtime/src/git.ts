@@ -329,6 +329,26 @@ export const addWorktree = (repository: string, path: string, branch: string, ba
 export const restoreWorktree = (repository: string, path: string, branch: string) =>
   Effect.andThen(git(repository, 'worktree', 'prune'), git(repository, 'worktree', 'add', path, branch))
 
+/**
+ * Changes that prevent moving a checkout. A failed read stays a failure,
+ * even when git wrote no status. Check each initialized submodule too:
+ * --ignore-submodules=none on the parent doesn't override a nested one's
+ * own ignore settings. Untracked files are checked separately by the merge.
+ */
+export const trackedStatus = (cwd: string): Effect.Effect<string, GitFailed> =>
+  Effect.gen(function* () {
+    const status = yield* git(cwd, 'status', '--porcelain', '--untracked-files=no', '--ignore-submodules=none')
+    if (status !== '') return status
+    return yield* git(
+      cwd,
+      'submodule',
+      'foreach',
+      '--quiet',
+      '--recursive',
+      'git status --porcelain --untracked-files=no --ignore-submodules=none || { printf "Cannot read submodule status: %s\\n" "$displaypath" >&2; exit 1; }',
+    )
+  })
+
 /** The files the worktree hasn't committed, changed, new or deleted, ignored files aside; by path, sorted. */
 export const uncommittedFiles = (cwd: string) =>
   Effect.gen(function* () {
