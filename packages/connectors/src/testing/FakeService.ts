@@ -37,6 +37,8 @@ export interface FakeServiceOptions {
   readonly pushUrl?: (path: ReadonlyArray<string>) => string
   /** The commit a change's branch is at on the host, as the host reads it now; without it, a name of the fake's own. */
   readonly headOf?: (number: number) => string | null
+  /** Whether a change conflicts with its target, as the host works it out now; without it, the host doesn't say. */
+  readonly conflictsOf?: (number: number) => boolean | undefined
 }
 
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
@@ -224,7 +226,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         const found = changes.find((change) => change.number === number)
         if (found === undefined) return Effect.fail(missing(`change ${number}`))
         const head = options.headOf?.(number) ?? null
-        return Effect.succeed(head === null ? found : { ...found, headSha: head })
+        const conflicts = found.state === 'open' ? options.conflictsOf?.(number) : undefined
+        return Effect.succeed({ ...found, ...(head === null ? {} : { headSha: head }), ...(conflicts === undefined ? {} : { conflicts }) })
       }),
     markReady: (_repository, change) =>
       Effect.andThen(called('markReady'), () => {
