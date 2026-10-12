@@ -503,6 +503,17 @@ describe('a role that only reads', () => {
     assert.strictEqual(verdict({ kind: 'execute', title: '' }), 'deny')
   })
 
+  it('refuses wrapped attempts to leave the Flatpak through flatpak-spawn, not only the bare one', () => {
+    for (const command of [
+      'flatpak-spawn --host cat ~/.ssh/id_ed25519',
+      'env flatpak-spawn --host ls /',
+      "sh -c 'flatpak-spawn --host ls /'",
+    ]) {
+      const decided = decideReader(request({ kind: 'execute', title: command, rawInput: { command } }))
+      assert.include(decided.verdict === 'deny' ? decided.reason : '', 'Agents do not run commands on the device through Flatpak', command)
+    }
+  })
+
   it('never reads credentials either, and says so', () => {
     for (const command of ['security find-generic-password -s Althar -w', 'git credential fill', 'cat x | git-credential-store get']) {
       const decided = decideReader(request({ kind: 'execute', title: command, rawInput: { command } }))
