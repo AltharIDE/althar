@@ -45,6 +45,7 @@ import { Permissions } from './Permissions'
 import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
+import { UsageData } from './UsageData'
 import { Queries } from './Queries'
 import { timestamp } from './records'
 import * as Runtime from './Runtime'
@@ -1004,7 +1005,10 @@ export const isInside = (
 
 /** The runtime's services: the store, this launch, and everything the API calls. Built once per launch. */
 export const services = (options: Runtime.RuntimeLayerOptions) =>
-  Layer.mergeAll(Nudges.layer, Folders.layer).pipe(Layer.provideMerge(Queries.layer), Layer.provideMerge(Runtime.layer(options)))
+  Layer.mergeAll(Nudges.layer, UsageData.layer, Folders.layer).pipe(
+    Layer.provideMerge(Queries.layer),
+    Layer.provideMerge(Runtime.layer(options)),
+  )
 
 /** One client's connection: the API served over its port, until the port closes. Each window gets one. */
 export const connection = (port: PortLike) => RpcServer.layer(Api).pipe(Layer.provide(handlers), Layer.provide(serverProtocol(port)))

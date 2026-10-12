@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { locations as locationsOf } from './locations'
 
 import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } from './appIcon'
-import { type AppPreferences, DEFAULT_PREFERENCES, isPreferenceKey } from './appPreferences'
+import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
 import { keepingAwake } from './awake'
 import { tokenIn } from './clipboard'
 import { startDictation } from './dictation'
@@ -22,6 +22,7 @@ import { alertSounds, playSound } from './sounds'
 import { failureForWindow, type StoreFailure, storeFailureOf } from './storeFailure'
 import { checkNow, startUpdates } from './updater'
 import type { UpdateGlance, Updates } from './updates'
+import { installOf, usageData } from './usageData'
 // Where each editor is, from the runtime's list of them, so its icon can be drawn here.
 import { bundleOf } from '../runtime/editors'
 
@@ -34,6 +35,7 @@ import {
   Menu,
   MessageChannelMain,
   nativeImage,
+  net,
   Notification,
   powerMonitor,
   powerSaveBlocker,
@@ -67,6 +69,9 @@ import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
  * Dictation's microphone, model and speech process are in dictation.ts.
  * A packaged app updates itself (updater.ts): it never restarts into an
  * update while work runs, and only when the person asks, or as they quit.
+ * Anonymous usage data goes from here alone (usageData.ts): what the runtime
+ * says happened, Althar opening and an update installed, each only while
+ * the person's switch is on.
  */
 
 const here = import.meta.dirname
@@ -104,6 +109,9 @@ if (fakeMicrophone) {
  */
 const quiet = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_QUIET === '1'
 if (quiet) Notification.isSupported = () => false
+/* The end-to-end tests' PostHog, on this computer (ALTHAR_FAKE_POSTHOG): usage data goes there, under a key of its own. Packaged builds leave this out. */
+const fakePostHog = __ALTHAR_TEST_HOOKS__ ? (process.env.ALTHAR_FAKE_POSTHOG ?? '') : ''
+const usageTarget = fakePostHog === '' ? __ALTHAR_USAGE__ : { key: 'phc_fake', host: fakePostHog }
 const restarts: Array<number> = []
 /* The store an update couldn't move, once the runtime says so: every window shows it, and no runtime starts again. */
 let storeFailure: StoreFailure | undefined
@@ -157,6 +165,8 @@ interface RuntimeMessage {
   readonly requestId?: string
   readonly grant?: string
   readonly value?: unknown
+  /** A usage event, as the runtime says it; usageData.ts keeps only what it names. */
+  readonly usage?: unknown
   readonly event?: {
     readonly _tag?: string
     readonly kind?: unknown
@@ -195,6 +205,32 @@ const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
   // A count the runtime gave before the file was read is shown again as the person has it.
   if (waiting > 0) app.setBadgeCount(dockCount(waiting, kept))
 })
+
+/*
+ * Anonymous usage data, once the preferences are read, so an event never
+ * goes before the person's switch is known (and the install is read after
+ * them, so its first write can't race a damaged file's), and once the app
+ * is ready, as its network needs: from a release build, while the switch is
+ * on and DO_NOT_TRACK isn't set. On Althar's first launch, events wait
+ * until the window has shown the switch. Its first events: Althar opened,
+ * and an update installed when it opens on another version than last time.
+ */
+const usage = Promise.all([preferencesRead.then(() => installOf(locations().profile, app.getVersion())), app.whenReady()]).then(
+  ([install]) => {
+    const sender = usageData({
+      ...usageTarget,
+      installId: install.id,
+      app: { version: app.getVersion(), platform: process.platform, arch: process.arch },
+      allowed: () => preferences.usageData && !doNotTrack(process.env),
+      fetch: (url, options) => net.fetch(url, options),
+      held: install.fresh,
+    })
+    sender.record({ name: 'app_opened' })
+    if (install.updatedFrom !== null) sender.record({ name: 'update_installed', properties: { from: install.updatedFrom } })
+    return sender
+  },
+)
+const recordUsage = (said: unknown) => void usage.then((sender) => sender.record(said))
 
 /* Althar's own windows, apart from the edge's pages. */
 const windows = new Set<BrowserWindow>()
@@ -289,6 +325,7 @@ const startRuntime = () => {
   child.on('message', (message: RuntimeMessage) => {
     if (message.type === 'seal' || message.type === 'open') return seal(child, message)
     if (message.type === 'nudge' && message.event !== undefined) return nudged(message.event)
+    if (message.type === 'usage') return recordUsage(message.usage)
     if (message.type === 'store-failed') {
       storeFailure = storeFailureOf(message)
       for (const window of BrowserWindow.getAllWindows()) connect(window)
@@ -504,6 +541,9 @@ ipcMain.handle('althar:set-app-icon', async (_event, icon: unknown) => {
   await writeAppIcon(locations().profile, icon)
 })
 
+// The window has shown usage data's switch: what waited for it may go, if it is on.
+ipcMain.on('althar:usage-shown', () => void usage.then((sender) => sender.shown()))
+
 // The app's own preferences, as kept; and a change to one, kept, then acted on at once. Anything a key can't hold fails, and the window says so.
 ipcMain.handle('althar:preferences', async () => {
   await preferencesRead
@@ -644,7 +684,8 @@ app.on('before-quit', (event) => {
   }, SHUTDOWN_GRACE)
   child.once('exit', () => {
     clearTimeout(timer)
-    app.exit(0)
+    // Usage data on its way gets a moment to go.
+    void usage.then((sender) => sender.stop()).finally(() => app.exit(0))
   })
   child.postMessage({ type: 'shutdown' })
 })

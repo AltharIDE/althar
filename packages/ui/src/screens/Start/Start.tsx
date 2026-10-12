@@ -1,5 +1,5 @@
 import { Checkbox } from 'radix-ui'
-import { useEffect, useId, useRef } from 'react'
+import { type ReactNode, useEffect, useId, useRef } from 'react'
 
 import { HalftoneMark } from '../../foundations/HalftoneMark/HalftoneMark'
 import { Icon } from '../../foundations/Icon/Icon'
@@ -29,7 +29,9 @@ import s from './Start.module.css'
  * each one ticked joins the project taking shape under the mark, named after
  * the first until the person names it. More come from Add a folder, or
  * dropped on the window. Nothing here is a step to finish: a project can be
- * made with no agent ready, and its tasks start once one is.
+ * made with no agent ready, and its tasks start once one is. At the sheet's
+ * foot, what Althar sends, each with its switch and its line, before
+ * anything is.
  */
 
 /** A repository that could be in the first project, as the screen lists it. */
@@ -66,6 +68,7 @@ export interface StartText {
   leaveOut: (name: string) => string
   create: string
   createKbd: string
+  privacy: string
 }
 
 export const startText: StartText = {
@@ -97,6 +100,7 @@ export const startText: StartText = {
   leaveOut: (name) => `Leave ${name} out`,
   create: 'Make the project',
   createKbd: '⌘⏎',
+  privacy: 'Privacy',
 }
 
 export interface StartProps extends Omit<RuntimesProps, 'label' | 'className' | 'text' | 'runtimes'> {
@@ -121,6 +125,8 @@ export interface StartProps extends Omit<RuntimesProps, 'label' | 'className' | 
   onCreate: () => void
   creating?: boolean
   error?: string
+  /** What Althar sends, each a switch with its line (the kit's UsageData in a SettingList), at the sheet's foot. */
+  privacy?: ReactNode
   className?: string
   text?: Partial<StartText>
   /** The agents' rows' own words, such as what this computer is called. */
@@ -152,6 +158,7 @@ export function Start({
   onCreate,
   creating = false,
   error,
+  privacy,
   className,
   text,
   runtimesText,
@@ -160,6 +167,7 @@ export function Start({
   const t = { ...startText, ...text }
   const agentsId = useId()
   const reposId = useId()
+  const privacyId = useId()
   const errorId = useId()
   const { over, handlers } = useDragOver(onDrop)
   const page = useRef<HTMLDivElement>(null)
@@ -343,6 +351,15 @@ export function Start({
               </ul>
             )}
           </div>
+
+          {privacy !== undefined && (
+            <section className={s.privacy} aria-labelledby={privacyId}>
+              <h2 id={privacyId} className={s.label}>
+                {t.privacy}
+              </h2>
+              {privacy}
+            </section>
+          )}
         </div>
       </section>
     </div>

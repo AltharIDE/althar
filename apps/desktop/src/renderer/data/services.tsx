@@ -108,6 +108,10 @@ export type ProblemAbout = { readonly kind: 'update'; readonly reason: string }
 export interface Host {
   /** The system Althar runs on: darwin, win32, linux; off a Mac the window's chrome is the app's own. */
   readonly platform: string
+  /** DO_NOT_TRACK is set where Althar started: usage data is off, whatever its switch says. */
+  readonly doNotTrack?: boolean
+  /** Says usage data's switch is on screen: on Althar's first launch, nothing is sent before it is. */
+  readonly usageShown?: () => void
   /** Closes, minimizes, or maximizes and restores the window itself. */
   readonly window: (action: WindowAction) => void
   /** Whether the window is maximized now, for the buttons' maximize or restore. */

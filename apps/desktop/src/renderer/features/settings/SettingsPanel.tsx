@@ -42,6 +42,7 @@ import {
   SettingSwitch,
   Switch,
   UpdateReady,
+  UsageData,
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
@@ -57,6 +58,7 @@ import { type UpdateModel, useUpdate } from '../../shared/useUpdate'
 import { type EdgeGlance, EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { productBrand, productName } from '../../shared/products'
+import { useServices } from '../../data/services'
 import { clock } from '../../shared/time'
 import { AgentAccounts } from '../accounts/AgentAccounts'
 import { type AccountSignInModel, useAccountSignIn } from '../accounts/useAccountSignIn'
@@ -83,8 +85,9 @@ import { type CoAuthorModel, useCoAuthor } from './useCoAuthor'
  * and, small, where Althar shows while you're in another app, on every
  * system, and the app's icon where there is a Dock. Althar as co-author is
  * the least of them: a quiet link in the foot, beside which Althar this is,
- * with its release notes, and a newer one ready to install. Any opens
- * out in place, as wide as it needs, and steps back to where it was.
+ * with its release notes, a newer one ready to install, and usage data,
+ * with what it sends and never sends. Any opens out in place, as wide as it
+ * needs, and steps back to where it was.
  * Connecting a code host or tracker narrows the panel to a sign-in card, a
  * step at a time, and comes back to the list connected. It is calm: nothing
  * in it says what is running.
@@ -142,6 +145,9 @@ export const text = {
   examples: 'With nothing under way yet, here is how a busy moment would look.',
   notifyNote: 'Only while Althar isn’t in front. Never for progress.',
   preferenceFailed: 'That couldn’t be kept. Try again.',
+  usage: 'Usage data',
+  usageWhat:
+    'What goes: Althar opening, an agent signed in, a project made, a task started and settled, an ask answered, a usage limit reached and an update installed. Each carries a random id for this install, Althar’s version and the system. Never your code, prompts, messages, names, paths or accounts.',
 }
 
 /** The notification switches as the kit shows them, from the preferences as kept. */
@@ -203,7 +209,7 @@ export const hostsLineOf = (list: ConnectionList): { readonly line: string; read
   return list.connections.length === 0 ? null : { line: text.connected(list.connections.length) }
 }
 
-type Showing = 'all' | 'agents' | 'connections' | 'connect' | 'coauthor' | 'icon' | 'edge' | 'mac' | 'notify'
+type Showing = 'all' | 'agents' | 'connections' | 'connect' | 'coauthor' | 'icon' | 'edge' | 'mac' | 'notify' | 'usage'
 
 /** How wide the panel is for what is open in it: the agents, the code hosts, co-author and the edge need the room; a walk in is a card. 440 at rest. */
 const WIDTHS: Partial<Record<Showing, number>> = { agents: 720, connections: 800, connect: 480, coauthor: 600, edge: 600 }
@@ -228,6 +234,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
       edge={useEdgePlace(props.open)}
       coAuthor={useCoAuthor()}
       preferences={usePreferences()}
+      doNotTrack={useServices().host.doNotTrack === true}
+      onUsageShown={useServices().host.usageShown}
       editors={useEditorList()}
       pictures={useEditorPictures()}
       sounds={useSounds()}
@@ -244,6 +252,8 @@ export function SettingsView({
   edge,
   coAuthor,
   preferences: kept,
+  doNotTrack = false,
+  onUsageShown,
   editors,
   pictures,
   sounds,
@@ -259,6 +269,10 @@ export function SettingsView({
   /** Null until the settings are read. */
   coAuthor: CoAuthorModel | null
   preferences: PreferencesModel
+  /** DO_NOT_TRACK is set where Althar started: usage data is off, whatever its switch says. */
+  doNotTrack?: boolean
+  /** Usage data's switch is on screen, opened here. */
+  onUsageShown?: (() => void) | undefined
   editors: ReadonlyArray<{ readonly id: string; readonly name: string }>
   /** Each editor's icon by its id, as they come. */
   pictures: Readonly<Record<string, string>>
@@ -321,6 +335,11 @@ export function SettingsView({
   useEffect(() => {
     if (open) void recheck()
   }, [open, recheck])
+
+  // Opened here, usage data's switch has been shown, as the first screen shows it.
+  useEffect(() => {
+    if (showing === 'usage') onUsageShown?.()
+  }, [showing, onUsageShown])
 
   const hosts = list === null ? null : hostsLineOf(list)
   // The person, on the commit co-author is shown on, as GitHub names them.
@@ -420,6 +439,12 @@ export function SettingsView({
               <AppVersion version={start.status.appVersion} notes={notesOf(start.status.appVersion)} text={{ name: text.version }} />
             )}
             {update !== undefined && update.ready !== null && <UpdateReady {...update.ready} />}
+            <ControlLink
+              title={text.usage}
+              picture={<Icon name="load" size={13} />}
+              off={!preferences.usageData || doNotTrack}
+              onClick={() => setShowing('usage')}
+            />
             {coAuthor !== null && (
               <ControlLink
                 title={text.coAuthor}
@@ -614,6 +639,17 @@ export function SettingsView({
                 />
               )}
             </SettingList>
+            {failed}
+          </ControlSheet>
+        </ControlDetail>
+      )}
+      {showing === 'usage' && (
+        <ControlDetail title={text.usage} onBack={all}>
+          <ControlSheet>
+            <SettingList>
+              <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={doNotTrack} />
+            </SettingList>
+            <p className={s.quiet}>{text.usageWhat}</p>
             {failed}
           </ControlSheet>
         </ControlDetail>

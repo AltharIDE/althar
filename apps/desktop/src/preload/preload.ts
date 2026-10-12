@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
+import { doNotTrack } from '../main/appPreferences'
 import type { WindowAction } from '../renderer/data/services'
 
 /*
@@ -15,8 +16,9 @@ import type { WindowAction } from '../renderer/data/services'
  * clipboard, while connecting a service asks for one. An update ready to
  * install, and restarting into it. And an update that couldn't move the
  * store, with where its copy is as the person knows the place, which main
- * shows in the file manager when asked. The page never sees or sends a
- * path. It gets no Node, no file system, no shell.
+ * shows in the file manager when asked. Whether DO_NOT_TRACK is set, which
+ * keeps usage data off, and that usage data's switch has been shown. The page never sees or sends a path. It gets no
+ * Node, no file system, no shell.
  */
 
 ipcRenderer.on('althar:port', (event) => {
@@ -70,6 +72,10 @@ ipcRenderer.on('althar:update', (_event, glance: unknown) => {
 contextBridge.exposeInMainWorld('althar', {
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
+  // Usage data stays off while it is set, whatever its switch says; the switch shows so.
+  doNotTrack: doNotTrack(process.env),
+  // Usage data's switch is on screen: on a first launch, nothing is sent before it is.
+  usageShown: (): void => ipcRenderer.send('althar:usage-shown'),
   window: (action: WindowAction): void => ipcRenderer.send('althar:window', action),
   maximized: (): Promise<boolean> => ipcRenderer.invoke('althar:maximized'),
   onMaximized: (listener: (maximized: boolean) => void): (() => void) => {

@@ -1016,6 +1016,40 @@ describe('the app’s own preferences in settings', () => {
   })
 })
 
+describe('usage data in settings', () => {
+  it('is on until the person turns it off, a quiet link in the foot, saying what goes and what never does', async () => {
+    const host = fakeHost()
+    withServices(<Settings />, fakeClient().client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await userEvent.click(await within(panel).findByRole('button', { name: 'Usage data' }))
+    expect(within(panel).getByRole('heading', { name: 'Usage data', level: 2 })).toBeTruthy()
+    const usage = within(panel).getByRole('switch', { name: 'Usage data' })
+    await waitFor(() => expect(usage.getAttribute('aria-checked')).toBe('true'))
+    expect(document.getElementById(usage.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      'Anonymous: steps such as a project made or a task settled. Never your code, what is written, or any name.',
+    )
+    expect(within(panel).getByText(/^What goes: Althar opening, an agent signed in, a project made/)).toBeTruthy()
+    expect(within(panel).getByText(/Never your code, prompts, messages, names, paths or accounts\.$/)).toBeTruthy()
+    await userEvent.click(usage)
+    expect(host.setPreference).toHaveBeenLastCalledWith('usageData', false)
+    await waitFor(() => expect(usage.getAttribute('aria-checked')).toBe('false'))
+    // Off, the link says so.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Back to all settings' }))
+    expect(within(panel).getByRole('button', { name: 'Usage data Off' })).toBeTruthy()
+  })
+
+  it('is off, and can’t be turned on, while DO_NOT_TRACK is set', async () => {
+    const host = fakeHost({ doNotTrack: true })
+    withServices(<Settings />, fakeClient().client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await userEvent.click(await within(panel).findByRole('button', { name: 'Usage data Off' }))
+    const usage = within(panel).getByRole('switch', { name: 'Usage data' })
+    expect(usage.getAttribute('aria-checked')).toBe('false')
+    expect((usage as HTMLButtonElement).disabled).toBe(true)
+    expect(document.getElementById(usage.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Off while DO_NOT_TRACK is set.')
+  })
+})
+
 describe('preference changes made together', () => {
   it('keeps a change made before the first read came, and shows only the latest answer of several', async () => {
     let answer: (preferences: typeof DEFAULT_PREFERENCES) => void = () => {}

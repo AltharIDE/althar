@@ -301,6 +301,43 @@ export function NotificationSound({ sounds, value, onChange, onPlay, system, tex
   )
 }
 
+/* ---- usage data ------------------------------------------------------------------ */
+
+export interface UsageDataText {
+  title: string
+  note: string
+  /** Why it is off, whatever was chosen. */
+  doNotTrack: string
+}
+
+export const usageDataText: UsageDataText = {
+  title: 'Usage data',
+  note: 'Anonymous: steps such as a project made or a task settled. Never your code, what is written, or any name.',
+  doNotTrack: 'Off while DO_NOT_TRACK is set.',
+}
+
+export interface UsageDataProps {
+  on: boolean
+  onChange: (on: boolean) => void
+  /** DO_NOT_TRACK is set where Althar started: off, whatever was chosen, and not turned on here. */
+  doNotTrack?: boolean
+  text?: Partial<UsageDataText>
+}
+
+/** Whether Althar sends anonymous usage data, with the one line on what it sends. */
+export function UsageData({ on, onChange, doNotTrack = false, text }: UsageDataProps) {
+  const t = { ...usageDataText, ...text }
+  return (
+    <SettingSwitch
+      title={t.title}
+      note={doNotTrack ? t.doNotTrack : t.note}
+      checked={on && !doNotTrack}
+      onChange={onChange}
+      disabled={doNotTrack}
+    />
+  )
+}
+
 /* ---- where Althar shows in another app ------------------------------------------- */
 
 export interface EdgeSceneProps {
