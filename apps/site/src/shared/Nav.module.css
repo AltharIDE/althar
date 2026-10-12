@@ -129,17 +129,23 @@
 /*
  * Coming in: the capsule drops in from the top on a soft spring as its
  * glass fades up, then what is on it settles in, one after another. On the
- * homepage (.opening) it waits a moment, to come in with the light rising
- * under it; elsewhere it is quicker and smaller. Each layer fades on its
- * own: the bar fading would be a backdrop of its own, and its glass would
- * lose the page while it did. Nothing waits on it to be laid out.
+ * homepage (.opening) it follows the hero's opening: it holds until the
+ * page's script starts the light rising (data-opened), then comes in as the
+ * mark sets, with the words. Elsewhere it is quicker and smaller, at once.
+ * Each layer fades on its own: the bar fading would be a backdrop of its
+ * own, and its glass would lose the page while it did. Nothing waits on it
+ * to be laid out.
  */
 @keyframes drop-in { from { transform: translateY(-10px) scale(0.97); } }
 @keyframes drop-in-far { from { transform: translateY(-22px) scale(0.92); } }
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes settle-in { from { opacity: 0; transform: translateY(-4px); } }
 .wrap { --enter: 0ms; --stagger: 25ms; }
-.opening { --enter: 240ms; --stagger: 32ms; }
+.opening { --enter: 1750ms; --stagger: 32ms; }
+/* Without script there is no opening to follow, and it comes in on its own. */
+@media (scripting: enabled) {
+  .opening:not([data-opened]) :is(.bar, .glass, .tint, .mark, .links a, .github, .download, .menu) { animation-play-state: paused; }
+}
 .bar { animation: drop-in 460ms cubic-bezier(0.34, 1.3, 0.64, 1) var(--enter) backwards; }
 .opening .bar { animation: drop-in-far 620ms cubic-bezier(0.3, 1.36, 0.6, 1) var(--enter) backwards; }
 .bar > .glass, .bar > .tint { animation: fade-in 340ms ease-out var(--enter) backwards; }
@@ -197,3 +203,5 @@
   /* It is simply there. */
   .bar, .opening .bar, .bar > .glass, .bar > .tint, .mark, .links a, .github, .download, .menu { animation: none; }
 }
+/* Held still for a look at one frame (?t=), it is simply there too. */
+.still :is(.bar, .glass, .tint, .mark, .links a, .github, .download, .menu) { animation: none; }

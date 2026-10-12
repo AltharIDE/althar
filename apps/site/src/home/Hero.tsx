@@ -182,9 +182,15 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
     const whole = light.current
     if (!el || !whole) return
     const fast = still()
-    const first = opened.current === null
-    if (first) opened.current = performance.now()
+    if (opened.current === null) opened.current = performance.now()
     const since = () => performance.now() - (opened.current ?? 0)
+    /*
+     * How far into the opening this is. The effect runs again within it (in
+     * development React runs it twice; on a phone the light's heart is only
+     * known once the page has hydrated): the light rises on from where it
+     * would be by now, not stood up at once, which lost the rise.
+     */
+    const into = since()
     const rests = COLUMNS.map((column) => heightOf(column, heart))
 
     /*
@@ -229,14 +235,15 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
       if (!node) return
       const stand = `translateX(0px) scaleY(${rests[i]!.toFixed(4)})`
       // Risen already (the page changed size across a phone's width), or held still, it stands at once.
-      if (fast || !first) {
+      const delay = rise.start + column.d * rise.spread - into
+      if (fast || delay + rise.duration <= 0) {
         node.style.transform = stand
         if (!fast) sway(node, i, 0)
         return
       }
       const up = node.animate([{ transform: 'translateX(0px) scaleY(0)' }, { transform: stand }], {
         duration: rise.duration,
-        delay: rise.start + column.d * rise.spread,
+        delay,
         easing: rise.easing,
         fill: 'forwards',
       })
@@ -253,8 +260,9 @@ export function Hero({ nav }: { nav?: ReactNode } = {}) {
       )
     })
     if (grain.current) {
-      if (fast || !first) grain.current.style.opacity = String(GRAIN)
-      else runs.add(grain.current.animate([{ opacity: 0 }, { opacity: GRAIN }], { ...springEasing(1, 1), delay: 200, fill: 'both' }))
+      const fade = springEasing(1, 1)
+      if (fast || 200 + fade.duration <= into) grain.current.style.opacity = String(GRAIN)
+      else runs.add(grain.current.animate([{ opacity: 0 }, { opacity: GRAIN }], { ...fade, delay: 200 - into, fill: 'both' }))
     }
 
     // The name's turn swells it, a breath up and back, most in the middle.

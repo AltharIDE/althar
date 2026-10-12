@@ -2,6 +2,7 @@ import { Brand, BrandMark, Logo } from '@althar/ui'
 import { type CSSProperties, useEffect, useId, useRef, useState } from 'react'
 
 import { LINKS } from '../content/facts'
+import { still } from '../lib/browser'
 import { cx } from '../lib/cx'
 import { useHere } from '../lib/pathname'
 import { glassDrop, type GlassDrop } from './glassDrop'
@@ -48,7 +49,7 @@ function useScrolled(past: number) {
 /** Where each thing on the bar comes in, one after another. */
 const nth = (i: number) => ({ '--i': i }) as CSSProperties
 
-/** `opening`: the page opens with the hero's light rising, and the nav comes in with it. */
+/** `opening`: the page opens with the hero's light rising and its mark unveiling, and the nav comes in after it. */
 export function Nav({ opening = false }: { opening?: boolean } = {}) {
   const here = useHere()
   const bar = useRef<HTMLElement>(null)
@@ -60,6 +61,9 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
   const scrolled = useScrolled(8)
   const lit = useLightUnder(bar)
   const [open, setOpen] = useState(false)
+  // The hero's opening starts once the page's script runs; so does the nav's entrance, timed to follow it. Held still, it is simply there.
+  const [opened, setOpened] = useState<'yes' | 'still' | null>(null)
+  useEffect(() => setOpened(still() ? 'still' : 'yes'), [])
 
   useEffect(() => {
     if (!row.current || !drop.current) return
@@ -96,7 +100,8 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
   const close = () => setOpen(false)
   return (
     <div
-      className={cx(s.wrap, opening && s.opening, scrolled && s.scrolled, lit && s.lit, open && s.open)}
+      className={cx(s.wrap, opening && s.opening, opened === 'still' && s.still, scrolled && s.scrolled, lit && s.lit, open && s.open)}
+      data-opened={opened ? '' : undefined}
       // Tabbed on out of the menu into the page it covers, it closes.
       onBlur={(e) => {
         if (open && e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) close()
