@@ -53,6 +53,7 @@ const nth = (i: number) => ({ '--i': i }) as CSSProperties
 export function Nav({ opening = false }: { opening?: boolean } = {}) {
   const here = useHere()
   const bar = useRef<HTMLElement>(null)
+  const sheetEl = useRef<HTMLDivElement>(null)
   const row = useRef<HTMLDivElement>(null)
   const drop = useRef<HTMLSpanElement>(null)
   const lens = useRef<GlassDrop>(null)
@@ -60,6 +61,8 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
   const sheet = useId()
   const scrolled = useScrolled(8)
   const under = useLightUnder(bar)
+  // The card hangs below the bar, so it asks for itself: over the light it is smoked cobalt, over a dark section graphite, and on paper it stays paper.
+  const sheetUnder = useLightUnder(sheetEl, true)
   const [open, setOpen] = useState(false)
   // The hero's opening starts once the page's script runs; so does the nav's entrance, timed to follow it. Held still, it is simply there.
   const opened = useHydrated()
@@ -85,7 +88,7 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
     return () => phone.removeEventListener('change', on)
   }, [])
 
-  // Escape closes it, and leaves you on its button.
+  // Escape closes it, and leaves you on its button. While it is open the page stays put, so a drag doesn't scroll the hero under the card.
   useEffect(() => {
     if (!open) return
     const key = (e: KeyboardEvent) => {
@@ -93,8 +96,18 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
       setOpen(false)
       button.current?.focus()
     }
+    const html = document.documentElement
+    const body = document.body
+    const htmlOverflow = html.style.overflow
+    const bodyOverflow = body.style.overflow
+    html.style.overflow = 'hidden'
+    body.style.overflow = 'hidden'
     window.addEventListener('keydown', key)
-    return () => window.removeEventListener('keydown', key)
+    return () => {
+      html.style.overflow = htmlOverflow
+      body.style.overflow = bodyOverflow
+      window.removeEventListener('keydown', key)
+    }
   }, [open])
 
   const close = () => setOpen(false)
@@ -115,6 +128,7 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
         if (open && e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) close()
       }}
     >
+      {open && <button type="button" className={s.scrim} aria-label="Close menu" tabIndex={-1} onClick={close} />}
       <header ref={bar} className={s.bar} onPointerLeave={() => lens.current?.point(null)}>
         <span className={s.glass} aria-hidden="true" />
         <span className={s.tint} aria-hidden="true" />
@@ -166,8 +180,10 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
           </span>
         </div>
       </header>
-      <div id={sheet} className={s.sheet}>
+      <div id={sheet} ref={sheetEl} className={cx(s.sheet, sheetUnder && s.lit, sheetUnder === 'ink' && s.ink)}>
         <span className={s.glass} aria-hidden="true" />
+        <span className={s.tint} aria-hidden="true" />
+        <span className={s.graphite} aria-hidden="true" />
         <nav aria-label="Site">
           {PAGES.map((p) => (
             <a key={p.href} href={p.href} onClick={close} aria-current={here(p.href) ? 'page' : undefined}>
@@ -175,7 +191,7 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
             </a>
           ))}
           <a href={LINKS.repo} onClick={close}>
-            <BrandMark brand={Brand.GitHub} size={18} />
+            <BrandMark brand={Brand.GitHub} size={16} />
             GitHub
           </a>
         </nav>

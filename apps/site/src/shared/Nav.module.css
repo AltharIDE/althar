@@ -67,7 +67,7 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 0 0 0.5px rgba(255, 255, 255, 0.22), 0 10px 30px -12px rgba(10, 14, 90, 0.5);
   opacity: 0; transition: opacity var(--turn);
 }
-.lit .tint { opacity: 1; }
+.lit > .bar > .tint { opacity: 1; }
 /* Over a dark section the smoke is graphite instead, the page's own ink, not the light's cobalt: one fades out as the other fades in. */
 .graphite {
   position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
@@ -75,8 +75,8 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), inset 0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 10px 30px -12px rgba(0, 0, 0, 0.5);
   opacity: 0; transition: opacity var(--turn);
 }
-.ink .tint { opacity: 0; }
-.ink .graphite { opacity: 1; }
+.ink > .bar > .tint { opacity: 0; }
+.ink > .bar > .graphite { opacity: 1; }
 /* Read on, it sits a little closer to the top. */
 .scrolled .bar { transform: translateY(-2px); }
 
@@ -167,43 +167,66 @@
   animation: settle-in 360ms cubic-bezier(0.22, 1, 0.36, 1) calc(var(--enter) + 120ms + var(--i, 0) * var(--stagger)) backwards;
 }
 
-/* The phone's menu: a card of the same glass, frosted more, dropping from the capsule. */
+/* Open, the wrap covers the page, so a tap beside the card hits the scrim and closes it. */
+.open { inset: 0; }
+.scrim { position: absolute; inset: 0; z-index: 0; border: 0; padding: 0; background: rgba(20, 20, 23, 0.18); pointer-events: auto; cursor: default; }
+.bar, .sheet { z-index: 1; }
+
+/*
+ * The phone's menu: a short list in the same glass as the bar, dropping
+ * from the capsule. It moves as one piece. The glass does not fade: fading
+ * it is a backdrop of its own, and on a phone the blur pops. It opens on a
+ * short drop and closes quicker, so it does not hang.
+ *
+ * Its own .lit and .ink, not the bar's. The card hangs below the bar, so
+ * the ground under it is often not the ground under the bar: over the light
+ * it is smoked cobalt, over a dark section graphite, and on paper it stays
+ * paper. The variables are set here so a lit bar cannot leave a paper card
+ * with white words, or the other way round.
+ */
 .sheet {
-  position: absolute; top: 66px; left: 0; right: 0; width: min(640px, calc(100vw - 20px)); margin: 0 auto; display: none; border-radius: 24px; color: var(--t-1); pointer-events: auto;
-  visibility: hidden; transform: translateY(-8px) scale(0.97); transform-origin: 50% 0;
-  transition: transform var(--move), visibility 0s linear 420ms;
+  --nav-ink: var(--t-1); --nav-ink-2: var(--t-2); --nav-point: var(--live);
+  position: absolute; top: 64px; left: 0; right: 0; width: min(640px, calc(100vw - 20px)); margin: 0 auto; display: none; border-radius: 18px; color: var(--nav-ink); pointer-events: auto;
+  visibility: hidden; transform: translateY(-8px); transform-origin: 50% 0;
+  transition: transform 160ms cubic-bezier(0.4, 0, 1, 1), visibility 0s linear 160ms;
 }
-.sheet .glass {
-  background: linear-gradient(to bottom, rgba(252, 251, 248, 0.82), rgba(248, 246, 240, 0.9));
-  -webkit-backdrop-filter: blur(36px) saturate(1.8) brightness(1.05);
-  backdrop-filter: blur(36px) saturate(1.8) brightness(1.05);
+.sheet.lit {
+  --nav-ink: #fff; --nav-ink-2: rgba(255, 255, 255, 0.78); --nav-point: #fff;
+}
+.sheet.lit > .tint { opacity: 1; }
+.sheet.ink > .tint { opacity: 0; }
+.sheet.ink > .graphite { opacity: 1; }
+/* A little more body than the bar, so the words stay readable on paper. The smoke covers it once the light or a dark section is behind the card. */
+.sheet > .glass {
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.64));
+  -webkit-backdrop-filter: blur(24px) saturate(1.8) brightness(1.04);
+  backdrop-filter: blur(24px) saturate(1.8) brightness(1.04);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 0 0 0.5px rgba(20, 20, 28, 0.12),
-    0 24px 48px -20px rgba(40, 32, 20, 0.4);
+    inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 0 0 0.5px rgba(20, 20, 28, 0.1),
+    0 14px 32px -16px rgba(40, 32, 20, 0.32);
 }
 /* On a short screen, a phone on its side, the pages scroll inside the card rather than run off it. */
-.sheet nav { position: relative; display: grid; max-height: calc(100dvh - 86px); overflow-y: auto; overscroll-behavior: contain; padding: 8px 22px; }
+.sheet nav { position: relative; display: grid; max-height: calc(100dvh - 86px); overflow-y: auto; overscroll-behavior: contain; padding: 6px; }
+.sheet a, .sheet a::after {
+  transition: color var(--turn), background-color var(--turn), border-color var(--turn), fill var(--turn);
+}
 .sheet a {
-  position: relative; isolation: isolate; display: flex; -webkit-tap-highlight-color: transparent; align-items: center; gap: 12px; padding: 14px 0;
-  font-family: 'Inter Display', var(--display); font-size: 26px; font-weight: 300; letter-spacing: -0.03em;
-  color: var(--t-1); text-decoration: none;
+  position: relative; isolation: isolate; display: flex; -webkit-tap-highlight-color: transparent; align-items: center; gap: 10px; padding: 9px 12px;
+  font: 560 15px/1.2 var(--font); letter-spacing: -0.011em; color: var(--nav-ink-2); text-decoration: none;
 }
-.sheet a + a { border-top: 0.5px solid rgba(20, 20, 28, 0.12); }
-.sheet a[aria-current='page'] { font-weight: 550; }
-/* Pressed or tabbed to, a pane of the lens's glass comes up under it: at once on the press, settling out after. */
+.sheet a + a { border-top: 0.5px solid color-mix(in srgb, var(--nav-ink) 14%, transparent); }
+.sheet a[aria-current='page'] { color: var(--nav-ink); font-weight: 640; }
+/* Pressed or tabbed to, a wash of the words' own colour comes up under it, and leaves as soon as the press does. */
 .sheet a::before {
-  content: ''; position: absolute; inset: 4px -12px; z-index: -1; border-radius: 16px;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.45));
-  box-shadow: inset 0 1px 0 #fff, inset 0 0 0 0.5px rgba(20, 20, 28, 0.1), inset 0 0 8px rgba(255, 255, 255, 0.8), 0 4px 12px -6px rgba(40, 32, 20, 0.3);
-  opacity: 0; transform: scale(0.96); transition: opacity 320ms ease, transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  content: ''; position: absolute; inset: 2px 4px; z-index: -1; border-radius: 10px;
+  background: color-mix(in srgb, var(--nav-ink) 10%, transparent);
+  opacity: 0; transition: opacity 120ms ease;
 }
-.sheet a:active::before, .sheet a:focus-visible::before { opacity: 1; transform: none; transition-duration: 60ms, 160ms; }
+.sheet a:active::before, .sheet a:focus-visible::before { opacity: 1; transition-duration: 40ms; }
 .sheet a:focus-visible { outline: none; }
-.sheet a[aria-current='page']::after { content: ''; width: 7px; height: 7px; margin-left: 2px; border-radius: 50%; background: var(--live); }
-.open .sheet { visibility: visible; transform: none; transition: transform var(--move); }
-/* What's in it fades, not the sheet: a box fading is a backdrop of its own, and its glass would lose the page while it did. */
-.sheet > * { opacity: 0; transition: opacity 200ms ease; }
-.open .sheet > * { opacity: 1; }
+.sheet.lit a:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+.sheet a[aria-current='page']::after { content: ''; width: 5px; height: 5px; margin-left: 2px; border-radius: 50%; background: var(--nav-point); }
+.open .sheet { visibility: visible; transform: none; transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1); }
 
 @media (max-width: 900px) {
   .links, .github { display: none; }
@@ -212,7 +235,7 @@
   .row { padding-left: 16px; gap: 8px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .bar, .sheet, .open .sheet, .sheet > *, .sheet a::before { transition: none; }
+  .bar, .sheet, .open .sheet, .sheet a::before { transition: none; }
   .sheet, .scrolled .bar, .download:active, .sheet a::before { transform: none; }
   /* It is simply there. */
   .bar, .opening .bar, .bar > .glass, .bar > .tint, .bar > .graphite, .mark, .links a, .github, .download, .menu { animation: none; }

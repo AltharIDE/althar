@@ -53,8 +53,13 @@ export function LightUnder({ tone = 'light', className }: { tone?: Under; classN
   )
 }
 
-/** What LightUnder is under the middle of `ref`'s box, if any: its tone. None in the prerender and while the page hydrates. */
-export function useLightUnder(ref: RefObject<HTMLElement | null>) {
+/**
+ * What LightUnder is under `ref`, if any: its tone. The bar asks about a line
+ * through its middle. The phone's menu passes `span`, and asks about the
+ * whole of its card, so it takes the ground it actually covers. None in the
+ * prerender and while the page hydrates.
+ */
+export function useLightUnder(ref: RefObject<HTMLElement | null>, span = false) {
   const known = useSyncExternalStore(
     subscribe,
     () => version,
@@ -64,21 +69,29 @@ export function useLightUnder(ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const bar = ref.current
     if (!bar || !marks.size) return setLit(null)
-    // A line one pixel tall across the window at the bar's middle; the observer says when a mark crosses it.
     let watch: IntersectionObserver | undefined
-    const under = new Map<Element, boolean>()
+    const cover = new Map<Element, number>()
     const start = () => {
       watch?.disconnect()
-      under.clear()
+      cover.clear()
       const box = bar.getBoundingClientRect()
-      const middle = Math.round(box.top + box.height / 2)
+      // The bar: a line one pixel tall across its middle. The menu: its own box, so a card hanging into the light is the light even while the bar is still on paper.
+      const top = span ? Math.max(0, Math.round(box.top)) : Math.round(box.top + box.height / 2)
+      const bottom = span ? Math.min(window.innerHeight, Math.round(box.bottom)) : top + 1
+      if (bottom - top < 1) return setLit(null)
       watch = new IntersectionObserver(
         (entries) => {
-          for (const e of entries) under.set(e.target, e.isIntersecting)
-          const at = [...under].find(([, on]) => on)?.[0]
-          setLit(at ? ((at as HTMLElement).dataset.under as Under) : null)
+          for (const e of entries) cover.set(e.target, e.isIntersecting ? e.intersectionRect.height : 0)
+          let best: Element | undefined
+          let most = 0
+          for (const [el, h] of cover)
+            if (h > most) {
+              most = h
+              best = el
+            }
+          setLit(best ? ((best as HTMLElement).dataset.under as Under) : null)
         },
-        { rootMargin: `${-middle}px 0px ${-(window.innerHeight - middle - 1)}px 0px` },
+        { rootMargin: `${-top}px 0px ${-(window.innerHeight - bottom)}px 0px` },
       )
       for (const mark of marks) watch.observe(mark)
     }
@@ -88,6 +101,6 @@ export function useLightUnder(ref: RefObject<HTMLElement | null>) {
       watch?.disconnect()
       window.removeEventListener('resize', start)
     }
-  }, [ref, known])
+  }, [ref, known, span])
   return lit
 }
