@@ -52,6 +52,7 @@ export const fetchNode = async (cache: string, platform: string = process.platfo
   const archive = new Uint8Array(await response.arrayBuffer())
   const got = sha256(archive)
   if (got !== digest) throw new Error(`${url} has SHA-256 ${got}, not the ${digest} pinned in scripts/node.ts.`)
+  mkdirSync(cache, { recursive: true })
   const scratch = mkdtempSync(join(cache, '.fetching-'))
   try {
     writeFileSync(join(scratch, 'node.tar.gz'), archive)
