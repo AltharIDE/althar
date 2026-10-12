@@ -94,7 +94,7 @@ provisional.
 | Tool | What it does | Kind |
 |---|---|---|
 | `project_overview` | Rules, repositories, notes | Read |
-| `list_tasks`, `read_task` | Status, plan, steps, lead, change | Read |
+| `list_tasks`, `read_task` | Status, plan, steps, lead, and how its pull request stands: draft or ready, checks, unpushed commits, merged or closed, read from the same data as the task's card (never asked of the host; said as last seen where it may be stale or unknown). A task whose pull requests are all merged reads as finished; a closed one is said as last seen, since nothing watches it for reopening | Read |
 | `read_thread` | Earlier turns of a task's thread or its own, by range | Read |
 | `read_change` | A task's diff and checks | Read |
 | `draft_task` | Creates a task in draft, with its repositories and intent: a title of a few words (at most 60 characters), and what the person last said to it kept as what they asked for, which the task's thread opens with and its lead reads | Command |
