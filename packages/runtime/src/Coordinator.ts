@@ -461,16 +461,16 @@ export class Coordinator extends Context.Service<
        */
       const stepOf = (projectId: string, pick: typeof StepPick.Type) =>
         Effect.gen(function* () {
-          // On the way it goes, at an effort that model takes there.
-          const on = (route: Route) =>
-            Effect.map(effortOf(pick.model ?? route.model, route.efforts, pick.effort), (effort) => ({
+          // On the way it goes, at an effort that model takes there; named as the plan names it.
+          const on = (route: Route, named: string) =>
+            Effect.map(effortOf(named, route.efforts, pick.effort), (effort) => ({
               agentId: route.agentId,
               model: route.model,
               ...(effort === null ? {} : { effort }),
             }))
           if (pick.model !== undefined) {
             const route = routeTo(yield* usableModels(projectId), pick.model, pick.agent)
-            if (route !== null) return yield* on(route)
+            if (route !== null) return yield* on(route, pick.model)
             if (pick.agent === undefined)
               return yield* new ToolRefused({
                 message: `No model called ${pick.model} can be used now. ${describeModels(yield* usableModels(projectId))}`,
@@ -488,7 +488,7 @@ export class Coordinator extends Context.Service<
               offered === undefined
                 ? null
                 : routeTo(yield* usableModels(projectId), knownModelName({ id: agentId, name: agentName }, offered))
-            if (elsewhere !== null) return yield* on(elsewhere)
+            if (elsewhere !== null) return yield* on(elsewhere, pick.model)
             return yield* new ToolRefused({
               message: `The person switched ${pick.model} off. ${describeModels(yield* usableModels(projectId))}`,
             })

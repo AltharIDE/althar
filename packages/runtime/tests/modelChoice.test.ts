@@ -16,6 +16,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
+import { describeModels, type Route, routeTo } from '../src/usableModels'
 import { callTool, repository, runtime, until } from './support'
 
 /*
@@ -87,6 +88,69 @@ describe('what is known of models', () => {
       factFor(facts, { id: 'opencode', name: 'OpenCode' }, { id: 'opencode/glm-5.3-free', name: 'GLM-5.3 Free' })?.slug,
       'z-ai/glm-5.3',
     )
+  })
+})
+
+describe('the models as the coordinator reads them', () => {
+  const route = (over: Partial<Route> = {}): Route => ({
+    agentId: 'codex',
+    agentName: 'Codex',
+    model: 'gpt-x',
+    plan: false,
+    efforts: [],
+    effort: null,
+    defaultEffort: null,
+    ...over,
+  })
+
+  it('says each one’s efforts as the tools take them, the one it starts at and the person’s default, as far as they are known', () => {
+    const said = describeModels([
+      {
+        name: 'GPT-X',
+        maker: 'OpenAI',
+        fact: { slug: 'openai/gpt-x', intelligence: null, coding: 70, agentic: null, price: { input: 1.25, output: 10 }, context: null },
+        // What it starts at isn't known, and the person's default is one it doesn't offer.
+        routes: [
+          route({
+            efforts: [
+              { id: 'low', name: 'Low' },
+              { id: 'xhigh', name: 'Extra high' },
+            ],
+            defaultEffort: 'max',
+          }),
+        ],
+      },
+      {
+        name: 'Mystery',
+        maker: null,
+        fact: null,
+        routes: [route({ model: 'mystery', plan: true, efforts: [{ id: 'high', name: 'High' }], effort: 'high', defaultEffort: 'high' })],
+      },
+      { name: 'Nobody', maker: null, fact: null, routes: [] },
+    ])
+    assert.include(
+      said,
+      '\nOpenAI\n- GPT-X: intelligence unknown, coding 70, agentic unknown; per use, $1.25 in and $10.00 out per million tokens; effort low, xhigh\n',
+    )
+    assert.include(said, "\nOthers\n- Mystery: no scores known; on a plan; effort high (its own: high; the person's default: high)\n")
+    assert.match(said, /\n- Nobody: no scores known; per use; no effort to set$/)
+  })
+
+  it('takes a model the way the agent named goes, else the best way, and nothing where it has none', () => {
+    const usable = [
+      {
+        name: 'Large',
+        maker: null,
+        fact: null,
+        routes: [route({ agentId: 'claude-code', model: 'large', plan: true }), route({ model: 'large' })],
+      },
+      { name: 'Gone', maker: null, fact: null, routes: [] },
+    ]
+    assert.strictEqual(routeTo(usable, ' LARGE ')?.agentId, 'claude-code')
+    assert.strictEqual(routeTo(usable, 'large', 'codex')?.agentId, 'codex')
+    assert.strictEqual(routeTo(usable, 'Large', 'opencode')?.agentId, 'claude-code')
+    assert.isNull(routeTo(usable, 'gone'))
+    assert.isNull(routeTo(usable, 'small'))
   })
 })
 
@@ -297,6 +361,18 @@ describe('a plan that names models', () => {
         yield* callTool(access, 'propose_plan', { task: 'tidy-more', lead: { agent: 'codex', model: 'small' } }),
         /^The person switched small off\./,
       )
+      // Named by agent alone, on its own default model, whose efforts aren't known: an effort is refused, and none plans as before.
+      yield* callTool(access, 'draft_task', { title: 'Tidy last' })
+      assert.strictEqual(
+        yield* callTool(access, 'propose_plan', { task: 'tidy-last', lead: { agent: 'codex', effort: 'high' } }),
+        "Fake codex's default model has no effort to set. Leave effort out.",
+      )
+      // Named by agent and an id the agent doesn't offer: none known there either.
+      assert.strictEqual(
+        yield* callTool(access, 'propose_plan', { task: 'tidy-last', lead: { agent: 'codex', model: 'mystery-9', effort: 'high' } }),
+        'mystery-9 has no effort to set. Leave effort out.',
+      )
+      assert.match(yield* callTool(access, 'propose_plan', { task: 'tidy-last', lead: { agent: 'codex', model: 'mystery-9' } }), /^Planned/)
     }).pipe(Effect.provide(runtime(':memory:', {}, { perUse: ['codex'] }))),
   )
 
