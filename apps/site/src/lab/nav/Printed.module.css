@@ -1,0 +1,83 @@
+/* The printed bar: the README banner's two inks on its paper stock (brand/export/palette: print-stock, print-black, cobalt). */
+
+.bar {
+  --stock: #efeadf;
+  --ink: #1b1b20;
+  --cobalt: #2b3bff;
+  --move: 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  position: fixed; inset: 0 0 auto; z-index: 40;
+  display: flex; align-items: center; gap: 28px; height: 64px; padding: 0 var(--gut);
+  background: var(--stock); color: var(--ink);
+  /* The masthead's rules: a heavy one, and a hairline under it. */
+  box-shadow: inset 0 -1px 0 var(--ink), 0 3px 0 -1px var(--stock), 0 4px 0 -1px var(--ink);
+}
+
+.brand {
+  /* The halftone draws in the ink it is given. */
+  --t-1: var(--ink); --live: var(--cobalt);
+  flex: none; display: inline-flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none;
+  font: 600 13.5px var(--mono); letter-spacing: 0.2em; text-transform: uppercase;
+}
+
+.pages { display: flex; gap: 6px; margin: 0 auto; }
+.pages a {
+  position: relative; display: inline-flex; align-items: center; height: 34px; padding: 0 14px; overflow: hidden;
+  color: var(--ink); text-decoration: none; font: 500 12.5px var(--mono); letter-spacing: 0.16em; text-transform: uppercase;
+}
+/* The word is knocked out of the screen, as a printer leaves the stock bare under type, so it reads over the dots. */
+.pages a span { position: relative; padding: 3px 4px 3px 6px; background: var(--stock); }
+/* The screen comes in from the left, printing over the page you're on in cobalt, and the one pointed at in black. */
+.screen {
+  position: absolute; inset: 0;
+  /* A screen of dots, as the banners print the mark, in the ink it is given. */
+  background: radial-gradient(circle, var(--dot, var(--cobalt)) 0 1.15px, transparent 1.5px) 0 0 / 4px 4px;
+  transform: scaleX(0); transform-origin: left; transition: transform var(--move);
+}
+.pages a:hover .screen, .pages a:focus-visible .screen { --dot: rgba(27, 27, 32, 0.38); transform: none; }
+.pages a[aria-current='page'] .screen { --dot: var(--cobalt); transform: none; }
+.pages a[aria-current='page'] span { font-weight: 700; }
+
+.end { flex: none; display: flex; align-items: center; gap: 8px; }
+.github { display: grid; place-items: center; width: 34px; height: 34px; color: var(--ink); }
+.github:hover { background: rgba(27, 27, 32, 0.08); }
+.download {
+  display: inline-flex; align-items: center; gap: 9px; height: 34px; padding: 0 15px;
+  background: var(--ink); color: var(--stock); text-decoration: none;
+  font: 600 12px var(--mono); letter-spacing: 0.16em; text-transform: uppercase;
+}
+.download i { width: 6px; height: 6px; border-radius: 50%; background: #5563ff; }
+.menuButton {
+  display: none; height: 34px; padding: 0 12px; border: 1px solid var(--ink); border-radius: 0; background: none; color: var(--ink);
+  font: 600 12px var(--mono); letter-spacing: 0.16em; text-transform: uppercase; cursor: pointer;
+}
+
+/* The phone's menu: the banner's words, the page you're on printed as a cobalt halftone. */
+.sheet { position: absolute; top: calc(100% + 4px); left: 0; right: 0; overflow: hidden; pointer-events: none; }
+.sheet > nav {
+  display: grid; padding: 8px var(--gut) 22px; background: var(--stock); box-shadow: inset 0 -1px 0 var(--ink);
+  transform: translateY(-101%); transition: transform 380ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.sheetOpen { pointer-events: auto; }
+.sheetOpen > nav { transform: none; }
+.sheet a {
+  padding: 4px 0; color: var(--ink); text-decoration: none;
+  font-family: 'Inter Display', var(--display); font-size: 46px; line-height: 1.05; font-weight: 700; letter-spacing: -0.045em;
+}
+.sheet a[aria-current='page'] {
+  color: transparent; background: radial-gradient(circle, var(--cobalt) 0 1.5px, transparent 1.9px) 0 0 / 4.5px 4.5px;
+  -webkit-background-clip: text; background-clip: text;
+}
+.sheet .sheetGithub {
+  display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--ink);
+  font: 600 12.5px var(--mono); letter-spacing: 0.16em; text-transform: uppercase;
+}
+
+@media (max-width: 900px) {
+  .bar { height: 58px; gap: 12px; }
+  .pages, .github { display: none; }
+  .end { margin-left: auto; }
+  .menuButton { display: inline-flex; align-items: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .screen, .sheet > nav { transition: none; }
+}

@@ -1,0 +1,28 @@
+/* The stand-in page under each concept, and the panel that switches between them. */
+
+.page { min-height: 220vh; padding: 168px var(--edge) 240px; }
+.kicker { font: 500 12px var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--t-3); }
+.title {
+  max-width: 14em; margin-top: 14px;
+  font-family: 'Inter Display', var(--display); font-size: clamp(40px, 6.4vw, 84px); line-height: 1; font-weight: 600; letter-spacing: -0.045em;
+}
+.lede { max-width: 34em; margin-top: 22px; color: var(--t-2); font-size: 19px; }
+.blocks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-top: 64px; }
+.block { height: 220px; border-radius: 14px; background: var(--n-1); box-shadow: var(--lift-card), inset 0 0 0 1px var(--line); }
+
+.panel {
+  position: fixed; left: 50%; bottom: 16px; z-index: 50; width: min(720px, calc(100vw - 24px)); box-sizing: border-box;
+  padding: 12px 14px 14px; border-radius: 16px; background: var(--n-1); box-shadow: var(--lift-dialog), inset 0 0 0 1px var(--line-2);
+  transform: translateX(-50%);
+}
+.choices { display: flex; gap: 4px; padding: 3px; border-radius: 10px; background: var(--sunk); }
+.choices button {
+  flex: 1; height: 32px; border: 0; border-radius: 8px; background: none; color: var(--t-2); font: 600 13px var(--font); cursor: pointer;
+}
+.choices button[aria-pressed='true'] { background: var(--paper); color: var(--t-1); box-shadow: var(--lift); }
+.idea { margin-top: 10px; color: var(--t-2); font-size: 13.5px; line-height: 1.5; }
+
+@media (max-width: 640px) {
+  .page { padding-top: 132px; }
+  .idea { font-size: 12.5px; }
+}

@@ -22,6 +22,8 @@ const PAGES: Record<string, ComponentType> = {
   '/enterprise': EnterpriseHome,
   /** The link previews, drawn for scripts/og.ts to screenshot: in development only, and not in the build. */
   ...(import.meta.env.DEV ? { '/og': lazy(() => import('./og/Og').then((m) => ({ default: m.Og }))) } : {}),
+  /** The nav concepts, to choose the next nav from: in development only, and not in the build. */
+  ...(import.meta.env.DEV ? { '/lab/nav': lazy(() => import('./lab/nav/NavLab').then((m) => ({ default: m.NavLab }))) } : {}),
 }
 
 /** The developer page at the root, and the other pages by path. Any other path is the page that isn't there. */
