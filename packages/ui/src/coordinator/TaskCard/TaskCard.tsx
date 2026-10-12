@@ -60,6 +60,8 @@ export interface TaskCardProps {
   /** When it started: 2m ago. */
   started: string
   lead: ModelInfo
+  /** How hard its lead thinks, in the picker's words (High); left out where it isn't known. */
+  effort?: string
   /** A question, not a change: its lead is who answered it. */
   question?: boolean
   branch?: string
@@ -87,6 +89,7 @@ export function TaskCard({
   now,
   started,
   lead,
+  effort,
   question,
   branch,
   from,
@@ -126,6 +129,7 @@ export function TaskCard({
       <div className={s.foot}>
         <span className={s.lead}>
           {question ? t.answeredBy : t.lead} <Model model={lead} short className={s.leadModel} />
+          {effort !== undefined && <span className={s.effort}>{effort}</span>}
         </span>
         {branch && (
           <>

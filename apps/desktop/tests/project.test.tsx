@@ -385,6 +385,27 @@ describe('the Talk room', () => {
     )
   })
 
+  it('says beside a running task’s lead how hard it thinks, and nothing where that isn’t known', async () => {
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          items: [
+            // A mini task, which has no plan's card to show it.
+            items.card(card({ phase: 'running', step: 'implement', plan: null, leadModel: 'opus', leadEffort: 'high' })),
+            items.card(card({ taskId: 't2', slug: 'tidy', title: 'Tidy', phase: 'running', step: 'review', leadModel: 'sonnet' })),
+          ],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    const running = await screen.findByRole('article', { name: 'Add a retry' })
+    expect(within(running).getByText('Claude Opus')).toBeTruthy()
+    expect(within(running).getByText('High')).toBeTruthy()
+    const tidy = screen.getByRole('article', { name: 'Tidy' })
+    expect(within(tidy).getByText('Claude Sonnet')).toBeTruthy()
+    expect(within(tidy).queryByText(/^(Low|Medium|High)$/)).toBeNull()
+  })
+
   it('talks to the coordinator on the agent last used, or on another the person picks', async () => {
     const { client } = fakeClient()
     withServices(<Project />, client)

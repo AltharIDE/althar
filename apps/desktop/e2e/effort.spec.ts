@@ -11,7 +11,8 @@ import { launch, say } from './support'
  * The effort the coordinator picks for a step, in a real window with the
  * fake agent: `[coordinator:plan-effort]` plans its lead on the large model
  * at high effort. The plan's card shows it as one the person chose, and the
- * person changes it there before the plan starts.
+ * person changes it there before the plan starts; once it has, the task's
+ * card says the effort its lead is on.
  */
 
 test('shows on the plan the effort the coordinator picked for its lead, which the person can change before it starts', async () => {
@@ -46,6 +47,13 @@ test('shows on the plan the effort the coordinator picked for its lead, which th
     await page.getByRole('radio', { name: 'Low' }).click()
     await page.keyboard.press('Escape')
     await expect(page.getByRole('button', { name: /^Lead for this task: .*Large Low$/ })).toBeVisible()
+
+    // Started, its card says what its lead is on.
+    await page.getByRole('button', { name: 'Start', exact: true }).click()
+    const task = page.getByRole('article', { name: 'Rework how the cache expires' })
+    await expect(task.getByText('Low', { exact: true })).toBeVisible({ timeout: 20_000 })
+    await expect(task.getByText(/Large/)).toBeVisible()
+    await task.screenshot({ path: 'test-results/task-effort.png', animations: 'disabled' })
   } finally {
     await electronApp.close()
   }

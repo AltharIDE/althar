@@ -4,7 +4,7 @@ import type { AgentStatus, PlanStep, TaskEnd as End } from '@althar/contracts'
 import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@althar/ui'
 
 import { waitsWords } from '../../shared/agents'
-import { type NameModel, useModelNames } from '../../shared/modelNames'
+import { type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
 import { stepIndex, stepNames, stepText } from '../../shared/steps'
@@ -133,6 +133,7 @@ function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; 
 
 export function Card({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
   const named = useModelNames()
+  const effortOf = useEffortNames()
   if ((card.phase === 'planned' || card.phase === 'held') && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} />
   const steps = stepNames(card.plan?.steps ?? [])
@@ -148,6 +149,8 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
           ? undefined
           : text.now[card.step]
   const from = fromOf(card)
+  // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
+  const effort = effortOf(card.lead, card.leadModel, card.leadEffort)
   return (
     <TaskCard
       task={card.slug}
@@ -158,6 +161,7 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
       {...(now === undefined ? {} : { now })}
       started={card.startedAt === null ? '' : ago(card.startedAt)}
       lead={named(card.lead, card.leadModel)}
+      {...(effort === null ? {} : { effort })}
       {...(card.branch === null ? {} : { branch: card.branch })}
       {...(from === undefined ? {} : { from })}
       {...(card.change === null ? {} : { pr: `${card.change.short} ${card.change.prefix}${card.change.number}` })}

@@ -1156,6 +1156,7 @@ export class Queries extends Context.Service<
             review: string | null
             lead: string | null
             leadModel: string | null
+            leadEffort: string | null
             firstSession: string | null
             starting: number
             held: string | null
@@ -1172,6 +1173,7 @@ export class Queries extends Context.Service<
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
               (SELECT model FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_model,
+              (SELECT effort FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_effort,
               (SELECT min(started_at) FROM provider_sessions WHERE thread_id = t.id) AS first_session,
               -- A step admitted and not yet running, or a session still starting: its agent is on its way.
               (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
@@ -1222,6 +1224,10 @@ export class Queries extends Context.Service<
             }
           })
           const end = text(parameters, 'end')
+          // How hard its lead thinks: what its session is on, which it says once started; until then the plan's, while its lead is the plan's.
+          const implement = planned.find((step) => step.key === 'implement')
+          const onPlan = task.lead === null || (task.lead === implement?.agentId && task.leadModel === implement.model)
+          const leadEffort = task.leadEffort ?? (onPlan ? (implement?.effort ?? null) : null)
           const { issue, changes } = links ?? (yield* linksOf(taskId))
           return {
             taskId,
@@ -1244,9 +1250,10 @@ export class Queries extends Context.Service<
             change: changes.find((candidate) => candidate.state === 'open') ?? changes[0] ?? null,
             step: task.step,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
-            lead: task.lead ?? (planned.find((step) => step.key === 'implement')?.agentId || null),
+            lead: task.lead ?? (implement?.agentId || null),
             // Its session's model once one started; the plan's until then.
-            leadModel: task.lead === null ? (planned.find((step) => step.key === 'implement')?.model ?? null) : task.leadModel,
+            leadModel: task.lead === null ? (implement?.model ?? null) : task.leadModel,
+            leadEffort,
             branch: task.branch,
             startedAt: task.runAt ?? task.firstSession,
             waits: waitsOf(task.held),

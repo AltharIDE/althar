@@ -245,6 +245,9 @@ const cardsOf = (projectId: string) =>
     return snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : []))
   })
 
+/** A task's latest card, by its slug. */
+const cardOf = (projectId: string, slug: string) => Effect.map(cardsOf(projectId), (cards) => cards.findLast((card) => card.slug === slug))
+
 describe('a plan that names models', () => {
   it.live('takes each model the best way there is, refuses one that can’t be used, and still takes an agent', () =>
     Effect.gen(function* () {
@@ -345,6 +348,8 @@ describe('a plan that names models', () => {
           { key: 'implement', agentId: 'claude-code', model: 'large', effort: 'high', skipped: false },
           { key: 'review', agentId: 'codex', model: 'huge', effort: 'max', skipped: false },
         ])
+        // Its lead's, beside its model, the plan's until a lead has started.
+        assert.deepStrictEqual([card?.lead, card?.leadModel, card?.leadEffort], ['claude-code', 'large', 'high'])
         const planId = card?.plan?.id ?? ''
         yield* plans.change(
           planId,
@@ -367,6 +372,8 @@ describe('a plan that names models', () => {
           (rows) => rows.length === 1,
         )
         assert.strictEqual(lead?.effort, 'high')
+        // Running, its card says what its lead is on.
+        assert.strictEqual((yield* cardOf(projectId, 'rework-the-cache'))?.leadEffort, 'high')
 
         // Left out, the step names none: it starts at the person's default for the model, or the model's own, as before.
         yield* callTool(access, 'draft_task', { title: 'Fix a typo' })
@@ -419,6 +426,9 @@ describe('a plan that names models', () => {
           (yield* leadOf('try-the-cache')).map((lead) => [lead.model, lead.effort]),
           [['large', 'high']],
         )
+        // With no plan to show it, its card says it.
+        const tried = yield* cardOf(projectId, 'try-the-cache')
+        assert.deepStrictEqual([tried?.leadModel, tried?.leadEffort], ['large', 'high'])
         // Left out, it starts at the person's default for the model, as before.
         yield* setDefaultEffort('claude-code', 'small', 'low')
         assert.match(
@@ -429,6 +439,7 @@ describe('a plan that names models', () => {
           (yield* leadOf('try-the-queue')).map((lead) => [lead.model, lead.effort]),
           [['small', 'low']],
         )
-      }).pipe(Effect.provide(runtime(':memory:', {}, { signedOut: ['opencode'] }))),
+        assert.strictEqual((yield* cardOf(projectId, 'try-the-queue'))?.leadEffort, 'low')
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { signedOut: ['opencode'] }))))),
   )
 })

@@ -970,6 +970,8 @@ export const TaskCard = Schema.Struct({
   lead: Schema.NullOr(Schema.String),
   /** The model it leads on, by the agent's id for it: its latest session's, or the plan's; null for the agent's own. */
   leadModel: Schema.NullOr(Schema.String),
+  /** How hard its lead thinks, by the agent's id for the level: its latest session's, or the plan's until that has said; null where neither says. */
+  leadEffort: Schema.NullOr(Schema.String),
   branch: Schema.NullOr(Schema.String),
   startedAt: Schema.NullOr(Schema.String),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
