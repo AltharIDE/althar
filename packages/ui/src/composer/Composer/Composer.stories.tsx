@@ -412,6 +412,52 @@ export const SendsOnEnter: Story = {
   },
 }
 
+/** Enter while dictating wraps up and writes down what was said, and does not send; with ⌘Enter the same. */
+export const EnterStopsDictating: Story = {
+  args: { onSubmit: fn(), onSendNow: fn(), busy: true, dictation: { elapsed: '0:04', onStart: () => {}, onStop: fn() } },
+  render: (args) => <Composer {...args} value="Keep the limiter where it is." onChange={() => {}} />,
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const field = c.getByRole('textbox', { name: 'Tell the lead' })
+    await expect(c.getByText('Enter to stop; it is not sent')).toBeInTheDocument()
+    await userEvent.click(field)
+    await userEvent.keyboard('{Enter}')
+    await userEvent.keyboard('{Meta>}{Enter}{/Meta}')
+    await expect(args.dictation?.onStop).toHaveBeenCalledTimes(2)
+    await expect(args.onSubmit).not.toHaveBeenCalled()
+    await expect(args.onSendNow).not.toHaveBeenCalled()
+  },
+}
+/** Enter while what was said is written down does nothing: a half-finished message cannot go. */
+export const EnterWhileWritingDoesNothing: Story = {
+  args: { onSubmit: fn(), onSendNow: fn(), dictation: { elapsed: null, busy: true, onStart: () => {}, onStop: fn() } },
+  render: (args) => <Composer {...args} value="Keep the limiter where it is." onChange={() => {}} />,
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('textbox', { name: 'Tell the lead' }))
+    await userEvent.keyboard('{Enter}')
+    await expect(args.dictation?.onStop).not.toHaveBeenCalled()
+    await expect(args.onSubmit).not.toHaveBeenCalled()
+  },
+}
+/** Once the text is in the field and dictation has ended, Enter sends as usual. */
+export const EnterSendsAfterDictating: Story = {
+  args: { onSubmit: fn() },
+  render: (args) => (
+    <Composer
+      {...args}
+      value="Keep the limiter where it is."
+      onChange={() => {}}
+      dictation={{ elapsed: null, onStart: () => {}, onStop: () => {} }}
+    />
+  ),
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('textbox', { name: 'Tell the lead' }))
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onSubmit).toHaveBeenCalledWith('Keep the limiter where it is.')
+  },
+}
+
 /* The field takes the forced focus; the send button the forced hover and press. */
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'button[type="submit"]', focus: 'textarea', pressed: 'button[type="submit"]' }),
