@@ -45,6 +45,7 @@ import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
 import { git } from './git'
 import { reviewCopyOf } from './reviewCopy'
+import { Setups } from './Setups'
 import type { InputImage } from './sentImages'
 import { defaultEffortOf } from './preferences'
 import { addItem, type OutputSoFar, recorder, toolItem, transcript } from './threads'
@@ -225,6 +226,7 @@ type Store =
   | Accounts
   | Limits
   | Models
+  | Setups
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
 
 /** A turn's input was taken back while the turn was being made: it is made again from what still waits. */
@@ -414,6 +416,7 @@ export class Sessions extends Context.Service<
       const accounts = yield* Accounts
       const limits = yield* Limits
       const toolServer = yield* ToolServer
+      const setups = yield* Setups
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
@@ -679,6 +682,9 @@ export class Sessions extends Context.Service<
               Effect.catchCause((cause) => Effect.logWarning('Could not refresh the coordinator folder', cause)),
             )
           const brief = running.brief
+          // The lead is told how its worktrees were set up, in its brief.
+          const setUp = thread.role === 'task' && brief !== undefined ? yield* setups.told(thread.taskId) : null
+          const briefed = brief === undefined || setUp === null ? brief : { ...brief, text: `${brief.text}\n\n${setUp}` }
           // The coordinator is told what became of its plans in its models' names, which are read first: asking an agent may take a while.
           const named =
             thread.role === 'coordinator'
@@ -688,7 +694,7 @@ export class Sessions extends Context.Service<
                   ),
                 )
               : null
-          let prompt = promptFor(inputs, brief)
+          let prompt = promptFor(inputs, briefed)
           const turnId = yield* newId(Ids.turnDelivery)
           const [session] = yield* sql<{
             model: string | null
@@ -711,7 +717,7 @@ export class Sessions extends Context.Service<
                       Effect.as(Effect.logWarning('Could not read what changed for the coordinator', cause), null),
                     ),
                   )
-                  prompt = promptFor(inputs, brief, news)
+                  prompt = promptFor(inputs, briefed, news)
                 }
                 const at = yield* timestamp
                 yield* sql`INSERT INTO turn_deliveries ${sql.insert({
@@ -989,6 +995,9 @@ export class Sessions extends Context.Service<
         Effect.forever(
           Effect.gen(function* () {
             yield* Queue.take(running.wake)
+            // A lead's first turn waits for its worktrees to be set up (Setups.ts), and so has what was said meanwhile. It
+            // waits before it holds the turn, so the lead can be stopped meanwhile.
+            if (running.thread.role === 'task' && running.brief !== undefined) yield* setups.ready(running.thread.taskId)
             yield* running.delivering.withPermits(1)(
               Effect.gen(function* () {
                 while (!running.stopping && (yield* deliver(running))) {

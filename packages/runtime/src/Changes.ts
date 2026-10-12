@@ -376,6 +376,8 @@ export class Changes extends Context.Service<
      * where their remotes name none it knows.
      */
     hostFor(projectId: string): Effect.Effect<Host | null>
+    /** Each host of a project's repositories, or of those a task changes: null for one on none Althar knows. */
+    hostsFor(projectId: string, taskId?: string): Effect.Effect<ReadonlyArray<Host | null>>
   }
 >()('@althar/runtime/Changes') {
   static readonly layer: Layer.Layer<Changes, never, Store> = Layer.effect(
@@ -2502,6 +2504,7 @@ export class Changes extends Context.Service<
             }),
           ),
         hostFor: (projectId) => provide(hostFor(projectId)),
+        hostsFor: (projectId, taskId) => provide(hostsFor(projectId, taskId)).pipe(Effect.orElseSucceed(() => [])),
       })
     }),
   )

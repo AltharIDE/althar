@@ -470,6 +470,20 @@ export const items = {
       ...content,
     },
   }),
+  /** Althar setting up the task's worktree, installing the dependencies its lockfile names, still running unless told otherwise. */
+  setup: (content: Partial<Extract<ThreadItem, { kind: 'setup' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'setup',
+    content: {
+      repository: 'meridian',
+      command: 'bun install --frozen-lockfile',
+      kept: false,
+      startedAt: NOW,
+      ended: null,
+      ...content,
+    },
+  }),
 }
 
 type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']

@@ -91,6 +91,8 @@ export const ThreadItemKind = Schema.Literals([
   'run',
   /** An issue the coordinator drafted, in its thread: the person files it, changes it or discards it there. Althar posts it. */
   'issue_draft',
+  /** Althar setting up a task's worktree, in the task's thread, before its lead starts. Althar posts it and keeps it current. */
+  'setup',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
