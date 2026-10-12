@@ -60,6 +60,8 @@ printf 'GIT_CONFIG_COUNT=%s\\n' "\${GIT_CONFIG_COUNT-<unset>}"
 printf 'GIT_CONFIG_KEY_0=%s\\n' "\${GIT_CONFIG_KEY_0-<unset>}"
 printf 'GIT_CONFIG_VALUE_0=%s\\n' "\${GIT_CONFIG_VALUE_0-<unset>}"
 printf 'GIT_TERMINAL_PROMPT=%s\\n' "\${GIT_TERMINAL_PROMPT-<unset>}"
+printf 'GIT_DIR=%s\\n' "\${GIT_DIR-<unset>}"
+printf 'GIT_WORK_TREE=%s\\n' "\${GIT_WORK_TREE-<unset>}"
 printf 'SSH_AUTH_SOCK=%s\\n' "\${SSH_AUTH_SOCK-<unset>}"
 printf 'OPENCODE_CONFIG_CONTENT=%s\\n' "\${OPENCODE_CONFIG_CONTENT-<unset>}"
 if git config --list >/dev/null 2>&1; then echo 'git=ok'; else echo 'git=failed'; fi
@@ -84,6 +86,7 @@ const device = ({ codex = 'bins', deny = false }: At = {}) => {
   const sandboxHome = join(root, 'sandbox-home')
   const worktree = join(root, 'worktrees', 'p', 't')
   for (const folder of [hostHome, sandboxHome, worktree]) mkdirSync(folder, { recursive: true })
+  writeFileSync(join(worktree, '.git'), 'gitdir: /run/flatpak/doc/abc123/repo/.git/worktrees/task\n')
   // A Codex on the session PATH, or only where an installer puts one (a usual directory).
   const codexBin = codex === 'home' ? join(hostHome, '.local', 'bin') : bins
   if (codex !== 'none') {
@@ -155,6 +158,8 @@ describe('the Codex host bridge', () => {
     expect(output).toContain('GIT_CONFIG_KEY_0=credential.helper')
     // An empty value is a value: it is what unsets git's credential helper, and a git that misses it refuses to start.
     expect(output).toContain('GIT_CONFIG_VALUE_0=\n')
+    expect(output).toContain('GIT_DIR=/run/user/' + uid + '/doc/abc123/repo/.git/worktrees/task')
+    expect(output).toContain(`GIT_WORK_TREE=${realpathSync(at.worktree)}`)
     expect(output).toContain('git=ok')
     expect(output).toContain('SSH_AUTH_SOCK=<unset>')
     // The device's own home, not the sandbox's.
@@ -166,7 +171,7 @@ describe('the Codex host bridge', () => {
     expect(output).toContain('OPENCODE_CONFIG_CONTENT=<unset>')
     const calls = readFileSync(at.log, 'utf8')
     expect(calls).toContain('--clear-env')
-    expect(calls).toContain(JSON.stringify('--directory=' + at.worktree))
+    expect(calls).toContain(JSON.stringify('--directory=' + realpathSync(at.worktree)))
     expect(calls).toContain(JSON.stringify('--unset-env=SSH_AUTH_SOCK'))
     expect(calls).toContain(JSON.stringify('--env=CODEX_CONFIG=' + at.codexConfig))
     expect(calls).toContain(JSON.stringify('--env=GIT_CONFIG_VALUE_0='))
