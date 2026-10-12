@@ -144,6 +144,17 @@ export enum Verdict {
   Blocked = 'blocked',
 }
 
+/** What a piece of evidence is: what a lead shows to say its change does what it should. */
+export enum EvidenceKind {
+  Screenshot = 'screenshot',
+  Recording = 'recording',
+  Command = 'command',
+  TestRun = 'test_run',
+  Response = 'response',
+  Log = 'log',
+  Note = 'note',
+}
+
 /**
  * Where a review finding stands. The lead settles findings by default: it
  * fixes what holds and sets aside what does not. A finding reaches you when

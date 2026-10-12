@@ -25,6 +25,9 @@ export const reviewCopyOf = (worktree: string) => {
   return join(dirname(task), '.review', basename(task), basename(worktree))
 }
 
+/** Where a task's reviewer reads the lead's evidence, beside the copies it reads: from one of the copies. */
+export const evidenceFolderOf = (copy: string) => join(dirname(copy), '.evidence')
+
 /** Snapshots the worktree as it stands and makes the review copy hold it: the snapshot's commit and tree. */
 export const snapshotForReview = (worktree: string, round: number) =>
   Effect.gen(function* () {

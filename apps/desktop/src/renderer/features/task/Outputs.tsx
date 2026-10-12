@@ -1,9 +1,20 @@
 import type { ChangeSummary, ChangedFile, TaskRepositoryMerged, ThreadSnapshot } from '@althar/contracts'
 import { doing, type Doing } from './actions'
-import { Button, type ChangeCheck, ChangeSet, ChangeState, CheckState, type ModelInfo, type PullRequest, ThreadMeasure } from '@althar/ui'
+import {
+  Button,
+  type ChangeCheck,
+  ChangeSet,
+  ChangeState,
+  CheckState,
+  Evidence,
+  type ModelInfo,
+  type PullRequest,
+  ThreadMeasure,
+} from '@althar/ui'
 
 import { type NameModel, useModelNames } from '../../shared/modelNames'
 import { checkOf } from '../../shared/checks'
+import { taskEvidence } from '../../shared/evidence'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
 import s from './Task.module.css'
@@ -15,7 +26,8 @@ import { device } from '../../shared/device'
  * up to the heads shown, and its repositories whose work ended on its branch
  * merge here. A draft is marked ready here, what the lead committed since is
  * pushed here, and sending it back is a note to the lead. Before it is
- * ready, the same card shows what it has changed so far.
+ * ready, the same card shows what it has changed so far. Under it, what
+ * the lead showed of it working, and what it couldn't.
  */
 
 export const text = {
@@ -343,6 +355,8 @@ export function Outputs({
   const drafts = open.filter((one) => one.state === 'open' && one.draft)
   // A pull request needs its host connected: without, there is nothing a press could open.
   const unpublished = ready && first === undefined && task.commits > 0 && snapshot.host?.connected === true
+  // What the lead showed of it working, under what it changed: what the person reads before accepting it.
+  const shown = taskEvidence(snapshot.items)
   return (
     <div className={s.outputs}>
       <ThreadMeasure className={s.outputsBody}>
@@ -396,6 +410,7 @@ export function Outputs({
             ))}
           </div>
         )}
+        <Evidence pieces={shown.pieces} unverified={shown.unverified} headingLevel={2} />
       </ThreadMeasure>
     </div>
   )
