@@ -4,6 +4,7 @@ import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
   Arrived,
   CodeBlock,
+  Evidence,
   FindingState,
   Issue,
   LinkButton,
@@ -28,6 +29,7 @@ import {
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
+import { piecesOf } from './evidence'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
 import { useModelNames } from './modelNames'
@@ -199,7 +201,12 @@ function StepView({ id, result, of }: { id: string; result: StepResult; of: numb
         state={StepState.Done}
         {...(model === undefined ? {} : { model })}
         defaultOpen
-        detail={<Markdown source={result.summary} />}
+        detail={
+          <>
+            <Markdown source={result.summary} />
+            <Evidence pieces={piecesOf(id, result.evidence)} unverified={result.unverified} headingLevel={4} />
+          </>
+        }
       />
     )
   // The lead settles findings on its own for now: what the review found is left to it.

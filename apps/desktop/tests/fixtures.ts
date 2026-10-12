@@ -316,6 +316,8 @@ export const items = {
       summary: 'Added the retry.',
       verdict: null,
       findings: [],
+      evidence: [],
+      unverified: [],
       agentId: null,
       change: null,
       ...content,
