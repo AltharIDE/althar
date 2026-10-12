@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -407,7 +407,9 @@ const playStall = async (
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
  * Althar says it isn't committed; `[lead:evidence]` saves a screenshot in
  * the worktree, uncommitted, and finishes with it, a test run and something
- * it couldn't try. Asked for its pull request's description
+ * it couldn't try, and settling, a new run and nothing left untried;
+ * `[review:evidence]` reads each evidence file its brief names, and says so
+ * in its summary. Asked for its pull request's description
  * in the repository's template, it fills it in, ticking a box it shouldn't.
  * Told what people said on its pull
  * request, `[lead:answer]`
@@ -454,10 +456,16 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
             { severity: 'nit', file: 'README.md', claim: 'A typo.' },
           ],
         })
+      // Asked to look at the lead's evidence, it reads each file its brief names, and says what it found.
+      const looked = session.markers.has('[review:evidence]')
+        ? ` Read: ${[...text.matchAll(/^- [^\n]*: (\/[^\n]+)$/gm)]
+            .map(([, path = '']) => `${path.split('/').at(-1) ?? ''} (${statSync(path).size} bytes)`)
+            .join(', ')}.`
+        : ''
       if (text.includes('[review:findings]') && !text.startsWith('Round '))
         return await call('report_review', {
           verdict: 'changes_requested',
-          summary: 'The heading needs fixing.',
+          summary: `The heading needs fixing.${looked}`,
           findings: [{ severity: 'major', file: 'README.md', line: 1, claim: 'The heading is wrong.' }],
         })
       if (text.includes('[review:') || text.startsWith('Round '))
@@ -478,7 +486,16 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         const findings = (text.match(/find_[0-9a-f]{32}/g) ?? []).map((id) =>
           aside ? { id, outcome: 'set_aside', reason: 'It reads as intended.' } : { id, outcome: 'fixed' },
         )
-        return await call('finish_step', { summary: 'Fixed the heading.', findings })
+        // Showing its work, it hands a new run, not its screenshot again, and has now tried what it couldn't.
+        const shown = session.markers.has('[lead:evidence]')
+          ? {
+              evidence: [
+                { kind: 'test_run', caption: 'The heading test', command: 'bun test heading', exit_code: 0, output: '1 passed\n' },
+              ],
+              unverified: [],
+            }
+          : {}
+        return await call('finish_step', { summary: 'Fixed the heading.', findings, ...shown })
       }
       // Told to carry on, as a lead that took a step over is, it finishes as it was told to at first.
       // Told to carry on, or to try another way, as Althar tells one that stalled or went round in circles.

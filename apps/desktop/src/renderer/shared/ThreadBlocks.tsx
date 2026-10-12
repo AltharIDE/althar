@@ -204,7 +204,7 @@ function StepView({ id, result, of }: { id: string; result: StepResult; of: numb
         detail={
           <>
             <Markdown source={result.summary} />
-            <Evidence pieces={piecesOf(id, result.evidence)} unverified={result.unverified} headingLevel={4} />
+            <Evidence pieces={piecesOf(id, result.evidence)} unverified={result.unverified ?? []} headingLevel={4} />
           </>
         }
       />

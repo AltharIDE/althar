@@ -856,8 +856,9 @@ export class Queries extends Context.Service<
                 WHERE thread_id = (SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task') AND kind = 'tool_call'`
             : []
           // A screenshot the lead handed as evidence, left uncommitted, isn't part of what it changed.
-          const pictures = wants.changed ? yield* evidencePaths(taskId) : new Set<string>()
-          const shown = (file: ChangedFile) => !(file.uncommitted && file.status === 'added' && pictures.has(file.path))
+          const pictures = wants.changed ? yield* evidencePaths(taskId) : () => false
+          const shown = (worktree: string) => (file: ChangedFile) =>
+            !(file.uncommitted && file.status === 'added' && pictures(worktree, file.path))
           const each = yield* Effect.forEach(
             worktrees,
             (worktree) =>
@@ -919,12 +920,12 @@ export class Queries extends Context.Service<
           return {
             files: each.flatMap(({ worktree, changed }) =>
               worktrees.length > 1
-                ? changed.files.filter(shown).map((file) => ({
+                ? changed.files.filter(shown(worktree.path)).map((file) => ({
                     ...file,
                     path: `${worktree.slug}/${file.path}`,
                     from: file.from === null ? null : `${worktree.slug}/${file.from}`,
                   }))
-                : changed.files.filter(shown),
+                : changed.files.filter(shown(worktree.path)),
             ),
             commits: each.reduce((sum, { changed }) => sum + changed.commits, 0),
             here: each.flatMap(({ here }) => here),

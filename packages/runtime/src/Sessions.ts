@@ -45,6 +45,7 @@ import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
 import { git } from './git'
 import { reviewCopyOf } from './reviewCopy'
+import { evidenceForReview } from './evidence'
 import { defaultEffortOf } from './preferences'
 import { addItem, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import { commandOfCall, exitCodeIn, type LeftRunning, printedMore, servingAt, type ShownLeftRunning, shownOf, tailOf } from './leftRunning'
@@ -145,31 +146,6 @@ type ThreadContext = TaskThread | CoordinatorThread | ReviewThread
 const cwdOf = (thread: ThreadContext) => (thread.role === 'coordinator' ? thread.folder.folder : thread.cwd)
 
 /** Every folder a thread's agent works in: a picture an agent points at is read only from inside them. */
-/** What a lead's step result says of its work, as the reviewer is told it. */
-interface LeadReported {
-  readonly summary?: string
-  readonly evidence?: ReadonlyArray<{
-    readonly kind?: string
-    readonly caption?: string
-    readonly command?: string | null
-    readonly exit?: number | null
-  }>
-  readonly unverified?: ReadonlyArray<string>
-}
-
-/** The evidence the lead handed, and what it couldn't show, in words for the reviewer: captions, and commands with their exits. */
-const shownText = (reported: LeadReported) => {
-  const evidence = (reported.evidence ?? []).map((piece) => {
-    const ran = piece.command == null ? '' : ` (\`${piece.command}\`${piece.exit == null ? '' : `, exit ${piece.exit}`})`
-    return `- ${(piece.kind ?? 'note').replace('_', ' ')}: ${piece.caption ?? ''}${ran}`
-  })
-  const unverified = (reported.unverified ?? []).map((line) => `- ${line}`)
-  return [
-    ...(evidence.length === 0 ? ['The lead handed no evidence.'] : [`The lead's evidence:\n${evidence.join('\n')}`]),
-    ...(unverified.length === 0 ? [] : [`What it says it couldn't show:\n${unverified.join('\n')}`]),
-  ].join('\n\n')
-}
-
 const foldersOf = (thread: ThreadContext): ReadonlyArray<string> =>
   thread.role === 'coordinator'
     ? [thread.folder.folder]
@@ -1519,9 +1495,14 @@ export class Sessions extends Context.Service<
             SELECT i.content FROM thread_items i JOIN threads t ON t.id = i.thread_id
             WHERE t.task_id = ${thread.taskId} AND t.kind = 'task' AND i.kind = 'step_result'
             ORDER BY i.sequence DESC LIMIT 1`
-          const reported = lead === undefined ? {} : (JSON.parse(lead.content) as LeadReported)
-          const summary = reported.summary ?? ''
-          const shown = shownText(reported)
+          const summary = lead === undefined ? '' : ((JSON.parse(lead.content) as { summary?: string }).summary ?? '')
+          // The lead's evidence, written beside the copies it reads: what it left uncommitted, or git keeps out, isn't in them.
+          const [taskThread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${thread.taskId} AND kind = 'task'`
+          const [first] = thread.repositories
+          const shown =
+            taskThread === undefined || first === undefined
+              ? ''
+              : yield* evidenceForReview(taskThread.id, join(dirname(first.worktree), '.evidence')).pipe(Effect.orElseSucceed(() => ''))
           return [
             "You are reviewing another agent's change, in Althar. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
             `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,

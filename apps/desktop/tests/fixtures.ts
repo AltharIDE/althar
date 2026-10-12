@@ -317,7 +317,7 @@ export const items = {
       verdict: null,
       findings: [],
       evidence: [],
-      unverified: [],
+      unverified: null,
       agentId: null,
       change: null,
       ...content,

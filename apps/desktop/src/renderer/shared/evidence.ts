@@ -84,6 +84,7 @@ export const taskEvidence = (items: ReadonlyArray<ThreadItem>): { readonly piece
   )
   return {
     pieces: lead.flatMap((item) => piecesOf(item.id, item.content.evidence)),
-    unverified: [...(lead.findLast((item) => item.content.unverified.length > 0)?.content.unverified ?? [])],
+    // The last list it said, even empty: what an earlier step couldn't show, a later one may have.
+    unverified: [...(lead.findLast((item) => item.content.unverified !== null)?.content.unverified ?? [])],
   }
 }

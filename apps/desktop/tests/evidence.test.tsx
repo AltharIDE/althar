@@ -86,13 +86,16 @@ describe('evidence, as the window draws it', () => {
   })
 
   it('takes a task’s evidence from each of its lead’s steps, and what it last said it couldn’t show', () => {
-    const shown = taskEvidence([
-      items.step({ evidence: [SHOT], unverified: ['Not seen in Safari'] }),
-      items.step({ step: 'review', verdict: 'changes_requested' }),
-      items.step({ step: 'settle', round: 0, evidence: [RUN] }),
-    ])
+    const implement = items.step({ evidence: [SHOT], unverified: ['Not seen in Safari'] })
+    const review = items.step({ step: 'review', verdict: 'changes_requested' })
+    // A step that doesn't say leaves the list standing.
+    const shown = taskEvidence([implement, review, items.step({ step: 'settle', round: 0, evidence: [RUN] })])
     expect(shown.pieces.map((one) => one.caption)).toEqual(['The Evidence section under the step', 'The kit’s tests'])
     expect(shown.unverified).toEqual(['Not seen in Safari'])
+    // One that says none clears it: it has shown it since.
+    expect(taskEvidence([implement, review, items.step({ step: 'settle', round: 0, evidence: [RUN], unverified: [] })]).unverified).toEqual(
+      [],
+    )
   })
 
   it('shows it under the lead’s step in the thread, and under what the task changed, its screenshot opening full size', async () => {

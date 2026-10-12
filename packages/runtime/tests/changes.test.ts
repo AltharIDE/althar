@@ -606,6 +606,34 @@ describe('a task that ends in a pull request', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('lets the reviewer read the evidence, and keeps it across settling, which needn’t hand the screenshot again', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:evidence] [lead:set-aside] [review:findings] [review:evidence]',
+      )
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
+      const all = yield* items(ready?.threadId ?? '')
+      const results = all.flatMap((item) => (item.kind === 'step_result' ? [item.content] : []))
+      // The reviewer read the screenshot, which isn't in its copy, and the run's output, each from where its brief said.
+      const review = results.find((result) => result.step === 'review')
+      assert.match(String(review?.summary), / Read: 1-retry\.png \(\d+ bytes\), 2-test_run\.txt \(\d+ bytes\)\./)
+      // Settling, the lead handed a new run and an empty list of what it couldn't show, not its screenshot again: Althar took it.
+      const settled = results.find((result) => result.step === 'settle')
+      assert.deepStrictEqual(settled?.unverified, [])
+      assert.strictEqual(results.find((result) => result.step === 'publish')?.summary, 'Opened draft pull request #1.')
+      // The pull request has all it showed, and nothing left unverified: settling cleared it.
+      const body = github.changes[0]?.body ?? ''
+      assert.include(body, '- Screenshot: The retry button after a failed checkout\n- Test run: The checkout tests')
+      assert.include(body, '- Test run: The heading test: `bun test heading`, exit 0')
+      assert.notInclude(body, '### Unverified')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('goes on without its pull request when the person says so', () => {
     const { working } = hosted()
     return Effect.gen(function* () {

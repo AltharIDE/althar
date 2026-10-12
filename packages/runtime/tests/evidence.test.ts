@@ -54,12 +54,14 @@ describe('the evidence a lead hands', () => {
       const [shot, lint, note] = evidence ?? []
       assert.strictEqual(shot?.caption, 'The retry, after')
       assert.strictEqual(shot?.path, 'shots/after.png')
+      assert.strictEqual(shot?.worktree, worktree)
       assert.match((shot?.picture as { sha256?: string } | undefined)?.sha256 ?? '', /^[0-9a-f]{64}$/)
       assert.deepStrictEqual(lint, {
         kind: 'command',
         caption: 'Lint',
         picture: null,
         path: null,
+        worktree: null,
         command: 'bun run check',
         exit: 0,
         text: 'No issues.\n',
@@ -70,6 +72,7 @@ describe('the evidence a lead hands', () => {
         caption: 'Nothing else changed on screen',
         picture: null,
         path: null,
+        worktree: null,
         command: null,
         exit: null,
         text: null,
@@ -89,7 +92,14 @@ describe('the evidence a lead hands', () => {
         yield* finish([{ kind: 'screenshot', caption: 'After', path: 'nowhere.png' }]),
         /couldn’t find nowhere\.png in the task’s worktree/,
       )
-      assert.match(yield* finish([{ kind: 'command', caption: 'Tests' }]), /say what you ran/)
+      // A run is what ran and how it went: a claim of one with none of it is refused, saying where it belongs.
+      assert.match(yield* finish([{ kind: 'command', caption: 'Tests' }]), /give what you ran in `command`, its `exit_code`/)
+      assert.match(yield* finish([{ kind: 'test_run', caption: 'Tests passed' }]), /is a test run: .* belongs in `unverified`/)
+      assert.match(
+        yield* finish([{ kind: 'test_run', caption: 'Tests', command: 'bun test', exit_code: 0 }]),
+        /what it printed in `output`/,
+      )
+      assert.match(yield* finish([{ kind: 'response', caption: '200' }]), /is a response: give what it said/)
       // Not a picture the window draws.
       writeFileSync(join(worktree, 'clip.mp4'), 'not a picture')
       assert.match(yield* finish([{ kind: 'recording', caption: 'Clip', path: 'clip.mp4' }]), /isn’t a picture Althar shows/)

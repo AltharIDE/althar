@@ -22,7 +22,7 @@ import { filesLine, templateAsk } from './pullRequestWords'
 import { snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
-import { EVIDENCE_KINDS, EvidenceGiven, evidenceFiles, keepEvidence, readEvidence, unverifiedOf } from './evidence'
+import { EVIDENCE_KINDS, EvidenceGiven, evidenceFiles, evidencePaths, keepEvidence, readEvidence, unverifiedOf } from './evidence'
 import { Sessions } from './Sessions'
 import { type GiveUp, watchStalls } from './Stalls'
 import type { Tried } from './stallWatch'
@@ -1469,7 +1469,7 @@ export class Runs extends Context.Service<
             findings: settled = [],
             descriptions: given = [],
             evidence: handed = [],
-            unverified = [],
+            unverified,
           } = yield* read(Finished, input)
           const worktrees = access.taskId === null ? [] : yield* worktreesOf(access.taskId)
           // What it shows of its work: its pictures read now, and kept once the step is taken.
@@ -1480,8 +1480,11 @@ export class Runs extends Context.Service<
           const itemId = yield* newId(Ids.threadItem)
           const shows = Effect.gen(function* () {
             const kept = yield* keepEvidence({ projectId: access.projectId as ProjectId, itemId, folders: [] }, evidence)
-            const unshown = unverifiedOf(unverified)
-            return { ...(kept.length === 0 ? {} : { evidence: kept }), ...(unshown.length === 0 ? {} : { unverified: unshown }) }
+            // A list given is kept even empty: what an earlier step couldn't show, this one may have.
+            return {
+              ...(kept.length === 0 ? {} : { evidence: kept }),
+              ...(unverified === undefined ? {} : { unverified: unverifiedOf(unverified) }),
+            }
           })
           // What it gave before Althar sent the step back, and what it gives now.
           const now = yield* descriptionsOf(worktrees, given)
@@ -1507,12 +1510,18 @@ export class Runs extends Context.Service<
           // A task that ends on its host pushes commits only: what isn't committed is the lead's to commit or clear away first.
           const end = (yield* stepsOf(current)).end ?? (yield* changes.endFor(current.projectId, current.taskId))
           if (end !== null) {
-            // In a task of several repositories, each file by the repository it's in. A picture handed as evidence needn't be committed.
+            // In a task of several repositories, each file by the repository it's in. A picture handed as evidence, now or at an
+            // earlier step, needn't be committed.
             const pictures = evidenceFiles(evidence)
+            const before = yield* evidencePaths(current.taskId)
             const left = (yield* Effect.forEach(worktrees, (worktree) =>
               Effect.map(uncommittedFiles(worktree.path), (files) =>
                 files
-                  .filter((file) => !pictures.some((picture) => picture.worktree === worktree.path && picture.file === file))
+                  .filter(
+                    (file) =>
+                      !before(worktree.path, file) &&
+                      !pictures.some((picture) => picture.worktree === worktree.path && picture.file === file),
+                  )
                   .map((file) => (worktrees.length > 1 ? `${worktree.name}/${file}` : file)),
               ),
             )).flat()
@@ -1695,7 +1704,7 @@ export class Runs extends Context.Service<
               evidence: {
                 type: 'array',
                 description:
-                  "What shows the change does what it should, in the form that fits the task, each with a caption saying what it shows. A screenshot or recording is a PNG, JPEG, GIF or WebP file in the worktree, by its path (it needn't be committed); a command or test run is what you ran, its exit code and the end of its output; a response, log or note is text. Where nothing fits (a typo, a version bump), one note saying so.",
+                  "What shows the change does what it should, in the form that fits the task, each with a caption saying what it shows. A screenshot or recording is a PNG, JPEG, GIF or WebP file in the worktree, by its path (it needn't be committed); a command or test run is what you ran, its exit code and the end of its output, all three; a response, log or note is text. Where nothing fits (a typo, a version bump), one note saying so.",
                 items: {
                   type: 'object',
                   properties: {
@@ -1719,7 +1728,7 @@ export class Runs extends Context.Service<
               unverified: {
                 type: 'array',
                 description:
-                  'What you changed but couldn\'t show working, each in a line, and why: "Not tried with a real microphone: none in the sandbox". A claim with no evidence belongs here.',
+                  'What you changed but couldn\'t show working, each in a line, and why: "Not tried with a real microphone: none in the sandbox". A claim with no evidence belongs here. Settling a review, an empty list says what you couldn\'t show before, you have now.',
                 items: { type: 'string' },
               },
               descriptions: {

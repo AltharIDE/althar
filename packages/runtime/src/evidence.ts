@@ -1,10 +1,11 @@
-import { readFile, stat } from 'node:fs/promises'
-import { basename, isAbsolute, relative, resolve, sep } from 'node:path'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 import type { Evidence } from '@althar/contracts'
 import { Effect, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Artifacts } from './Artifacts'
 import { inside, keepPicture, type HandedPlace, type KeptPicture, PICTURE_KEPT, picturesOf } from './handed'
 import { ToolRefused } from './ToolServer'
 
@@ -45,8 +46,9 @@ export interface KeptEvidence {
   readonly kind: Kind
   readonly caption: string
   readonly picture: KeptPicture | null
-  /** The picture's path, from the worktree it's in: so publishing doesn't count it as left uncommitted. */
+  /** The picture's path, from the worktree it's in, and that worktree: so it isn't counted as left uncommitted, or changed. */
   readonly path: string | null
+  readonly worktree: string | null
   readonly command: string | null
   readonly exit: number | null
   readonly text: string | null
@@ -126,8 +128,16 @@ export const readEvidence = (given: ReadonlyArray<EvidenceGiven>, worktrees: Rea
         read.push({ given: piece, found: yield* findPicture(piece.path.trim(), worktrees) })
         continue
       }
-      if (piece.kind === 'command' && (piece.command === undefined || piece.command.trim() === ''))
-        return yield* refuse(`${which} is a command: say what you ran, in \`command\`, with its \`exit_code\` and \`output\`.`)
+      // A run is what ran and how it went; a response or a log, what it said. A claim without them is a note, or unverified.
+      if (
+        (piece.kind === 'command' || piece.kind === 'test_run') &&
+        (piece.command === undefined || piece.command.trim() === '' || piece.exit_code === undefined || piece.output === undefined)
+      )
+        return yield* refuse(
+          `${which} is a ${piece.kind === 'command' ? 'command' : 'test run'}: give what you ran in \`command\`, its \`exit_code\`, and what it printed in \`output\` (the part that shows the result; empty if it printed nothing). What you didn't run belongs in \`unverified\`.`,
+        )
+      if ((piece.kind === 'response' || piece.kind === 'log') && (piece.text ?? piece.output ?? '').trim() === '')
+        return yield* refuse(`${which} is a ${piece.kind}: give what it said, in \`text\`.`)
       read.push({ given: piece, found: null })
     }
     return read
@@ -145,11 +155,12 @@ export const evidenceFiles = (read: ReadonlyArray<{ readonly found: Found | null
 export const evidencePaths = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const rows = yield* sql<{ path: string }>`
-      SELECT DISTINCT json_extract(e.value, '$.path') AS path
+    const rows = yield* sql<{ path: string; worktree: string | null }>`
+      SELECT DISTINCT json_extract(e.value, '$.path') AS path, json_extract(e.value, '$.worktree') AS worktree
       FROM thread_items i JOIN threads t ON t.id = i.thread_id AND t.kind = 'task', json_each(i.content, '$.evidence') e
       WHERE t.task_id = ${taskId} AND i.kind = 'step_result' AND json_extract(e.value, '$.path') IS NOT NULL`
-    return new Set(rows.map((row) => row.path))
+    /** Whether a file, by its path in a worktree, is a picture handed as evidence from that worktree. */
+    return (worktree: string, file: string) => rows.some((row) => row.path === file && (row.worktree === null || row.worktree === worktree))
   })
 
 /** Keeps evidence read: its pictures in the artifact store, for the item they belong to; its texts to their ends. */
@@ -178,6 +189,7 @@ export const keepEvidence = (place: HandedPlace, read: ReadonlyArray<{ readonly 
         caption: given.caption.trim(),
         picture,
         path: found?.file ?? null,
+        worktree: found?.worktree ?? null,
         command: given.command?.trim() || null,
         exit: given.exit_code ?? null,
         text: kept?.text ?? null,
@@ -216,6 +228,81 @@ export const evidenceOf = (value: unknown): ReadonlyArray<Evidence> =>
     ]
   })
 
-/** What a step result says couldn't be shown. */
-export const unverifiedIn = (value: unknown): ReadonlyArray<string> =>
-  (Array.isArray(value) ? value : []).flatMap((line) => (typeof line === 'string' && line !== '' ? [line] : []))
+/** What a step result says couldn't be shown; null where it didn't say, so what an earlier step said stands. */
+export const unverifiedIn = (value: unknown): ReadonlyArray<string> | null =>
+  Array.isArray(value) ? value.flatMap((line) => (typeof line === 'string' && line !== '' ? [line] : [])) : null
+
+/**
+ * What a task's lead showed across its steps, in order, and what it last said
+ * it couldn't show: a step that says nothing of it leaves the last list
+ * standing, and one that says none clears it.
+ */
+export const taskShown = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ content: string }>`
+      SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
+        AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence`
+    const reported = rows.map((row) => recordIn(JSON.parse(row.content)))
+    return {
+      evidence: reported.flatMap((report) => evidenceOf(report.evidence)),
+      unverified: reported.map((report) => unverifiedIn(report.unverified)).findLast((list) => list !== null) ?? [],
+    }
+  })
+
+const KIND_WORDS: Readonly<Record<Kind, string>> = {
+  screenshot: 'screenshot',
+  recording: 'recording',
+  command: 'command',
+  test_run: 'test run',
+  response: 'response',
+  log: 'log',
+  note: 'note',
+}
+
+/** A file name from what a lead called a picture: its last part, in letters a file name takes. */
+const fileName = (name: string) => basename(name).replace(/[^\w.-]+/g, '-') || 'picture'
+
+/**
+ * The lead's evidence for its reviewer, who reads a copy of the work where a
+ * screenshot the lead left uncommitted, or kept out by git, isn't: each
+ * picture from the store, and each output whole as it was kept, written to
+ * `folder` (made again each time), and in words, with where each is.
+ */
+export const evidenceForReview = (taskThreadId: string, folder: string) =>
+  Effect.gen(function* () {
+    const artifacts = yield* Artifacts
+    const { evidence, unverified } = yield* taskShown(taskThreadId)
+    yield* Effect.promise(() => rm(folder, { recursive: true, force: true }))
+    if (evidence.length > 0) yield* Effect.promise(() => mkdir(folder, { recursive: true }))
+    const lines: Array<string> = []
+    for (const [index, piece] of evidence.entries()) {
+      const n = index + 1
+      const ran = piece.command === null ? '' : ` (\`${piece.command}\`${piece.exit === null ? '' : `, exit ${piece.exit}`})`
+      let at = ''
+      const digest = piece.picture?.digest ?? null
+      const bytes = digest === null ? null : yield* artifacts.read(digest)
+      if (bytes !== null) {
+        const path = join(folder, `${n}-${fileName(piece.picture?.name ?? 'screenshot.png')}`)
+        yield* Effect.promise(() => writeFile(path, bytes))
+        at = `: ${path}`
+      } else if (piece.text !== null) {
+        const path = join(folder, `${n}-${piece.kind}.txt`)
+        const whole = [
+          ...(piece.command === null ? [] : [`$ ${piece.command}`]),
+          ...(piece.dropped === 0 ? [] : [`(${piece.dropped} earlier lines weren't kept)`]),
+          piece.text,
+          ...(piece.exit === null ? [] : [`(exit ${piece.exit})`]),
+        ].join('\n')
+        yield* Effect.promise(() => writeFile(path, whole))
+        at = `: ${path}`
+      } else if (piece.picture !== null) at = ' (not kept)'
+      lines.push(`- ${KIND_WORDS[piece.kind]}: ${piece.caption}${ran}${at}`)
+    }
+    return [
+      lines.length === 0
+        ? 'The lead handed no evidence.'
+        : `The lead's evidence, each picture and output where you can read it:\n${lines.join('\n')}`,
+      ...(unverified.length === 0 ? [] : [`What it says it couldn't show:\n${unverified.map((line) => `- ${line}`).join('\n')}`]),
+    ].join('\n\n')
+  })

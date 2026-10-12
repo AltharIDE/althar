@@ -1885,7 +1885,7 @@ describe('thread items', () => {
           { severity: 'nit', file: null, line: null, claim: 'z' },
         ],
         evidence: [],
-        unverified: [],
+        unverified: null,
         agentId: 'codex',
         change: null,
       },
@@ -1897,7 +1897,7 @@ describe('thread items', () => {
       verdict: null,
       findings: [],
       evidence: [],
-      unverified: [],
+      unverified: null,
       agentId: null,
       change: null,
     })

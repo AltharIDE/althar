@@ -878,8 +878,8 @@ export const StepResultItem = Schema.Struct({
     findings: Schema.Array(Finding),
     /** For the lead's steps: what it showed of its change working. */
     evidence: Schema.Array(Evidence),
-    /** For the lead's steps: what it couldn't show, as it said it. */
-    unverified: Schema.Array(Schema.String),
+    /** For the lead's steps: what it couldn't show, as it said it; null where it didn't say, so an earlier step's list stands. */
+    unverified: Schema.NullOr(Schema.Array(Schema.String)),
     /** Who reported it, for a review. */
     agentId: Schema.NullOr(Schema.String),
   }),
