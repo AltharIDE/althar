@@ -119,6 +119,55 @@ describe('how a task’s pull request is told to the coordinator', () => {
     assert.match(section, /Conflicts with the base: not known/)
   })
 
+  it('names failing checks from the list where the host named none, and says what still runs', () => {
+    const failed = checks({
+      outcome: 'failed',
+      failed: 1,
+      passed: 0,
+      running: 1,
+      list: [
+        { name: 'e2e', state: 'failed', summary: null },
+        { name: 'unit', state: 'running', summary: null },
+      ],
+    })
+    assert.match(sectionWords(facts([change({ checks: failed })])), /Checks: failing \(e2e\); 0 of 2 passed, 1 pending\./)
+    assert.match(
+      sectionWords(facts([change({ checks: checks({ outcome: 'failed', failed: 1, passed: 1 }) })])),
+      /Checks: failing; 1 of 2 passed\./,
+    )
+  })
+
+  it('reads a task of several: each pull request by its repository, one merged here, and the repositories left', () => {
+    const several: PullRequestFacts = {
+      changes: [
+        { change: change({ repository: 'acme/api', number: 7, state: 'merged', title: '', url: '' }), seenAt: null, host: connected },
+        { change: change({ repository: '', number: 9, unpushed: 2 }), seenAt: null, host: null },
+      ],
+      merged: [{ name: 'docs', branch: 'main', remote: 'origin/main', ahead: 0 }],
+      unmerged: 2,
+    }
+    assert.strictEqual(
+      listWords(several),
+      'acme/api: PR #7 merged; PR #9 draft, checks passing, 2 unpushed, as last seen (its host is not known); docs: merged locally into main, no pull request; 2 repositories with work not merged or in a pull request yet',
+    )
+    assert.strictEqual(
+      sectionWords(several),
+      [
+        'Pull requests:\nacme/api: PR #7 merged\nMerged.',
+        [
+          'PR #9 draft, checks passing, 2 unpushed, as last seen (its host is not known): Add a retry',
+          'URL: https://github.com/acme/app/pull/113',
+          'Checks: passing (2 of 2).',
+          "2 commits on the task's branch are not on the pull request yet; the person pushes them.",
+          'Conflicts with the base: not known (Althar does not ask the host).',
+          'Possibly out of date: its host is not known, so this is as last seen.',
+        ].join('\n'),
+        'docs: merged locally into main, no pull request',
+        '2 repositories with work not merged or in a pull request yet: the task is not done.',
+      ].join('\n\n'),
+    )
+  })
+
   it('reads checks pending, none and never fetched', () => {
     assert.match(
       sectionWords(facts([change({ checks: checks({ outcome: 'running', running: 1, passed: 1 }) })])),
