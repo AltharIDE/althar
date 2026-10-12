@@ -59,6 +59,11 @@
   - **git has no ssh-agent socket.** Althar's own pushes use the code-host
     connections it keeps. The manifest does not expose the person's ssh
     agent to the sandbox.
+  - **The desktop's tray carries the edge's icon.** The manifest asks for
+    `--talk-name=org.kde.StatusNotifierWatcher`, so the StatusNotifierItem
+    Electron registers for the tray (edgeWindows.ts) reaches the desktop's
+    watcher. The item is registered under the app's own unique bus name, so
+    the Flatpak needs no own-name permission.
   - **The profile is the app's own.** In a Flatpak it is
     `$XDG_DATA_HOME/althar` = `~/.var/app/dev.althar.app/data/althar`, with the
     worktrees beside it; the CLI keeps `~/.local/share/althar`. Projects reach

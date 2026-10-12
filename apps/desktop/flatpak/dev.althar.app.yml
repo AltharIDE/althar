@@ -11,10 +11,11 @@ base-version: '24.08'
 command: althar
 separate-locales: false
 
-# Network, display, GPU and the host keyring are available. The permission to
-# talk to org.freedesktop.Flatpak is broad: it can run commands on the host,
-# which the app uses to reach the person's tools. Project folders enter via
-# the document portal; the host bridge is not a sandbox boundary.
+# Network, display, GPU, the host keyring and the desktop's tray are available.
+# The permission to talk to org.freedesktop.Flatpak is broad: it can run
+# commands on the host, which the app uses to reach the person's tools.
+# Project folders enter via the document portal; the host bridge is not a
+# sandbox boundary.
 finish-args:
   - --share=network
   - --socket=wayland
@@ -23,6 +24,12 @@ finish-args:
   - --share=ipc
   - --device=dri
   - --talk-name=org.freedesktop.secrets
+  # The edge's tray icon: Electron registers it with the desktop's
+  # StatusNotifierWatcher, and without this talk permission the sandbox
+  # cannot see the watcher, so the tray silently doesn't appear. The item
+  # is registered under the app's own unique bus name, so no own-name is
+  # needed.
+  - --talk-name=org.kde.StatusNotifierWatcher
   # The person's own agents and editors, found and run where they are
   # installed (Codex among them: flatpak/codex-host.sh); nothing else.
   - --talk-name=org.freedesktop.Flatpak
