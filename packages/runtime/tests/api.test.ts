@@ -717,6 +717,22 @@ describe('settings, through the API', () => {
   )
 })
 
+describe('this computer’s load, through the API', () => {
+  it.live('says how hard this computer works, read as it is, checked on the way', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        const load = yield* client.GetLoad({})
+        assert.isAbove(load.memoryTotal, 0)
+        assert.isAtMost(load.memoryUsed, load.memoryTotal)
+        assert.lengthOf(load.history, 1)
+        // Nothing of Althar's runs, so its part is none; or unknown, where processes can't be listed.
+        if (load.shares !== null) assert.lengthOf(load.shares, 0)
+      }),
+    ),
+  )
+})
+
 describe('project rules, through the API', () => {
   it.live('reads a project’s rules, and changes them in part as the person', () =>
     Effect.scoped(

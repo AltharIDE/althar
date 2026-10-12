@@ -9,6 +9,7 @@ import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
+import type { LoadOptions } from './MachineLoad'
 import type { ModelFactsOptions } from './ModelFacts'
 
 export interface RuntimeOptions {
@@ -70,6 +71,8 @@ export interface RuntimeOptions {
   readonly stalls?: StallOptions
   /** Where what is known of models comes from (`ModelFacts.ts`); without it, nothing is fetched and nothing is known. */
   readonly modelFacts?: ModelFactsOptions
+  /** How this computer's load is read, and how often at most (`MachineLoad.ts`). */
+  readonly load?: LoadOptions
 }
 
 /** Each is the default unless a test says otherwise. */

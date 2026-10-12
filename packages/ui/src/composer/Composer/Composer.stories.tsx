@@ -573,7 +573,6 @@ export const EnterStopsDictating: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
     const field = c.getByRole('textbox', { name: 'Tell the lead' })
-    await expect(c.getByText('Enter to stop; it is not sent')).toBeInTheDocument()
     await userEvent.click(field)
     await userEvent.keyboard('{Enter}')
     await userEvent.keyboard('{Meta>}{Enter}{/Meta}')

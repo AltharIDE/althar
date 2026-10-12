@@ -20,6 +20,7 @@ import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { Secrets } from '../src/Secrets'
+import type { LoadOptions } from '../src/MachineLoad'
 import type { ModelFactsOptions } from '../src/ModelFacts'
 
 /** A git repository with one commit on `main`. */
@@ -184,6 +185,8 @@ export const runtime = (
     readonly editors?: RuntimeOptions['editors']
     /** Where the artifact store keeps bytes; a folder of its own unless a test says (null: nowhere). */
     readonly artifactsRoot?: string | null
+    /** How this computer's load is read. */
+    readonly load?: LoadOptions
     /** The device outside a sandbox, as for a Flatpak. */
     readonly onDevice?: RuntimeOptions['onDevice']
   } = {},
@@ -207,6 +210,7 @@ export const runtime = (
     ...(more.permissionJudgeTimeout === undefined ? {} : { permissionJudgeTimeout: more.permissionJudgeTimeout }),
     ...(more.modelFacts === undefined ? {} : { modelFacts: more.modelFacts }),
     ...(more.editors === undefined ? {} : { editors: more.editors }),
+    ...(more.load === undefined ? {} : { load: more.load }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
   })
 

@@ -15,7 +15,7 @@ import { readAppPreferences, writeAppPreference } from '../src/main/preferences'
 const profile = () => mkdtempSync(join(tmpdir(), 'althar-preferences-'))
 
 describe('the app’s preferences kept in the profile', () => {
-  it('start awake while plugged in, every notification on, the count on, silent, and the first editor found', async () => {
+  it('start awake while plugged in, every notification on, the count on, silent, the first editor found, and the load in the bar', async () => {
     expect(await readAppPreferences(profile())).toEqual({
       keepAwake: true,
       awakeOnBattery: false,
@@ -25,6 +25,7 @@ describe('the app’s preferences kept in the profile', () => {
       notifyStopped: true,
       badge: true,
       sound: null,
+      showLoad: true,
     })
   })
 
