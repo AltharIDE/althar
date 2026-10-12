@@ -109,7 +109,13 @@ export function GlassNav({ kind }: { kind: GlassKind }) {
 
   const close = () => setOpen(false)
   return (
-    <div className={cx(s.wrap, scrolled && s.scrolled, lit && s.lit, open && s.open)}>
+    <div
+      className={cx(s.wrap, scrolled && s.scrolled, lit && s.lit, open && s.open)}
+      // Tabbed on out of the menu into the page it covers, it closes.
+      onBlur={(e) => {
+        if (open && e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) close()
+      }}
+    >
       <header ref={bar} className={s.bar}>
         <span className={s.glass} aria-hidden="true" />
         <span className={s.tint} aria-hidden="true" />

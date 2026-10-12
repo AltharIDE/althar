@@ -27,10 +27,10 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 -1px 0 rgba(255, 255, 255, 0.35),
     0 0 0 0.5px rgba(20, 20, 28, 0.12), 0 8px 24px -12px rgba(40, 32, 20, 0.3);
 }
-/* The smoke: the light's own cobalt, deep enough that white reads at the light's pale edges too. */
+/* The smoke: the light's own cobalt, deep enough that white reads at the light's pale edges too, over the glass's own white. */
 .tint {
   position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  background: linear-gradient(to bottom, rgba(18, 26, 130, 0.34), rgba(10, 14, 90, 0.46));
+  background: linear-gradient(to bottom, rgba(16, 22, 110, 0.62), rgba(10, 14, 80, 0.7));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 0 0 0.5px rgba(255, 255, 255, 0.22), 0 10px 30px -12px rgba(10, 14, 90, 0.5);
   opacity: 0; transition: opacity var(--move);
 }
@@ -71,10 +71,13 @@
 }
 /* Cobalt focus is lost in cobalt glass. */
 .lit .row :focus-visible { outline-color: #fff; }
+/* Into the light, the words turn white only once the smoke is mostly in, never white on the clear glass; out of it, they turn ink at once. */
+.lit .row, .lit .row * { transition: color 0s linear 220ms, background-color 0s linear 220ms; }
+.lit .row :hover { transition: none; }
 
 /* The phone's menu: a card of the same glass, frosted more, dropping from the capsule. */
 .sheet {
-  position: absolute; top: 66px; left: 10px; right: 10px; display: none; border-radius: 24px; color: var(--t-1); pointer-events: auto;
+  position: absolute; top: 66px; left: 0; right: 0; width: min(640px, calc(100vw - 20px)); margin: 0 auto; display: none; border-radius: 24px; color: var(--t-1); pointer-events: auto;
   visibility: hidden; transform: translateY(-8px) scale(0.97); transform-origin: 50% 0;
   transition: transform var(--move), visibility 0s linear 420ms;
 }
@@ -86,7 +89,8 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 0 0 0.5px rgba(20, 20, 28, 0.12),
     0 24px 48px -20px rgba(40, 32, 20, 0.4);
 }
-.sheet nav { position: relative; display: grid; padding: 8px 22px; }
+/* On a short screen, a phone on its side, the pages scroll inside the card rather than run off it. */
+.sheet nav { position: relative; display: grid; max-height: calc(100dvh - 86px); overflow-y: auto; overscroll-behavior: contain; padding: 8px 22px; }
 .sheet a {
   display: flex; align-items: center; gap: 12px; padding: 14px 0;
   font-family: 'Inter Display', var(--display); font-size: 26px; font-weight: 300; letter-spacing: -0.03em;
@@ -107,6 +111,6 @@
   .row { padding-left: 16px; gap: 8px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .bar, .tint, .sheet, .open .sheet, .sheet > * { transition: none; }
+  .bar, .tint, .sheet, .open .sheet, .sheet > *, .lit .row, .lit .row * { transition: none; }
   .sheet, .scrolled .bar { transform: none; }
 }

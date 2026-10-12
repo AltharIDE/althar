@@ -72,7 +72,8 @@
   backdrop-filter: blur(32px) saturate(1.6) brightness(1.06);
   box-shadow: none;
 }
-.sheet nav { position: relative; display: grid; padding: 8px var(--gut) 24px; }
+/* The pages scroll inside it on a short screen, a phone on its side, and never the page under it. */
+.sheet nav { position: absolute; inset: 0; display: grid; align-content: start; overflow-y: auto; overscroll-behavior: contain; padding: 8px var(--gut) 24px; }
 .sheet a {
   display: flex; align-items: center; gap: 12px; padding: 16px 0;
   border-bottom: 0.5px solid rgba(20, 20, 28, 0.12);
