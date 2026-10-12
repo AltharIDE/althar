@@ -1,84 +1,194 @@
-/* The island: black, hanging from the top edge, drawing in as you read. The first screen keeps its room. */
-
-.spacer { height: 68px; }
-.phoneOnly { display: none; }
-
-.islandWrap { position: fixed; inset: 0 0 auto; z-index: 40; display: flex; justify-content: center; pointer-events: none; }
-
 /*
- * Always as wide as it opens (--full); it shows --now of that. Each half of
- * its black, the mark and the way in come in by --in from their ends, so
- * drawing in moves only transforms. Only what shows takes the pointer.
+ * The nav, the lens: a capsule of nearly clear glass floating under the top
+ * edge. Over paper it is paper with a rim of light, its words ink. Once the
+ * light is under it (.lit) it takes the light's cobalt as smoked glass, and
+ * its words turn white: the smoke fades in, nothing else moves. A drop of
+ * the same glass glides under what is pointed at (glassDrop.ts).
  */
-.island {
-  --full: min(620px, calc(100vw - 24px));
-  /* Drawn in, at least half of --full plus a corner, or a half's square end would show past the other's round one. */
-  --now: 340px;
-  --in: calc((var(--full) - var(--now)) / 2);
-  --move: 520ms cubic-bezier(0.22, 1, 0.36, 1);
-  position: relative;
-  width: var(--full);
-  color: #fff;
-  filter: drop-shadow(0 10px 14px rgba(0, 0, 0, 0.14));
-}
-.islandWide { --now: var(--full); }
 
-/* The halves overlap in the middle however far in they are, so the black never parts. */
-.half {
-  position: absolute; top: 0; bottom: 0; width: calc(50% + 1px);
-  background: #000; pointer-events: auto;
+/* The first screen keeps the room the nav floats in. */
+.space { height: 68px; }
+
+.wrap {
+  --move: 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  --ink: var(--t-1); --ink-2: var(--t-2); --wash: rgba(20, 20, 28, 0.06);
+  /* The drop over paper: clearer, brighter glass than the lens, so ink reads darker on it, not lighter. */
+  --drop-fill: linear-gradient(to bottom, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.38));
+  --drop-shine: rgba(255, 255, 255, 0.95);
+  --drop-sheen: rgba(255, 255, 255, 0.6);
+  --drop-rim: rgba(20, 20, 28, 0.1);
+  --drop-glow: rgba(255, 255, 255, 0.7);
+  --drop-fall: rgba(40, 32, 20, 0.24);
+  position: fixed; inset: 0 0 auto; z-index: 40; display: flex; justify-content: center;
+  padding-top: 10px; pointer-events: none; color: var(--ink);
+}
+/* In the light, a wash (Menu, and what is pointed at) deepens the smoke rather than whitening it, so white still reads on it. */
+.lit {
+  --ink: #fff; --ink-2: rgba(255, 255, 255, 0.8); --wash: rgba(6, 10, 70, 0.3);
+  /* In the light the drop is a deeper smoke with a bright edge, so white reads on it as on the lens. */
+  --drop-fill: linear-gradient(to bottom, rgba(6, 10, 70, 0.3), rgba(6, 10, 70, 0.44));
+  --drop-shine: rgba(255, 255, 255, 0.6);
+  --drop-sheen: rgba(200, 206, 255, 0.24);
+  --drop-rim: rgba(255, 255, 255, 0.2);
+  --drop-glow: rgba(160, 170, 255, 0.22);
+  --drop-fall: rgba(4, 8, 60, 0.4);
+}
+
+.bar {
+  position: relative; width: min(640px, calc(100vw - 20px)); height: 48px; border-radius: 24px; pointer-events: auto;
   transition: transform var(--move);
 }
-.halfLeft { left: 0; border-radius: 0 0 0 24px; transform: translateX(var(--in)); }
-.halfRight { right: 0; border-radius: 0 0 24px 0; transform: translateX(calc(-1 * var(--in))); }
+.glass {
+  position: absolute; inset: 0; border-radius: inherit;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.44), rgba(255, 255, 255, 0.26));
+  -webkit-backdrop-filter: blur(20px) saturate(2) brightness(1.04);
+  backdrop-filter: blur(20px) saturate(2) brightness(1.04);
+  /* The rim: light along its top, a fainter catch along its foot, a hairline round, and a soft fall of shadow. */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 -1px 0 rgba(255, 255, 255, 0.35),
+    0 0 0 0.5px rgba(20, 20, 28, 0.12), 0 8px 24px -12px rgba(40, 32, 20, 0.3);
+}
+/* The smoke: the light's own cobalt, deep enough that white reads at the light's pale edges too, over the glass's own white. */
+.tint {
+  position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(to bottom, rgba(16, 22, 110, 0.62), rgba(10, 14, 80, 0.7));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 0 0 0.5px rgba(255, 255, 255, 0.22), 0 10px 30px -12px rgba(10, 14, 90, 0.5);
+  opacity: 0; transition: opacity var(--move);
+}
+.lit .tint { opacity: 1; }
+/* Read on, it sits a little closer to the top. */
+.scrolled .bar { transform: translateY(-2px); }
 
-.islandBar { position: relative; display: flex; align-items: center; height: 52px; padding: 0 10px 0 20px; white-space: nowrap; }
-/* The mark and the way in keep their size and ride in with the ends; the pages hold their place between and fade. */
-.islandMark {
-  flex: none; display: inline-flex; align-items: center; gap: 8px; color: #fff; text-decoration: none; font-weight: 650; font-size: 15px; --logo-point: #9aa6ff;
-  pointer-events: auto; transform: translateX(var(--in)); transition: transform var(--move);
-}
-.islandLinks { flex: 1 1 auto; min-width: 0; overflow: hidden; display: flex; gap: 22px; padding: 0 24px; font-size: 13.5px; opacity: 0; transition: opacity 200ms ease; }
-.islandWide .islandLinks { opacity: 1; pointer-events: auto; transition: opacity 360ms ease 200ms; }
-.islandLinks a { color: rgba(255, 255, 255, 0.72); text-decoration: none; }
-.islandLinks a:hover, .islandLinks a[aria-current='page'] { color: #fff; }
-.islandEnd {
-  flex: none; display: flex; align-items: center; gap: 6px; margin-left: auto;
-  pointer-events: auto; transform: translateX(calc(-1 * var(--in))); transition: transform var(--move);
-}
-.islandGithub { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; color: rgba(255, 255, 255, 0.8); }
-.islandGithub:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
-.islandDownload {
-  display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 15px; border-radius: 17px;
-  background: #fff; color: #000; font: 600 13px var(--font); text-decoration: none;
-}
-.islandDownload i { width: 6px; height: 6px; border-radius: 50%; background: var(--live); }
-.menuButton {
-  height: 32px; padding: 0 12px; border: 0; border-radius: 16px; background: none;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
-  font: 600 13.5px var(--font); color: #fff; cursor: pointer;
-}
+.row { position: relative; display: flex; align-items: center; gap: 14px; height: 100%; padding: 0 6px 0 18px; white-space: nowrap; }
+.mark { flex: none; display: inline-flex; align-items: center; gap: 8px; color: var(--ink); font-weight: 650; font-size: 15px; letter-spacing: -0.01em; text-decoration: none; }
+.lit .mark { --logo-point: #fff; }
 
-/* The phone's sheet of pages, under the island. */
-.sheet { position: relative; display: grid; grid-template-rows: 0fr; overflow: hidden; transition: grid-template-rows 360ms cubic-bezier(0.22, 1, 0.36, 1); }
-.sheet > nav { min-height: 0; display: grid; padding: 0 var(--gut); }
-.sheetOpen { grid-template-rows: 1fr; pointer-events: auto; }
-.sheetOpen > nav { padding-bottom: 14px; }
+.links { flex: 1; display: flex; justify-content: center; gap: 2px; font-size: 13.5px; }
+.links a { position: relative; display: inline-block; padding: 6px 11px; border-radius: 999px; color: var(--ink-2); text-decoration: none; }
+.links a:hover, .links a:focus-visible { color: var(--ink); }
+
+/*
+ * The drop: two halves side by side, each clipped at the middle, with one
+ * rounded end of the capsule (an i) sliding in its half to the width
+ * wanted. Under them, one box (the b) stretched to the width blurs what is
+ * behind and casts the shadow: blurred or shadowed in halves, the line where
+ * they meet would show. A box's shadow falls only outside it, so none of it
+ * greys the glass.
+ * glassDrop.ts moves it; until then it is out of sight.
+ */
+.drop {
+  --drop-half: 60px; --drop-h: 30px;
+  position: absolute; left: 0; top: 50%; width: calc(2 * var(--drop-half)); height: var(--drop-h); margin-top: calc(var(--drop-h) / -2);
+  display: flex; pointer-events: none; transform-origin: 50% 50%;
+}
+.drop b {
+  position: absolute; z-index: -1; left: calc(var(--drop-half) - 30px); top: 0; width: 60px; height: 100%; border-radius: 999px; opacity: 0;
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  box-shadow: 0 4px 10px -4px var(--drop-fall);
+}
+.half { position: relative; flex: none; width: var(--drop-half); height: 100%; overflow: hidden; }
+.half i {
+  position: absolute; top: 0; width: calc(var(--drop-half) + 24px); height: var(--drop-h); opacity: 0;
+  /* The specular: a band of light under its top edge, gone by its middle where the words are. */
+  background: linear-gradient(to bottom, var(--drop-sheen), transparent 40%), var(--drop-fill);
+  -webkit-backdrop-filter: saturate(1.8) brightness(1.06);
+  backdrop-filter: saturate(1.8) brightness(1.06);
+  /* A bright edge along its top, a catch along its foot, a hairline rim with a soft glow inside it, and a faint fall of shadow. */
+  box-shadow:
+    inset 0 1px 0 var(--drop-shine), inset 0 -1px 0.5px rgba(255, 255, 255, 0.25),
+    inset 0 0 0 0.5px var(--drop-rim), inset 0 0 6px 0 var(--drop-glow);
+}
+.half:first-of-type i { left: 0; border-radius: 999px 0 0 999px; }
+.half:last-of-type i { right: 0; border-radius: 0 999px 999px 0; }
+/* The page being read: full ink, and a point of light under it. */
+.links a[aria-current='page'] { color: var(--ink); font-weight: 560; }
+.links a[aria-current='page']::after {
+  content: ''; position: absolute; left: 50%; bottom: 1px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%;
+  background: var(--live);
+}
+.lit .links a[aria-current='page']::after { background: #fff; }
+
+.end { flex: none; display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.github { position: relative; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; color: var(--ink-2); }
+.github:hover, .github:focus-visible { color: var(--ink); }
+.download {
+  position: relative; display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 15px; border-radius: 18px;
+  background: var(--t-1); color: #fff; font: 600 13px var(--font); text-decoration: none;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  transition: transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+/* Pointed at, a sheen of glass comes over its top; pressed, it gives a little, and springs back. */
+.download::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0) 55%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), inset 0 0 0 0.5px rgba(255, 255, 255, 0.18);
+  opacity: 0; transition: opacity 240ms ease;
+}
+.download:hover::before, .download:focus-visible::before { opacity: 1; }
+.download:active { transform: scale(0.95); transition-duration: 90ms; transition-timing-function: ease-out; }
+.download i { width: 6px; height: 6px; border-radius: 50%; background: var(--live-on-ink); }
+/* In the light, the way in is the hero's own: white, its words cobalt. */
+.lit .download { background: #fff; color: var(--live); box-shadow: 0 1px 2px rgba(10, 14, 90, 0.2); }
+.lit .download::before { background: linear-gradient(to bottom, rgba(43, 59, 255, 0.07), rgba(43, 59, 255, 0) 60%); box-shadow: inset 0 0 0 0.5px rgba(43, 59, 255, 0.22), inset 0 -1px 0 rgba(43, 59, 255, 0.1); }
+.lit .download i { background: var(--live); }
+.menu {
+  display: none; height: 36px; padding: 0 14px; border: 0; border-radius: 18px; background: var(--wash);
+  font: 600 13.5px var(--font); color: var(--ink); cursor: pointer;
+}
+/* Cobalt focus is lost in cobalt glass. */
+.lit .row :focus-visible { outline-color: #fff; }
+/* Into the light, the words turn white only once the smoke is mostly in, never white on the clear glass; out of it, they turn ink at once. */
+.lit .row, .lit .row * { transition: color 0s linear 220ms, background-color 0s linear 220ms; }
+.lit .row :hover { transition: none; }
+.lit .row .download { transition: color 0s linear 220ms, background-color 0s linear 220ms, transform 380ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+.lit .row .download:active { transition: transform 90ms ease-out; }
+
+/* The phone's menu: a card of the same glass, frosted more, dropping from the capsule. */
+.sheet {
+  position: absolute; top: 66px; left: 0; right: 0; width: min(640px, calc(100vw - 20px)); margin: 0 auto; display: none; border-radius: 24px; color: var(--t-1); pointer-events: auto;
+  visibility: hidden; transform: translateY(-8px) scale(0.97); transform-origin: 50% 0;
+  transition: transform var(--move), visibility 0s linear 420ms;
+}
+.sheet .glass {
+  background: linear-gradient(to bottom, rgba(252, 251, 248, 0.82), rgba(248, 246, 240, 0.9));
+  -webkit-backdrop-filter: blur(36px) saturate(1.8) brightness(1.05);
+  backdrop-filter: blur(36px) saturate(1.8) brightness(1.05);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 0 0 0.5px rgba(20, 20, 28, 0.12),
+    0 24px 48px -20px rgba(40, 32, 20, 0.4);
+}
+/* On a short screen, a phone on its side, the pages scroll inside the card rather than run off it. */
+.sheet nav { position: relative; display: grid; max-height: calc(100dvh - 86px); overflow-y: auto; overscroll-behavior: contain; padding: 8px 22px; }
 .sheet a {
-  display: flex; align-items: center; gap: 10px; padding: 14px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.14);
-  font-family: 'Inter Display', var(--display); font-size: 24px; font-weight: 300; letter-spacing: -0.03em;
-  color: #fff; text-decoration: none;
+  position: relative; isolation: isolate; display: flex; -webkit-tap-highlight-color: transparent; align-items: center; gap: 12px; padding: 14px 0;
+  font-family: 'Inter Display', var(--display); font-size: 26px; font-weight: 300; letter-spacing: -0.03em;
+  color: var(--t-1); text-decoration: none;
 }
+.sheet a + a { border-top: 0.5px solid rgba(20, 20, 28, 0.12); }
+.sheet a[aria-current='page'] { font-weight: 550; }
+/* Pressed or tabbed to, a pane of the lens's glass comes up under it: at once on the press, settling out after. */
+.sheet a::before {
+  content: ''; position: absolute; inset: 4px -12px; z-index: -1; border-radius: 16px;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.45));
+  box-shadow: inset 0 1px 0 #fff, inset 0 0 0 0.5px rgba(20, 20, 28, 0.1), inset 0 0 8px rgba(255, 255, 255, 0.8), 0 4px 12px -6px rgba(40, 32, 20, 0.3);
+  opacity: 0; transform: scale(0.96); transition: opacity 320ms ease, transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.sheet a:active::before, .sheet a:focus-visible::before { opacity: 1; transform: none; transition-duration: 60ms, 160ms; }
+.sheet a:focus-visible { outline: none; }
+.sheet a[aria-current='page']::after { content: ''; width: 7px; height: 7px; margin-left: 2px; border-radius: 50%; background: var(--live); }
+.open .sheet { visibility: visible; transform: none; transition: transform var(--move); }
+/* What's in it fades, not the sheet: a box fading is a backdrop of its own, and its glass would lose the page while it did. */
+.sheet > * { opacity: 0; transition: opacity 200ms ease; }
+.open .sheet > * { opacity: 1; }
 
 @media (max-width: 900px) {
-  .islandLinks, .islandGithub { display: none; }
-  .phoneOnly { display: inline-flex; align-items: center; }
-  /* On a phone it opens across the screen for the menu, and otherwise shows a bar's width of it. */
-  .island, .islandWide { --full: calc(100vw - 16px); --now: min(380px, calc(100vw - 24px)); }
-  .islandOpen { --now: var(--full); }
-  .islandBar { gap: 10px; }
+  .links, .github { display: none; }
+  .menu { display: inline-flex; align-items: center; }
+  .sheet { display: block; }
+  .row { padding-left: 16px; gap: 8px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .half, .islandMark, .islandEnd, .islandLinks, .sheet { transition: none; }
+  .bar, .tint, .sheet, .open .sheet, .sheet > *, .lit .row, .lit .row *, .download, .sheet a::before { transition: none; }
+  .sheet, .scrolled .bar, .download:active, .sheet a::before { transform: none; }
 }

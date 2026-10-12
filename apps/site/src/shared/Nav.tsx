@@ -1,22 +1,28 @@
 import { Brand, BrandMark, Logo } from '@althar/ui'
-import { useEffect, useState } from 'react'
+import { type RefObject, useEffect, useId, useRef, useState } from 'react'
 
 import { LINKS } from '../content/facts'
 import { cx } from '../lib/cx'
 import { useHere } from '../lib/pathname'
+import { glassDrop, type GlassDrop } from './glassDrop'
+import { useLightUnder } from './lightUnder'
 import s from './Nav.module.css'
 
 /*
- * The site's nav, as Althar's own island: the notch's black capsule hanging
- * from the top of the window with the site's pages, GitHub and the
- * download. It draws in to the mark and the download as you read, and opens
- * out again when pointed at or tabbed into. On a phone, Menu drops the
- * pages under it.
+ * The site's nav, the lens: a capsule of nearly clear glass floating under
+ * the top edge, with the mark, the pages with the one being read marked,
+ * GitHub, the download, and on a phone a Menu that drops the pages. Over
+ * paper it is paper with a rim; once a head's light is under it
+ * (useLightUnder) it takes the light's cobalt as smoked glass and its words
+ * turn white.
  *
- * Nothing in it changes size as it draws in, so it never lays itself out
- * again: it is always as wide as it opens, its black is two halves that
- * slide in from either end and overlap in the middle, and the mark and the
- * way in ride in with them. Only transforms move, on the compositor.
+ * Pointed at or tabbed through, the pages and GitHub have a drop of the
+ * same glass under them, gliding from one to the next (glassDrop).
+ *
+ * The glass is a layer of its own beside what reads on it, never around it:
+ * a box with a backdrop filter is where the boxes in it stop seeing the
+ * page, and the phone's menu is glass of its own. Only opacity and
+ * transforms move.
  */
 
 export const PAGES = [
@@ -27,7 +33,7 @@ export const PAGES = [
 ]
 
 /** Whether the page has scrolled past `past` px. */
-function useScrolled(past = 40) {
+function useScrolled(past: number) {
   const [scrolled, setScrolled] = useState(false)
   useEffect(() => {
     const on = () => setScrolled(window.scrollY > past)
@@ -38,78 +44,135 @@ function useScrolled(past = 40) {
   return scrolled
 }
 
-/** The phone's menu: the pages as a sheet under the island, opened by its button. */
-function PhoneMenu({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const here = useHere()
+/** The drop's shadow and two halves of glass: see glassDrop. */
+function Drop({ drop }: { drop: RefObject<HTMLSpanElement | null> }) {
   return (
-    <div className={cx(s.sheet, open && s.sheetOpen)} aria-hidden={!open}>
-      <nav aria-label="Site">
-        {PAGES.map((p) => (
-          <a key={p.href} href={p.href} onClick={onClose} tabIndex={open ? 0 : -1} aria-current={here(p.href) ? 'page' : undefined}>
-            {p.name}
-          </a>
-        ))}
-        <a href={LINKS.repo} onClick={onClose} tabIndex={open ? 0 : -1}>
-          <BrandMark brand={Brand.GitHub} size={18} />
-          GitHub
-        </a>
-      </nav>
-    </div>
+    <span ref={drop} className={s.drop} aria-hidden="true">
+      <span className={s.half}>
+        <i />
+      </span>
+      <span className={s.half}>
+        <i />
+      </span>
+      <b />
+    </span>
   )
 }
 
 export function Nav() {
   const here = useHere()
-  const scrolled = useScrolled(120)
-  const [pointed, setPointed] = useState(false)
-  const [focused, setFocused] = useState(false)
+  const bar = useRef<HTMLElement>(null)
+  const row = useRef<HTMLDivElement>(null)
+  const drop = useRef<HTMLSpanElement>(null)
+  const lens = useRef<GlassDrop>(null)
+  const button = useRef<HTMLButtonElement>(null)
+  const sheet = useId()
+  const scrolled = useScrolled(8)
+  const lit = useLightUnder(bar)
   const [open, setOpen] = useState(false)
-  const wide = !scrolled || pointed || focused
+
+  useEffect(() => {
+    if (!row.current || !drop.current) return
+    const made = glassDrop(row.current, drop.current)
+    lens.current = made
+    return () => {
+      made.stop()
+      lens.current = null
+    }
+  }, [])
+
+  // Widened past a phone's width, the menu has nothing to drop: it closes.
+  useEffect(() => {
+    const phone = window.matchMedia('(max-width: 900px)')
+    const on = () => {
+      if (!phone.matches) setOpen(false)
+    }
+    phone.addEventListener('change', on)
+    return () => phone.removeEventListener('change', on)
+  }, [])
+
+  // Escape closes it, and leaves you on its button.
+  useEffect(() => {
+    if (!open) return
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setOpen(false)
+      button.current?.focus()
+    }
+    window.addEventListener('keydown', key)
+    return () => window.removeEventListener('keydown', key)
+  }, [open])
+
+  const close = () => setOpen(false)
   return (
-    <div className={s.islandWrap}>
-      <header
-        className={cx(s.island, wide && s.islandWide, open && s.islandOpen)}
-        onPointerEnter={() => setPointed(true)}
-        onPointerLeave={() => setPointed(false)}
-        onFocus={() => setFocused(true)}
-        onBlur={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget)) setFocused(false)
-        }}
-      >
-        <span className={cx(s.half, s.halfLeft)} aria-hidden="true" />
-        <span className={cx(s.half, s.halfRight)} aria-hidden="true" />
-        <div className={s.islandBar}>
-          <a className={s.islandMark} href="/" aria-label="Althar">
+    <div
+      className={cx(s.wrap, scrolled && s.scrolled, lit && s.lit, open && s.open)}
+      // Tabbed on out of the menu into the page it covers, it closes.
+      onBlur={(e) => {
+        if (open && e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) close()
+      }}
+    >
+      <header ref={bar} className={s.bar} onPointerLeave={() => lens.current?.point(null)}>
+        <span className={s.glass} aria-hidden="true" />
+        <span className={s.tint} aria-hidden="true" />
+        <div
+          ref={row}
+          className={s.row}
+          onPointerOver={(e) => {
+            if (e.pointerType === 'touch') return
+            const at = e.target as Element
+            const item = at.closest('[data-drop]')
+            // Between two of them it stays where it was; on the mark or the download, it goes.
+            if (item || at.closest('a, button')) lens.current?.point(item)
+          }}
+          onFocus={(e) => lens.current?.focus(e.target.matches('[data-drop]:focus-visible') ? e.target : null)}
+          onBlur={() => lens.current?.focus(null)}
+        >
+          <Drop drop={drop} />
+          <a className={s.mark} href="/" aria-label="Althar">
             <Logo size={18} />
             <span>Althar</span>
           </a>
-          <nav className={s.islandLinks} aria-label="Site">
+          <nav className={s.links} aria-label="Site">
             {PAGES.map((p) => (
-              <a key={p.href} href={p.href} aria-current={here(p.href) ? 'page' : undefined}>
+              <a key={p.href} href={p.href} data-drop aria-current={here(p.href) ? 'page' : undefined}>
                 {p.name}
               </a>
             ))}
           </nav>
-          <span className={s.islandEnd}>
-            <a className={s.islandGithub} href={LINKS.repo} aria-label="GitHub">
+          <span className={s.end}>
+            <a className={s.github} href={LINKS.repo} data-drop aria-label="GitHub">
               <BrandMark brand={Brand.GitHub} size={16} />
             </a>
-            <a className={s.islandDownload} href={LINKS.releases}>
+            <a className={s.download} href={LINKS.releases}>
               <i aria-hidden="true" />
               Download
             </a>
-            <button type="button" className={cx(s.menuButton, s.phoneOnly)} aria-expanded={open} onClick={() => setOpen(!open)}>
+            <button ref={button} type="button" className={s.menu} aria-expanded={open} aria-controls={sheet} onClick={() => setOpen(!open)}>
               {open ? 'Close' : 'Menu'}
             </button>
           </span>
         </div>
-        <PhoneMenu open={open} onClose={() => setOpen(false)} />
       </header>
+      <div id={sheet} className={s.sheet}>
+        <span className={s.glass} aria-hidden="true" />
+        <nav aria-label="Site">
+          {PAGES.map((p) => (
+            <a key={p.href} href={p.href} onClick={close} aria-current={here(p.href) ? 'page' : undefined}>
+              {p.name}
+            </a>
+          ))}
+          <a href={LINKS.repo} onClick={close}>
+            <BrandMark brand={Brand.GitHub} size={18} />
+            GitHub
+          </a>
+        </nav>
+      </div>
     </div>
   )
 }
 
-/** Under the island, the first screen keeps the room a bar would have taken. */
+/** Under the nav, the first screen keeps the room it floats in. */
 export function NavSpace() {
-  return <div className={s.spacer} aria-hidden="true" />
+  return <div className={s.space} aria-hidden="true" />
 }
