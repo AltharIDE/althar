@@ -1,4 +1,4 @@
-import { type Column, jitter, PICTURE } from '@althar/ui/opening'
+import { clamp, type Column, jitter, PICTURE } from '@althar/ui/opening'
 
 /*
  * The site's light: Althar's columns, graded as the app's light is
@@ -33,9 +33,31 @@ export const heightOf = (column: Column, heart: number) =>
 /** Where a column's colours change, up its height: strong to 55%, its high tone at 90%, gone at its top. */
 export const STOPS = [0.55, 0.9, 1] as const
 
-/** A column drawn once, soft already, as the launch draws its own (foundations/Light), in this light's colours. */
-export const drawColumn = (context: CanvasRenderingContext2D, tones: Tones) => {
-  const { width, height, column: inner, blur } = PICTURE
+/**
+ * How finely a column is drawn, 2 to 3: the app's picture (PICTURE) is sized
+ * for a window, and stretched across a page its round top shows its pixels
+ * as steps. Here the picture is this many times finer, by how wide the
+ * column is on the screen, its blur and shape scaled with it: soft in the
+ * same proportion as the app's, a smooth ramp at any stretch, and still
+ * quick to draw once (the 23 columns take some 40ms at 3, 70ms at 4).
+ */
+export const finenessOf = (canvas: HTMLCanvasElement) =>
+  clamp(Math.ceil((canvas.clientWidth * (window.devicePixelRatio || 1)) / PICTURE.width), 2, 3)
+
+/**
+ * A column drawn once, soft already, as the launch draws its own
+ * (foundations/Light), in this light's colours, at the fineness its place
+ * on the screen asks: the canvas is sized to the picture here.
+ */
+export const drawColumn = (canvas: HTMLCanvasElement, tones: Tones, fineness = finenessOf(canvas)) => {
+  const width = PICTURE.width * fineness
+  const height = PICTURE.height * fineness
+  const inner = PICTURE.column * fineness
+  const blur = PICTURE.blur * fineness
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d')
+  if (!context) return
   const left = (width - inner) / 2
   const cap = height * 0.22
   const fill = context.createLinearGradient(0, height, 0, 0)
