@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -410,8 +410,10 @@ const playStall = async (
  * Told what people said on its pull
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
- * publishes it. Asked to plan a change with a link in it, the coordinator
- * drafts the task from that issue.
+ * publishes it. Asked to bring its branch up to date, `[lead:resolve]`
+ * merges what it was told to, keeps both sides of each conflict and commits
+ * the merge; `[lead:resolve-fails]` can't, and says so. Asked to plan a
+ * change with a link in it, the coordinator drafts the task from that issue.
  */
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
 const commitIn = (cwd: string, file: string, message: string) => {
@@ -420,6 +422,24 @@ const commitIn = (cwd: string, file: string, message: string) => {
     execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd })
   git('add', '-A')
   git('commit', '-q', '-m', message)
+}
+
+/** Merges a branch into the worktree's, keeping both sides of each conflict, and commits the merge. */
+const resolveIn = (cwd: string, ref: string) => {
+  const git = (...args: Array<string>) =>
+    execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd, stdio: 'pipe' }).toString()
+  try {
+    git('merge', '-q', '--no-edit', ref)
+  } catch {
+    for (const file of git('diff', '--name-only', '--diff-filter=U')
+      .split('\n')
+      .filter((line) => line !== '')) {
+      const lines = readFileSync(join(cwd, file), 'utf8').split('\n')
+      writeFileSync(join(cwd, file), lines.filter((line) => !/^(<<<<<<<|=======|>>>>>>>)( |$)/.test(line)).join('\n'))
+    }
+    git('add', '-A')
+    git('commit', '-q', '--no-edit')
+  }
 }
 
 const playRole = async (session: SessionState, text: string, serve: (exits: boolean) => Promise<void>): Promise<string | undefined> => {
@@ -505,6 +525,14 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
           body: 'Seconds, the same as charges.',
           ...(thread === undefined ? {} : { thread_id: thread }),
         })
+      }
+      // Asked to resolve a conflict with the branch its own goes into: merged and settled, or not.
+      const merging = /Bring the branch up to date: merge (\S+) into it/.exec(text)?.[1]
+      if (merging !== undefined && session.markers.has('[lead:resolve-fails]'))
+        return "Couldn't settle the conflict: both sides change the same lines."
+      if (merging !== undefined && session.markers.has('[lead:resolve]')) {
+        resolveIn(session.cwd, merging)
+        return 'Merged it, settled the conflict, and committed the merge.'
       }
       // Fixed and committed, for the person to push.
       if (session.markers.has('[lead:fix]') && text.startsWith('Checks failed')) {

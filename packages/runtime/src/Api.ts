@@ -35,7 +35,7 @@ import { Launches } from './Launches'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
-import { accountsOf, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from './Policies'
+import { accountsOf, Policies, type ProjectRules, resolvesConflicts, ruleSetOf, usageLimitOf } from './Policies'
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
@@ -247,6 +247,7 @@ export const handlers = Api.toLayer(
         alwaysAllow: set.allow,
         commands: set.commands,
         end: rules.end ?? null,
+        resolveConflicts: resolvesConflicts(rules),
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
         onlyAccounts: accounts.only ?? null,

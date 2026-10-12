@@ -334,6 +334,8 @@ export const ProjectRulesView = Schema.Struct({
   commands: Schema.Array(CommandRule),
   /** How a task ends when its plan doesn't say; null: a draft pull request where Althar is connected to the host, else its branch. */
   end: Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
+  /** Whether a task's lead resolves a conflict with its default branch on its own, without the person asking it. */
+  resolveConflicts: Schema.Boolean,
   usageLimit: UsageLimit,
   rotateAccounts: Schema.Boolean,
   onlyAccounts: Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String))),
@@ -1856,6 +1858,7 @@ export const Api = RpcGroup.make(
       alwaysAllow: Schema.optional(Schema.Array(RuleKind)),
       commands: Schema.optional(Schema.Array(CommandRule)),
       end: Schema.optional(Schema.NullOr(Schema.Literals(['draft', 'ready', 'none']))),
+      resolveConflicts: Schema.optional(Schema.Boolean),
       usageLimit: Schema.optional(UsageLimit),
       rotateAccounts: Schema.optional(Schema.Boolean),
       onlyAccounts: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.Array(Schema.String)))),

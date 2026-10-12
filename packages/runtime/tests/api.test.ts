@@ -733,6 +733,7 @@ describe('project rules, through the API', () => {
           alwaysAllow: [],
           commands: [],
           end: null,
+          resolveConflicts: false,
           usageLimit: 'move',
           rotateAccounts: false,
           onlyAccounts: null,
@@ -751,6 +752,7 @@ describe('project rules, through the API', () => {
           never: ['force-push'],
           commands: [{ pattern: 'terraform *', decision: 'ask' }],
           end: 'ready',
+          resolveConflicts: true,
           usageLimit: 'wait',
           rotateAccounts: true,
           onlyAccounts: { codex: ['acc_x'] },
@@ -761,6 +763,7 @@ describe('project rules, through the API', () => {
             changed.never,
             changed.commands,
             changed.end,
+            changed.resolveConflicts,
             changed.usageLimit,
             changed.rotateAccounts,
             changed.onlyAccounts,
@@ -770,6 +773,7 @@ describe('project rules, through the API', () => {
             ['force-push'],
             [{ pattern: 'terraform *', decision: 'ask' }],
             'ready',
+            true,
             'wait',
             true,
             { codex: ['acc_x'] },
@@ -777,7 +781,10 @@ describe('project rules, through the API', () => {
         )
         // Back to deciding the ending by the host, and every account; the rest stays.
         const back = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, end: null, onlyAccounts: null })
-        assert.deepStrictEqual([back.end, back.onlyAccounts, back.rotateAccounts, back.never], [null, null, true, ['force-push']])
+        assert.deepStrictEqual(
+          [back.end, back.onlyAccounts, back.rotateAccounts, back.never, back.resolveConflicts],
+          [null, null, true, ['force-push'], true],
+        )
         assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
         const missing = yield* Effect.flip(client.GetProjectRules({ projectId: 'proj_missing' }))
         assert.strictEqual(missing.reason, 'NotFound')

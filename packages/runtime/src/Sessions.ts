@@ -1523,6 +1523,10 @@ export class Sessions extends Context.Service<
             ORDER BY b.created_at, b.rowid`
           const [plan] = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${thread.threadId} AND kind = 'plan' ORDER BY sequence DESC LIMIT 1`
+          // Whether the project has its leads resolve conflicts on their own: then Althar pushes that merge (ADR-027).
+          const [resolves] = yield* sql<{ resolves: number | null }>`
+            SELECT json_extract(rules, '$.resolveConflicts') AS resolves FROM policies WHERE project_id = ${thread.projectId}
+            ORDER BY revision DESC LIMIT 1`
           const entries =
             plan === undefined
               ? []
@@ -1564,6 +1568,11 @@ export class Sessions extends Context.Service<
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
             // Althar reaches the code host for the task (ADR-011).
             "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: the person looks at your commits and pushes them to the pull request themselves. read_issue reads the issue the task came from, or any other.",
+            ...(resolves?.resolves === 1
+              ? [
+                  'This project has you resolve a conflict with the default branch on your own: Althar tells you when it finds one, and what to merge. Once you commit that merge, with any fix its checks needed, Althar pushes it to the pull request itself. Nothing else you commit is pushed for you, and you still never push.',
+                ]
+              : []),
             // Althar runs the project for the person itself (ADR-023): the lead keeps how, when it changes it.
             'Althar runs the project for the person, with no agent, from a command it works out from the repository or keeps for it. If you change how the project runs, such as its dev script, its port or what it needs installed first, keep it with set_run_command.',
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),

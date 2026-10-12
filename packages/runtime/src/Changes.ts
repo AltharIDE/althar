@@ -1,14 +1,24 @@
 import { createHash } from 'node:crypto'
 
-import { type Account, ChangeRequest, Comment, ConnectorFailed, type Person, type Product, type Repository } from '@althar/connectors'
+import {
+  type Account,
+  ChangeRequest,
+  type CodeHost,
+  Comment,
+  ConnectorFailed,
+  type Person,
+  type Product,
+  type Repository,
+} from '@althar/connectors'
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore } from 'effect'
+import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
+import { ATTEMPTS, type Conflict, Conflicts, Ended, noteFor, onlyTheResolution, type Place, unresolved, whereLine } from './conflicts'
 import { coAuthorOn, creditBranch, type Memory, recallMade, rememberMade, withoutAgentCredit } from './credit'
 import { envelope } from './envelope'
 import { CantMerge, ChangedSinceSeen, type GitFailed, NotFound, PushRefused } from './errors'
@@ -18,6 +28,7 @@ import {
   commitOf,
   commitsAhead,
   commitsOf,
+  fetchInto,
   gitOutcome,
   gitWithin,
   namedRemotes,
@@ -28,6 +39,7 @@ import {
   uncommittedFiles,
 } from './git'
 import { Instance } from './Instance'
+import { Live, type LiveEvent } from './Live'
 import { applyMerges, planMerge } from './localMerge'
 import { outward, reconcileOutward } from './outward'
 import {
@@ -48,10 +60,11 @@ import {
   standing,
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
-import { Policies } from './Policies'
+import { Policies, resolvesConflicts } from './Policies'
 import { Sessions } from './Sessions'
 import { addItem } from './threads'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
+import { summarize } from './words'
 
 /*
  * A task's change on its code host (docs/architecture/06; docs/plans/
@@ -198,6 +211,20 @@ type Store =
   | ToolServer
   | Agents
   | Policies
+  | Live
+
+interface RoundRow {
+  readonly id: string
+  readonly projectId: ProjectId
+  readonly taskId: string
+  readonly threadId: string
+  readonly url: string | null
+  readonly conflicts: string
+  readonly attempt: number
+  readonly state: string
+  readonly failure: string | null
+  readonly ended: string | null
+}
 
 interface LinkRow {
   readonly id: string
@@ -299,6 +326,8 @@ export class Changes extends Context.Service<
       const sessions = yield* Sessions
       const toolServer = yield* ToolServer
       const agents = yield* Agents
+      const live = yield* Live
+      const scope = yield* Scope.Scope
       const every = (yield* RuntimeConfig).listenEvery ?? Duration.seconds(30)
       /* One thing at a time on a task's pull request: a reply's receipt is kept before listening reads the reply back. */
       const locks = new Map<string, Semaphore.Semaphore>()
@@ -936,7 +965,33 @@ export class Changes extends Context.Service<
           const conflicts = plans.flatMap(({ repository, plan }) =>
             plan.kind === 'conflicts' ? [named(repository, plan.files.join(', '))] : [],
           )
-          if (conflicts.length > 0) return yield* cant('conflicts', conflicts.join('; '))
+          if (conflicts.length > 0) {
+            // Where the project says so, the lead resolves it unasked, and the person merges again after.
+            const asked = yield* askable(taskId, null)
+            if (asked === 'resolving') return yield* cant('resolving', conflicts.join('; '))
+            if (asked === 'yes') {
+              const found = yield* Effect.forEach(
+                plans.flatMap(({ repository, plan }) => (plan.kind === 'conflicts' ? [{ repository, files: plan.files }] : [])),
+                ({ repository, files }) =>
+                  Effect.gen(function* () {
+                    const target = yield* commitOf(repository.root, `refs/heads/${repository.base}`)
+                    const from = yield* commitOf(repository.worktree, 'HEAD')
+                    return {
+                      repository: repository.slug,
+                      name: repository.name,
+                      branch: repository.base,
+                      ref: repository.base,
+                      target,
+                      from,
+                      files,
+                    } satisfies Conflict
+                  }),
+              )
+              yield* beginRound({ projectId: task.projectId, taskId, threadId: task.threadId }, null, found)
+              return yield* cant('resolving', conflicts.join('; '))
+            }
+            return yield* cant('conflicts', conflicts.join('; '))
+          }
           const missing = plans.find(({ plan }) => plan.kind === 'missing')
           if (missing !== undefined) return yield* cant('missing', missing.repository.base)
           for (const { plan } of plans)
@@ -1350,6 +1405,10 @@ export class Changes extends Context.Service<
           })
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
           yield* tellLead(link, forLead)
+          if (now.state === 'open' && now.conflicts === true)
+            yield* conflicted(link, before, now, host, repository).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not ask the lead to resolve a conflict', cause)),
+            )
           return happened
         })
 
@@ -1423,6 +1482,403 @@ export class Changes extends Context.Service<
           )
           yield* touchCard(taskId)
         })
+
+      /* ---- A lead resolving a conflict on its own, where the project says to (conflicts.ts) ---- */
+
+      const decodeConflicts = Schema.decodeUnknownEffect(Schema.fromJsonString(Conflicts))
+      const decodeEnded = Schema.decodeUnknownEffect(Schema.fromJsonString(Ended))
+
+      const roundOf = (where: { readonly id: string } | { readonly threadId: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [round] =
+            'id' in where
+              ? yield* sql<RoundRow>`
+                  SELECT c.id, c.project_id, c.task_id, t.id AS thread_id, c.pull_request_url AS url, c.conflicts, c.attempt, c.state, c.failure, c.ended
+                  FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task' WHERE c.id = ${where.id}`
+              : yield* sql<RoundRow>`
+                  SELECT c.id, c.project_id, c.task_id, t.id AS thread_id, c.pull_request_url AS url, c.conflicts, c.attempt, c.state, c.failure, c.ended
+                  FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
+                  WHERE t.id = ${where.threadId} AND c.state = 'resolving'`
+          return round
+        })
+
+      /** The task's worktrees here, by their repository's slug. */
+      const worktreesOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ slug: string; path: string }>`
+            SELECT b.slug, w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}`
+          return new Map(rows.map((row) => [row.slug, row.path]))
+        })
+
+      /** Where each of the round's branches is now. */
+      const endedOf = (taskId: string, conflicts: ReadonlyArray<Conflict>) =>
+        Effect.gen(function* () {
+          const worktrees = yield* worktreesOf(taskId)
+          return yield* Effect.forEach(conflicts, (conflict) =>
+            Effect.map(commitOf(worktrees.get(conflict.repository) ?? '', 'HEAD').pipe(Effect.orElseSucceed(() => '')), (head) => ({
+              repository: conflict.repository,
+              head,
+            })),
+          )
+        })
+
+      /**
+       * Whether a conflict is the lead's to resolve now, unasked: the project
+       * says so, the task is open with its run done, and no round is under
+       * way. One the lead couldn't resolve stays the person's while its
+       * branches are as it left them.
+       */
+      const askable = (taskId: string, url: string | null) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: ProjectId; state: string; run: string | null }>`
+            SELECT k.project_id, k.state, (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run
+            FROM tasks k WHERE k.id = ${taskId}`
+          if (task === undefined || task.state !== 'open' || task.run === 'running') return 'no' as const
+          if (!resolvesConflicts((yield* (yield* Policies).current(task.projectId)).rules)) return 'no' as const
+          const [latest] = yield* sql<{ id: string; url: string | null; state: string; conflicts: string; ended: string | null }>`
+            SELECT id, pull_request_url AS url, state, conflicts, ended FROM conflict_resolutions WHERE task_id = ${taskId}
+            ORDER BY created_at DESC, rowid DESC LIMIT 1`
+          if (latest?.state === 'resolving') return 'resolving' as const
+          if (latest?.state === 'failed' && latest.url === url && latest.ended !== null) {
+            const left = yield* decodeEnded(latest.ended)
+            const now = yield* endedOf(taskId, yield* decodeConflicts(latest.conflicts))
+            if (left.every((one) => now.some((head) => head.repository === one.repository && head.head === one.head))) return 'no' as const
+          }
+          return 'yes' as const
+        })
+
+      /** Where a round is, in its words: its pull request (`PR #1`), or none for merging here. */
+      const placeOf = (taskId: string, url: string | null): Effect.Effect<Place, unknown, Store> =>
+        Effect.gen(function* () {
+          if (url === null) return { change: null }
+          const seen = (yield* urlsOf(taskId)).find((one) => one.url === url)
+          return { change: seen === undefined ? 'the pull request' : nameOf(seen) }
+        })
+
+      /**
+       * Asks the lead: quietly, as Althar does, since the thread says it in a
+       * notice; a lead that isn't running is started for it, on the agent last
+       * on the thread, as an answer starts one (Runs.answered).
+       */
+      const askLead = (
+        round: { readonly id: string; readonly taskId: string; readonly threadId: string },
+        attempt: number,
+        body: string,
+      ): Effect.Effect<void, unknown, Store> =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sessions.send({
+            envelope: yield* envelope('thread.send', { threadId: round.threadId, resolving: round.id, attempt }),
+            threadId: round.threadId,
+            body,
+            quiet: true,
+          })
+          if (Option.isSome(yield* sessions.running(round.threadId))) return
+          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
+            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${round.threadId} ORDER BY started_at DESC LIMIT 1`
+          if (last === undefined) return yield* settleRound(round.id, { why: 'There was no lead to ask.' })
+          // Started apart, so what holds the task's pull request isn't held while an agent starts.
+          yield* Effect.forkIn(
+            sessions
+              .start({
+                threadId: round.threadId,
+                agentId: last.agentId,
+                ...(last.model === null ? {} : { model: last.model }),
+                ...(last.effort === null ? {} : { effort: last.effort }),
+              })
+              .pipe(
+                Effect.catchCause((cause) =>
+                  locked(round.taskId)(settleRound(round.id, { why: `The lead couldn't start: ${summarize(cause) || 'it failed to'}.` })),
+                ),
+                provide,
+              ),
+            scope,
+          )
+        })
+
+      /** A conflict the lead is to resolve: recorded, said in the thread, and asked of it. */
+      const beginRound = (
+        task: { readonly projectId: ProjectId; readonly taskId: string; readonly threadId: string },
+        url: string | null,
+        conflicts: ReadonlyArray<Conflict>,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const id = yield* newId(Ids.conflictResolution)
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const at = yield* timestamp
+              yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+                id,
+                projectId: task.projectId,
+                taskId: task.taskId,
+                pullRequestUrl: url,
+                conflicts: JSON.stringify(conflicts),
+                attempt: 1,
+                state: 'resolving',
+                createdAt: at,
+                updatedAt: at,
+              })}`
+              yield* fact({
+                projectId: task.projectId,
+                aggregateType: 'conflict_resolution',
+                aggregateId: id,
+                revision: 1,
+                type: 'conflict_resolution.started',
+                payload: { url, conflicts: conflicts.map((one) => ({ repository: one.repository, branch: one.branch, files: one.files })) },
+                actorId: instance.systemId,
+              })
+            }),
+          )
+          const place = yield* placeOf(task.taskId, url)
+          yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `${place.change ?? 'It'} conflicts with ${whereLine(conflicts)}.`,
+            description: 'Althar asked the lead to resolve it, as the project’s rules say.',
+          })
+          yield* touchCard(task.taskId)
+          yield* askLead({ id, taskId: task.taskId, threadId: task.threadId }, 1, noteFor(conflicts, place, null))
+        })
+
+      /** Changes a round's record, with its fact. */
+      const reviseRound = (
+        round: RoundRow,
+        type: string,
+        set: Readonly<Record<string, unknown>>,
+        payload: Readonly<Record<string, unknown>> = {},
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* change('conflict_resolutions', round.id, { ...set, updatedAt: yield* timestamp })
+              yield* fact({
+                projectId: round.projectId,
+                aggregateType: 'conflict_resolution',
+                aggregateId: round.id,
+                revision,
+                type,
+                payload,
+                actorId: instance.systemId,
+              })
+            }),
+          )
+          yield* touchCard(round.taskId)
+        })
+
+      /**
+       * Looks at a round once the lead's turn on it is over: resolved, it is
+       * said so, and pushed where it is the pull request's and nothing else
+       * would go with it; not, the lead is asked once more with why, unless
+       * it was stopped or has been asked enough, and then it is the person's.
+       */
+      const settleRound = (id: string, how: { readonly why?: string } = {}): Effect.Effect<void, unknown, Store> =>
+        Effect.gen(function* () {
+          const round = yield* roundOf({ id })
+          if (round === undefined || round.state !== 'resolving') return
+          const conflicts = yield* decodeConflicts(round.conflicts)
+          const worktrees = yield* worktreesOf(round.taskId)
+          const several = conflicts.length > 1
+          const failures: Array<string> = []
+          for (const conflict of conflicts) {
+            const worktree = worktrees.get(conflict.repository)
+            const why = worktree === undefined ? 'Its worktree is gone.' : yield* unresolved(worktree, conflict)
+            if (why !== null) failures.push(several ? `${conflict.name}: ${why}` : why)
+          }
+          const ended = yield* endedOf(round.taskId, conflicts)
+          const place = yield* placeOf(round.taskId, round.url)
+          const thread = { projectId: round.projectId, threadId: round.threadId }
+          if (failures.length === 0) {
+            yield* reviseRound(round, 'conflict_resolution.resolved', {
+              state: 'resolved',
+              ended: JSON.stringify(ended),
+              settledAt: yield* timestamp,
+            })
+            return yield* resolved(round, conflicts, ended, place)
+          }
+          const failure = [...(how.why === undefined ? [] : [how.why]), ...failures].join(' ')
+          if (how.why === undefined && round.attempt < ATTEMPTS) {
+            yield* reviseRound(round, 'conflict_resolution.retried', { attempt: round.attempt + 1 }, { failure })
+            yield* addItem(thread, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: `The conflict with ${whereLine(conflicts)} isn’t resolved yet: ${failure}`,
+              description: 'Althar asked the lead once more.',
+            })
+            return yield* askLead(round, round.attempt + 1, noteFor(conflicts, place, failure))
+          }
+          yield* reviseRound(
+            round,
+            'conflict_resolution.failed',
+            { state: 'failed', failure, ended: JSON.stringify(ended), settledAt: yield* timestamp },
+            { failure },
+          )
+          yield* addItem(thread, 'notice', {
+            source: 'runtime',
+            severity: 'warning',
+            title: `The lead couldn’t resolve the conflict with ${whereLine(conflicts)}.`,
+            description: `${failure} It’s yours to settle, or to ask the lead again.`,
+          })
+        })
+
+      /**
+       * A round resolved. Merging here, the person merges again. On a pull
+       * request, Althar pushes the merge itself, with any fix after it: the
+       * one push of a lead's commits that isn't the person's (ADR-027). Only
+       * where the pull request had the branch as it was when the lead was
+       * asked, and the commits since are the resolution alone, up to the head
+       * it settled at; otherwise the merge waits for the person to push it
+       * with the rest.
+       */
+      const resolved = (round: RoundRow, conflicts: ReadonlyArray<Conflict>, ended: Ended, place: Place) =>
+        Effect.gen(function* () {
+          const thread = { projectId: round.projectId, threadId: round.threadId }
+          const said = `The lead resolved the conflict with ${whereLine(conflicts)}`
+          const [conflict] = conflicts
+          const head = ended.find((one) => one.repository === conflict?.repository)?.head ?? ''
+          const worktree = (yield* worktreesOf(round.taskId)).get(conflict?.repository ?? '')
+          if (round.url === null || conflict === undefined || worktree === undefined || head === '')
+            return yield* addItem(thread, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: `${said}.`,
+              description: 'Merge it again.',
+            })
+          const alone =
+            conflict.pushed != null &&
+            conflict.pushed === conflict.from &&
+            (yield* onlyTheResolution(worktree, conflict, head).pipe(Effect.orElseSucceed(() => false))) &&
+            (yield* commitOf(worktree, 'HEAD').pipe(Effect.orElseSucceed(() => ''))) === head
+          if (!alone)
+            return yield* addItem(thread, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: `${said}.`,
+              description: `Its branch has other commits ${place.change ?? 'the pull request'} doesn’t have yet, so the merge waits for you to push it with them.`,
+            })
+          const pushed = yield* Effect.exit(push(round.taskId, head, round.url))
+          if (pushed._tag === 'Failure')
+            return yield* addItem(thread, 'notice', {
+              source: 'runtime',
+              severity: 'warning',
+              title: `${said}, but Althar couldn’t push it.`,
+              description: `${summarize(pushed.cause) || 'The push failed.'} Push it from ${place.change ?? 'the pull request'}’s card.`,
+            })
+          yield* reviseRound(
+            round,
+            'conflict_resolution.pushed',
+            { pushedHead: pushed.value.change.headSha },
+            { head: pushed.value.change.headSha },
+          )
+          yield* addItem(thread, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `${said}, and Althar pushed the merge to ${place.change ?? 'the pull request'}.`,
+          })
+        })
+
+      /**
+       * What the host says of an open pull request that conflicts: where the
+       * project has the lead resolve it, Althar fetches the branch it goes
+       * into, and asks the lead where its branch here conflicts with it too.
+       * One that merges cleanly here is from before the branch moved, or
+       * merged here already and waiting for the person to push.
+       */
+      const conflicted = (link: LinkRow, seen: Snapshot, now: ChangeRequest, host: CodeHost, repository: Repository) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          if ((yield* askable(link.taskId, seen.url)) !== 'yes') return
+          const [workspace] = yield* sql<{ path: string; slug: string; name: string; threadId: string }>`
+            SELECT w.path, b.slug, b.display_name AS name, t.id AS thread_id FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
+            WHERE w.task_id = ${link.taskId} AND w.device_id = ${instance.deviceId}
+            ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${seen.url} LIMIT 1) DESC,
+              b.created_at, b.rowid
+            LIMIT 1`
+          if (workspace === undefined) return
+          // Into the repository a fork came from, its branch is upstream's; otherwise origin's, as `git fetch` names them.
+          const fork = yield* namedRemotes(workspace.path).pipe(
+            Effect.map(forkOf),
+            Effect.orElseSucceed(() => null),
+          )
+          const remote =
+            fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase() ? 'upstream' : 'origin'
+          const ref = `${remote}/${now.target}`
+          const target = yield* fetchInto(workspace.path, yield* host.pushTarget(repository), now.target, `refs/remotes/${ref}`)
+          const from = yield* commitOf(workspace.path, 'HEAD').pipe(Effect.orElseSucceed(() => null))
+          if (target === null || from === null) return
+          const merged = yield* gitOutcome(workspace.path, 'merge-tree', '--write-tree', '--name-only', '--no-messages', target, from)
+          if (merged.code === 0) return
+          const [sent] = yield* sql<{ head: string | null }>`
+            SELECT head_commit AS head FROM repository_changes WHERE pull_request_url = ${seen.url} AND project_id = ${link.projectId} LIMIT 1`
+          yield* beginRound({ projectId: link.projectId, taskId: link.taskId, threadId: workspace.threadId }, seen.url, [
+            {
+              repository: workspace.slug,
+              name: workspace.name,
+              branch: now.target,
+              ref,
+              target,
+              from,
+              pushed: now.headSha ?? sent?.head ?? null,
+              files: merged.stdout
+                .split('\n')
+                .slice(1)
+                .filter((line) => line !== ''),
+            },
+          ])
+        })
+
+      /**
+       * When the lead's turn ends on a round, or its session goes, the round
+       * is looked at: not while more waits for it on the thread, which comes
+       * in the next turn, nor while it asks the person something. A turn the
+       * person interrupted is theirs to carry on.
+       */
+      const onLive = (event: LiveEvent) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          if (event._tag !== 'TurnEnded' && event._tag !== 'SessionEnded') return
+          if (event._tag === 'TurnEnded' && (event.state === 'interrupted' || event.errorClass === 'usage_limit')) return
+          if (event._tag === 'SessionEnded' && event.state === 'superseded') return
+          const round = yield* roundOf({ threadId: event.threadId })
+          if (round === undefined) return
+          const running = yield* sessions.running(event.threadId)
+          if (event._tag === 'SessionEnded' && Option.isSome(running)) return
+          if (event._tag === 'TurnEnded') {
+            const [queued] = yield* sql<{ id: string }>`
+              SELECT id FROM user_inputs WHERE thread_id = ${event.threadId} AND state = 'queued' LIMIT 1`
+            if (queued !== undefined) return
+            // A turn of a session another agent has taken over from is that session's last.
+            const [turn] = yield* sql<{ sessionId: string | null }>`
+              SELECT provider_session_id AS session_id FROM turn_deliveries WHERE id = ${event.turnId}`
+            if (Option.isSome(running) && turn?.sessionId != null && running.value.sessionId !== turn.sessionId) return
+          }
+          const [asking] = yield* sql<{ id: string }>`
+            SELECT id FROM attention_requests WHERE task_id = ${round.taskId} AND kind = 'question' AND state = 'open' LIMIT 1`
+          if (asking !== undefined) return
+          // Stopped by the person, it is theirs: it isn't started again to try once more.
+          const stopped = event._tag === 'SessionEnded' && event.state === 'completed'
+          yield* locked(round.taskId)(settleRound(round.id, stopped ? { why: 'The lead was stopped before it resolved it.' } : {}))
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look at a conflict the lead was resolving', cause)))
+
+      yield* Effect.forkScoped(provide(Stream.runForEach(yield* live.subscribe, onLive)))
+
+      // A round an earlier launch left under way has no lead on it now: what the branch holds says how it ended.
+      yield* Effect.forkScoped(
+        provide(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const open = yield* sql<{ id: string; taskId: string }>`SELECT id, task_id FROM conflict_resolutions WHERE state = 'resolving'`
+            for (const round of open)
+              yield* locked(round.taskId)(settleRound(round.id, { why: 'Althar stopped while the lead was resolving it.' }))
+          }),
+        ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look at the conflicts leads were resolving', cause))),
+      )
 
       // What an earlier launch was doing outside when it stopped is uncertain until read back or asked for again.
       yield* provide(reconcileOutward).pipe(
