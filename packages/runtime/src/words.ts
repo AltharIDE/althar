@@ -212,7 +212,9 @@ export const words = (
       case 'AccountRefused':
         return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Althar can't add that account."
       case 'ChangedSinceSeen':
-        return 'The pull request changed since you looked at it. Have another look before you accept it.'
+        return text(error, 'what') === 'branch'
+          ? 'The branch changed since you looked at it, so nothing was pushed. Have another look at what would go up, then push.'
+          : 'The pull request changed since you looked at it. Have another look before you accept it.'
       case 'NotConnected':
         return `Althar isn't connected to ${productOf(text(error, 'product'))}. Connect it, then try again.`
       case 'NotAnIssue':
@@ -242,7 +244,7 @@ export const words = (
         return agentSaid(error) ?? "Althar's runtime couldn't do that. Its log has the details."
     }
   })()
-  // A merge that conflicts says in which files, for the window to have the lead settle them.
+  // A merge that conflicts says in which files, for the window to have the lead settle them, or say it is.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
   // A service's refusal says which, for the window to say it where it happened: a token it didn't take, as against one it took and limits.
   if (reason === 'ConnectorFailed') return { reason, message, why: text(error, 'reason') }
@@ -280,6 +282,8 @@ const cantMerge = {
   changed: () => 'The task’s branch changed since you looked. Look again, then merge.',
   conflicts: (files: string) =>
     `It conflicts with the default branch, in ${files}. Tell the lead to bring its branch up to date, then merge again.`,
+  resolving: (files: string) =>
+    `It conflicts with the default branch, in ${files}. The lead is resolving it, as the project’s rules say; merge again once it has.`,
   busy: (where: string) =>
     `The default branch is checked out in ${where} with changes not committed. Commit or put them away, then merge again.`,
   untracked: (files: string) => `The merge would overwrite files git doesn’t track: ${files}. Move them away, then merge again.`,

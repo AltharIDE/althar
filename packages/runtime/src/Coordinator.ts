@@ -32,7 +32,7 @@ import type { InputImage } from './sentImages'
 import { SignIns } from './SignIns'
 import { addItem, transcript } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
-import { describeModels, routeTo, usableModels } from './usableModels'
+import { describeModels, type Route, routeTo, usableModels } from './usableModels'
 
 /*
  * The project's coordinator (docs/architecture/04; docs/plans/mvp.md, "The
@@ -94,8 +94,15 @@ const DraftedIssue = Schema.Struct({
   container: Schema.optional(Schema.String),
   labels: Schema.optional(Schema.Array(Schema.String)),
 })
-/* A step's model, as list_models names it; or, as plans once did, an agent and its own id for the model. */
-const StepPick = Schema.Struct({ model: Schema.optional(Schema.String), agent: Schema.optional(Schema.String) })
+/*
+ * A step's model, as list_models names it; or, as plans once did, an agent and its own id for the model. And how hard it
+ * thinks, where named: one of the model's efforts as list_models writes them.
+ */
+const StepPick = Schema.Struct({
+  model: Schema.optional(Schema.String),
+  agent: Schema.optional(Schema.String),
+  effort: Schema.optional(Schema.NullOr(Schema.String)),
+})
 const Proposed = Schema.Struct({
   task: Schema.String,
   lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
@@ -423,15 +430,47 @@ export class Coordinator extends Context.Service<
       const listModels = (access: ToolAccess) => Effect.map(usableModels(access.projectId), describeModels)
 
       /**
-       * A step's agent and model, from what the plan names (ADR-015): a model
-       * as list_models writes it, taken the best way there is; or an agent, on
-       * its own id for a model or on its own default.
+       * A step's effort, where the plan names one: one of the levels its model
+       * takes the way it goes, by its id or its name, kept as its id. Any other
+       * is refused, with the ones it takes. Left out, the step starts at the
+       * person's default for the model, or else at the model's own.
+       */
+      const effortOf = (
+        named: string,
+        levels: ReadonlyArray<{ readonly id: string; readonly name: string }>,
+        asked: string | null | undefined,
+      ): Effect.Effect<string | null, ToolRefused> => {
+        if (asked == null) return Effect.succeed(null)
+        const wanted = asked.trim().toLowerCase()
+        const level = levels.find((one) => one.id.toLowerCase() === wanted || one.name.toLowerCase() === wanted)
+        if (level !== undefined) return Effect.succeed(level.id)
+        return Effect.fail(
+          new ToolRefused({
+            message:
+              levels.length === 0
+                ? `${named} has no effort to set. Leave effort out.`
+                : `${named} has no effort ${asked}. Name one of its efforts, as list_models writes them: ${levels.map((one) => one.id).join(', ')}; or leave effort out.`,
+          }),
+        )
+      }
+
+      /**
+       * A step's agent, model and effort, from what the plan names (ADR-015):
+       * a model as list_models writes it, taken the best way there is; or an
+       * agent, on its own id for a model or on its own default.
        */
       const stepOf = (projectId: string, pick: typeof StepPick.Type) =>
         Effect.gen(function* () {
+          // On the way it goes, at an effort that model takes there; named as the plan names it.
+          const on = (route: Route, named: string) =>
+            Effect.map(effortOf(named, route.efforts, pick.effort), (effort) => ({
+              agentId: route.agentId,
+              model: route.model,
+              ...(effort === null ? {} : { effort }),
+            }))
           if (pick.model !== undefined) {
             const route = routeTo(yield* usableModels(projectId), pick.model, pick.agent)
-            if (route !== null) return { agentId: route.agentId, model: route.model }
+            if (route !== null) return yield* on(route, pick.model)
             if (pick.agent === undefined)
               return yield* new ToolRefused({
                 message: `No model called ${pick.model} can be used now. ${describeModels(yield* usableModels(projectId))}`,
@@ -449,12 +488,19 @@ export class Coordinator extends Context.Service<
               offered === undefined
                 ? null
                 : routeTo(yield* usableModels(projectId), knownModelName({ id: agentId, name: agentName }, offered))
-            if (elsewhere !== null) return { agentId: elsewhere.agentId, model: elsewhere.model }
+            if (elsewhere !== null) return yield* on(elsewhere, pick.model)
             return yield* new ToolRefused({
               message: `The person switched ${pick.model} off. ${describeModels(yield* usableModels(projectId))}`,
             })
           }
-          return { agentId, model: pick.model ?? null }
+          // Its efforts as the agent offers that model; on its own default, they aren't known, so none is taken.
+          const levels =
+            pick.effort == null || pick.model === undefined
+              ? []
+              : ((yield* (yield* Models).catalog).find((one) => one.agentId === agentId)?.models.find((model) => model.id === pick.model)
+                  ?.efforts ?? [])
+          const effort = yield* effortOf(pick.model ?? `${nameOf(agentId)}'s default model`, levels, pick.effort)
+          return { agentId, model: pick.model ?? null, ...(effort === null ? {} : { effort }) }
         })
 
       const propose = (access: ToolAccess, input: unknown) =>
@@ -607,6 +653,11 @@ export class Coordinator extends Context.Service<
         properties: { task: { type: 'string', description: "The task's slug, as list_tasks shows it." } },
         required: ['task'],
       }
+      const effort = {
+        type: 'string',
+        description:
+          "How hard it thinks: one of the efforts list_models gives for its model. Left out, it starts at the person's default for the model, or else at the model's own.",
+      }
 
       yield* toolServer.serve('coordinator', [
         tool('project_overview', 'The project: its repositories, how many tasks it has, and its rules.', nothing, (access) =>
@@ -683,26 +734,27 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'list_models',
-          'The models you can give work to now, by who makes them, with how each scores and whether a plan pays for it.',
+          'The models you can give work to now, by who makes them, with how each scores, whether a plan pays for it, and the efforts it takes: their ids, the one it starts at by itself, and the person’s default where they set one.',
           nothing,
           (access) => listModels(access),
         ),
         tool(
           'propose_plan',
-          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. Name each model as list_models writes it. It starts on its own after 25 seconds unless the person holds or changes it.",
+          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. It starts on its own after 25 seconds unless the person holds or changes it.",
           {
             type: 'object',
             properties: {
               task: { type: 'string', description: "The task's slug." },
               lead: {
                 type: 'object',
-                properties: { model: { type: 'string', description: 'As list_models writes it.' }, reason: { type: 'string' } },
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort, reason: { type: 'string' } },
                 required: ['model'],
               },
               review: {
                 type: ['object', 'null'],
                 properties: {
                   model: { type: 'string', description: 'As list_models writes it; another maker’s than the lead’s where there is one.' },
+                  effort,
                 },
                 required: ['model'],
               },
@@ -713,7 +765,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'start_task',
-          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. A change worth reviewing, or that should end in a pull request, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
+          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it, and an effort it lists where it matters; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. A change worth reviewing, or that should end in a pull request, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
           {
             type: 'object',
             properties: {
@@ -721,7 +773,7 @@ export class Coordinator extends Context.Service<
               description: { type: 'string' },
               lead: {
                 type: 'object',
-                properties: { model: { type: 'string', description: 'As list_models writes it.' }, reason: { type: 'string' } },
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort, reason: { type: 'string' } },
                 required: ['model'],
               },
               repositories: {

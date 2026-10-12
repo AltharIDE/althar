@@ -9,11 +9,13 @@ import { useServices } from '../../data/services'
 
 /*
  * A project's settings' view model: its name and ink, changed in place, its
- * rules in a line, and removing it. A new name or ink shows at once, and
- * goes to the runtime one change after another; the tabs and the home hear
- * it through the change feed, and the projects are read again at once too,
- * so it shows everywhere before the feed is heard. One that didn't hold goes
- * back, and says why. Removing it from Althar is asked in a dialog first.
+ * rules in a line, whether its leads resolve conflicts, and removing it. A
+ * new name or ink shows at once, and goes to the runtime one change after
+ * another; the tabs and the home hear it through the change feed, and the
+ * projects are read again at once too, so it shows everywhere before the
+ * feed is heard. One that didn't hold goes back, and says why. So does the
+ * switch for conflicts, a rule saved as the rules screen saves one. Removing
+ * it from Althar is asked in a dialog first.
  */
 
 export interface ProjectSettingsModel {
@@ -28,6 +30,10 @@ export interface ProjectSettingsModel {
   /** Why the last new name or ink didn't hold. */
   readonly failed: string | null
   readonly rules: ProjectRulesView | null
+  /** Turns on or off the project's leads resolving conflicts on their own (ADR-030). */
+  readonly setResolveConflicts: (on: boolean) => void
+  /** Why the switch didn't hold. */
+  readonly ruleFailed: string | null
   /** Asking whether to remove it from Althar. */
   readonly removing: boolean
   readonly askRemove: () => void
@@ -92,6 +98,25 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     [change, client, projectId],
   )
 
+  // Shown switched at once; the rules as kept once saved, or as they were, with why, when it isn't.
+  const [ruleFailed, setRuleFailed] = useState<string | null>(null)
+  const setResolveConflicts = useCallback(
+    (on: boolean) => {
+      const key = keys.rules(projectId)
+      setRuleFailed(null)
+      cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, resolveConflicts: on }))
+      queue.current = queue.current.then(async () => {
+        try {
+          cache.setQueryData(key, await client.setProjectRules({ projectId, resolveConflicts: on }))
+        } catch (failure) {
+          setRuleFailed(messageOf(failure))
+          await cache.invalidateQueries({ queryKey: key, exact: true })
+        }
+      })
+    },
+    [cache, client, projectId],
+  )
+
   const taken: Partial<Record<ProjectInk, string>> = {}
   for (const other of listed?.projects ?? []) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
 
@@ -132,6 +157,8 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     setInk,
     failed: failed?.message ?? null,
     rules,
+    setResolveConflicts,
+    ruleFailed,
     removing,
     askRemove,
     closeRemove,

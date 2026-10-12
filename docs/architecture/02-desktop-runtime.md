@@ -342,7 +342,7 @@ streams through which the runtime may send requests and receive structured
 events. Agents speak ACP over `stdio`.
 
 Bundled ACP adapters written for Node run on a Node the packaged app ships
-(ADR-030), so Althar doesn't depend on a Node installed on the machine, and
+(ADR-031), so Althar doesn't depend on a Node installed on the machine, and
 its own binary never runs as Node: its `runAsNode` fuse is off. In
 development they run on Electron's binary as Node (`ELECTRON_RUN_AS_NODE`).
 

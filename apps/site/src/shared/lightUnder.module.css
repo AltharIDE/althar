@@ -1,0 +1,2 @@
+/* Placed by its head's `top`; reaching far down, it ends where the head clips it. Nothing to see or point at. */
+.under { position: absolute; left: 0; right: 0; bottom: -200vh; pointer-events: none; }

@@ -13,7 +13,7 @@
   - The runtime package imports nothing from Electron, so it also runs under
     plain Node for tests, a diagnostic CLI, or a later daemon.
   - Bundled adapters written for Node run on Electron's own Node. Since
-    ADR-030, the packaged app ships a Node for them instead.
+    ADR-031, the packaged app ships a Node for them instead.
   - Details: [02](../architecture/02-desktop-runtime.md).
 - **Alternatives considered:**
   - Tauri: a Rust core plus a bundled Node or Bun for the runtime means two

@@ -25,7 +25,7 @@ import { NOT_NOTARIZING, notarize, notaryAuth } from './notarize.ts'
  * pinned to the versions the workspace runs, so the app ships what dev and
  * CI tested. Electron comes from the copy already installed, at the version
  * the app is tested on. The adapters run on a Node the app ships in its
- * resources (ADR-030, scripts/node.ts), as Althar's binary doesn't run as
+ * resources (ADR-031, scripts/node.ts), as Althar's binary doesn't run as
  * Node: its `runAsNode` fuse is off.
  *
  * Signing: every executable in the app is signed on its own, deepest first,
@@ -193,7 +193,7 @@ await build({
     nodeGypRebuild: false,
     /*
      * Nothing may run Althar's binary as Node, or steer it through
-     * NODE_OPTIONS or the inspector (ADR-030): the adapters run on the Node
+     * NODE_OPTIONS or the inspector (ADR-031): the adapters run on the Node
      * the app ships, and need none of these.
      */
     electronFuses: { runAsNode: false, enableNodeOptionsEnvironmentVariable: false, enableNodeCliInspectArguments: false },

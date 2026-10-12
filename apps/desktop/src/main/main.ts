@@ -289,7 +289,7 @@ const startRuntime = () => {
       ALTHAR_PROFILE: profile,
       ALTHAR_WORKTREES: worktrees,
       ALTHAR_APP_VERSION: app.getVersion(),
-      // The Node the agent adapters run on (ADR-030): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
+      // The Node the agent adapters run on (ADR-031): the packaged app's own, as its binary doesn't run as Node; in dev, Electron's.
       ...(app.isPackaged ? { ALTHAR_NODE: join(process.resourcesPath, 'node', 'bin', 'node') } : {}),
     },
   })

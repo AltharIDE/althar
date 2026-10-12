@@ -37,4 +37,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [027](027-what-the-flatpak-reaches.md) | What the Flatpak reaches, and what it does not |
 | [028](028-linux-windows-packages-and-the-keyring.md) | Linux windows, packages and the keyring |
 | [029](029-the-load-read-when-asked.md) | How hard the computer works is read by the runtime, only while a window shows it |
-| [030](030-adapters-on-a-node-of-their-own.md) | The agent adapters run on a Node the app ships, and Althar's binary never runs as Node |
+| [030](030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md) | Where the project says so, the lead resolves a conflict unasked, and Althar pushes the merge |
+| [031](031-adapters-on-a-node-of-their-own.md) | The agent adapters run on a Node the app ships, and Althar's binary never runs as Node |

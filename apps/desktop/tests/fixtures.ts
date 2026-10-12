@@ -52,6 +52,7 @@ export const projectRules: ProjectRulesView = {
   alwaysAllow: [],
   commands: [],
   end: null,
+  resolveConflicts: false,
   usageLimit: 'move',
   rotateAccounts: false,
   onlyAccounts: null,
@@ -483,6 +484,27 @@ export const items = {
       ...content,
     },
   }),
+  push: (content: Partial<Extract<ThreadItem, { kind: 'push_request' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'push_request',
+    content: {
+      url: 'https://github.com/meridian/api/pull/12',
+      where: 'PR #12',
+      product: 'github',
+      head: 'def4567890',
+      commits: [
+        { sha: 'abc1234', subject: 'Read Retry-After as seconds' },
+        { sha: 'def4567', subject: 'Name the retry option' },
+      ],
+      count: 2,
+      moved: false,
+      blocked: null,
+      state: 'open',
+      settledAt: null,
+      ...content,
+    },
+  }),
 }
 
 type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
@@ -522,6 +544,7 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   summary: null,
   lead: 'claude-code',
   leadModel: null,
+  leadEffort: null,
   branch: 'althar/add-a-retry',
   startedAt: null,
   waits: null,
@@ -611,6 +634,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     planId: null,
     runCommand: null,
     launches: [],
+    resolveConflicts: { task: null, project: false },
   },
   session: {
     id: 's1',
@@ -769,6 +793,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setCoAuthor: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
+    setTaskResolveConflicts: vi.fn(async () => {}),
     resumeTask: vi.fn(async () => {}),
     abandonTask: vi.fn(async () => {}),
     reopenTask: vi.fn(async () => {}),

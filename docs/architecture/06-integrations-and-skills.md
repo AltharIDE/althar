@@ -249,8 +249,17 @@ service's model.
   commits after, answering the person, a review or failed checks, waits on the
   task's branch until the person has looked at it and pushes it: the task
   says how many commits aren't on the pull request yet, and Push pushes up to
-  the commit they saw, never one the lead made since. The lead has no tool to
-  push.
+  the commit they saw, never one the lead made since. The lead never pushes:
+  when the person asks it to, or what it committed should go up, it asks them
+  to (`push_to_pull_request`), which puts the commits that would go up in the
+  thread, with Push. Pressing it pushes up to the head shown; the request
+  then says it was pushed and the lead hears so. Where the branch changed
+  since, nothing is pushed, and the request shows the branch as it is now,
+  or why that can't go up: rewritten under what went up, or behind commits
+  pushed from elsewhere.
+  One exception (ADR-030): where the project has its leads resolve
+  conflicts, Althar pushes the merge that resolves one, and a fix for checks
+  that fail on it, and nothing with them (Resolving a conflict, below).
 - **Without a connection, the person pushes the task's branch with their own
   git** (ADR-016): to the remote that repository's work goes to (the one its
   default branch follows, else `origin`, else its only remote), under the
@@ -286,7 +295,9 @@ service's model.
   - A conflict with the default branch offers to have the lead resolve it: a
     note to the lead naming the files, sent as the person's own message, to
     merge the default branch into its branch, settle each conflict, and
-    commit. The person merges again after.
+    commit. The person merges again after. Where the project's rules say so,
+    Althar asks the lead itself, in the same words, and the merge says the
+    lead is resolving it (Resolving a conflict, below).
 - **A task is done once each of its repositories is merged:** its pull
   request merged, or, where it has none, its branch in its default branch
   here. A pull request closed without merging keeps the task open. Until
@@ -308,7 +319,7 @@ service's model.
 - **Everything arrives in the task's thread,** once: comments, reviews,
   checks finishing, merged, closed, marked ready. Bots aside.
 - **Only some of it reaches the lead.** Failed checks do, with the end of
-  their logs: the lead fixes and commits, and the person pushes. So do comments and reviews from the person and from people who
+  their logs: the lead fixes and commits, and asks the person to push. So do comments and reviews from the person and from people who
   can write to the repository (GitHub's owners, members and collaborators).
   On a public repository anyone can comment, so what anyone else says stays in
   the thread, marked as not passed on, for the person to pass on in their own
@@ -318,6 +329,90 @@ service's model.
   them: they go up under the person's account, which is also where the
   person comments. Each says it came from Althar, and which agent wrote
   it.
+- **A pull request that conflicts with its target** is read from the host,
+  once it has worked it out: GitHub's mergeable state, GitLab's merge
+  status, Bitbucket Data Center's merge result. Bitbucket Cloud doesn't say.
+
+**Resolving a conflict, where the project says so** (ADR-030). A project's
+rules can have its leads resolve a conflict with the default branch on their
+own, switched by "Resolve conflicts automatically" in its settings. Off, a conflict waits
+for the person, as above.
+
+- **A task can say otherwise.** Its ⋯ menu offers "Resolve conflicts
+  automatically": use the project setting, on for this task, or off for it. It is
+  kept on the task; where it differs from the project's, a quiet word beside
+  the menu says so, and otherwise nothing shows. Each conflict found goes by
+  what the task and its project say then, and the lead's brief by what they
+  said as it started.
+- **Turned on, it acts at once.** The project's switch going on, or a task's
+  menu where the task wasn't resolving its conflicts, has Althar look at
+  each open task with a branch here, rather than waiting for a new
+  conflict: its repositories merging here are merged with their default
+  branches without anything moving, whatever the person's own checkout
+  holds, and a conflict starts a round as a Merge pressed would; its
+  listened pull requests are asked about now, and one whose host says it
+  conflicts starts one as ever. The rules below hold for each: a run that
+  succeeded, one round at a time, and the same push. Turned off, a round
+  under way carries on; the next conflict waits for the person.
+
+- **Found either way, asked the same way.** A merge here that conflicts, or
+  a pull request its host says conflicts, has Althar send the lead the note
+  the person's press would, unasked: merge the default branch into the
+  task's branch, settle each conflict so both sides' changes hold, run the
+  checks, and commit the merge. For a pull request, Althar first fetches the
+  branch it goes into, under the remote's name (`origin/main`, or
+  `upstream/main` into the repository a fork came from), and asks only where
+  the task's branch conflicts with it here too; one that merges cleanly is
+  from before the target moved, or merged already and not yet pushed. A
+  lead that isn't running is started, on the agent last on the thread.
+- **Only where the task is open and its run succeeded,** and one round at a
+  time: not while the run runs, nor where the person stopped it, which an
+  agent starting would go against. The thread says Althar asked, and why:
+  the project's rules, or the task's own say. A merge here pressed
+  meanwhile says the lead is resolving it.
+- **Althar looks at the branch, not at what the lead said,** once its turn
+  is over: not while more waits for it, or while it asks the person
+  something. Resolved means the branch it conflicted with is in it, nothing
+  is half merged, and no file it conflicted in still has markers.
+- **Not resolved, it is asked once more,** with why. Then, or where the
+  person stopped it, it is the person's: the thread says why, the task is
+  back in Needs you, and merging again offers the person's press, as before,
+  until the branch moves.
+- **No review round.** The checks are enough: the lead runs them and fixes
+  what they find before it commits the merge, so the fix is in it; on a pull
+  request, the host's run on what Althar pushes.
+- **On a pull request, Althar pushes the resolution itself** with the
+  connection, the one push of the lead's work that isn't the person's: the
+  merge alone, made on the branch as the pull request had it. Where the
+  branch had other commits the pull request didn't, the lead committed
+  anything after the merge, something else came in, or anyone else asked
+  the lead something meanwhile, nothing is pushed: the thread says the
+  merge waits, and the task's Push sends it with the rest. Merging stays
+  the person's.
+- **The round follows the checks on what Althar pushed.** Passed (or none
+  two minutes after the push), it is done, and the task is ready to merge.
+  Failed, the lead is asked to fix them within the round, not as failed
+  checks usually reach it: one commit on top of the merge, with nobody else
+  asking it anything meanwhile, is pushed in turn, and its checks heard the
+  same way. More than one, such as other work after the fix, waits for the
+  person's Push. The fix counts as the lead's one more try, so checks that
+  fail after it, or on a merge that took two tries, make the round the
+  person's. Where the lead committed anything else since the push, the pull
+  request moved on past it, or it was merged or closed, the round is over,
+  and what comes after is as ever.
+- **Stopping is the person's say.** Where the person stops or interrupts
+  the lead, or stops the task, a round under way is theirs: nothing more is
+  pushed for it, and checks that fail after don't ask the lead again. A
+  message sent to interrupt it is the person talking to the lead, not taking
+  the conflict over, and the round goes on. Stopping listening to
+  the pull request ends its round too, since nothing there is heard; Althar
+  does the same, as it starts, for a round left waiting on a pull request it
+  no longer listens to.
+- **The lead never pushes,** here as anywhere (Agents and the hosts, below).
+  Its brief says what Althar pushes for it where the task, or else its
+  project, has it resolve conflicts.
+- **A round under way when Althar stopped** is looked at as it starts again,
+  by what the branch holds, and is the person's if it isn't resolved.
 
 ### Trackers
 
