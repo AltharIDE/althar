@@ -4,7 +4,7 @@ import type { ProjectId } from '@althar/domain'
 import type { SessionEvent } from '@althar/provider-adapters'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Exit, Layer, Stream } from 'effect'
+import { Effect, Exit, Fiber, Layer, Scope, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents, WebCrypto } from '../src/Config'
@@ -13,7 +13,8 @@ import { currentBranch, defaultBranch, remoteUrls } from '../src/git'
 import { change } from '../src/records'
 import { Live } from '../src/Live'
 import { Sessions } from '../src/Sessions'
-import { addItem, recorder, transcript } from '../src/threads'
+import { Ledger } from '@althar/persistence-sqlite'
+import { addItem, betweenTurns, recorder, transcript } from '../src/threads'
 import { items, repository, runtime, task, turns, until } from './support'
 
 /** A thread with a session on it, for the recorder to write into. */
@@ -167,6 +168,139 @@ describe('long messages', () => {
       yield* writer.flush
       const [done] = (yield* items(where.threadId)).slice(where.before)
       assert.isTrue(String(done?.content.text).endsWith('x end'))
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('what an agent says between turns', () => {
+  const chunks = (tag: 'AgentMessage' | 'AgentThought', words: ReadonlyArray<string>, messageId?: string): ReadonlyArray<SessionEvent> =>
+    words.map((text) => ({ _tag: tag, text, ...(messageId === undefined || tag === 'AgentThought' ? {} : { messageId }) }) as SessionEvent)
+
+  const texts = (threadId: string, before: number) =>
+    items(threadId).pipe(Effect.map((all) => all.slice(before).map((item) => [item.kind, item.content.text ?? item.content.title])))
+
+  const tool: SessionEvent = { _tag: 'ToolCall', toolCallId: 'check', title: 'Run the check', kind: 'execute', status: 'in_progress' }
+
+  for (const [tag, kind] of [
+    ['AgentMessage', 'agent_message'],
+    ['AgentThought', 'agent_thought'],
+  ] as const) {
+    for (const ids of [false, true]) {
+      it.live(`keeps a ${kind} whole around a tool call, ${ids ? 'with' : 'without'} message ids`, () =>
+        Effect.gen(function* () {
+          const where = yield* place
+          const scope = yield* Scope.make()
+          const { record } = yield* betweenTurns(recorder(where), scope)
+          const run = [
+            ...chunks(tag, ['The log', " isn't", ' where I', ' expected.'], ids ? 'm1' : undefined),
+            tool,
+            ...chunks(tag, ['Coverage ', 'clears ', '90%.'], ids ? 'm2' : undefined),
+          ]
+          for (const event of run) yield* record(event)
+          yield* until(texts(where.threadId, where.before), (rows) => rows.length === 3 && rows[2]?.[1] === 'Coverage clears 90%.')
+          assert.deepStrictEqual(yield* texts(where.threadId, where.before), [
+            [kind, "The log isn't where I expected."],
+            ['tool_call', 'Run the check'],
+            [kind, 'Coverage clears 90%.'],
+          ])
+          yield* Scope.close(scope, Exit.void)
+        }).pipe(Effect.provide(runtime())),
+      )
+    }
+  }
+
+  it.live('tells two messages apart by their ids, with nothing between them', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const scope = yield* Scope.make()
+      const { record } = yield* betweenTurns(recorder(where), scope)
+      for (const event of [...chunks('AgentMessage', ['One ', 'two.'], 'a'), ...chunks('AgentMessage', ['Three ', 'four.'], 'b')])
+        yield* record(event)
+      yield* until(texts(where.threadId, where.before), (rows) => rows.length === 2 && rows[1]?.[1] === 'Three four.')
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [
+        ['agent_message', 'One two.'],
+        ['agent_message', 'Three four.'],
+      ])
+      yield* Scope.close(scope, Exit.void)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('closes a message once the agent goes quiet, and the next one is a new item', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const scope = yield* Scope.make()
+      const { record } = yield* betweenTurns(recorder(where), scope, '50 millis')
+      for (const event of chunks('AgentMessage', ['First ', 'part.'])) yield* record(event)
+      yield* Effect.sleep('300 millis')
+      for (const event of chunks('AgentMessage', ['Second.'])) yield* record(event)
+      yield* until(texts(where.threadId, where.before), (rows) => rows.length === 2)
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [
+        ['agent_message', 'First part.'],
+        ['agent_message', 'Second.'],
+      ])
+      yield* Scope.close(scope, Exit.void)
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('keeps what was said when the scope ends before the agent goes quiet', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const scope = yield* Scope.make()
+      const { record } = yield* betweenTurns(recorder(where), scope)
+      for (const event of chunks('AgentMessage', ['Cut ', 'off ', 'soon.'])) yield* record(event)
+      yield* Scope.close(scope, Exit.void)
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [['agent_message', 'Cut off soon.']])
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  /** A ledger that takes its time to notify, so a write is under way, inside its transaction, while the test acts. */
+  const slowLedger = Effect.gen(function* () {
+    const real = yield* Ledger
+    return Ledger.of({ ...real, notify: (change) => Effect.andThen(Effect.sleep('300 millis'), real.notify(change)) })
+  })
+
+  it.live('keeps what was said when the scope ends while the quiet close is writing it', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const slow = yield* slowLedger
+      const scope = yield* Scope.make()
+      const { record } = yield* betweenTurns(recorder(where), scope, '50 millis')
+      const [last, ...before] = chunks('AgentMessage', ['Cut ', 'off ', 'mid-write.']).toReversed()
+      for (const event of before.toReversed()) yield* record(event)
+      // The timer is forked with the slow ledger, so what it writes at the end of the quiet is still under way when the scope ends.
+      if (last !== undefined) yield* Effect.provideService(record(last), Ledger, slow)
+      yield* Effect.sleep('150 millis')
+      yield* Scope.close(scope, Exit.void)
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [['agent_message', 'Cut off mid-write.']])
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('writes a message again when a write of it was cut short', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const slow = yield* slowLedger
+      const items = recorder(where)
+      for (const event of chunks('AgentMessage', ['Whole ', 'text.'])) yield* items.record(event)
+      const writing = yield* Effect.forkChild(Effect.provideService(items.flush, Ledger, slow))
+      yield* Effect.sleep('100 millis')
+      yield* Fiber.interrupt(writing)
+      yield* items.flush
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [['agent_message', 'Whole text.']])
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('closes a message when the stream is handed on, so what comes next is a new item', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const scope = yield* Scope.make()
+      const { record, close } = yield* betweenTurns(recorder(where), scope)
+      for (const event of chunks('AgentMessage', ['Before ', 'the turn.'])) yield* record(event)
+      yield* close
+      for (const event of chunks('AgentMessage', ['After ', 'it.'])) yield* record(event)
+      yield* Scope.close(scope, Exit.void)
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [
+        ['agent_message', 'Before the turn.'],
+        ['agent_message', 'After it.'],
+      ])
     }).pipe(Effect.provide(runtime())),
   )
 })
