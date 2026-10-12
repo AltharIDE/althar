@@ -1,7 +1,8 @@
 import { Brand, BrandMark, Logo } from '@althar/ui'
-import { type RefObject, useEffect, useId, useRef, useState } from 'react'
+import { type CSSProperties, useEffect, useId, useRef, useState } from 'react'
 
 import { LINKS } from '../content/facts'
+import { useHydrated, useStill } from '../lib/browser'
 import { cx } from '../lib/cx'
 import { useHere } from '../lib/pathname'
 import { glassDrop, type GlassDrop } from './glassDrop'
@@ -14,10 +15,11 @@ import s from './Nav.module.css'
  * GitHub, the download, and on a phone a Menu that drops the pages. Over
  * paper it is paper with a rim; once a head's light is under it
  * (useLightUnder) it takes the light's cobalt as smoked glass and its words
- * turn white.
+ * turn white, and over a dark section it is smoked graphite, white on it.
  *
  * Pointed at or tabbed through, the pages and GitHub have a drop of the
- * same glass under them, gliding from one to the next (glassDrop).
+ * same glass under them, gliding from one to the next (glassDrop). It comes
+ * in as the page opens: with the light, on the homepage (`opening`).
  *
  * The glass is a layer of its own beside what reads on it, never around it:
  * a box with a backdrop filter is where the boxes in it stop seeing the
@@ -44,22 +46,11 @@ function useScrolled(past: number) {
   return scrolled
 }
 
-/** The drop's shadow and two halves of glass: see glassDrop. */
-function Drop({ drop }: { drop: RefObject<HTMLSpanElement | null> }) {
-  return (
-    <span ref={drop} className={s.drop} aria-hidden="true">
-      <span className={s.half}>
-        <i />
-      </span>
-      <span className={s.half}>
-        <i />
-      </span>
-      <b />
-    </span>
-  )
-}
+/** Where each thing on the bar comes in, one after another. */
+const nth = (i: number) => ({ '--i': i }) as CSSProperties
 
-export function Nav() {
+/** `opening`: the page opens with the hero's light rising and its mark unveiling, and the nav comes in after it. */
+export function Nav({ opening = false }: { opening?: boolean } = {}) {
   const here = useHere()
   const bar = useRef<HTMLElement>(null)
   const row = useRef<HTMLDivElement>(null)
@@ -68,8 +59,11 @@ export function Nav() {
   const button = useRef<HTMLButtonElement>(null)
   const sheet = useId()
   const scrolled = useScrolled(8)
-  const lit = useLightUnder(bar)
+  const under = useLightUnder(bar)
   const [open, setOpen] = useState(false)
+  // The hero's opening starts once the page's script runs; so does the nav's entrance, timed to follow it. Held still, it is simply there.
+  const opened = useHydrated()
+  const held = useStill()
 
   useEffect(() => {
     if (!row.current || !drop.current) return
@@ -106,7 +100,16 @@ export function Nav() {
   const close = () => setOpen(false)
   return (
     <div
-      className={cx(s.wrap, scrolled && s.scrolled, lit && s.lit, open && s.open)}
+      className={cx(
+        s.wrap,
+        opening && s.opening,
+        held && s.still,
+        scrolled && s.scrolled,
+        under && s.lit,
+        under === 'ink' && s.ink,
+        open && s.open,
+      )}
+      data-opened={opened ? '' : undefined}
       // Tabbed on out of the menu into the page it covers, it closes.
       onBlur={(e) => {
         if (open && e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) close()
@@ -115,6 +118,7 @@ export function Nav() {
       <header ref={bar} className={s.bar} onPointerLeave={() => lens.current?.point(null)}>
         <span className={s.glass} aria-hidden="true" />
         <span className={s.tint} aria-hidden="true" />
+        <span className={s.graphite} aria-hidden="true" />
         <div
           ref={row}
           className={s.row}
@@ -128,27 +132,35 @@ export function Nav() {
           onFocus={(e) => lens.current?.focus(e.target.matches('[data-drop]:focus-visible') ? e.target : null)}
           onBlur={() => lens.current?.focus(null)}
         >
-          <Drop drop={drop} />
-          <a className={s.mark} href="/" aria-label="Althar">
+          <span ref={drop} className={s.drop} aria-hidden="true" />
+          <a className={s.mark} href="/" aria-label="Althar" style={nth(0)}>
             <Logo size={18} />
             <span>Althar</span>
           </a>
           <nav className={s.links} aria-label="Site">
-            {PAGES.map((p) => (
-              <a key={p.href} href={p.href} data-drop aria-current={here(p.href) ? 'page' : undefined}>
+            {PAGES.map((p, i) => (
+              <a key={p.href} href={p.href} data-drop aria-current={here(p.href) ? 'page' : undefined} style={nth(1 + i)}>
                 {p.name}
               </a>
             ))}
           </nav>
           <span className={s.end}>
-            <a className={s.github} href={LINKS.repo} data-drop aria-label="GitHub">
+            <a className={s.github} href={LINKS.repo} data-drop aria-label="GitHub" style={nth(1 + PAGES.length)}>
               <BrandMark brand={Brand.GitHub} size={16} />
             </a>
-            <a className={s.download} href={LINKS.releases}>
+            <a className={s.download} href={LINKS.releases} style={nth(2 + PAGES.length)}>
               <i aria-hidden="true" />
               Download
             </a>
-            <button ref={button} type="button" className={s.menu} aria-expanded={open} aria-controls={sheet} onClick={() => setOpen(!open)}>
+            <button
+              ref={button}
+              type="button"
+              className={s.menu}
+              style={nth(3 + PAGES.length)}
+              aria-expanded={open}
+              aria-controls={sheet}
+              onClick={() => setOpen(!open)}
+            >
               {open ? 'Close' : 'Menu'}
             </button>
           </span>

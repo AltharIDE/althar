@@ -6,18 +6,17 @@
  * gathers in where it first appears and fades out when nothing is held.
  * What passes under it is magnified, by as much as it is covered.
  *
- * Its width moves without its corners stretching: it is two halves, each
- * a box clipped at the middle with one rounded end of the capsule sliding
- * inside it, out to the width wanted. So the script writes only transforms
- * and opacity, a frame at a time and only while something moves. The
- * fading is the glass's own, not the drop's: an ancestor fading is a
- * backdrop of its own, and the glass would lose the page while it did.
+ * It is one piece of glass, never clipped. Aimed somewhere, it takes that
+ * width as its own once, and is carried there by a transform alone:
+ * stretched from the width it had, so its ends round out to its own as it
+ * settles. So while it moves the script writes only its transform and
+ * opacity, a frame at a time and only while something moves; the glass
+ * fades itself, as an ancestor fading would be a backdrop of its own and
+ * the glass would lose the page while it did.
  *
  * With reduced motion it appears where it is wanted, without gliding.
  */
 
-/** Half the widest the drop is drawn: its halves' boxes. Keep with --drop-half in Nav.module.css. */
-const HALF = 60
 /** The glide's spring, per unit mass: about a third of a second, at a damping ratio of 0.75, so it settles just past and back. */
 const STIFF = 300
 const DAMP = 26
@@ -29,8 +28,8 @@ const MAGNIFY = 0.07
 /** At most how far it stretches along its way and squashes across, at its quickest. */
 const STRETCH = 0.12
 const SQUASH = 0.08
-/** Its narrowest: GitHub's circle. */
-const LEAST = 34
+/** Its narrowest: a circle as tall as it is, round GitHub's. Keep with .drop's height in Nav.module.css. */
+const LEAST = 36
 
 export type GlassDrop = {
   /** What the pointer is on, or null once it has left the bar. */
@@ -43,8 +42,6 @@ export type GlassDrop = {
 type Item = { el: HTMLElement; centre: number; width: number }
 
 export function glassDrop(row: HTMLElement, drop: HTMLElement): GlassDrop {
-  const glass = [...drop.querySelectorAll<HTMLElement>('i')]
-  const fall = drop.querySelector<HTMLElement>('b')
   let items: Item[] = []
   let pointed: Element | null = null
   let focused: Element | null = null
@@ -61,6 +58,8 @@ export function glassDrop(row: HTMLElement, drop: HTMLElement): GlassDrop {
   let toShown = 0
   let frame = 0
   let last = 0
+  // The width it is drawn at, set as it is aimed: at rest it is unscaled.
+  let size = 0
 
   const still = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -78,18 +77,12 @@ export function glassDrop(row: HTMLElement, drop: HTMLElement): GlassDrop {
     const gather = still() ? 1 : 0.82 + 0.18 * shown
     const along = gather * (1 + STRETCH * speed)
     const across = gather * (1 - SQUASH * speed)
-    // On whole device pixels, so the line where the halves meet (its middle, which stretching doesn't move) is sharp.
-    const pixel = window.devicePixelRatio || 1
-    const left = Math.round((x - HALF) * pixel) / pixel
-    drop.style.transform = `translate3d(${left}px, 0, 0) scale(${along.toFixed(4)}, ${across.toFixed(4)})`
-    const reach = Math.max(0, HALF - w / 2).toFixed(2)
-    if (glass[0]) glass[0].style.transform = `translate3d(${reach}px, 0, 0)`
-    if (glass[1]) glass[1].style.transform = `translate3d(-${reach}px, 0, 0)`
-    for (const g of glass) g.style.opacity = shown.toFixed(3)
-    if (fall) {
-      fall.style.transform = `scaleX(${(w / 60).toFixed(4)})`
-      fall.style.opacity = shown.toFixed(3)
+    if (size !== toW) {
+      size = toW
+      drop.style.width = `${size}px`
     }
+    drop.style.transform = `translate3d(${(x - size / 2).toFixed(2)}px, 0, 0) scale(${((w / size) * along).toFixed(4)}, ${across.toFixed(4)})`
+    drop.style.opacity = shown.toFixed(3)
     // What is under it, by how much of the narrower of the two the other covers.
     for (const item of items) {
       const over = Math.min(x + w / 2, item.centre + item.width / 2) - Math.max(x - w / 2, item.centre - item.width / 2)

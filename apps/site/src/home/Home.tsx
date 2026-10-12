@@ -14,7 +14,7 @@ import { Hero } from './Hero'
 export function Home() {
   return (
     <div className={s.page} id="top">
-      <Nav />
+      <Nav opening />
       <Hero nav={<NavSpace />} />
       <RunsOn />
       <DesktopBody />

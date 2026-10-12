@@ -8,18 +8,13 @@ import { glassDrop } from '../src/shared/glassDrop'
  * is aimed and its place can be read from its transform.
  */
 
-/** Half the drop's width, as glassDrop has it. */
-const HALF = 60
-
 type Fake = { style: Record<string, string> }
 const fake = (): Fake => ({ style: {} })
 
 function rig() {
   const row = fake()
   const items = [0, 1, 2].map((i) => ({ ...fake(), offsetLeft: 100 + i * 80, offsetWidth: 60, offsetParent: row }))
-  const glass = [fake(), fake()]
-  const fall = fake()
-  const drop = { ...fake(), querySelectorAll: () => glass, querySelector: () => fall }
+  const drop = fake()
   Object.assign(row, { querySelectorAll: () => items })
   return { row, items, drop }
 }
@@ -49,7 +44,8 @@ afterEach(() => vi.unstubAllGlobals())
 describe('the nav’s glass drop', () => {
   it('follows keyboard focus away from where the pointer rests, and goes back to it when focus leaves', () => {
     const { row, items, drop } = rig()
-    const at = (i: number) => `translate3d(${items[i]!.offsetLeft + 30 - HALF}px, 0, 0)`
+    // Each item is 60 wide, so the drop, as wide, starts where it does.
+    const at = (i: number) => `translate3d(${items[i]!.offsetLeft.toFixed(2)}px, 0, 0)`
     const lens = glassDrop(row as unknown as HTMLElement, drop as unknown as HTMLElement)
 
     lens.point(items[0] as unknown as Element)
