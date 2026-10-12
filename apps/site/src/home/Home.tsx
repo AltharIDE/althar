@@ -6,7 +6,7 @@ import s from './Home.module.css'
 import { Hero } from './Hero'
 
 /*
- * The developer page: the island for a nav, the first screen in Althar's
+ * The developer page: the lens for a nav, the first screen in Althar's
  * light, the systems it runs on, the product shown (bodies/desktop), and
  * the footer (shared/footer).
  */
@@ -14,7 +14,7 @@ import { Hero } from './Hero'
 export function Home() {
   return (
     <div className={s.page} id="top">
-      <Nav />
+      <Nav opening />
       <Hero nav={<NavSpace />} />
       <RunsOn />
       <DesktopBody />

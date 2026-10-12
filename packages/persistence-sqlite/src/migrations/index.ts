@@ -24,7 +24,9 @@ import { statements as runCommands } from './0019_run_commands'
 import { statements as issueDrafts } from './0020_issue_drafts'
 import { statements as inputImages } from './0021_input_images'
 import { statements as connectionCli } from './0022_connection_cli'
-import { statements as pushRequests } from './0023_push_requests'
+import { statements as worktreeSetup } from './0023_worktree_setup'
+import { statements as conflictResolutions } from './0024_conflict_resolutions'
+import { statements as pushRequests } from './0025_push_requests'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -66,7 +68,9 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0020_issue_drafts', statements: issueDrafts },
   { key: '0021_input_images', statements: inputImages },
   { key: '0022_connection_cli', statements: connectionCli },
-  { key: '0023_push_requests', statements: pushRequests },
+  { key: '0023_worktree_setup', statements: worktreeSetup },
+  { key: '0024_conflict_resolutions', statements: conflictResolutions },
+  { key: '0025_push_requests', statements: pushRequests },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

@@ -37,3 +37,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [027](027-what-the-flatpak-reaches.md) | What the Flatpak reaches, and what it does not |
 | [028](028-linux-windows-packages-and-the-keyring.md) | Linux windows, packages and the keyring |
 | [029](029-the-load-read-when-asked.md) | How hard the computer works is read by the runtime, only while a window shows it |
+| [030](030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md) | Where the project says so, the lead resolves a conflict unasked, and Althar pushes the merge |

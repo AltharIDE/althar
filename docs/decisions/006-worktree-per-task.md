@@ -13,8 +13,9 @@
     settings, and per project. "Open in editor" opens the task's folder, so a
     task across several repositories opens as one workspace. Althar's own
     data stays in its profile folder.
-  - A project can declare a setup command and untracked files to copy into
-    each worktree, such as `.env`.
+  - Each new worktree is set up before its lead starts, with its
+    repository's setup ([ADR-023](023-althar-runs-the-project.md)). Untracked
+    files to copy into it, such as `.env`, may be declared later.
   - Working on a plain branch in the user's own checkout may come later, as an
     explicit per-project choice.
   - Details: [01](../architecture/01-concepts-and-project-model.md).

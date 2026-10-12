@@ -29,7 +29,9 @@
 
 /* ---- the edge of the screen: a dark scene ---- */
 /* A dark panel, set in as the light one before it is. */
-.ink { margin: 120px 16px 0; padding-bottom: 150px; border-radius: 30px; background: #0b0c12; }
+.ink { position: relative; margin: 120px 16px 0; padding-bottom: 150px; border-radius: 30px; background: #0b0c12; }
+/* The whole dark panel is dark under the nav. */
+.ink > .under { top: 0; bottom: 0; }
 .ink .head h2 { color: #fff; }
 .ink .head p { color: rgba(255, 255, 255, 0.7); }
 .ink .head p:first-child i { background: #9aa6ff; }

@@ -36,6 +36,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { questionTitle } from './Questions'
 import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
+import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { documentText, outputText } from './reading'
@@ -486,6 +487,30 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         onNone: () => undefined,
         onSome: (asked): ThreadItem => ({ ...base, kind: 'push_request', content: asked }),
       })
+    case 'setup': {
+      const ended = field(content, 'ended')
+      const code = field(ended, 'code')
+      return {
+        ...base,
+        kind: 'setup',
+        content: {
+          repository: text(content, 'repository'),
+          command: text(content, 'command'),
+          kept: field(content, 'kept') === true,
+          startedAt: text(content, 'startedAt'),
+          ended:
+            typeof ended === 'object' && ended !== null
+              ? {
+                  at: text(ended, 'at'),
+                  code: typeof code === 'number' ? code : null,
+                  timedOut: field(ended, 'timedOut') === true,
+                  stopped: field(ended, 'stopped') === true,
+                  last: text(ended, 'last') || null,
+                }
+              : null,
+        },
+      }
+    }
     default:
       return undefined
   }
@@ -1065,6 +1090,46 @@ export class Queries extends Context.Service<
           return { issue, changes }
         })
 
+      /** A task's pull requests as its card reads them, and the repositories it merged here: what the coordinator is told of them. */
+      const pullRequestsOf = (taskId: string): Effect.Effect<PullRequestFacts, SqlError.SqlError, Store> =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ projectId: string }>`SELECT project_id FROM tasks WHERE id = ${taskId}`
+          if (task === undefined) return { changes: [], merged: [], unmerged: 0 }
+          const [links, said, host, seen] = yield* Effect.all(
+            [
+              linksOf(taskId),
+              gitOf(taskId, { changed: false, here: true }),
+              Effect.flatMap(Changes, (changes) => changes.hostsFor(task.projectId, taskId)),
+              sql<{
+                url: string
+                updatedAt: string
+              }>`SELECT url, updated_at FROM external_links WHERE task_id = ${taskId} AND kind = 'change'`,
+            ],
+            { concurrency: 'unbounded' },
+          )
+          const known = host.flatMap((one) => (one === null ? [] : [one]))
+          // Each pull request's own host: the one whose address it is at, else the only one of its product; none where that can't be told.
+          const hostOfChange = (change: ChangeSummary) => {
+            const there = known.find((one) => change.url.startsWith(one.webUrl.replace(/\/$/, '') + '/'))
+            if (there !== undefined) return there
+            const same = known.filter((one) => one.product === change.product)
+            return same.length === 1 ? same[0] : undefined
+          }
+          return {
+            changes: links.changes.map((change) => {
+              const one = hostOfChange(change)
+              return {
+                change,
+                seenAt: seen.find((link) => link.url === change.url)?.updatedAt ?? null,
+                host: one === undefined ? null : { name: one.name, connected: one.connected },
+              }
+            }),
+            merged: said.merged.map(({ name, branch, remote, ahead }) => ({ name, branch, remote, ahead })),
+            unmerged: said.here.length,
+          }
+        })
+
       /**
        * A task's card in the coordinator's thread: where it stands, worked out
        * from its plan, its run, the calls waiting and the agents working.
@@ -1444,9 +1509,12 @@ export class Queries extends Context.Service<
             baseRef: string | null
             baseCommit: string | null
             settledAt: string | null
+            resolveConflicts: number | null
+            projectResolves: number | null
           }>`
             SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.request, k.slug, k.state,
-              k.settled_at, w.branch, w.path AS worktree, w.base_ref, w.base_commit
+              k.settled_at, w.branch, w.path AS worktree, w.base_ref, w.base_commit, k.resolve_conflicts,
+              (SELECT json_extract(r.rules, '$.resolveConflicts') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS project_resolves
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE t.id = ${threadId} AND t.kind = 'task'`
@@ -1519,6 +1587,10 @@ export class Queries extends Context.Service<
               planId: standing.planId,
               runCommand: yield* launches.commandFor(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => null)),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
+              resolveConflicts: {
+                task: head.resolveConflicts === null ? null : head.resolveConflicts === 1,
+                project: head.projectResolves === 1,
+              },
             },
             session,
             attention: attention.map(callOf),
@@ -1598,6 +1670,9 @@ export class Queries extends Context.Service<
               END AS thread_id
             FROM change_log c WHERE c.cursor > ${after} ORDER BY c.cursor LIMIT ${limit}`
         })
+
+      // The coordinator's list_tasks and read_task say how each task's pull request stands, from the same reads as the card.
+      yield* (yield* Coordinator).reading((taskId) => run(pullRequestsOf(taskId)).pipe(Effect.orElseSucceed(() => undefined)))
 
       return Queries.of({
         projects: run(projects),

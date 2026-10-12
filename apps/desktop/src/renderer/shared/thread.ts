@@ -60,6 +60,7 @@ export type ArrivalContent = Extract<ThreadItem, { kind: 'arrival' }>['content']
 export type QuestionContent = Extract<ThreadItem, { kind: 'question' }>['content']
 export type RunContent = Extract<ThreadItem, { kind: 'run' }>['content']
 export type IssueDraftContent = Extract<ThreadItem, { kind: 'issue_draft' }>['content']
+export type SetupContent = Extract<ThreadItem, { kind: 'setup' }>['content']
 export type PushRequestContent = Extract<ThreadItem, { kind: 'push_request' }>['content']
 
 export type Block =
@@ -105,6 +106,8 @@ export type Block =
   | { readonly kind: 'run'; readonly id: string; readonly run: RunContent }
   /** An issue the coordinator drafted, filed only when the person says. */
   | { readonly kind: 'draft'; readonly id: string; readonly draft: IssueDraftContent }
+  /** Althar setting up the task's worktree, before its lead starts (ADR-023). */
+  | { readonly kind: 'setup'; readonly id: string; readonly setup: SetupContent }
   /** The lead asking the person to push its new commits to the task's pull request: when it asked, or when it settled. */
   | { readonly kind: 'push'; readonly id: string; readonly at: string; readonly request: PushRequestContent }
 
@@ -416,6 +419,9 @@ export const blocksOf = (
         continue
       case 'issue_draft':
         blocks.push({ kind: 'draft', id: item.id, draft: item.content })
+        continue
+      case 'setup':
+        blocks.push({ kind: 'setup', id: item.id, setup: item.content })
         continue
       case 'push_request':
         blocks.push({ kind: 'push', id: item.id, at: ago(item.content.settledAt ?? item.createdAt), request: item.content })

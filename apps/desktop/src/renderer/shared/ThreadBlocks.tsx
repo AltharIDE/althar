@@ -18,6 +18,7 @@ import {
   Severity,
   Step,
   StepState,
+  Terminal,
   ThreadDivider,
   Tool,
   ToolState,
@@ -43,6 +44,7 @@ import type {
   PushRequestContent,
   QuestionContent,
   RunContent,
+  SetupContent,
   StepResult,
   TaskCardContent,
 } from './thread'
@@ -87,6 +89,15 @@ export const text = {
   failing: (names: ReadonlyArray<string>) => `Failed: ${names.join(', ')}`,
   outsider: (from: string) => `Not passed to the lead: ${from} can’t write to the repository.`,
   passOn: 'Pass it on',
+  /** Althar setting up a repository's worktree: installing the dependencies its lockfile names, or the setup kept for it. */
+  setup: {
+    running: (setup: SetupContent) => (setup.kept ? `Setting up ${setup.repository}…` : `Installing dependencies in ${setup.repository}…`),
+    done: (setup: SetupContent) => (setup.kept ? `Set up ${setup.repository}` : `Installed dependencies in ${setup.repository}`),
+    failed: (setup: SetupContent) =>
+      `${setup.kept ? `Couldn’t set up ${setup.repository}` : `Couldn’t install dependencies in ${setup.repository}`}. The lead is told.`,
+    stopped: (setup: SetupContent) => `Setting up ${setup.repository} stopped as Althar quit. It runs again before the lead starts.`,
+    timedOut: 'It took too long, and was stopped.',
+  },
   /** What passing it on says to the lead, in the person's name. */
   passed: (said: string, text: string) =>
     `${said}:\n\n${text
@@ -101,6 +112,37 @@ const SEVERITY: Readonly<Record<StepResult['findings'][number]['severity'], Seve
   major: Severity.High,
   minor: Severity.Medium,
   nit: Severity.Low,
+}
+
+/**
+ * Althar setting up the task's worktree before its lead starts (ADR-023): a
+ * line across the thread while it runs, and once it went through. Failed,
+ * the end of what it printed shows under it, as a command's output does.
+ */
+function SetupView({ setup }: { setup: SetupContent }) {
+  const { ended } = setup
+  const failed = ended !== null && !ended.stopped && ended.code !== 0
+  const line =
+    ended === null
+      ? text.setup.running(setup)
+      : ended.stopped
+        ? text.setup.stopped(setup)
+        : failed
+          ? text.setup.failed(setup)
+          : text.setup.done(setup)
+  return (
+    <>
+      <ThreadDivider icon="terminal">{line}</ThreadDivider>
+      {failed && (
+        <Terminal
+          command={setup.command}
+          lines={ended.last?.split('\n') ?? []}
+          {...(ended.code === null ? {} : { exit: ended.code })}
+          {...(ended.timedOut ? { failure: text.setup.timedOut } : {})}
+        />
+      )}
+    </>
+  )
 }
 
 /**
@@ -477,6 +519,8 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{run?.(block.run)}</Fragment>
       case 'draft':
         return <Fragment key={block.id}>{draft?.(block.draft)}</Fragment>
+      case 'setup':
+        return <SetupView key={block.id} setup={block.setup} />
       case 'push':
         return <Fragment key={block.id}>{push?.(block.request, block.at)}</Fragment>
       case 'turn': {

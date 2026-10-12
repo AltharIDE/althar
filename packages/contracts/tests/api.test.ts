@@ -301,6 +301,7 @@ describe('the API', () => {
               Interrupt: () => Effect.void,
               StopSession: () => Effect.void,
               StopTask: () => Effect.void,
+              SetTaskResolveConflicts: () => Effect.void,
               ResumeTask: () => Effect.void,
               AbandonTask: () => Effect.void,
               ReopenTask: () => Effect.void,

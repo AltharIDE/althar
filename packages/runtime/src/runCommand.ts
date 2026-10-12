@@ -9,12 +9,22 @@ import { join } from 'node:path'
  * web process; else a Makefile's dev, run or serve target. Nothing, where none
  * of these says. Installing never changes the lockfile, so a task's change
  * stays what its lead made.
+ *
+ * What makes a fresh copy ready is one thing, kept or worked out: Althar runs
+ * it before each run, and in a task's worktree once, when it is made, before
+ * its lead starts.
  */
 
 export interface RunCommand {
   /** What runs it: `bun run dev`. */
   readonly command: string
-  /** What makes a fresh copy ready first, each time it runs; null for nothing. */
+  /** What makes a fresh copy ready first: before it runs, and in a task's worktree as it is made; null for nothing. */
+  readonly setup: string | null
+}
+
+/** What is kept for a repository: either may be null, for worked out from it. */
+export interface Kept {
+  readonly command: string | null
   readonly setup: string | null
 }
 
@@ -43,25 +53,58 @@ const recordOf = (value: unknown): Readonly<Record<string, unknown>> | undefined
 const unlessInstalled = (install: string, platform: NodeJS.Platform) =>
   platform === 'win32' ? `if not exist node_modules ${install}` : `test -d node_modules || ${install}`
 
+/** A folder's package.json, read; undefined where it has none, or one that isn't JSON. */
+const manifestIn = (folder: string): Readonly<Record<string, unknown>> | undefined => {
+  const text = read(join(folder, 'package.json'))
+  if (text === null) return undefined
+  try {
+    return recordOf(JSON.parse(text))
+  } catch {
+    return undefined
+  }
+}
+
+/** The package manager the lockfile beside it names, or the one at the repository's root in a folder of a larger one. */
+const managerOf = (folder: string, root: string) =>
+  MANAGERS.find((one) => existsSync(join(folder, one.lockfile)) || existsSync(join(root, one.lockfile)))
+
+/** The workspaces a package.json names: npm's, Yarn's and Bun's list, or Yarn's `{ packages }`. */
+const workspacesOf = (manifest: Readonly<Record<string, unknown>>): ReadonlyArray<unknown> => {
+  const named = manifest.workspaces
+  return Array.isArray(named)
+    ? named
+    : Array.isArray(recordOf(named)?.packages)
+      ? (recordOf(named)?.packages as ReadonlyArray<unknown>)
+      : []
+}
+
+/**
+ * What installs a package.json's packages, where it has any: its own, or its
+ * workspaces' at the root of a monorepo (pnpm names those beside it). Null for
+ * nothing to install.
+ */
+const installFor = (manifest: Readonly<Record<string, unknown>>, folder: string, root: string) => {
+  const own = [manifest.dependencies, manifest.devDependencies, manifest.optionalDependencies].some(
+    (field) => Object.keys(recordOf(field) ?? {}).length > 0,
+  )
+  const workspaces = workspacesOf(manifest).length > 0 || existsSync(join(folder, 'pnpm-workspace.yaml'))
+  return own || workspaces ? (managerOf(folder, root)?.install ?? 'npm install --no-package-lock') : null
+}
+
+/** What installs a package.json's packages only where none are installed yet, as a run wants before it starts. */
+const guarded = (install: string | null, platform: NodeJS.Platform) => (install === null ? null : unlessInstalled(install, platform))
+
 /** The command a package.json runs with, and what installs its packages first. */
 const fromPackage = (folder: string, root: string, platform: NodeJS.Platform): RunCommand | null => {
-  const text = read(join(folder, 'package.json'))
-  if (text === null) return null
-  let manifest: Readonly<Record<string, unknown>> | undefined
-  try {
-    manifest = recordOf(JSON.parse(text))
-  } catch {
-    return null
-  }
-  const scripts = recordOf(manifest?.scripts) ?? {}
+  const manifest = manifestIn(folder)
+  if (manifest === undefined) return null
+  const scripts = recordOf(manifest.scripts) ?? {}
   const script = SCRIPTS.find((name) => typeof scripts[name] === 'string')
   if (script === undefined) return null
-  // The lockfile beside it, or at the repository's root in a folder of a larger one.
-  const manager = MANAGERS.find((one) => existsSync(join(folder, one.lockfile)) || existsSync(join(root, one.lockfile)))
-  const name = manager?.name ?? 'npm'
-  const packages = [manifest?.dependencies, manifest?.devDependencies].some((field) => Object.keys(recordOf(field) ?? {}).length > 0)
-  const install = manager?.install ?? 'npm install --no-package-lock'
-  return { command: `${name} run ${script}`, setup: packages ? unlessInstalled(install, platform) : null }
+  return {
+    command: `${managerOf(folder, root)?.name ?? 'npm'} run ${script}`,
+    setup: guarded(installFor(manifest, folder, root), platform),
+  }
 }
 
 /** A Procfile's web process, as Heroku and Foreman run it. */
@@ -80,6 +123,37 @@ const fromMakefile = (folder: string): RunCommand | null => {
 /** How the repository in `folder` runs, as what is in it says; `root` is its repository's root, where that is above it. */
 export const runCommandIn = (folder: string, root: string = folder, platform: NodeJS.Platform = process.platform): RunCommand | null =>
   fromPackage(folder, root, platform) ?? fromProcfile(folder) ?? fromMakefile(folder)
+
+/**
+ * What installs the packages of the repository in `folder`, as what is in it
+ * says, whether or not it says how it runs: its package.json's, or its
+ * workspaces', with the package manager its lockfile names. Run as it is,
+ * whatever is installed already: a task's worktree, whose setup is kept on
+ * its workspace, isn't taken as set up for a `node_modules` an install cut
+ * short left. Null for nothing to install.
+ */
+export const installIn = (folder: string, root: string = folder): string | null => {
+  const manifest = manifestIn(folder)
+  return manifest === undefined ? null : installFor(manifest, folder, root)
+}
+
+/** What makes a fresh copy ready before a run, as what is in it says: its install, only where nothing is installed yet. Null for nothing. */
+export const setupIn = (folder: string, root: string = folder, platform: NodeJS.Platform = process.platform): string | null =>
+  guarded(installIn(folder, root), platform)
+
+/**
+ * How a repository runs and is made ready: what is kept for it, and, for
+ * what isn't, what is in it says. Null where nothing says how it runs.
+ */
+export const runOf = (
+  kept: Kept,
+  folder: string,
+  root: string = folder,
+  platform: NodeJS.Platform = process.platform,
+): RunCommand | null => {
+  const command = kept.command ?? runCommandIn(folder, root, platform)?.command
+  return command === undefined ? null : { command, setup: kept.setup ?? setupIn(folder, root, platform) }
+}
 
 /** The line a shell runs: what makes it ready, then the command. */
 export const lineOf = (run: RunCommand) => (run.setup === null ? run.command : `(${run.setup}) && ${run.command}`)

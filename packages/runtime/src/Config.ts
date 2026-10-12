@@ -73,6 +73,15 @@ export interface RuntimeOptions {
   readonly modelFacts?: ModelFactsOptions
   /** How this computer's load is read, and how often at most (`MachineLoad.ts`). */
   readonly load?: LoadOptions
+  /** How a task's worktree is set up before its lead starts (`Setups.ts`). */
+  readonly setups?: SetupOptions
+}
+
+export interface SetupOptions {
+  /** How long a setup may run before it is stopped and counts as failed: ten minutes unless a test says otherwise. */
+  readonly within?: Duration.Duration
+  /** The shell it runs in, as a login shell: the person's own (`SHELL`) unless a test says otherwise. */
+  readonly shell?: string
 }
 
 /** Each is the default unless a test says otherwise. */
