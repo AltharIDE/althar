@@ -14,7 +14,9 @@ import { stopBackgroundMethod, type StopBackgroundResponse } from '../background
  * A scripted ACP agent for tests, so the adapter's contract runs in CI without
  * signing in to anything. It speaks real ACP through the same SDK the agents
  * use. The prompt's text picks a scenario. It starts every session in a bypass
- * mode, so tests show the adapter always moves a session out of it.
+ * mode, so tests show the adapter always moves a session out of it. It takes
+ * images in a prompt unless told not to, and says first what images it was
+ * sent: `saw images: image/png 68 B, …`.
  */
 
 export const scenarios = {
@@ -204,6 +206,8 @@ export interface FakeAgentOptions {
   readonly staysOn?: ReadonlyArray<string>
   /** How long it takes to make a session, in milliseconds: for what happens while an agent starts. */
   readonly slowStart?: number
+  /** Whether it says it takes images in a prompt, as Claude Code, Codex and OpenCode do. True unless false. */
+  readonly images?: boolean
 }
 
 interface SessionState {
@@ -655,7 +659,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         ? { protocolVersion: acp.PROTOCOL_VERSION }
         : {
             protocolVersion: acp.PROTOCOL_VERSION,
-            agentCapabilities: { loadSession: false, mcpCapabilities: { http: true, sse: false }, sessionCapabilities: { close: {} } },
+            agentCapabilities: {
+              loadSession: false,
+              mcpCapabilities: { http: true, sse: false },
+              sessionCapabilities: { close: {} },
+              promptCapabilities: { image: options.images !== false },
+            },
             authMethods: [],
             agentInfo: { name: 'fake-agent', version: '0.0.0' },
             _meta: { steering: { supported: true } },
@@ -775,6 +784,11 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         if (filled[1] === undefined) await update(usage)
         else setTimeout(() => void update(usage), 300)
       }
+
+      // What images it was sent, in order, by what they are and how many bytes: said before anything else it does.
+      const images = params.prompt.flatMap((block) => (block.type === 'image' ? [block] : []))
+      if (images.length > 0)
+        await say(`saw images: ${images.map((image) => `${image.mimeType} ${Buffer.from(image.data, 'base64').length} B`).join(', ')}\n\n`)
 
       /** Asks permission; cancelling the turn withdraws the request. */
       const ask = async (toolCall: acp.ToolCallUpdate, offered: Array<acp.PermissionOption>) => {

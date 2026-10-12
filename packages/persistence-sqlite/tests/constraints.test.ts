@@ -159,6 +159,33 @@ describe('constraints', () => {
     }).pipe(Effect.provide(Env)),
   )
 
+  it.effect('name a message’s images in order, each an artifact of the message’s own project', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, threadId, actorId, createdAt } = yield* seedRun
+      const other = yield* seed
+      const inputId = yield* Domain.newId(Domain.Ids.userInput)
+      const commandId = yield* Domain.newId(Domain.Ids.command)
+      yield* sql`INSERT INTO user_inputs ${sql.insert({ id: inputId, projectId, threadId, sequence: 1, commandId, disposition: 'after_current', body: '', authorActorId: actorId, state: 'queued', acceptedAt: createdAt })}`
+      const artifact = (project: string) =>
+        Effect.gen(function* () {
+          const id = yield* Domain.newId(Domain.Ids.artifact)
+          yield* sql`INSERT INTO artifacts ${sql.insert({ id, projectId: project, sha256: 'b'.repeat(64), size: 68, mediaType: 'image/png', kind: 'image', sensitivity: 'may_contain_secrets', createdAt })}`
+          return id
+        })
+      const mine = yield* artifact(projectId)
+      const theirs = yield* artifact(other.projectId)
+      const image = (position: number, artifactId: string) =>
+        succeeds(sql`INSERT INTO user_input_images ${sql.insert({ projectId, userInputId: inputId, position, artifactId })}`)
+      assert.isTrue(yield* image(1, mine))
+      // The same image twice is two places in the message.
+      assert.isTrue(yield* image(2, mine))
+      assert.isFalse(yield* image(2, mine), 'one image a place')
+      assert.isFalse(yield* image(0, mine), 'places count from one')
+      assert.isFalse(yield* image(3, theirs), 'no image from another project')
+    }).pipe(Effect.provide(Env)),
+  )
+
   it.effect('allow one unfinished attempt per node, and say why an attempt is held', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient

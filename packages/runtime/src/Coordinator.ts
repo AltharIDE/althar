@@ -27,6 +27,7 @@ import { envelope } from './envelope'
 import { type PlanStep } from './Runs'
 import { type Disposition, Sessions } from './Sessions'
 import { blockedModelsOf } from './preferences'
+import type { InputImage } from './sentImages'
 import { SignIns } from './SignIns'
 import { addItem, transcript } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
@@ -131,6 +132,8 @@ export class Coordinator extends Context.Service<
       readonly threadId: string
       readonly body: string
       readonly disposition: Disposition
+      /** Images the person sent with it, in the store already: sent to the coordinator with its words. */
+      readonly images?: ReadonlyArray<InputImage>
       /** Written by Althar for the person, such as an answer to a question the coordinator asked before it went: not shown as their message. */
       readonly quiet?: boolean
     }): Effect.Effect<void, unknown>
@@ -174,6 +177,7 @@ export class Coordinator extends Context.Service<
         readonly threadId: string
         readonly body: string
         readonly disposition: Disposition
+        readonly images?: ReadonlyArray<InputImage>
         readonly quiet?: boolean
       }) =>
         Effect.gen(function* () {

@@ -9,6 +9,7 @@ import type {
   ConnectionSummary,
   CoordinatorSnapshot,
   HomeSnapshot,
+  Picture,
   ProjectNote,
   ProjectRulesView,
   ProjectRepository,
@@ -116,7 +117,7 @@ const offering =
     effort: 'medium',
   })
 
-/** What the agents offer: Claude Code's own default first, Codex's models by id, OpenCode still being asked. */
+/** What the agents offer: Claude Code's own default first, Codex's models by id, OpenCode still being asked. Claude Code takes images; Codex here doesn't; OpenCode hasn't said. */
 export const models: ReadonlyArray<AgentModels> = [
   {
     agentId: 'claude-code',
@@ -130,6 +131,7 @@ export const models: ReadonlyArray<AgentModels> = [
     defaults: [],
     blocked: [],
     probing: false,
+    images: true,
   },
   {
     agentId: 'codex',
@@ -142,8 +144,9 @@ export const models: ReadonlyArray<AgentModels> = [
     defaults: [],
     blocked: [],
     probing: false,
+    images: false,
   },
-  { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], blocked: [], probing: true },
+  { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], blocked: [], probing: true, images: null },
 ]
 
 /** A project's repositories as this Mac has them: one plain and one a fork, on GitHub as you, and one on GitLab, not connected. */
@@ -248,11 +251,12 @@ export const items = {
     text: string,
     input: Extract<ThreadItem, { kind: 'user_message' }>['input'] = { state: 'delivered', interrupting: false },
     links: ReadonlyArray<Unfurl> = [],
+    pictures: ReadonlyArray<Picture> = [],
   ): ThreadItem => ({
     ...next(),
     agentId: null,
     kind: 'user_message',
-    content: { text, links },
+    content: { text, links, pictures },
     input,
   }),
   says: (text: string, agentId = 'claude-code', id?: string): ThreadItem => ({

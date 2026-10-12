@@ -83,6 +83,7 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Findings | review findings | What a review step found. By default the lead settles them. |
 | Artifacts | artifacts | What a task wrote that is worth keeping and isn't in a repository. |
 | Screenshots, Image | artifact of kind `image` | Pictures an agent hands back, under what it said, full size on a click. One without a name is "Image 1". |
+| Add images, Drop to add them to your message | `user_input_images`, artifacts of kind `image` | Images you send with a message: dropped on the composer, pasted, or picked with Add images; shown small above what you write, each with Remove, and above your message once sent. PNG, JPEG, GIF or WebP, up to ten a message; one wider than 2000 pixels or over 5 MB is made smaller first. An agent that doesn't take images gets none: the composer says so. One copied with no name is "Pasted image". |
 | Document | a markdown file an agent wrote or pointed at | Its card stands under what it said; "Read in the panel" opens it beside the thread, as it is now in the worktree. |
 | Output | artifact of kind `log` | What a command printed, in its tool call: its last lines, "N earlier lines" a click away. |
 | Knowledge | knowledge claims | Everything the project holds. It has two parts: |

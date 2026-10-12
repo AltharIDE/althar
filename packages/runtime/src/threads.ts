@@ -399,8 +399,12 @@ export const transcript = (
       const text = (key: string) => (typeof content[key] === 'string' ? (content[key] as string) : '')
       const agent = options.agent ?? item.agentId ?? 'agent'
       switch (item.kind) {
-        case 'user_message':
-          return [`[person] ${text('text')}`]
+        case 'user_message': {
+          // Images the person sent are said, though only the agent they went to saw them.
+          const pictures = Array.isArray(content['pictures']) ? content['pictures'].length : 0
+          const sent = pictures === 0 ? '' : ` [sent ${pictures === 1 ? 'an image' : `${pictures} images`}]`
+          return [`[person] ${text('text')}${sent}`]
+        }
         case 'agent_message':
           return [`[${agent}] ${text('text')}`]
         case 'tool_call':
