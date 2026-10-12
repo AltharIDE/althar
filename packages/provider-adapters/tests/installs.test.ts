@@ -101,7 +101,14 @@ describe('finding an agent’s command', () => {
     expect(pointed.signIn.login).toBe('/kept/opencode auth login')
     found = { command: 'opencode', whose: 'theirs' }
     expect(pointed.signIn.login).toBe('opencode auth login')
-    expect(usingLocated(agents.codex, () => found)).toBe(agents.codex)
+    const codex = usingLocated(agents.codex, () => found)
+    expect(codex.launch('node').command).toBe('node')
+    found = { command: '/device/codex', whose: 'theirs' }
+    expect(codex.signIn.status('node')).toMatchObject({ command: '/device/codex', args: ['login', 'status'] })
+    expect(codex.signIn.inApp?.run('node')).toMatchObject({ command: '/device/codex', args: ['app-server'] })
+    expect(codex.signIn.logout?.run('node')).toMatchObject({ command: '/device/codex', args: ['logout'] })
+    expect(codex.version?.('node')).toMatchObject({ command: '/device/codex', args: ['--version'] })
+    expect(codex.signIn.login).toBe('/device/codex login')
   })
 
   it('carries a copy that lives out on the device with the spec that names it, so an executor runs it there', () => {

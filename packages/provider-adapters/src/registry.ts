@@ -224,7 +224,7 @@ const only =
 const require = createRequire(import.meta.url)
 const bundled = (packageName: string, entry: string) => join(dirname(require.resolve(`${packageName}/package.json`)), entry)
 
-/** The Codex binary codex-acp drives, so its sign-in status is the one that counts. */
+/** The Codex CLI shipped with the adapter, used where the person's own CLI is not required. */
 const bundledCodex = () => {
   const fromAdapter = createRequire(require.resolve('@agentclientprotocol/codex-acp/package.json'))
   return join(dirname(fromAdapter.resolve('@openai/codex/package.json')), 'bin/codex.js')
@@ -422,25 +422,25 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     modes: { ask: 'workspace-write', readOnly: 'read-only', reader: 'read-only' },
     options: { mode: 'mode', model: 'model', effort: 'reasoning_effort' },
     signIn: {
-      status: (node) => ({ command: node, args: [bundledCodex(), 'login', 'status'] }),
+      status: () => ({ command: 'codex', args: ['login', 'status'] }),
       read: (output, exitCode) => (/not logged in/i.test(output) ? false : /logged in/i.test(output) && exitCode === 0 ? true : undefined),
       /* "Logged in using ChatGPT" is the person's plan; "using an API key" is paid per use. */
       paidBy: (output) => (/using chatgpt/i.test(output) ? 'plan' : /api key/i.test(output) ? 'key' : undefined),
       login: 'codex login',
-      // The bundled Codex, as its status check runs.
+      // The same Codex CLI the ACP adapter uses, where that CLI is available.
       inApp: {
         kind: 'codex-app-server',
         ways: ['browser', 'device'],
-        run: (node) => ({ command: node, args: [bundledCodex(), 'app-server'] }),
+        run: () => ({ command: 'codex', args: ['app-server'] }),
       },
-      logout: { run: (node) => ({ command: node, args: [bundledCodex(), 'logout'] }), line: 'codex logout' },
+      logout: { run: () => ({ command: 'codex', args: ['logout'] }), line: 'codex logout' },
     },
     home: {
       variable: 'CODEX_HOME',
       usual: (env, homeDir) => env.CODEX_HOME || join(homeDir, '.codex'),
       shared: only(['config.toml', 'AGENTS.md', 'skills', 'prompts', 'rules']),
     },
-    version: (node) => ({ command: node, args: [bundledCodex(), '--version'] }),
+    version: () => ({ command: 'codex', args: ['--version'] }),
     withoutOwnTools: codexWithoutOwnTools,
     /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
@@ -457,6 +457,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply.",
       'Usage limits are held by the adapter but only shown as /status text; only errors show them over ACP.',
     ],
+    cli: {
+      name: 'codex',
+      // In a Flatpak sessions use the host's Codex bridge too; reporting the
+      // bundled CLI here would show an unrelated sign-in state.
+      ...(process.env.FLATPAK_ID === undefined ? { bundled: bundledCodex } : {}),
+    },
   },
   opencode: {
     id: 'opencode',
