@@ -67,6 +67,8 @@ function Example(
     streaming?: boolean
     /** The words the transcriber hears and writes on stopping (default: one sentence). */
     transcript?: readonly string[]
+    /** Words heard per step of the streaming transcriber (default: one). */
+    pace?: number
     waiting?: (string | { text: string; attached: string })[]
     at?: number
     inputs?: readonly DictationInput[]
@@ -81,6 +83,7 @@ function Example(
     recording = false,
     streaming = false,
     transcript = SAID,
+    pace = 1,
     waiting = [],
     at,
     inputs = INPUTS,
@@ -107,7 +110,7 @@ function Example(
     }
   }, [running])
   /* a streaming transcriber: a word every few ticks, until the sentence is out */
-  const heard = streaming ? transcript.slice(0, Math.min(transcript.length, 3 + Math.floor(tick / 4))).join(' ') : undefined
+  const heard = streaming ? transcript.slice(0, Math.min(transcript.length, 3 + pace * Math.floor(tick / 4))).join(' ') : undefined
   return (
     <div style={{ maxWidth: 700, paddingTop: 60 }}>
       <Composer
@@ -297,7 +300,7 @@ export const EnterEndsDictationAtItsSize: Story = {
       <>
         <div data-testid="dictated-short"><Example recording streaming /></div>
         <div data-testid="typed-short"><Example initial={said} /></div>
-        <div data-testid="dictated-long"><Example recording streaming transcript={longWords} /></div>
+        <div data-testid="dictated-long"><Example recording streaming transcript={longWords} pace={10} /></div>
         <div data-testid="typed-long"><Example initial={long} /></div>
       </>
     )
