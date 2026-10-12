@@ -4,7 +4,8 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 
-import { Api, ApiError, CommandId, NewProjectId, PAGE, Product, ThreadItem, WatchEvent } from '../src/Api'
+import { Api, ApiError, CommandId, NewProjectId, PAGE, Product, type SentImage, SentImages, ThreadItem, WatchEvent } from '../src/Api'
+import { MESSAGE_IMAGES } from '../src/pictures'
 import { clientProtocol, emitterPort, serverProtocol } from '../src/transport'
 
 const at = '2026-09-29T12:00:00.000Z'
@@ -15,9 +16,27 @@ describe('the API', () => {
     const decode = Schema.decodeUnknownSync(ThreadItem)
     const base = { id: 'i1', sequence: 1, agentId: 'codex', createdAt: at }
     assert.strictEqual(
-      decode({ ...base, kind: 'user_message', content: { text: 'Hi', links: [] }, input: { state: 'queued', interrupting: false } }).kind,
+      decode({
+        ...base,
+        kind: 'user_message',
+        content: { text: 'Hi', links: [], pictures: [] },
+        input: { state: 'queued', interrupting: false },
+      }).kind,
       'user_message',
     )
+    // The images the person sent with what they said, by their digests.
+    const shown = decode({
+      ...base,
+      kind: 'user_message',
+      content: {
+        text: '',
+        links: [],
+        pictures: [{ digest: 'a'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null }],
+      },
+      input: null,
+    })
+    assert.strictEqual(shown.kind === 'user_message' && shown.content.pictures[0]?.name, 'shot.png')
+    assert.throws(() => decode({ ...base, kind: 'user_message', content: { text: 'Hi', links: [] }, input: null }))
     assert.strictEqual(decode({ ...base, kind: 'agent_thought', content: { text: 'Hmm', pictures: [], files: [] } }).kind, 'agent_thought')
     const tool = decode({
       ...base,
@@ -129,6 +148,7 @@ describe('the API', () => {
             container: 'Meridian',
           },
         ],
+        pictures: [],
       },
       input: null,
     })
@@ -178,6 +198,21 @@ describe('the API', () => {
       Schema.decodeUnknownSync(WatchEvent)({ _tag: 'Changed', aggregateType: 'task', aggregateId: 't', projectId: null, threadId: null }),
     )
     assert.strictEqual(PAGE, 100)
+  })
+
+  it('takes images sent with a message as bytes or a digest, as many as a message carries', () => {
+    const decode = Schema.decodeUnknownSync(SentImages)
+    const sent: ReadonlyArray<SentImage> = [
+      { data: 'iVBORw0KGgo=', name: 'shot.png' },
+      { digest: 'b'.repeat(64), name: null },
+    ]
+    assert.deepStrictEqual(decode(sent), sent)
+    // A digest is 64 hex digits, and nothing else; neither is an image without its name.
+    assert.throws(() => decode([{ digest: '../../etc/passwd', name: null }]))
+    assert.throws(() => decode([{ data: 'iVBORw0KGgo=' }]))
+    const one = { data: 'iVBORw0KGgo=', name: null }
+    assert.strictEqual(decode(Array.from({ length: MESSAGE_IMAGES.count }, () => one)).length, MESSAGE_IMAGES.count)
+    assert.throws(() => decode(Array.from({ length: MESSAGE_IMAGES.count + 1 }, () => one)))
   })
 
   it.live('runs over a port, checking what is sent on the way', () =>
@@ -238,7 +273,11 @@ describe('the API', () => {
               ResumeTask: () => Effect.void,
               AbandonTask: () => Effect.void,
               ReopenTask: () => Effect.void,
-              Send: () => Effect.void,
+              // What was sent, said back in the error, so the test reads what crossed the port.
+              Send: ({ body, images }) =>
+                images === undefined
+                  ? Effect.void
+                  : Effect.fail(new ApiError({ reason: 'Echo', message: `${body}: ${images.map((image) => image.name ?? '').join(',')}` })),
               TakeBack: () => Effect.die('unused'),
               AnswerQuestion: () => Effect.void,
               Answer: () => Effect.void,
@@ -322,6 +361,20 @@ describe('the API', () => {
           (yield* Stream.runCollect(client.Watch({ since: 41 }))).map((event) => event._tag === 'Changed' && event.cursor),
           [42],
         )
+        // Images cross the port with what was said, bytes and digests alike.
+        const echoed = yield* Effect.flip(
+          client.Send({
+            commandId,
+            threadId: 'th1',
+            body: 'Look',
+            disposition: 'after_current',
+            images: [
+              { data: 'iVBORw0KGgo=', name: 'a.png' },
+              { digest: 'c'.repeat(64), name: 'b.png' },
+            ],
+          }),
+        )
+        assert.strictEqual(echoed.message, 'Look: a.png,b.png')
         // A command without its id doesn't leave the client.
         const bad = yield* Effect.exit(client.Send({ commandId: 'cmd_nope', threadId: 'th1', body: 'Hi', disposition: 'after_current' }))
         assert.strictEqual(bad._tag, 'Failure')

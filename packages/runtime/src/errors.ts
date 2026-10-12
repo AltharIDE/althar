@@ -179,6 +179,18 @@ export class DocumentRefused extends Schema.TaggedError<DocumentRefused>()('Docu
 }) {}
 
 /**
+ * An image sent with a message that Althar won't send: a kind other than
+ * PNG, JPEG, GIF or WebP, one larger than a message's images may be, more
+ * images than a message carries, one kept before that isn't there any more,
+ * or none of them kept, where there is nowhere to keep them. `name` is the
+ * image's, where it had one.
+ */
+export class ImageRefused extends Schema.TaggedError<ImageRefused>()('ImageRefused', {
+  reason: Schema.Literals(['unsupported', 'too_large', 'too_many', 'missing', 'unkept']),
+  name: Schema.NullOr(Schema.String),
+}) {}
+
+/**
  * A task that can't take that turn in its course: a merged task is done for
  * good, so it is never abandoned or reopened; one whose worktree went with
  * its branch can't be reopened on it; and an abandoned one has no agent on
@@ -187,4 +199,10 @@ export class DocumentRefused extends Schema.TaggedError<DocumentRefused>()('Docu
 export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
   taskId: Schema.String,
   why: Schema.Literals(['merged', 'branch_gone', 'abandoned']),
+}) {}
+
+/** gh or glab didn't get to say whether it is signed in: it timed out, or couldn't be started. */
+export class CliUnanswered extends Schema.TaggedError<CliUnanswered>()('CliUnanswered', {
+  tool: Schema.String,
+  message: Schema.String,
 }) {}

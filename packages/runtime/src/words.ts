@@ -2,7 +2,8 @@ import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
 import type { AccountRefused } from './Accounts'
-import type { CantMerge, DocumentRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
+import type { CantMerge, DocumentRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
+import { MESSAGE_IMAGES } from './pictures'
 
 /*
  * What went wrong, in words a person reads in the window. The runtime's
@@ -135,6 +136,13 @@ export const words = (
         return `Althar has no agent called ${text(error, 'agentId')}.`
       case 'DocumentRefused':
         return documentRefused[text(error, 'reason') as DocumentRefused['reason']] ?? 'Althar can’t show that file here.'
+      case 'ImageRefused': {
+        const name = text(error, 'name')
+        return (
+          imageRefused[text(error, 'reason') as ImageRefused['reason']]?.(name === '' ? 'An image' : name) ??
+          "Althar can't send that image."
+        )
+      }
       case 'SessionRunning':
         return 'An agent is already working on this task.'
       case 'NoSession':
@@ -226,6 +234,8 @@ export const words = (
       }
       case 'CliSignedOut':
         return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this Mac.`
+      case 'CliUnanswered':
+        return `${text(error, 'tool')} didn't answer in time. Try again in a moment.`
       case 'CliElsewhere':
         return `Althar only gives ${text(error, 'tool')}'s sign-in to a server it knows, over HTTPS. ${text(error, 'address')} isn't one.`
       case 'OtherAccount':
@@ -312,6 +322,7 @@ export const expected = new Set([
   'TaskRefused',
   'NotConnected',
   'CliSignedOut',
+  'CliUnanswered',
   'CliElsewhere',
   'OtherAccount',
   'NotAnIssue',
@@ -319,6 +330,7 @@ export const expected = new Set([
   'RepositoriesNeeded',
   'ProjectRefused',
   'DocumentRefused',
+  'ImageRefused',
   'NotFound',
   'UnknownAgent',
   'SessionRunning',
@@ -339,6 +351,15 @@ const documentRefused: Readonly<Record<DocumentRefused['reason'], string>> = {
   outside: 'This file isn’t in the task’s worktree, so Althar doesn’t show it.',
   too_large: 'This document is too large to show here. Open it in your editor.',
 }
+
+/** Why an image sent with a message isn't sent, by reason, of the image by its name. */
+const imageRefused = {
+  unsupported: (name) => `${name} isn't a PNG, JPEG, GIF or WebP image, so it can't be sent.`,
+  too_large: (name) => `${name} is larger than ${MESSAGE_IMAGES.bytes / (1024 * 1024)} MB, so it can't be sent.`,
+  too_many: () => `A message can carry at most ${MESSAGE_IMAGES.count} images.`,
+  missing: (name) => `${name} isn't kept any more. Add it again.`,
+  unkept: () => 'Althar has nowhere to keep images here, so none can be sent.',
+} as const satisfies Record<ImageRefused['reason'], (name: string) => string>
 
 /** Why a project can't be changed so, by reason. */
 const projectRefused = {

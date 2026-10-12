@@ -303,7 +303,11 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return {
         ...base,
         kind: 'user_message',
-        content: { text: text(content, 'text'), links: Option.getOrElse(decodeLinks(field(content, 'links') ?? []), () => []) },
+        content: {
+          text: text(content, 'text'),
+          links: Option.getOrElse(decodeLinks(field(content, 'links') ?? []), () => []),
+          pictures: picturesOf(field(content, 'pictures')),
+        },
         input: row.inputState === null ? null : { state: row.inputState, interrupting: row.disposition === 'interrupt_and_continue' },
       }
     case 'agent_message':

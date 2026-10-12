@@ -51,6 +51,7 @@
 -- repository_role: service, frontend, infrastructure, library, docs, other
 -- change_target: upstream, fork
 -- issue_draft_state: pending, filing, filed, failed, uncertain, discarded
+-- connection_cli: gh, glab, none
 
 CREATE TABLE "schema_migrations" (
   migration_id integer PRIMARY KEY NOT NULL,
@@ -903,7 +904,7 @@ CREATE TABLE connections (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   updated_at TEXT NOT NULL CHECK (updated_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
-) STRICT;
+, cli TEXT REFERENCES vocab_connection_cli (word)) STRICT;
 
 CREATE UNIQUE INDEX one_connection_per_account ON connections (device_id, product, web_url, account_id) WHERE state <> 'removed';
 
@@ -1022,3 +1023,13 @@ CREATE TABLE issue_drafts (
 ) STRICT;
 
 CREATE INDEX issue_drafts_by_project ON issue_drafts (project_id);
+
+CREATE TABLE user_input_images (
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  user_input_id TEXT NOT NULL,
+  position INTEGER NOT NULL CHECK (position >= 1),
+  artifact_id TEXT NOT NULL,
+  PRIMARY KEY (user_input_id, position),
+  FOREIGN KEY (user_input_id, project_id) REFERENCES user_inputs (id, project_id),
+  FOREIGN KEY (artifact_id, project_id) REFERENCES artifacts (id, project_id)
+) STRICT;

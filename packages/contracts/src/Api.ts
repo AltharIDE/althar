@@ -1,6 +1,8 @@
 import { Schema } from 'effect'
 import { Rpc, RpcGroup } from 'effect/rpc'
 
+import { MESSAGE_IMAGES } from './pictures'
+
 /*
  * What a client can ask the runtime (docs/architecture/02): commands that
  * change state, queries that return what a screen shows, and one stream of
@@ -138,6 +140,8 @@ export const AgentModels = Schema.Struct({
   blocked: Schema.Array(Schema.String),
   /** Being asked now, for an agent not seen before: read again shortly. */
   probing: Schema.Boolean,
+  /** It takes images in a message, as it said when last asked or started (ACP's `promptCapabilities.image`); null until it has said. */
+  images: Schema.NullOr(Schema.Boolean),
 })
 export type AgentModels = typeof AgentModels.Type
 
@@ -661,21 +665,10 @@ const itemFields = {
   createdAt: Schema.String,
 }
 
-/** What the person said, and where it stands with the lead. */
-export const UserMessageItem = Schema.Struct({
-  ...itemFields,
-  kind: Schema.Literal('user_message'),
-  /** What they said, and the links in it Althar could unfurl. */
-  content: Schema.Struct({ text: Schema.String, links: Schema.Array(Unfurl) }),
-  input: Schema.NullOr(
-    Schema.Struct({ state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']), interrupting: Schema.Boolean }),
-  ),
-})
-
 /**
- * A picture an agent handed back, in a message or a tool's result: kept in
- * the artifact store by its digest, by which the window asks for its bytes,
- * or not kept, saying why.
+ * A picture an agent handed back, in a message or a tool's result, or one
+ * the person sent with a message: kept in the artifact store by its digest,
+ * by which the window asks for its bytes, or not kept, saying why.
  */
 export const Picture = Schema.Struct({
   /** Its SHA-256; null for one that wasn't kept. */
@@ -690,6 +683,34 @@ export const Picture = Schema.Struct({
   unkept: Schema.NullOr(Schema.Literals(['too_large', 'unsupported', 'unkept'])),
 })
 export type Picture = typeof Picture.Type
+
+/**
+ * An image the person sends with a message: its bytes, in base64, as the
+ * window read them; or one Althar keeps already, by its digest, as when a
+ * message waiting its turn is taken back to change and sent again. Its name
+ * is its file's, where it had one. The runtime believes the bytes, not the
+ * name: only PNG, JPEG, GIF and WebP are sent, each of at most
+ * `MESSAGE_IMAGES.bytes`.
+ */
+export const SentImage = Schema.Union([
+  Schema.Struct({ data: Schema.String, name: Schema.NullOr(Schema.String) }),
+  Schema.Struct({ digest: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)), name: Schema.NullOr(Schema.String) }),
+])
+export type SentImage = typeof SentImage.Type
+
+/** The images sent with one message, in the order they show: at most `MESSAGE_IMAGES.count`. */
+export const SentImages = Schema.Array(SentImage).check(Schema.isMaxLength(MESSAGE_IMAGES.count))
+
+/** What the person said, and where it stands with the lead. */
+export const UserMessageItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('user_message'),
+  /** What they said, the links in it Althar could unfurl, and the images they sent with it. */
+  content: Schema.Struct({ text: Schema.String, links: Schema.Array(Unfurl), pictures: Schema.Array(Picture) }),
+  input: Schema.NullOr(
+    Schema.Struct({ state: Schema.Literals(['queued', 'delivered', 'superseded', 'withdrawn']), interrupting: Schema.Boolean }),
+  ),
+})
 
 /** A file an agent wrote whole, or pointed at: by its path as it named it, never its contents. */
 export const FileMention = Schema.Struct({
@@ -1732,6 +1753,8 @@ export const Api = RpcGroup.make(
       model: Schema.optional(Schema.String),
       effort: Schema.optional(Schema.String),
       body: Schema.optional(Schema.String),
+      /** Images sent with what the person said. */
+      images: Schema.optional(SentImages),
     },
     Schema.String,
   ),
@@ -1771,7 +1794,12 @@ export const Api = RpcGroup.make(
   command('AbandonTask', { taskId: Schema.String }, Schema.Void),
   /** Opens an abandoned task again, on the same worktree and branch; nothing runs until the person says so. Never a merged one. */
   command('ReopenTask', { taskId: Schema.String }, Schema.Void),
-  command('Send', { threadId: Schema.String, body: Schema.String, disposition: Disposition }, Schema.Void),
+  /** Says something to a thread's agent, with any images: empty words with images are a message too. */
+  command(
+    'Send',
+    { threadId: Schema.String, body: Schema.String, disposition: Disposition, images: Schema.optional(SentImages) },
+    Schema.Void,
+  ),
   /** Takes back a message still waiting its turn, by its item: to edit it, or to drop it. One the agent already has stays. */
   command('TakeBack', { itemId: Schema.String }, Schema.Void),
   /**
