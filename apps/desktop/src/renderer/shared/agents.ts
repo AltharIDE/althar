@@ -29,9 +29,13 @@ export const queuedWords = ({ busy, atOnce }: Queued, where: string = device.thi
     ? `Waiting: ${busy} agents busy on ${where}, which runs ${atOnce} at once`
     : `Waiting: ${busy} of ${atOnce} agents busy on ${where}`
 
-/** The same, for a project's tasks on the home: how many wait, and for what. */
-export const queuedOfWords = (n: number, queued: Queued, where: string = device.this) =>
-  n === 1 ? queuedWords(queued, where) : `${n} waiting: ${queuedWords(queued, where).slice('Waiting: '.length)}`
+/**
+ * The same, short, for a project's tasks on the home, which is this
+ * computer's anyway: how many wait, and for what, in the line under the
+ * project's name.
+ */
+export const queuedOfWords = (n: number, { busy, atOnce }: Queued) =>
+  `${n === 1 ? 'Waiting' : `${n} waiting`}: ${busy > atOnce ? `${busy} agents busy, ${atOnce} at once` : `${busy} of ${atOnce} agents busy`}`
 
 /** What an agent signs in to in the browser, as the window names it: the plan, and the site that asks. */
 const SIGN_IN: Readonly<Record<string, { readonly plan: string; readonly host: string }>> = {

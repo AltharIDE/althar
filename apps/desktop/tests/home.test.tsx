@@ -359,7 +359,7 @@ describe('the home', () => {
     })
     withServices(<Home />, client)
     const projects = await screen.findByRole('complementary', { name: 'Projects' })
-    expect(within(projects).getByText('2 waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
+    expect(within(projects).getByText('2 waiting: 4 of 4 agents busy')).toBeTruthy()
     // Only the one at work moves.
     expect(screen.getByText('1 task moving in 1 project.')).toBeTruthy()
   })
