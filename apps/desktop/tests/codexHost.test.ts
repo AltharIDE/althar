@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -160,8 +160,8 @@ describe('the Codex host bridge', () => {
     // The device's own home, not the sandbox's.
     expect(output).toContain(`HOME=${at.hostHome}`)
     expect(output).not.toContain(`HOME=${at.sandboxHome}`)
-    // The adapter's working directory, as the device sees it.
-    expect(output).toContain(`PWD=${at.worktree}`)
+    // The adapter's working directory, as the device sees it: the shell reports the real path, so /var is /private/var on a Mac.
+    expect(output).toContain(`PWD=${realpathSync(at.worktree)}`)
     // Only the names the bridge names cross: none of Althar's other settings does.
     expect(output).toContain('OPENCODE_CONFIG_CONTENT=<unset>')
     const calls = readFileSync(at.log, 'utf8')
