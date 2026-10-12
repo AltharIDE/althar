@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 
 import {
   type Account,
@@ -10,6 +11,7 @@ import {
   type Product,
   type Repository,
 } from '@althar/connectors'
+import { PushRequestItem } from '@althar/contracts'
 import { type ActorId, type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
@@ -43,6 +45,7 @@ import {
   commitOf,
   commitsAhead,
   commitsOf,
+  git,
   fetchInto,
   gitOutcome,
   gitWithin,
@@ -77,7 +80,7 @@ import {
 import { change, fact, timestamp } from './records'
 import { Policies, resolvesConflictsFor } from './Policies'
 import { Sessions } from './Sessions'
-import { addItem } from './threads'
+import { addItem, updateItem } from './threads'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
 import { summarize, words } from './words'
 
@@ -194,6 +197,19 @@ export const listenDue = (input: {
 /** How many failing checks' logs the lead gets, and how many comments a reading of the pull request shows. */
 const LOGS_TO_LEAD = 2
 const COMMENTS_SHOWN = 30
+/** How many of the commits a push would send its request lists; it says how many there are in all. */
+const COMMITS_SHOWN = 20
+
+/** A push the lead asked the person for, as its item in the task's thread keeps it. */
+type Asked = typeof PushRequestItem.fields.content.Type
+const decodeAsked = Schema.decodeUnknownOption(Schema.fromJsonString(PushRequestItem.fields.content))
+
+/** Commits, counted, as the lead and the person read them. */
+const commitsWord = (n: number) => (n === 1 ? '1 commit' : `${n} commits`)
+
+/** Files named in a sentence, the first few. */
+const filesWord = (files: ReadonlyArray<string>) =>
+  files.length <= 5 ? files.join(', ') : `${files.slice(0, 5).join(', ')} and ${files.length - 5} more`
 
 const snapshotOf = (
   change: ChangeRequest,
@@ -890,43 +906,202 @@ export class Changes extends Context.Service<
           yield* touchCard(link.taskId)
         })
 
-      const push = (taskId: string, seen: string, url?: string) =>
+      /** The worktree of the repository a pull request is from; the task's first, where the record doesn't say. */
+      const worktreeOf = (taskId: string, url: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { link, snapshot, host, repository } = yield* current(taskId, url)
-          // The worktree of the repository this pull request is from; the task's first, where the record doesn't say.
           const [workspace] = yield* sql<{ path: string; branch: string }>`
             SELECT w.path, w.branch FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
-            ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${snapshot.url} LIMIT 1) DESC,
+            ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${url} LIMIT 1) DESC,
               b.created_at, b.rowid
             LIMIT 1`
-          if (workspace === undefined) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
-          // What the person saw, and nothing the lead committed after: one rewritten away since isn't pushed.
-          // A pull request from a fork into the repository it was forked from takes its commits on the fork.
-          const fork = yield* namedRemotes(workspace.path).pipe(
+          return workspace
+        })
+
+      /** The commit Althar last pushed to a pull request, as the record of its push keeps it. */
+      const sentTo = (projectId: string, url: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [sent] = yield* sql<{ head: string | null }>`
+            SELECT head_commit AS head FROM repository_changes WHERE pull_request_url = ${url} AND project_id = ${projectId} LIMIT 1`
+          return sent?.head ?? null
+        })
+
+      /* ---- Pushes the lead asks the person for, as items in the task's thread ---- */
+
+      /**
+       * Where a pull request's commits are pushed: its own repository, or, for
+       * one from a fork into the repository it was forked from, the fork.
+       */
+      const pushTargetOf = (host: CodeHost, repository: Repository, path: string) =>
+        Effect.gen(function* () {
+          const fork = yield* namedRemotes(path).pipe(
             Effect.map(forkOf),
             Effect.orElseSucceed(() => null),
           )
           const into = fork !== null && repository.path.join('/').toLowerCase() === fork.upstream.path.join('/').toLowerCase()
-          const to = into ? yield* host.repository(fork.fork.path) : repository
-          const [sent] = yield* sql<{ head: string | null }>`
-            SELECT head_commit AS head FROM repository_changes WHERE pull_request_url = ${snapshot.url} AND project_id = ${link.projectId} LIMIT 1`
-          const pushTarget = yield* host.pushTarget(to)
-          const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [
-            snapshot.headSha,
-            sent?.head ?? null,
-            yield* remoteTip(workspace.path, pushTarget, workspace.branch),
-          ])
-          // The commit seen, or what crediting made of it, is on the branch still.
-          if (!(yield* onHead(workspace.path, seen)) && !(yield* onHead(workspace.path, head)))
-            return yield* new ChangedSinceSeen({ taskId })
+          return yield* host.pushTarget(into ? yield* host.repository(fork.fork.path) : repository)
+        })
+
+      /** A commit, and what crediting made it from (credit.ts): the branch stays on that until it moves onto what was sent. */
+      const madeFrom = (commit: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ original: string }>`SELECT original FROM credited_commits WHERE credited = ${commit}`
+          return [commit, ...rows.map((row) => row.original).filter((original) => original !== commit)]
+        }).pipe(Effect.orElseSucceed(() => [commit]))
+
+      /** The first of `commits` the branch has. */
+      const firstOnHead = (path: string, commits: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          for (const commit of commits) if (yield* onHead(path, commit)) return commit
+          return undefined
+        })
+
+      /**
+       * What a task's branch has that its pull request doesn't, as a push the
+       * lead asks for shows it: from what the pull request has to the branch's
+       * head, the first few oldest first. What it has is the latest of what
+       * is known of it that the worktree knows, never an older commit behind
+       * it: the remote's branch as the remote says now (`tip`), else, in
+       * `known`, the pull request's head as its host says, the commit Althar
+       * last pushed, and its head as last seen, in that order. `behind` where
+       * the remote's branch is on a commit the worktree doesn't know, pushed
+       * from elsewhere; `rewritten` where the branch no longer has what the
+       * pull request has, so a push would need forcing; `unknown` where the
+       * worktree knows none of them.
+       */
+      const aheadOf = (path: string, tip: string | null, known: ReadonlyArray<string | null>) =>
+        Effect.gen(function* () {
+          const head = yield* commitOf(path, 'HEAD')
+          const [latest] = (yield* commitsOf(
+            path,
+            [tip, ...known].filter((commit) => commit !== null),
+          )).filter((commit) => commit !== null)
+          if (tip !== null && latest !== tip) return { kind: 'behind', head } as const
+          if (latest === undefined) return { kind: 'unknown', head } as const
+          const from = yield* firstOnHead(path, yield* madeFrom(latest))
+          if (from === undefined) return { kind: 'rewritten', from: latest, head } as const
+          const count = yield* commitsAhead(path, from, head)
+          const listed = count === 0 ? '' : yield* git(path, 'log', '--reverse', '--format=%h%x1f%s', `${from}..${head}`)
+          const commits = listed
+            .split('\n')
+            .filter((line) => line !== '')
+            .slice(0, COMMITS_SHOWN)
+            .map((line) => ({ sha: line.slice(0, line.indexOf('\x1f')), subject: line.slice(line.indexOf('\x1f') + 1) }))
+          return { kind: 'ahead', from, head, count, commits } as const
+        })
+
+      /** The pushes the lead asked for on a pull request that still wait for the person, oldest first. */
+      const askedOf = (taskId: string, url: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ id: string; projectId: ProjectId; content: string }>`
+            SELECT i.id, i.project_id, i.content FROM thread_items i JOIN threads t ON t.id = i.thread_id
+            WHERE t.task_id = ${taskId} AND t.kind = 'task' AND i.kind = 'push_request'
+              AND json_extract(i.content, '$.url') = ${url} AND json_extract(i.content, '$.state') = 'open'
+            ORDER BY i.sequence`
+          return rows.flatMap((row) => {
+            const content = decodeAsked(row.content)
+            return Option.isSome(content) ? [{ id: row.id, projectId: row.projectId, content: content.value }] : []
+          })
+        })
+
+      /** A push the lead asked for, settled: pushed, asked for again, or its pull request closed. */
+      const settleAsked = (
+        asked: { readonly id: string; readonly projectId: ProjectId; readonly content: Asked },
+        state: 'pushed' | 'replaced' | 'closed',
+      ) =>
+        Effect.flatMap(timestamp, (at) => updateItem(asked.projectId, asked.id, { ...asked.content, state, settledAt: at } satisfies Asked))
+
+      /** A commit, and what crediting made of it where it made it again (credit.ts): either may be what the branch has now. */
+      const asCredited = (commit: string) =>
+        Effect.map(memory.recall([commit]), (made) => {
+          const credited = made.get(commit)
+          return credited === undefined || credited === commit ? [commit] : [commit, credited]
+        })
+
+      /** Whether any of `commits` is one of `tips`, or behind one. */
+      const behindAny = (path: string, commits: ReadonlyArray<string>, tips: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          for (const commit of commits)
+            for (const tip of tips)
+              if (commit === tip || (yield* gitOutcome(path, 'merge-base', '--is-ancestor', commit, tip)).code === 0) return true
+          return false
+        })
+
+      /**
+       * The branch moved since the person saw a push the lead asked for, so
+       * what it showed isn't on it any more: it shows what is on it now, for
+       * the person to look at again, and pushes that; or why that can't go up.
+       */
+      const movedAsked = (taskId: string, url: string, path: string, tip: string | null, known: ReadonlyArray<string | null>) =>
+        Effect.gen(function* () {
+          for (const asked of yield* askedOf(taskId, url)) {
+            if (yield* behindAny(path, yield* asCredited(asked.content.head), ['HEAD'])) continue
+            const ahead = yield* aheadOf(path, tip, known)
+            yield* updateItem(asked.projectId, asked.id, {
+              ...asked.content,
+              moved: true,
+              head: ahead.head,
+              commits: ahead.kind === 'ahead' ? ahead.commits : [],
+              count: ahead.kind === 'ahead' ? ahead.count : 0,
+              blocked: ahead.kind === 'ahead' ? null : ahead.kind,
+            } satisfies Asked)
+          }
+        })
+
+      /**
+       * Once the person pushed a pull request up to `pushed` (the commit they
+       * saw, and what crediting made of it), each push the lead asked for
+       * that is on it now says so, and the lead hears it.
+       */
+      const pushedAsked = (link: LinkRow, url: string, path: string, pushed: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          const told: Array<string> = []
+          for (const asked of yield* askedOf(link.taskId, url)) {
+            if (!(yield* behindAny(path, yield* asCredited(asked.content.head), pushed))) continue
+            yield* settleAsked(asked, 'pushed')
+            told.push(
+              asked.content.count === 1
+                ? `The person pushed your commit to ${asked.content.where}, as you asked: the pull request has it now.`
+                : `The person pushed your ${asked.content.count} commits to ${asked.content.where}, as you asked: the pull request has them now.`,
+            )
+          }
+          yield* tellLead(link, told)
+        })
+
+      const push = (taskId: string, seen: string, url?: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { link, snapshot, host, repository } = yield* current(taskId, url)
+          const workspace = yield* worktreeOf(taskId, snapshot.url)
+          if (workspace === undefined) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
+          // What the person saw, and nothing the lead committed after: one rewritten away since isn't pushed.
+          // A pull request from a fork into the repository it was forked from takes its commits on the fork.
+          const sent = yield* sentTo(link.projectId, snapshot.url)
+          const pushTarget = yield* pushTargetOf(host, repository, workspace.path)
+          const tip = yield* remoteTip(workspace.path, pushTarget, workspace.branch)
+          const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [snapshot.headSha, sent, tip])
+          // The commit seen, or what crediting made of it, is on the branch still. A push the lead asked for that showed it shows what is.
+          if (!(yield* onHead(workspace.path, seen)) && !(yield* onHead(workspace.path, head))) {
+            // What Althar last pushed before what it last saw: a pull request read before that push is behind it.
+            yield* movedAsked(taskId, snapshot.url, workspace.path, tip, [sent, snapshot.headSha]).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not show the branch as it is now', cause)),
+            )
+            return yield* new ChangedSinceSeen({ taskId, what: 'branch' })
+          }
           yield* pushTo(workspace.path, pushTarget, workspace.branch, head)
           yield* settle
           yield* sql`UPDATE repository_changes SET head_commit = ${head}, updated_at = ${yield* timestamp}, revision = revision + 1
             WHERE pull_request_url = ${snapshot.url} AND project_id = ${link.projectId}`
           // The pull request's head is what was pushed, for the card to count from; the host's next look has the last word.
           yield* saveSnapshot(link, { ...snapshot, headSha: head })
+          // What the lead asked the person to push that went up: its request says so, and the lead hears it.
+          yield* pushedAsked(link, snapshot.url, workspace.path, [seen, head]).pipe(
+            Effect.catchCause((cause) => Effect.logWarning('Could not tell the lead what was pushed', cause)),
+          )
           yield* news(taskId)
           wakeNow(taskId)
           return { change: yield* summaryOf({ ...link, snapshot: JSON.stringify({ ...snapshot, headSha: head }) }) }
@@ -1477,6 +1652,8 @@ export class Changes extends Context.Service<
             polledAt: yield* timestamp,
             ...(settled ? { listening: 0 } : {}),
           })
+          // Merged or closed, it takes no more pushes: what the lead asked to push to it is closed.
+          if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
           if (after.state === 'merged') yield* settleIfDone(link.taskId)
           // Checks on what Althar pushed to resolve a conflict are the round's; what fails there isn't told the lead twice.
           const theRounds = yield* checked(link, before.url, now, host, repository).pipe(
@@ -2367,6 +2544,60 @@ export class Changes extends Context.Service<
         pull_request: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
       })
 
+      const PushAsked = Schema.Struct({
+        pull_request: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
+      })
+
+      /** Whether the lead names this pull request: by its repository and number, as read_pull_request does (web#3), its whole path, or its number. */
+      const isNamed = (candidate: Snapshot, asked: string) =>
+        asked === `${candidate.repository.at(-1) ?? ''}${candidate.words.prefix}${candidate.number}`.toLowerCase() ||
+        asked === `${candidate.repository.join('/')}${candidate.words.prefix}${candidate.number}`.toLowerCase() ||
+        asked === String(candidate.number) ||
+        asked === `${candidate.words.prefix}${candidate.number}`
+
+      /**
+       * What a push the lead asks for would send to one of the task's pull
+       * requests, which it calls `where`; refused, in words it can act on,
+       * where the pull request isn't open, the branch has nothing new for it,
+       * or a push would need forcing.
+       */
+      const toPush = (taskId: string, url: string, where: string) =>
+        Effect.gen(function* () {
+          const { link, snapshot, host, repository } = yield* current(taskId, url)
+          // As its host has it now: one merged since Althar last asked has nothing to push to.
+          const now = yield* host.change(repository, snapshot.number)
+          if (now.state !== 'open')
+            return yield* new ToolRefused({
+              message: `${where} is ${now.state}, so there's nothing to push to. Tell the person what you committed.`,
+            })
+          const workspace = yield* worktreeOf(taskId, snapshot.url)
+          if (workspace === undefined || !existsSync(workspace.path))
+            return yield* new ToolRefused({
+              message: "The task's worktree isn't on this Mac, so Althar can't see what is on its branch. Tell the person.",
+            })
+          // What the pull request has: its branch as the remote says now, else as its host says, else as Althar last pushed it, else as last seen.
+          const tip = yield* remoteTip(workspace.path, yield* pushTargetOf(host, repository, workspace.path), workspace.branch)
+          const ahead = yield* aheadOf(workspace.path, tip, [now.headSha, yield* sentTo(link.projectId, snapshot.url), snapshot.headSha])
+          const left = yield* uncommittedFiles(workspace.path).pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))
+          if (ahead.kind === 'behind')
+            return yield* new ToolRefused({
+              message: `${where} has commits your branch doesn't: someone pushed to it from elsewhere, so nothing can go up until they're in your branch. Tell the person.`,
+            })
+          if (ahead.kind === 'unknown')
+            return yield* new ToolRefused({
+              message: `Althar can't tell which of the branch's commits ${where} has: your worktree has none of the commits it was pushed with. Tell the person.`,
+            })
+          if (ahead.kind === 'rewritten')
+            return yield* new ToolRefused({
+              message: `Your branch no longer has ${where}'s head, ${ahead.from.slice(0, 7)}: it was rewritten since the pull request last got commits, so pushing it would need forcing, which isn't done from a task. Put your new commits back on top of ${ahead.from.slice(0, 7)}, then ask again; or tell the person.`,
+            })
+          if (ahead.count === 0)
+            return yield* new ToolRefused({
+              message: `${where} already has every commit on the branch, so there's nothing new to push.${left.length === 0 ? '' : ` What you changed isn't committed yet (${filesWord(left)}): commit it, then ask again.`}`,
+            })
+          return { link, snapshot, where, ahead, left }
+        })
+
       /** A lead's tool: refusals reach it in words; anything else says to try again, and goes to the log. */
       const leadTool = (
         name: string,
@@ -2414,7 +2645,7 @@ export class Changes extends Context.Service<
         ),
         leadTool(
           'reply_on_pull_request',
-          "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. In a task of several repositories, pull_request names the one to reply on, by its repository and number, as read_pull_request names it: web#3. For answering what people said; a change to the code is a commit, which the person pushes.",
+          "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. In a task of several repositories, pull_request names the one to reply on, by its repository and number, as read_pull_request names it: web#3. For answering what people said; a change to the code is a commit, which the person pushes: ask them to with push_to_pull_request.",
           {
             type: 'object',
             properties: { body: { type: 'string' }, thread_id: { type: 'string' }, pull_request: { type: 'string' } },
@@ -2436,15 +2667,7 @@ export class Changes extends Context.Service<
               // Among several pull requests, the one it names, by repository and number: numbers repeat across repositories.
               const seen = yield* urlsOf(taskId)
               const asked = replied.pull_request == null ? null : String(replied.pull_request).trim().toLowerCase()
-              const matching = seen.filter((candidate) => {
-                const short = `${candidate.repository.at(-1) ?? ''}${candidate.words.prefix}${candidate.number}`.toLowerCase()
-                return (
-                  asked === short ||
-                  asked === `${candidate.repository.join('/')}${candidate.words.prefix}${candidate.number}`.toLowerCase() ||
-                  asked === String(candidate.number) ||
-                  asked === `${candidate.words.prefix}${candidate.number}`
-                )
-              })
+              const matching = seen.filter((candidate) => asked !== null && isNamed(candidate, asked))
               const [named] = matching
               if (seen.length > 1 && (named === undefined || matching.length > 1))
                 return yield* new ToolRefused({
@@ -2460,6 +2683,83 @@ export class Changes extends Context.Service<
               )
               return `Replied on ${nameOf(change)}.`
             }),
+        ),
+        leadTool(
+          'push_to_pull_request',
+          "Asks the person to push what you've committed on the task's branch to its pull request, once it's open. Althar shows them the commits that would go up, from the pull request's head to your branch's, with a Push button, and tells you once they've pushed. Use it when the person asks you to push, or when what you've committed should go up to the pull request. Commit first: only commits go up. Nothing is pushed until the person presses Push, so don't say it's up, or that Althar will push it by itself. In a task of several repositories, pull_request names the one, as read_pull_request names it: web#3.",
+          { type: 'object', properties: { pull_request: { type: 'string' } } },
+          (taskId, input) =>
+            locked(taskId)(
+              Effect.gen(function* () {
+                const sql = yield* SqlClient.SqlClient
+                const asked = yield* Schema.decodeUnknownEffect(PushAsked)(input).pipe(
+                  Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
+                )
+                const seen = yield* urlsOf(taskId)
+                if (seen.length === 0) return yield* new NotFound({ kind: 'pull request', id: taskId })
+                const several = seen.length > 1
+                const named = asked.pull_request == null ? null : String(asked.pull_request).trim().toLowerCase()
+                const candidates = named === null ? seen : seen.filter((candidate) => isNamed(candidate, named))
+                if (named !== null && candidates.length !== 1)
+                  return yield* new ToolRefused({
+                    message: several
+                      ? `This task has several pull requests: ${seen.map(shortNameOf).join(', ')}. Say which with pull_request, as one of those.`
+                      : `This task's pull request is ${seen.map(nameOf).join('')}. Leave pull_request out, or name it so.`,
+                  })
+                // Without a name, among several, the open one whose branch has something new for it.
+                const tried = yield* Effect.forEach(
+                  candidates.length === 1 ? candidates : candidates.filter((candidate) => candidate.state === 'open'),
+                  (candidate) => Effect.exit(toPush(taskId, candidate.url, several ? shortNameOf(candidate) : nameOf(candidate))),
+                )
+                const ready = tried.flatMap((one) => (one._tag === 'Success' ? [one.value] : []))
+                if (ready.length > 1)
+                  return yield* new ToolRefused({
+                    message: `Several of this task's pull requests have new commits: ${ready.map((one) => one.where).join(', ')}. Ask once for each, naming it with pull_request.`,
+                  })
+                const [chosen] = ready
+                if (chosen === undefined) {
+                  // Why none can take a push: each one's refusal, or else what went wrong, for the lead's tool to say.
+                  const failures = tried.flatMap((one) => (one._tag === 'Failure' ? [one.cause] : []))
+                  const refusals = failures.flatMap((cause) => {
+                    const error = Cause.findErrorOption(cause)
+                    return Option.isSome(error) && error.value instanceof ToolRefused ? [error.value.message] : []
+                  })
+                  const [first] = failures
+                  if (first !== undefined && refusals.length < failures.length) return yield* Effect.failCause(first)
+                  return yield* new ToolRefused({
+                    message:
+                      refusals.length > 0
+                        ? refusals.join(' ')
+                        : "None of this task's pull requests is open, so there's nothing to push to. Tell the person what you committed.",
+                  })
+                }
+                const { link, snapshot, where, ahead, left } = chosen
+                const waiting = yield* askedOf(taskId, snapshot.url)
+                const already = waiting.find((one) => one.content.head === ahead.head)
+                if (already !== undefined)
+                  return `Already asked the person to push ${commitsWord(already.content.count)} to ${where}: it waits for them in the task's thread, and you'll be told when they've pushed.`
+                // Asked again, with more on the branch, what was asked before gives way to it.
+                for (const one of waiting) yield* settleAsked(one, 'replaced')
+                const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task'`
+                if (thread === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
+                yield* addItem({ projectId: link.projectId, threadId: thread.id }, 'push_request', {
+                  url: snapshot.url,
+                  where,
+                  product: link.product,
+                  head: ahead.head,
+                  commits: ahead.commits,
+                  count: ahead.count,
+                  moved: false,
+                  blocked: null,
+                  state: 'open',
+                  settledAt: null,
+                } satisfies Asked)
+                return [
+                  `Asked the person to push ${commitsWord(ahead.count)} to ${where}. They see them in the task's thread with a Push button; nothing goes up until they press it, and you'll be told when they have.`,
+                  ...(left.length === 0 ? [] : [`Not included, since they aren't committed: ${filesWord(left)}.`]),
+                ].join(' ')
+              }),
+            ),
         ),
       ])
 

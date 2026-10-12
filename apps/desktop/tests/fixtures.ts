@@ -486,6 +486,27 @@ export const items = {
       ...content,
     },
   }),
+  push: (content: Partial<Extract<ThreadItem, { kind: 'push_request' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'push_request',
+    content: {
+      url: 'https://github.com/meridian/api/pull/12',
+      where: 'PR #12',
+      product: 'github',
+      head: 'def4567890',
+      commits: [
+        { sha: 'abc1234', subject: 'Read Retry-After as seconds' },
+        { sha: 'def4567', subject: 'Name the retry option' },
+      ],
+      count: 2,
+      moved: false,
+      blocked: null,
+      state: 'open',
+      settledAt: null,
+      ...content,
+    },
+  }),
 }
 
 type TaskCardContent = Extract<ThreadItem, { kind: 'task' }>['content']
