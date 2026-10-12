@@ -12,6 +12,7 @@ The versioned client and runtime schemas of [docs/architecture/02](../../docs/ar
 | --- | --- |
 | `Api.ts` | The calls, their payloads, results and error, and the projections they return |
 | `transport.ts` | Effect RPC over a message port: the port shapes each side has, and a protocol for each |
+| `pictures.ts` | What a picture's bytes say it is (PNG, JPEG, GIF or WebP) and how big it is, and what a message's images may be (`MESSAGE_IMAGES`): pure, so the runtime and the window check images alike |
 
 ## Principles
 

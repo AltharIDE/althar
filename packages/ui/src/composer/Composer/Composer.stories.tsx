@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useEffect, useRef, useState } from 'react'
-import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fireEvent, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { MODEL_LIST, model, useModelPrefs } from '../../fixtures/models'
+import { SHOT_AFTER, SHOT_BEFORE } from '../../fixtures/shots'
 import { Brand } from '../../foundations/brands/brands'
 import { DictationSetup } from '../../foundations/vocabulary'
 import { ContextRing } from '../ContextRing/ContextRing'
@@ -10,7 +11,7 @@ import { DictationTray, type DictationState } from '../DictationTray/DictationTr
 import { Listening } from '../Listening/Listening'
 import { Running } from '../Running/Running'
 import { ModelPick } from '../ModelPick/ModelPick'
-import { Composer, type ComposerProps, type DictationInput } from './Composer'
+import { Composer, type ComposerImage, type ComposerProps, type DictationInput } from './Composer'
 import { States, statesOn } from '../../storybook/States'
 
 const clock = (n: number) => `0:${String(n).padStart(2, '0')}`
@@ -50,20 +51,46 @@ const INPUTS: readonly DictationInput[] = [
   { id: 'usb', label: 'Shure MV7' },
 ]
 
+/* Images as the host has read them: the two screenshots, as small copies. */
+const SHOTS: ComposerImage[] = [
+  { id: 'i1', name: 'refunds-before.png', src: SHOT_BEFORE.src },
+  { id: 'i2', name: 'refunds-after.png', src: SHOT_AFTER.src },
+]
+
+/* What the host says of a file that isn't a picture it can send. */
+const refusedNote = (name: string) => `${name} isn’t a PNG, JPEG, GIF or WebP image, so it can’t be sent.`
+
 function Example(
   props: Partial<ComposerProps> & {
     initial?: string
     recording?: boolean
     streaming?: boolean
-    waiting?: string[]
+    waiting?: (string | { text: string; attached: string })[]
     at?: number
     inputs?: readonly DictationInput[]
+    /** Images already added. */
+    pictures?: ComposerImage[]
+    /** Takes images: what is dropped, pasted or picked is read as the host would, and anything that isn't an image refused. */
+    takesImages?: boolean
   },
 ) {
-  const { initial = '', recording = false, streaming = false, waiting = [], at, inputs = INPUTS, onSendNow = () => {}, ...rest } = props
+  const {
+    initial = '',
+    recording = false,
+    streaming = false,
+    waiting = [],
+    at,
+    inputs = INPUTS,
+    pictures = [],
+    takesImages = false,
+    onSendNow = () => {},
+    ...rest
+  } = props
   const [value, setValue] = useState(initial)
   const [input, setInput] = useState<string | null>(null)
-  const [queue, setQueue] = useState(waiting.map((text, i) => ({ id: `q${i}`, text })))
+  const [images, setImages] = useState(pictures)
+  const [note, setNote] = useState<string | undefined>(undefined)
+  const [queue, setQueue] = useState(waiting.map((said, i) => ({ id: `q${i}`, ...(typeof said === 'string' ? { text: said } : said) })))
   const [seconds, setSeconds] = useState<number | null>(recording ? 4 : null)
   const [tick, setTick] = useState(0)
   const running = seconds !== null
@@ -84,9 +111,30 @@ function Example(
         value={value}
         onChange={setValue}
         onSubmit={(text) => {
-          if (rest.busy) setQueue([...queue, { id: `q${queue.length}-${text.length}`, text }])
+          if (rest.busy)
+            setQueue([
+              ...queue,
+              { id: `q${queue.length}-${text.length}`, text, ...(images.length > 0 ? { attached: `${images.length} images` } : {}) },
+            ])
           setValue('')
+          setImages([])
         }}
+        images={images}
+        {...(takesImages
+          ? {
+              onAddImages: (files: readonly File[]) => {
+                const refused = files.find((file) => !file.type.startsWith('image/'))
+                setNote(refused === undefined ? undefined : refusedNote(refused.name))
+                const added = files.filter((file) => file.type.startsWith('image/'))
+                setImages((now) => [
+                  ...now,
+                  ...added.map((file, i) => ({ id: `added-${now.length + i}`, name: file.name, src: SHOT_BEFORE.src })),
+                ])
+              },
+              onRemoveImage: (id: string) => setImages((now) => now.filter((image) => image.id !== id)),
+              imageNote: note,
+            }
+          : {})}
         placeholder="Tell the lead"
         hint="/"
         picker={<Picker />}
@@ -397,6 +445,112 @@ export const ListeningAndRunning: Story = {
 /** Nothing in the lower row but send: no picker, no meter, no dictation. */
 export const Minimal: Story = { render: () => <Example picker={undefined} meter={undefined} dictation={undefined} hint={undefined} /> }
 
+/** Images to send with what you write, drawn small above the field, each with a way off. */
+export const WithImages: Story = {
+  render: () => <Example takesImages pictures={SHOTS} initial="The refund button moved; put it back where it was." />,
+}
+/** Images alone are something to send: the button shows, and Enter sends them with nothing written. */
+export const ImagesOnly: Story = {
+  args: { onSubmit: fn() },
+  render: (args) => <Example takesImages pictures={SHOTS.slice(0, 1)} onSubmit={args.onSubmit} />,
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+    await userEvent.click(c.getByRole('textbox', { name: 'Tell the lead' }))
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onSubmit).toHaveBeenCalledWith('')
+  },
+}
+/** Dropped on it, pasted into it or picked with Add images: each goes to the host, which adds it, and takes it off again. */
+export const AddingImages: Story = {
+  render: () => <Example takesImages />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const field = c.getByRole('textbox', { name: 'Tell the lead' })
+    const shot = new File(['png'], 'shot.png', { type: 'image/png' })
+    // Held over it, it says what dropping does; carried away, it doesn't.
+    await fireEvent.dragEnter(field, { dataTransfer: { types: ['Files'], files: [shot] } })
+    await expect(c.getByText('Drop to add them to your message')).toBeInTheDocument()
+    await fireEvent.dragLeave(field, { dataTransfer: { types: ['Files'], files: [shot] } })
+    await expect(c.queryByText('Drop to add them to your message')).toBeNull()
+    await fireEvent.dragEnter(field, { dataTransfer: { types: ['Files'], files: [shot] } })
+    await fireEvent.drop(field, { dataTransfer: { types: ['Files'], files: [shot] } })
+    await expect(c.getByRole('list', { name: '1 image to send' })).toBeInTheDocument()
+    await expect(c.getByRole('img', { name: 'shot.png' })).toBeInTheDocument()
+    // A picture on the clipboard is added, not pasted as words.
+    await fireEvent.paste(field, { clipboardData: { files: [new File(['jpg'], 'photo.jpg', { type: 'image/jpeg' })], types: ['Files'] } })
+    await expect(c.getByRole('list', { name: '2 images to send' })).toBeInTheDocument()
+    await expect(field).toHaveValue('')
+    // Words on the clipboard paste as words.
+    await fireEvent.paste(field, { clipboardData: { files: [], types: ['text/plain'] } })
+    await expect(c.getByRole('list', { name: '2 images to send' })).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Remove shot.png' }))
+    await expect(c.getByRole('list', { name: '1 image to send' })).toBeInTheDocument()
+    // Picked with the button, from the file input it opens.
+    const input = canvasElement.querySelector<HTMLInputElement>('input[type="file"]')
+    await expect(input).toHaveAttribute('accept', 'image/png,image/jpeg,image/gif,image/webp')
+    if (input !== null) await userEvent.upload(input, new File(['gif'], 'loop.gif', { type: 'image/gif' }))
+    await expect(c.getByRole('list', { name: '2 images to send' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Add images' })).toBeInTheDocument()
+  },
+}
+/** A file the host won't send: it says why in a line over the field, and the rest are added. */
+export const ImageRefused: Story = {
+  render: () => <Example takesImages />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const files = [new File(['%PDF'], 'notes.pdf', { type: 'application/pdf' }), new File(['png'], 'shot.png', { type: 'image/png' })]
+    await fireEvent.drop(c.getByRole('textbox', { name: 'Tell the lead' }), { dataTransfer: { types: ['Files'], files } })
+    await expect(c.getByRole('status')).toHaveTextContent(refusedNote('notes.pdf'))
+    await expect(c.getByRole('list', { name: '1 image to send' })).toBeInTheDocument()
+  },
+}
+/** One still being read or made smaller turns until it is ready. */
+export const ReadingImage: Story = {
+  render: () => (
+    <Example takesImages pictures={[SHOTS[0] ?? { id: 'i1', name: 'refunds-before.png' }, { id: 'i3', name: 'huge.png', reading: true }]} />
+  ),
+  play: async ({ canvasElement }) => {
+    // Said as a status, in place of its picture.
+    await expect(within(canvasElement).getByText('Reading huge.png').closest('[role="status"]')).toBeInTheDocument()
+    await expect(within(canvasElement).queryByRole('img', { name: 'huge.png' })).toBeNull()
+  },
+}
+/** The host says the agent doesn't take images: the line says so over the images waiting, before anything is sent. */
+export const AgentTakesNoImages: Story = {
+  render: () => (
+    <Example
+      takesImages
+      pictures={SHOTS}
+      imageNote="Codex doesn’t take images. Remove them to send this, or pick an agent that does."
+      initial="Why does it look like this?"
+    />
+  ),
+}
+/** Without an image the placeholder stands in its place; without onAddImages there is no button, and nothing is taken. */
+export const NoImageSource: Story = {
+  render: () => <Example pictures={[{ id: 'i1', name: 'refunds-before.png' }]} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('img', { name: 'refunds-before.png' })).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Add images' })).toBeNull()
+    await expect(c.queryByRole('button', { name: /^Remove/ })).toBeNull()
+  },
+}
+/** Sent with images while the lead worked: the queue says what went with each. */
+export const QueuedWithImages: Story = {
+  render: () => (
+    <Example
+      busy
+      onStopAgent={() => {}}
+      waiting={[
+        { text: 'Like this one.', attached: '2 images' },
+        { text: '', attached: '1 image' },
+      ]}
+    />
+  ),
+}
+
 export const SendsOnEnter: Story = {
   render: function Render(args) {
     const [value, setValue] = useState('')
@@ -437,6 +591,26 @@ export const AllStates: Story = {
         { state: 'dictating', node: <Example recording /> },
         { state: 'dictating, word by word', node: <Example recording streaming initial="Keep the limiter where it is." /> },
         { state: 'minimal', node: <Example picker={undefined} meter={undefined} dictation={undefined} hint={undefined} /> },
+        { state: 'images', node: <Example takesImages pictures={SHOTS} initial="Put the button back." /> },
+        { state: 'images only', node: <Example takesImages pictures={SHOTS.slice(0, 1)} /> },
+        {
+          state: 'reading an image',
+          node: <Example takesImages pictures={[{ id: 'i3', name: 'huge.png', reading: true }]} />,
+        },
+        {
+          state: 'agent takes no images',
+          node: (
+            <Example
+              takesImages
+              pictures={SHOTS}
+              imageNote="Codex doesn’t take images. Remove them to send this, or pick an agent that does."
+            />
+          ),
+        },
+        {
+          state: 'queued, with images',
+          node: <Example busy onStopAgent={() => {}} waiting={[{ text: 'Like this one.', attached: '2 images' }]} />,
+        },
       ]}
     />
   ),
