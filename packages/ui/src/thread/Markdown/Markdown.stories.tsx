@@ -99,3 +99,12 @@ export const AllStates: Story = {
     />
   ),
 }
+
+/* A long block, such as a prompt an agent wrote for another: its copy waits in the corner, and the text keeps clear of it. */
+const LONG_CODE = `Review the refund route in src/refunds/router.ts. The idempotency key is checked after the partner budget, so a repeated request spends the budget twice. Move the key check first, answer 409 for a repeat within the window, and add a test that sends the same key three times and expects one charge.
+
+Keep the public response shape. Do not change the webhook payloads, and leave the charges route alone.
+
+When done, run \`bun test refunds\` and report the diff in one paragraph.`
+/** A long block of code: the copy waits in its corner, and the code keeps clear of it. */
+export const LongCode: Story = { args: { source: '```text\n' + LONG_CODE + '\n```' } }

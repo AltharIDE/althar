@@ -14,7 +14,23 @@ import {
   type SessionEvent,
   type StopReport,
 } from '@althar/provider-adapters'
-import { Cause, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
+import {
+  Cause,
+  Clock,
+  Context,
+  Crypto,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Queue,
+  Schema,
+  Scope,
+  Semaphore,
+  Stream,
+} from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
@@ -53,7 +69,19 @@ import type { InputImage } from './sentImages'
 import { evidenceForReview } from './evidence'
 import { defaultEffortOf } from './preferences'
 import { addItem, betweenTurns, type OutputSoFar, recorder, toolItem, transcript } from './threads'
-import { commandOfCall, exitCodeIn, type LeftRunning, printedMore, servingAt, type ShownLeftRunning, shownOf, tailOf } from './leftRunning'
+import {
+  commandOfCall,
+  exitCodeIn,
+  type LeftRunning,
+  printedMore,
+  QUIET_FOR,
+  servingAt,
+  type ShownLeftRunning,
+  shownOf,
+  stillBusy,
+  tailOf,
+  WAKE_FOR,
+} from './leftRunning'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
@@ -202,6 +230,12 @@ interface Running {
   recording: { readonly outputOf: (itemId: string) => OutputSoFar | undefined } | undefined
   /** What it left running in the background, in the order it started them (leftRunning.ts). */
   readonly background: Map<string, LeftRunning>
+  /** Tool calls it began outside a turn Althar sent, as Claude Code does when something it left running ends, and hasn't finished. */
+  readonly callsOpen: Set<string>
+  /** When it last spoke outside a turn, or something it left running ended, in milliseconds; null if not since its last turn began. */
+  workedAt: number | null
+  /** When something it left running ended in between turns, if it hasn't spoken since, in milliseconds. */
+  wakeAt: number | null
   /**
    * A coordinator's handover to a fresh session (ADR-031): under way, it
    * takes no more turns; left, it carries on as it is, its agent compacting
@@ -210,6 +244,9 @@ interface Running {
    */
   handover: 'none' | 'under_way' | 'left'
 }
+
+/** How often, at most, a thread's agent is looked at while a round waits for it to be done. */
+const IDLE_EVERY = Duration.millis(250)
 
 /** How often, and for how long, what one left running is read for where it answers. */
 const SERVING_EVERY = Duration.millis(500)
@@ -433,6 +470,8 @@ export class Sessions extends Context.Service<
         readonly reviewer: boolean
         readonly turnRunning: boolean
         readonly background: boolean
+        /** The agent's process, where it runs as one: what its left running is a part of, and is read for CPU (Busy.ts). */
+        readonly pid: number | null
       }>
     >
     /**
@@ -456,6 +495,19 @@ export class Sessions extends Context.Service<
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) => Effect.Effect<boolean>,
     ): Effect.Effect<void>
+    /**
+     * Whether the thread's agent is still at work, though its turn has ended:
+     * it left a command running, is in a call of its own, or spoke outside a
+     * turn Althar sent a moment ago, as Claude Code does once something it
+     * left running ends (leftRunning.ts, `stillBusy`). False where no
+     * session is.
+     */
+    busy(threadId: string): Effect.Effect<boolean>
+    /**
+     * Waits until the agent isn't (`idle`), or its session ends (`gone`), or
+     * it is still at work once `within` has passed (`late`).
+     */
+    untilIdle(threadId: string, within: Duration.Duration): Effect.Effect<'idle' | 'gone' | 'late'>
   }
 >()('@althar/runtime/Sessions') {
   static readonly layer: Layer.Layer<Sessions, never, Store> = Layer.effect(
@@ -471,6 +523,8 @@ export class Sessions extends Context.Service<
       const toolServer = yield* ToolServer
       const setups = yield* Setups
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
+      const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
+      const wakeFor = (yield* RuntimeConfig).idle?.wake ?? WAKE_FOR
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
@@ -537,6 +591,8 @@ export class Sessions extends Context.Service<
                   startedAt: yield* timestamp,
                   ended: null,
                 })
+                // Left running, its call is no longer one the agent has open.
+                if (event.toolCallId !== undefined) running.callsOpen.delete(event.toolCallId)
                 yield* toldBackground(running)
                 yield* Effect.forkIn(watchServing(running, event.id), running.scope)
                 return
@@ -556,6 +612,9 @@ export class Sessions extends Context.Service<
               case 'BackgroundEnded': {
                 const left = running.background.get(event.id)
                 if (left === undefined) return
+                // Claude Code may start a turn of its own now (ADR-022).
+                running.workedAt = yield* Clock.currentTimeMillis
+                if (!running.turnRunning && event.end !== 'stopped') running.wakeAt = running.workedAt
                 // Stopped, it goes, whoever stopped it. Ended by itself, it stays, to say how.
                 if (event.end === 'stopped') running.background.delete(event.id)
                 else {
@@ -569,6 +628,36 @@ export class Sessions extends Context.Service<
             }
           }),
         ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not keep what an agent left running', cause)))
+
+      /**
+       * Keeps that the agent is at work outside a turn Althar sent, from an
+       * event it streamed between turns: it speaks, or makes a call and has
+       * not finished it. Nothing says when such a turn ends, so it is taken
+       * as over once the agent has said nothing for a while (`stillBusy`).
+       */
+      const heardWork = (running: Running, event: SessionEvent) =>
+        Effect.gen(function* () {
+          switch (event._tag) {
+            case 'AgentMessage':
+            case 'AgentContent':
+            case 'AgentThought':
+            case 'Plan':
+              break
+            case 'ToolCall':
+              if (event.status === 'pending' || event.status === 'in_progress') running.callsOpen.add(event.toolCallId)
+              else running.callsOpen.delete(event.toolCallId)
+              break
+            case 'ToolCallUpdate':
+              if (event.status === 'completed' || event.status === 'failed') running.callsOpen.delete(event.toolCallId)
+              // What a command it left running prints isn't the agent at work.
+              if ([...running.background.values()].some((left) => left.toolCallId === event.toolCallId)) return
+              break
+            default:
+              return
+          }
+          running.workedAt = yield* Clock.currentTimeMillis
+          running.wakeAt = null
+        })
 
       /** No agent starts, and nothing is said to one, in a project removed from Althar: a window that hadn't heard yet is told it's gone. */
       const inLiveProject = (threadId: string) =>
@@ -852,6 +941,10 @@ export class Sessions extends Context.Service<
             )
           running.brief = undefined
           running.turnRunning = true
+          // What it did outside a turn before is over with: this turn is what it is at.
+          running.callsOpen.clear()
+          running.workedAt = null
+          running.wakeAt = null
           const begun = running.begun
           running.begun = undefined
           if (begun !== undefined) yield* begun
@@ -1380,6 +1473,9 @@ export class Sessions extends Context.Service<
             recording: undefined,
             settleBetween: Effect.void,
             background: new Map(),
+            callsOpen: new Set(),
+            workedAt: null,
+            wakeAt: null,
             handover: 'none',
           }
           threads.set(thread.threadId, running)
@@ -1400,7 +1496,7 @@ export class Sessions extends Context.Service<
                         Effect.sync(() => heardContext(running, event)),
                         heard.record(event),
                       ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
-                      heardBackground(running, event),
+                      Effect.andThen(heardWork(running, event), heardBackground(running, event)),
                     ),
                     live.publish({ _tag: 'Agent', threadId: thread.threadId, event }),
                   ),
@@ -1450,6 +1546,25 @@ export class Sessions extends Context.Service<
             yield* Scope.close(running.scope, Exit.void)
           }
           yield* Deferred.await(running.ended)
+        })
+
+      /** Whether a thread's agent is still at work, though its turn may have ended (`Sessions.busy`). */
+      const busyNow = (threadId: string) =>
+        Effect.gen(function* () {
+          const running = threads.get(threadId)
+          if (running === undefined) return false
+          return stillBusy(
+            {
+              turnRunning: running.turnRunning,
+              background: [...running.background.values()],
+              callsOpen: running.callsOpen.size,
+              workedAt: running.workedAt,
+              wakeAt: running.wakeAt,
+            },
+            yield* Clock.currentTimeMillis,
+            quietFor,
+            wakeFor,
+          )
         })
 
       /** Start, switch and stop on one thread happen one at a time. */
@@ -1857,13 +1972,15 @@ export class Sessions extends Context.Service<
             "Once the plan's steps are done, what the person asks you for is a round of work of its own: when you have done it, call finish_step the same way, with your summary and evidence. Where they only asked something and you changed nothing, answer them; there is nothing to finish. What you commit after the task's pull request merged or closed goes in a new pull request, which the person opens from the task.",
             // What the lead shows of its work: evidence that fits the task, and what it couldn't show.
             "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo or a version bump, a single note saying so is enough. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check.",
+            // What the task built, which ends it: the person reads it before the proof, and it is said again when the work changes.
+            "When you finish the task, say in finish_step's `built` what it has built, as it stands now, the way you would wrap up a session for the person: what it does for them now, the main changes and where they are, anything left open or decided along the way (\"the images aren't in the pull request because…\"), and what they should do next (try it at its local address, push, check it on a real device). A few lines or a short list, in plain words, about where it ended rather than how it got there: a review finding you fixed belongs only if it changed what was built. For a prototype or anything to look at, say how to see it. Settling a review that changes the work, say it again, so it never describes an earlier version; and once the plan's steps are done, when you change the work after (a failed check, what people said on the pull request), call finish_step again with `built` as it now stands.",
             // Althar reaches the code host for the task (ADR-011).
             "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. read_issue reads the issue the task came from, or any other.",
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
             `${published.join(' ')} Bring the default branch in by merging it, never by rebasing, and never amend or squash commits that were or may have been pushed: a pull request would no longer take your commits. Where Althar says a branch is published, go by that, not by git status or a remote you can't fetch.`,
             ...(resolves?.resolves === 1
               ? [
-                  'This project has you resolve a conflict with the default branch on your own: Althar tells you when it finds one, and what to merge. On a pull request, Althar pushes that merge itself once you commit it, and then a fix you commit on top of it, as one commit, when Althar tells you its checks failed. Nothing else you commit is pushed for you, and you still never push.',
+                  "This project has you resolve a conflict with the default branch on your own: Althar tells you when it finds one, and what to merge. Commit the merge as soon as the conflicts are settled and the quick checks pass, and don't end your turn with it uncommitted or while you wait on something running in the background: Althar looks at the branch when your turn ends. If the full test suites then find something, fix it in one follow-up commit on top of the merge. On a pull request, Althar pushes that merge itself once you commit it, with that one fix if you made it, and then a fix you commit on top when Althar tells you its checks failed, as one commit. Nothing else you commit is pushed for you, and you still never push.",
                 ]
               : []),
             // Althar runs the project for the person itself (ADR-023): the lead keeps how, when it changes it.
@@ -1898,7 +2015,7 @@ export class Sessions extends Context.Service<
             '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial; each with an effort where it matters. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
             "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built. It shows over the composer with where it answers. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command.",
             "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
-            '- list_tasks, read_task and read_thread, to see what is under way and how it went. read_thread without a task reads your conversation with the person, back to its start.',
+            '- list_tasks, read_task and read_thread, to see what is under way and how it went; read_task says what a finished task built. read_thread without a task reads your conversation with the person, back to its start.',
             "- read_issue and find_issues, for the issues on the person's connected trackers and in the project's repository. When the person points at an issue, read it, and draft the task from it with its link or key as draft_task's issue.",
             "- draft_issue, when the person wants something tracked rather than done now, such as a bug you found or follow-up work, as an issue on one of their connected trackers. It files nothing: the person sees it as a card, and files it, changes it or discards it there. Once they file it, you hear its key and link, and a task drafted from it later takes that as draft_task's issue.",
             "- message_lead, to pass something to a task's lead.",
@@ -2156,6 +2273,20 @@ export class Sessions extends Context.Service<
             yield* toldBackground(running)
           }),
         outputSoFar: (threadId, itemId) => Effect.sync(() => Option.fromNullishOr(threads.get(threadId)?.recording?.outputOf(itemId))),
+        busy: (threadId) => busyNow(threadId),
+        untilIdle: (threadId, within) =>
+          Effect.gen(function* () {
+            const give = Duration.toMillis(within)
+            const began = yield* Clock.currentTimeMillis
+            // In memory, and only while a round waits on it: looked at often enough that a short quiet is noticed.
+            const every = Duration.min(IDLE_EVERY, quietFor)
+            for (;;) {
+              if (!threads.has(threadId)) return 'gone' as const
+              if (!(yield* busyNow(threadId))) return 'idle' as const
+              if ((yield* Clock.currentTimeMillis) - began >= give) return 'late' as const
+              yield* Effect.sleep(every)
+            }
+          }),
         gateTurns: (next) =>
           Effect.sync(() => {
             gate = next
@@ -2175,6 +2306,7 @@ export class Sessions extends Context.Service<
                     reviewer: running.thread.role === 'reviewer',
                     turnRunning: running.turnRunning,
                     background: [...running.background.values()].some((left) => left.ended === null),
+                    pid: running.connection.process?.pid ?? null,
                   },
                 ],
           ),

@@ -418,23 +418,45 @@ const playStall = async (
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
  * Althar says it isn't committed; `[lead:evidence]` saves a screenshot in
  * the worktree, uncommitted, and finishes with it, a test run and something
- * it couldn't try, and settling, a new run and nothing left untried;
+ * it couldn't try, and settling, a new run and nothing left untried.
+ * Finishing, it says what the task built, and says it again settling a
+ * review that changed the work (with `[lead:built-unsaid]`, only once told
+ * to); set aside, it leaves what it said standing;
  * `[review:evidence]` reads each evidence file its brief names, and says so
  * in its summary. Asked for its pull request's description
  * in the repository's template, it fills it in, ticking a box it shouldn't.
  * Told what people said on its pull
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
- * publishes it, `[lead:fix-more]` commits other work after it, and
- * `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
+ * says again what the task built, `[lead:fix-more]` commits other work after it,
+ * `[lead:fix-late]` leaves the full tests running and commits it once they
+ * end, and `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
  * `[lead:push]` commits what it has and asks the person to push it. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
- * of it; `[lead:resolve-fails]` can't, and says so; `[lead:resolve-wait]`
+ * of it in two commits; `[lead:resolve-fix]` commits one fix on top of the
+ * merge; `[lead:resolve-fails]` can't, and says so; `[lead:resolve-wait]`
  * works at it until it is interrupted or stopped, and `[lead:resolve-hold]`
- * does so once it has committed the merge. Asked to plan a
+ * does so once it has committed the merge. `[lead:resolve-forgets]` settles
+ * the merge but ends its turn without committing it, and commits it when
+ * told that is all that is left. `[lead:resolve-tests]` settles it, leaves
+ * the full tests running in the background and ends its turn with the merge
+ * uncommitted; when they end it is woken, as Claude Code wakes an agent, and
+ * commits the merge outside a turn; `[lead:resolve-tests-fix]` then commits
+ * a fix the tests found too, and `[lead:resolve-tests-hang]` has tests that
+ * never end. `[lead:resolve-tests-codex]` has Codex say the tests are running
+ * just after its turn, `[lead:resolve-tests-slow]` is slow to be woken by
+ * them (`[lead:resolve-tests-again]` leaves more running once woken, `[lead:resolve-tests-output]` too, after they print once more), and `[lead:resolve-tests-url]` has tests that print a local address. Asked to plan a
  * change with a link in it, the coordinator drafts the task from that issue.
  */
+/** What the fake says its task built when it finishes, and again once settling a review changed it. */
+export const BUILT = 'Checkout retries once when the payment call fails, in `src/checkout.ts`. Try a checkout with the network off.'
+export const BUILT_SETTLED =
+  'Checkout retries once when the payment call fails, in `src/checkout.ts`, and the README heading names it. Try a checkout with the network off.'
+/** What it says the task built once it fixed a failed check, after its plan was done. */
+export const BUILT_FIXED =
+  'Checkout retries once when the payment call fails, in `src/checkout.ts`, and its check passes again. Push the fix.'
+
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
 const commitIn = (cwd: string, file: string, message: string) => {
   appendFileSync(join(cwd, file), `${file.replace(/\.txt$/, '')}\n`)
@@ -462,7 +484,133 @@ const resolveIn = (cwd: string, ref: string) => {
   }
 }
 
-const playRole = async (session: SessionState, text: string, serve: (exits: boolean) => Promise<void>): Promise<string | undefined> => {
+/** Merges a branch into the worktree's and settles each conflict as `resolveIn` does, but leaves the merge uncommitted: staged, with the merge under way. */
+const settleIn = (cwd: string, ref: string) => {
+  const git = (...args: Array<string>) =>
+    execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd, stdio: 'pipe' }).toString()
+  try {
+    git('merge', '-q', '--no-edit', '--no-commit', '--no-ff', ref)
+  } catch {
+    for (const file of git('diff', '--name-only', '--diff-filter=U')
+      .split('\n')
+      .filter((line) => line !== '')) {
+      const lines = readFileSync(join(cwd, file), 'utf8').split('\n')
+      writeFileSync(join(cwd, file), lines.filter((line) => !/^(<<<<<<<|=======|>>>>>>>)( |$)/.test(line)).join('\n'))
+    }
+  }
+  git('add', '-A')
+}
+
+/** Commits the merge settled under way. */
+const commitMergeIn = (cwd: string) =>
+  execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '--no-edit'], { cwd, stdio: 'pipe' })
+
+/**
+ * Leaves the full tests running in the background, as Claude Code reports a
+ * command it sends there. After `lasts` milliseconds they end (never, with
+ * no `lasts`), and Claude Code wakes the agent as it does: outside any
+ * prompt it speaks and makes a call, `then` done in it, and speaks again.
+ * `reportsAfter` says it that many milliseconds after the turn, as Codex
+ * does; `wakesAfter` has the agent slow to speak once they end, and `prints`
+ * is what they print as they run.
+ */
+const leaveTests = async (
+  sessionId: string,
+  session: SessionState,
+  client: acp.AgentContext,
+  plan: {
+    readonly lasts?: number
+    readonly commits?: () => void
+    readonly reportsAfter?: number
+    readonly wakesAfter?: number
+    readonly prints?: string
+    readonly printsAfterEnd?: boolean
+    readonly again?: boolean
+  },
+) => {
+  const notify = (update: Record<string, unknown>) =>
+    client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
+  session.served += 1
+  const id = `tests-${session.served}`
+  const toolCallId = `tests-call-${session.served}`
+  await notify({
+    sessionUpdate: 'tool_call',
+    toolCallId,
+    title: 'bun run test',
+    kind: 'execute',
+    status: 'in_progress',
+    rawInput: { command: 'bun run test' },
+  })
+  const folder = join(tmpdir(), 'althar-fake-agent')
+  mkdirSync(folder, { recursive: true })
+  const outputPath = join(folder, `${sessionId}-${id}.output`)
+  writeFileSync(outputPath, `running the full tests\n${plan.prints ?? ''}`)
+  const report = async () => {
+    session.background.set(id, { toolCallId, outputPath })
+    await notify({
+      sessionUpdate: 'async_task_spawned',
+      asyncTaskId: id,
+      name: 'Run the full tests',
+      description: 'Run the full tests',
+      taskType: 'shell',
+      showInTranscript: false,
+      canStop: true,
+      toolCallId,
+    })
+    await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
+    await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
+    if (plan.lasts === undefined) return
+    const timer = setTimeout(() => {
+      // Stopped meanwhile, they have ended already.
+      if (!session.background.delete(id)) return
+      appendFileSync(outputPath, 'all passed\n[exited with code 0]\n')
+      void (async () => {
+        await notify({ sessionUpdate: 'async_task_state_update', asyncTaskId: id, state: 'completed' })
+        // What it printed last, on its own call, as Codex streams it: not the agent speaking.
+        if (plan.printsAfterEnd === true)
+          await notify({ sessionUpdate: 'tool_call_update', toolCallId, _meta: { terminal_output_delta: { data: 'all passed\n' } } })
+        if (plan.commits === undefined) return
+        if (plan.wakesAfter !== undefined) await pause(plan.wakesAfter)
+        // Woken, it leaves more tests running, outside any turn Althar sent.
+        if (plan.again === true) {
+          await leaveTests(sessionId, session, client, { lasts: 100 })
+          await pause(300)
+        }
+        const call = `${toolCallId}-woken`
+        await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'The tests finished. ' } })
+        await notify({
+          sessionUpdate: 'tool_call',
+          toolCallId: call,
+          title: 'git commit',
+          kind: 'execute',
+          status: 'in_progress',
+          rawInput: { command: 'git commit' },
+        })
+        plan.commits()
+        await notify({ sessionUpdate: 'tool_call_update', toolCallId: call, status: 'completed' })
+        await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Committed.' } })
+      })()
+    }, plan.lasts)
+    timer.unref()
+  }
+  if (plan.reportsAfter === undefined) await report()
+  else setTimeout(() => void report(), plan.reportsAfter).unref()
+}
+
+const playRole = async (
+  session: SessionState,
+  text: string,
+  serve: (exits: boolean) => Promise<void>,
+  tests: (plan: {
+    readonly lasts?: number
+    readonly commits?: () => void
+    readonly reportsAfter?: number
+    readonly wakesAfter?: number
+    readonly prints?: string
+    readonly printsAfterEnd?: boolean
+    readonly again?: boolean
+  }) => Promise<void> = () => Promise.resolve(),
+): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
   const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ') || text.startsWith('More to review')
   if (session.tools === undefined || !asked) return undefined
@@ -534,7 +682,13 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
               unverified: [],
             }
           : {}
-        return await call('finish_step', { summary: 'Fixed the heading.', findings, ...shown })
+        // What the task built, said again where settling changed it; or, unsaid, once Althar asks for it.
+        const built = aside ? {} : { built: BUILT_SETTLED }
+        if (session.markers.has('[lead:built-unsaid]') && !aside) {
+          const answer = await call('finish_step', { summary: 'Fixed the heading.', findings, ...shown })
+          if (!answer.startsWith('Settling changed the work')) return answer
+        }
+        return await call('finish_step', { summary: 'Fixed the heading.', findings, ...built, ...shown })
       }
       // Told to carry on, as a lead that took a step over is, it finishes as it was told to at first.
       // Told to carry on, or to try another way, as Althar tells one that stalled or went round in circles.
@@ -560,11 +714,11 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         }
       }
       const finish = async () => {
-        const answer = await call('finish_step', { summary: 'Did the task.', ...evidence() })
+        const answer = await call('finish_step', { summary: 'Did the task.', built: BUILT, ...evidence() })
         const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
         if (template === undefined) return answer
         const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
-        return await call('finish_step', { summary: 'Did the task.', descriptions: [{ text }] })
+        return await call('finish_step', { summary: 'Did the task.', built: BUILT, descriptions: [{ text }] })
       }
       // Asked to resolve a conflict, as a fresh session is with its brief after a restart, it does that rather than finish.
       const resolving = /Bring the branch up to date: merge \S+ into it/.test(text)
@@ -572,7 +726,7 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         if (session.markers.has('[lead:edit]')) commitIn(session.cwd, 'change.txt', 'Change it')
         if (!session.markers.has('[lead:scratch]')) return await finish()
         appendFileSync(join(session.cwd, 'scratch.log'), 'trying things\n')
-        const answer = await call('finish_step', { summary: 'Did the task.' })
+        const answer = await call('finish_step', { summary: 'Did the task.', built: BUILT })
         if (!/These aren.t committed/.test(answer)) return answer
         rmSync(join(session.cwd, 'scratch.log'))
         return await finish()
@@ -599,19 +753,81 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         return 'Stopped before settling it.'
       }
       const more = session.markers.has('[lead:resolve-more]')
+      const fix = session.markers.has('[lead:resolve-fix]')
       const hold = session.markers.has('[lead:resolve-hold]')
-      if (merging !== undefined && (session.markers.has('[lead:resolve]') || more || hold)) {
+      if (merging !== undefined && (session.markers.has('[lead:resolve]') || more || fix || hold)) {
         resolveIn(session.cwd, merging)
         if (hold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        if (fix) {
+          commitIn(session.cwd, 'tests.txt', 'Fix what the tests found')
+          return 'Merged it, settled the conflict, committed the merge, and fixed what the tests found.'
+        }
         if (!more) return 'Merged it, settled the conflict, and committed the merge.'
         commitIn(session.cwd, 'more.txt', 'Tidy up while here')
+        commitIn(session.cwd, 'more-still.txt', 'Tidy up some more')
         return 'Merged it, settled the conflict, committed the merge, and tidied up while here.'
+      }
+      // Settled, but not committed: forgotten at first, committed once told that is all that is left.
+      const commitIt = /resolved but not committed: commit/.test(text)
+      if (session.markers.has('[lead:resolve-forgets]')) {
+        if (merging !== undefined) {
+          settleIn(session.cwd, merging)
+          return 'Merged it and settled the conflict.'
+        }
+        if (commitIt) {
+          commitMergeIn(session.cwd)
+          return 'Committed the merge.'
+        }
+      }
+      // Settled, with the full tests left running: the merge is committed once they end, by the agent they wake.
+      if (session.markers.has('[lead:resolve-tests-hang]')) {
+        if (merging !== undefined) {
+          settleIn(session.cwd, merging)
+          await tests({})
+          return "Merged it and settled the conflict. I'll wait for the tests."
+        }
+        if (commitIt) return 'Still waiting for the tests.'
+      }
+      const woken =
+        session.markers.has('[lead:resolve-tests]') ||
+        session.markers.has('[lead:resolve-tests-fix]') ||
+        session.markers.has('[lead:resolve-tests-codex]') ||
+        session.markers.has('[lead:resolve-tests-slow]') ||
+        session.markers.has('[lead:resolve-tests-url]') ||
+        session.markers.has('[lead:resolve-tests-output]') ||
+        session.markers.has('[lead:resolve-tests-again]')
+      if (merging !== undefined && woken) {
+        settleIn(session.cwd, merging)
+        const fixes = session.markers.has('[lead:resolve-tests-fix]')
+        const cwd = session.cwd
+        await tests({
+          lasts: 400,
+          ...(session.markers.has('[lead:resolve-tests-codex]') ? { reportsAfter: 300 } : {}),
+          ...(session.markers.has('[lead:resolve-tests-slow]') ? { lasts: 1500, wakesAfter: 1200 } : {}),
+          ...(session.markers.has('[lead:resolve-tests-again]') ? { again: true } : {}),
+          ...(session.markers.has('[lead:resolve-tests-output]') ? { lasts: 1500, wakesAfter: 1200, printsAfterEnd: true } : {}),
+          ...(session.markers.has('[lead:resolve-tests-url]')
+            ? { lasts: 3000, prints: 'serving the browser tests at http://localhost:4173/\n' }
+            : {}),
+          commits: () => {
+            commitMergeIn(cwd)
+            if (fixes) commitIn(cwd, 'tests.txt', 'Fix what the tests found')
+          },
+        })
+        return "Merged it and settled the conflict. I'll wait for the notification that the tests are done."
       }
       // Fixed and committed, for the person to push.
       const fixMore = session.markers.has('[lead:fix-more]')
       const fixHold = session.markers.has('[lead:fix-hold]')
+      // Leaves the full tests running before it commits the fix, which it does once they end, woken outside a turn.
+      if (session.markers.has('[lead:fix-late]') && text.startsWith('Checks failed')) {
+        const cwd = session.cwd
+        await tests({ lasts: 400, commits: () => commitIn(cwd, 'fixed.txt', 'Fix the failing check') })
+        return "I'll wait for the tests, then commit the fix."
+      }
       if ((session.markers.has('[lead:fix]') || fixMore || fixHold) && text.startsWith('Checks failed')) {
         commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
+        await call('finish_step', { summary: 'Fixed the failing check, and committed it.', built: BUILT_FIXED })
         if (fixHold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
         if (!fixMore) return 'Fixed the failing check, and committed it.'
         commitIn(session.cwd, 'more.txt', 'Tidy up while here')
@@ -1022,7 +1238,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const told = /The person answered[^\n]*\n([\s\S]*)$/.exec(text)
       if (told?.[1] !== undefined) {
         await say(`told=${told[1].trim().split('\n').join(' | ')}`)
-        const after = await playRole(session, text, (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }))
+        const after = await playRole(
+          session,
+          text,
+          (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+          (plan) => leaveTests(params.sessionId, session, client, plan),
+        )
         if (after !== undefined) await say(after)
         return ended()
       }
@@ -1038,7 +1259,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const stalled = await playStall(session, text, update)
       if (stalled !== undefined) return stalled
       // With Althar's tools, a marker in the prompt says which role to play.
-      const played = await playRole(session, text, (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }))
+      const played = await playRole(
+        session,
+        text,
+        (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+        (plan) => leaveTests(params.sessionId, session, client, plan),
+      )
       // Stopped while it played its part, the turn was cancelled, as an agent says.
       if (played !== undefined && session.cancelled) return { stopReason: 'cancelled' }
       if (played !== undefined) {

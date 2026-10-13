@@ -38,7 +38,7 @@ import { MachineLoad } from './MachineLoad'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
-import { accountsOf, Policies, type ProjectRules, resolvesConflicts, ruleSetOf, usageLimitOf } from './Policies'
+import { accountsOf, movesIssues, Policies, type ProjectRules, resolvesConflicts, ruleSetOf, usageLimitOf } from './Policies'
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
@@ -273,6 +273,7 @@ export const handlers = Api.toLayer(
         onlyAccounts: accounts.only ?? null,
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
+        moveIssues: movesIssues(rules),
       }
     }
 
@@ -543,6 +544,8 @@ export const handlers = Api.toLayer(
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       GetFileDiff: ({ taskId, path }) => api(queries.fileDiff(taskId, path)),
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
+      GetOlderSettled: ({ projectId, before, taskId }) =>
+        api(Effect.map(queries.olderSettled(projectId, before, taskId), (tasks) => ({ tasks }))),
       GetHome: ({ since }) => api(queries.home(since)),
       LeftHome: () =>
         api(
@@ -657,6 +660,15 @@ export const handlers = Api.toLayer(
         once(
           commandId,
           api(Effect.flatMap(envelope('task.abandon', { taskId }, commandId), (said) => tasks.abandon({ envelope: said, taskId }))),
+        ),
+      RenameTask: ({ commandId, taskId, title }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.rename', { taskId, title }, commandId), (said) =>
+              tasks.rename({ envelope: said, taskId, title }),
+            ),
+          ),
         ),
       ReopenTask: ({ commandId, taskId }) =>
         once(

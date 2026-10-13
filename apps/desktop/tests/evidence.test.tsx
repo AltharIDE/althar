@@ -14,7 +14,8 @@ import { withServices } from './render'
 /*
  * What a lead showed of its change working (finish_step's evidence), in the
  * window: under its step in the thread, and the whole of it under what the
- * task changed, with what it couldn't show.
+ * task changed, with what it couldn't show. Once the lead says what the
+ * task built, that leads it, closing the thread and topping the Outputs.
  */
 
 const DIGEST = 'a'.repeat(64)
@@ -121,5 +122,85 @@ describe('evidence, as the window draws it', () => {
     expect(within(dialog).getByRole('img', { name: 'The Evidence section under the step' })).toBeTruthy()
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('takes what the task built from the last of its lead’s steps that said it', () => {
+    const implement = items.step({ built: 'A retry.' })
+    const review = items.step({ step: 'review', verdict: 'changes_requested' })
+    expect(taskEvidence([implement, review]).built).toBe('A retry.')
+    // Settling that changed the work says it again; one that didn't leaves it standing.
+    expect(taskEvidence([implement, review, items.step({ step: 'settle', built: 'A retry, named.' })]).built).toBe('A retry, named.')
+    expect(taskEvidence([implement, review, items.step({ step: 'settle' })]).built).toBe('A retry.')
+    expect(taskEvidence([review]).built).toBeNull()
+  })
+
+  it('closes the thread with what the task built, then its proof, and tops the Outputs with them', async () => {
+    const built = 'Checkout retries once when the payment call fails.\n\n- Try a checkout with the network off.'
+    const { client } = fakeClient({
+      getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
+        snapshot({
+          items: [
+            items.step({ evidence: [SHOT, RUN], unverified: ['Not tried in a real browser'], built: 'A first go.' }),
+            items.step({ step: 'review', verdict: 'changes_requested', summary: 'The name is off.' }),
+            items.step({ step: 'settle', summary: 'Renamed it.', built }),
+            items.step({ step: 'review', verdict: 'pass', summary: 'It holds.' }),
+          ],
+          task: { ...snapshot().task, phase: 'ready', changes: [change()] },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    // Ready, it opens on its Outputs: what it built at the top, as it now stands, above what it changed.
+    const heading = await screen.findByRole('heading', { name: 'What it built', level: 2 })
+    const headings = screen.getAllByRole('heading', { level: 2 })
+    expect(headings.slice(0, 3).map((one) => one.textContent)).toEqual(['What it built', 'Evidence', 'Unverified'])
+    expect(headings.indexOf(heading)).toBe(0)
+    expect(screen.getByText('Checkout retries once when the payment call fails.')).toBeTruthy()
+    expect(screen.queryByText('A first go.')).toBeNull()
+    // The closing card, at the end of the thread.
+    await userEvent.click(screen.getByRole('radio', { name: /Conversation/ }))
+    const card = await screen.findByRole('article', { name: 'What the task built' })
+    expect(within(card).getByText('Try a checkout with the network off.')).toBeTruthy()
+    expect(
+      within(card)
+        .getAllByRole('heading')
+        .map((one) => one.textContent),
+    ).toEqual(['What it built', 'Evidence', 'Unverified'])
+    // What the steps showed is gathered there, not shown again under them.
+    expect(screen.getAllByRole('button', { name: 'What it printed: The kit’s tests' })).toHaveLength(1)
+    expect(within(card).getByRole('button', { name: 'What it printed: The kit’s tests' })).toBeTruthy()
+    expect(screen.getByText('It holds.').compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('keeps the closing card back while a step is under way, its evidence under its step', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
+        snapshot({
+          items: [items.step({ evidence: [RUN], built: 'A retry.' })],
+          task: { ...snapshot().task, phase: 'running', step: 'review' },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByRole('button', { name: 'What it printed: The kit’s tests' })).toBeTruthy()
+    expect(screen.queryByRole('article', { name: 'What the task built' })).toBeNull()
+  })
+
+  it('keeps what the task built when its report is on an earlier page than the one read', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
+        snapshot({
+          // A long review came after it: the page read starts there.
+          items: [items.step({ step: 'review', verdict: 'pass', summary: 'It holds.' })],
+          earlier: true,
+          reports: [items.step({ evidence: [RUN], unverified: ['Not in Safari'], built: 'A retry, on the checkout.' })],
+          task: { ...snapshot().task, phase: 'ready', changes: [change()] },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByRole('heading', { name: 'What it built', level: 2 })).toBeTruthy()
+    expect(screen.getByText('A retry, on the checkout.')).toBeTruthy()
+    expect(screen.getByText('Not in Safari')).toBeTruthy()
   })
 })

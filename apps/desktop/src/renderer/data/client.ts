@@ -4,6 +4,7 @@ import {
   type AgentModels,
   type AlwaysScope,
   type AppSettings,
+  type BoardTask,
   type FieldAnswer,
   type FoundAccount,
   type ProjectNote,
@@ -113,6 +114,8 @@ export interface Client {
   readonly getFileDiff: (taskId: string, path: string) => Promise<FileDiff>
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   readonly getBoard: (projectId: string) => Promise<BoardSnapshot>
+  /** The next page of a project's settled tasks, older than the one settled at `before` (`taskId` breaking a tie). */
+  readonly getOlderSettled: (projectId: string, before: string, taskId: string) => Promise<ReadonlyArray<BoardTask>>
   /** The home, across every project; what the loop did from `since`, else from when the person last left the home. */
   readonly getHome: (since?: string) => Promise<HomeSnapshot>
   /** The person left the home: what the loop does from now on is new to them. */
@@ -151,6 +154,8 @@ export interface Client {
   readonly abandonTask: (taskId: string) => Promise<void>
   /** Opens an abandoned task again, on its worktree and branch. */
   readonly reopenTask: (taskId: string) => Promise<void>
+  /** Gives the task another title, in any state; its slug, branch and folder stay. */
+  readonly renameTask: (taskId: string, title: string) => Promise<void>
   readonly send: (input: {
     readonly threadId: string
     readonly body: string
@@ -420,6 +425,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     readDocument: (threadId, path) => settle(api.ReadDocument({ threadId, path })),
     getFileDiff: (taskId, path) => settle(api.GetFileDiff({ taskId, path })),
     getBoard: (projectId) => settle(api.GetBoard({ projectId })),
+    getOlderSettled: (projectId, before, taskId) => settle(api.GetOlderSettled({ projectId, before, taskId })).then((older) => older.tasks),
     getHome: (since) => settle(api.GetHome(since === undefined ? {} : { since })),
     leftHome: () => command((commandId) => api.LeftHome({ commandId })),
     startSession: (input) => command((commandId) => api.StartSession({ commandId, ...input })),
@@ -438,6 +444,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     resumeTask: (input) => command((commandId) => api.ResumeTask({ commandId, ...input })),
     abandonTask: (taskId) => command((commandId) => api.AbandonTask({ commandId, taskId })),
     reopenTask: (taskId) => command((commandId) => api.ReopenTask({ commandId, taskId })),
+    renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),

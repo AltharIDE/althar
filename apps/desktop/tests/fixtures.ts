@@ -59,6 +59,7 @@ export const projectRules: ProjectRulesView = {
   onlyAccounts: null,
   branchPattern: null,
   titlePattern: null,
+  moveIssues: true,
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
 }
 
@@ -376,6 +377,7 @@ export const items = {
       summary: 'Added the retry.',
       verdict: null,
       findings: [],
+      built: null,
       evidence: [],
       unverified: null,
       agentId: null,
@@ -658,6 +660,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
   attention: [],
   items: [],
   earlier: false,
+  reports: [],
   ...overrides,
 })
 
@@ -762,7 +765,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       bytes: 42,
       lines: 3,
     })),
-    getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [] })),
+    getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [], settledTotal: 0 })),
+    getOlderSettled: vi.fn(async () => []),
     getHome: vi.fn(async () => home()),
     leftHome: vi.fn(async () => {}),
     merge: vi.fn(async () => {}),
@@ -807,6 +811,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     resumeTask: vi.fn(async () => {}),
     abandonTask: vi.fn(async () => {}),
     reopenTask: vi.fn(async () => {}),
+    renameTask: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
     takeBack: vi.fn(async () => {}),
     answer: vi.fn(async () => {}),

@@ -76,8 +76,22 @@ export interface RuntimeOptions {
   readonly load?: LoadOptions
   /** How a task's worktree is set up before its lead starts (`Setups.ts`). */
   readonly setups?: SetupOptions
+  /** When a lead that ended its turn counts as done, and how long a round waits for one that isn't (`leftRunning.ts`, `conflicts.ts`). */
+  readonly idle?: IdleOptions
   /** How many tasks are at work at once here, and how what waits for a place is looked at (`Busy.ts`). */
   readonly busy?: BusyOptions
+}
+
+/** Each is the default unless a test says otherwise. */
+export interface IdleOptions {
+  /** How long an agent must say nothing outside a turn, once what it left running ended, to be taken as done: 30 seconds. */
+  readonly quiet?: Duration.Duration
+  /** How long a round waits for a lead that is still at work before it judges the branch as it is: 45 minutes. */
+  readonly within?: Duration.Duration
+  /** How long an agent is given to wake once what it left running ended, before it speaks: five minutes. */
+  readonly wake?: Duration.Duration
+  /** How long after its turn ends a lead is given to report what it left running: two seconds. */
+  readonly reports?: Duration.Duration
 }
 
 export interface BusyOptions {
@@ -85,6 +99,18 @@ export interface BusyOptions {
   readonly machine?: Machine
   /** How often what waits is looked at, besides whenever an agent's turn or session ends: every 5 seconds. */
   readonly every?: Duration.Duration
+  /** How often the CPU of what agents left running is read, while any is: every 2 seconds. */
+  readonly sample?: Duration.Duration
+  /** How long what an agent left running must stay below real CPU before it stops taking a place: 30 seconds. */
+  readonly quiet?: Duration.Duration
+  /**
+   * The CPU time of each process in the tree of each of these agents (the agent's process and everything it started), by
+   * process and in milliseconds, by thread; null where it can't be said, as for an agent that is no process of its own:
+   * read with `ps` from the agent's process, once a sample.
+   */
+  readonly cpuOf?: (
+    agents: ReadonlyArray<{ readonly threadId: string; readonly pid: number | null }>,
+  ) => Effect.Effect<ReadonlyMap<string, ReadonlyMap<number, number> | null>>
 }
 
 export interface SetupOptions {

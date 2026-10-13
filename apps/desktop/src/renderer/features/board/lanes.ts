@@ -13,7 +13,9 @@ export interface Lanes {
   readonly running: ReadonlyArray<BoardTask>
   readonly calls: ReadonlyArray<BoardCall>
   readonly ready: ReadonlyArray<BoardTask>
+  /** The most recently settled the board has loaded; `settledTotal` is how many there are in all. */
   readonly settled: ReadonlyArray<BoardTask>
+  readonly settledTotal: number
 }
 
 export const lanesOf = (board: BoardSnapshot): Lanes => {
@@ -25,6 +27,7 @@ export const lanesOf = (board: BoardSnapshot): Lanes => {
     calls: board.calls,
     ready: of('ready'),
     settled: of('settled').toSorted((a, b) => (b.settledAt ?? '').localeCompare(a.settledAt ?? '')),
+    settledTotal: board.settledTotal,
   }
 }
 

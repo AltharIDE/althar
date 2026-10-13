@@ -258,8 +258,9 @@ service's model.
   or why that can't go up: rewritten under what went up, or behind commits
   pushed from elsewhere.
   One exception (ADR-030): where the project has its leads resolve
-  conflicts, Althar pushes the merge that resolves one, and a fix for checks
-  that fail on it, and nothing with them (Resolving a conflict, below).
+  conflicts, Althar pushes the merge that resolves one, with at most one fix
+  for what the full tests found, and a fix for checks that fail on it, and
+  nothing with them (Resolving a conflict, below).
 - **Without a connection, the person pushes the task's branch with their own
   git** (ADR-016): to the remote that repository's work goes to (the one its
   default branch follows, else `origin`, else its only remote), under the
@@ -359,7 +360,9 @@ for the person, as above.
   a pull request its host says conflicts, has Althar send the lead the note
   the person's press would, unasked: merge the default branch into the
   task's branch, settle each conflict so both sides' changes hold, run the
-  checks, and commit the merge. For a pull request, Althar first fetches the
+  quick checks, and commit the merge as soon as they pass, before the full
+  test suites, and not end its turn with the merge uncommitted or while it
+  waits on something running in the background. For a pull request, Althar first fetches the
   branch it goes into, under the remote's name (`origin/main`, or
   `upstream/main` into the repository a fork came from), and asks only where
   the task's branch conflicts with it here too; one that merges cleanly is
@@ -370,25 +373,37 @@ for the person, as above.
   agent starting would go against. The thread says Althar asked, and why:
   the project's rules, or the task's own say. A merge here pressed
   meanwhile says the lead is resolving it.
-- **Althar looks at the branch, not at what the lead said,** once its turn
-  is over: not while more waits for it, or while it asks the person
-  something. Resolved means the branch it conflicted with is in it, nothing
-  is half merged, and no file it conflicted in still has markers.
-- **Not resolved, it is asked once more,** with why. Then, or where the
-  person stopped it, it is the person's: the thread says why, the task is
-  back in Needs you, and merging again offers the person's press, as before,
-  until the branch moves.
-- **No review round.** The checks are enough: the lead runs them and fixes
-  what they find before it commits the merge, so the fix is in it; on a pull
-  request, the host's run on what Althar pushes.
+- **Althar looks at the branch, not at what the lead said,** once the lead
+  is done: its turn over, and nothing it left running in the background
+  still going (the full tests, say) or at work after, as Claude Code starts
+  a turn of its own when that ends. Not while more waits for it, or while it
+  asks the person something. Nothing says when a turn the agent starts
+  itself ends, so it counts as done once it has said nothing for half a
+  minute since it last did, or since what it left running ended. A server
+  it left running, which says where it answers, is not waited for. The wait
+  is bounded (45 minutes): past it the branch is looked at as it is, as a
+  lead that never finishes would otherwise hold the round for ever.
+  Resolved means the branch it conflicted with is in it, nothing is half
+  merged, and no file it conflicted in still has markers.
+- **Not resolved, it is asked once more,** with why. Where all that was
+  left was to commit the merge, it is told that: its merge is resolved but
+  not committed, commit it; not asked to resolve it again. Then, or where
+  the person stopped it, it is the person's: the thread says why, the task
+  is back in Needs you, and merging again offers the person's press, as
+  before, until the branch moves.
+- **No review round.** The checks are enough: the lead runs the quick ones
+  and commits the merge before the slow ones, and if the full tests then
+  find something, fixes it in one follow-up commit on top of the merge; on
+  a pull request, the host's run on what Althar pushes.
 - **On a pull request, Althar pushes the resolution itself** with the
   connection, the one push of the lead's work that isn't the person's: the
-  merge alone, made on the branch as the pull request had it. Where the
-  branch had other commits the pull request didn't, the lead committed
-  anything after the merge, something else came in, or anyone else asked
-  the lead something meanwhile, nothing is pushed: the thread says the
-  merge waits, and the task's Push sends it with the rest. Merging stays
-  the person's.
+  merge, made on the branch as the pull request had it, with at most one
+  commit on top of it, the fix for what the full tests found, as a fix for
+  failed checks is (below). Where the branch had other commits the pull
+  request didn't, the lead committed more than that one after the merge,
+  something else came in, or anyone else asked the lead something
+  meanwhile, nothing is pushed: the thread says the merge waits, and the
+  task's Push sends it with the rest. Merging stays the person's.
 - **The round follows the checks on what Althar pushed.** Passed (or none
   two minutes after the push), it is done, and the task is ready to merge.
   Failed, the lead is asked to fix them within the round, not as failed
@@ -428,7 +443,13 @@ for the person, as above.
 - **Status by category.** Althar asks for a category, and the adapter
   picks the tracker's state. A Jira transition that needs fields becomes a
   call for the person. Trello's lists are mapped by the person, once per
-  board. Who moves an issue's status, and when, is an open question.
+  board. Althar moves an issue to In Progress as its task's first step
+  starts (Linear: the team's first `started` state; Jira: the first
+  transition offered into the In Progress category), once, and leaves one
+  already started, done or cancelled as it is. GitHub's, GitLab's and
+  Trello's issues have no standard In Progress and are left alone. A
+  project's rules can turn it off. Who moves an issue to in review or done,
+  and when, is an open question.
 - **The key goes in the branch and the PR's title,** so the trackers' own
   Git integrations link them. Field ownership (above) decides whether
   Althar also moves a status those integrations move.

@@ -19,6 +19,7 @@ import {
   type AgentEntry,
   type BusyOptions,
   Connectors,
+  type IdleOptions,
   type RuntimeOptions,
   type SetupOptions,
   type StallOptions,
@@ -197,6 +198,8 @@ export const runtime = (
     readonly setups?: SetupOptions
     /** How this computer's load is read. */
     readonly load?: LoadOptions
+    /** When a lead that ended its turn counts as done, and how long a round waits for one that isn't. */
+    readonly idle?: IdleOptions
     /** The device outside a sandbox, as for a Flatpak. */
     readonly onDevice?: RuntimeOptions['onDevice']
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
@@ -224,6 +227,7 @@ export const runtime = (
     ...(more.editors === undefined ? {} : { editors: more.editors }),
     setups: { shell: '/bin/sh', ...more.setups },
     ...(more.load === undefined ? {} : { load: more.load }),
+    ...(more.idle === undefined ? {} : { idle: more.idle }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     busy: { machine: ROOMY, ...more.busy },
   })

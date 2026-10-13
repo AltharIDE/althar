@@ -310,11 +310,13 @@ const noChangeToOpen = {
     `The new commits don’t apply on the default branch as it is now: they conflict${files === '' ? '' : ` in ${files}`}. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.`,
 } as const satisfies Record<NoChangeToOpen['why'], (detail: string) => string>
 
-/** Why a task can't be abandoned or reopened, by reason. */
+/** Why a task can't be abandoned, reopened or renamed, by reason. */
 const taskRefused = {
   merged: 'The task is merged, so it stays done.',
   branch_gone: 'The task’s worktree and its branch are both gone, so it can’t be reopened on them.',
   abandoned: 'The task is abandoned. Reopen it to carry on.',
+  no_title: 'Give the task a title.',
+  title_too_long: 'Keep the title short: what should change, in a few words.',
 } as const satisfies Record<TaskRefused['why'], string>
 
 /** Why an issue draft can't change, by where it stands. */

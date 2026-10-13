@@ -13,6 +13,7 @@ import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { Agents } from './Config'
 import { NotFound } from './errors'
+import { taskShown } from './evidence'
 import { Instance } from './Instance'
 import { DraftUntitled, IssueDrafts, IssueTargetNeeded } from './IssueDrafts'
 import { Issues } from './Issues'
@@ -307,9 +308,14 @@ export class Coordinator extends Context.Service<
             WHERE w.task_id = ${task.id} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
           const seen = yield* pullRequests(task.id)
           const found = task.state === 'done' && seen !== undefined ? { ...seen, unmerged: 0 } : seen
+          // What it built, as its lead last said it: what to tell the person it delivered, without reading every round.
+          const { built, unverified } = yield* taskShown(task.threadId)
           return [
             `${task.slug}: ${task.title}`,
             task.description === '' ? '' : task.description,
+            built === null ? '' : `What it built, as its lead says it now stands:\n${built}`,
+            unverified.length === 0 ? '' : `What its lead couldn't show working:\n${unverified.map((line) => `- ${line}`).join('\n')}`,
+            yield* issueWords(task.id),
             workspaces.length === 1
               ? `Branch ${workspaces[0]?.branch ?? ''}, in ${workspaces[0]?.path ?? ''}.`
               : workspaces.map((workspace) => `${workspace.name}: branch ${workspace.branch}, in ${workspace.path}.`).join('\n'),
@@ -321,6 +327,26 @@ export class Coordinator extends Context.Service<
           ]
             .filter((line) => line !== '')
             .join('\n\n')
+        })
+
+      /** The issue a task came from, where it stands as last seen, and whether Althar moved it to In Progress as the task started. */
+      const issueWords = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [link] = yield* sql<{ key: string; url: string; snapshot: string; type: string | null; payload: string | null }>`
+            SELECT x.key, x.url, x.snapshot, e.type, e.payload FROM external_links x
+            LEFT JOIN record_events e ON e.aggregate_id = x.id
+              AND e.type IN ('external_link.issue_started', 'external_link.issue_start_failed')
+            WHERE x.task_id = ${taskId} AND x.kind = 'issue' ORDER BY x.created_at, e.sequence DESC LIMIT 1`
+          if (link === undefined) return ''
+          const status = (JSON.parse(link.snapshot) as { status?: { name?: string } }).status?.name
+          const said = JSON.parse(link.payload ?? '{}') as { moved?: boolean; error?: string }
+          const issue = `Issue: ${link.key}${status === undefined ? '' : `, ${status}`}, ${link.url}.`
+          if (link.type === 'external_link.issue_started' && said.moved === true)
+            return `${issue} Althar moved it to In Progress as the task started: the person needn’t.`
+          if (link.type === 'external_link.issue_start_failed')
+            return `${issue} Althar couldn’t move it to In Progress as the task started: ${said.error ?? ''}.`
+          return issue
         })
 
       /** A task's thread, or the coordinator's own conversation: its latest part, or the part before an earlier read. */
@@ -723,7 +749,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'read_task',
-          "A task: what it is, its branch, what each of its steps reported, and its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date.",
+          "A task: what it is, what it built as its lead last said it (and what it couldn't show working), its branch, what each of its steps reported, and its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date.",
           named,
           readTask,
         ),

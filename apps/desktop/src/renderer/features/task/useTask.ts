@@ -94,6 +94,8 @@ export interface TaskModel {
   readonly abandon: () => Promise<boolean>
   /** Opens it again, once abandoned, on its worktree and branch. */
   readonly reopen: () => Promise<void>
+  /** Gives it another title, in any state; the title shown is Althar's, once it is back. */
+  readonly rename: (title: string) => Promise<void>
   /** Starts its plan now, while it waits to start. */
   readonly startPlan: (planId: string) => Promise<void>
   /** Answers a call; with `always`, the answer is kept in the project's rules by that scope. */
@@ -135,6 +137,8 @@ export interface TaskModel {
   readonly stopListening: (url: string) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
+  /** Stops a command another task's lead left running, which keeps a place this task waits for. */
+  readonly stopHolding: (threadId: string, id: string) => Promise<void>
   /** Clears one that ended by itself from the list. */
   readonly clearBackground: (id: string) => Promise<void>
   /** Runs what it built, with no agent, in its worktree. */
@@ -285,7 +289,12 @@ export const useTask = (threadId: string): TaskModel => {
     }
   }, [client, threadId, snapshot, setSnapshot, fail])
 
-  /** Runs an action, says what went wrong if it did, and reads the thread's head again. */
+  /**
+   * Runs an action, says what went wrong if it did, and reads the thread's
+   * head again. It stays under way until that read, or one begun after it,
+   * is shown, so what it changed shows as it ends: a Push never shows its
+   * count from before it went.
+   */
   const act = useCallback(
     async (action: () => Promise<unknown>, which: Doing | null = null) => {
       setError(null)
@@ -296,12 +305,14 @@ export const useTask = (threadId: string): TaskModel => {
       } catch (failure) {
         fail(failure)
       } finally {
+        await readHead()
+        // A read begun since, as the runtime's word of the push arrives, replaces it: shown once that lands.
+        await newest.landed('head')
         setPending(false)
         setActing(null)
-        await readHead()
       }
     },
-    [readHead, fail],
+    [readHead, newest, fail],
   )
 
   /** Runs an action on the task, once it has been read. */
@@ -429,6 +440,7 @@ export const useTask = (threadId: string): TaskModel => {
       return abandoned
     },
     reopen: () => onTask((taskId) => client.reopenTask(taskId)),
+    rename: (title) => onTask((taskId) => client.renameTask(taskId, title)),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     answer: async (attentionId, decision, reason, always) => {
       // Whether it went through: a call whose answer didn't is answerable again.
@@ -523,6 +535,7 @@ export const useTask = (threadId: string): TaskModel => {
     },
     stopListening: (url) => onTask((taskId) => client.stopListening(taskId, url)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
+    stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),
     runProject: () => act(async () => (snapshot === null ? undefined : client.runProject(snapshot.project.id, snapshot.task.id, threadId))),
     stopLaunch: (id) => act(() => client.stopLaunch(id)),

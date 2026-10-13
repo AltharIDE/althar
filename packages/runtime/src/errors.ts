@@ -202,11 +202,11 @@ export class ImageRefused extends Schema.TaggedError<ImageRefused>()('ImageRefus
  * A task that can't take that turn in its course: a merged task is done for
  * good, so it is never abandoned or reopened; one whose worktree went with
  * its branch can't be reopened on it; and an abandoned one has no agent on
- * it until it is reopened.
+ * it until it is reopened. A title can't be empty or longer than a title may be.
  */
 export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['merged', 'branch_gone', 'abandoned']),
+  why: Schema.Literals(['merged', 'branch_gone', 'abandoned', 'no_title', 'title_too_long']),
 }) {}
 
 /** gh or glab didn't get to say whether it is signed in: it timed out, or couldn't be started. */

@@ -9,15 +9,19 @@ import { useServices } from '../../data/services'
 
 /*
  * A project's settings' view model: its name and ink, changed in place, its
- * rules in a line, whether its leads resolve conflicts, the notes its
- * coordinator keeps, and removing it. A new name or ink shows at once, and
- * goes to the runtime one change after another; the tabs and the home hear
- * it through the change feed, and the projects are read again at once too,
- * so it shows everywhere before the feed is heard. One that didn't hold goes
- * back, and says why. So does the switch for conflicts, a rule saved as the
- * rules screen saves one, and a note dropped, which goes at once. Removing
- * it from Althar is asked in a dialog first.
+ * rules in a line, whether its leads resolve conflicts and its tasks move
+ * their issues to In Progress, the notes its coordinator keeps, and removing
+ * it. A new name or ink shows at once, and goes to the runtime one change
+ * after another; the tabs and the home hear it through the change feed, and
+ * the projects are read again at once too, so it shows everywhere before the
+ * feed is heard. One that didn't hold goes back, and says why. So do the
+ * switches, each a rule saved as the rules screen saves one, and a note
+ * dropped, which goes at once. Removing it from Althar is asked in a dialog
+ * first.
  */
+
+/** A rule the settings switch in place. */
+export type RuleSwitch = 'resolveConflicts' | 'moveIssues'
 
 export interface ProjectSettingsModel {
   readonly project: ProjectSummary | null
@@ -38,8 +42,10 @@ export interface ProjectSettingsModel {
   readonly noteFailed: string | null
   /** Turns on or off the project's leads resolving conflicts on their own (ADR-030). */
   readonly setResolveConflicts: (on: boolean) => void
-  /** Why the switch didn't hold. */
-  readonly ruleFailed: string | null
+  /** Moves a task's issue to In Progress as the task starts, or stops doing so. */
+  readonly setMoveIssues: (on: boolean) => void
+  /** Which switch didn't hold, and why. */
+  readonly ruleFailed: { readonly rule: RuleSwitch; readonly message: string } | null
   /** Asking whether to remove it from Althar. */
   readonly removing: boolean
   readonly askRemove: () => void
@@ -106,23 +112,25 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   )
 
   // Shown switched at once; the rules as kept once saved, or as they were, with why, when it isn't.
-  const [ruleFailed, setRuleFailed] = useState<string | null>(null)
-  const setResolveConflicts = useCallback(
-    (on: boolean) => {
+  const [ruleFailed, setRuleFailed] = useState<{ readonly rule: RuleSwitch; readonly message: string } | null>(null)
+  const setRule = useCallback(
+    (rule: RuleSwitch, on: boolean) => {
       const key = keys.rules(projectId)
       setRuleFailed(null)
-      cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, resolveConflicts: on }))
+      cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, [rule]: on }))
       queue.current = queue.current.then(async () => {
         try {
-          cache.setQueryData(key, await client.setProjectRules({ projectId, resolveConflicts: on }))
+          cache.setQueryData(key, await client.setProjectRules({ projectId, [rule]: on }))
         } catch (failure) {
-          setRuleFailed(messageOf(failure))
+          setRuleFailed({ rule, message: messageOf(failure) })
           await cache.invalidateQueries({ queryKey: key, exact: true })
         }
       })
     },
     [cache, client, projectId],
   )
+  const setResolveConflicts = useCallback((on: boolean) => setRule('resolveConflicts', on), [setRule])
+  const setMoveIssues = useCallback((on: boolean) => setRule('moveIssues', on), [setRule])
 
   const taken: Partial<Record<ProjectInk, string>> = {}
   for (const other of listed?.projects ?? []) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
@@ -183,6 +191,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     dropNote,
     noteFailed,
     setResolveConflicts,
+    setMoveIssues,
     ruleFailed,
     removing,
     askRemove,

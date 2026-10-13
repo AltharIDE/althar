@@ -806,6 +806,7 @@ describe('project rules, through the API', () => {
           onlyAccounts: null,
           branchPattern: null,
           titlePattern: null,
+          moveIssues: true,
         })
         // A repository that says nothing of its pull requests: Althar's own names, and no template.
         assert.deepStrictEqual(
@@ -1514,6 +1515,15 @@ describe('the coordinator, through the API', () => {
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'codex', model: 'large', effort: 'high' })
         const resumed = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
         assert.strictEqual(resumed.session?.agentId, 'codex')
+        // Renamed by the person, even now; a retry is one rename, and an empty title is refused.
+        const rename = { commandId: commandId(), taskId: task.id, title: ' Retry the checkout ' }
+        yield* client.RenameTask(rename)
+        yield* client.RenameTask(rename)
+        assert.strictEqual((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).task.title, 'Retry the checkout')
+        assert.strictEqual(
+          (yield* Effect.flip(client.RenameTask({ commandId: commandId(), taskId: task.id, title: ' ' }))).message,
+          'Give the task a title.',
+        )
         yield* client.AbandonTask({ commandId: commandId(), taskId: task.id })
         const abandoned = yield* client.GetThread({ threadId: task.threadId, limit: 0 })
         assert.deepStrictEqual([abandoned.task.state, abandoned.task.phase, abandoned.task.actions], ['abandoned', 'settled', ['reopen']])
@@ -2126,6 +2136,7 @@ describe('thread items', () => {
           { severity: 'blocking', file: 'a.ts', line: null, claim: 'y' },
           { severity: 'nit', file: null, line: null, claim: 'z' },
         ],
+        built: null,
         evidence: [],
         unverified: null,
         agentId: 'codex',
@@ -2138,6 +2149,7 @@ describe('thread items', () => {
       summary: 'Done.',
       verdict: null,
       findings: [],
+      built: null,
       evidence: [],
       unverified: null,
       agentId: null,
@@ -2173,6 +2185,7 @@ describe('thread items', () => {
         summary: 'Done.',
         verdict: null,
         findings: [],
+        built: null,
         evidence: [
           {
             kind: 'screenshot',

@@ -648,7 +648,7 @@ describe('a task’s next pull request, in its repositories', () => {
         const said = yield* callTool(
           { role: 'lead', projectId: project.projectId, threadId: ready?.threadId ?? '', sessionId: lead?.id ?? '', taskId },
           'finish_step',
-          { summary: 'Fixed the failing check.' },
+          { summary: 'Fixed the failing check.', built: 'The check passes again.' },
         )
         assert.strictEqual(said, 'Althar has your summary. A review starts now; wait for its findings.')
         const [, round] = yield* until(runsOf(taskId), (rows) => rows[1]?.state === 'succeeded', Duration.seconds(30))
@@ -736,7 +736,7 @@ describe('a task’s first pull request in a repository, and a reported round wi
         const said = yield* callTool(
           { role: 'lead', projectId: project.projectId, threadId: task.threadId, sessionId: lead?.id ?? '', taskId: task.taskId },
           'finish_step',
-          { summary: 'Did web too.' },
+          { summary: 'Did web too.', built: 'The retry, in web too.' },
         )
         assert.strictEqual(said, 'Althar has your summary. The task is ready for the person.')
         const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
@@ -794,7 +794,8 @@ describe('a task’s first pull request in a repository, and a reported round wi
           callTool(
             { role: 'lead', projectId: project.projectId, threadId: created.threadId, sessionId: lead?.id ?? '', taskId: created.taskId },
             'finish_step',
-            { summary },
+            // A round that made something says what the task built (#152); one that made nothing needn't.
+            { summary, built: 'What the round made.' },
           )
         const quiet = 'Althar has your summary. Nothing on the branch changed this round, so the task is back where it was.'
         const ready = 'Althar has your summary. The task is ready for the person.'

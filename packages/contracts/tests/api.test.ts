@@ -132,6 +132,7 @@ describe('the API', () => {
         summary: 'One thing to fix.',
         verdict: 'changes_requested',
         findings: [{ severity: 'major', file: 'src/a.ts', line: 3, claim: 'The retry never stops.' }],
+        built: null,
         evidence: [],
         unverified: [],
         agentId: 'codex',
@@ -149,6 +150,7 @@ describe('the API', () => {
         summary: 'Added the retry.',
         verdict: null,
         findings: [],
+        built: 'A retry button on a failed checkout.',
         evidence: [{ kind: 'test_run', caption: 'The tests', picture: null, command: 'bun test', exit: 0, text: '1 passed', dropped: 0 }],
         unverified: ['Not tried in Safari'],
         agentId: null,
@@ -310,6 +312,7 @@ describe('the API', () => {
               GetThread: () => Effect.die('unused'),
               GetFileDiff: () => Effect.die('unused'),
               GetBoard: () => Effect.die('unused'),
+              GetOlderSettled: () => Effect.die('unused'),
               GetHome: () => Effect.die('unused'),
               LeftHome: () => Effect.die('unused'),
               Merge: () => Effect.die('unused'),
@@ -363,6 +366,7 @@ describe('the API', () => {
               SetTaskResolveConflicts: () => Effect.void,
               ResumeTask: () => Effect.void,
               AbandonTask: () => Effect.void,
+              RenameTask: () => Effect.void,
               ReopenTask: () => Effect.void,
               // What was sent, said back in the error, so the test reads what crossed the port.
               Send: ({ body, images }) =>

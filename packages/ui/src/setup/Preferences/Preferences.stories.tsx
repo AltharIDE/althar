@@ -86,7 +86,6 @@ function AtOnce() {
   return (
     <AgentsAtOnce
       count={own ?? MACHINE.count}
-      own={own !== null}
       machine={MACHINE}
       onChange={(count) => {
         setOwn(count)
@@ -200,18 +199,28 @@ export const AgentsAtOnceSetting: Story = {
   ),
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    const count = c.getByRole('combobox', { name: 'Agents at once' })
-    await expect(count).toHaveTextContent('4')
+    const count = c.getByRole('slider', { name: 'Agents at once' })
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
     await expect(c.getByText('4: this Mac has 16 GB and 10 cores. More tasks than that wait their turn.')).toBeInTheDocument()
     await expect(c.queryByRole('button', { name: 'Use the default' })).toBeNull()
-    await userEvent.click(count)
-    await userEvent.click(await within(document.body).findByRole('option', { name: '6' }))
-    await expect(onAtOnce).toHaveBeenCalledWith(6)
-    await expect(count).toHaveTextContent('6')
-    await expect(c.getByText(/Your own number\. The default is 4: this Mac has 16 GB and 10 cores\./)).toBeInTheDocument()
+    count.focus()
+    await userEvent.keyboard('{ArrowRight}{ArrowRight}')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(6)
+    await expect(count).toHaveAttribute('aria-valuenow', '6')
+    await expect(c.getByText(/^6: a little more than this Mac’s 16 GB suggests\./)).toBeInTheDocument()
+    await userEvent.keyboard('{End}')
+    await expect(c.getByText(/^16: well past what this Mac’s 16 GB suggests\./)).toBeInTheDocument()
     await userEvent.click(c.getByRole('button', { name: 'Use the default' }))
-    await expect(onAtOnce).toHaveBeenCalledWith(null)
-    await expect(count).toHaveTextContent('4')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(null)
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
+    // Back on the default by the keys: the default again, not a number of the person's own.
+    count.focus()
+    await userEvent.keyboard('{ArrowLeft}')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(3)
+    await expect(count).toHaveAttribute('aria-valuenow', '3')
+    await userEvent.keyboard('{ArrowRight}')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(null)
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
   },
 }
 
@@ -306,11 +315,14 @@ export const AllStates: Story = {
           ),
         },
         {
-          state: 'agents at once, the default and the person’s own',
+          state: 'agents at once: the default, fewer, well past it, a small Mac past its one, and a big Mac under its sixteen',
           node: (
             <SettingList>
-              <AgentsAtOnce count={4} own={false} machine={MACHINE} onChange={fn()} />
-              <AgentsAtOnce count={2} own machine={{ count: 1, memory: 8, cores: 8 }} onChange={fn()} />
+              <AgentsAtOnce count={4} machine={MACHINE} onChange={fn()} />
+              <AgentsAtOnce count={2} machine={MACHINE} onChange={fn()} />
+              <AgentsAtOnce count={11} machine={MACHINE} onChange={fn()} />
+              <AgentsAtOnce count={2} machine={{ count: 1, memory: 8, cores: 8 }} onChange={fn()} />
+              <AgentsAtOnce count={12} machine={{ count: 16, memory: 128, cores: 16 }} onChange={fn()} />
             </SettingList>
           ),
         },

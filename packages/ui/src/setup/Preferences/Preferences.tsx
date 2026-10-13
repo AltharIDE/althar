@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
@@ -149,68 +149,170 @@ export interface AtOnceMachine {
 
 export interface AgentsAtOnceText {
   title: string
-  /** Why the default is what it is, where it is the default: 4, as this Mac has 16 GB and 10 cores. */
-  why: (machine: AtOnceMachine) => string
-  /** Where the person set their own number: what the default would be, and why. */
-  own: (machine: AtOnceMachine) => string
+  /** What the number means as it moves: at the default, why; under it or past it, what that does to this Mac. */
+  note: (count: number, machine: AtOnceMachine) => string
+  /** The default's mark on the scale. */
+  mark: (machine: AtOnceMachine) => string
   /** Goes back to the default. */
   reset: string
 }
 
 export const agentsAtOnceText: AgentsAtOnceText = {
   title: 'Agents at once',
-  why: ({ count, memory, cores }) => `${count}: this Mac has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`,
-  own: ({ count, memory, cores }) => `Your own number. The default is ${count}: this Mac has ${memory} GB and ${cores} cores.`,
+  note: (n, { count, memory, cores }) => {
+    if (n === count) return `${n}: this Mac has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`
+    if (n === 1) return '1: one at a time. The calmest this Mac can be.'
+    if (n < count) return `${n}: fewer than this Mac could carry.`
+    if (n <= count + 2) return `${n}: a little more than this Mac’s ${memory} GB suggests. Tests may slow down.`
+    return `${n}: well past what this Mac’s ${memory} GB suggests. Expect it to run hot.`
+  },
+  mark: ({ count }) => `${count} · this Mac`,
   reset: 'Use the default',
 }
 
 export interface AgentsAtOnceProps {
   /** How many tasks' agents work at once now: the person's number, else the default. */
   count: number
-  /** It is the person's own number, not the default. */
-  own: boolean
+  /** Whether the person's own number is kept, as it may be the default's number too. Without it, a number other than the default is. */
+  own?: boolean
   /** The default, and the machine it comes from. */
   machine: AtOnceMachine
   /** The most the person can choose. */
   most?: number
-  /** A number of their own; null goes back to the default. */
+  /** A number of their own; null goes back to the default, as does the default's own number. */
   onChange: (count: number | null) => void
   text?: Partial<AgentsAtOnceText>
 }
 
 /**
- * How many tasks' agents work at once on this machine, and why: the
- * default, from its memory and cores, or the person's own number, with the
- * way back to the default. It says nothing of what runs now: Settings stays
- * calm.
+ * How many tasks' agents work at once on this machine, and why: a stepped
+ * track from one to the most, the default from its memory and cores marked
+ * on it. The thumb clicks into the default as it passes; past it the track,
+ * the number and the row's glyph warm, and the glyph breathes faster, the
+ * further it goes. A drag goes out once it is let go. It says nothing of
+ * what runs now: Settings stays calm.
  */
-export function AgentsAtOnce({ count, own, machine, most = 16, onChange, text }: AgentsAtOnceProps) {
+export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, text }: AgentsAtOnceProps) {
   const t = { ...agentsAtOnceText, ...text }
+  // While the thumb is held, the number it is on; it goes out once let go.
+  const [held, setHeld] = useState<number | null>(null)
+  const [clicks, setClicks] = useState(0)
+  const track = useRef<HTMLDivElement>(null)
+  const n = held ?? count
+  const own = held === null ? (kept ?? n !== machine.count) : n !== machine.count
+  const heat = Math.max(0, Math.min(1, (n - machine.count) / Math.max(1, most - machine.count)))
+  const at = (v: number) => `${((v - 1) / Math.max(1, most - 1)) * 100}%`
+  const clamp = (v: number) => Math.max(1, Math.min(most, v))
+  const show = (next: number) => {
+    if (next === machine.count && n !== machine.count) setClicks((c) => c + 1)
+  }
+  const send = (next: number) => {
+    if (next !== count || (next === machine.count && kept === true)) onChange(next === machine.count ? null : next)
+  }
+  const from = (x: number) => {
+    const box = track.current?.getBoundingClientRect()
+    if (box === undefined || box.width === 0) return n
+    const raw = 1 + ((x - box.left) / box.width) * (most - 1)
+    // The default pulls the thumb in as it passes.
+    if (Math.abs(raw - machine.count) < 0.6) return machine.count
+    return clamp(Math.round(raw))
+  }
+  const hold = (next: number) => {
+    show(next)
+    setHeld(next)
+  }
+  const heatStyle = { '--heat': heat } as CSSProperties
   return (
     <SettingRow
       title={t.title}
       note={
-        own ? (
-          <>
-            {t.own(machine)}{' '}
-            <LinkButton className={s.reset} onClick={() => onChange(null)}>
-              {t.reset}
-            </LinkButton>
-          </>
-        ) : (
-          t.why(machine)
-        )
+        <>
+          {t.note(n, machine)}
+          {own && held === null && (
+            <>
+              {' '}
+              <LinkButton
+                className={s.reset}
+                onClick={() => {
+                  show(machine.count)
+                  onChange(null)
+                }}
+              >
+                {t.reset}
+              </LinkButton>
+            </>
+          )}
+        </>
       }
-      glyph={<Icon name="agents" size={15} />}
+      glyph={
+        <span className={s.breathe} style={{ ...heatStyle, '--speed': `${2.8 - heat * 2.1}s` } as CSSProperties}>
+          <Icon name="agents" size={15} />
+        </span>
+      }
+      under={
+        <div className={s.slider} style={heatStyle}>
+          <div
+            ref={track}
+            className={s.track}
+            role="slider"
+            tabIndex={0}
+            aria-label={t.title}
+            aria-valuemin={1}
+            aria-valuemax={most}
+            aria-valuenow={n}
+            onPointerDown={(e: PointerEvent<HTMLDivElement>) => {
+              e.currentTarget.setPointerCapture?.(e.pointerId)
+              hold(from(e.clientX))
+            }}
+            onPointerMove={(e: PointerEvent<HTMLDivElement>) => {
+              if (held !== null) hold(from(e.clientX))
+            }}
+            onPointerUp={() => {
+              if (held === null) return
+              setHeld(null)
+              send(held)
+            }}
+            onPointerCancel={() => setHeld(null)}
+            onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
+              const steps: Record<string, number> = {
+                ArrowRight: n + 1,
+                ArrowUp: n + 1,
+                ArrowLeft: n - 1,
+                ArrowDown: n - 1,
+                Home: 1,
+                End: most,
+              }
+              const next = steps[e.key]
+              if (next === undefined) return
+              e.preventDefault()
+              show(clamp(next))
+              send(clamp(next))
+            }}
+          >
+            <div className={s.rail}>
+              <div className={s.fill} style={{ width: at(n) }} />
+            </div>
+            <span className={s.atDefault} style={{ left: at(machine.count) }} />
+            <span key={clicks} className={cx(s.thumb, held !== null && s.held, !own && clicks > 0 && s.clicked)} style={{ left: at(n) }} />
+          </div>
+          <div className={s.scale} aria-hidden="true">
+            {/* The default at an end of the scale stands for that end's number. */}
+            <span>{machine.count === 1 ? '' : 1}</span>
+            <span
+              className={cx(s.mark, machine.count === 1 && s.markStart, machine.count === most && s.markEnd)}
+              style={{ left: at(machine.count) }}
+            >
+              {t.mark(machine)}
+            </span>
+            <span>{machine.count === most ? '' : most}</span>
+          </div>
+        </div>
+      }
     >
       {() => (
-        <Select
-          label={t.title}
-          options={Array.from({ length: most }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))}
-          value={String(count)}
-          onChange={(next) => onChange(Number(next))}
-          width={72}
-        />
+        <span className={s.value} style={heatStyle} aria-hidden="true">
+          {n}
+        </span>
       )}
     </SettingRow>
   )

@@ -232,6 +232,34 @@ describe('a project’s settings', () => {
     await waitFor(() => expect(conflicts.getAttribute('aria-checked')).toBe('false'))
   })
 
+  it('moves a task’s issue to In Progress as it starts unless switched off, a rule kept at once', async () => {
+    const { client } = windowAt('/projects/p1')
+    const panel = await openSettings()
+    const move = await panel.findByRole('switch', { name: 'Move issues to In Progress when their task starts' })
+    expect(move.getAttribute('aria-checked')).toBe('true')
+    expect(panel.getByText('On: Althar moves the issue as its task starts')).toBeTruthy()
+    await userEvent.click(move)
+    // Off at once, before the runtime has said so.
+    expect(move.getAttribute('aria-checked')).toBe('false')
+    expect(panel.getByText('Off: you move issues yourself')).toBeTruthy()
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', moveIssues: false }))
+    expect(move.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('switches issues back, saying why, where the rule didn’t hold, and the other switch says nothing of it', async () => {
+    windowAt('/projects/p1', {
+      setProjectRules: vi.fn(async () => {
+        throw new ApiError({ reason: 'RulesChanged', message: 'The rules changed meanwhile.' })
+      }),
+    })
+    const panel = await openSettings()
+    const move = panel.getByRole('switch', { name: 'Move issues to In Progress when their task starts' })
+    await userEvent.click(move)
+    expect(await panel.findByText('The rules changed meanwhile.')).toBeTruthy()
+    await waitFor(() => expect(move.getAttribute('aria-checked')).toBe('true'))
+    expect(panel.getByText('Off: you ask the lead to fix them')).toBeTruthy()
+  })
+
   it('removes the project after saying what happens, and goes home; its tab goes', async () => {
     const { client, router } = windowAt('/projects/p1')
     await waitFor(() => expect(tabNamed('meridian')).toBeTruthy())

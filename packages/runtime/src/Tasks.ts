@@ -6,6 +6,7 @@ import { Context, type Crypto, Effect, Layer, Option, Schema, Semaphore } from '
 import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
+import { TITLE_LENGTH } from './Coordinator'
 import { NotFound, TaskRefused } from './errors'
 import { branchExists, restoreWorktree } from './git'
 import { Instance } from './Instance'
@@ -128,6 +129,11 @@ export class Tasks extends Context.Service<
     abandon(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /** Opens an abandoned task again, on its worktree and branch. Refused for a merged task. */
     reopen(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
+    /**
+     * Gives the task another title, in any state, and records who did. Its slug, its branch, its worktree's
+     * folder and the title of a pull request or an issue already opened for it stay as they were made.
+     */
+    rename(input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly title: string }): Effect.Effect<void, unknown>
     /** Does something in the task's turn: never beside its stopping, resuming, abandoning or reopening. */
     inTurn<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
   }
@@ -406,7 +412,46 @@ export class Tasks extends Context.Service<
           yield* touchCard(input.taskId)
         })
 
+      /*
+       * Only the title changes: the slug, the branch and the worktree's folder
+       * were made from the first one and other things find them by it, and a
+       * pull request or issue opened already keeps the title it was opened with.
+       * The event says who renamed it, and what it was, so the person's rename
+       * and a later coordinator's or lead's are one command.
+       */
+      const rename = (input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly title: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const title = input.title.trim()
+          if (title === '') return yield* new TaskRefused({ taskId: input.taskId, why: 'no_title' })
+          if (title.length > TITLE_LENGTH) return yield* new TaskRefused({ taskId: input.taskId, why: 'title_too_long' })
+          const renamed = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [task] = yield* sql<{
+                projectId: ProjectId
+                title: string
+              }>`SELECT project_id, title FROM tasks WHERE id = ${input.taskId}`
+              if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
+              if (task.title === title) return false
+              const revision = yield* change('tasks', input.taskId, { title })
+              yield* fact({
+                projectId: task.projectId,
+                aggregateType: 'task',
+                aggregateId: input.taskId,
+                revision,
+                type: 'task.renamed',
+                payload: { title, was: task.title },
+                actorId: input.envelope.actorId,
+                commandId: input.envelope.commandId,
+              })
+              return true
+            }),
+          )
+          if (renamed) yield* touchCard(input.taskId)
+        })
+
       return Tasks.of({
+        rename: (input) => provide(rename(input)),
         stop: (input) => oneAtATime(input.taskId, stop(input)),
         resume: (input) => oneAtATime(input.taskId, resume(input)),
         abandon: (input) => oneAtATime(input.taskId, abandon(input)),

@@ -22,6 +22,7 @@ import {
   type TaskConflicts,
   TaskMenu,
   TaskStatus,
+  Finished,
   Thread,
   ThreadDivider,
   ThreadShellProvider,
@@ -33,6 +34,7 @@ import {
 import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
+import { Holders } from '../../shared/Holders'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
@@ -46,6 +48,7 @@ import { stepNames, stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
+import { taskEvidence } from '../../shared/evidence'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
@@ -145,6 +148,8 @@ export const statusOf = (
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
+  // Ready, but its lead couldn't resolve a conflict with its default branch: it needs the person before it can be accepted.
+  if (phase === 'ready' && snapshot.task.handedBack != null) return { status: TaskStatus.Yours, state: text.needsYou }
   // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
   if (phase === 'ready') return { status: TaskStatus.Yours, state: text.ready }
   // Abandoned, it says so in place of where it stood, as stopped does.
@@ -188,6 +193,7 @@ export const sinceOf = (snapshot: ThreadSnapshot, now: string): string | null =>
     return settledAt === null
       ? null
       : (snapshot.task.state === 'abandoned' ? text.since.abandoned : text.since.done)(ago(settledAt, new Date(now)))
+  if (phase === 'ready' && snapshot.task.handedBack != null) return null
   if (phase === 'ready') {
     const reported = snapshot.items.findLast((item) => item.kind === 'step_result')
     return reported === undefined ? null : text.since.ready(ago(reported.createdAt, new Date(now)))
@@ -221,6 +227,9 @@ const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, r
 /** The task's own say on its lead resolving conflicts, as its menu offers it: none goes by the project. */
 const conflictsChoice = (own: boolean | null): TaskConflicts => (own === null ? 'project' : own ? 'on' : 'off')
 
+/** How long a title may be, as the runtime keeps it. */
+const TITLE_LENGTH = 60
+
 /** The line of a file's first change, where its diff is read: for an editor to open at. */
 const firstChange = (view: FileView): number | undefined => {
   if (view.state !== 'ready') return undefined
@@ -251,6 +260,8 @@ export function TaskView({
   const [connecting, setConnecting] = useState(false)
   // Abandoning it asks first, saying what happens to its worktree and branch.
   const [abandoning, setAbandoning] = useState(false)
+  // Whether its title is a field, from its menu's Rename or from pressing the title.
+  const [renaming, setRenaming] = useState(false)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
   const [face, setFace] = useState<Face | null>(null)
   // Ready, or merged here with its remote still to have it, it opens on what it made: there is something there to do.
@@ -378,6 +389,9 @@ export function TaskView({
       now,
     ),
   ]
+  // What the task built, as its lead last said it, closes its thread once no step is under way, with what its steps showed gathered under it.
+  const finished = taskEvidence(snapshot.items, snapshot.reports)
+  const closing = finished.built !== null && !busy && snapshot.task.step === null && snapshot.task.phase !== 'waiting'
   // What each document was last changed by, so one open beside the thread follows its edits.
   const versionOf = documentVersions(
     blocks.flatMap((block) => (block.kind === 'turn' ? block.parts : [])),
@@ -471,6 +485,7 @@ export function TaskView({
         />
       )}
       <TaskMenu
+        onRename={() => setRenaming(true)}
         // What it built runs with no agent, where its repository says how.
         {...(snapshot.task.runCommand === null ? {} : { run: { command: snapshot.task.runCommand, onRun: () => void model.runProject() } })}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
@@ -513,6 +528,7 @@ export function TaskView({
         </p>
       )}
       {session === null && model.agentsKnown && model.agents.length === 0 && <p className={s.handover}>{text.needsAgent}</p>}
+      <Holders holders={snapshot.task.queued?.holders} onStop={(holder, id) => void model.stopHolding(holder, id)} />
       {waiting !== null && (
         <p className={s.handover}>
           {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}
@@ -600,7 +616,17 @@ export function TaskView({
           />
         }
       >
-        <BackCrumb to={snapshot.project.name} kbd="esc" title={snapshot.task.title} titleLevel={1} onBack={onBack} />
+        <BackCrumb
+          to={snapshot.project.name}
+          kbd="esc"
+          title={snapshot.task.title}
+          titleLevel={1}
+          maxLength={TITLE_LENGTH}
+          editing={renaming}
+          onEditingChange={setRenaming}
+          onRename={(title) => void model.rename(title)}
+          onBack={onBack}
+        />
       </TitleBar>
       {shown === 'out' && !hasOutputs(snapshot) ? (
         <NoOutputsView snapshot={snapshot} lead={lead.name} />
@@ -696,6 +722,7 @@ export function TaskView({
                 threadId={snapshot.threadId}
                 worktree={snapshot.task.worktree}
                 {...(openFile === undefined ? {} : { openFile })}
+                gathered={closing}
                 session={session}
                 project={snapshot.project.name}
                 onPassOn={(words) => void model.send(words)}
@@ -715,6 +742,9 @@ export function TaskView({
                   />
                 )}
               />
+              {closing && finished.built !== null && (
+                <Finished built={finished.built} pieces={finished.pieces} unverified={finished.unverified} />
+              )}
             </ThreadShellProvider>
             {snapshot.attention.map((request) =>
               request.kind === 'stuck' && request.stuck !== null ? (
