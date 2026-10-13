@@ -24,6 +24,7 @@ import { Plans } from './Plans'
 import { finishedBy, listWords, type PullRequestFacts, sectionWords } from './pullRequestStanding'
 import type { Policies } from './Policies'
 import { Projects } from './Projects'
+import { ReviewRefused, Reviews } from './Reviews'
 import { notesSection, projectOverview } from './handover'
 import { dropNote, keepNote, NOTE_LENGTH, NoteRefused, NOTES_KEPT, notesOf, sayNotes } from './notes'
 import { envelope } from './envelope'
@@ -82,6 +83,7 @@ type Store =
   | Limits
   | Busy
   | Accounts
+  | Reviews
 
 const Drafted = Schema.Struct({
   title: Schema.String,
@@ -117,6 +119,11 @@ const Started = Schema.Struct({
   description: Schema.optional(Schema.String),
   lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
   repositories: Schema.optional(Schema.Array(Schema.String)),
+})
+/* A pull request to review, by its link or number, and the model that reviews it. */
+const ToReview = Schema.Struct({
+  pull_request: Schema.Union([Schema.String, Schema.Number]),
+  lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
 })
 const Named = Schema.Struct({ task: Schema.String })
 /* A thread to read: a task's, or, with none, the coordinator's own; and, to read further back, where the part read before began. */
@@ -169,6 +176,7 @@ export class Coordinator extends Context.Service<
       const changes = yield* Changes
       const issues = yield* Issues
       const issueDrafts = yield* IssueDrafts
+      const reviews = yield* Reviews
       /* How a task's pull requests stand: set by Queries, which can read them (it needs this service, so this can't need it). */
       let pullRequests: (taskId: string) => Effect.Effect<PullRequestFacts | undefined> = () =>
         Effect.succeed({ changes: [], merged: [], unmerged: 0 })
@@ -502,6 +510,49 @@ export class Coordinator extends Context.Service<
             return `Started ${created.slug}, but it waits for a free agent: ${atWork} of the ${atOnce} this computer runs at once are busy. Its lead starts on it by itself when one is free, with no review, and nothing goes outside the project when it is done. The person sees it as a card, waiting; say in a sentence what it does, and that it waits its turn.`
           }
           return `Started ${created.slug}: its lead is on it now, with no review, and nothing goes outside the project when it is done. The person sees it as a card; say in a sentence what it does.`
+        })
+
+      /**
+       * A review of someone else's pull request: a task whose lead reads a
+       * read-only copy of it and drafts a review, which the person posts.
+       * Asked again, it says the task already reviewing it.
+       */
+      const review = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* read(ToReview, input)
+          const lead = yield* stepOf(access.projectId, asked.lead)
+          const pullRequest = String(asked.pull_request).trim()
+          // What the person said in the turn the coordinator is on is what they asked for: the task's thread opens with it.
+          const sql = yield* SqlClient.SqlClient
+          const said = yield* sql<{ body: string }>`
+            SELECT u.body FROM turn_deliveries d JOIN turn_delivery_inputs di ON di.delivery_id = d.id JOIN user_inputs u ON u.id = di.user_input_id
+            WHERE d.provider_session_id = ${access.sessionId}
+              AND d.requested_at = (SELECT max(requested_at) FROM turn_deliveries WHERE provider_session_id = ${access.sessionId})
+            ORDER BY di.position`
+          // The same pull request from the same session is the same command: called again, unsure the first worked, it starts nothing twice.
+          const commandId = `cmd_${createHash('sha256').update(`${access.sessionId}\u0000review\u0000${pullRequest.toLowerCase()}`).digest('hex').slice(0, 32)}`
+          const started = yield* reviews
+            .start({
+              envelope: yield* envelope('task.review', { pullRequest: pullRequest.toLowerCase() }, commandId, instance.coordinatorId),
+              projectId: access.projectId as ProjectId,
+              pullRequest,
+              lead: { agentId: lead.agentId, model: lead.model, ...(lead.effort === undefined ? {} : { effort: lead.effort }) },
+              ...(said.length === 0 ? {} : { request: said.map((input) => input.body).join('\n\n') }),
+            })
+            .pipe(
+              Effect.catch((error) => Effect.fail(error instanceof ReviewRefused ? new ToolRefused({ message: error.message }) : error)),
+            )
+          if (started.already)
+            return `${started.slug} already reviews ${started.author}'s ${started.name}; message its lead to ask it more.`
+          const reach = started.outside
+            ? `It comes from outside the project, so its lead reads it with no network, and Approve is the person's to choose.`
+            : `${started.author} is one of the repository's people.`
+          const posting = started.posts
+            ? "The person has their team's reviews posted without asking, so it posts itself once drafted."
+            : 'Nothing is posted until the person posts it from its card.'
+          if (!started.leading)
+            return `Started ${started.slug} to review ${started.author}'s ${started.name}, "${started.title}", but its lead couldn't start: its thread says why, and the person starts another there. Tell them.`
+          return `Started ${started.slug}: its lead reviews ${started.author}'s ${started.name}, "${started.title}", from a read-only copy of its code, running nothing of it. ${reach} ${posting} The person sees it as a card; say in a sentence that it's under way.`
         })
 
       /** The models the coordinator can give work to in the project, as it reads them. */
@@ -874,6 +925,23 @@ export class Coordinator extends Context.Service<
             required: ['title', 'lead'],
           },
           startNow,
+        ),
+        tool(
+          'review_pull_request',
+          "Starts a review of a pull request, when the person asks for one or pastes a pull request's link and asks: by its link, or its number in the project's repository (#123). Its lead, the model you pick as list_models writes it (a strong one), reads a read-only copy of the pull request's code, runs nothing of it, and drafts a review the person posts from its card. Nothing reaches the code host until they do. Don't review it yourself.",
+          {
+            type: 'object',
+            properties: {
+              pull_request: { type: 'string', description: 'Its link, or its number in the project’s repository: #123.' },
+              lead: {
+                type: 'object',
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort, reason: { type: 'string' } },
+                required: ['model'],
+              },
+            },
+            required: ['pull_request', 'lead'],
+          },
+          review,
         ),
         tool(
           'message_lead',

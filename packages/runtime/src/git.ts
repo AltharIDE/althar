@@ -238,6 +238,26 @@ export const fetchInto = (cwd: string, target: { readonly url: string; readonly 
     Effect.orElseSucceed(() => null),
   )
 
+/**
+ * Fetches refs from a remote by URL into refs here, as a push is signed in,
+ * each `from` into its `into`, forced: whether git could. Tags aren't
+ * fetched, and nothing is written to FETCH_HEAD.
+ */
+export const fetchRefs = (
+  cwd: string,
+  target: { readonly url: string; readonly header: string | null },
+  refs: ReadonlyArray<{ readonly from: string; readonly into: string }>,
+) =>
+  run(
+    120_000,
+    cwd,
+    ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', target.url, ...refs.map((ref) => `+${ref.from}:${ref.into}`)],
+    signedIn(target),
+  ).pipe(
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+  )
+
 /** The top of the repository a path is in. */
 export const topLevel = (path: string) => git(path, 'rev-parse', '--show-toplevel')
 

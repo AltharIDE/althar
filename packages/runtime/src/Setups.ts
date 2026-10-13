@@ -22,6 +22,8 @@ import { addItem, updateItem } from './threads'
  * package manager's cache and temporary folders outside the worktree.
  *
  * It starts as the worktree is made, and the lead's first turn waits for it.
+ * Never in a copy a task only reads, such as the pull request a review reads:
+ * nothing of someone else's code runs there.
  * It runs once per worktree: how it went is kept on the workspace, so a lead
  * that resumes doesn't set it up again, and a worktree made again (a reopened
  * task's whose folder went) is. It runs in the person's login shell, so it
@@ -285,7 +287,7 @@ export class Setups extends Context.Service<
                   JOIN tasks k ON k.id = w.task_id AND k.state <> 'abandoned'
                   JOIN projects p ON p.id = w.project_id AND p.archived_at IS NULL
                   JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
-                  WHERE w.id = ${workspaceId} AND w.state = 'ready' AND w.setup IS NULL`
+                  WHERE w.id = ${workspaceId} AND w.state = 'ready' AND w.access = 'write' AND w.setup IS NULL`
                 if (unset !== undefined) yield* setUp(unset)
               }),
             ),
@@ -298,7 +300,7 @@ export class Setups extends Context.Service<
             const sql = yield* SqlClient.SqlClient
             const unset = yield* sql<{ id: string }>`
               SELECT w.id FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-              WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.setup IS NULL
+              WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready' AND w.access = 'write' AND w.setup IS NULL
               ORDER BY b.created_at, b.rowid`
             // Each in a fiber of Althar's own, side by side: a lead that stops waiting doesn't stop its worktree's setup.
             const fibers = yield* Effect.forEach(unset, (workspace) => Effect.forkIn(settle(workspace.id), setupsScope))

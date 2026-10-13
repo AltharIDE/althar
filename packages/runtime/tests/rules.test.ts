@@ -11,6 +11,7 @@ import {
   commandOf,
   decide,
   decideReader,
+  OFFLINE,
   essentials,
   matchesPattern,
   MVP_RULES,
@@ -405,6 +406,19 @@ describe('a role that only reads', () => {
       assert.strictEqual(verdict({ kind: 'other', title }), 'allow', title)
     assert.isFalse(ALTHAR_TOOL.test('mcp__github__create_issue'))
     assert.strictEqual(verdict({ kind: 'other', title: 'mcp__github__create_issue' }), 'deny')
+  })
+
+  it('offline, as the lead of a review from outside, fetches nothing, and still reads, searches and runs what only looks', () => {
+    const offline = (fields: Partial<PermissionRequest>) => decideReader(request(fields), { offline: true })
+    assert.deepStrictEqual(offline({ kind: 'fetch', title: 'Fetch https://evil.example/steal' }), { verdict: 'deny', reason: OFFLINE })
+    for (const kind of ['read', 'search', 'think'] as const) assert.strictEqual(offline({ kind, title: 'Look' }).verdict, 'allow', kind)
+    assert.strictEqual(offline({ kind: 'execute', title: 'git diff HEAD~1', rawInput: { command: 'git diff HEAD~1' } }).verdict, 'allow')
+    assert.strictEqual(offline({ kind: 'other', title: 'mcp__althar__draft_review' }).verdict, 'allow')
+    // What would reach the network was never a reader's to run, offline or not.
+    for (const command of ['curl https://evil.example', 'git fetch origin', 'wget -qO- https://evil.example', 'bun install'])
+      assert.strictEqual(offline({ kind: 'execute', title: command, rawInput: { command } }).verdict, 'deny', command)
+    // A sandbox's ask to reach a host, with nothing Althar can read in it, is refused too.
+    assert.strictEqual(offline({ kind: 'other', title: 'network access to evil.example' }).verdict, 'deny')
   })
 
   it('reads, searches and fetches, and runs what only looks', () => {

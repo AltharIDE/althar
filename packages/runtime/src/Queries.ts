@@ -12,6 +12,7 @@ import {
   type HomeEvent,
   type HomeSnapshot,
   IssueDraftCard,
+  ReviewDraftCard,
   type IssueSummary,
   LimitCall,
   PAGE,
@@ -49,6 +50,7 @@ import { Instance } from './Instance'
 import { Launches } from './Launches'
 import { commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
 import { commandIn, shortCommand } from './rules'
+import { reviewBriefOf } from './Reviews'
 import { Sessions } from './Sessions'
 import { actionsOf, standingOf } from './Tasks'
 
@@ -292,6 +294,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
 const decodeDraft = Schema.decodeUnknownOption(IssueDraftCard)
+const decodeReviewDraft = Schema.decodeUnknownOption(ReviewDraftCard)
 const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
@@ -490,6 +493,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
       return Option.match(decodeDraft(content), {
         onNone: () => undefined,
         onSome: (card) => ({ ...base, kind: 'issue_draft' as const, content: card }),
+      })
+    // A review draft's card, written whole with each change to the draft, as an issue draft's is.
+    case 'review_draft':
+      return Option.match(decodeReviewDraft(content), {
+        onNone: () => undefined,
+        onSome: (card): ThreadItem => ({ ...base, kind: 'review_draft', content: card }),
       })
     case 'push_request':
       // Althar writes it whole, as the contract has it; one that doesn't read so is left out.
@@ -796,7 +805,7 @@ export class Queries extends Context.Service<
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' ORDER BY b.created_at, b.rowid`
         })
 
       const nothingChanged = { files: [], commits: 0 } as const satisfies {
@@ -1801,6 +1810,7 @@ export class Queries extends Context.Service<
                 task: head.resolveConflicts === null ? null : head.resolveConflicts === 1,
                 project: head.projectResolves === 1,
               },
+              review: yield* reviewBriefOf(head.taskId),
             },
             session,
             attention: attention.map(callOf),
@@ -1878,6 +1888,7 @@ export class Queries extends Context.Service<
                 WHEN 'external_link' THEN (SELECT t.id FROM external_links x
                   JOIN threads t ON t.task_id = x.task_id AND t.kind = 'task' WHERE x.id = c.aggregate_id)
                 WHEN 'issue_draft' THEN (SELECT thread_id FROM issue_drafts WHERE id = c.aggregate_id)
+                WHEN 'review_draft' THEN (SELECT thread_id FROM review_drafts WHERE id = c.aggregate_id)
               END AS thread_id
             FROM change_log c WHERE c.cursor > ${after} ORDER BY c.cursor LIMIT ${limit}`
         })

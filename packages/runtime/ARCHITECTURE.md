@@ -26,6 +26,8 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `MachineLoad.ts` | How hard this computer works, and each task's, coordinator's and run's part, read when a window asks (`GetLoad`, ADR-029) |
 | `Plans.ts` | A task's plan: proposed, held, changed or started by the person, and started on its own when its countdown ends |
 | `IssueDrafts.ts` | Issues the coordinator drafts on a connected tracker: where each goes, its card in the coordinator's thread, and filing, changing or discarding it, only when the person says |
+| `Reviews.ts` | Reviews of someone else's pull request: a task on a read-only copy of its head that Althar fetches (`review_pull_request`), the lead's draft as a card in the task's thread (`draft_review`), and posting, changing or discarding it, only when the person says or their setting posts their team's; `reviewBriefOf`, what a review task's card and view show |
+| `reviewing.ts` | What every part knows of a review task: the pull request it reviews (its external link of kind `review`), its lead's brief, and what `read_pull_request` reads it |
 | `Tasks.ts` | A task's course as the person steers it: what applies where it stands (`actionsOf`), stopping it, resuming it, abandoning it and reopening it |
 | `Runs.ts` | Runs a started plan as the task workflow: Implement, then Review, which the lead settles, up to three rounds; the lead's and the reviewer's tools |
 | `cards.ts` | Each task's card in the coordinator's thread: posted once, touched when what it shows changes |
