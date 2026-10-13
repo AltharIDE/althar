@@ -49,6 +49,7 @@
      Althar's own colour: the work it is running right now.               */
   --live: #2b3bff;
   --live-dim: rgba(43, 59, 255, 0.1);
+  --warm: #c9822f; /* running hotter than the machine suggests, short of danger */
   --danger: #c4402f;
   --danger-dim: rgba(196, 64, 47, 0.07);
   --danger-hover: rgba(196, 64, 47, 0.12);

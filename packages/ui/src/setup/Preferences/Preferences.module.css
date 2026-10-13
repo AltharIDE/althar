@@ -68,6 +68,127 @@
   font-size: inherit;
 }
 
+/* ---- agents at once: a stepped track that warms past the default ---- */
+/* the number, large, where the row's control goes */
+.value {
+  display: inline-block;
+  min-width: 2ch;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--warm) calc(var(--heat, 0) * 100%), var(--t-1));
+}
+.slider {
+  margin: 6px 0 4px;
+}
+.track {
+  position: relative;
+  height: 20px;
+  cursor: pointer;
+  touch-action: none;
+  outline: none;
+}
+.rail {
+  position: absolute;
+  inset: 7px 0;
+  border-radius: 99px;
+  background: var(--track);
+  overflow: hidden;
+}
+/* ink up to the default, warming past it the further it goes */
+.fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--t-1) 0%,
+    var(--t-1) calc(100% - var(--heat) * 100%),
+    color-mix(in srgb, var(--warm) calc(45% + var(--heat) * 55%), var(--danger)) 100%
+  );
+  transition: width 120ms ease-out;
+}
+.atDefault {
+  position: absolute;
+  top: 2px;
+  width: 2px;
+  height: 16px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background: var(--signal);
+}
+.thumb {
+  position: absolute;
+  top: 1px;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  border-radius: 99px;
+  background: var(--paper);
+  border: 1px solid color-mix(in srgb, var(--warm) calc(var(--heat) * 100%), var(--line-3));
+  box-shadow: var(--lift-2);
+  transition:
+    left 120ms ease-out,
+    transform 160ms ease-out;
+}
+.held {
+  transform: scale(1.12);
+}
+.track:focus-visible .thumb {
+  box-shadow:
+    0 0 0 4px var(--signal-dim),
+    var(--lift-2);
+}
+/* it clicks into the default */
+.clicked {
+  border-color: var(--signal);
+  animation: click 280ms ease-out;
+}
+@keyframes click {
+  40% {
+    transform: scale(1.28);
+    box-shadow: 0 0 0 6px var(--signal-dim);
+  }
+}
+.scale {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--t-4);
+  font-variant-numeric: tabular-nums;
+}
+.mark {
+  position: absolute;
+  transform: translateX(-50%);
+  color: var(--signal);
+  white-space: nowrap;
+}
+.markStart {
+  transform: none;
+}
+.markEnd {
+  transform: translateX(-100%);
+}
+/* the row's glyph warms, and breathes faster, the further past the default */
+.breathe {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--warm) calc(var(--heat) * 100%), var(--t-1));
+  transition: background 200ms ease-out;
+  animation: breathe var(--speed) ease-in-out infinite;
+}
+@keyframes breathe {
+  50% {
+    box-shadow: 0 0 0 calc(var(--heat) * 6px) color-mix(in srgb, var(--warm) calc(var(--heat) * 35%), transparent);
+  }
+}
+
 /* what only matters while the row above is on: a well under its words */
 .well {
   padding: 0 12px;
