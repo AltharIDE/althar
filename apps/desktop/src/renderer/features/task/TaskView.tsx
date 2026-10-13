@@ -101,6 +101,8 @@ export const text = {
     return `The default branches have moved on, and merging this task's branches into them conflicts: ${where}. Bring each branch up to date: merge its default branch into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Merge, don't rebase: a branch that was pushed can't be rewritten. Then say it's ready to merge again.`
   },
   working: 'Working',
+  /** The pill over the composer of a task waiting for a place, naming the tasks that keep one by what they left running. */
+  holding: 'Keeping a place',
   needsYou: 'Needs you',
   ready: 'Ready for you',
   done: 'Done',
@@ -351,6 +353,11 @@ export function TaskView({
   const running = [...(session?.background ?? []), ...snapshot.task.launches]
   const launched = new Set(snapshot.task.launches.map((launch) => launch.id))
   const leftRunning = runningOf(running, now)
+  // While it waits for a place: what other tasks' leads left running, which keeps theirs, each with the task it is from.
+  const holding = (snapshot.task.queued?.holders ?? []).flatMap(({ threadId, title, running: left }) =>
+    threadId === null ? [] : left.map((one) => ({ ...one, id: `${threadId} ${one.id}`, where: title, threadId, left: one.id })),
+  )
+  const keeping = runningOf(holding, now, { where: true })
   const blocks = [
     // What the person asked for opens the thread, in their words, before anything the lead did.
     ...(snapshot.task.request === null || snapshot.earlier
@@ -521,7 +528,7 @@ export function TaskView({
         tray={voice.tray && <DictationTray {...voice.tray} />}
         // What goes on outside the conversation floats over its end: the pull requests it listens to, and what its lead left running.
         above={
-          (listening.length > 0 || leftRunning.length > 0) && (
+          (listening.length > 0 || leftRunning.length > 0 || keeping.length > 0) && (
             <>
               {listening.length > 0 && (
                 <Listening sources={listening} heard={heard} onStop={(url) => void model.stopListening(url)} note={behindText.note} />
@@ -533,6 +540,18 @@ export function TaskView({
                 // Where it answers opens in the person's browser.
                 onOpenUrl={(id) => {
                   const url = running.find((command) => command.id === id)?.url
+                  if (url != null) window.open(url, '_blank')
+                }}
+              />
+              <Running
+                processes={keeping}
+                text={{ title: text.holding }}
+                onStop={(id) => {
+                  const held = holding.find((command) => command.id === id)
+                  if (held !== undefined) void model.stopHolding(held.threadId, held.left)
+                }}
+                onOpenUrl={(id) => {
+                  const url = holding.find((command) => command.id === id)?.url
                   if (url != null) window.open(url, '_blank')
                 }}
               />

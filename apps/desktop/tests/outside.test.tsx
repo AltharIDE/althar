@@ -803,6 +803,30 @@ describe('running what a task built, with no agent', () => {
   })
 })
 
+describe('what keeps the places a task waits for', () => {
+  it('names the task whose server keeps a place, over the composer of the task that waits, and stops it from there', async () => {
+    const server = { id: 'bg-1', command: 'bun dev', url: 'http://localhost:5173/', startedAt: '2026-10-10T09:00:00.000Z', ended: null }
+    const thread = snapshot()
+    const holders = [
+      { taskId: 't2', title: 'Prototype the board', threadId: 'th2', kept: true, running: [server] },
+      { taskId: 't3', title: 'Fix the login', threadId: 'th3', kept: false, running: [] },
+    ]
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...thread, task: { ...thread.task, queued: { busy: 2, atOnce: 2, holders } } })),
+    })
+    withServices(<Task />, client)
+    const pill = await screen.findByRole('button', { name: /^Keeping a place/ })
+    expect(pill.textContent).toContain('bun dev')
+    await userEvent.click(pill)
+    const list = within(await screen.findByRole('dialog', { name: 'Keeping a place' }))
+    // Which task it is from; a task at work in its turn is not a server to stop.
+    expect(list.getByText(/Prototype the board/)).toBeTruthy()
+    expect(list.queryByText(/Fix the login/)).toBeNull()
+    await userEvent.click(list.getByRole('button', { name: 'Stop bun dev' }))
+    expect(client.stopBackground).toHaveBeenCalledWith('th2', 'bg-1')
+  })
+})
+
 describe('what a task’s lead left running', () => {
   it('shows over the composer, opens where it answers, stops it, follows it as it changes, and clears one that exited', async () => {
     const open = vi.spyOn(window, 'open').mockReturnValue(null)
