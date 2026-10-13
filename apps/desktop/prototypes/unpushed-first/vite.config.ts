@@ -8,6 +8,8 @@ const here = import.meta.dirname
 
 export default defineConfig({
   root: here,
+  // The screenshots shoot.mjs takes, which the comparison page shows.
+  publicDir: join(here, '../../test-results/unpushed-first'),
   plugins: [react()],
   resolve: {
     // The app's own test fixtures make the fake runtime; their vi.fn is a plain function here.
