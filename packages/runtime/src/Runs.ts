@@ -15,6 +15,7 @@ import { Changes, type Published } from './Changes'
 import { NotConnected } from './Connections'
 import { AttentionClosed, NoChangeToOpen, NotFound, NothingToWaitFor } from './errors'
 import { Instance } from './Instance'
+import { Issues } from './Issues'
 import { Limits, outWords, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
 import { Policies, usageLimitOf } from './Policies'
@@ -161,6 +162,7 @@ type Store =
   | Ledger
   | Live
   | Changes
+  | Issues
   | Limits
   | Policies
   | Agents
@@ -348,6 +350,7 @@ export class Runs extends Context.Service<
       const toolServer = yield* ToolServer
       const live = yield* Live
       const changes = yield* Changes
+      const issues = yield* Issues
       const limits = yield* Limits
       const policies = yield* Policies
       const busy = yield* Busy
@@ -1649,6 +1652,8 @@ export class Runs extends Context.Service<
             )
           }
           yield* begin(current, attemptId, begun.value, current.threadId)
+          // Its first step has started: the issue it came from moves to In Progress, as the person would move it.
+          yield* issues.started(current.taskId)
           yield* touchCard(current.taskId)
         })
 

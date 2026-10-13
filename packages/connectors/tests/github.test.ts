@@ -601,8 +601,11 @@ describe('GitHub as a tracker', () => {
       yield* host.comment(found, 'Picked up by Althar')
       assert.deepStrictEqual(sent[0]?.body, { body: 'Picked up by Althar' })
       yield* host.link(found, { url: 'https://x', title: 'x' })
+      // An issue has no In Progress of its own: it is left open, as it is.
+      assert.deepStrictEqual(yield* host.start(found), { moved: false, status: { name: 'Open', category: 'todo' } })
       assert.lengthOf(sent, 1)
       assert.isFalse(host.capabilities.links)
+      assert.isFalse(host.capabilities.starts)
     }),
   )
   it.effect('lists the repositories it can file issues in, last pushed first, leaving out the archived and those without issues', () =>

@@ -33,11 +33,12 @@ import type { ProjectSettingsModel } from './useProjectSettings'
  * whichever view is shown. A module for its name and colour opens out, to
  * change them in place; the others say where each thing stands and open
  * where it is changed: its repositories, its rules, and connecting the code
- * host and tracker it is on. Beside its rules, a switch has its leads
- * resolve a conflict with the default branch unasked (ADR-030). The notes
- * its coordinator keeps open out too, to read and drop one that no longer
- * holds (ADR-031). Removing it from Althar is at the foot, and asks first.
- * Nothing in it says what is running.
+ * host and tracker it is on. Beside the tracker, a switch for whether a task's
+ * issue moves to In Progress as the task starts; beside its rules, one has
+ * its leads resolve a conflict with the default branch unasked (ADR-030).
+ * The notes its coordinator keeps open out too, to read and drop one that no
+ * longer holds (ADR-031). Removing it from Althar is at the foot, and asks
+ * first. Nothing in it says what is running.
  */
 
 export const text = {
@@ -49,6 +50,9 @@ export const text = {
   conflicts: 'Resolve conflicts automatically',
   conflictsOn: 'On: the lead fixes merge conflicts itself',
   conflictsOff: 'Off: you ask the lead to fix them',
+  moveIssues: 'Move issues to In Progress when their task starts',
+  moveIssuesOn: 'On: Althar moves the issue as its task starts',
+  moveIssuesOff: 'Off: you move issues yourself',
   notes: 'Notes',
   noNotes: 'None yet',
   connectedAs: (login: string) => `Connected as ${login}`,
@@ -61,6 +65,7 @@ export const text = {
 /** Where a module sits beside another, in the grid's four columns: the left half, or the right. */
 const LEFT: ControlPlace = { column: [1, 3] }
 const RIGHT: ControlPlace = { column: [3, 5] }
+const ACROSS: ControlPlace = { column: [1, 5] }
 
 const INK: Readonly<Record<ProjectInk, ProjectSummary['ink']>> = {
   [ProjectInk.Clay]: 'clay',
@@ -179,7 +184,7 @@ export function ProjectSettings({
               {tracker !== null && (
                 <ControlModule
                   title={productName(tracker.product)}
-                  {...(host === null ? { place: RIGHT } : {})}
+                  place={host === null ? RIGHT : LEFT}
                   {...(trackerLogin === null ? { aside: text.connect } : {})}
                   onClick={leave(() => onConnect(tracker.product, tracker.at))}
                 >
@@ -190,13 +195,36 @@ export function ProjectSettings({
                   />
                 </ControlModule>
               )}
+              {model.rules !== null && (
+                <ControlToggle
+                  title={text.moveIssues}
+                  line={
+                    model.ruleFailed?.rule === 'moveIssues'
+                      ? model.ruleFailed.message
+                      : model.rules.moveIssues
+                        ? text.moveIssuesOn
+                        : text.moveIssuesOff
+                  }
+                  on={model.rules.moveIssues}
+                  onChange={model.setMoveIssues}
+                  glyph={<Icon name="play" size={16} />}
+                  // Beside the tracker where the code host sits above it; across the panel where it would be alone.
+                  place={host !== null && tracker !== null ? RIGHT : ACROSS}
+                />
+              )}
               <ControlModule title={text.rules} {...(model.rules === null ? {} : { place: LEFT })} onClick={leave(onRules)}>
                 {rules !== null && <ControlWords title={rules.policy} line={rules.asks} />}
               </ControlModule>
               {model.rules !== null && (
                 <ControlToggle
                   title={text.conflicts}
-                  line={model.ruleFailed ?? (model.rules.resolveConflicts ? text.conflictsOn : text.conflictsOff)}
+                  line={
+                    model.ruleFailed?.rule === 'resolveConflicts'
+                      ? model.ruleFailed.message
+                      : model.rules.resolveConflicts
+                        ? text.conflictsOn
+                        : text.conflictsOff
+                  }
                   on={model.rules.resolveConflicts}
                   onChange={model.setResolveConflicts}
                   glyph={<Icon name="branch" size={16} />}

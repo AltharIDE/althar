@@ -1,15 +1,17 @@
-import { type Issue, linksIn, parseLink, type Product, type StatusCategory } from '@althar/connectors'
+import { ConnectorFailed, type Issue, linksIn, parseLink, type Product, type Started, type StatusCategory } from '@althar/connectors'
 import { Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
+import { Cause, Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
 import { Connections, NotConnected } from './Connections'
-import { NotAnIssue, NotFound } from './errors'
+import { NotAnIssue, NotFound, OutwardUncertain } from './errors'
 import { Instance } from './Instance'
+import { outward } from './outward'
+import { movesIssues, Policies } from './Policies'
 import { change, fact, timestamp } from './records'
-import { updateItem } from './threads'
+import { addItem, updateItem } from './threads'
 import { ToolRefused, ToolServer } from './ToolServer'
 
 /*
@@ -18,7 +20,9 @@ import { ToolRefused, ToolServer } from './ToolServer'
  * there: the issue's key, title and status, or the pull request's. A task can
  * come from an issue, which it keeps as a link of its own; its branch and its
  * pull request carry the issue's key, so the tracker's own Git integration
- * finds them. Althar moves no issue's status (an open question).
+ * finds them. As the task starts, Althar moves its issue to the tracker's
+ * In Progress, where the tracker has one and the project's rules say to:
+ * once, never back from further along, and never at the task's cost.
  */
 
 /** A link, unfurled where it was pasted: an issue or a change, as its service has it. */
@@ -73,7 +77,7 @@ const summaryOf = (product: Product, issue: Issue): IssueSummary => ({
   updatedAt: issue.updatedAt,
 })
 
-type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections | ToolServer
+type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Connections | ToolServer | Policies
 
 /** The repository a project's tasks change, as its host has it, through a ready connection: where `#12` lives. */
 export const projectRepository = (projectId: string) =>
@@ -99,6 +103,12 @@ export class Issues extends Context.Service<
     attach(input: { readonly projectId: ProjectId; readonly taskId: string; readonly issue: string }): Effect.Effect<IssueSummary, unknown>
     /** The issue a task came from, as last seen. */
     ofTask(taskId: string): Effect.Effect<IssueSummary | null, unknown>
+    /**
+     * Moves the issue a task came from to its tracker's In Progress, as the
+     * task's first step starts: in the background, once. It says how that
+     * went in the task's thread; nothing it meets fails the task.
+     */
+    started(taskId: string): Effect.Effect<void>
   }
 >()('@althar/runtime/Issues') {
   static readonly layer: Layer.Layer<Issues, never, Store> = Layer.effect(
@@ -108,6 +118,7 @@ export class Issues extends Context.Service<
       const instance = yield* Instance
       const connections = yield* Connections
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
+      const scope = yield* Effect.scope
 
       const unfurl = (link: string) =>
         Effect.gen(function* () {
@@ -291,6 +302,104 @@ export class Issues extends Context.Service<
           } satisfies IssueSummary
         })
 
+      /** What kept an issue where it was, in a line: the tracker's own words where it gave some. */
+      const whyNot = (error: unknown) =>
+        error instanceof ConnectorFailed
+          ? error.message.replace(/[\s.]+$/, '')
+          : error instanceof NotConnected
+            ? `Althar isn’t connected to ${error.product} any more`
+            : error instanceof OutwardUncertain
+              ? 'its answer was lost, so it may or may not have moved'
+              : 'something went wrong'
+
+      const start = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [link] = yield* sql<{
+            id: string
+            projectId: ProjectId
+            ref: string
+            key: string
+            snapshot: string
+            connectionId: string | null
+            threadId: string | null
+          }>`
+            SELECT x.id, x.project_id, x.ref, x.key, x.snapshot, x.connection_id,
+              (SELECT id FROM threads WHERE task_id = x.task_id AND kind = 'task') AS thread_id
+            FROM external_links x WHERE x.task_id = ${taskId} AND x.kind = 'issue' ORDER BY x.created_at LIMIT 1`
+          if (link === undefined || link.connectionId === null || link.threadId === null) return
+          if (!movesIssues((yield* (yield* Policies).current(link.projectId)).rules)) return
+          // Once: a task started again, by a plan after its first, leaves its issue to the person.
+          const [before] = yield* sql<{ id: string }>`
+            SELECT id FROM record_events WHERE aggregate_type = 'external_link' AND aggregate_id = ${link.id}
+              AND type IN ('external_link.issue_started', 'external_link.issue_start_failed') LIMIT 1`
+          if (before !== undefined) return
+          const connectionId = link.connectionId
+          const exit = yield* Effect.exit(
+            Effect.gen(function* () {
+              const { tracker } = yield* connections.adapters(connectionId)
+              // GitHub's, GitLab's and Trello's have no In Progress of their own: their issues are left as they are, and nothing is said.
+              if (tracker === undefined || !tracker.capabilities.starts) return null
+              // As it is now, not as it was when the task was drafted: one someone started meanwhile is left as it is.
+              const issue = yield* tracker.issue(link.ref)
+              return yield* outward({
+                projectId: link.projectId,
+                subject: { type: 'external_link', id: link.id },
+                target: `${tracker.product}:${link.key}`,
+                operation: 'start_issue',
+                key: `start_issue:${link.id}`,
+                request: { from: issue.status.name },
+                // Moving it again moves nothing: one already started is left as it is.
+                retryable: true,
+                perform: tracker.start(issue),
+                encode: (answer: Started) => answer,
+                decode: (kept) => kept as Started,
+              })
+            }),
+          )
+          if (exit._tag === 'Success' && exit.value === null) return
+          const failure = exit._tag === 'Failure' ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+          const started = exit._tag === 'Success' ? exit.value : null
+          const at = yield* timestamp
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              // The card shows the issue as it is now.
+              const kept = JSON.parse(link.snapshot) as Record<string, unknown>
+              const revision = yield* change(
+                'external_links',
+                link.id,
+                started === null ? { updatedAt: at } : { snapshot: JSON.stringify({ ...kept, status: started.status }), updatedAt: at },
+              )
+              yield* fact({
+                projectId: link.projectId,
+                aggregateType: 'external_link',
+                aggregateId: link.id,
+                revision,
+                type: started === null ? 'external_link.issue_start_failed' : 'external_link.issue_started',
+                payload:
+                  started === null
+                    ? { key: link.key, error: whyNot(failure) }
+                    : { key: link.key, moved: started.moved, status: started.status },
+                actorId: instance.systemId,
+              })
+              // One already started, or past it, is left without a word.
+              if (started !== null && !started.moved) return
+              yield* addItem({ projectId: link.projectId, threadId: link.threadId ?? '' }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title:
+                  started === null
+                    ? `Couldn’t move ${link.key} to In Progress: ${whyNot(failure)}`
+                    : `Moved ${link.key} to ${started.status.name}`,
+                description: null,
+              })
+            }),
+          )
+          if (exit._tag === 'Failure' && !(failure instanceof ConnectorFailed))
+            yield* Effect.logWarning('Could not move an issue to In Progress', exit.cause)
+          yield* touchCard(taskId)
+        })
+
       // A task's lead and its reviewers can read the issue it came from, or any other.
       const readIssueTool = {
         name: 'read_issue',
@@ -324,6 +433,15 @@ export class Issues extends Context.Service<
         mine: (projectId) => provide(mine(projectId)),
         attach: (input) => provide(attach(input)),
         ofTask: (taskId) => provide(ofTask(taskId)),
+        started: (taskId) =>
+          Effect.asVoid(
+            Effect.forkIn(
+              provide(start(taskId)).pipe(
+                Effect.catchCause((cause) => Effect.logWarning('Could not move a task’s issue to In Progress', cause)),
+              ),
+              scope,
+            ),
+          ),
       })
     }),
   )

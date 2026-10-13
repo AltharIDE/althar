@@ -60,6 +60,8 @@ export const ProjectRules = Schema.Struct({
    */
   branchPattern: Schema.optional(Schema.String),
   titlePattern: Schema.optional(Schema.String),
+  /** Whether a task's issue is moved to its tracker's In Progress as the task starts: on without it. */
+  moveIssues: Schema.optional(Schema.Boolean),
   /** Without one, it moves on. */
   usageLimit: Schema.optional(Schema.Literals(['move', 'wait', 'ask'])),
   /**
@@ -134,6 +136,9 @@ export type RulesChange = { readonly [Key in keyof Omit<ProjectRules, 'source' |
 
 /** What a revision's rules say a usage limit does. */
 export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimit ?? 'move'
+
+/** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
+export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
 
 /** Whether a revision's rules have the lead resolve a conflict on its own: not unless the person turned it on. */
 export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts === true
