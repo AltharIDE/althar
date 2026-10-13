@@ -480,6 +480,15 @@ export class Sessions extends Context.Service<
      * delivers what the thread has queued; the gate runs it now, or once
      * there is a place.
      */
+    /**
+     * What happens as a lead's turn that delivers the person's own words
+     * begins, before the agent reads them: a round of work after its task's
+     * plan opens (Runs.ts, ADR-034). It is done once, and never fails the
+     * turn.
+     */
+    onPersonsTurn(
+      next: (lead: { readonly taskId: string; readonly threadId: string; readonly sessionId: string }) => Effect.Effect<void>,
+    ): Effect.Effect<void>
     gateTurns(
       gate: (
         agent: { readonly taskId: string; readonly threadId: string; readonly sessionId: string; readonly review: boolean },
@@ -519,6 +528,9 @@ export class Sessions extends Context.Service<
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
+      /* What a lead's turn that delivers the person's words starts, once Runs says (onPersonsTurn): until then, nothing. */
+      let personsTurn = (_lead: { readonly taskId: string; readonly threadId: string; readonly sessionId: string }): Effect.Effect<void> =>
+        Effect.void
       /* What a lead's or a reviewer's turns wait for, once Busy says (gateTurns): until then, nothing. */
       let gate = (
         _agent: { readonly taskId: string; readonly threadId: string; readonly sessionId: string; readonly review: boolean },
@@ -921,6 +933,12 @@ export class Sessions extends Context.Service<
               }
             }),
           )
+          // What the person says to a task's lead after its plan opens a round of work, before the lead reads it, or its card says it
+          // works (ADR-034).
+          if (thread.role === 'task' && inputs.some((input) => input.shown === 1))
+            yield* personsTurn({ taskId: thread.taskId, threadId: thread.threadId, sessionId: running.sessionId }).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not open a round of work for the person’s turn', cause)),
+            )
           running.brief = undefined
           running.turnRunning = true
           // What it did outside a turn before is over with: this turn is what it is at.
@@ -1950,6 +1968,8 @@ export class Sessions extends Context.Service<
                 ]),
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
+            // After its plan, what the person asks for is a round of work of its own (ADR-034).
+            "Once the plan's steps are done, what the person asks you for is a round of work of its own: when you have done it, call finish_step the same way, with your summary and evidence. Where they only asked something and you changed nothing, answer them; there is nothing to finish. What you commit after the task's pull request merged or closed goes in a new pull request, which the person opens from the task.",
             // What the lead shows of its work: evidence that fits the task, and what it couldn't show.
             "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo or a version bump, a single note saying so is enough. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check.",
             // What the task built, which ends it: the person reads it before the proof, and it is said again when the work changes.
@@ -2270,6 +2290,10 @@ export class Sessions extends Context.Service<
         gateTurns: (next) =>
           Effect.sync(() => {
             gate = next
+          }),
+        onPersonsTurn: (next) =>
+          Effect.sync(() => {
+            personsTurn = next
           }),
         onTasks: Effect.sync(() =>
           [...threads.values()].flatMap((running) =>

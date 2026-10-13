@@ -419,6 +419,7 @@ describe('the API', () => {
               FindAccounts: () => Effect.succeed({ found: [] }),
               SignInAccount: () => Effect.succeed({ line: 'codex login', opened: false }),
               OpenChange: () => Effect.void,
+              SkipReview: () => Effect.void,
               RefreshTask: () => Effect.void,
               StopListening: () => Effect.void,
               StopBackground: () => Effect.void,

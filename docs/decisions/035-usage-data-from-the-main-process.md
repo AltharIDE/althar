@@ -1,4 +1,4 @@
-# ADR-034: Anonymous usage data goes from the main process, named events only
+# ADR-035: Anonymous usage data goes from the main process, named events only
 
 - **Status:** Accepted
 - **Date:** 2026-10-12
@@ -80,7 +80,9 @@
     than an event now and then.
   - **A task settles once**, the first way it does (merged here, its first
     pull request, or abandoned), until it is reopened; one abandoned after
-    its pull request opened isn't said again.
+    its pull request opened isn't said again. A finished task that goes back
+    to work (ADR-034) is reopened: its round is no new start, and shipping
+    it again settles it again.
   - **The switch is seen on the first screen only by a new install.** No
     one had Althar with a project when this shipped; one that has a project
     finds the switch in Settings.

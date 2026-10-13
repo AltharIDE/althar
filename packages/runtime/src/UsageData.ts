@@ -175,6 +175,8 @@ export class UsageData extends Context.Service<
               ])
             }
             case 'run.admitted': {
+              // A round of a task that went back to work after it finished (ADR-034) isn't a task starting.
+              if (payload.round === true) return []
               const runs = yield* sql<{ parameters: string; acceptedBy: string | null }>`
                 SELECT r.parameters, (SELECT actor_id FROM record_events WHERE aggregate_type = 'task_plan' AND aggregate_id = r.plan_id
                   AND type = 'task_plan.accepted' ORDER BY sequence DESC LIMIT 1) AS accepted_by

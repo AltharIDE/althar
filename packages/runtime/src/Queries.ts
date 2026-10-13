@@ -811,14 +811,26 @@ export class Queries extends Context.Service<
       /**
        * Where a task's change starts, as `baseOf` has it: where its head meets
        * its default branch, or where its worktree started when they never
-       * meet, or the default branch isn't known here.
+       * meet, or the default branch isn't known here. Where it started after
+       * they meet, as a branch for its next pull request starts from the
+       * default branch as its host has it, newer than here (ADR-034), from
+       * there.
        */
       const forkOf = (cwd: string, head: string, base: string | null, started: string) => {
         if (base === null) return Effect.succeed(started)
         const args = ['merge-base', base, head]
-        return Effect.flatMap(gitOutcome(cwd, ...args), ({ code, stdout }) =>
-          code === 0 ? Effect.succeed(stdout) : code === 1 ? Effect.succeed(started) : unclear(cwd, args, code),
-        )
+        return Effect.flatMap(gitOutcome(cwd, ...args), ({ code, stdout }) => {
+          if (code === 1) return Effect.succeed(started)
+          if (code !== 0) return unclear(cwd, args, code)
+          if (stdout === started) return Effect.succeed(stdout)
+          return Effect.map(
+            Effect.all([
+              gitOutcome(cwd, 'merge-base', '--is-ancestor', stdout, started),
+              gitOutcome(cwd, 'merge-base', '--is-ancestor', started, head),
+            ]),
+            ([before, on]) => (before.code === 0 && on.code === 0 ? started : stdout),
+          )
+        })
       }
 
       /** What a task changed in one worktree, committed or not, and in how many commits, from where its change starts; nothing, where git can't tell. */
@@ -1195,6 +1207,14 @@ export class Queries extends Context.Service<
             }),
             merged: said.merged.map(({ name, branch, remote, ahead }) => ({ name, branch, remote, ahead })),
             unmerged: said.here.length,
+            // Commits after its last pull request merged or closed, in none yet (ADR-034).
+            unshipped:
+              links.changes.length === 0
+                ? 0
+                : (yield* Effect.flatMap(Changes, (changes) => changes.unshipped(taskId)).pipe(Effect.orElseSucceed(() => []))).reduce(
+                    (sum, one) => sum + one.commits.length,
+                    0,
+                  ),
           }
         })
 
@@ -1239,6 +1259,16 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
+          // Commits after its last pull request merged or closed, in none yet: something for the person to ship (ADR-034). Read
+          // from git before the store, so a round of work that opens meanwhile shows as it is, not a settled task with its commit.
+          // By repository: one whose pull request is still open takes pushes instead.
+          const [shipping] = yield* sql<{ state: string; changes: number }>`
+            SELECT k.state, (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change') AS changes
+            FROM tasks k WHERE k.id = ${taskId}`
+          const after =
+            shipping !== undefined && shipping.changes > 0 && shipping.state !== 'abandoned'
+              ? yield* (yield* Changes).unshipped(taskId).pipe(Effect.orElseSucceed(() => []))
+              : []
           const [task] = yield* sql<{
             threadId: string
             title: string
@@ -1264,10 +1294,11 @@ export class Queries extends Context.Service<
             roundWaits: number
             answersWait: number
             turnWaits: number
+            runPlan: string | null
           }>`
             SELECT t.id AS thread_id, k.title, k.slug, k.state, w.branch,
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
-              r.state AS run_state, r.created_at AS run_at,
+              r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
               -- A step held until an agent's usage limit resets, or until a place among the agents at work here frees.
@@ -1317,13 +1348,24 @@ export class Queries extends Context.Service<
             Option.exists(reviewer, (session) => session.turnRunning)
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
           const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
+          const unshipped =
+            after.length === 0
+              ? null
+              : {
+                  commits: after.reduce((sum, one) => sum + one.commits.length, 0),
+                  add: after.reduce((sum, one) => sum + one.add, 0),
+                  del: after.reduce((sum, one) => sum + one.del, 0),
+                }
           const phase = ((): TaskPhase => {
-            if (task.state === 'done' || task.state === 'abandoned') return 'settled'
+            if (task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
-            // A call waiting on the person, and work under way, come before being ready: work sent back isn't ready again
-            // until its lead is done with the note.
+            // A call waiting on the person, and work under way, come before anything else (ADR-034): work sent back isn't ready
+            // again until its lead is done with the note, and a merged task whose lead works on it again is running.
             if (task.waiting > 0) return 'waiting'
-            if (task.runState === 'succeeded') return busy || queued || resolving !== undefined ? 'running' : 'ready'
+            if (busy || queued || resolving !== undefined) return 'running'
+            // Merged, it is settled, unless commits after its pull requests are in none yet.
+            if (task.state === 'done') return unshipped === null ? 'settled' : 'ready'
+            if (task.runState === 'succeeded') return 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
             return working || task.held !== null ? 'running' : 'stopped'
@@ -1348,6 +1390,7 @@ export class Queries extends Context.Service<
           const onPlan = task.lead === null || (task.lead === implement?.agentId && task.leadModel === implement.model)
           const leadEffort = task.leadEffort ?? (onPlan ? (implement?.effort ?? null) : null)
           const { issue, changes } = links ?? (yield* linksOf(taskId))
+          const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           return {
             taskId,
             threadId: task.threadId,
@@ -1365,10 +1408,13 @@ export class Queries extends Context.Service<
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
                   },
             issue: issue === null ? null : { product: issue.product, key: issue.key, title: issue.title, url: issue.url },
-            // The first still open, for the person to act on: one merged while another isn't leaves the other.
-            change: changes.find((candidate) => candidate.state === 'open') ?? changes[0] ?? null,
+            // The first still open, for the person to act on: one merged while another isn't leaves the other. Else its latest.
+            change: shown,
+            earlier: changes.filter((candidate) => candidate !== shown).toReversed(),
+            unshipped,
             // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
             step: task.step ?? (resolving === undefined || phase !== 'running' ? null : resolving.checks ? 'checks' : 'conflict'),
+            followUp: task.runState === 'running' && task.runPlan === null,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (implement?.agentId || null),
             // Its session's model once one started; the plan's until then.
@@ -1377,7 +1423,8 @@ export class Queries extends Context.Service<
             branch: task.branch,
             startedAt: task.runAt ?? task.firstSession,
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
-            queued: queued && task.state !== 'done' && task.state !== 'abandoned' ? yield* queuedNow : null,
+            // A merged task whose lead goes back to work waits its turn too (ADR-034).
+            queued: queued && task.state !== 'abandoned' ? yield* queuedNow : null,
             ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
@@ -1408,7 +1455,9 @@ export class Queries extends Context.Service<
         readonly settledAt: string | null
       }) =>
         Effect.gen(function* () {
-          const settled = row.settledAt === null ? undefined : settledCards.get(`${row.id}:${row.settledAt}`)
+          // A settled task whose lead works on it again isn't as it settled (ADR-034).
+          const working = (yield* (yield* Sessions).onTasks).some((session) => session.taskId === row.id)
+          const settled = row.settledAt === null || working ? undefined : settledCards.get(`${row.id}:${row.settledAt}`)
           if (settled !== undefined) return [settled]
           const card = yield* cardFor(row.id)
           if (card === undefined) return []
@@ -1424,6 +1473,8 @@ export class Queries extends Context.Service<
               : null
           const read = { ...card, state: row.state, createdAt: row.createdAt, settledAt: row.settledAt, changed, here: said?.here ?? [] }
           if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, read)
+          // Back at work, what was kept of it as it settled goes: settled again, at the same time, it may say more.
+          else for (const key of settledCards.keys()) if (key.startsWith(`${row.id}:`)) settledCards.delete(key)
           return [read]
         })
 
@@ -1697,6 +1748,11 @@ export class Queries extends Context.Service<
           const planned = card?.plan?.steps.find((step) => step.key === 'implement')
           // What the person can do to it as a whole, from where it stands.
           const standing = yield* standingOf(head.taskId)
+          // Whether its run under way still has a review to come or under way, which the person can skip (ADR-034).
+          const [reviewing] = yield* sql<{ left: number }>`
+            SELECT count(*) AS left FROM runs r, json_each(r.parameters, '$.steps') s
+            WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1)
+              AND r.state = 'running' AND json_extract(s.value, '$.key') = 'review' AND NOT json_extract(s.value, '$.skipped')`
           // Its links, whose open pull requests say what isn't pushed, what git says of its worktrees, and its host, read at the same time.
           const [links, said, host] = yield* Effect.all(
             [linksOf(head.taskId), gitOf(head.taskId, { changed: true, here: true, fresh: page.fresh === true }), hostOf(head.projectId)],
@@ -1730,6 +1786,9 @@ export class Queries extends Context.Service<
               stepAt: onStep?.admittedAt ?? null,
               settledAt: head.settledAt,
               ...links,
+              unshipped: card?.unshipped ?? null,
+              skipReview: (reviewing?.left ?? 0) > 0 && card?.step !== 'publish',
+              followUp: card?.followUp === true,
               files: said.files,
               commits: said.commits,
               here: said.here,

@@ -247,12 +247,14 @@ export const builtAsk = (changed: boolean) =>
  * says nothing of it leaves the last list standing, and one that says none
  * clears it.
  */
-export const taskShown = (threadId: string) =>
+export const taskShown = (threadId: string, since: string | null = null) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
+    // Since a time, where only what came after counts: a task's next pull request is described from its own work (ADR-034).
     const rows = yield* sql<{ content: string }>`
       SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
-        AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence`
+        AND json_extract(content, '$.step') IN ('implement', 'settle') AND (${since} IS NULL OR created_at > ${since})
+      ORDER BY sequence`
     const reported = rows.map((row) => recordIn(JSON.parse(row.content)))
     return {
       built: reported.map((report) => builtIn(report.built)).findLast((said) => said !== null) ?? null,

@@ -109,9 +109,22 @@ describe('usage data', () => {
           WHERE r.task_id = ${mini.taskId}`,
         (rows) => rows.length > 0,
       )
+      // A round of it, as when a finished task goes back to work, starts nothing new.
+      const [run] = yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${mini.taskId}`
+      const instance = yield* Instance
+      yield* fact({
+        projectId: project.projectId as ProjectId,
+        aggregateType: 'run',
+        aggregateId: run?.id ?? '',
+        revision: 1,
+        type: 'run.admitted',
+        payload: { round: true, after: run?.id },
+        actorId: instance.systemId,
+      })
       const tasks = yield* Tasks
       yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: mini.taskId })
       yield* awaiting(events, (seen) => named(seen, 'task_settled').length === 1)
+      assert.lengthOf(named(events, 'task_started'), 2)
       const [settled] = named(events, 'task_settled')
       assert.deepStrictEqual(settled, { name: 'task_settled', properties: { as: 'abandoned', took: 'under_10m', steps: 1 } })
       // Nothing it said names the project, its folder or a task.

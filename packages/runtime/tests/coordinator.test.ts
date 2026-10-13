@@ -112,6 +112,8 @@ describe('the coordinator loop', () => {
         Effect.map(touches, (revision) => (revision >= before + 2 ? [revision] : [])),
         (rows) => rows.length === 1,
       )
+      // What the person said opened a round of work after the plan, which made nothing new: the task is ready as it was (ADR-034).
+      yield* until(sql<{ state: string }>`SELECT state FROM runs WHERE plan_id IS NULL`, (rows) => rows[0]?.state === 'succeeded')
       assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'ready')
 
       // Implement, a review with a finding, the lead settling it, and a second review that passes.
@@ -142,13 +144,15 @@ describe('the coordinator loop', () => {
           ['review', 0, 'succeeded'],
           ['settle', 0, 'succeeded'],
           ['review', 1, 'succeeded'],
+          // The round "hello" opened.
+          ['implement', 0, 'succeeded'],
         ],
       )
       // The lead said what became of the finding, and the record keeps it with the settling that did it.
       const [finding] = yield* sql<{ severity: string; claim: string; state: string; settled: number }>`
         SELECT severity, claim, state, settled_in_attempt_id IS NOT NULL AS settled FROM findings`
       assert.deepStrictEqual({ ...finding }, { severity: 'major', claim: 'The heading is wrong.', state: 'fixed', settled: 1 })
-      const [run] = yield* sql<{ state: string }>`SELECT state FROM runs`
+      const [run] = yield* sql<{ state: string }>`SELECT state FROM runs WHERE plan_id IS NOT NULL`
       assert.strictEqual(run?.state, 'succeeded')
       // Each round read a copy of the work as it stood, and the record keeps which code that was; the lead's branch is untouched.
       const snapshots = yield* sql<{ commitSha: string; nodeKey: string }>`
@@ -232,12 +236,29 @@ describe('the coordinator loop', () => {
       assert.match(yield* callTool(access, 'read_thread', { task: 'add-a-retry' }), /\[review, pass\] The change holds\./)
       assert.match(yield* callTool(access, 'propose_plan', { task: 'add-a-retry', lead: { agent: 'codex' } }), /has started already/)
       assert.match(yield* callTool(access, 'message_lead', { task: 'add-a-retry', message: 'Stop.', now: true }), /^Passed on/)
-      // Its plan done, a lead that changes the work after says again what the task built: without it, Althar asks.
+      // Its plan done, a lead that changes the work after reports a round of its own (ADR-034), and says again what the task
+      // built: without it, Althar asks.
+      const [leadSession] = yield* sql<{ id: string }>`
+        SELECT id FROM provider_sessions WHERE thread_id = ${ready?.threadId ?? ''} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+      const [worktree] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${ready?.taskId ?? ''} LIMIT 1`
+      writeFileSync(join(worktree?.path ?? '', 'AGAIN.md'), 'Again.\n')
+      execFileSync('git', ['-C', worktree?.path ?? '', 'add', 'AGAIN.md'])
+      execFileSync('git', [
+        '-C',
+        worktree?.path ?? '',
+        '-c',
+        'user.name=Lead',
+        '-c',
+        'user.email=lead@example.com',
+        'commit',
+        '-qm',
+        'Again',
+      ])
       const lead: ToolAccess = {
         role: 'lead',
         projectId,
         threadId: ready?.threadId ?? '',
-        sessionId: 'none',
+        sessionId: leadSession?.id ?? 'none',
         taskId: ready?.taskId ?? null,
       }
       assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Again.' }), builtAsk(false))
