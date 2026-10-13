@@ -134,10 +134,14 @@ export const text = {
   withSound: 'With sound',
   awakeTitle: `Keep ${device.this} awake while work runs`,
   awakeNote: `Work stops when ${device.the} sleeps. The display can still sleep.`,
-  atOnceWhy: ({ count, memory, cores }: { count: number; memory: number; cores: number }) =>
-    `${count}: ${device.this} has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`,
-  atOnceOwn: ({ count, memory, cores }: { count: number; memory: number; cores: number }) =>
-    `Your own number. The default is ${count}: ${device.this} has ${memory} GB and ${cores} cores.`,
+  atOnceNote: (n: number, { count, memory, cores }: { count: number; memory: number; cores: number }) => {
+    if (n === count) return `${n}: ${device.this} has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`
+    if (n === 1) return `1: one at a time. The calmest ${device.this} can be.`
+    if (n < count) return `${n}: fewer than ${device.this} could carry.`
+    if (n <= count + 2) return `${n}: a little more than ${device.this}’s ${memory} GB suggests. Tests may slow down.`
+    return `${n}: well past what ${device.this}’s ${memory} GB suggests. Expect it to run hot.`
+  },
+  atOnceMark: ({ count }: { count: number }) => `${count} · ${device.this}`,
   loadTitle: `Show how hard ${device.this} works`,
   loadNote: 'CPU and memory in the bar, and how much of each Althar’s work uses.',
   badge: `Count them on ${device.count ?? 'the icon'}`,
@@ -586,7 +590,7 @@ export function SettingsView({
                   machine={atOnce.atOnce.machine}
                   most={MOST_AT_ONCE}
                   onChange={atOnce.set}
-                  text={{ why: text.atOnceWhy, own: text.atOnceOwn }}
+                  text={{ note: text.atOnceNote, mark: text.atOnceMark }}
                 />
               )}
               <SettingSwitch
