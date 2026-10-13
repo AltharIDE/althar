@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 
 import { Effect } from 'effect'
 
-import { asNode } from './process'
+import { adapterNode, asNode } from './process'
 import type { AgentDefinition } from './registry'
 
 /*
@@ -14,7 +14,7 @@ import type { AgentDefinition } from './registry'
 /** The first version number in what a CLI printed. */
 export const versionIn = (output: string): string | null => /\d+\.\d+(?:\.\d+)?/.exec(output)?.[0] ?? null
 
-export const agentVersion = (agent: AgentDefinition, node: string = process.execPath): Effect.Effect<string | null> => {
+export const agentVersion = (agent: AgentDefinition, node: string = adapterNode()): Effect.Effect<string | null> => {
   const spec = agent.version?.(node)
   if (spec === undefined) return Effect.succeed(null)
   return Effect.callback<string | null>((resume) => {

@@ -5,6 +5,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Choices } from '../../primitives/Choices/Choices'
 import { IconButton } from '../../primitives/IconButton/IconButton'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Select } from '../../primitives/Select/Select'
 import { Switch } from '../../primitives/Switch/Switch'
 import s from './Preferences.module.css'
@@ -134,6 +135,84 @@ export function KeepAwake({ on, onChange, onBattery, onBatteryChange, text }: Ke
         </div>
       }
     />
+  )
+}
+
+/* ---- agents at once ------------------------------------------------------------- */
+
+/** The machine the default comes from: how many it runs at once by default, its memory in GB and its cores. */
+export interface AtOnceMachine {
+  readonly count: number
+  readonly memory: number
+  readonly cores: number
+}
+
+export interface AgentsAtOnceText {
+  title: string
+  /** Why the default is what it is, where it is the default: 4, as this Mac has 16 GB and 10 cores. */
+  why: (machine: AtOnceMachine) => string
+  /** Where the person set their own number: what the default would be, and why. */
+  own: (machine: AtOnceMachine) => string
+  /** Goes back to the default. */
+  reset: string
+}
+
+export const agentsAtOnceText: AgentsAtOnceText = {
+  title: 'Agents at once',
+  why: ({ count, memory, cores }) => `${count}: this Mac has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`,
+  own: ({ count, memory, cores }) => `Your own number. The default is ${count}: this Mac has ${memory} GB and ${cores} cores.`,
+  reset: 'Use the default',
+}
+
+export interface AgentsAtOnceProps {
+  /** How many tasks' agents work at once now: the person's number, else the default. */
+  count: number
+  /** It is the person's own number, not the default. */
+  own: boolean
+  /** The default, and the machine it comes from. */
+  machine: AtOnceMachine
+  /** The most the person can choose. */
+  most?: number
+  /** A number of their own; null goes back to the default. */
+  onChange: (count: number | null) => void
+  text?: Partial<AgentsAtOnceText>
+}
+
+/**
+ * How many tasks' agents work at once on this machine, and why: the
+ * default, from its memory and cores, or the person's own number, with the
+ * way back to the default. It says nothing of what runs now: Settings stays
+ * calm.
+ */
+export function AgentsAtOnce({ count, own, machine, most = 16, onChange, text }: AgentsAtOnceProps) {
+  const t = { ...agentsAtOnceText, ...text }
+  return (
+    <SettingRow
+      title={t.title}
+      note={
+        own ? (
+          <>
+            {t.own(machine)}{' '}
+            <LinkButton className={s.reset} onClick={() => onChange(null)}>
+              {t.reset}
+            </LinkButton>
+          </>
+        ) : (
+          t.why(machine)
+        )
+      }
+      glyph={<Icon name="agents" size={15} />}
+    >
+      {() => (
+        <Select
+          label={t.title}
+          options={Array.from({ length: most }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }))}
+          value={String(count)}
+          onChange={(next) => onChange(Number(next))}
+          width={72}
+        />
+      )}
+    </SettingRow>
   )
 }
 

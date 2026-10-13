@@ -4,7 +4,7 @@ import { isAbsolute, join, relative, sep } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
 import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
-import { type AgentDefinition, signOut } from '@althar/provider-adapters'
+import { adapterNode, type AgentDefinition, signOut } from '@althar/provider-adapters'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -223,7 +223,7 @@ export class Accounts extends Context.Service<
         Effect.gen(function* () {
           const definition = definitionOf(account.agentId)
           const logout = definition?.signIn.logout
-          if (definition !== undefined && logout !== undefined && !(yield* signOut(definition, process.execPath, env(account))))
+          if (definition !== undefined && logout !== undefined && !(yield* signOut(definition, adapterNode(), env(account))))
             return yield* new SignOutFailed({
               line: `${definition.home.variable}=${quoted(folder)} ${logout.line}`,
             })

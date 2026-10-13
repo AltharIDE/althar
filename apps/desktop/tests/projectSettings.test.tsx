@@ -127,6 +127,61 @@ describe('a project’s settings', () => {
     expect(panel.getByRole('textbox', { name: 'Name' })).toHaveProperty('value', 'meridian')
   })
 
+  it('shows the notes its coordinator keeps, and drops one that no longer holds', async () => {
+    const notes = [
+      {
+        id: 'note_1',
+        body: 'Issue drafts need an approval card, on every tracker.',
+        createdAt: '2026-10-01T09:00:00.000Z',
+        keptBy: 'coordinator' as const,
+      },
+      {
+        id: 'note_2',
+        body: 'Dependency setup runs outside the sandbox.',
+        createdAt: '2026-10-02T09:00:00.000Z',
+        keptBy: 'coordinator' as const,
+      },
+    ]
+    let kept = notes
+    const { client } = windowAt('/projects/p1', {
+      getProjectNotes: vi.fn(async () => kept),
+      dropProjectNote: vi.fn(async (_projectId: string, noteId: string) => {
+        kept = kept.filter((note) => note.id !== noteId)
+      }),
+    })
+    const panel = await openSettings()
+    // At a glance: how many, and the latest.
+    const module = await panel.findByRole('button', { name: /^Notes/ })
+    expect(module.textContent).toContain('2')
+    expect(module.textContent).toContain('Dependency setup runs outside the sandbox.')
+    await userEvent.click(module)
+    expect(panel.getByRole('heading', { name: 'Notes', level: 2 })).toBeTruthy()
+    await userEvent.click(panel.getByRole('button', { name: 'Remove “Issue drafts need an approval card, on every tracker.”' }))
+    await waitFor(() => expect(client.dropProjectNote).toHaveBeenCalledWith('p1', 'note_1'))
+    await waitFor(() => expect(panel.getAllByRole('listitem')).toHaveLength(1))
+    expect(panel.getByRole('button', { name: 'Remove “Dependency setup runs outside the sandbox.”' })).toBe(document.activeElement)
+  })
+
+  it('puts a note back and says why when dropping it doesn’t hold', async () => {
+    const note = {
+      id: 'note_1',
+      body: 'Issue drafts need an approval card.',
+      createdAt: '2026-10-01T09:00:00.000Z',
+      keptBy: 'coordinator' as const,
+    }
+    windowAt('/projects/p1', {
+      getProjectNotes: vi.fn(async () => [note]),
+      dropProjectNote: vi.fn(async () => {
+        throw new ApiError({ reason: 'NotFound', message: 'That project isn’t there any more.' })
+      }),
+    })
+    const panel = await openSettings()
+    await userEvent.click(await panel.findByRole('button', { name: /^Notes/ }))
+    await userEvent.click(panel.getByRole('button', { name: 'Remove “Issue drafts need an approval card.”' }))
+    expect(await panel.findByRole('alert')).toHaveProperty('textContent', 'That project isn’t there any more.')
+    await waitFor(() => expect(panel.getAllByRole('listitem')).toHaveLength(1))
+  })
+
   it('says where each thing stands, and opens its repositories and its rules', async () => {
     const { router } = windowAt('/projects/p1')
     let panel = await openSettings()

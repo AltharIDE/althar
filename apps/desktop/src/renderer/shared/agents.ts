@@ -1,4 +1,7 @@
+import type { Queued } from '@althar/contracts'
 import { Brand } from '@althar/ui'
+
+import { device } from './device'
 
 /*
  * How an agent is drawn: its mark, and its words. Who works is named by
@@ -15,6 +18,24 @@ export const brandOf = (agentId: string): Brand | undefined => BRANDS[agentId]
 
 /** What a step held for a usage limit waits for: the agent, and when it is back. */
 export const waitsWords = (agent: string, at: string) => `Waits for ${agent}, back at ${at}`
+
+/**
+ * What work waiting for a free agent waits for (ADR-032): every agent this
+ * computer runs at once is busy. More busy than that, after the person
+ * lowered the number, says both.
+ */
+export const queuedWords = ({ busy, atOnce }: Queued, where: string = device.this) =>
+  busy > atOnce
+    ? `Waiting: ${busy} agents busy on ${where}, which runs ${atOnce} at once`
+    : `Waiting: ${busy} of ${atOnce} agents busy on ${where}`
+
+/**
+ * The same, short, for a project's tasks on the home, which is this
+ * computer's anyway: how many wait, and for what, in the line under the
+ * project's name.
+ */
+export const queuedOfWords = (n: number, { busy, atOnce }: Queued) =>
+  `${n === 1 ? 'Waiting' : `${n} waiting`}: ${busy > atOnce ? `${busy} agents busy, ${atOnce} at once` : `${busy} of ${atOnce} agents busy`}`
 
 /** What an agent signs in to in the browser, as the window names it: the plan, and the site that asks. */
 const SIGN_IN: Readonly<Record<string, { readonly plan: string; readonly host: string }>> = {

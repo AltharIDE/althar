@@ -17,6 +17,7 @@ import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Busy } from './Busy'
 import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
@@ -37,7 +38,8 @@ import {
 } from './conflicts'
 import { coAuthorOn, creditBranch, type Memory, recallMade, rememberMade, withoutAgentCredit } from './credit'
 import { envelope } from './envelope'
-import { CantMerge, ChangedSinceSeen, type GitFailed, NotFound, PushRefused } from './errors'
+import { evidencePaths, taskShown } from './evidence'
+import { CantMerge, ChangedSinceSeen, GitFailed, NotFound, PushRefused } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
 import { forkOf } from './forks'
 import {
@@ -77,7 +79,7 @@ import {
   standing,
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
-import { Policies, resolvesConflictsFor } from './Policies'
+import { Policies, resolvesConflictsFor, ruleSetOf } from './Policies'
 import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
@@ -242,6 +244,7 @@ type Store =
   | Agents
   | Policies
   | Live
+  | Busy
 
 interface RoundRow {
   readonly id: string
@@ -257,7 +260,18 @@ interface RoundRow {
   readonly pushedHead: string | null
   readonly askedSequence: number | null
   readonly updatedAt: string
+  /** The ask it waits to put to the lead until a place among the agents at work on this machine frees; null once asked. */
+  readonly waiting: string | null
 }
+
+/** What a round keeps while it waits for a place to ask its lead: which attempt, what it asks and why, and since when. */
+const RoundWaiting = Schema.Struct({
+  attempt: Schema.Int,
+  body: Schema.String,
+  why: Schema.Record(Schema.String, Schema.Unknown),
+  since: Schema.String,
+})
+type RoundWaiting = typeof RoundWaiting.Type
 
 /** One of a task's repositories here: its worktree and branch, the default branch it merges into, and whether it has a pull request. */
 interface HereRow {
@@ -301,6 +315,19 @@ export class Changes extends Context.Service<
      * that isn't on the branch any more isn't pushed.
      */
     push(taskId: string, head: string, url?: string): Effect.Effect<{ readonly change: ChangeSummary }, unknown>
+    /**
+     * Replaces the commits on the task's pull request with its branch here, up
+     * to the commit the person saw, after its published commits were rewritten:
+     * a force push, theirs to confirm, and only while the pull request is still
+     * at `replaces`, the head they saw it at.
+     */
+    replace(taskId: string, head: string, replaces: string, url?: string): Effect.Effect<{ readonly change: ChangeSummary }, unknown>
+    /**
+     * What to tell the lead so its branch takes the pull request's commits in
+     * by merging, and a plain push works again: the pull request's head is
+     * fetched here first.
+     */
+    mergeNote(taskId: string, url?: string): Effect.Effect<{ readonly note: string; readonly head: string }, unknown>
     /** Marks the task's draft pull request ready for review: the person's to do. */
     markReady(taskId: string, url?: string): Effect.Effect<void, unknown>
     /**
@@ -403,6 +430,7 @@ export class Changes extends Context.Service<
       const instance = yield* Instance
       const connections = yield* Connections
       const sessions = yield* Sessions
+      const busy = yield* Busy
       const toolServer = yield* ToolServer
       const agents = yield* Agents
       const live = yield* Live
@@ -523,6 +551,8 @@ export class Changes extends Context.Service<
                 AND json_extract(content, '$.step') = 'review' ORDER BY sequence DESC LIMIT 1) AS verdict,
               (SELECT count(*) FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
                 AND json_extract(content, '$.step') = 'review') AS rounds`
+          // What the lead showed across its steps, and what it last said it couldn't.
+          const { evidence, unverified } = yield* taskShown(threadId)
           // An agent may sign its summary as it signs a commit; that stays here too.
           const summary = lead?.summary ?? null
           return bodyOf({
@@ -532,6 +562,8 @@ export class Changes extends Context.Service<
               const location = JSON.parse(finding.location) as { file?: string | null; line?: number | null }
               return { ...finding, file: location.file ?? null, line: location.line ?? null }
             }),
+            evidence,
+            unverified,
             issue,
             template: repository.template,
             written: written === undefined || written.text === null ? null : withoutAgentCredit(written.text, agentNames),
@@ -673,8 +705,9 @@ export class Changes extends Context.Service<
           const from = repository === own ? undefined : own
           // The repository as its host names it, not as the remote spells it: Bitbucket Data Center's has `scm/` in front.
           const path = repository.path
-          // Althar pushes what the lead committed, never what it left lying in the worktree.
-          const left = yield* uncommittedFiles(task.path)
+          // Althar pushes what the lead committed, never what it left lying in the worktree; a screenshot it handed as evidence isn't left.
+          const pictures = yield* evidencePaths(input.taskId)
+          const left = (yield* uncommittedFiles(task.path)).filter((file) => !pictures(task.path, file))
           const base = task.baseCommit ?? task.baseRef ?? own.defaultBranch
           if ((yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing', left } as const
           const [sent] = yield* sql<{ head: string | null }>`
@@ -900,12 +933,14 @@ export class Changes extends Context.Service<
           yield* touchCard(link.taskId)
         })
 
-      /** The worktree of the repository a pull request is from; the task's first, where the record doesn't say. */
+      /** The worktree of the repository a pull request is from, with its default branch and the task's thread; the task's first, where the record doesn't say. */
       const worktreeOf = (taskId: string, url: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [workspace] = yield* sql<{ path: string; branch: string }>`
-            SELECT w.path, w.branch FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+          const [workspace] = yield* sql<{ path: string; branch: string; base: string; threadId: string }>`
+            SELECT w.path, w.branch, coalesce(b.default_base_ref, w.base_ref) AS base,
+              (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
             ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${url} LIMIT 1) DESC,
               b.created_at, b.rowid
@@ -1066,39 +1101,161 @@ export class Changes extends Context.Service<
           yield* tellLead(link, told)
         })
 
-      const push = (taskId: string, seen: string, url?: string) =>
+      /**
+       * Where the task's pull request takes its commits from and goes to: its
+       * repository's worktree here, where a push of it goes on the host, and
+       * the commit Althar last pushed there.
+       */
+      const pushingTo = (taskId: string, url?: string) =>
         Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
           const { link, snapshot, host, repository } = yield* current(taskId, url)
           const workspace = yield* worktreeOf(taskId, snapshot.url)
           if (workspace === undefined) return yield* new NotFound({ kind: 'task’s worktree', id: taskId })
-          // What the person saw, and nothing the lead committed after: one rewritten away since isn't pushed.
           // A pull request from a fork into the repository it was forked from takes its commits on the fork.
-          const sent = yield* sentTo(link.projectId, snapshot.url)
           const pushTarget = yield* pushTargetOf(host, repository, workspace.path)
-          const tip = yield* remoteTip(workspace.path, pushTarget, workspace.branch)
-          const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [snapshot.headSha, sent, tip])
-          // The commit seen, or what crediting made of it, is on the branch still. A push the lead asked for that showed it shows what is.
-          if (!(yield* onHead(workspace.path, seen)) && !(yield* onHead(workspace.path, head))) {
-            // What Althar last pushed before what it last saw: a pull request read before that push is behind it.
-            yield* movedAsked(taskId, snapshot.url, workspace.path, tip, [sent, snapshot.headSha]).pipe(
-              Effect.catchCause((cause) => Effect.logWarning('Could not show the branch as it is now', cause)),
-            )
-            return yield* new ChangedSinceSeen({ taskId, what: 'branch' })
-          }
-          yield* pushTo(workspace.path, pushTarget, workspace.branch, head)
-          yield* settle
+          return { link, snapshot, workspace, pushTarget, sent: yield* sentTo(link.projectId, snapshot.url) }
+        })
+
+      /**
+       * What the person saw, or what crediting made of it, still on the branch:
+       * one rewritten away since isn't pushed. A push the lead asked for that
+       * showed it shows what is on it now.
+       */
+      const stillOnHead = (
+        taskId: string,
+        url: string,
+        path: string,
+        seen: string,
+        head: string,
+        tip: string | null,
+        known: ReadonlyArray<string | null>,
+      ) =>
+        Effect.gen(function* () {
+          if ((yield* onHead(path, seen)) || (yield* onHead(path, head))) return
+          yield* movedAsked(taskId, url, path, tip, known).pipe(
+            Effect.catchCause((cause) => Effect.logWarning('Could not show the branch as it is now', cause)),
+          )
+          return yield* new ChangedSinceSeen({ taskId, what: 'branch' })
+        })
+
+      /** Pushed: the record and the pull request's head say so, for the card to count from; the host's next look has the last word. */
+      const pushedTo = (taskId: string, link: LinkRow, snapshot: Snapshot, path: string, seen: string, head: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
           yield* sql`UPDATE repository_changes SET head_commit = ${head}, updated_at = ${yield* timestamp}, revision = revision + 1
             WHERE pull_request_url = ${snapshot.url} AND project_id = ${link.projectId}`
-          // The pull request's head is what was pushed, for the card to count from; the host's next look has the last word.
           yield* saveSnapshot(link, { ...snapshot, headSha: head })
           // What the lead asked the person to push that went up: its request says so, and the lead hears it.
-          yield* pushedAsked(link, snapshot.url, workspace.path, [seen, head]).pipe(
+          yield* pushedAsked(link, snapshot.url, path, [seen, head]).pipe(
             Effect.catchCause((cause) => Effect.logWarning('Could not tell the lead what was pushed', cause)),
           )
           yield* news(taskId)
           wakeNow(taskId)
           return { change: yield* summaryOf({ ...link, snapshot: JSON.stringify({ ...snapshot, headSha: head }) }) }
+        })
+
+      const push = (taskId: string, seen: string, url?: string) =>
+        Effect.gen(function* () {
+          const { link, snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
+          const tip = yield* remoteTip(workspace.path, pushTarget, workspace.branch)
+          const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [snapshot.headSha, sent, tip])
+          // What Althar last pushed before what it last saw: a pull request read before that push is behind it.
+          yield* stillOnHead(taskId, snapshot.url, workspace.path, seen, head, tip, [sent, snapshot.headSha])
+          // Refused, it says why in a sentence, not git's hint: the pull request has commits the branch doesn't.
+          yield* pushTo(workspace.path, pushTarget, workspace.branch, head).pipe(
+            Effect.catchTag('GitFailed', (failed) => refusal(taskId, nameOf(snapshot), failed)),
+          )
+          yield* settle
+          return yield* pushedTo(taskId, link, snapshot, workspace.path, seen, head)
+        })
+
+      /**
+       * Replaces the commits on the task's pull request with its branch here,
+       * up to the commit the person saw, once its published commits were
+       * rewritten. A force push, which the project's rules keep for the
+       * person: their press, confirmed on the card, is their answer, and the
+       * record says so. Only while the pull request is still at `replaces`,
+       * the head they saw it at (`--force-with-lease`), so what anyone else
+       * pushed meanwhile is never lost. Where the rules never allow a force
+       * push, nothing is pushed.
+       */
+      const replace = (taskId: string, seen: string, replaces: string, url?: string) =>
+        Effect.gen(function* () {
+          if (!/^[0-9a-f]{40,64}$/.test(replaces)) return yield* new ChangedSinceSeen({ taskId })
+          const sql = yield* SqlClient.SqlClient
+          const { link, snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
+          const where = nameOf(snapshot)
+          const { rules } = yield* (yield* Policies).current(link.projectId)
+          if (ruleSetOf(rules).never.includes('force-push')) return yield* new PushRefused({ taskId, why: 'never', remote: where })
+          const { head, settle } = yield* credited(workspace.path, workspace.branch, seen, [replaces, sent])
+          yield* stillOnHead(taskId, snapshot.url, workspace.path, seen, head, null, [replaces, sent])
+          yield* pushTo(workspace.path, pushTarget, workspace.branch, head, replaces).pipe(
+            Effect.catchTag('GitFailed', (failed) =>
+              /\(stale info\)/i.test(failed.stderr)
+                ? Effect.fail(new PushRefused({ taskId, why: 'moved', remote: where }))
+                : refusal(taskId, where, failed),
+            ),
+          )
+          yield* settle
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* change('external_links', link.id, { updatedAt: yield* timestamp })
+              yield* fact({
+                projectId: link.projectId,
+                aggregateType: 'external_link',
+                aggregateId: link.id,
+                revision,
+                type: 'external_link.force_pushed',
+                // The person's own press answers the force push the rules keep for them.
+                payload: { url: snapshot.url, replaced: replaces, head, rule: 'force-push', answeredBy: 'person' },
+                actorId: instance.personId,
+              })
+            }),
+          )
+          yield* addItem({ projectId: link.projectId, threadId: workspace.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `Replaced the commits on ${where} with the branch here.`,
+            description: `As you confirmed: a force push, only from ${replaces.slice(0, 12)}, where you saw it.`,
+          })
+          return yield* pushedTo(taskId, link, snapshot, workspace.path, seen, head)
+        })
+
+      /**
+       * What the lead is told so its branch takes the pull request's commits
+       * in by merging, and a plain push works again. The pull request's head
+       * is fetched here first, since the lead can't reach the host. Where the
+       * lead rewrote what Althar pushed, it starts again from that and keeps
+       * its fixes; where someone else pushed, it merges what they pushed.
+       */
+      const mergeNote = (taskId: string, url?: string) =>
+        Effect.gen(function* () {
+          const { snapshot, workspace, pushTarget, sent } = yield* pushingTo(taskId, url)
+          const ref = `refs/althar/pull-request/${workspace.branch}`
+          const head = yield* fetchInto(workspace.path, pushTarget, workspace.branch, ref)
+          if (head === null)
+            return yield* new GitFailed({
+              args: ['fetch', workspace.branch],
+              cwd: workspace.path,
+              stderr: `Couldn't fetch ${workspace.branch} from the host.`,
+            })
+          const where = nameOf(snapshot)
+          const short = head.slice(0, 12)
+          const rewritten = head === sent && !(yield* onHead(workspace.path, head))
+          // A hard reset loses what isn't committed: the note has it committed, and the backup checked, before any reset.
+          const left = rewritten ? yield* uncommittedFiles(workspace.path).pipe(Effect.orElseSucceed(() => [])) : []
+          const saved = `${workspace.branch}-rewritten`
+          const note = rewritten
+            ? [
+                `Your branch ${workspace.branch} was rewritten after it was pushed, so ${where} won't take a plain push of it: its commits are no longer under yours. ${where} is at ${short}. Put your work back on top of it, keeping your fixes, in this order:`,
+                `1. Commit everything not committed yet, so the reset below can't lose it${left.length === 0 ? '' : ` (not committed now: ${left.join(', ')})`}. \`git status --short\` must then print nothing.`,
+                `2. Save where you are with \`git branch ${saved}\` (another name, if that one is taken, used below in its place), and check \`git rev-parse ${saved} HEAD\` prints the same commit twice.`,
+                `3. Only once both hold: reset to the pull request's head with \`git reset --hard ${head}\`, and merge ${workspace.base} into it with \`git merge ${workspace.base}\`.`,
+                `4. Bring in each change of ${saved} that isn't there yet as new commits: \`git diff HEAD ${saved}\` shows what differs.`,
+                `Merge, never rebase, amend or squash commits that are pushed. Run the checks, commit, and say so: Althar pushes it as a plain push. Keep ${saved} until it has.`,
+              ].join('\n')
+            : `${where} has commits your branch ${workspace.branch} doesn't: someone pushed to it, such as with the host's "Update branch". Althar fetched them here as ${ref}, at ${short}. Merge them into your branch with \`git merge ${head}\`, settle any conflict so both sides' changes hold, run the checks, and commit the merge. Merge, never rebase. Then say so: Althar pushes it as a plain push.`
+          return { note, head }
         })
 
       const markReady = (taskId: string, url?: string) =>
@@ -1735,11 +1892,12 @@ export class Changes extends Context.Service<
       /* ---- A lead resolving a conflict on its own, where the project says to (conflicts.ts) ---- */
 
       const decodeConflicts = Schema.decodeUnknownEffect(Schema.fromJsonString(Conflicts))
+      const decodeWaiting = Schema.decodeUnknownEffect(Schema.fromJsonString(RoundWaiting))
       const decodeEnded = Schema.decodeUnknownEffect(Schema.fromJsonString(Ended))
 
       const roundColumns = (sql: SqlClient.SqlClient) =>
         sql`c.id, c.project_id, c.task_id, t.id AS thread_id, c.pull_request_url AS url, c.conflicts, c.attempt, c.state,
-            c.failure, c.ended, c.pushed_head, c.asked_sequence, c.updated_at`
+            c.failure, c.ended, c.pushed_head, c.asked_sequence, c.updated_at, c.waiting`
 
       /** The task's round under way, resolving or waiting for its checks: one at most. */
       const underWay = (taskId: string) =>
@@ -1760,7 +1918,7 @@ export class Changes extends Context.Service<
                   SELECT ${columns} FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task' WHERE c.id = ${where.id}`
               : yield* sql<RoundRow>`
                   SELECT ${columns} FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
-                  WHERE t.id = ${where.threadId} AND c.state = 'resolving'`
+                  WHERE t.id = ${where.threadId} AND c.state = 'resolving' AND c.waiting IS NULL`
           return round
         })
 
@@ -1855,7 +2013,12 @@ export class Changes extends Context.Service<
             body,
             quiet: true,
           })
-          yield* reviseRound(round, 'conflict_resolution.asked', { attempt, askedSequence: accepted.sequence }, { attempt, ...why })
+          yield* reviseRound(
+            round,
+            'conflict_resolution.asked',
+            { attempt, askedSequence: accepted.sequence, waiting: null },
+            { attempt, ...why },
+          )
           if (Option.isSome(yield* sessions.running(round.threadId))) return
           // Started apart, so what holds the task's pull request isn't held while an agent starts.
           yield* Effect.forkIn(
@@ -1872,7 +2035,11 @@ export class Changes extends Context.Service<
           )
         })
 
-      /** A conflict the lead is to resolve: recorded, said in the thread, and asked of it. */
+      /**
+       * A conflict the lead is to resolve: recorded, said in the thread, and
+       * asked of it, once the lead has a place among the agents at work on
+       * this machine; until then the round keeps its ask, and waits.
+       */
       const beginRound = (
         task: { readonly projectId: ProjectId; readonly taskId: string; readonly threadId: string },
         url: string | null,
@@ -1881,44 +2048,78 @@ export class Changes extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const id = yield* newId(Ids.conflictResolution)
-          yield* sql.withTransaction(
-            Effect.gen(function* () {
-              const at = yield* timestamp
-              yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
-                id,
-                projectId: task.projectId,
-                taskId: task.taskId,
-                pullRequestUrl: url,
-                conflicts: JSON.stringify(conflicts),
-                attempt: 1,
-                state: 'resolving',
-                createdAt: at,
-                updatedAt: at,
-              })}`
-              yield* fact({
-                projectId: task.projectId,
-                aggregateType: 'conflict_resolution',
-                aggregateId: id,
-                revision: 1,
-                type: 'conflict_resolution.started',
-                payload: { url, conflicts: conflicts.map((one) => ({ repository: one.repository, branch: one.branch, files: one.files })) },
-                actorId: instance.systemId,
-              })
-            }),
-          )
           const place = yield* placeOf(task.taskId, url)
+          const body = noteFor(conflicts, place, null)
+          const room = yield* busy.enter(task.taskId, (room) =>
+            sql.withTransaction(
+              Effect.gen(function* () {
+                const at = yield* timestamp
+                yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+                  id,
+                  projectId: task.projectId,
+                  taskId: task.taskId,
+                  pullRequestUrl: url,
+                  conflicts: JSON.stringify(conflicts),
+                  attempt: 1,
+                  state: 'resolving',
+                  waiting: room ? null : JSON.stringify({ attempt: 1, body, why: {}, since: at } satisfies RoundWaiting),
+                  createdAt: at,
+                  updatedAt: at,
+                })}`
+                yield* fact({
+                  projectId: task.projectId,
+                  aggregateType: 'conflict_resolution',
+                  aggregateId: id,
+                  revision: 1,
+                  type: 'conflict_resolution.started',
+                  payload: {
+                    url,
+                    conflicts: conflicts.map((one) => ({ repository: one.repository, branch: one.branch, files: one.files })),
+                    ...(room ? {} : { waiting: true }),
+                  },
+                  actorId: instance.systemId,
+                })
+                return room
+              }),
+            ),
+          )
           const [own] = yield* sql<{ resolveConflicts: number | null }>`SELECT resolve_conflicts FROM tasks WHERE id = ${task.taskId}`
+          const as = own?.resolveConflicts === 1 ? 'as you said for this task' : 'as the project’s rules say'
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
             title: `${place.change ?? 'It'} conflicts with ${whereLine(conflicts)}.`,
-            description:
-              own?.resolveConflicts === 1
-                ? 'Althar asked the lead to resolve it, as you said for this task.'
-                : 'Althar asked the lead to resolve it, as the project’s rules say.',
+            description: room
+              ? `Althar asked the lead to resolve it, ${as}.`
+              : `Althar asks the lead to resolve it, ${as}, once an agent is free on this computer.`,
           })
           yield* touchCard(task.taskId)
-          yield* askLead({ id, ...task }, 1, noteFor(conflicts, place, null))
+          if (room) yield* askLead({ id, ...task }, 1, body)
+        })
+
+      /** Every round that waits for a place to ask its lead, with since when, and what asks it once it has one. */
+      const roundsWaiting = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const rows = yield* sql<RoundRow>`
+          SELECT ${roundColumns(sql)} FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
+          JOIN tasks k ON k.id = c.task_id JOIN projects p ON p.id = c.project_id
+          WHERE c.state = 'resolving' AND c.waiting IS NOT NULL AND k.state = 'open' AND p.archived_at IS NULL`
+        return yield* Effect.forEach(rows, (round) =>
+          Effect.map(decodeWaiting(round.waiting ?? ''), (waited) => ({
+            taskId: round.taskId,
+            since: waited.since,
+            start: provide(locked(round.taskId)(askWaiting(round.id))),
+          })),
+        )
+      })
+
+      /** A round that waited for a place, asked of its lead now it has one; nothing where it no longer waits, as one the person stopped. */
+      const askWaiting = (id: string) =>
+        Effect.gen(function* () {
+          const round = yield* roundOf({ id })
+          if (round === undefined || round.state !== 'resolving' || round.waiting === null) return
+          const waited = yield* decodeWaiting(round.waiting)
+          yield* askLead(round, waited.attempt, waited.body, waited.why)
         })
 
       /** Changes a round's record, with its fact. */
@@ -2279,14 +2480,28 @@ export class Changes extends Context.Service<
             const log = yield* host.checkLog(repository, check).pipe(Effect.orElseSucceed(() => null))
             if (log !== null) logs.push(logOf(check.name, log))
           }
-          yield* reviseRound(round, 'conflict_resolution.checks_failed', { state: 'resolving' }, { failing: sum.failing })
+          // The lead takes a place among the agents at work on this machine to fix them, or the round keeps its ask and waits for one.
+          const body = fixNoteFor(place, { failing: sum.failing, logs })
+          const why = { failing: sum.failing }
+          const room = yield* busy.enter(round.taskId, (room) =>
+            Effect.gen(function* () {
+              const since = yield* timestamp
+              const waiting = room
+                ? {}
+                : { waiting: JSON.stringify({ attempt: round.attempt + 1, body, why, since } satisfies RoundWaiting) }
+              yield* reviseRound(round, 'conflict_resolution.checks_failed', { state: 'resolving', ...waiting }, why)
+              return room
+            }),
+          )
           yield* addItem(thread, 'notice', {
             source: 'runtime',
             severity: 'info',
             title: `The checks failed on what Althar pushed to ${where}: ${sum.failing.join(', ')}.`,
-            description: 'Althar asked the lead to fix them.',
+            description: room
+              ? 'Althar asked the lead to fix them.'
+              : 'Althar asks the lead to fix them once an agent is free on this computer.',
           })
-          yield* askLead(round, round.attempt + 1, fixNoteFor(place, { failing: sum.failing, logs }), { failing: sum.failing })
+          if (room) yield* askLead(round, round.attempt + 1, body, why)
           return true
         })
 
@@ -2375,12 +2590,14 @@ export class Changes extends Context.Service<
 
       yield* Effect.forkScoped(provide(Stream.runForEach(yield* live.subscribe, onLive)))
 
-      // A round an earlier launch left under way has no lead on it now: what the branch holds says how it ended.
+      // A round an earlier launch left under way has no lead on it now: what the branch holds says how it ended. One that waited
+      // for a place to ask its lead still waits, and is asked once it has one.
       yield* Effect.forkScoped(
         provide(
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
-            const open = yield* sql<{ id: string; taskId: string }>`SELECT id, task_id FROM conflict_resolutions WHERE state = 'resolving'`
+            const open = yield* sql<{ id: string; taskId: string }>`
+              SELECT id, task_id FROM conflict_resolutions WHERE state = 'resolving' AND waiting IS NULL`
             for (const round of open)
               yield* locked(round.taskId)(settleRound(round.id, { why: 'Althar stopped while the lead was resolving it.' }))
             // Waiting for checks on a pull request no longer listened to, nothing would end it.
@@ -2392,6 +2609,8 @@ export class Changes extends Context.Service<
           }),
         ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look at the conflicts leads were resolving', cause))),
       )
+
+      yield* busy.queue(provide(roundsWaiting))
 
       // What an earlier launch was doing outside when it stopped is uncertain until read back or asked for again.
       yield* provide(reconcileOutward).pipe(
@@ -2760,6 +2979,8 @@ export class Changes extends Context.Service<
       return Changes.of({
         publish: (input) => provide(publish(input)),
         push: (taskId, head, url) => provide(locked(taskId)(push(taskId, head, url))),
+        replace: (taskId, head, replaces, url) => provide(locked(taskId)(replace(taskId, head, replaces, url))),
+        mergeNote: (taskId, url) => provide(locked(taskId)(mergeNote(taskId, url))),
         markReady: (taskId, url) => provide(locked(taskId)(markReady(taskId, url))),
         exclusive: (taskId, effect) => locked(taskId)(effect),
         merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),

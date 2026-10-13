@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 
 import { Effect } from 'effect'
 
-import { asNode } from './process'
+import { adapterNode, asNode } from './process'
 import type { AgentDefinition, PaidBy } from './registry'
 
 export type SignInStatus = 'signed_in' | 'signed_out' | 'unknown'
@@ -21,7 +21,7 @@ export interface SignInCheck {
  */
 export const signInCheck = (
   agent: AgentDefinition,
-  node: string = process.execPath,
+  node: string = adapterNode(),
   /** An account's home, as the agent's environment points at it (ADR-012); none for its usual folder. */
   home: Readonly<Record<string, string>> = {},
 ): Effect.Effect<SignInCheck> =>
@@ -45,7 +45,7 @@ export const signInCheck = (
   })
 
 /** Whether the user is signed in to an agent (see `signInCheck`). */
-export const signInStatus = (agent: AgentDefinition, node: string = process.execPath): Effect.Effect<SignInStatus> =>
+export const signInStatus = (agent: AgentDefinition, node: string = adapterNode()): Effect.Effect<SignInStatus> =>
   Effect.map(signInCheck(agent, node), (check) => check.status)
 
 /**
@@ -55,7 +55,7 @@ export const signInStatus = (agent: AgentDefinition, node: string = process.exec
  */
 export const signOut = (
   agent: AgentDefinition,
-  node: string = process.execPath,
+  node: string = adapterNode(),
   home: Readonly<Record<string, string>> = {},
 ): Effect.Effect<boolean> => {
   const logout = agent.signIn.logout

@@ -86,9 +86,11 @@ export const noteFor = (conflicts: ReadonlyArray<Conflict>, place: Place, failur
     place.change === null
       ? "Then say it's ready to merge again."
       : `Fix what the checks find before you commit the merge, so it is all in the merge, and commit nothing else on top of it: Althar pushes that merge alone to ${place.change}. Don't push it yourself.`
+  // A rebase would rewrite what was pushed, and the pull request take no plain push of it.
+  const merge = "Merge, don't rebase: a branch that was pushed can't be rewritten."
   const stuck =
     "If you can't settle a conflict, or the checks fail and you can't fix them, don't commit the merge: undo it with git merge --abort, and say why."
-  return [...(failure === null ? [] : [`The conflict isn't resolved yet: ${failure} Try once more.`]), asked, after, stuck].join(' ')
+  return [...(failure === null ? [] : [`The conflict isn't resolved yet: ${failure} Try once more.`]), asked, merge, after, stuck].join(' ')
 }
 
 /**

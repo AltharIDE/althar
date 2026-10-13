@@ -63,6 +63,11 @@
 .withGlyph .under {
   grid-column: 2 / -1;
 }
+/* back to the default, in the note's own size, after what it says */
+.reset {
+  font-size: inherit;
+}
+
 /* what only matters while the row above is on: a well under its words */
 .well {
   padding: 0 12px;
