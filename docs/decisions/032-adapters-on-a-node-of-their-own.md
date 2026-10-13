@@ -1,4 +1,4 @@
-# ADR-031: The agent adapters run on a Node the app ships, and Althar's binary never runs as Node
+# ADR-032: The agent adapters run on a Node the app ships, and Althar's binary never runs as Node
 
 - **Status:** Accepted
 - **Date:** 2026-10-12

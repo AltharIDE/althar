@@ -262,7 +262,7 @@ type AgentDefinition = {
   pinned versions. Nothing is fetched with `npx` or a similar tool at run
   time. Adapters written for Node run on a Node the packaged app ships, and
   on Electron's own Node in development ([02](02-desktop-runtime.md),
-  ADR-031).
+  ADR-032).
 - Agents the user installs, such as OpenCode, are found by probe, and their
   version is checked against the support matrix.
 - Adding an ACP agent means adding an entry and passing the contract suite.

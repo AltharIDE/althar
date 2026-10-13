@@ -40,7 +40,7 @@ export const childEnvironment = (
 }
 
 /**
- * The Node the bundled adapters run on (ADR-031). The packaged app ships a
+ * The Node the bundled adapters run on (ADR-032). The packaged app ships a
  * Node of its own and names it in ALTHAR_NODE, since Althar's binary doesn't
  * run as Node there (its `runAsNode` fuse is off). Without one, in dev and
  * the tests, it is the binary this runs on: Electron's, run as Node (`asNode`),

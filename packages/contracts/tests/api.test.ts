@@ -104,11 +104,37 @@ describe('the API', () => {
         summary: 'One thing to fix.',
         verdict: 'changes_requested',
         findings: [{ severity: 'major', file: 'src/a.ts', line: 3, claim: 'The retry never stops.' }],
+        evidence: [],
+        unverified: [],
         agentId: 'codex',
         change: null,
       },
     })
     assert.strictEqual(review.kind === 'step_result' && review.content.findings.length, 1)
+    // The lead's, with what it showed: a test run, and what it couldn't show.
+    const implement = decode({
+      ...base,
+      kind: 'step_result',
+      content: {
+        step: 'implement',
+        round: 0,
+        summary: 'Added the retry.',
+        verdict: null,
+        findings: [],
+        evidence: [{ kind: 'test_run', caption: 'The tests', picture: null, command: 'bun test', exit: 0, text: '1 passed', dropped: 0 }],
+        unverified: ['Not tried in Safari'],
+        agentId: null,
+        change: null,
+      },
+    })
+    assert.strictEqual(implement.kind === 'step_result' && implement.content.evidence[0]?.exit, 0)
+    assert.throws(() =>
+      decode({
+        ...base,
+        kind: 'step_result',
+        content: { ...(implement.content as object), evidence: [{ kind: 'video', caption: 'x' }] },
+      }),
+    )
     // Something heard from outside: a comment on the task's pull request, with where it is.
     const heard = decode({
       ...base,
@@ -338,6 +364,8 @@ describe('the API', () => {
               MarkReady: () => Effect.void,
               SetUsageLimit: () => Effect.void,
               GetProjectRules: () => Effect.die('unused'),
+              GetProjectNotes: () => Effect.succeed([]),
+              DropProjectNote: () => Effect.void,
               GetVocabulary: () => Effect.die('unused'),
               RenameProject: () => Effect.die('unused'),
               SetProjectInk: () => Effect.die('unused'),

@@ -32,6 +32,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Document/Document.tsx': 'the fold at the foot of a document',
   'thread/Step/Step.tsx': 'the caret that opens a step',
   'thread/Diff/Diff.tsx': 'a folded stretch of unchanged lines, which opens in place',
+  'thread/Evidence/Evidence.tsx': 'the row of a run or a response, which folds what it printed',
   'screens/Home/Home.tsx': 'the line that folds what the loop did since you looked',
   /* an option in a list or a rail */
   'composer/ModelPick/ModelPick.tsx': 'the picker and its options',

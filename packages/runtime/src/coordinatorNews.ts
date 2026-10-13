@@ -26,7 +26,8 @@ import { PlanParameters, type PlanStep, type TaskEnd } from './Runs'
 /** The plan events the coordinator hears of, by what each did. */
 const HEARD = ['task_plan.changed', 'task_plan.held', 'task_plan.accepted', 'task_plan.declined'] as const
 
-const endWords = (end: TaskEnd | null | undefined) => {
+/** What a plan does when its steps are done, in words. */
+export const endWords = (end: TaskEnd | null | undefined) => {
   switch (end) {
     case 'draft':
       return 'it ends as a draft pull request'
@@ -58,6 +59,22 @@ export const modelNamer = Effect.gen(function* () {
 /** A step's effort, by the id the coordinator's tools take; without one, it starts at the person's default for its model, or the model's own. */
 const effortWords = (effort: string | null | undefined) => (effort == null ? 'default effort' : `effort ${effort}`)
 
+/** Who does a plan's steps, in words: its lead, and its reviewer or no review, each named as `named` says. */
+export const teamOf = (parameters: PlanParameters, named: ModelNamer) => {
+  // Every plan has its lead; a review may be left out, or skipped.
+  const review = parameters.steps.find((step) => step.key === 'review' && !step.skipped)
+  return [
+    ...parameters.steps.filter((step) => step.key === 'implement').map((lead) => `${named(lead)} leads`),
+    review === undefined ? 'no review' : `${named(review)} reviews`,
+  ].join(', ')
+}
+
+/** A step's model, and its effort where it has one: how a plan is told to a coordinator taking it over. */
+export const withEffort =
+  (modelOf: ModelNamer): ModelNamer =>
+  (step) =>
+    step.effort == null ? modelOf(step) : `${modelOf(step)} (${effortWords(step.effort)})`
+
 /**
  * The coordinator's news since its last turn on the thread, or null with
  * none: nothing changed, or it has never spoken. Read in the transaction
@@ -80,18 +97,11 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
     if (events.length === 0 && drafts.length === 0) return null
 
     /** Who does a plan's steps; each step's effort too where it isn't what the other plan gives it, as its ending is said only where it changed. */
-    const team = (parameters: PlanParameters, other: PlanParameters) => {
-      const named = (step: PlanStep) => {
+    const team = (parameters: PlanParameters, other: PlanParameters) =>
+      teamOf(parameters, (step) => {
         const was = other.steps.find((one) => one.key === step.key)
         return (was?.effort ?? null) === (step.effort ?? null) ? modelOf(step) : `${modelOf(step)} (${effortWords(step.effort)})`
-      }
-      // Every plan has its lead; a review may be left out, or skipped.
-      const review = parameters.steps.find((step) => step.key === 'review' && !step.skipped)
-      return [
-        ...parameters.steps.filter((step) => step.key === 'implement').map((lead) => `${named(lead)} leads`),
-        review === undefined ? 'no review' : `${named(review)} reviews`,
-      ].join(', ')
-    }
+      })
     const decode = Schema.decodeUnknownSync(Schema.fromJsonString(PlanParameters))
 
     const lines: Array<string> = []

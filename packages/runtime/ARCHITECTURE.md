@@ -41,6 +41,8 @@ The runtime of [docs/architecture/02](../../docs/architecture/02-desktop-runtime
 | `Questions.ts` | Records a question an agent asks the person as a call and a thread item; gives the answer back to the agent that asked, or, where its session has gone, says what to tell the next agent on the thread (ADR-021) |
 | `PermissionJudge.ts` | At most two fresh coordinator judgments, requiring verified tool removal, with task context, validated answers and usage metrics (ADR-019) |
 | `coordinatorChoice.ts` | The shared agent and model selection for coordinator conversations and judgments |
+| `handover.ts` | When the coordinator is handed to a fresh session (its context 80% full, between turns), and what that session is told from the records: the project, its notes, its open tasks and what waits on the person, and the last messages (ADR-031) |
+| `notes.ts` | A project's notes: decisions the person made in conversation, kept, listed and dropped by the coordinator, and dropped by the person (ADR-031) |
 | `rules.ts` | The rules: what no project can change (credentials, the code host), each kind of request they keep for the person, and the project's rules on top: never, then always ask, then allow rules (ADR-018), then the coordinator's judgment where the project asks for it; for a role that only reads, only what reads. Commands are read as a shell would split them. What an "always" answer would keep, and the scopes it would hold by |
 | `threads.ts` | Turns agent events into thread items; writes the thread as text for a brief |
 | `handed.ts` | What agents hand back, as an item keeps it: pictures to the artifact store, files by path, a command's output gathered as it comes and kept when it ends (ADR-020) |

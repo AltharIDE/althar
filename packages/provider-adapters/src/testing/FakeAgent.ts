@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -70,6 +70,8 @@ export const scenarios = {
   leaveMode: 'leave-mode',
   /** Ends the turn, then sends an update between turns. */
   afterTurn: 'after-turn',
+  /** Ends the turn, then says a message in two chunks on its own, as an agent woken by a command that finished does. */
+  wakesItself: 'wakes-itself',
   /** Reports the session's mode and model. */
   settings: 'settings',
   /** The process exits mid-turn. Only when the agent runs as a process. */
@@ -125,6 +127,9 @@ export const HANDED_DOCUMENT = {
 }
 
 export const USAGE_LIMIT_MESSAGE = 'Claude AI usage limit reached|1759075200'
+
+/** How many tokens its context holds, as it says when a prompt ends `[context:…]`. */
+export const CONTEXT_SIZE = 200_000
 
 /** The `_meta` Claude Code's adapter sends with a structured failure. */
 const failureMeta = (failure: {
@@ -410,7 +415,11 @@ const playStall = async (
  * `[lead:settle-quietly]` settles without reporting.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
- * Althar says it isn't committed. Asked for its pull request's description
+ * Althar says it isn't committed; `[lead:evidence]` saves a screenshot in
+ * the worktree, uncommitted, and finishes with it, a test run and something
+ * it couldn't try, and settling, a new run and nothing left untried;
+ * `[review:evidence]` reads each evidence file its brief names, and says so
+ * in its summary. Asked for its pull request's description
  * in the repository's template, it fills it in, ticking a box it shouldn't.
  * Told what people said on its pull
  * request, `[lead:answer]`
@@ -482,14 +491,20 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
             { severity: 'nit', file: 'README.md', claim: 'A typo.' },
           ],
         })
+      // Asked to look at the lead's evidence, it reads each file its brief names, and says what it found.
+      const looked = session.markers.has('[review:evidence]')
+        ? ` Read: ${[...text.matchAll(/^- [^\n]*: (\/[^\n]+)$/gm)]
+            .map(([, path = '']) => `${path.split('/').at(-1) ?? ''} (${statSync(path).size} bytes)`)
+            .join(', ')}.`
+        : ''
       if (text.includes('[review:findings]') && !text.startsWith('Round '))
         return await call('report_review', {
           verdict: 'changes_requested',
-          summary: 'The heading needs fixing.',
+          summary: `The heading needs fixing.${looked}`,
           findings: [{ severity: 'major', file: 'README.md', line: 1, claim: 'The heading is wrong.' }],
         })
       if (text.includes('[review:') || text.startsWith('Round '))
-        return await call('report_review', { verdict: 'pass', summary: 'The change holds.' })
+        return await call('report_review', { verdict: 'pass', summary: `The change holds.${looked}` })
       return undefined
     }
     if (available.has('finish_step')) {
@@ -506,14 +521,42 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         const findings = (text.match(/find_[0-9a-f]{32}/g) ?? []).map((id) =>
           aside ? { id, outcome: 'set_aside', reason: 'It reads as intended.' } : { id, outcome: 'fixed' },
         )
-        return await call('finish_step', { summary: 'Fixed the heading.', findings })
+        // Showing its work, it hands a new run, not its screenshot again, and has now tried what it couldn't.
+        const shown = session.markers.has('[lead:evidence]')
+          ? {
+              evidence: [
+                { kind: 'test_run', caption: 'The heading test', command: 'bun test heading', exit_code: 0, output: '1 passed\n' },
+              ],
+              unverified: [],
+            }
+          : {}
+        return await call('finish_step', { summary: 'Fixed the heading.', findings, ...shown })
       }
       // Told to carry on, as a lead that took a step over is, it finishes as it was told to at first.
       // Told to carry on, or to try another way, as Althar tells one that stalled or went round in circles.
       const toldToGoOn = /^(Carry on with the task|Your last turn|You ran )/.test(text)
       // Asked for its pull request's description in the repository's template, it writes under the first heading, and ticks a box it shouldn't.
+      // Asked to show its work, it saves a screenshot in its worktree, uncommitted, and hands it with a test run and what it couldn't try.
+      const evidence = (): Record<string, unknown> => {
+        if (!session.markers.has('[lead:evidence]')) return {}
+        mkdirSync(join(session.cwd, 'evidence'), { recursive: true })
+        writeFileSync(join(session.cwd, 'evidence', 'retry.png'), Buffer.from(SCREENSHOT_PNG, 'base64'))
+        return {
+          evidence: [
+            { kind: 'screenshot', caption: 'The retry button after a failed checkout', path: 'evidence/retry.png' },
+            {
+              kind: 'test_run',
+              caption: 'The checkout tests',
+              command: 'bun test checkout',
+              exit_code: 0,
+              output: 'checkout.test.ts\n  ✓ retries once\n\n1 passed\n',
+            },
+          ],
+          unverified: ['Not tried against the real payment provider: no sandbox account'],
+        }
+      }
       const finish = async () => {
-        const answer = await call('finish_step', { summary: 'Did the task.' })
+        const answer = await call('finish_step', { summary: 'Did the task.', ...evidence() })
         const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
         if (template === undefined) return answer
         const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
@@ -817,7 +860,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       const session = sessionOf(params.sessionId)
       session.cancelled = false
-      const text = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
+      const prompted = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
+      // A prompt that ends `[context:85]` says its context is that full, in percent, before anything else; the rest plays as it
+      // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
+      // context that holds 4,000 tokens rather than CONTEXT_SIZE.
+      const filled = /\s*\[context(-later)?:(\d+)(?:\/(\d+))?\]$/.exec(prompted)
+      const text = filled === null ? prompted : prompted.slice(0, filled.index)
       const out = options.outOfUsage
       if (out !== undefined && (out.until === undefined || Date.now() < out.until))
         throw new acp.RequestError(
@@ -828,6 +876,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
+      if (filled !== null) {
+        const size = filled[3] === undefined ? CONTEXT_SIZE : Number(filled[3])
+        const usage = { sessionUpdate: 'usage_update' as const, used: Math.round((size * Number(filled[2])) / 100), size }
+        if (filled[1] === undefined) await update(usage)
+        else setTimeout(() => void update(usage), 300)
+      }
 
       // What images it was sent, in order, by what they are and how many bytes: said before anything else it does.
       const images = params.prompt.flatMap((block) => (block.type === 'image' ? [block] : []))
@@ -1093,6 +1147,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         case scenarios.afterTurn:
           await say('Done')
           setTimeout(() => void update({ sessionUpdate: 'available_commands_update', availableCommands: [] }), 20)
+          return ended()
+        case scenarios.wakesItself:
+          await say('Done')
+          setTimeout(() => void say('Verify ').then(() => say('finished.')), 20)
           return ended()
         case scenarios.hello:
           await say('Hel')
