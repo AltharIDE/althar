@@ -1003,12 +1003,45 @@ export const PlanStep = Schema.Struct({
 export type PlanStep = typeof PlanStep.Type
 
 /**
- * Work waiting for a place among the agents this machine runs at once
- * (ADR-032), as it says why: how many tasks' agents are busy, and how many
- * the machine runs at once. It starts on its own, oldest first, when one is
- * free.
+ * A command the agent left running in the background, such as a dev server
+ * (docs/decisions/021): what it runs, where it answers once its output says,
+ * and how it ended if it did by itself. It runs as long as its session does.
  */
-export const Queued = Schema.Struct({ busy: Schema.Int, atOnce: Schema.Int })
+export const BackgroundCommand = Schema.Struct({
+  id: Schema.String,
+  command: Schema.String,
+  /** The command as it reads at a glance, without a leading `cd`, variables, `timeout` or output plumbing; the command is the whole of it. */
+  label: Schema.optional(Schema.String),
+  /** Where it answers, as its output said, as a browser opens it: http://localhost:5173/. Null until it says, or where it never does. */
+  url: Schema.NullOr(Schema.String),
+  startedAt: Schema.String,
+  /** It ended by itself: when, and its exit code where its output says. Null while it runs. */
+  ended: Schema.NullOr(Schema.Struct({ at: Schema.String, code: Schema.NullOr(Schema.Number) })),
+})
+export type BackgroundCommand = typeof BackgroundCommand.Type
+
+/**
+ * A task's agent holding a place among the agents this machine runs at once
+ * (ADR-032): at work in its step or a turn, or, `kept`, only by what it left
+ * running that is at work, which `running` lists, to stop from here.
+ */
+export const Holder = Schema.Struct({
+  taskId: Schema.String,
+  title: Schema.String,
+  /** The thread its agent is on, where what it left running is stopped; null where it has no session yet. */
+  threadId: Schema.NullOr(Schema.String),
+  kept: Schema.Boolean,
+  running: Schema.Array(BackgroundCommand),
+})
+export type Holder = typeof Holder.Type
+
+/**
+ * Work waiting for a place among the agents this machine runs at once
+ * (ADR-032), as it says why: how many tasks' agents are busy, which hold the
+ * places, and how many the machine runs at once. It starts on its own, oldest
+ * first, when one is free.
+ */
+export const Queued = Schema.Struct({ busy: Schema.Int, atOnce: Schema.Int, holders: Schema.optional(Schema.Array(Holder)) })
 export type Queued = typeof Queued.Type
 
 /** Where a task stands, as the coordinator's thread shows it. */
@@ -1244,24 +1277,6 @@ export type ThreadItem = typeof ThreadItem.Type
 /** How full an agent's context is: the tokens in it, and how many it holds. */
 export const ContextUse = Schema.Struct({ used: Schema.Number, size: Schema.Number })
 export type ContextUse = typeof ContextUse.Type
-
-/**
- * A command the agent left running in the background, such as a dev server
- * (docs/decisions/021): what it runs, where it answers once its output says,
- * and how it ended if it did by itself. It runs as long as its session does.
- */
-export const BackgroundCommand = Schema.Struct({
-  id: Schema.String,
-  command: Schema.String,
-  /** The command as it reads at a glance, without a leading `cd`, variables, `timeout` or output plumbing; the command is the whole of it. */
-  label: Schema.optional(Schema.String),
-  /** Where it answers, as its output said, as a browser opens it: http://localhost:5173/. Null until it says, or where it never does. */
-  url: Schema.NullOr(Schema.String),
-  startedAt: Schema.String,
-  /** It ended by itself: when, and its exit code where its output says. Null while it runs. */
-  ended: Schema.NullOr(Schema.Struct({ at: Schema.String, code: Schema.NullOr(Schema.Number) })),
-})
-export type BackgroundCommand = typeof BackgroundCommand.Type
 
 /**
  * The project as Althar runs it itself, with no agent (docs/decisions/022):

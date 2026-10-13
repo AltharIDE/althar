@@ -5,11 +5,13 @@ import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, Tas
 
 import { queuedWords, waitsWords } from '../../shared/agents'
 import { type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
+import { Holders } from '../../shared/Holders'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
 import { stepIndex, stepNames, stepText } from '../../shared/steps'
 import { ago, clock } from '../../shared/time'
 import type { TaskCardContent } from '../../shared/thread'
+import s from './Card.module.css'
 
 /*
  * A task's card in the Talk room. Before it starts, its plan: who does each
@@ -54,6 +56,8 @@ export interface CardActions {
   readonly onHold: (planId: string) => void
   readonly onChange: (planId: string, steps: ReadonlyArray<PlanStep>, end?: End | null) => void
   readonly onOpen: (threadId: string) => void
+  /** Stops a command a task's lead left running, from the task that waits for the place it keeps. */
+  readonly onStopBackground: (threadId: string, id: string) => void
 }
 
 type Plan = NonNullable<TaskCardContent['plan']>
@@ -144,7 +148,19 @@ function PlanCard({
   )
 }
 
+/** A task's card, with, while it waits for a free agent, who holds the places. */
 export function Card({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
+  const holders = card.queued?.holders
+  if (holders === undefined || holders.length === 0) return <Shown card={card} actions={actions} />
+  return (
+    <div className={s.stack}>
+      <Shown card={card} actions={actions} />
+      <Holders holders={holders} onStop={actions.onStopBackground} />
+    </div>
+  )
+}
+
+function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
   const named = useModelNames()
   const effortOf = useEffortNames()
   if ((card.phase === 'planned' || card.phase === 'held') && card.plan !== null)

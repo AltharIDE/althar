@@ -470,6 +470,8 @@ export class Sessions extends Context.Service<
         readonly reviewer: boolean
         readonly turnRunning: boolean
         readonly background: boolean
+        /** The agent's process, where it runs as one: what its left running is a part of, and is read for CPU (Busy.ts). */
+        readonly pid: number | null
       }>
     >
     /**
@@ -2280,6 +2282,7 @@ export class Sessions extends Context.Service<
                     reviewer: running.thread.role === 'reviewer',
                     turnRunning: running.turnRunning,
                     background: [...running.background.values()].some((left) => left.ended === null),
+                    pid: running.connection.process?.pid ?? null,
                   },
                 ],
           ),

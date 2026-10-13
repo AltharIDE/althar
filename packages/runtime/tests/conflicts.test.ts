@@ -360,7 +360,7 @@ describe('a conflict merging here', () => {
         assert.deepStrictEqual(yield* asked(threadId), [])
         const [card] = yield* cardOf(projectId, taskId)
         assert.strictEqual(card?.phase, 'running')
-        assert.deepStrictEqual(card?.queued, { busy: 1, atOnce: 1 })
+        assert.deepStrictEqual(card?.queued && { busy: card.queued.busy, atOnce: card.queued.atOnce }, { busy: 1, atOnce: 1 })
         // Asked to merge again meanwhile, it says the lead is at it.
         assert.strictEqual(cantOf(yield* Effect.flip(mergeHere(taskId)))[1], 'resolving')
         return { projectId, taskId, threadId, busy }
@@ -382,7 +382,8 @@ describe('a conflict merging here', () => {
           ['resolving'],
         )
         assert.deepStrictEqual(yield* asked(threadId), [])
-        assert.deepStrictEqual((yield* cardOf(projectId, taskId))[0]?.queued, { busy: 1, atOnce: 1 })
+        const [queued] = (yield* cardOf(projectId, taskId)).map((card) => card.queued)
+        assert.deepStrictEqual(queued && { busy: queued.busy, atOnce: queued.atOnce }, { busy: 1, atOnce: 1 })
         // The other task is stopped: its place goes to the round, whose lead is asked, and resolves it.
         yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: busy.taskId })
         yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt')

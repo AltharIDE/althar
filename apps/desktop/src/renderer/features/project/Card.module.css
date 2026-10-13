@@ -1,0 +1,5 @@
+/* A task's card, and under it who holds the places it waits for. */
+.stack {
+  display: grid;
+  gap: 8px;
+}
