@@ -403,6 +403,22 @@ export enum Wait {
   You = 'you',
 }
 
+/** Where a task a search found stands, in a word. */
+export enum FoundState {
+  /** Its plan waits to start. */
+  Planned = 'planned',
+  Running = 'running',
+  /** A call in it waits on you. */
+  Yours = 'you',
+  /** Done, waiting for you to accept it. */
+  Ready = 'ready',
+  Stopped = 'stopped',
+  Merged = 'merged',
+  /** Settled without a merge to show for it. */
+  Done = 'done',
+  Abandoned = 'abandoned',
+}
+
 /** What a piece of settled work came to. */
 export enum Outcome {
   Merged = 'merged',
