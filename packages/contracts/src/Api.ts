@@ -1651,7 +1651,7 @@ export const BoardTask = Schema.Struct({
   state: Schema.String,
   createdAt: Schema.String,
   settledAt: Schema.NullOr(Schema.String),
-  /** What a ready task changed, when it has no pull request to say so: its files, and lines added and removed. */
+  /** What a ready task, or a change at work, changed when it has no pull request to say so: its files, and lines added and removed. */
   changed: Schema.NullOr(Schema.Struct({ files: Schema.Number, add: Schema.Number, del: Schema.Number })),
   /** A ready task's repositories with no pull request, not merged yet, which merge here. */
   here: Schema.Array(TaskRepositoryHere),

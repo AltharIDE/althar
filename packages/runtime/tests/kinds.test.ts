@@ -1,3 +1,6 @@
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
@@ -159,6 +162,34 @@ describe("a task's kind", () => {
       const summary = (yield* queries.projects).projects.find((one) => one.id === project.projectId)
       assert.strictEqual(summary?.ready, 1)
       assert.deepStrictEqual([...(yield* queries.finished)], [question.taskId])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('becomes a change as a plain task writes, and a change at work shows how big its branch is so far', () =>
+    Effect.gen(function* () {
+      const queries = yield* Queries
+      const sessions = yield* Sessions
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* open
+      const looking = yield* planned(project.projectId, 'Look around', '[lead:wait]')
+      const card = yield* cardOnce(looking.taskId, (one) => one.phase === 'running')
+      assert.strictEqual(card.kind, 'plain')
+      assert.isNull((yield* queries.board(project.projectId)).tasks.find((task) => task.taskId === looking.taskId)?.changed)
+      // Its lead writes a file in its worktree: it is a change now, its size read from git.
+      const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${looking.taskId}`
+      writeFileSync(join(workspace?.path ?? '', 'notes.md'), 'one\ntwo\n')
+      // As a lead's edit comes: with its tool call, which is what tells what git says is worth reading again.
+      const place = { projectId: project.projectId as ProjectId, threadId: looking.threadId }
+      yield* addItem(place, 'tool_call', { title: 'Write notes.md', kind: 'edit', status: 'completed' }, { toolCallId: 'write-notes' })
+      const board = yield* queries.board(project.projectId)
+      assert.deepInclude(
+        board.tasks.find((task) => task.taskId === looking.taskId),
+        {
+          kind: 'change',
+          changed: { files: 1, add: 2, del: 0 },
+        },
+      )
+      yield* sessions.stop(looking.threadId)
     }).pipe(Effect.provide(withQueries())),
   )
 

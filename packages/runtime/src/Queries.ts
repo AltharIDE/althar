@@ -1525,8 +1525,11 @@ export class Queries extends Context.Service<
           if (settled !== undefined) return [settled]
           const card = yield* cardFor(row.id)
           if (card === undefined) return []
-          // Ready, what merges here is read from git; without a pull request, so is its size: its branch's.
-          const said = card.phase === 'ready' ? yield* gitOf(row.id, { changed: card.change === null, here: true }) : null
+          // Ready, what merges here is read from git; without a pull request, so is its size: its branch's. A change at work
+          // without one shows its branch's size so far.
+          const atWork = (card.phase === 'running' || card.phase === 'stopped') && card.kind === 'change' && card.change === null
+          const said =
+            card.phase === 'ready' || atWork ? yield* gitOf(row.id, { changed: card.change === null, here: card.phase === 'ready' }) : null
           const changed =
             said !== null && card.change === null
               ? {
