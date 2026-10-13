@@ -1,0 +1,123 @@
+/* The page round the windows: plain, light, out of the way. */
+html,
+body {
+  margin: 0;
+  background: var(--n-3, #ececec);
+}
+.page {
+  padding: 32px 40px 96px;
+  display: grid;
+  gap: 36px;
+  justify-items: start;
+}
+.page > header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.lede {
+  margin: 6px 0 0;
+  max-width: 860px;
+  color: var(--t-2);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 12px;
+  font-size: 13px;
+}
+.nav a {
+  color: var(--t-1);
+}
+.nav a[aria-current='page'] {
+  font-weight: 600;
+  text-decoration: none;
+}
+.shot {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.caption {
+  margin: 0;
+  max-width: 1180px;
+  font-size: 13px;
+  color: var(--t-2);
+}
+.caption b {
+  color: var(--t-1);
+  font-weight: 600;
+  margin-right: 6px;
+}
+.aside {
+  color: var(--t-3);
+}
+/* One app window. */
+.frame {
+  width: 1180px;
+  height: 900px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--lift-2, 0 2px 12px rgb(0 0 0 / 0.12));
+  background: var(--n-2);
+}
+.frame iframe {
+  display: block;
+  border: 0;
+}
+
+/* The comparison: today, then A to E across; each task in each place down. */
+.compare {
+  display: grid;
+  gap: 18px 16px;
+  align-items: start;
+}
+.compare .head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 0;
+  background: var(--n-3, #ececec);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--t-1);
+  text-decoration: none;
+}
+.compare .state {
+  font-size: 12.5px;
+  color: var(--t-2);
+  padding-top: 4px;
+}
+.compare .cell {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border-radius: 5px;
+  box-shadow: var(--lift-card);
+}
+.compare img {
+  display: block;
+  height: auto;
+}
+.compare .label {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--t-1);
+  color: var(--paper);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* The app's own page never scrolls; these pages of windows do. */
+html:has(body:not([data-page='screen'])),
+body:not([data-page='screen']),
+body:not([data-page='screen']) #root {
+  height: auto;
+  overflow: visible;
+}
