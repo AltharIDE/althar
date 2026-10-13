@@ -10,6 +10,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Busy } from '../src/Busy'
 import type { BusyOptions } from '../src/Config'
+import { touchTask } from '../src/cards'
 import { Coordinator } from '../src/Coordinator'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -782,6 +783,33 @@ describe('Agents at once, and what they left running', () => {
         yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
         // Nothing is left holding a place once it is done and the idle server counts no more.
         yield* busyAt(0)
+      }),
+    ),
+  )
+
+  it.live('read what the machine says of an agent that is no process, and count it, as it cannot say', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      yield* served(projectId, 'First')
+      yield* Effect.sleep('600 millis')
+      assert.strictEqual((yield* (yield* Busy).now).busy, 1)
+      // Telling the clients about a task that isn't there changes nothing.
+      yield* touchTask('missing')
+    }).pipe(Effect.provide(machine(1, ':memory:', { sample: Duration.millis(50), quiet: Duration.millis(100) }))),
+  )
+
+  it.live('let a session that ended go from what is read, with what it left running', () =>
+    withCpu(1, (cpu) =>
+      Effect.gen(function* () {
+        cpu.burning = true
+        const { projectId } = yield* opened
+        const sessions = yield* Sessions
+        const first = yield* served(projectId, 'First')
+        yield* Effect.sleep('300 millis')
+        yield* sessions.stop(first.threadId)
+        yield* busyAt(0)
+        yield* Effect.sleep('300 millis')
+        assert.strictEqual((yield* (yield* Busy).now).busy, 0)
       }),
     ),
   )

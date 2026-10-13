@@ -401,6 +401,26 @@ describe('the CPU an agent uses', () => {
     )
   })
 
+  it.effect('reads each process of the trees asked for, null for one that is gone, and nothing for none', () =>
+    Effect.gen(function* () {
+      const members = yield* treeMembers([process.pid, 2 ** 22 + 12_345])
+      assert.isTrue((members.get(process.pid) ?? new Map()).has(process.pid))
+      assert.isNull(members.get(2 ** 22 + 12_345))
+      assert.strictEqual((yield* treeMembers([])).size, 0)
+    }),
+  )
+
+  it('walks a tree once, though a listing loops back on itself', () => {
+    const looped = [' 10    11  0:01.00', ' 11    10  0:02.00'].join('\n')
+    assert.deepStrictEqual(
+      [...(treeMembersOf(looped, 10) ?? [])],
+      [
+        [10, 1_000],
+        [11, 2_000],
+      ],
+    )
+  })
+
   it.live('tells a server sitting idle from a busy loop and a runner of short-lived workers, in real processes', () =>
     Effect.gen(function* () {
       const start = (script: string) => spawn('sh', ['-c', script], { stdio: 'ignore' })

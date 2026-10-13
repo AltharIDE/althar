@@ -272,11 +272,9 @@ export class Busy extends Context.Service<
         const holders = new Map<string, Holder>()
         const take = (taskId: string, review: boolean, threadId: string | null, kept: boolean) => {
           const key = keyOf(taskId, review)
-          const had = holders.get(key)
           at.add(key)
-          // At work in its step or a turn, whatever else it left running.
-          if (had === undefined || (had.kept && !kept))
-            holders.set(key, { taskId, review, threadId: threadId ?? had?.threadId ?? null, kept })
+          // What is under way is taken first, so an agent at work in its step or a turn is never kept only by what it left running.
+          if (!holders.has(key)) holders.set(key, { taskId, review, threadId, kept })
         }
         for (const key of starting.keys()) take(key.replace(/ review$/, ''), key.endsWith(' review'), null, false)
         for (const row of under)
