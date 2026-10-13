@@ -3,9 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type ProjectRulesView } from '@althar/contracts'
+import { type AgentRules, ApiError, type ProjectRulesView } from '@althar/contracts'
 
 import { RulesView } from '../src/renderer/features/rules/RulesView'
+import { useAgentRules } from '../src/renderer/features/rules/useAgentRules'
 import { useRules } from '../src/renderer/features/rules/useRules'
 import { agents, changed, fakeClient, projectRules, usual } from './fixtures'
 import { withServices } from './render'
@@ -15,6 +16,31 @@ function Rules({ onBack = vi.fn() }: { onBack?: () => void }) {
 }
 
 const rulesOf = (rules: Partial<ProjectRulesView>) => vi.fn(async () => ({ ...projectRules, ...rules }))
+
+/** The rules screen with what the agents' own settings would add, open as their offer's Review asks, or not. */
+function Importing({ importing = false, onImportClosed = vi.fn() }: { importing?: boolean; onImportClosed?: () => void }) {
+  return (
+    <RulesView model={useRules('p1')} agents={useAgentRules('p1')} importing={importing} onImportClosed={onImportClosed} onBack={vi.fn()} />
+  )
+}
+
+const claude = { agent: 'claude', file: '.claude/settings.json' } as const
+
+/** What a repository's Claude Code settings say, and an OpenCode config Althar couldn't read. */
+const agentRules: AgentRules = {
+  projectId: 'p1',
+  offered: true,
+  files: [
+    { from: claude, readable: true },
+    { from: { agent: 'opencode', file: 'opencode.jsonc' }, readable: false },
+  ],
+  rules: [
+    { id: 'rm', from: claude, said: 'Bash(rm -rf:*)', decision: 'never', rule: { pattern: 'rm -rf', match: 'prefix' } },
+    { id: 'test', from: claude, said: 'Bash(npm test:*)', decision: 'allow', rule: { pattern: 'npm test', match: 'prefix' } },
+    { id: 'tf', from: claude, said: 'Bash(terraform:*)', decision: 'ask', rule: { pattern: 'terraform', match: 'prefix' } },
+    { id: 'env', from: claude, said: 'Read(./.env)', decision: 'never', skipped: 'paths' },
+  ],
+}
 
 /** One sentence of the rules, by its word in the margin. */
 const sentence = (label: string) => screen.getByRole('listitem', { name: label })
@@ -464,6 +490,95 @@ describe('a project’s rules', () => {
     expect(onBack).toHaveBeenCalledTimes(1)
     await userEvent.click(screen.getByRole('button', { name: /meridian/ }))
     expect(onBack).toHaveBeenCalledTimes(2)
+  })
+
+  it('says under its sentence where a command taken from an agent’s settings came from', async () => {
+    const { client } = fakeClient({
+      getProjectRules: rulesOf({
+        commands: [
+          { pattern: 'rm -rf', decision: 'never', from: claude },
+          { pattern: 'npm publish', decision: 'never' },
+        ],
+      }),
+    })
+    withServices(<Rules />, client)
+    await screen.findByRole('heading', { name: 'Rules', level: 1 })
+    expect(says('Never')).toBe('Agents never run rm -rf or npm publish.')
+    expect(within(sentence('Never')).getByText(/^From \.claude\/settings\.json:/).textContent).toBe('From .claude/settings.json: rm -rf.')
+    // Without a way to what the agents' settings would add, the page doesn't offer one.
+    expect(screen.queryByRole('button', { name: 'Import from your agents' })).toBeNull()
+  })
+
+  it('opens what the agents’ own settings would add, and takes those the person chose', async () => {
+    const onImportClosed = vi.fn()
+    const { client } = fakeClient({
+      readAgentRules: vi.fn(async () => ({ ...agentRules, offered: false })),
+      importAgentRules: vi.fn(async () => ({
+        ...projectRules,
+        revision: 2,
+        commands: [{ pattern: 'rm -rf', decision: 'never' as const, from: claude }],
+      })),
+    })
+    withServices(<Importing onImportClosed={onImportClosed} />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Import from your agents' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Rules from your agents' })
+    const rm = await within(dialog).findByRole('checkbox', { name: 'rm -rf' })
+    expect(document.getElementById(rm.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      'From .claude/settings.json, as Bash(rm -rf:*)',
+    )
+    expect(within(dialog).getByText('Althar couldn’t read opencode.jsonc as its agent does.')).toBeTruthy()
+    // Not the offer as the project opened: closing it takes nothing.
+    expect(within(dialog).queryByRole('button', { name: 'Take none' })).toBeNull()
+    // Each under the sentence it would join.
+    expect(within(within(dialog).getByRole('region', { name: 'Always ask me' })).getByRole('checkbox', { name: 'terraform' })).toBeTruthy()
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'npm test' }))
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'terraform' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Take 1 rule' }))
+    expect(client.importAgentRules).toHaveBeenCalledWith('p1', ['rm'])
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(onImportClosed).toHaveBeenCalledOnce()
+    expect(says('Never')).toBe('Agents never run rm -rf.')
+    expect(within(sentence('Never')).getByText(/^From/).textContent).toBe('From .claude/settings.json: rm -rf.')
+  })
+
+  it('opens on them as their offer asks, says why what can’t be taken can’t, and takes none when turned down', async () => {
+    const { client } = fakeClient({ readAgentRules: vi.fn(async () => agentRules) })
+    withServices(<Importing importing />, client)
+    const dialog = await screen.findByRole('dialog', { name: 'Rules from your agents' })
+    await userEvent.click(await within(dialog).findByRole('button', { name: 'One can’t be taken' }))
+    expect(await within(dialog).findByText('A rule on files: the project’s rules don’t hold paths yet.')).toBeTruthy()
+    expect(within(dialog).getByText('Read(./.env)')).toBeTruthy()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Take none' }))
+    expect(client.importAgentRules).toHaveBeenCalledWith('p1', [])
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('says when no agent keeps settings for the project, and what went wrong taking them', async () => {
+    const { client } = fakeClient({
+      readAgentRules: vi.fn(async () => ({ projectId: 'p1', offered: false, files: [], rules: [] })),
+    })
+    withServices(<Importing importing />, client)
+    const dialog = await screen.findByRole('dialog', { name: 'Rules from your agents' })
+    expect(await within(dialog).findByText(/^None of your agents keep settings for this project/)).toBeTruthy()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(client.importAgentRules).not.toHaveBeenCalled()
+  })
+
+  it('keeps the proposal open, saying why, where the files changed since they were read, and reads them again', async () => {
+    const { client } = fakeClient({
+      readAgentRules: vi.fn(async () => agentRules),
+      importAgentRules: vi.fn(async () =>
+        Promise.reject(new ApiError({ reason: 'AgentRulesChanged', message: 'Your agents’ settings changed since they were read.' })),
+      ),
+    })
+    withServices(<Importing importing />, client)
+    const dialog = await screen.findByRole('dialog', { name: 'Rules from your agents' })
+    await within(dialog).findByRole('checkbox', { name: 'rm -rf' })
+    await userEvent.click(await within(dialog).findByRole('button', { name: 'Take 3 rules' }))
+    expect((await within(dialog).findByRole('alert')).textContent).toBe('Your agents’ settings changed since they were read.')
+    await waitFor(() => expect(client.readAgentRules).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('dialog')).toBeTruthy()
   })
 
   it('says what went wrong saving', async () => {

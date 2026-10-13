@@ -96,6 +96,11 @@ export class RulesChanged extends Schema.TaggedError<RulesChanged>()('RulesChang
   expected: Schema.Number,
 }) {}
 
+/** A choice of the agents' own rules that they no longer offer (ADR-034): a settings file changed since it was read. */
+export class AgentRulesChanged extends Schema.TaggedError<AgentRulesChanged>()('AgentRulesChanged', {
+  projectId: Schema.String,
+}) {}
+
 /** An "always" answer by a scope the request wasn't offered: no rule of it would hold (ADR-018). */
 export class AlwaysNotOffered extends Schema.TaggedError<AlwaysNotOffered>()('AlwaysNotOffered', {
   attentionId: Schema.String,

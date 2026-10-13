@@ -22,6 +22,26 @@
 .row:hover {
   background: var(--n-2);
 }
+/* a row with a line under its label: the box sits by the label */
+.two {
+  align-items: flex-start;
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.two .box {
+  margin-top: 3px;
+}
+.text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.detail {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--t-3);
+  overflow-wrap: anywhere;
+}
 /* a hairline between rules, inset to the text, that a hovered row covers */
 .row {
   position: relative;

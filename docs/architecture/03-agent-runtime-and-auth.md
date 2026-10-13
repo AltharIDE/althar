@@ -749,6 +749,13 @@ including the always-ask list
   saying which rule; the person's Allow always and Deny always keep such a
   rule in the project ([ADR-018](../decisions/018-allow-always-keeps-a-rule.md)),
   and the agent is still sent its narrowest option.
+- The project's rules can start from the agents' own settings: Claude
+  Code's `permissions`, Codex's rules and OpenCode's `permission`, read from
+  the repositories and the person's home folder and offered once as the
+  project opens, and from the rules screen. What the person takes is copied
+  in, each rule with the file it came from; the files stay the agents', and
+  the ask rules below still beat what they allow
+  ([ADR-034](../decisions/034-rules-start-from-the-agents-settings.md)).
 - Where the project has the coordinator decide, it judges what no rule
   answers, in a fresh session ([ADR-019](../decisions/019-coordinator-judges-permissions.md)).
   The order is: what no project can change; what is never allowed; allowing

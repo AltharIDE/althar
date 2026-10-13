@@ -24,6 +24,8 @@ export const keys = {
   /** A task's head alone, as the board stood at `version`: what the dock shows of a ready task. */
   head: (threadId: string, version: number) => ['head', threadId, version] as const,
   rules: (projectId: string) => ['rules', projectId] as const,
+  /** What a project's agents' own settings would add to its rules, and whether the offer made as it opened stands. */
+  agentRules: (projectId: string) => ['agentRules', projectId] as const,
   /** A project's notes, as its coordinator keeps them. */
   notes: (projectId: string) => ['notes', projectId] as const,
   vocabulary: (projectId: string) => ['vocabulary', projectId] as const,
@@ -109,6 +111,9 @@ export const reads = (client: Client) => ({
     queryOptions({ queryKey: keys.head(threadId, version), queryFn: () => client.getThread(threadId, { limit: 0 }), gcTime: 60_000 }),
   rules: (projectId: string) => queryOptions({ queryKey: keys.rules(projectId), queryFn: () => client.getProjectRules(projectId) }),
   notes: (projectId: string) => queryOptions({ queryKey: keys.notes(projectId), queryFn: () => client.getProjectNotes(projectId) }),
+  // The agents' files change outside Althar, with nothing on the feed: read again each time they're shown.
+  agentRules: (projectId: string) =>
+    queryOptions({ queryKey: keys.agentRules(projectId), queryFn: () => client.readAgentRules(projectId), staleTime: 0 }),
   // Read once a window, as someone first dictates in the project: the names change slowly, and nothing on the feed says when.
   vocabulary: (projectId: string) => queryOptions({ queryKey: keys.vocabulary(projectId), queryFn: () => client.getVocabulary(projectId) }),
   repositories: (projectId: string) =>

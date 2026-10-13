@@ -196,6 +196,27 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.rules('p1'))?.isInvalidated).toBe(true)
   })
 
+  it('reads again what the agents’ settings offer once the project or its rules change, as taking them does', async () => {
+    const { client, cache, emit, read } = opened()
+    await cache.fetchQuery(read.agentRules('p1'))
+    const showing = new QueryObserver(cache, read.agentRules('p1'))
+    const stop = showing.subscribe(() => undefined)
+    // Shown, they're read again: the files change with nothing on the feed.
+    await settle()
+    const reads = vi.mocked(client.readAgentRules).mock.calls.length
+    emit(changed('project', 'p1', null, 'p1'))
+    await settle()
+    expect(client.readAgentRules).toHaveBeenCalledTimes(reads + 1)
+    emit(changed('policy', 'pol1', null, 'p1'))
+    await settle()
+    expect(client.readAgentRules).toHaveBeenCalledTimes(reads + 2)
+    // Another project's change leaves them be.
+    emit(changed('policy', 'pol2', null, 'p2'))
+    await settle()
+    expect(client.readAgentRules).toHaveBeenCalledTimes(reads + 2)
+    stop()
+  })
+
   it('reads once more what was being read when a change touched it', async () => {
     const { client, cache, emit, read } = opened()
     const first = later<ProjectList>()

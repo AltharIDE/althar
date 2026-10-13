@@ -428,7 +428,8 @@ export class Projects extends Context.Service<
                   projectId,
                   inks.map((row) => row.ink),
                 )
-              yield* sql`INSERT INTO projects ${sql.insert({ id: projectId, name, slug, ink, createdByActorId: envelope.actorId, createdAt })}`
+              // Its rules are offered once from its agents' own settings (ADR-034), until the person answers.
+              yield* sql`INSERT INTO projects ${sql.insert({ id: projectId, name, slug, ink, createdByActorId: envelope.actorId, createdAt, offersAgentRules: 1 })}`
               // An archived project lets go of its folder, so the folder can be opened afresh.
               yield* sql`DELETE FROM project_folders WHERE device_id = ${instance.deviceId} AND path = ${path}
                 AND project_id IN (SELECT id FROM projects WHERE archived_at IS NOT NULL)`

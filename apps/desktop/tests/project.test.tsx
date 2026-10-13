@@ -10,6 +10,7 @@ import { useProject } from '../src/renderer/features/project/useProject'
 import { useProjectSettings } from '../src/renderer/features/project/useProjectSettings'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
+import { useAgentRules } from '../src/renderer/features/rules/useAgentRules'
 import { agents, card, changed, coordinatorSnapshot, efforts, fakeClient, items, models, project, status, streamed } from './fixtures'
 import { clock } from '../src/renderer/shared/time'
 import { withServices } from './render'
@@ -745,5 +746,67 @@ describe('a send to the coordinator that fails', () => {
     expect(await screen.findByText('The project went away.')).toBeTruthy()
     expect(screen.queryByText('Plan it', { selector: 'p' })).toBeNull()
     expect((box as HTMLTextAreaElement).value).toBe('Plan it')
+  })
+})
+
+/** The project as it opens, with the offer to start its rules from its agents' own settings. */
+function Offered({ onReview }: { onReview: () => void }) {
+  return (
+    <ProjectView
+      model={useProject('p1')}
+      board={useBoard('p1')}
+      connections={useConnections()}
+      onTask={vi.fn()}
+      agentRules={{ model: useAgentRules('p1'), onReview }}
+    />
+  )
+}
+
+describe('the offer to start a project’s rules from its agents’ settings', () => {
+  const claude = { agent: 'claude', file: '.claude/settings.json' } as const
+  const read = {
+    projectId: 'p1',
+    offered: true,
+    files: [{ from: claude, readable: true }],
+    rules: [
+      { id: 'rm', from: claude, said: 'Bash(rm -rf:*)', decision: 'never' as const, rule: { pattern: 'rm -rf', match: 'prefix' as const } },
+      { id: 'env', from: claude, said: 'Read(./.env)', decision: 'never' as const, skipped: 'paths' as const },
+    ],
+  }
+
+  it('shows once as the project opens, reviews them where the rules are, and takes none when turned down', async () => {
+    const onReview = vi.fn()
+    const { client } = fakeClient({ readAgentRules: vi.fn(async () => read) })
+    withServices(<Offered onReview={onReview} />, client)
+    expect(await screen.findByText('Your agents’ own settings name a rule this project could start from.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }))
+    expect(onReview).toHaveBeenCalledOnce()
+    await userEvent.click(screen.getByRole('button', { name: 'Take none' }))
+    expect(client.importAgentRules).toHaveBeenCalledWith('p1', [])
+    await waitFor(() => expect(client.readAgentRules).toHaveBeenCalledTimes(2))
+  })
+
+  it('isn’t offered once answered, nor where nothing can be taken, and says why turning it down didn’t hold', async () => {
+    const answered = fakeClient({ readAgentRules: vi.fn(async () => ({ ...read, offered: false })) })
+    const { unmount } = withServices(<Offered onReview={vi.fn()} />, answered.client)
+    await waitFor(() => expect(answered.client.readAgentRules).toHaveBeenCalled())
+    await screen.findByRole('textbox')
+    expect(screen.queryByText(/could start from/)).toBeNull()
+    unmount()
+
+    const skippedOnly = fakeClient({ readAgentRules: vi.fn(async () => ({ ...read, rules: read.rules.slice(1) })) })
+    const second = withServices(<Offered onReview={vi.fn()} />, skippedOnly.client)
+    await waitFor(() => expect(skippedOnly.client.readAgentRules).toHaveBeenCalled())
+    await screen.findByRole('textbox')
+    expect(screen.queryByText(/could start from/)).toBeNull()
+    second.unmount()
+
+    const failing = fakeClient({
+      readAgentRules: vi.fn(async () => read),
+      importAgentRules: vi.fn(async () => Promise.reject(new ApiError({ reason: 'SqlError', message: 'The disk is full.' }))),
+    })
+    withServices(<Offered onReview={vi.fn()} />, failing.client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Take none' }))
+    expect((await screen.findByText('The disk is full.')).getAttribute('role')).toBe('alert')
   })
 })

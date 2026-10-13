@@ -4,6 +4,7 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
+import { offerOf } from '../src/agentRules'
 import { Policies, type ProjectRules, ruleSetOf, withRemembered } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
@@ -261,6 +262,53 @@ describe('a project’s rules, as kept', () => {
       // Against the rules as they are, it goes through.
       yield* policies.set(projectId, { commands: [] }, instance.personId, seen.revision + 1)
       assert.deepStrictEqual((yield* policies.current(projectId)).rules.commands, [])
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.effect('keep where a rule was copied from while it stays as it is, and never take one from whoever sets the rules', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const projectId = project.projectId as ProjectId
+      const from = { agent: 'claude', file: '.claude/settings.json' } as const
+      const found = [{ from, said: 'Bash(rm -rf:*)', decision: 'never', becomes: { pattern: 'rm -rf', match: 'prefix' } }] as const
+      const [offered] = offerOf(found, [])
+      const taken = yield* policies.adopt(projectId, found, [offered?.id ?? ''], instance.personId)
+      assert.deepStrictEqual(taken.commands, [{ pattern: 'rm -rf', decision: 'never', from }])
+      const [answered] = yield* sql<{ type: string; payload: string }>`
+        SELECT type, payload FROM record_events WHERE type = 'project.agent_rules_taken' AND project_id = ${projectId}`
+      assert.deepStrictEqual(JSON.parse(answered?.payload ?? '{}'), {
+        offered: true,
+        taken: [{ pattern: 'rm -rf', decision: 'never', from }],
+      })
+
+      const forged = { agent: 'codex', file: 'nowhere.rules' } as const
+      yield* policies.set(
+        projectId,
+        {
+          commands: [
+            { pattern: 'rm -rf', decision: 'never', from: forged },
+            { pattern: 'terraform', decision: 'ask', from: forged },
+          ],
+        },
+        instance.personId,
+      )
+      assert.deepStrictEqual((yield* policies.current(projectId)).rules.commands, [
+        { pattern: 'rm -rf', decision: 'never', from },
+        { pattern: 'terraform', decision: 'ask' },
+      ])
+      // Made the person's own another way, it is theirs.
+      yield* policies.set(projectId, { commands: [{ pattern: 'rm -rf', decision: 'ask' }] }, instance.personId)
+      assert.deepStrictEqual((yield* policies.current(projectId)).rules.commands, [{ pattern: 'rm -rf', decision: 'ask' }])
+      // Taking nothing makes no revision, and answers the offer all the same.
+      const before = (yield* policies.current(projectId)).revision
+      yield* policies.adopt(projectId, found, [], instance.personId)
+      assert.strictEqual((yield* policies.current(projectId)).revision, before)
+      const refused = yield* Effect.flip(policies.adopt('proj_missing', [], [], instance.personId))
+      assert.strictEqual(refused._tag, 'NotFound')
     }).pipe(Effect.provide(runtime())),
   )
 })

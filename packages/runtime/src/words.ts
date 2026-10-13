@@ -172,6 +172,8 @@ export const words = (
       }
       case 'RulesChanged':
         return "The project's rules changed meanwhile, so that change wasn't made. They're shown as they are now: make it again if it's still wanted."
+      case 'AgentRulesChanged':
+        return "Your agents' settings changed since they were read, so nothing was taken. They're read again: choose again."
       case 'AlwaysNotOffered':
         return "That can't be kept as a rule for this request. Answer it once instead."
       case 'QuestionUnanswered':
@@ -351,6 +353,7 @@ export const expected = new Set([
   'NothingToWaitFor',
   'RuleOnAnotherList',
   'RulesChanged',
+  'AgentRulesChanged',
   'AlreadyDelivered',
   'CommandIdReused',
 ])

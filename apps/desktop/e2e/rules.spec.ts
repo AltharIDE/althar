@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -69,6 +69,73 @@ test('changes a project’s rules from its settings, and keeps them', async () =
     await expect(sentence(page, 'Ask me').getByRole('button', { name: 'force pushing' })).toHaveCount(0)
     await expect(sentence(page, 'Ask me').getByText('terraform *', { exact: true })).toBeVisible()
     await expect(sentence(page, 'Finished')).toContainText('A finished task pushes its branch alone')
+  } finally {
+    await electronApp.close()
+  }
+})
+
+/** A repository whose Claude Code settings refuse `rm -rf`, allow `npm test`, and keep `.env` from being read. */
+const withClaudeSettings = (home: string) => {
+  const repo = repository(home)
+  mkdirSync(join(repo, '.claude'))
+  writeFileSync(
+    join(repo, '.claude', 'settings.json'),
+    JSON.stringify({ permissions: { deny: ['Bash(rm -rf:*)', 'Read(./.env)'], allow: ['Bash(npm test:*)'] } }),
+  )
+  return repo
+}
+
+test('starts a project’s rules from its agents’ own settings, offered once as it opens, each rule saying where it came from', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const repo = withClaudeSettings(home)
+  const { electronApp, page } = await launch(home)
+  try {
+    await openFirstProject(electronApp, page, repo)
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await expect(page.getByText('Your agents’ own settings name 2 rules this project could start from.')).toBeVisible()
+    await page.screenshot({ path: 'test-results/agent-rules-offer.png', animations: 'disabled' })
+
+    // Reviewed on the rules screen: every rule chosen to start with, and what can't be taken, with why.
+    await page.getByRole('button', { name: 'Review' }).click()
+    const proposal = page.getByRole('dialog', { name: 'Rules from your agents' })
+    await expect(proposal.getByRole('checkbox', { name: 'rm -rf' })).toBeChecked()
+    await expect(proposal.getByRole('checkbox', { name: 'npm test' })).toBeChecked()
+    await proposal.getByRole('button', { name: 'One can’t be taken' }).click()
+    await expect(proposal.getByText('A rule on files: the project’s rules don’t hold paths yet.')).toBeVisible()
+    await page.screenshot({ path: 'test-results/agent-rules-proposal.png', animations: 'disabled' })
+
+    // Some of it: the never alone.
+    await proposal.getByRole('checkbox', { name: 'npm test' }).click()
+    await proposal.getByRole('button', { name: 'Take 1 rule' }).click()
+    await expect(proposal).toHaveCount(0)
+    await expect(sentence(page, 'Never')).toContainText('Agents never run rm -rf.')
+    await expect(sentence(page, 'Never')).toContainText('From .claude/settings.json: rm -rf.')
+    await expect(sentence(page, 'Go ahead')).not.toContainText('npm test')
+    await page.screenshot({ path: 'test-results/agent-rules-taken.png', animations: 'disabled', fullPage: true })
+
+    // The offer is answered: the project doesn't make it again.
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await expect(page.getByText(/could start from/)).toHaveCount(0)
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('turning the agents’ rules down leaves the project’s rules as they were', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const repo = withClaudeSettings(home)
+  const { electronApp, page } = await launch(home)
+  try {
+    await openFirstProject(electronApp, page, repo)
+    await page.getByRole('button', { name: 'Take none' }).click()
+    await expect(page.getByText(/could start from/)).toHaveCount(0)
+    await openRules(page)
+    await expect(sentence(page, 'Never')).toContainText('Nothing is refused outright.')
+    await expect(sentence(page, 'Go ahead')).toContainText('Nothing goes ahead by a rule yet')
+    // Still there to take whenever the person asks.
+    await page.getByRole('button', { name: 'Import from your agents' }).click()
+    await expect(page.getByRole('dialog', { name: 'Rules from your agents' }).getByRole('button', { name: 'Cancel' })).toBeVisible()
   } finally {
     await electronApp.close()
   }

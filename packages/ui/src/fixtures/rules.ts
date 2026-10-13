@@ -1,6 +1,7 @@
 import { CommandMatch, RuleKind, RulePlace } from '../foundations/vocabulary'
 import type { AgentAccounts, RuleCommand } from '../screens/ProjectRules/ProjectRules'
 import type { RepositoryNaming, RepositoryTemplate } from '../setup/Conventions/Conventions'
+import type { ImportRule, SkippedRule } from '../setup/RulesImport/RulesImport'
 
 /*
  * Meridian's rules, as the rules screen draws them: where each kind of
@@ -77,5 +78,66 @@ export const MERIDIAN_ACCOUNTS: readonly AgentAccounts[] = [
       { id: 'personal', label: 'Personal' },
       { id: 'work', label: 'Work' },
     ],
+  },
+]
+
+/** What Meridian's agents' own settings say, as rules it can take: Claude Code's, the person's Codex rules, OpenCode's. */
+export const MERIDIAN_IMPORT: readonly ImportRule[] = [
+  {
+    id: 'rm',
+    place: RulePlace.Never,
+    pattern: 'rm -rf',
+    match: CommandMatch.Prefix,
+    from: '.claude/settings.json',
+    said: 'Bash(rm -rf:*)',
+  },
+  {
+    id: 'push',
+    place: RulePlace.Never,
+    pattern: 'git push --force',
+    match: CommandMatch.Prefix,
+    from: '~/.codex/rules/default.rules',
+    said: 'prefix_rule(pattern = ["git", "push", "--force"], decision = "forbidden")',
+  },
+  {
+    id: 'tf',
+    place: RulePlace.Ask,
+    pattern: 'terraform',
+    match: CommandMatch.Prefix,
+    from: 'opencode.json',
+    said: 'bash: "terraform *": "ask"',
+  },
+  {
+    id: 'test',
+    place: RulePlace.Allow,
+    pattern: 'npm test',
+    match: CommandMatch.Prefix,
+    from: '.claude/settings.json',
+    said: 'Bash(npm test:*)',
+  },
+  {
+    id: 'status',
+    place: RulePlace.Allow,
+    pattern: 'git status',
+    match: CommandMatch.Exact,
+    from: '.claude/settings.local.json',
+    said: 'Bash(git status)',
+  },
+]
+
+/** What can't be one of its rules, with why, as the desktop app says it. */
+export const MERIDIAN_SKIPPED: readonly SkippedRule[] = [
+  { id: 'env', from: '.claude/settings.json', said: 'Read(./.env)', why: 'A rule on files: the project’s rules don’t hold paths yet.' },
+  {
+    id: 'fetch',
+    from: '.claude/settings.json',
+    said: 'WebFetch(domain:stripe.com)',
+    why: 'A rule on the web: the project’s rules don’t hold domains yet.',
+  },
+  {
+    id: 'merge',
+    from: '~/.claude/settings.json',
+    said: 'Bash(gh pr merge:*)',
+    why: 'No project can change this: agents reach the code host through Althar.',
   },
 ]

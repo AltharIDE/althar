@@ -69,3 +69,19 @@ export const AllStates: Story = {
     />
   ),
 }
+
+const DETAILED: CheckItem[] = [
+  { id: 'rm', label: 'rm -rf', detail: 'From .claude/settings.json, as Bash(rm -rf:*)' },
+  { id: 'push', label: 'git push', detail: 'From ~/.codex/rules/default.rules' },
+]
+
+/** Each with a quieter line under it, which describes its box. */
+export const WithDetail: Story = {
+  args: { label: 'Never', items: DETAILED, value: ['rm'] },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const box = c.getByRole('checkbox', { name: 'rm -rf' })
+    await expect(box).toBeChecked()
+    await expect(box).toHaveAccessibleDescription('From .claude/settings.json, as Bash(rm -rf:*)')
+  },
+}

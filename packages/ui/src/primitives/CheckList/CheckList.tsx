@@ -1,5 +1,5 @@
 import { Checkbox } from 'radix-ui'
-import { useId } from 'react'
+import { type ReactNode, useId } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
@@ -9,7 +9,10 @@ import s from './CheckList.module.css'
 
 export interface CheckItem {
   id: string
-  label: string
+  /** What it is: its box's name. */
+  label: ReactNode
+  /** Under it, quieter: where it comes from, or what it means. It describes the box. */
+  detail?: ReactNode
 }
 
 export interface CheckListProps {
@@ -48,20 +51,32 @@ export function CheckList({ label, items, value, onChange, disabled, keepOne = f
       {items.map((item) => {
         const id = `${base}-${item.id}`
         const on = value.includes(item.id)
+        const labelId = `${id}-label`
+        const detailId = `${id}-detail`
         return (
-          <label key={item.id} htmlFor={id} className={s.row}>
+          <label key={item.id} htmlFor={id} className={cx(s.row, item.detail != null && s.two)}>
             <Checkbox.Root
               id={id}
               checked={on}
               disabled={keepOne && on && value.length === 1}
               onCheckedChange={(next) => toggle(item.id, next === true)}
               className={s.box}
+              {...(item.detail == null ? {} : { 'aria-labelledby': labelId, 'aria-describedby': detailId })}
             >
               <Checkbox.Indicator className={s.tick}>
                 <Icon name="check" size={10} />
               </Checkbox.Indicator>
             </Checkbox.Root>
-            <span>{item.label}</span>
+            {item.detail == null ? (
+              <span>{item.label}</span>
+            ) : (
+              <span className={s.text}>
+                <span id={labelId}>{item.label}</span>
+                <span id={detailId} className={s.detail}>
+                  {item.detail}
+                </span>
+              </span>
+            )}
           </label>
         )
       })}

@@ -364,3 +364,39 @@ export const LongCommands: Story = {
     ],
   },
 }
+
+const copied: readonly RuleCommand[] = [
+  { id: 'never:prefix:rm -rf', pattern: 'rm -rf', match: CommandMatch.Prefix, place: RulePlace.Never, from: '.claude/settings.json' },
+  {
+    id: 'never:prefix:git push --force',
+    pattern: 'git push --force',
+    match: CommandMatch.Prefix,
+    place: RulePlace.Never,
+    from: '~/.codex/rules/default.rules',
+  },
+  { id: 'allow:prefix:npm test', pattern: 'npm test', match: CommandMatch.Prefix, place: RulePlace.Allow, from: '.claude/settings.json' },
+]
+
+/** Rules taken from the agents' own settings: each in its sentence, and under it the file it came from. */
+export const FromTheAgents: Story = {
+  args: { commands: [...MERIDIAN_COMMANDS, ...copied], onImport: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const never = c.getByRole('listitem', { name: 'Never' })
+    await expect(within(never).getByText('From .claude/settings.json:', { exact: false })).toHaveTextContent(
+      'From .claude/settings.json: rm -rf.',
+    )
+    await expect(within(never).getByText('From ~/.codex/rules/default.rules:', { exact: false })).toHaveTextContent(
+      'From ~/.codex/rules/default.rules: git push --force.',
+    )
+    await userEvent.click(c.getByRole('button', { name: 'Import from your agents' }))
+    await expect(args.onImport).toHaveBeenCalledOnce()
+  },
+}
+
+/** Without a way to import, the page doesn't offer one. */
+export const NoImport: Story = {
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).queryByRole('button', { name: 'Import from your agents' })).toBeNull()
+  },
+}

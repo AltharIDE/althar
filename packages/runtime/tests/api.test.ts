@@ -59,6 +59,8 @@ const connected = (
     readonly editors?: RuntimeOptions['editors']
     /** The machine how many agents are at work at once comes from: a large one unless a test says. */
     readonly machine?: { readonly cores: number; readonly memory: number }
+    /** The person's home folder, where agents keep their own settings: one of its own unless a test says. */
+    readonly home?: string
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -81,6 +83,7 @@ const connected = (
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
         busy: { machine: options.machine ?? ROOMY },
+        home: options.home ?? mkdtempSync(join(tmpdir(), 'althar-home-')),
       }),
     )
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
@@ -529,6 +532,94 @@ describe('the API', () => {
           client.Answer({ commandId: commandId(), attentionId: 'att_missing', decision: 'allow', always: 'kind' }),
         )
         assert.strictEqual(refused.reason, 'NotFound')
+      }),
+    ),
+  )
+
+  it.live('offers the agents’ own rules as a project opens, and takes those the person chooses, with where they came from', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const home = mkdtempSync(join(tmpdir(), 'althar-home-'))
+        const write = (folder: string, settings: unknown) => {
+          mkdirSync(join(folder, '.claude'), { recursive: true })
+          writeFileSync(join(folder, '.claude', 'settings.json'), JSON.stringify(settings))
+        }
+        write(home, { permissions: { allow: ['Bash(npm test:*)'] } })
+        const { client, grant } = yield* connected({ home })
+        const path = repository()
+        write(path, { permissions: { deny: ['Bash(rm -rf:*)', 'Read(./.env)'] } })
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(path) })
+
+        const read = yield* client.ReadAgentRules({ projectId: project.id })
+        assert.isTrue(read.offered)
+        assert.deepStrictEqual(read.files, [
+          { from: { agent: 'claude', file: '.claude/settings.json' }, readable: true },
+          { from: { agent: 'claude', file: '~/.claude/settings.json' }, readable: true },
+        ])
+        const [never, path_, allow] = read.rules
+        assert.deepInclude(never, { said: 'Bash(rm -rf:*)', decision: 'never', rule: { pattern: 'rm -rf', match: 'prefix' } })
+        assert.deepInclude(path_, { said: 'Read(./.env)', decision: 'never', skipped: 'paths' })
+        assert.deepInclude(allow, { said: 'Bash(npm test:*)', decision: 'allow', rule: { pattern: 'npm test', match: 'prefix' } })
+        // Nothing is kept until the person takes it.
+        assert.deepStrictEqual((yield* client.GetProjectRules({ projectId: project.id })).commands, [])
+
+        const kept = yield* client.ImportAgentRules({ commandId: commandId(), projectId: project.id, ids: [never?.id ?? ''] })
+        const from = { agent: 'claude' as const, file: '.claude/settings.json' }
+        assert.deepStrictEqual(kept.commands, [{ pattern: 'rm -rf', decision: 'never', from }])
+        // The offer is answered, and what was taken is the project's already.
+        const again = yield* client.ReadAgentRules({ projectId: project.id })
+        assert.isFalse(again.offered)
+        assert.deepInclude(again.rules[0], { said: 'Bash(rm -rf:*)', skipped: 'already' })
+
+        // Where it came from stays with it through the rules screen's changes.
+        yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          commands: [
+            { pattern: 'rm -rf', decision: 'never' },
+            { pattern: 'terraform', decision: 'ask' },
+          ],
+          expectedRevision: kept.revision,
+        })
+        assert.deepStrictEqual((yield* client.GetProjectRules({ projectId: project.id })).commands, [
+          { pattern: 'rm -rf', decision: 'never', from },
+          { pattern: 'terraform', decision: 'ask' },
+        ])
+
+        // A file changed since it was read: what was chosen from it isn't taken.
+        write(home, { permissions: { allow: ['Bash(npm run test:*)'] } })
+        const changed = yield* Effect.flip(
+          client.ImportAgentRules({ commandId: commandId(), projectId: project.id, ids: [allow?.id ?? ''] }),
+        )
+        assert.strictEqual(changed.reason, 'AgentRulesChanged')
+        assert.match(changed.message, /changed since they were read/)
+        assert.lengthOf((yield* client.GetProjectRules({ projectId: project.id })).commands, 2)
+      }),
+    ),
+  )
+
+  it.live('takes none of the agents’ rules when the person turns them down, and the project keeps its rules as they were', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const path = repository()
+        writeFileSync(join(path, 'opencode.json'), JSON.stringify({ permission: { bash: { 'rm -rf *': 'deny' } } }))
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(path) })
+        const before = yield* client.GetProjectRules({ projectId: project.id })
+        const read = yield* client.ReadAgentRules({ projectId: project.id })
+        assert.deepInclude(read.rules[0], {
+          from: { agent: 'opencode', file: 'opencode.json' },
+          rule: { pattern: 'rm -rf', match: 'prefix' },
+        })
+        const after = yield* client.ImportAgentRules({ commandId: commandId(), projectId: project.id, ids: [] })
+        assert.deepStrictEqual(after, before)
+        assert.isFalse((yield* client.ReadAgentRules({ projectId: project.id })).offered)
+        // Still there to take from the rules screen, whenever the person asks.
+        assert.lengthOf((yield* client.ReadAgentRules({ projectId: project.id })).rules, 1)
+        const missing = yield* Effect.flip(client.ReadAgentRules({ projectId: 'proj_gone' }))
+        assert.strictEqual(missing.reason, 'NotFound')
+        const gone = yield* Effect.flip(client.ImportAgentRules({ commandId: commandId(), projectId: 'proj_gone', ids: [] }))
+        assert.strictEqual(gone.reason, 'NotFound')
       }),
     ),
   )

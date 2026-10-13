@@ -317,6 +317,71 @@ export const CommandRule = Schema.Struct({
 })
 export type CommandRule = typeof CommandRule.Type
 
+/** An agent whose own permission settings a project's rules can start from (ADR-034). */
+export const RulesAgent = Schema.Literals(['claude', 'codex', 'opencode'])
+export type RulesAgent = typeof RulesAgent.Type
+
+/** Where a rule was copied from: the agent, and its file as the person would find it (`.claude/settings.json`, `~/.codex/rules/default.rules`). */
+export const RuleSource = Schema.Struct({ agent: RulesAgent, file: Schema.String })
+export type RuleSource = typeof RuleSource.Type
+
+/** A command rule as the project keeps it, with where it was copied from, for one taken from an agent's settings (ADR-034). */
+export const KeptCommandRule = Schema.Struct({ ...CommandRule.fields, from: Schema.optional(RuleSource) })
+export type KeptCommandRule = typeof KeptCommandRule.Type
+
+/**
+ * Why one of an agent's rules isn't one of the project's (ADR-034): it is on
+ * paths, the web, an MCP tool or another tool; it is for every command; its
+ * wildcard, or its words, can't be said the same way; it is for one of
+ * OpenCode's agents; what no project can change says it already; the
+ * project has it already; or the same words are never allowed, or always
+ * ask, which comes first.
+ */
+export const AgentRuleSkip = Schema.Literals([
+  'paths',
+  'network',
+  'mcp',
+  'tool',
+  'every-command',
+  'wildcard',
+  'unsayable',
+  'one-agent',
+  'fixed',
+  'already',
+  'under-never',
+  'under-ask',
+])
+export type AgentRuleSkip = typeof AgentRuleSkip.Type
+
+const agentRuleFields = {
+  /** The same for the same rule from the same file, so a choice names what was read. */
+  id: Schema.String,
+  from: RuleSource,
+  /** The rule as the file has it: `Bash(rm -rf:*)`. */
+  said: Schema.String,
+  /** What it decides, in the project's words: its agent's deny, ask or allow. */
+  decision: Schema.Literals(['never', 'ask', 'allow']),
+}
+
+/** One of the agents' rules as a project is offered it: the command rule it becomes, or why it isn't one. */
+export const AgentRule = Schema.Union([
+  Schema.Struct({ ...agentRuleFields, rule: Schema.Struct({ pattern: Schema.String, match: Schema.Literals(['prefix', 'exact']) }) }),
+  Schema.Struct({ ...agentRuleFields, skipped: AgentRuleSkip }),
+])
+export type AgentRule = typeof AgentRule.Type
+
+/** What a project's agents' own settings offer its rules, read now from their files (ADR-034). */
+export const AgentRules = Schema.Struct({
+  projectId: Schema.String,
+  /** Whether the offer made as the project was opened still stands: once, until the person answers it. */
+  offered: Schema.Boolean,
+  /** The files read, each with whether it could be read as its agent reads it. */
+  files: Schema.Array(Schema.Struct({ from: RuleSource, readable: Schema.Boolean })),
+  /** Each rule in them, in the order read. */
+  rules: Schema.Array(AgentRule),
+})
+export type AgentRules = typeof AgentRules.Type
+
 /** How far an "always" answer to a permission reaches (ADR-018): this exact command, commands that start the same way, or the kind it is. */
 export const AlwaysScope = Schema.Literals(['exact', 'prefix', 'kind'])
 export type AlwaysScope = typeof AlwaysScope.Type
@@ -357,7 +422,7 @@ export const ProjectRulesView = Schema.Struct({
   never: Schema.Array(RuleKind),
   /** The kinds let through without asking, short of what always asks or is never allowed (ADR-018). */
   alwaysAllow: Schema.Array(RuleKind),
-  commands: Schema.Array(CommandRule),
+  commands: Schema.Array(KeptCommandRule),
   /** How a task ends when its plan doesn't say; null: a draft pull request where Althar is connected to the host, else its branch. */
   end: Schema.NullOr(Schema.Literals(['draft', 'ready', 'none'])),
   /** Whether a task's lead resolves a conflict with its default branch on its own, without the person asking it. */
@@ -2187,6 +2252,16 @@ export const Api = RpcGroup.make(
     },
     ProjectRulesView,
   ),
+  /** What the agents' own settings would add to a project's rules, read now from their files (ADR-034); nothing changes. */
+  call('ReadAgentRules', { projectId: Schema.String }, AgentRules),
+  /**
+   * Takes the rules chosen, by id, of what `ReadAgentRules` offers, into the
+   * project's rules, each kept with where it came from; with none, its rules
+   * stay as they are. Either way the offer made as the project was opened is
+   * answered. Refused (`AgentRulesChanged`) where a file changed since, so
+   * a rule chosen isn't offered now.
+   */
+  command('ImportAgentRules', { projectId: Schema.String, ids: Schema.Array(Schema.String) }, ProjectRulesView),
   /** Whether work moves on to an agent's next account in the project, and which accounts each agent may use there (null: every one). */
   command(
     'SetProjectAccounts',

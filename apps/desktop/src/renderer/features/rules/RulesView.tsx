@@ -1,11 +1,12 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 import { type AgentStatus, type CommandRule, fillPattern, type ProjectRulesView } from '@althar/contracts'
-import { BackCrumb, CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd, unreachable } from '@althar/ui'
+import { BackCrumb, CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, RulesImport, TaskEnd, unreachable } from '@althar/ui'
 import { type CommandPlace, ProjectRules, type RuleCommand } from '@althar/ui/screens'
 
 import { PartPending, pendingText } from '../../shared/Pending'
 import s from './Rules.module.css'
+import type { AgentRulesModel } from './useAgentRules'
 import type { RulesModel } from './useRules'
 
 /*
@@ -14,11 +15,16 @@ import type { RulesModel } from './useRules'
  * the rest, in the order a request meets them; how a task ends and is
  * named; and what a usage limit does, with the accounts work runs on. A
  * kind of request sits in one sentence: moving it writes it on one list
- * and takes it off the others. Escape goes back to the project.
+ * and takes it off the others. What the agents' own settings would add
+ * opens over it (ADR-034), and a command taken from them says where it came
+ * from. Escape goes back to the project.
  */
 
 export const text = {
   back: 'Back to the project',
+  /** No agent keeps settings the runtime could read for the project. */
+  noSettings:
+    'None of your agents keep settings for this project: no .claude/settings.json, Codex rules or opencode.json in its repositories or your home folder.',
   /** Why a command can't go ahead: a sentence that comes first has it. */
   onOtherList: (pattern: string, list: 'ask' | 'never') => {
     const named = list === 'never' ? 'Never' : 'Ask me'
@@ -190,6 +196,7 @@ const commandsOf = (rules: ProjectRulesView): RuleCommand[] =>
     pattern: rule.pattern,
     match: isExact(rule) ? CommandMatch.Exact : CommandMatch.Prefix,
     place: placeOfDecision(rule.decision),
+    ...(rule.from === undefined ? {} : { from: rule.from.file }),
   }))
 
 /**
@@ -250,8 +257,28 @@ const forSomethingElse = (event: KeyboardEvent) => {
   )
 }
 
-export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => void }) {
+export function RulesView({
+  model,
+  agents,
+  onBack,
+  importing: opening = false,
+  onImportClosed,
+}: {
+  model: RulesModel
+  /** What the agents' own settings would add; without it, there is no way to it here. */
+  agents?: AgentRulesModel
+  onBack: () => void
+  /** It opens on what the agents' settings would add, as their offer's Review asks. */
+  importing?: boolean
+  /** What the agents' settings would add was closed, answered or not. */
+  onImportClosed?: () => void
+}) {
   const { rules } = model
+  const [importing, setImporting] = useState(opening)
+  const closeImport = () => {
+    setImporting(false)
+    onImportClosed?.()
+  }
   // Escape goes back to the project, unless it is closing something on the page first.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -327,6 +354,7 @@ export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => 
               rotate={rules.rotateAccounts}
               onRotateChange={(rotateAccounts) => model.change({ rotateAccounts })}
               allowed={rules.onlyAccounts ?? {}}
+              {...(agents === undefined ? {} : { onImport: () => setImporting(true) })}
               onAllowedChange={(agentId, ids) => {
                 const every = model.agents.find((agent) => agent.id === agentId)?.accounts.length ?? 0
                 model.change((now) => {
@@ -339,6 +367,32 @@ export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => 
           )}
         </div>
       </main>
+      {agents !== undefined && importing && (
+        <RulesImport
+          rules={agents.rules}
+          skipped={agents.skipped}
+          unreadable={agents.unreadable}
+          reading={agents.read === null && agents.error === null}
+          onTake={(ids) =>
+            void agents.take(ids).then((taken) => {
+              if (taken) closeImport()
+            })
+          }
+          // The offer made as the project opened is answered here too: taking none turns it down.
+          {...(agents.read?.offered === true
+            ? {
+                onDecline: () =>
+                  void agents.decline().then((declined) => {
+                    if (declined) closeImport()
+                  }),
+              }
+            : {})}
+          onClose={closeImport}
+          taking={agents.taking || agents.declining}
+          {...(agents.error === null ? {} : { error: agents.error })}
+          {...(agents.read?.files.length === 0 ? { text: { none: text.noSettings } } : {})}
+        />
+      )}
     </div>
   )
 }

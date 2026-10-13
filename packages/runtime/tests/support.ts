@@ -204,12 +204,16 @@ export const runtime = (
     readonly onDevice?: RuntimeOptions['onDevice']
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
     readonly busy?: BusyOptions
+    /** The person's home folder, where agents keep their own settings. */
+    readonly home?: string
   } = {},
 ) =>
   Runtime.layer({
     database,
     worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
     accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
+    // The agents' settings of the person running the tests are theirs: a home of its own, unless a test says.
+    home: more.home ?? mkdtempSync(join(tmpdir(), 'althar-home-')),
     ...(more.artifactsRoot === null ? {} : { artifactsRoot: more.artifactsRoot ?? mkdtempSync(join(tmpdir(), 'althar-artifacts-')) }),
     // Nothing opens on the Mac running the tests: what would have is kept.
     openTerminal: (line) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(false)),

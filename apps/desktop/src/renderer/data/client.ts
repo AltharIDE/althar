@@ -8,6 +8,7 @@ import {
   type FieldAnswer,
   type FoundAccount,
   type ProjectNote,
+  type AgentRules,
   type ProjectRulesView,
   Api,
   ApiError,
@@ -252,6 +253,10 @@ export interface Client {
   readonly getVocabulary: (projectId: string) => Promise<ReadonlyArray<string>>
   /** Changes what is given of a project's rules; the rules as they are after it. */
   readonly setProjectRules: (input: ProjectRulesChange) => Promise<ProjectRulesView>
+  /** What the agents' own settings would add to a project's rules, read now from their files (ADR-034). */
+  readonly readAgentRules: (projectId: string) => Promise<AgentRules>
+  /** Takes the rules chosen, by id, of what the agents' settings offer; with none, answers the offer; the rules as they are after it. */
+  readonly importAgentRules: (projectId: string, ids: ReadonlyArray<string>) => Promise<ProjectRulesView>
   /** Adds an account to an agent: in the folder a grant names, or one Althar makes. */
   readonly addAccount: (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => Promise<AccountStatus>
   readonly renameAccount: (accountId: string, name: string) => Promise<void>
@@ -487,6 +492,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     dropProjectNote: (projectId, noteId) => command((commandId) => api.DropProjectNote({ commandId, projectId, noteId })),
     getVocabulary: (projectId) => settle(api.GetVocabulary({ projectId })),
     setProjectRules: (input) => command((commandId) => api.SetProjectRules({ commandId, ...input })),
+    readAgentRules: (projectId) => settle(api.ReadAgentRules({ projectId })),
+    importAgentRules: (projectId, ids) => command((commandId) => api.ImportAgentRules({ commandId, projectId, ids })),
     addAccount: (input) => command((commandId) => api.AddAccount({ commandId, ...input })),
     renameAccount: (accountId, name) => command((commandId) => api.RenameAccount({ commandId, accountId, name })),
     removeAccount: (accountId, anyway) =>

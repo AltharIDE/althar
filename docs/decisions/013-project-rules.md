@@ -1,7 +1,9 @@
 # ADR-013: Project rules: a mode, always ask, never, and command rules
 
 - **Status:** Accepted; amended by [ADR-018](018-allow-always-keeps-a-rule.md)
-  (2026-10-10), which adds allow rules after what always asks
+  (2026-10-10), which adds allow rules after what always asks, and by
+  [ADR-034](034-rules-start-from-the-agents-settings.md) (2026-10-13), which
+  lets a project's rules start from its agents' own settings, as a copy
 - **Date:** 2026-10-04
 - **Amended:** 2026-10-10: the usage limit row offers "Ask me". The step
   waits for the person, with each account that could take it over and when
@@ -115,7 +117,9 @@
 - **Alternatives considered:**
   - **Each agent's own rule files** (`.claude/settings.json`, Codex's rules,
     `opencode.json`). Each agent's differ in shape and reach. Althar's
-    reading of a request is the one that holds across agents.
+    reading of a request is the one that holds across agents. They can
+    still be the first draft of the project's rules, copied in when the
+    person takes them ([ADR-034](034-rules-start-from-the-agents-settings.md)).
   - **An allowlist** (Cursor's). Althar is permissive by default, and the
     person keeps the exceptions; an allowlist inverts that. One could serve
     the `ask` mode later.
