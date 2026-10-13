@@ -154,19 +154,23 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={queuedWords(card.queued)} />
   const steps = stepNames(card.plan?.steps ?? [])
   const at = stepIndex(steps, card.step)
+  // Ready, but its lead couldn't resolve a conflict: it needs the person, and says why.
+  const handedBack = card.phase === 'ready' ? (card.handedBack ?? null) : null
   // Waiting for a free agent, it says so, rather than that it runs.
-  const status = card.queued !== null ? TaskStatus.Queued : STATUS[card.phase]
+  const status = card.queued !== null ? TaskStatus.Queued : handedBack === null ? STATUS[card.phase] : TaskStatus.Yours
   // A step held for a usage limit, or waiting for a free agent, says what it waits for, rather than what it does.
   const now =
-    status === TaskStatus.Done
-      ? card.summary?.split('\n')[0]
-      : card.queued !== null
-        ? queuedWords(card.queued)
-        : card.waits !== null
-          ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until))
-          : card.step === null
-            ? undefined
-            : text.now[card.step]
+    handedBack !== null
+      ? handedBack
+      : status === TaskStatus.Done
+        ? card.summary?.split('\n')[0]
+        : card.queued !== null
+          ? queuedWords(card.queued)
+          : card.waits !== null
+            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until))
+            : card.step === null
+              ? undefined
+              : text.now[card.step]
   const from = fromOf(card)
   // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
   const effort = effortOf(card.lead, card.leadModel, card.leadEffort)
@@ -176,7 +180,7 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
       title={card.title}
       status={status}
       steps={steps}
-      at={status === TaskStatus.Done ? steps.length - 1 : at}
+      at={status === TaskStatus.Done || handedBack !== null ? steps.length - 1 : at}
       {...(now === undefined ? {} : { now })}
       started={card.startedAt === null ? '' : ago(card.startedAt)}
       lead={named(card.lead, card.leadModel)}

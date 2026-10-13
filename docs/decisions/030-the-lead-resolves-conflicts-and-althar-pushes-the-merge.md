@@ -34,21 +34,41 @@
     the person's press sends, in the same words; for a pull request, the
     branch it goes into is fetched first, and the note says Althar pushes the
     merge.
-  - **Althar judges the branch, not the lead's word.** Once the lead's turn
-    is over, the branch it conflicted with must be in it, nothing half
-    merged, and no conflicted file with markers left. Not resolved, the lead
-    is asked once more with why; then it is the person's, in Needs you,
-    where the button's flow would leave it.
-  - **No review round.** The lead runs the checks and fixes what they find
-    before it commits the merge, and the pull request's checks run on what
-    Althar pushes.
+  - **Althar judges the branch, not the lead's word.** Once the lead is
+    done, the branch it conflicted with must be in it, nothing half merged,
+    and no conflicted file with markers left. Not resolved, the lead is
+    asked once more with why; then it is the person's, in Needs you, where
+    the button's flow would leave it. Where all that was left was to commit
+    the merge, the lead is told its merge is resolved but not committed, and
+    to commit it, not asked to resolve it again.
+  - **The lead commits before it finishes.** It commits the merge as soon as
+    the conflicts are settled and the quick checks pass, before the full
+    test suites, and doesn't end its turn with the merge uncommitted or
+    while it waits on something running in the background. If the full tests
+    then find something, it fixes it in one follow-up commit on top of the
+    merge.
+  - **Done is the turn over and nothing in hand.** A lead that backgrounded
+    the full tests and ended its turn isn't done: Claude Code wakes it when
+    they end (ADR-022), and it commits then. The round waits for a lead
+    with a command it left running going, in a call of its own, or that
+    spoke outside a turn Althar sent less than half a minute ago, as
+    `Sessions.busy` says; nothing says when a turn the agent starts itself
+    ends, so quiet is how it is told. A server it left running, which says
+    where it answers, isn't waited for. The wait is bounded (45 minutes),
+    and past it the branch is judged as it is, then asked once more and
+    given to the person as before.
+  - **No review round.** The lead runs the quick checks and commits the
+    merge, and the pull request's checks run on what Althar pushes.
   - **Althar pushes the resolution itself:** the one exception to "after the
     first push, pushing is the person's". Only the merge, made on the branch
     as the pull request had it, with nothing after it, and only where nobody
-    else asked the lead anything meanwhile. Where the branch had other
-    commits the pull request didn't, or anything else is on it, nothing is
-    pushed, and the task's Push card sends it all once the person has
-    looked. It uses the same push as that card, with the connection.
+    else asked the lead anything meanwhile, and with at most the one commit
+    the lead made on top of it for what the full tests found, the same
+    one commit a fix for failed checks is. Where the branch had other
+    commits the pull request didn't, or anything else is on it, such as
+    more than that one commit, nothing is pushed, and the task's Push card
+    sends it all once the person has looked. It uses the same push as that
+    card, with the connection.
   - **The round follows the checks on what Althar pushed.** Passed, the task
     is ready to merge. Failed, the lead is asked to fix them within the
     round, as one commit on top of the merge, and that commit alone is
@@ -100,9 +120,20 @@
     work a lead slips into that very commit goes up with it; the checks, and
     the pull request's review, are what catch it. A fix split over several
     commits waits for the person.
-  - **A fix the checks needed found before the merge is committed is in the
-    merge.** A lead that commits it after the merge instead leaves the merge
-    for the person to push.
+  - **A fix the quick checks needed found before the merge is committed is
+    in the merge,** and one the full tests found after it is the one
+    commit on top. Two or more commits after the merge leave it for the
+    person to push. A test fix is told apart from other work only by being
+    the one commit; other work the lead slips into that commit goes up with
+    it, as it does in a fix for failed checks.
+  - **A lead that is woken after Althar judged it** has its commits wait for
+    the person's Push. Past the bound, or for an agent that says what it left
+    running only after its turn (Codex, ADR-022), a round can be judged
+    while tests still run.
+  - **The wait for "done" rests on quiet.** A turn Claude Code starts itself
+    shows as messages and calls with no end marker, so half a minute without
+    one is taken as the end. A long call the agent doesn't report as a call
+    of its own can outlast that.
 - **Revisit when:**
   - Althar runs a project's checks itself, rather than the lead: judge the
     resolution by them before pushing.

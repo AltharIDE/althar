@@ -1945,6 +1945,16 @@ describe('a task', () => {
         attention: [{ id: 'a', kind: 'permission', title: 't', reason: 'r', command: null, stuck: null, createdAt: '' }],
       }).state,
     ).toBe('Needs you')
+    // Resolving a conflict is work under way, though its lead's turn is over; once it hands the conflict back, it needs the person.
+    expect(statusOf({ ...base, task: { ...base.task, phase: 'running', step: 'conflict' } })).toEqual({
+      status: TaskStatus.Running,
+      state: 'Resolving a conflict',
+    })
+    expect(statusOf({ ...base, task: { ...base.task, phase: 'running', step: 'checks' } }).state).toBe('Fixing the checks')
+    expect(statusOf({ ...base, task: { ...base.task, phase: 'ready', handedBack: 'The lead couldn’t resolve the conflict.' } })).toEqual({
+      status: TaskStatus.Yours,
+      state: 'Needs you',
+    })
     // On a step, it says what it does there: while its lead works, and while another agent reviews.
     expect(statusOf({ ...running(), task: { ...base.task, step: 'implement' } }).state).toBe('Implementing')
     expect(statusOf({ ...base, task: { ...base.task, step: 'settle' } })).toEqual({

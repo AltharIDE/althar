@@ -14,7 +14,23 @@ import {
   type SessionEvent,
   type StopReport,
 } from '@althar/provider-adapters'
-import { Cause, Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
+import {
+  Cause,
+  Clock,
+  Context,
+  Crypto,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Queue,
+  Schema,
+  Scope,
+  Semaphore,
+  Stream,
+} from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
@@ -53,7 +69,19 @@ import type { InputImage } from './sentImages'
 import { evidenceForReview } from './evidence'
 import { defaultEffortOf } from './preferences'
 import { addItem, betweenTurns, type OutputSoFar, recorder, toolItem, transcript } from './threads'
-import { commandOfCall, exitCodeIn, type LeftRunning, printedMore, servingAt, type ShownLeftRunning, shownOf, tailOf } from './leftRunning'
+import {
+  commandOfCall,
+  exitCodeIn,
+  type LeftRunning,
+  printedMore,
+  QUIET_FOR,
+  servingAt,
+  type ShownLeftRunning,
+  shownOf,
+  stillBusy,
+  tailOf,
+  WAKE_FOR,
+} from './leftRunning'
 import { outputText } from './reading'
 import { ToolServer } from './ToolServer'
 import { agentSaid, summarize } from './words'
@@ -202,6 +230,12 @@ interface Running {
   recording: { readonly outputOf: (itemId: string) => OutputSoFar | undefined } | undefined
   /** What it left running in the background, in the order it started them (leftRunning.ts). */
   readonly background: Map<string, LeftRunning>
+  /** Tool calls it began outside a turn Althar sent, as Claude Code does when something it left running ends, and hasn't finished. */
+  readonly callsOpen: Set<string>
+  /** When it last spoke outside a turn, or something it left running ended, in milliseconds; null if not since its last turn began. */
+  workedAt: number | null
+  /** When something it left running ended in between turns, if it hasn't spoken since, in milliseconds. */
+  wakeAt: number | null
   /**
    * A coordinator's handover to a fresh session (ADR-031): under way, it
    * takes no more turns; left, it carries on as it is, its agent compacting
@@ -210,6 +244,9 @@ interface Running {
    */
   handover: 'none' | 'under_way' | 'left'
 }
+
+/** How often, at most, a thread's agent is looked at while a round waits for it to be done. */
+const IDLE_EVERY = Duration.millis(250)
 
 /** How often, and for how long, what one left running is read for where it answers. */
 const SERVING_EVERY = Duration.millis(500)
@@ -447,6 +484,19 @@ export class Sessions extends Context.Service<
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) => Effect.Effect<boolean>,
     ): Effect.Effect<void>
+    /**
+     * Whether the thread's agent is still at work, though its turn has ended:
+     * it left a command running, is in a call of its own, or spoke outside a
+     * turn Althar sent a moment ago, as Claude Code does once something it
+     * left running ends (leftRunning.ts, `stillBusy`). False where no
+     * session is.
+     */
+    busy(threadId: string): Effect.Effect<boolean>
+    /**
+     * Waits until the agent isn't (`idle`), or its session ends (`gone`), or
+     * it is still at work once `within` has passed (`late`).
+     */
+    untilIdle(threadId: string, within: Duration.Duration): Effect.Effect<'idle' | 'gone' | 'late'>
   }
 >()('@althar/runtime/Sessions') {
   static readonly layer: Layer.Layer<Sessions, never, Store> = Layer.effect(
@@ -462,6 +512,8 @@ export class Sessions extends Context.Service<
       const toolServer = yield* ToolServer
       const setups = yield* Setups
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
+      const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
+      const wakeFor = (yield* RuntimeConfig).idle?.wake ?? WAKE_FOR
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
@@ -525,6 +577,8 @@ export class Sessions extends Context.Service<
                   startedAt: yield* timestamp,
                   ended: null,
                 })
+                // Left running, its call is no longer one the agent has open.
+                if (event.toolCallId !== undefined) running.callsOpen.delete(event.toolCallId)
                 yield* toldBackground(running)
                 yield* Effect.forkIn(watchServing(running, event.id), running.scope)
                 return
@@ -544,6 +598,9 @@ export class Sessions extends Context.Service<
               case 'BackgroundEnded': {
                 const left = running.background.get(event.id)
                 if (left === undefined) return
+                // Claude Code may start a turn of its own now (ADR-022).
+                running.workedAt = yield* Clock.currentTimeMillis
+                if (!running.turnRunning && event.end !== 'stopped') running.wakeAt = running.workedAt
                 // Stopped, it goes, whoever stopped it. Ended by itself, it stays, to say how.
                 if (event.end === 'stopped') running.background.delete(event.id)
                 else {
@@ -557,6 +614,36 @@ export class Sessions extends Context.Service<
             }
           }),
         ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not keep what an agent left running', cause)))
+
+      /**
+       * Keeps that the agent is at work outside a turn Althar sent, from an
+       * event it streamed between turns: it speaks, or makes a call and has
+       * not finished it. Nothing says when such a turn ends, so it is taken
+       * as over once the agent has said nothing for a while (`stillBusy`).
+       */
+      const heardWork = (running: Running, event: SessionEvent) =>
+        Effect.gen(function* () {
+          switch (event._tag) {
+            case 'AgentMessage':
+            case 'AgentContent':
+            case 'AgentThought':
+            case 'Plan':
+              break
+            case 'ToolCall':
+              if (event.status === 'pending' || event.status === 'in_progress') running.callsOpen.add(event.toolCallId)
+              else running.callsOpen.delete(event.toolCallId)
+              break
+            case 'ToolCallUpdate':
+              if (event.status === 'completed' || event.status === 'failed') running.callsOpen.delete(event.toolCallId)
+              // What a command it left running prints isn't the agent at work.
+              if ([...running.background.values()].some((left) => left.toolCallId === event.toolCallId)) return
+              break
+            default:
+              return
+          }
+          running.workedAt = yield* Clock.currentTimeMillis
+          running.wakeAt = null
+        })
 
       /** No agent starts, and nothing is said to one, in a project removed from Althar: a window that hadn't heard yet is told it's gone. */
       const inLiveProject = (threadId: string) =>
@@ -834,6 +921,10 @@ export class Sessions extends Context.Service<
           )
           running.brief = undefined
           running.turnRunning = true
+          // What it did outside a turn before is over with: this turn is what it is at.
+          running.callsOpen.clear()
+          running.workedAt = null
+          running.wakeAt = null
           const begun = running.begun
           running.begun = undefined
           if (begun !== undefined) yield* begun
@@ -1362,6 +1453,9 @@ export class Sessions extends Context.Service<
             recording: undefined,
             settleBetween: Effect.void,
             background: new Map(),
+            callsOpen: new Set(),
+            workedAt: null,
+            wakeAt: null,
             handover: 'none',
           }
           threads.set(thread.threadId, running)
@@ -1382,7 +1476,7 @@ export class Sessions extends Context.Service<
                         Effect.sync(() => heardContext(running, event)),
                         heard.record(event),
                       ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
-                      heardBackground(running, event),
+                      Effect.andThen(heardWork(running, event), heardBackground(running, event)),
                     ),
                     live.publish({ _tag: 'Agent', threadId: thread.threadId, event }),
                   ),
@@ -1432,6 +1526,25 @@ export class Sessions extends Context.Service<
             yield* Scope.close(running.scope, Exit.void)
           }
           yield* Deferred.await(running.ended)
+        })
+
+      /** Whether a thread's agent is still at work, though its turn may have ended (`Sessions.busy`). */
+      const busyNow = (threadId: string) =>
+        Effect.gen(function* () {
+          const running = threads.get(threadId)
+          if (running === undefined) return false
+          return stillBusy(
+            {
+              turnRunning: running.turnRunning,
+              background: [...running.background.values()],
+              callsOpen: running.callsOpen.size,
+              workedAt: running.workedAt,
+              wakeAt: running.wakeAt,
+            },
+            yield* Clock.currentTimeMillis,
+            quietFor,
+            wakeFor,
+          )
         })
 
       /** Start, switch and stop on one thread happen one at a time. */
@@ -1845,7 +1958,7 @@ export class Sessions extends Context.Service<
             `${published.join(' ')} Bring the default branch in by merging it, never by rebasing, and never amend or squash commits that were or may have been pushed: a pull request would no longer take your commits. Where Althar says a branch is published, go by that, not by git status or a remote you can't fetch.`,
             ...(resolves?.resolves === 1
               ? [
-                  'This project has you resolve a conflict with the default branch on your own: Althar tells you when it finds one, and what to merge. On a pull request, Althar pushes that merge itself once you commit it, and then a fix you commit on top of it, as one commit, when Althar tells you its checks failed. Nothing else you commit is pushed for you, and you still never push.',
+                  "This project has you resolve a conflict with the default branch on your own: Althar tells you when it finds one, and what to merge. Commit the merge as soon as the conflicts are settled and the quick checks pass, and don't end your turn with it uncommitted or while you wait on something running in the background: Althar looks at the branch when your turn ends. If the full test suites then find something, fix it in one follow-up commit on top of the merge. On a pull request, Althar pushes that merge itself once you commit it, with that one fix if you made it, and then a fix you commit on top when Althar tells you its checks failed, as one commit. Nothing else you commit is pushed for you, and you still never push.",
                 ]
               : []),
             // Althar runs the project for the person itself (ADR-023): the lead keeps how, when it changes it.
@@ -2138,6 +2251,20 @@ export class Sessions extends Context.Service<
             yield* toldBackground(running)
           }),
         outputSoFar: (threadId, itemId) => Effect.sync(() => Option.fromNullishOr(threads.get(threadId)?.recording?.outputOf(itemId))),
+        busy: (threadId) => busyNow(threadId),
+        untilIdle: (threadId, within) =>
+          Effect.gen(function* () {
+            const give = Duration.toMillis(within)
+            const began = yield* Clock.currentTimeMillis
+            // In memory, and only while a round waits on it: looked at often enough that a short quiet is noticed.
+            const every = Duration.min(IDLE_EVERY, quietFor)
+            for (;;) {
+              if (!threads.has(threadId)) return 'gone' as const
+              if (!(yield* busyNow(threadId))) return 'idle' as const
+              if ((yield* Clock.currentTimeMillis) - began >= give) return 'late' as const
+              yield* Effect.sleep(every)
+            }
+          }),
         gateTurns: (next) =>
           Effect.sync(() => {
             gate = next

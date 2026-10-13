@@ -1,3 +1,4 @@
+import { REPORT_FOR } from './leftRunning'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 
@@ -23,6 +24,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import {
   ATTEMPTS,
+  BUSY_UP_TO,
   changeOf,
   type Conflict,
   Conflicts,
@@ -246,6 +248,11 @@ type Store =
   | Live
   | Busy
 
+/** Where a task's conflict round stands, as its card says it (`Changes.conflictStanding`). */
+export type ConflictStanding =
+  | { readonly state: 'resolving'; readonly checks: boolean }
+  | { readonly state: 'handed_back'; readonly why: string }
+
 interface RoundRow {
   readonly id: string
   readonly projectId: ProjectId
@@ -403,6 +410,15 @@ export class Changes extends Context.Service<
       readonly taskId: string
       readonly resolveConflicts: boolean | null
     }): Effect.Effect<void, unknown>
+    /**
+     * Where a task's latest conflict round stands, for its card: the lead at
+     * work on one (`resolving`; `checks` where it is fixing the checks that
+     * failed on what Althar pushed rather than the conflict), or handed back
+     * to the person, saying why, for as long as the task's branches are as
+     * the lead left them. Null otherwise, such as while Althar waits for the
+     * checks on what it pushed.
+     */
+    conflictStanding(taskId: string): Effect.Effect<ConflictStanding | null>
     /** Does something with a task's pull request as one action: one at a time with replying, pushing, marking ready and merging. */
     exclusive<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
     /**
@@ -1993,6 +2009,25 @@ export class Changes extends Context.Service<
           return 'yes' as const
         })
 
+      /** Where a task's latest round stands, for its card (`Changes.conflictStanding`). */
+      const standingOfRound = (taskId: string): Effect.Effect<ConflictStanding | null, unknown, Store> =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [latest] = yield* sql<{ id: string }>`
+            SELECT id FROM conflict_resolutions WHERE task_id = ${taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`
+          const round = latest === undefined ? undefined : yield* roundOf({ id: latest.id })
+          if (round === undefined) return null
+          if (round.state === 'resolving') return { state: 'resolving', checks: round.pushedHead !== null }
+          if (round.state !== 'failed' || round.ended === null || round.failure === null) return null
+          // Still the person's while the branches are as the lead left them, as `askable` reads it.
+          const conflicts = yield* decodeConflicts(round.conflicts)
+          const left = yield* decodeEnded(round.ended)
+          const now = yield* endedOf(taskId, conflicts)
+          if (!left.every((one) => now.some((head) => head.repository === one.repository && head.head === one.head))) return null
+          const couldnt = round.pushedHead === null ? `resolve the conflict with ${whereLine(conflicts)}` : 'fix the checks on the merge'
+          return { state: 'handed_back', why: `The lead couldn’t ${couldnt}. ${round.failure}` }
+        })
+
       /** Where a round is, in its words: its pull request (`PR #1`), or none for merging here. */
       const placeOf = (taskId: string, url: string | null): Effect.Effect<Place, unknown, Store> =>
         Effect.gen(function* () {
@@ -2210,10 +2245,15 @@ export class Changes extends Context.Service<
           const worktrees = yield* worktreesOf(round.taskId)
           const several = conflicts.length > 1
           const failures: Array<string> = []
+          // Where all that is left is to commit the merge.
+          const uncommitted: Array<Conflict> = []
           for (const conflict of conflicts) {
             const worktree = worktrees.get(conflict.repository)
-            const why = worktree === undefined ? 'Its worktree is gone.' : yield* unresolved(worktree, conflict)
-            if (why !== null) failures.push(several ? `${conflict.name}: ${why}` : why)
+            const left =
+              worktree === undefined ? { why: 'Its worktree is gone.', uncommitted: false } : yield* unresolved(worktree, conflict)
+            if (left === null) continue
+            failures.push(several ? `${conflict.name}: ${left.why}` : left.why)
+            if (left.uncommitted) uncommitted.push(conflict)
           }
           const ended = yield* endedOf(round.taskId, conflicts)
           // Asked to fix the checks on what Althar pushed: what it pushed is where a fix goes on top.
@@ -2244,7 +2284,9 @@ export class Changes extends Context.Service<
               title: `The conflict with ${whereLine(conflicts)} isn’t resolved yet: ${failure}`,
               description: 'Althar asked the lead once more.',
             })
-            return yield* askLead(round, round.attempt + 1, noteFor(conflicts, place, failure), { failure })
+            // Asked to commit it where that is all that was left, not to resolve it again.
+            const note = noteFor(conflicts, place, failure, uncommitted.length === failures.length ? uncommitted : [])
+            return yield* askLead(round, round.attempt + 1, note, { failure })
           }
           yield* reviseRound(
             round,
@@ -2271,7 +2313,7 @@ export class Changes extends Context.Service<
         head: string,
         ended: Ended,
         said: string,
-        what: 'the merge' | 'the fix',
+        what: 'the merge' | 'the merge and its fix' | 'the fix',
         place: Place,
       ) =>
         Effect.gen(function* () {
@@ -2330,12 +2372,11 @@ export class Changes extends Context.Service<
             return yield* endRound(round, ended, { title: `${said}.`, description: 'Merge it again.' })
           const { worktree, head } = branch
           const others = yield* askedSince(round)
-          const alone =
-            !others &&
-            conflict.pushed != null &&
-            conflict.pushed === conflict.from &&
-            (yield* onlyTheResolution(worktree, conflict, head).pipe(Effect.orElseSucceed(() => false))) &&
-            (yield* commitOf(worktree, 'HEAD').pipe(Effect.orElseSucceed(() => ''))) === head
+          const made =
+            !others && conflict.pushed != null && conflict.pushed === conflict.from
+              ? yield* onlyTheResolution(worktree, conflict, head).pipe(Effect.orElseSucceed(() => null))
+              : null
+          const alone = made !== null && (yield* commitOf(worktree, 'HEAD').pipe(Effect.orElseSucceed(() => ''))) === head
           if (!alone)
             return yield* endRound(round, ended, {
               title: `${said}.`,
@@ -2343,7 +2384,7 @@ export class Changes extends Context.Service<
                 ? `The lead was asked something else meanwhile, so the merge waits for you to look at it and push it to ${changeOf(place)}.`
                 : `Its branch has commits besides the merge that ${changeOf(place)} doesn’t have yet, so the merge waits for you to push it with them.`,
             })
-          yield* pushRound(round, round.url, head, ended, said, 'the merge', place)
+          yield* pushRound(round, round.url, head, ended, said, made === 'merge and fix' ? 'the merge and its fix' : 'the merge', place)
         })
 
       /**
@@ -2573,13 +2614,25 @@ export class Changes extends Context.Service<
           }
         })
 
+      /*
+       * Rounds waiting for a lead that ended its turn but is still at work,
+       * by id: so one is waited for once, though its thread says more meanwhile.
+       */
+      const holding = new Set<string>()
+      const busyUpTo = (yield* RuntimeConfig).idle?.within ?? BUSY_UP_TO
+      const reportsWithin = (yield* RuntimeConfig).idle?.reports ?? REPORT_FOR
+
       /**
        * When the lead's turn ends on a round, or its session goes, the round
        * is looked at: not while more waits for it on the thread, which comes
        * in the next turn, nor while it asks the person something. A turn the
-       * person interrupted is theirs to carry on.
+       * person interrupted is theirs to carry on. Nor while the lead is still
+       * at work: it left a command running, such as the full tests, and is
+       * woken when it ends, or is in a turn of its own after (`Sessions.busy`).
+       * The round is looked at once it is done, or after BUSY_UP_TO, as it
+       * is: a lead that doesn't finish isn't waited for for ever.
        */
-      const onLive = (event: LiveEvent) =>
+      const look = (event: LiveEvent, waited: boolean): Effect.Effect<void, unknown, Store> =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           if (event._tag !== 'TurnEnded' && event._tag !== 'SessionEnded') return
@@ -2601,12 +2654,40 @@ export class Changes extends Context.Service<
           const [asking] = yield* sql<{ id: string }>`
             SELECT id FROM attention_requests WHERE task_id = ${round.taskId} AND kind = 'question' AND state = 'open' LIMIT 1`
           if (asking !== undefined) return
+          // Not at once: a lead may report what it left running just after its turn (`REPORT_FOR`).
+          if (event._tag === 'TurnEnded' && !waited) return yield* hold(round.id, event)
           // Stopped by the person, it is theirs: it isn't started again to try once more.
           const stopped = event._tag === 'SessionEnded' && event.state === 'completed'
           yield* locked(round.taskId)(
             settleRound(round.id, stopped ? { why: 'The lead was stopped before it resolved it.', stopped: true } : {}),
           )
-        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look at a conflict the lead was resolving', cause)))
+        })
+
+      /**
+       * Waits for the lead to be done, apart from the stream of events so
+       * that the rounds of other tasks aren't held up, then looks at the
+       * round as its turn ending would have: what the thread holds by then
+       * is what counts. Its session going meanwhile is looked at when it is.
+       */
+      const hold = (id: string, event: LiveEvent & { readonly _tag: 'TurnEnded' }) => {
+        if (holding.has(id)) return Effect.void
+        holding.add(id)
+        return Effect.forkIn(
+          Effect.sleep(reportsWithin).pipe(
+            Effect.andThen(sessions.untilIdle(event.threadId, busyUpTo)),
+            Effect.flatMap((done) => (done === 'gone' ? Effect.void : look(event, true))),
+            Effect.catchCause((cause) => Effect.logWarning('Could not look at a conflict after the lead was done', cause)),
+            Effect.ensuring(Effect.sync(() => holding.delete(id))),
+            provide,
+          ),
+          scope,
+        )
+      }
+
+      const onLive = (event: LiveEvent) =>
+        look(event, false).pipe(
+          Effect.catchCause((cause) => Effect.logWarning('Could not look at a conflict the lead was resolving', cause)),
+        )
 
       yield* Effect.forkScoped(provide(Stream.runForEach(yield* live.subscribe, onLive)))
 
@@ -3046,6 +3127,7 @@ export class Changes extends Context.Service<
           ),
         hostFor: (projectId) => provide(hostFor(projectId)),
         hostsFor: (projectId, taskId) => provide(hostsFor(projectId, taskId)).pipe(Effect.orElseSucceed(() => [])),
+        conflictStanding: (taskId) => provide(standingOfRound(taskId)).pipe(Effect.orElseSucceed(() => null)),
       })
     }),
   )
