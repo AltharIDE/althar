@@ -176,6 +176,28 @@ describe('useStickToBottom', () => {
     expect(el.scrollTop).toBe(100)
   })
 
+  it('stays at the bottom when the browser moves it down, or reports a scroll after more arrived', () => {
+    const o = observers()
+    render(<Scroller />)
+    const el = screen.getByTestId('scroller')
+    metrics(el, 1000, 400)
+    o.resize()
+    // A fold above closes and the browser holds its place, then a card arrives below as it moves back down.
+    metrics(el, 900, 400)
+    el.scrollTop = 500
+    fireEvent.scroll(el)
+    metrics(el, 1200, 400)
+    el.scrollTop = 600
+    fireEvent.scroll(el)
+    o.resize()
+    expect(el.scrollTop).toBe(1200)
+    // Where it followed to, reported once more has come.
+    metrics(el, 1800, 400)
+    fireEvent.scroll(el)
+    o.resize()
+    expect(el.scrollTop).toBe(1800)
+  })
+
   it('does nothing without a ResizeObserver', () => {
     vi.stubGlobal('ResizeObserver', undefined)
     render(<Scroller />)

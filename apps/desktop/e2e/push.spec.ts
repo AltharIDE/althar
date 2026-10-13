@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import { expect, test } from '@playwright/test'
 
-import { repository } from '../tests/repository'
+import { author, repository } from '../tests/repository'
 import { launch, openFirstProject } from './support'
 
 /*
@@ -60,6 +60,7 @@ test('pushes ten commits in one press, and counts none left as it ends', async (
     for (let n = 1; n <= 10; n++)
       execFileSync('git', ['commit', '-q', '--allow-empty', '-m', `Step ${n}`, '-m', 'Co-Authored-By: Claude <noreply@anthropic.com>'], {
         cwd: worktree,
+        env: { ...process.env, ...author },
       })
 
     await page.getByRole('button', { name: /Open task/ }).click()

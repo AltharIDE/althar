@@ -831,12 +831,21 @@ export class Changes extends Context.Service<
             base = tip
             if (yield* onHead(task.path, tip)) yield* git(task.path, 'checkout', '-q', '-b', fresh)
             else {
+              // The commits as the branch has them now, after the fetch: what the lead committed meanwhile goes too.
+              const from = yield* commitOf(task.path, 'HEAD')
+              const commits = (yield* git(task.path, 'rev-list', '--reverse', '--no-merges', `${next.head}..${from}`))
+                .split('\n')
+                .filter((line) => line !== '')
               yield* git(task.path, 'checkout', '-q', '-b', fresh, tip)
-              const conflicted = yield* pickOnto(task.path, next.commits)
-              if (conflicted !== null) {
+              const conflicted = yield* pickOnto(task.path, commits)
+              // One committed as it switched would be left on the old branch alone: it goes back to it, and says the lead is at work.
+              const moved = (yield* commitOf(task.path, `refs/heads/${task.branch}`).pipe(Effect.orElseSucceed(() => ''))) !== from
+              if (conflicted !== null || moved) {
                 yield* Effect.ignore(git(task.path, 'checkout', '-q', task.branch))
                 yield* Effect.ignore(git(task.path, 'branch', '-D', fresh))
-                return yield* new NoChangeToOpen({ taskId, why: 'conflicts', detail: filesWord(conflicted) })
+                return yield* new NoChangeToOpen(
+                  conflicted === null ? { taskId, why: 'working' } : { taskId, why: 'conflicts', detail: filesWord(conflicted) },
+                )
               }
             }
           } else yield* git(task.path, 'checkout', '-q', '-b', fresh)
