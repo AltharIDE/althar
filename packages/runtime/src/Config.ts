@@ -85,6 +85,17 @@ export interface BusyOptions {
   readonly machine?: Machine
   /** How often what waits is looked at, besides whenever an agent's turn or session ends: every 5 seconds. */
   readonly every?: Duration.Duration
+  /** How often the CPU of what agents left running is read, while any is: every 5 seconds. */
+  readonly sample?: Duration.Duration
+  /** How long what an agent left running must stay below real CPU before it stops taking a place: 30 seconds. */
+  readonly quiet?: Duration.Duration
+  /**
+   * The CPU time each of these agents and everything it started have used, in milliseconds, by thread, or null where it
+   * can't be said, as for an agent that is no process of its own: read with `ps` from the agent's process, once a sample.
+   */
+  readonly cpuOf?: (
+    agents: ReadonlyArray<{ readonly threadId: string; readonly pid: number | null }>,
+  ) => Effect.Effect<ReadonlyMap<string, number | null>>
 }
 
 export interface SetupOptions {

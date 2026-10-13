@@ -5,10 +5,11 @@ import { join } from 'node:path'
 import type { ActorId, ProjectId } from '@althar/domain'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Layer, Option } from 'effect'
+import { Duration, Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from '../src/Busy'
+import type { BusyOptions } from '../src/Config'
 import { Coordinator } from '../src/Coordinator'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -34,7 +35,12 @@ const GB = 1024 ** 3
 const runsAtOnce = (n: number) => ({ busy: { machine: { cores: Math.ceil(n * 2.5), memory: (4 + 3 * n) * GB } } })
 
 /** The runtime, on a machine that runs `n` at once, with the queries the screens read. */
-const machine = (n: number, database = ':memory:') => Queries.layer.pipe(Layer.provideMerge(runtime(database, {}, runsAtOnce(n))))
+const machine = (n: number, database = ':memory:', busy: BusyOptions = {}) =>
+  Queries.layer.pipe(Layer.provideMerge(runtime(database, {}, { busy: { ...runsAtOnce(n).busy, ...busy } })))
+
+/** What a card says it waits for, without who holds the places. */
+const countsOf = (queued: { readonly busy: number; readonly atOnce: number } | null | undefined) =>
+  queued == null ? queued : { busy: queued.busy, atOnce: queued.atOnce }
 
 const store = () => join(mkdtempSync(join(tmpdir(), 'althar-busy-')), 'althar.sqlite')
 
@@ -253,9 +259,17 @@ describe('Agents at once', () => {
       const card = yield* cardOf(projectId, third.taskId)
       assert.strictEqual(card?.phase, 'running')
       assert.strictEqual(card?.step, 'implement')
-      assert.deepStrictEqual(card?.queued, { busy: 2, atOnce: 2 })
+      assert.deepStrictEqual(countsOf(card?.queued), { busy: 2, atOnce: 2 })
+      // It names the tasks that hold the places, none of them only by something it left running.
+      assert.deepStrictEqual(
+        card?.queued?.holders?.map((holder) => [holder.title, holder.kept]),
+        [
+          ['First', false],
+          ['Second', false],
+        ],
+      )
       assert.isNull(card?.waits)
-      assert.deepStrictEqual((yield* onHome(third.taskId))?.queued, { busy: 2, atOnce: 2 })
+      assert.deepStrictEqual(countsOf((yield* onHome(third.taskId))?.queued), { busy: 2, atOnce: 2 })
       assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
 
       // The first is told to finish: once it has, the third starts by itself, and finishes too.
@@ -289,7 +303,7 @@ describe('Agents at once', () => {
       yield* working(second.taskId)
       // One place: the third waits on behind the second.
       assert.deepStrictEqual((yield* attempts(third.taskId)).at(-1), { step: 'implement', state: 'held', holdReason: 'machine_busy' })
-      assert.deepStrictEqual((yield* cardOf(projectId, third.taskId))?.queued, { busy: 1, atOnce: 1 })
+      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, third.taskId))?.queued), { busy: 1, atOnce: 1 })
     }).pipe(Effect.provide(machine(1))),
   )
 
@@ -309,7 +323,7 @@ describe('Agents at once', () => {
       const [quick] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE slug = 'try-the-double-jump'`
       const taskId = quick?.id ?? ''
       yield* waiting(taskId)
-      assert.deepStrictEqual((yield* cardOf(projectId, taskId))?.queued, { busy: 1, atOnce: 1 })
+      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, taskId))?.queued), { busy: 1, atOnce: 1 })
       // A place frees when the first is stopped: the quick task starts, and finishes.
       const tasks = yield* Tasks
       yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
@@ -340,7 +354,7 @@ describe('Agents at once', () => {
       // Resumed while the first still works, it waits for a place again.
       yield* tasks.resume({ envelope: yield* Runtime.envelope('task.resume', {}), taskId: second.taskId })
       yield* waiting(second.taskId)
-      assert.deepStrictEqual((yield* cardOf(projectId, second.taskId))?.queued, { busy: 1, atOnce: 1 })
+      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, second.taskId))?.queued), { busy: 1, atOnce: 1 })
       assert.deepStrictEqual(yield* sessionsOn(second.threadId), [])
 
       // The first is stopped: the second carries on, on its lead, and finishes.
@@ -373,12 +387,12 @@ describe('Agents at once', () => {
       yield* waiting(second.taskId)
       yield* busy.set(2)
       yield* working(second.taskId)
-      assert.deepStrictEqual(yield* busy.now, { busy: 2, atOnce: 2 })
+      assert.deepStrictEqual(countsOf(yield* busy.now), { busy: 2, atOnce: 2 })
       // Fewer again leaves what works at work: the next waits until it is below the number.
       yield* busy.set(1)
       const third = yield* started(projectId, 'Third', 'Work on it. [lead:wait]')
       yield* waiting(third.taskId)
-      assert.deepStrictEqual((yield* cardOf(projectId, third.taskId))?.queued, { busy: 2, atOnce: 1 })
+      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, third.taskId))?.queued), { busy: 2, atOnce: 1 })
       yield* busy.set(null)
       assert.strictEqual((yield* busy.atOnce).count, 1)
     }).pipe(Effect.provide(machine(1))),
@@ -417,7 +431,7 @@ describe('Agents at once', () => {
       // Answered now, the first's lead would be a second agent at work: the answer is kept, and its task says it waits.
       yield* answerIt(question)
       assert.deepStrictEqual(yield* questionOf(question), { state: 'answered', kept: true })
-      assert.deepStrictEqual((yield* cardOf(projectId, first.taskId))?.queued, { busy: 1, atOnce: 1 })
+      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
       yield* Effect.sleep('300 millis')
       assert.isFalse((yield* replies(first.threadId)).some((text) => text.startsWith('answer=')))
       // Once the second stops, the first's lead is told, and carries on.
@@ -451,7 +465,7 @@ describe('Agents at once', () => {
         Effect.map(cardOf(projectId, first.taskId), (card) => (card?.queued == null ? [] : [card.queued])),
         (rows) => rows.length === 1,
       )
-      assert.deepStrictEqual((yield* cardOf(projectId, first.taskId))?.queued, { busy: 1, atOnce: 1 })
+      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
       yield* Effect.sleep('300 millis')
       assert.lengthOf(yield* turnsOn(first.threadId), turns)
       // Once the second stops, it is delivered.
@@ -475,7 +489,7 @@ describe('Agents at once', () => {
         attempts(task.taskId),
         (rows) => rows.map((row) => [row.step, row.state, row.holdReason]).join() === 'implement,succeeded,,review,held,machine_busy',
       )
-      assert.deepStrictEqual((yield* cardOf(projectId, task.taskId))?.queued, { busy: 1, atOnce: 1 })
+      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, task.taskId))?.queued), { busy: 1, atOnce: 1 })
       // The server stops: the reviewer takes the place, and the review passes.
       yield* sessions.stopBackground(task.threadId, running[0]?.id ?? '')
       yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.state === 'succeeded')
@@ -506,7 +520,7 @@ describe('Agents at once', () => {
       yield* working(second.taskId)
       yield* Effect.sleep('300 millis')
       assert.lengthOf(yield* turnsOn(first.threadId), turns)
-      assert.deepStrictEqual((yield* cardOf(projectId, first.taskId))?.queued, { busy: 1, atOnce: 1 })
+      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
       yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
       yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1)
     }).pipe(Effect.provide(machine(1))),
@@ -559,6 +573,158 @@ describe('Agents at once', () => {
   )
 })
 
+/** A stand-in for `ps`, for agents that are no process here: the CPU time of every agent rises by a second a reading while `burning`, else stands still. */
+const fakeCpu = () => {
+  const cpu = { burning: false, total: 0, unreadable: false }
+  const of: NonNullable<BusyOptions['cpuOf']> = (agents) =>
+    Effect.sync(() => {
+      if (cpu.burning) cpu.total += 1_000
+      return new Map(agents.map((agent) => [agent.threadId, cpu.unreadable ? null : cpu.total]))
+    })
+  return { cpu, of }
+}
+
+/** A machine that runs `n` at once, whose agents' CPU the test sets: read every 50 ms, and quiet for 400 ms before it counts as idle. */
+const withCpu = <A, E, R>(n: number, body: (cpu: ReturnType<typeof fakeCpu>['cpu']) => Effect.Effect<A, E, R>) => {
+  const fake = fakeCpu()
+  return body(fake.cpu).pipe(
+    Effect.provide(machine(n, ':memory:', { cpuOf: fake.of, sample: Duration.millis(50), quiet: Duration.millis(400) })),
+  )
+}
+
+/** The lead of a task that served and finished: its step is done, and what it left running is the only thing that may hold its place. */
+const served = (projectId: ProjectId, title: string) =>
+  Effect.gen(function* () {
+    const sessions = yield* Sessions
+    const task = yield* started(projectId, title, 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
+    yield* until(attempts(task.taskId), (rows) => rows[0]?.state === 'succeeded')
+    const running = yield* until(
+      Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
+      (left) => left.length === 1,
+    )
+    return { ...task, serverId: running[0]?.id ?? '' }
+  })
+
+/** Waits until this many agents are counted at work. */
+const busyAt = (n: number) =>
+  Effect.flatMap(Busy, (busy) =>
+    until(
+      Effect.map(busy.now, (now) => [now.busy]),
+      (rows) => rows[0] === n,
+    ),
+  )
+
+describe('Agents at once, and what they left running', () => {
+  it.live('take no place for a server left running that sits idle', () =>
+    withCpu(1, () =>
+      Effect.gen(function* () {
+        const { projectId } = yield* opened
+        const sessions = yield* Sessions
+        const first = yield* served(projectId, 'First')
+        // Nothing uses CPU: the server is still there, and takes no place.
+        yield* busyAt(0)
+        const left = yield* sessions.running(first.threadId)
+        assert.strictEqual(Option.isSome(left) ? left.value.background.length : 0, 1)
+        // The next task starts at once, and finishes, though the cap is one.
+        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
+        assert.strictEqual(second.outcome, 'running')
+        yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
+      }),
+    ),
+  )
+
+  it.live('count a test run left running, and say it keeps the place, with what to stop', () =>
+    withCpu(1, (cpu) =>
+      Effect.gen(function* () {
+        cpu.burning = true
+        const { projectId } = yield* opened
+        const sessions = yield* Sessions
+        const first = yield* served(projectId, 'First')
+        // Well past the time an idle server stops counting, it still holds its place.
+        yield* Effect.sleep('800 millis')
+        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
+        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
+        assert.strictEqual(second.outcome, 'waiting')
+        yield* waiting(second.taskId)
+        // The waiting task says who keeps the place: the first, by what it left running, and what to stop.
+        const holders = (yield* cardOf(projectId, second.taskId))?.queued?.holders ?? []
+        assert.deepStrictEqual(
+          holders.map((holder) => [holder.taskId, holder.title, holder.threadId, holder.kept, holder.running.map((left) => left.id)]),
+          [[first.taskId, 'First', first.threadId, true, [first.serverId]]],
+        )
+        yield* sessions.stopBackground(first.threadId, first.serverId)
+        yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
+      }),
+    ),
+  )
+
+  it.live('keep counting a test run that idles for a moment', () =>
+    withCpu(1, (cpu) =>
+      Effect.gen(function* () {
+        cpu.burning = true
+        const { projectId } = yield* opened
+        yield* served(projectId, 'First')
+        yield* Effect.sleep('300 millis')
+        // A pause shorter than the quiet it takes to stop counting.
+        cpu.burning = false
+        yield* Effect.sleep('150 millis')
+        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
+        cpu.burning = true
+        yield* Effect.sleep('600 millis')
+        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
+        // Quiet for good, it stops counting.
+        cpu.burning = false
+        yield* busyAt(0)
+      }),
+    ),
+  )
+
+  it.live('count a server again once it starts working', () =>
+    withCpu(1, (cpu) =>
+      Effect.gen(function* () {
+        const { projectId } = yield* opened
+        yield* served(projectId, 'First')
+        yield* busyAt(0)
+        // A request makes it work: it holds its place again, and the next task waits.
+        cpu.burning = true
+        yield* busyAt(1)
+        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
+        assert.strictEqual(second.outcome, 'waiting')
+      }),
+    ),
+  )
+
+  it.live('start a waiting task as soon as the server it waits for goes idle, with nothing else happening', () =>
+    withCpu(1, (cpu) =>
+      Effect.gen(function* () {
+        cpu.burning = true
+        const { projectId } = yield* opened
+        yield* served(projectId, 'First')
+        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
+        yield* waiting(second.taskId)
+        // The server goes quiet: no turn ends, no one answers, nothing is stopped.
+        cpu.burning = false
+        yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
+        assert.strictEqual((yield* (yield* Busy).now).busy, 0)
+      }),
+    ),
+  )
+
+  it.live('count what it cannot read the CPU of', () =>
+    withCpu(1, (cpu) =>
+      Effect.gen(function* () {
+        cpu.unreadable = true
+        const { projectId } = yield* opened
+        yield* served(projectId, 'First')
+        yield* Effect.sleep('800 millis')
+        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
+        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
+        assert.strictEqual(second.outcome, 'waiting')
+      }),
+    ),
+  )
+})
+
 describe('Agents at once, across a restart', () => {
   it.live('carry on a stuck step as the person answered, once there is a place, though Althar restarted meanwhile', () =>
     Effect.gen(function* () {
@@ -582,7 +748,7 @@ describe('Agents at once, across a restart', () => {
           answer: { kind: 'retry', agentId: 'codex' },
         })
         yield* waiting(stuck.taskId)
-        assert.deepStrictEqual((yield* cardOf(projectId, stuck.taskId))?.queued, { busy: 1, atOnce: 1 })
+        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, stuck.taskId))?.queued), { busy: 1, atOnce: 1 })
         // Only the lead that couldn't start: nothing is on it yet.
         assert.deepStrictEqual(
           (yield* sessionsOn(stuck.threadId)).map((session) => session.agentId),
@@ -595,7 +761,7 @@ describe('Agents at once, across a restart', () => {
         const { projectId, stuck, other } = before
         yield* until(sessionsOn(other.threadId), (rows) => rows.length === 2)
         yield* waiting(stuck.taskId)
-        assert.deepStrictEqual((yield* cardOf(projectId, stuck.taskId))?.queued, { busy: 1, atOnce: 1 })
+        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, stuck.taskId))?.queued), { busy: 1, atOnce: 1 })
         // The other is stopped: the step carries on on Codex, as the person said, and finishes.
         const tasks = yield* Tasks
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: other.taskId })
@@ -627,7 +793,7 @@ describe('Agents at once, across a restart', () => {
         const { projectId, first, second, turns } = before
         yield* until(sessionsOn(second.threadId), (rows) => rows.length === 2)
         // Still waiting, and saying so; once the second is stopped, the lead starts again and is told.
-        assert.deepStrictEqual((yield* cardOf(projectId, first.taskId))?.queued, { busy: 1, atOnce: 1 })
+        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
         const tasks = yield* Tasks
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
         yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1)
@@ -727,7 +893,7 @@ describe('Agents at once, across a restart', () => {
       yield* Effect.gen(function* () {
         const { projectId, first, second } = before
         yield* until(sessionsOn(second.threadId), (rows) => rows.length === 2)
-        assert.deepStrictEqual((yield* cardOf(projectId, first.taskId))?.queued, { busy: 1, atOnce: 1 })
+        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
         const tasks = yield* Tasks
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
         // Claude Code starts again, as the person last had it, and takes what waited.
@@ -835,7 +1001,7 @@ describe('Agents at once, across a restart', () => {
         yield* working(second.taskId)
         assert.deepStrictEqual(yield* questionOf(question), { state: 'answered', kept: true })
         assert.strictEqual((yield* attempts(first.taskId))[0]?.state, 'waiting_attention')
-        assert.deepStrictEqual((yield* cardOf(projectId, first.taskId))?.queued, { busy: 1, atOnce: 1 })
+        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
         // Once the second stops, the answer is told to a lead started for it.
         const tasks = yield* Tasks
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
@@ -866,7 +1032,7 @@ describe('Agents at once, across a restart', () => {
         yield* until(sessionsOn(first.threadId), (rows) => rows.length === 2)
         yield* working(first.taskId)
         yield* waiting(second.taskId)
-        assert.deepStrictEqual((yield* cardOf(projectId, second.taskId))?.queued, { busy: 1, atOnce: 1 })
+        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, second.taskId))?.queued), { busy: 1, atOnce: 1 })
         assert.deepStrictEqual(yield* sessionsOn(second.threadId), [])
         // Once the first is stopped, the second starts by itself.
         const tasks = yield* Tasks
@@ -901,7 +1067,7 @@ describe('Agents at once, across a restart', () => {
         // One place: the first admitted carries on, and the other waits for it, kept so a restart doesn't lose it.
         yield* working(first.taskId)
         yield* waiting(second.taskId)
-        assert.deepStrictEqual((yield* cardOf(projectId, second.taskId))?.queued, { busy: 1, atOnce: 1 })
+        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, second.taskId))?.queued), { busy: 1, atOnce: 1 })
       }).pipe(Effect.provide(machine(2, file)))
     }),
   )

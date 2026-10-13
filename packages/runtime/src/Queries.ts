@@ -1192,6 +1192,30 @@ export class Queries extends Context.Service<
             : { id: row.id, sequence: row.sequence, agentId: null, createdAt: row.createdAt, kind: 'task', content },
         )
 
+      /** Why work waits for a place: how many are busy, and who holds them. What a holder left running is listed where it alone keeps the place, to stop it from here. */
+      const queuedNow = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const sessions = yield* Sessions
+        const { busy, atOnce, holders } = yield* (yield* Busy).now
+        return {
+          busy,
+          atOnce,
+          holders: yield* Effect.forEach(holders, (holder) =>
+            Effect.gen(function* () {
+              const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${holder.taskId}`
+              const live = holder.kept && holder.threadId !== null ? yield* sessions.running(holder.threadId) : Option.none()
+              return {
+                taskId: holder.taskId,
+                title: task?.title ?? '',
+                threadId: holder.threadId,
+                kept: holder.kept,
+                running: Option.isSome(live) ? live.value.background.filter((left) => left.ended === null) : [],
+              }
+            }),
+          ),
+        }
+      })
+
       /** Where a task stands, read from it, its plan, its run and its sessions: what its card and its header show. Its links, where they are read already. */
       const cardFor = (taskId: string, links?: { readonly issue: IssueSummary | null; readonly changes: ReadonlyArray<ChangeSummary> }) =>
         Effect.gen(function* () {
@@ -1331,7 +1355,7 @@ export class Queries extends Context.Service<
             branch: task.branch,
             startedAt: task.runAt ?? task.firstSession,
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
-            queued: queued && task.state !== 'done' && task.state !== 'abandoned' ? yield* (yield* Busy).now : null,
+            queued: queued && task.state !== 'done' && task.state !== 'abandoned' ? yield* queuedNow : null,
             ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
