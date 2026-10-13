@@ -449,4 +449,7 @@
   .place {
     transition: none;
   }
+  .breathe {
+    animation: none;
+  }
 }
