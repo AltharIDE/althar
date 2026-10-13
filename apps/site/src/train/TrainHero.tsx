@@ -16,18 +16,19 @@ import { type Box, bakeWorld, drawWorld, lightAt, PICTURES, type Pictures, type 
 /*
  * The first screen, seen from a train: the carriage comes up out of the
  * dark with the train already rolling, slowly, a man and a child looking
- * out, and a readout in the window giving its speed. The headline comes in
- * quickly, then the train pulls, gathers speed over a few seconds and is
- * flying, the near ground gone to streaks, and the headline's last word
- * shoots in on the speed: "fast."
+ * out. The headline comes in quickly, then the train pulls, gathers speed
+ * over a few seconds and is flying, the near ground gone to streaks; a train
+ * goes by the other way, and as its tail clears the glass the headline's
+ * last word is there in the scene beyond it: "fast."
  *
  * The carriage is a photograph with its windows keyed out (plate.ts), laid
  * over the page to cover it, as an image would be with `object-fit: cover`
  * but keeping the window's upper middle in view. Behind it, one canvas draws
  * what's outside (world.ts), slid along by the journey's clock
- * (journey.ts), painted once for the size, so each frame only lays it down.
- * The words are the page's own, set in the middle window by the same
- * measure the photograph is set by.
+ * (journey.ts), painted once for the size, so each frame only lays it down;
+ * over that, a sharper one draws what passes close by (passer.ts) and the
+ * word behind it (bigword.ts). The words are the page's own, set in the
+ * middle window by the same measure the photograph is set by (looks.tsx).
  *
  * With reduced motion it is one frame, flying, and the words are simply
  * there; `?t=` in the address holds it at that second.
@@ -98,7 +99,7 @@ const STAGE = {
 } as CSSProperties
 
 /** The first screen from the train, its words set in one of the looks (looks.tsx). */
-export function TrainHero({ nav, look = 'title' }: { nav?: ReactNode; look?: LookName } = {}) {
+export function TrainHero({ nav, look = 'depth' }: { nav?: ReactNode; look?: LookName } = {}) {
   const root = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
   const nearCanvas = useRef<HTMLCanvasElement>(null)
@@ -148,9 +149,6 @@ export function TrainHero({ nav, look = 'title' }: { nav?: ReactNode; look?: Loo
     let size = ''
     let dpr = 1
     let k = 1
-    // What follows the train: every speed figure the look shows, and its pace as --pace, written only when they change.
-    const readouts = [...el.querySelectorAll<HTMLElement>('[data-kmh]')]
-    let lastPace = -1
 
     const bake = () => {
       if (!pictures) return false
@@ -224,13 +222,6 @@ export function TrainHero({ nav, look = 'title' }: { nav?: ReactNode; look?: Loo
       const shade = passer * 0.32
       if (dim.current) dim.current.style.opacity = String(clamp((1 - lightAt(world, metres)) * 1.4 + shade))
       el.style.setProperty('--dark', dark.toFixed(3))
-      const reading = String(Math.round(speed * 3.6))
-      for (const r of readouts) if (r.textContent !== reading) r.textContent = reading
-      const p = Math.round(pace(t) * 400) / 400
-      if (p !== lastPace) {
-        lastPace = p
-        el.style.setProperty('--pace', String(p))
-      }
       // "fast.", on the train's own time.
       style.frame(el, t, { win, painted: word !== null })
       direct(t, passer)
