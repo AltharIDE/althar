@@ -1,6 +1,6 @@
 /*
  * Work that waits for a place among the agents this machine runs at once
- * (DEV-58, ADR-031), kept so a restart doesn't lose it. A step that can't
+ * (DEV-58, ADR-032), kept so a restart doesn't lose it. A step that can't
  * start is held, why being `machine_busy`, with how it starts once a place
  * frees in its output. A conflict round whose lead can't be asked yet keeps
  * the ask it waits to make, and since when, in `waiting`: null once asked.

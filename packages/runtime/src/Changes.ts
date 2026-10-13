@@ -38,6 +38,7 @@ import {
 } from './conflicts'
 import { coAuthorOn, creditBranch, type Memory, recallMade, rememberMade, withoutAgentCredit } from './credit'
 import { envelope } from './envelope'
+import { evidencePaths, taskShown } from './evidence'
 import { CantMerge, ChangedSinceSeen, type GitFailed, NotFound, PushRefused } from './errors'
 import { conventionsAt, ruleOf, titleFor } from './conventions'
 import { forkOf } from './forks'
@@ -537,6 +538,8 @@ export class Changes extends Context.Service<
                 AND json_extract(content, '$.step') = 'review' ORDER BY sequence DESC LIMIT 1) AS verdict,
               (SELECT count(*) FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
                 AND json_extract(content, '$.step') = 'review') AS rounds`
+          // What the lead showed across its steps, and what it last said it couldn't.
+          const { evidence, unverified } = yield* taskShown(threadId)
           // An agent may sign its summary as it signs a commit; that stays here too.
           const summary = lead?.summary ?? null
           return bodyOf({
@@ -546,6 +549,8 @@ export class Changes extends Context.Service<
               const location = JSON.parse(finding.location) as { file?: string | null; line?: number | null }
               return { ...finding, file: location.file ?? null, line: location.line ?? null }
             }),
+            evidence,
+            unverified,
             issue,
             template: repository.template,
             written: written === undefined || written.text === null ? null : withoutAgentCredit(written.text, agentNames),
@@ -687,8 +692,9 @@ export class Changes extends Context.Service<
           const from = repository === own ? undefined : own
           // The repository as its host names it, not as the remote spells it: Bitbucket Data Center's has `scm/` in front.
           const path = repository.path
-          // Althar pushes what the lead committed, never what it left lying in the worktree.
-          const left = yield* uncommittedFiles(task.path)
+          // Althar pushes what the lead committed, never what it left lying in the worktree; a screenshot it handed as evidence isn't left.
+          const pictures = yield* evidencePaths(input.taskId)
+          const left = (yield* uncommittedFiles(task.path)).filter((file) => !pictures(task.path, file))
           const base = task.baseCommit ?? task.baseRef ?? own.defaultBranch
           if ((yield* commitsAhead(task.path, base)) === 0) return { kind: 'nothing', left } as const
           const [sent] = yield* sql<{ head: string | null }>`

@@ -234,6 +234,13 @@ describe('the coordinator loop', () => {
       )
       // What the person says to a task goes to its lead, not the coordinator.
       assert.instanceOf(yield* Effect.flip(say(ready?.threadId ?? '', 'Hello')), NotFound)
+      // Where its pull requests can't be read just now, the list says nothing of them and the task says so, rather than guessing.
+      yield* (yield* Coordinator).reading(() => Effect.succeed(undefined))
+      assert.match(yield* callTool(access, 'list_tasks', {}), /^- add-a-retry: Add a retry \([^)]*\)$/)
+      assert.match(
+        yield* callTool(access, 'read_task', { task: 'add-a-retry' }),
+        /\n\nPull request: Althar could not read its state just now\.$/,
+      )
     }).pipe(Effect.provide(withQueries())),
   )
 

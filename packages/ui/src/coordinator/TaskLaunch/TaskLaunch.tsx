@@ -163,7 +163,7 @@ export interface TaskLaunchProps {
   /** Held: the clock stops until you start it. */
   held?: boolean
   /**
-   * Started, it waits for a free agent (ADR-031): what it waits for, said
+   * Started, it waits for a free agent (ADR-032): what it waits for, said
    * where the clock was. Its steps can still be changed; there is nothing to
    * start or hold.
    */

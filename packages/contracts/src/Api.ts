@@ -152,7 +152,7 @@ export const MOST_AT_ONCE = 16
 export const AtOnceCount = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MOST_AT_ONCE }))
 
 /**
- * How many tasks' agents may be at work at once on this machine (ADR-031):
+ * How many tasks' agents may be at work at once on this machine (ADR-032):
  * the person's number, else the default Althar worked out at this launch
  * from the machine's cores and memory, which it says so Settings can say why.
  */
@@ -372,6 +372,20 @@ export const ProjectRulesView = Schema.Struct({
   conventions: Schema.Array(RepositoryConventions),
 })
 export type ProjectRulesView = typeof ProjectRulesView.Type
+
+/**
+ * One of a project's notes (ADR-031): a decision the person made in
+ * conversation that the code doesn't show, which every coordinator session
+ * starts with. The coordinator keeps them; the person sees them in the
+ * project's settings, and drops what no longer holds.
+ */
+export const ProjectNote = Schema.Struct({
+  id: Schema.String,
+  body: Schema.String,
+  createdAt: Schema.String,
+  keptBy: Schema.Literals(['coordinator', 'person']),
+})
+export type ProjectNote = typeof ProjectNote.Type
 export type ProjectList = typeof ProjectList.Type
 
 export const TaskSummary = Schema.Struct({
@@ -885,6 +899,26 @@ export const Finding = Schema.Struct({
 export type Finding = typeof Finding.Type
 
 /**
+ * Something the lead shows to say its change does what it should, with a
+ * caption saying what it shows: a screenshot or a recording, as a picture
+ * kept like one an agent hands back; a command or a test run, with its exit
+ * code and the end of what it printed; or a response, a log or a note, as
+ * text.
+ */
+export const Evidence = Schema.Struct({
+  kind: Schema.Literals(['screenshot', 'recording', 'command', 'test_run', 'response', 'log', 'note']),
+  caption: Schema.String,
+  picture: Schema.NullOr(Picture),
+  command: Schema.NullOr(Schema.String),
+  exit: Schema.NullOr(Schema.Number),
+  /** What it printed or said: its end, where it was long. */
+  text: Schema.NullOr(Schema.String),
+  /** Lines from the start of the text that weren't kept. */
+  dropped: Schema.Number,
+})
+export type Evidence = typeof Evidence.Type
+
+/**
  * What a step reported when it ended: the lead's summary of its work or of
  * settling a review, or the review's verdict and findings. The person reads
  * this rather than the work itself.
@@ -901,6 +935,10 @@ export const StepResultItem = Schema.Struct({
     change: Schema.NullOr(ChangeSummary),
     verdict: Schema.NullOr(Schema.Literals(['pass', 'changes_requested'])),
     findings: Schema.Array(Finding),
+    /** For the lead's steps: what it showed of its change working. */
+    evidence: Schema.Array(Evidence),
+    /** For the lead's steps: what it couldn't show, as it said it; null where it didn't say, so an earlier step's list stands. */
+    unverified: Schema.NullOr(Schema.Array(Schema.String)),
     /** Who reported it, for a review. */
     agentId: Schema.NullOr(Schema.String),
   }),
@@ -948,7 +986,7 @@ export type PlanStep = typeof PlanStep.Type
 
 /**
  * Work waiting for a place among the agents this machine runs at once
- * (ADR-031), as it says why: how many tasks' agents are busy, and how many
+ * (ADR-032), as it says why: how many tasks' agents are busy, and how many
  * the machine runs at once. It starts on its own, oldest first, when one is
  * free.
  */
@@ -1009,7 +1047,7 @@ export const TaskCard = Schema.Struct({
   startedAt: Schema.NullOr(Schema.String),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
   waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
-  /** It waits for a place among the agents this machine runs at once (ADR-031): how many are busy, and how many it runs at once. */
+  /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
   queued: Schema.NullOr(Queued),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
   planWaits: Schema.optional(Schema.Boolean),
@@ -2061,6 +2099,10 @@ export const Api = RpcGroup.make(
   command('CancelAccountSignIn', { flowId: Schema.String }, Schema.Void),
   /** A project's rules. */
   call('GetProjectRules', { projectId: Schema.String }, ProjectRulesView),
+  /** A project's notes, oldest first: the decisions the coordinator keeps for it. */
+  call('GetProjectNotes', { projectId: Schema.String }, Schema.Array(ProjectNote)),
+  /** Drops one of a project's notes: it no longer holds, and no coordinator session starts with it. */
+  command('DropProjectNote', { projectId: Schema.String, noteId: Schema.String }, Schema.Void),
   /**
    * The names a project's code uses that have parts (`RefundLedger`,
    * `useEffect`, `charges-api.ts`), most used first, so dictation can write

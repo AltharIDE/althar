@@ -1,4 +1,4 @@
-# ADR-031: A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn
+# ADR-032: A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn
 
 - **Status:** Accepted
 - **Date:** 2026-10-13

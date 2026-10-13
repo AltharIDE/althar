@@ -595,30 +595,33 @@ export function TaskView({
         <NoOutputsView snapshot={snapshot} lead={lead.name} />
       ) : shown === 'out' ? (
         <div className={connecting ? s.withPanel : s.outputsFace}>
-          <Outputs
-            snapshot={snapshot}
-            lead={lead}
-            pending={model.pending}
-            doing={model.doing}
-            error={model.error}
-            onAccept={(changes) => void model.accept(changes)}
-            onMergeHere={() => void model.mergeHere()}
-            onOpenChange={() => void model.openChange()}
-            onPush={(head, url) => void model.push(head, url)}
-            onMarkReady={(url) => void model.markReady(url)}
-            // Sending it back is a note to its lead, which starts it again if it stopped.
-            onSendBack={(note) => send(note, false)}
-            onOpenFile={changes.show}
-            conflict={model.conflict}
-            onPushHere={() => void model.pushHere()}
-            onPushBranch={() => void model.pushBranch()}
-            onConnect={() => setConnecting(true)}
-            // So is a conflict to settle, in words the lead acts on.
-            onResolve={() => {
-              model.dismissConflict()
-              void send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
-            }}
-          />
+          {/* Its evidence's screenshots open in the lightbox, as the thread's pictures do. */}
+          <ThreadShellProvider value={host.shell}>
+            <Outputs
+              snapshot={snapshot}
+              lead={lead}
+              pending={model.pending}
+              doing={model.doing}
+              error={model.error}
+              onAccept={(changes) => void model.accept(changes)}
+              onMergeHere={() => void model.mergeHere()}
+              onOpenChange={() => void model.openChange()}
+              onPush={(head, url) => void model.push(head, url)}
+              onMarkReady={(url) => void model.markReady(url)}
+              // Sending it back is a note to its lead, which starts it again if it stopped.
+              onSendBack={(note) => send(note, false)}
+              onOpenFile={changes.show}
+              conflict={model.conflict}
+              onPushHere={() => void model.pushHere()}
+              onPushBranch={() => void model.pushBranch()}
+              onConnect={() => setConnecting(true)}
+              // So is a conflict to settle, in words the lead acts on.
+              onResolve={() => {
+                model.dismissConflict()
+                void send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
+              }}
+            />
+          </ThreadShellProvider>
           {connecting && snapshot.host !== null && (
             <ConnectPanel service={serviceOfProduct(snapshot.host.product)} onClose={() => setConnecting(false)} />
           )}

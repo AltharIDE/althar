@@ -13,7 +13,7 @@ import { Sessions } from './Sessions'
 
 /*
  * How many agents are at work at once on this machine, and what waits for a
- * place among them (DEV-58, ADR-031). An agent at work takes a place: a
+ * place among them (DEV-58, ADR-032). An agent at work takes a place: a
  * task's lead, while a step of its run is admitted or under way (implement,
  * settle), it is asked about a conflict or the checks on one, it is starting,
  * or it is in a turn; and a task's reviewer, while a review is admitted or

@@ -20,7 +20,7 @@ export const brandOf = (agentId: string): Brand | undefined => BRANDS[agentId]
 export const waitsWords = (agent: string, at: string) => `Waits for ${agent}, back at ${at}`
 
 /**
- * What work waiting for a free agent waits for (ADR-031): every agent this
+ * What work waiting for a free agent waits for (ADR-032): every agent this
  * computer runs at once is busy. More busy than that, after the person
  * lowered the number, says both.
  */

@@ -67,11 +67,66 @@ export interface FindingLine {
   readonly response: string | null
 }
 
+/** A piece of evidence, as the description lists it: as the step result keeps it. */
+export interface EvidenceLine {
+  readonly kind: string
+  readonly caption: string
+  readonly picture: unknown
+  readonly command: string | null
+  readonly exit: number | null
+  readonly text: string | null
+}
+
+/** How many lines of what a command printed, or a text, the description quotes: its end. */
+export const EVIDENCE_LINES = 12
+
+const EVIDENCE_WORDS: Readonly<Record<string, string>> = {
+  screenshot: 'Screenshot',
+  recording: 'Recording',
+  command: 'Command',
+  test_run: 'Test run',
+  response: 'Response',
+  log: 'Log',
+  note: 'Note',
+}
+
+/** The end of a text, fenced and indented under its list item; a fence its text can't close. */
+const quotedEnd = (text: string) => {
+  const lines = text.replace(/\n+$/, '').split('\n')
+  const end = lines.slice(-EVIDENCE_LINES)
+  const fence = '~'.repeat(Math.max(4, ...end.map((line) => (/^\s*(~+)/.exec(line)?.[1]?.length ?? 0) + 1)))
+  return [`${lines.length > end.length ? '  …\n' : ''}  ${fence}`, ...end.map((line) => `  ${line}`), `  ${fence}`].join('\n')
+}
+
 /**
- * The pull request's description: the lead's summary, how review went, the
- * issue it is for, and who opened it, unless the person turned Althar's
- * credit off. Where the repository has a template,
- * it's written in that: the lead's own description where it keeps the
+ * What the lead showed, as the description says it: each piece with its
+ * caption; a command with what it ran, its exit code and the end of what it
+ * printed. Pictures aren't hosted with the pull request, so a screenshot is
+ * named, and said to be in Althar. Then what it couldn't show.
+ */
+export const evidenceText = (evidence: ReadonlyArray<EvidenceLine>, unverified: ReadonlyArray<string>) => {
+  const parts: Array<string> = []
+  if (evidence.length > 0) {
+    const lines = evidence.map((piece) => {
+      const word = EVIDENCE_WORDS[piece.kind] ?? 'Evidence'
+      const ran =
+        piece.command === null ? '' : `: \`${piece.command.replace(/`/g, "'")}\`${piece.exit === null ? '' : `, exit ${piece.exit}`}`
+      const head = `- ${word}: ${piece.caption}${ran}`
+      if (piece.picture !== null && piece.picture !== undefined) return head
+      return piece.text === null || piece.text.trim() === '' ? head : `${head}\n${quotedEnd(piece.text)}`
+    })
+    const pictured = evidence.some((piece) => piece.picture !== null && piece.picture !== undefined)
+    parts.push(['### Evidence', lines.join('\n'), ...(pictured ? ['Screenshots are in Althar, on the task.'] : [])].join('\n\n'))
+  }
+  if (unverified.length > 0) parts.push(`### Unverified\n\n${unverified.map((line) => `- ${line}`).join('\n')}`)
+  return parts.join('\n\n')
+}
+
+/**
+ * The pull request's description: the lead's summary, what it showed of
+ * its change working, how review went, the issue it is for, and who opened
+ * it, unless the person turned Althar's credit off. Where the repository has
+ * a template, it's written in that: the lead's own description where it keeps the
  * template, with every box unticked, else the template with the lead's
  * summary in its place for one, or under a heading of its own below.
  */
@@ -79,6 +134,9 @@ export const bodyOf = (input: {
   readonly lead: string | null
   readonly review: { readonly rounds: number; readonly verdict: string | null } | null
   readonly findings: ReadonlyArray<FindingLine>
+  /** What the lead showed of its change working, and what it couldn't. */
+  readonly evidence?: ReadonlyArray<EvidenceLine>
+  readonly unverified?: ReadonlyArray<string>
   readonly issue: { readonly key: string; readonly url: string; readonly sameHost: boolean } | null
   /** The repository's template, and the description the lead wrote in it. */
   readonly template?: string | null
@@ -98,6 +156,8 @@ export const bodyOf = (input: {
     parts.push(untick(placed ?? template).trim())
     if (placed === null && lead !== null) parts.push(`### Summary\n\n${lead}`)
   }
+  const shown = evidenceText(input.evidence ?? [], input.unverified ?? [])
+  if (shown !== '') parts.push(shown)
   if (input.review !== null && input.review.rounds > 0) {
     const rounds = input.review.rounds === 1 ? 'one round' : `${input.review.rounds} rounds`
     parts.push(`### Review\n\n${input.review.verdict === 'pass' ? `Passed after ${rounds} of review.` : `Reviewed in ${rounds}.`}`)

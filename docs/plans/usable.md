@@ -128,7 +128,7 @@ Confirmed with the user on 1 October 2026:
   rebooted a MacBook: each machine runs as many tasks' agents at once as its
   cores and memory allow, or the person's own number, and the rest wait
   their turn, first come, first served
-  ([ADR-031](../decisions/031-agents-at-once-on-this-machine.md), DEV-58).
+  ([ADR-032](../decisions/032-agents-at-once-on-this-machine.md), DEV-58).
 - **Permission asks** are the lead's to answer within the project's rules;
   only the "always ask me" list reaches the person.
 - **A usage limit is handled as configured:** stop and wait for the reset, or

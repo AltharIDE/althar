@@ -21,7 +21,7 @@ import type { ToolAccess } from '../src/ToolServer'
 import { callTool, repository, runtime, until } from './support'
 
 /*
- * How many tasks are at work at once on this machine (Busy.ts, ADR-031).
+ * How many tasks are at work at once on this machine (Busy.ts, ADR-032).
  * With every place taken, the next task's first step doesn't start: it
  * waits, held in the store, and its card says why; it starts on its own,
  * oldest first, when a place frees, after a restart too. The person can stop

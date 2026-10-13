@@ -38,4 +38,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [028](028-linux-windows-packages-and-the-keyring.md) | Linux windows, packages and the keyring |
 | [029](029-the-load-read-when-asked.md) | How hard the computer works is read by the runtime, only while a window shows it |
 | [030](030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md) | Where the project says so, the lead resolves a conflict unasked, and Althar pushes the merge |
-| [031](031-agents-at-once-on-this-machine.md) | A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn |
+| [031](031-coordinator-handed-over-before-it-fills.md) | Althar hands the coordinator to a fresh session before its context fills, and keeps the project's notes |
+| [032](032-agents-at-once-on-this-machine.md) | A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn |

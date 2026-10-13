@@ -52,7 +52,7 @@ export class Plans extends Context.Service<
     /**
      * Changes a proposed plan's steps (who does them, or which are skipped),
      * and what happens when the work is done; or a started one's, while its
-     * first step waits for a place among the agents at work here (ADR-031).
+     * first step waits for a place among the agents at work here (ADR-032).
      */
     change(planId: string, steps: ReadonlyArray<PlanStep>, actorId: ActorId, end?: TaskEnd | null): Effect.Effect<void, unknown>
   }

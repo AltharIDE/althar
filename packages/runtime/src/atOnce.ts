@@ -2,7 +2,7 @@ import { MOST_AT_ONCE } from '@althar/contracts'
 
 /*
  * How many tasks may be at work at once on a machine, by default, from its
- * cores and its memory (DEV-58, ADR-031). A lead with its test runs easily
+ * cores and its memory (DEV-58, ADR-032). A lead with its test runs easily
  * takes several GB and many cores, so each figure is conservative: a task
  * counts 2.5 cores and 3 GB, and 4 GB are left for the system, the person's
  * own apps and Althar itself. The default is the lower of the two, never
