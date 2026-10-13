@@ -1,6 +1,6 @@
 /*
  * What each executable in Althar.app may do under the hardened runtime
- * (ADR-032): each is signed on its own, with only what it needs. What
+ * (ADR-033): each is signed on its own, with only what it needs. What
  * the agents' own binaries need is what their makers sign them with, less
  * what Althar never uses (Claude Code's microphone and Apple Events, Codex's
  * voice host). Anything not named here gets none.

@@ -311,7 +311,7 @@ never under running work.
   run as Althar's identity.
 - [x] **One entitlements file for every helper.** electron-builder gives all
   of them the agents' entitlements (JIT, unsigned executable memory, no
-  library validation). Decided in ADR-032: each executable is signed with
+  library validation). Decided in ADR-033: each executable is signed with
   its own, and only Claude Code's binary may load any library.
 - [ ] **A download link that stays the same.** The site and the README link
   the Releases page. A fixed asset name (`Althar-arm64.dmg`) would let
@@ -322,7 +322,7 @@ never under running work.
 - [x] **Running the bundled adapters once the app is signed.** They run on
   Electron's own binary as Node (`ELECTRON_RUN_AS_NODE`), so the RunAsNode
   fuse has to stay on, and then anything can run Althar's signed binary as
-  Node with the app's entitlements. Decided in ADR-032: the app ships Node
+  Node with the app's entitlements. Decided in ADR-033: the app ships Node
   for them and the fuse is off. A utility process per adapter was tried
   and can't own the adapter's process group.
 

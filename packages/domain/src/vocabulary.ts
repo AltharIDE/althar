@@ -161,8 +161,8 @@ export type FindingState = typeof FindingState.Type
 export const SnapshotReason = Schema.Literals(['node_started', 'node_ended', 'switch', 'interrupt'])
 export type SnapshotReason = typeof SnapshotReason.Type
 
-/** Why a node attempt is held without needing a person. */
-export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable'])
+/** Why a node attempt is held without needing a person: `machine_busy` waits for a place among the agents this machine runs at once. */
+export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable', 'machine_busy'])
 export type HoldReason = typeof HoldReason.Type
 
 export const AttentionKind = Schema.Literals([

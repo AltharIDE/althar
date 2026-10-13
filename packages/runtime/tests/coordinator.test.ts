@@ -676,11 +676,11 @@ describe('what the coordinator hears of its plans', () => {
       const { projectId, threadId } = yield* opened
       const person = instance.personId
       const coordinator = instance.coordinatorId
-      // It has spoken once: what it hears is what came after.
+      // It has spoken once: what it hears is what came after. Its turn is over, not only not yet begun.
       yield* say(threadId, 'Hello.')
       yield* until(
-        sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId} AND state IN ('pending', 'delivered')`,
-        (rows) => rows.length === 0,
+        sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId}`,
+        (rows) => rows.length > 0 && rows.every((row) => row.state !== 'pending' && row.state !== 'delivered'),
       )
       const draft = (title: string) =>
         Effect.map(

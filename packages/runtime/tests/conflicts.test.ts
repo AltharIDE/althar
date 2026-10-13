@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
@@ -13,6 +14,7 @@ import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { conflictsOf } from '../src/localMerge'
+import { Plans } from '../src/Plans'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
@@ -281,6 +283,98 @@ describe('a conflict merging here', () => {
       assert.strictEqual((yield* rounds(taskId)).length, 2)
     }).pipe(Effect.provide(runtimeWith()))
   })
+
+  it.live('waits for a place among the agents at work on this machine, after a restart too, and is asked once one frees', () => {
+    const working = repository()
+    const file = join(mkdtempSync(join(tmpdir(), 'althar-conflicts-')), 'althar.sqlite')
+    // One agent at once: 2.5 cores and 3 GB, and 4 GB kept.
+    const oneAtOnce = () =>
+      Queries.layer.pipe(
+        Layer.provideMerge(runtime(file, {}, { connectors: fakeConnectors({}), busy: { machine: { cores: 3, memory: 7 * 1024 ** 3 } } })),
+      )
+    /** The waiting round's task's card, by its id. */
+    const cardOf = (projectId: string, taskId: string) => Effect.map(cards(projectId), (all) => all.filter((one) => one.taskId === taskId))
+    return Effect.gen(function* () {
+      const before = yield* Effect.gen(function* () {
+        const projectId = yield* ask(
+          working,
+          'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:resolve]',
+          true,
+        )
+        const [task] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+        const taskId = task?.taskId ?? ''
+        const threadId = task?.threadId ?? ''
+        // Another task takes the one place: its lead works on until it is stopped.
+        const projects = yield* Projects
+        const plans = yield* Plans
+        const busy = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId,
+          title: 'Work on',
+          description: 'Work on it. [lead:wait]',
+          draft: true,
+        })
+        const actorId = (yield* Instance).personId
+        const planId = yield* plans.propose({
+          projectId: projectId as Parameters<typeof plans.propose>[0]['projectId'],
+          taskId: busy.taskId,
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          reason: null,
+          actorId,
+          end: null,
+          held: true,
+        })
+        assert.strictEqual(yield* plans.start(planId, actorId), 'running')
+        moveMainOn(working)
+        assert.strictEqual(cantOf(yield* Effect.flip(mergeHere(taskId)))[1], 'resolving')
+        // The round is kept, and says it waits; the lead isn't asked yet.
+        yield* titled(threadId, 'It conflicts with main')
+        const said = (yield* notices(threadId)).find((notice) => notice.title?.startsWith('It conflicts with main') === true)
+        assert.strictEqual(
+          said?.description,
+          'Althar asks the lead to resolve it, as the project’s rules say, once an agent is free on this computer.',
+        )
+        assert.deepStrictEqual(
+          (yield* rounds(taskId)).map((round) => round.state),
+          ['resolving'],
+        )
+        assert.deepStrictEqual(yield* asked(threadId), [])
+        const [card] = yield* cardOf(projectId, taskId)
+        assert.strictEqual(card?.phase, 'running')
+        assert.deepStrictEqual(card?.queued, { busy: 1, atOnce: 1 })
+        // Asked to merge again meanwhile, it says the lead is at it.
+        assert.strictEqual(cantOf(yield* Effect.flip(mergeHere(taskId)))[1], 'resolving')
+        return { projectId, taskId, threadId, busy }
+      }).pipe(Effect.provide(oneAtOnce()))
+
+      yield* Effect.gen(function* () {
+        const { projectId, taskId, threadId, busy } = before
+        // After a restart, the round still waits, and isn't settled as one a lead was cut short on.
+        yield* until(
+          Effect.flatMap(
+            SqlClient.SqlClient,
+            (sql) => sql<{ state: string }>`SELECT state FROM provider_sessions WHERE thread_id = ${busy.threadId}`,
+          ),
+          (rows) => rows.length === 2,
+        )
+        yield* Effect.sleep('300 millis')
+        assert.deepStrictEqual(
+          (yield* rounds(taskId)).map((round) => round.state),
+          ['resolving'],
+        )
+        assert.deepStrictEqual(yield* asked(threadId), [])
+        assert.deepStrictEqual((yield* cardOf(projectId, taskId))[0]?.queued, { busy: 1, atOnce: 1 })
+        // The other task is stopped: its place goes to the round, whose lead is asked, and resolves it.
+        yield* (yield* Tasks).stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: busy.taskId })
+        yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt')
+        assert.strictEqual((yield* asked(threadId)).length, 1)
+        assert.deepStrictEqual(
+          (yield* rounds(taskId)).map((round) => [round.state, round.attempt]),
+          [['resolved', 1]],
+        )
+      }).pipe(Effect.provide(oneAtOnce()))
+    })
+  })
 })
 
 describe('a task that says otherwise than its project', () => {
@@ -449,6 +543,7 @@ describe('a conflict its pull request’s host reports', () => {
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
       const [note] = yield* asked(threadId)
       assert.include(note, 'merge origin/main into it, which Althar has fetched')
+      assert.include(note, "Merge, don't rebase: a branch that was pushed can't be rewritten.")
       assert.include(note, "Althar pushes that merge alone to PR #1. Don't push it yourself.")
       // Its brief says what Althar pushes for it, and that it never pushes itself.
       assert.include(yield* briefOf(threadId), PUSHED_FOR_IT)
@@ -559,8 +654,8 @@ describe('a conflict its pull request’s host reports', () => {
       writeFileSync(join(bare, 'hooks', 'pre-receive'), '#!/bin/sh\necho "refused" >&2\nexit 1\n', { mode: 0o755 })
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, but Althar couldn’t push the merge.')
       const said = (yield* notices(threadId)).find((notice) => notice.title?.endsWith('but Althar couldn’t push the merge.') === true)
-      // Why, as the task's Push card says it: git's own words.
-      assert.match(said?.description ?? '', /^git push didn't work: .+ Push it from PR #1’s card\.$/)
+      // Why, as the task's Push card says it: what the host said, in a sentence, not git's hint.
+      assert.match(said?.description ?? '', /^PR #1 refused the push: pre-receive hook declined\. Push it from PR #1’s card\.$/)
       assert.strictEqual((yield* rounds(taskId))[0]?.state, 'resolved')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -1089,7 +1184,7 @@ describe('a round’s words, and what git says of its branch', () => {
     assert.strictEqual(whereLine([one, two]), 'web’s develop, in README.md; api’s main, in a.ts, b.ts')
     const note = noteFor([one, two], { change: null }, null)
     assert.include(note, 'in web, develop conflicts in README.md; in api, main conflicts in a.ts, b.ts.')
-    assert.include(note, "Then say it's ready to merge again.")
+    assert.include(note, "Merge, don't rebase: a branch that was pushed can't be rewritten. Then say it's ready to merge again.")
     assert.strictEqual(changeOf({ change: null }), 'the pull request')
     const fix = fixNoteFor({ change: null }, { failing: ['test'], logs: [] })
     assert.match(fix, /^Checks failed on the merge Althar pushed to the pull request: test\.\n\nFix what broke/)

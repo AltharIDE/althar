@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { join } from 'node:path'
 
 /*
- * The Node the packaged app runs the agent adapters on (ADR-032): Althar's
+ * The Node the packaged app runs the agent adapters on (ADR-033): Althar's
  * own binary doesn't run as Node there, as its `runAsNode` fuse is off. It
  * is Node's official build, at the version Electron's own Node is, so the
  * adapters run on the Node dev and CI run them on (Electron's, as Node). It

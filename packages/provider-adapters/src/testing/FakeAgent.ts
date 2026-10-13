@@ -562,7 +562,9 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
         return await call('finish_step', { summary: 'Did the task.', descriptions: [{ text }] })
       }
-      if (text.includes('[lead:finish]') || (toldToGoOn && session.markers.has('[lead:finish]'))) {
+      // Asked to resolve a conflict, as a fresh session is with its brief after a restart, it does that rather than finish.
+      const resolving = /Bring the branch up to date: merge \S+ into it/.test(text)
+      if (!resolving && (text.includes('[lead:finish]') || (toldToGoOn && session.markers.has('[lead:finish]')))) {
         if (session.markers.has('[lead:edit]')) commitIn(session.cwd, 'change.txt', 'Change it')
         if (!session.markers.has('[lead:scratch]')) return await finish()
         appendFileSync(join(session.cwd, 'scratch.log'), 'trying things\n')

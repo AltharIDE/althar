@@ -7,6 +7,7 @@ import { available, type Fetch, type Product, type ProductInfo } from '@althar/c
 import { adapterNode, agents, type AgentDefinition, type Transport, usingLocated } from '@althar/provider-adapters'
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
+import type { Machine } from './atOnce'
 import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
@@ -75,6 +76,15 @@ export interface RuntimeOptions {
   readonly load?: LoadOptions
   /** How a task's worktree is set up before its lead starts (`Setups.ts`). */
   readonly setups?: SetupOptions
+  /** How many tasks are at work at once here, and how what waits for a place is looked at (`Busy.ts`). */
+  readonly busy?: BusyOptions
+}
+
+export interface BusyOptions {
+  /** The machine the default is worked out from: this one, as Node says it, unless a test says. */
+  readonly machine?: Machine
+  /** How often what waits is looked at, besides whenever an agent's turn or session ends: every 5 seconds. */
+  readonly every?: Duration.Duration
 }
 
 export interface SetupOptions {

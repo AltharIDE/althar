@@ -14,7 +14,7 @@ import {
   WorkCard,
 } from '@althar/ui'
 
-import { waitsWords } from '../../shared/agents'
+import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
 import { callKindOf, kindWords, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
@@ -40,6 +40,7 @@ export const text = {
     [TaskStatus.Yours]: 'Waiting on you',
     [TaskStatus.Done]: 'Done',
     [TaskStatus.Paused]: 'Paused',
+    [TaskStatus.Queued]: 'Waiting',
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   stopped: 'No agent is working on it',
@@ -118,7 +119,8 @@ export function BoardView({
       <BoardColumn lane={BoardLane.Running} count={lanes.running.length}>
         {lanes.running.map((work) => {
           const { steps, at } = trackOf(work)
-          const status = STATUS[work.phase] ?? TaskStatus.Running
+          // Waiting for a free agent, it says so, rather than that it runs.
+          const status = work.queued !== null ? TaskStatus.Queued : (STATUS[work.phase] ?? TaskStatus.Running)
           return (
             <WorkCard
               key={work.taskId}
@@ -129,13 +131,15 @@ export function BoardView({
               at={at}
               elapsed={work.startedAt === null ? '' : running(work.startedAt, now)}
               lead={lead(work)}
-              {...(work.waits !== null
-                ? { note: waitsWords(name(work.waits.agentId), clock(work.waits.until)) }
-                : status === TaskStatus.Stopped
-                  ? { note: text.stopped }
-                  : steps.length === 1
-                    ? { note: '' }
-                    : {})}
+              {...(work.queued !== null
+                ? { note: queuedWords(work.queued) }
+                : work.waits !== null
+                  ? { note: waitsWords(name(work.waits.agentId), clock(work.waits.until)) }
+                  : status === TaskStatus.Stopped
+                    ? { note: text.stopped }
+                    : steps.length === 1
+                      ? { note: '' }
+                      : {})}
               onOpen={() => onOpen(work.threadId)}
               text={{ status: text.status, task: unnamed }}
             />

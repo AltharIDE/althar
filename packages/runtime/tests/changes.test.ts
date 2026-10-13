@@ -24,7 +24,7 @@ import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
-import { callTool, fakeConnectors, HOST, hosted, items, repository, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, repository, runtime, turns, until } from './support'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -816,6 +816,178 @@ describe('a pull request, by the person and the lead', () => {
       assert.lengthOf(yield* changes.ofTask(created.taskId), 0)
       assert.isNull(yield* changes.endFor(project.projectId))
     }).pipe(Effect.provide(runtimeWith({})))
+  })
+})
+
+describe('a branch that parted from its pull request', () => {
+  it.live('is said in a new lead’s brief to be published, by its pull request', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null, Duration.seconds(20))
+      const threadId = ready?.threadId ?? ''
+      const [workspace] = yield* (yield* SqlClient.SqlClient)<{
+        branch: string
+      }>`SELECT branch FROM workspaces WHERE task_id = ${ready?.taskId ?? ''}`
+      const before = (yield* turns(threadId)).length
+      yield* (yield* Sessions).switchAgent({ threadId, agentId: 'opencode' })
+      const briefed = yield* until(
+        turns(threadId),
+        (rows) => rows.length > before && rows.every((row) => !['pending', 'delivered'].includes(row.state)),
+      )
+      assert.include(
+        briefed.at(before)?.prompt ?? '',
+        `The branch ${workspace?.branch ?? ''} is published: its pull request, ${ready?.change?.url ?? ''}, has it at ${(ready?.change?.head ?? '').slice(0, 12)}.`,
+      )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('is told apart from one that only adds to it, replaced only under a lease, or brought back by merging', () => {
+    const { working, bare } = hosted()
+    const tip = tipOf(bare)
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tip })
+    github.addRepository(['meridian', 'api'])
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      yield* setCoAuthor(false)
+      const changes = yield* Changes
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const taskId = ready?.taskId ?? ''
+      const [workspace] = yield* sql<{ path: string; branch: string }>`SELECT path, branch FROM workspaces WHERE task_id = ${taskId}`
+      const here = workspace?.path ?? ''
+      const branch = workspace?.branch ?? ''
+      const at = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
+      const refused = (error: unknown) => (error instanceof Error && 'why' in error ? `${error.name}:${String(error.why)}` : String(error))
+
+      // A commit on top: a plain fast-forward, as it always was.
+      at(here, 'commit', '-q', '--allow-empty', '-m', 'More')
+      const [ahead] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1)
+      assert.isNull(ahead?.change?.diverged)
+      yield* changes.push(taskId, ahead?.change?.localHead ?? '')
+      assert.strictEqual(tip(), at(here, 'rev-parse', 'HEAD'))
+      // Pushed by URL, with no remote-tracking ref: Althar keeps its own, for the brief to say the branch is published.
+      assert.strictEqual(at(here, 'rev-parse', `refs/althar/pushed/${branch}`), tip())
+
+      // The lead rewrites what was pushed: the card says so, with nothing to push plainly.
+      const published = tip() ?? ''
+      at(here, 'commit', '-q', '--amend', '--allow-empty', '-m', 'More, reworded')
+      at(here, 'commit', '-q', '--allow-empty', '-m', 'Then this')
+      const [rewritten] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged != null)
+      assert.deepStrictEqual(rewritten?.change?.diverged, { kind: 'rewritten', local: 2, onPullRequest: 1 })
+      assert.strictEqual(rewritten?.change?.unpushed, 0)
+      const local = rewritten?.change?.localHead ?? ''
+
+      // A plain push is refused in a sentence, not git's hint.
+      const plain = yield* Effect.flip(changes.push(taskId, local))
+      assert.strictEqual(refused(plain), 'PushRefused:behind')
+      assert.strictEqual(
+        words(plain, String).message,
+        'PR #1 has commits that aren’t here yet, so it didn’t take the push. Bring them in, then push again.',
+      )
+
+      // Asking the lead to merge instead: the note has it start again from what was pushed, and merge, never rebase;
+      // what it hasn't committed is committed, and the backup checked, before any reset.
+      assert.notInclude((yield* changes.mergeNote(taskId)).note, 'not committed now')
+      writeFileSync(join(here, 'half-done.ts'), 'export {}\n')
+      const asked = yield* changes.mergeNote(taskId)
+      rmSync(join(here, 'half-done.ts'))
+      assert.strictEqual(asked.head, published)
+      assert.include(asked.note, 'was rewritten after it was pushed')
+      assert.include(asked.note, '(not committed now: half-done.ts)')
+      const order = ['Commit everything not committed yet', `git rev-parse ${branch}-rewritten HEAD`, `git reset --hard ${published}`]
+      assert.deepStrictEqual(
+        order.map((step) => asked.note.indexOf(step)),
+        order.map((step) => asked.note.indexOf(step)).toSorted((a, b) => a - b),
+      )
+      assert.notInclude(
+        order.map((step) => asked.note.indexOf(step)),
+        -1,
+      )
+      assert.include(asked.note, 'Merge, never rebase')
+      assert.strictEqual(at(here, 'rev-parse', `refs/althar/pull-request/${branch}`), published)
+
+      // Someone pushed meanwhile: replacing under the lease of the head seen refuses, and nothing on the host moves.
+      at(bare, 'update-ref', `refs/heads/${branch}`, `${published}~1`)
+      // Only from a head seen, as a commit: anything else replaces nothing.
+      assert.instanceOf(yield* Effect.flip(changes.replace(taskId, local, 'not-a-commit')), ChangedSinceSeen)
+      const stale = yield* Effect.flip(changes.replace(taskId, local, published))
+      assert.strictEqual(refused(stale), 'PushRefused:moved')
+      assert.strictEqual(tip(), at(bare, 'rev-parse', `${published}~1`))
+      at(bare, 'update-ref', `refs/heads/${branch}`, published)
+
+      // Still where the person saw it: their branch replaces it, and the record says it was their force push.
+      yield* changes.replace(taskId, local, published)
+      assert.strictEqual(tip(), local)
+      const [forced] = yield* sql<{ payload: string; actorId: string }>`
+        SELECT payload, actor_id FROM record_events WHERE type = 'external_link.force_pushed'`
+      assert.deepInclude(JSON.parse(forced?.payload ?? '{}'), {
+        replaced: published,
+        head: local,
+        rule: 'force-push',
+        answeredBy: 'person',
+      })
+      assert.strictEqual(forced?.actorId, (yield* Instance).personId)
+      yield* until(cards(projectId), (all) => all[0]?.change?.diverged === null && all[0]?.change?.unpushed === 0)
+
+      // Someone pushes to the pull request from elsewhere: it moved, and a plain push is refused the same way.
+      const tree = at(bare, 'rev-parse', `${local}^{tree}`)
+      const theirs = execFileSync('git', ['commit-tree', tree, '-p', local, '-m', 'Update branch'], {
+        cwd: bare,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 'Dana',
+          GIT_AUTHOR_EMAIL: 'dana@x',
+          GIT_COMMITTER_NAME: 'Dana',
+          GIT_COMMITTER_EMAIL: 'dana@x',
+        },
+      })
+        .toString()
+        .trim()
+      at(bare, 'update-ref', `refs/heads/${branch}`, theirs)
+      at(here, 'commit', '-q', '--allow-empty', '-m', 'Mine')
+      const [moved] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged?.kind === 'moved', Duration.seconds(20))
+      assert.deepStrictEqual(moved?.change?.diverged, { kind: 'moved', local: 0, onPullRequest: null })
+      assert.strictEqual(refused(yield* Effect.flip(changes.push(taskId, moved?.change?.localHead ?? ''))), 'PushRefused:behind')
+      // Bringing its commits in: fetched here, and the lead merges them.
+      const bringing = yield* changes.mergeNote(taskId)
+      assert.strictEqual(bringing.head, theirs)
+      assert.include(bringing.note, `git merge ${theirs}`)
+      const [counted] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged?.onPullRequest === 1)
+      assert.deepStrictEqual(counted?.change?.diverged, { kind: 'moved', local: 1, onPullRequest: 1 })
+      at(here, 'merge', '-q', '--no-edit', theirs)
+      const [merged] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged === null && all[0]?.change?.unpushed === 2)
+      yield* changes.push(taskId, merged?.change?.localHead ?? '')
+      assert.strictEqual(tip(), merged?.change?.localHead)
+
+      // A host that takes no forced push says so in its own words, and nothing moves there.
+      at(bare, 'config', 'receive.denyNonFastForwards', 'true')
+      const kept = tip() ?? ''
+      at(here, 'commit', '-q', '--amend', '--allow-empty', '-m', 'Merged, reworded first')
+      const denied = yield* Effect.flip(changes.replace(taskId, at(here, 'rev-parse', 'HEAD'), kept))
+      assert.strictEqual(refused(denied), 'PushRefused:refused')
+      assert.strictEqual(tip(), kept)
+      at(bare, 'config', 'receive.denyNonFastForwards', 'false')
+
+      // Where the project never allows a force push, nothing is replaced.
+      const policies = yield* Policies
+      yield* policies.set(
+        projectId,
+        { alwaysAsk: ['default-branch', 'many-branches', 'delete-branch', 'deploy', 'outside'], never: ['force-push'] },
+        (yield* Instance).personId,
+      )
+      const before = tip() ?? ''
+      at(here, 'commit', '-q', '--amend', '--allow-empty', '-m', 'Merged, reworded')
+      const never = yield* Effect.flip(changes.replace(taskId, at(here, 'rev-parse', 'HEAD'), before))
+      assert.strictEqual(refused(never), 'PushRefused:never')
+      assert.strictEqual(tip(), before)
+    }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })
 

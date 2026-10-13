@@ -6,6 +6,7 @@ import {
   ChangeSet,
   ChangeState,
   CheckState,
+  Diverged,
   Evidence,
   type ModelInfo,
   type PullRequest,
@@ -25,9 +26,10 @@ import { device } from '../../shared/device'
  * to accept it. Its pull requests merge on their host when it is accepted,
  * up to the heads shown, and its repositories whose work ended on its branch
  * merge here. A draft is marked ready here, what the lead committed since is
- * pushed here, and sending it back is a note to the lead. Before it is
- * ready, the same card shows what it has changed so far. Under it, what
- * the lead showed of it working, and what it couldn't.
+ * pushed here, and sending it back is a note to the lead. A branch its pull
+ * request won't take a plain push of says why, and offers what puts it
+ * right. Before it is ready, the same card shows what it has changed so far.
+ * Under it, what the lead showed of it working, and what it couldn't.
  */
 
 export const text = {
@@ -78,6 +80,10 @@ export const text = {
       : 'Push to each remote'
   },
   resolve: 'Ask the lead to resolve it',
+  /** A pull request in a sentence, and by name: in a task of several, whose. */
+  pullRequest: (change: ChangeSummary, several: boolean) =>
+    several ? `${nameOf(change.repository)}’s ${change.noun}` : `the ${change.noun}`,
+  named: (change: ChangeSummary) => `${change.short} ${change.prefix}${change.number}`,
   /** What a review that asked for changes found; its words are in the conversation. */
   found: (n: number) => (n === 1 ? '1 finding' : `${n} findings`),
   diffKey: '⌘D',
@@ -148,6 +154,9 @@ export function Outputs({
   onPushHere,
   onPushBranch,
   onConnect,
+  refused = null,
+  onReplace,
+  onBringIn,
 }: {
   snapshot: ThreadSnapshot
   lead: ModelInfo
@@ -170,6 +179,12 @@ export function Outputs({
   onMergeHere: () => void
   onOpenChange: () => void
   onPush: (head: string, url: string) => void
+  /** The pull request a push was refused by for commits on it that aren't here, by its address. */
+  refused?: string | null
+  /** Replaces a pull request's commits with the branch, up to the head shown, while it is still at `replaces`: confirmed on the card. */
+  onReplace: (head: string, replaces: string, url: string) => void
+  /** Has the lead merge a pull request's commits into its branch, so a plain push works. */
+  onBringIn: (url: string) => void
   onMarkReady: (url: string) => void
   onSendBack: (note: string) => void
   /** Opens what it changed over the whole window, on a file or the first. */
@@ -351,7 +366,19 @@ export function Outputs({
       </p>
     ) : null
 
-  const pushes = open.filter((one) => one.state === 'open' && one.unpushed > 0 && one.localHead !== null)
+  // A branch its pull request won't take a plain push of, as Althar counts it or as a push just found: said, with what puts it right, not pushed.
+  const parted = open.flatMap((one) =>
+    one.state !== 'open' || one.localHead === null
+      ? []
+      : one.diverged !== null
+        ? [{ change: one, ...one.diverged }]
+        : refused === one.url
+          ? [{ change: one, kind: 'moved' as const, local: one.unpushed, onPullRequest: null }]
+          : [],
+  )
+  const pushes = open.filter(
+    (one) => one.state === 'open' && one.unpushed > 0 && one.localHead !== null && !parted.some((p) => p.change.url === one.url),
+  )
   const drafts = open.filter((one) => one.state === 'open' && one.draft)
   // A pull request needs its host connected: without, there is nothing a press could open.
   const unpublished = ready && first === undefined && task.commits > 0 && snapshot.host?.connected === true
@@ -369,6 +396,24 @@ export function Outputs({
           <p key={one.url} className={s.quiet}>
             {text.closed(one, productName(one.product))}
           </p>
+        ))}
+        {parted.map(({ change: one, kind, local: here, onPullRequest }) => (
+          <Diverged
+            key={`parted-${one.url}`}
+            kind={kind}
+            local={here}
+            onPullRequest={onPullRequest}
+            pullRequest={text.pullRequest(one, several)}
+            named={text.named(one)}
+            // Only from the head the person saw it at: what anyone pushed since is never replaced.
+            {...(kind === 'rewritten' && one.head !== null
+              ? { onReplace: () => onReplace(one.localHead ?? '', one.head ?? '', one.url) }
+              : {})}
+            onMerge={() => onBringIn(one.url)}
+            replacing={acting === doing.replace(one.url)}
+            merging={acting === doing.bringIn(one.url)}
+            locked={pending}
+          />
         ))}
         {pushes.map((one) => (
           <p key={`unpushed-${one.url}`} className={s.quiet}>

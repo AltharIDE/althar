@@ -133,6 +133,8 @@ export interface Client {
   readonly getSettings: () => Promise<AppSettings>
   /** Althar as co-author of the commits and pull requests it sends, or not. */
   readonly setCoAuthor: (on: boolean) => Promise<void>
+  /** How many agents work at once on this machine: the person's number, or null for the default again. */
+  readonly setAgentsAtOnce: (count: number | null) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
   /** Stops a task: every agent on it, and the step it was on waits until it is resumed. */
   readonly stopTask: (taskId: string) => Promise<void>
@@ -292,6 +294,10 @@ export interface Client {
   }) => Promise<boolean>
   /** Pushes the task's branch to its pull request, up to the commit the person saw; in a task of several repositories, the one at `url`. */
   readonly push: (taskId: string, head: string, url?: string) => Promise<void>
+  /** Replaces the commits on the task's pull request with its branch, up to the commit the person saw, only while it is still at `replaces`: a force push they confirmed. */
+  readonly replacePullRequest: (taskId: string, head: string, replaces: string, url?: string) => Promise<void>
+  /** What to tell the lead so its branch takes the pull request's commits in by merging; they are fetched to its worktree first. */
+  readonly mergeNote: (taskId: string, url?: string) => Promise<string>
   /** Asks a task's pull request for news now. */
   readonly refreshTask: (taskId: string) => Promise<void>
   /** Stops listening to the task's pull request at this address. */
@@ -423,6 +429,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setModelBlocked: (input) => command((commandId) => api.SetModelBlocked({ commandId, ...input })),
     getSettings: () => settle(api.GetSettings({})),
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
+    setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
     setTaskResolveConflicts: (input) => command((commandId) => api.SetTaskResolveConflicts({ commandId, ...input })),
@@ -496,6 +503,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),
+    replacePullRequest: (taskId, head, replaces, url) =>
+      command((commandId) => api.ReplacePullRequest({ commandId, taskId, head, replaces, ...(url === undefined ? {} : { url }) })),
+    mergeNote: (taskId, url) =>
+      command((commandId) => api.MergeNote({ commandId, taskId, ...(url === undefined ? {} : { url }) })).then(({ note }) => note),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     stopListening: (taskId, url) => command((commandId) => api.StopListening({ commandId, taskId, url })),
     stopBackground: (threadId, id) => command((commandId) => api.StopBackground({ commandId, threadId, id })),
