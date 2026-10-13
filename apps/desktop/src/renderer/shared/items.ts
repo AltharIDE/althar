@@ -175,17 +175,26 @@ export const withQueued = (draft: string, text: string): string => (draft.trim()
 /**
  * Reads that can come back out of order, as the runtime answers each on its
  * own: an answer is kept only if no read of the same thing began after it,
- * so an earlier answer never puts back what a later one replaced.
+ * so an earlier answer never puts back what a later one replaced. `landed`
+ * waits for the newest read of a thing, whichever began last: the one kept.
  */
 export const newestReads = () => {
-  const begun = new Map<string, number>()
+  const begun = new Map<string, { readonly read: number; readonly landed: Promise<void> }>()
   let reads = 0
-  return <A>(key: string, read: Promise<A>, keep: (value: A) => void, fail: (failure: unknown) => void): Promise<void> => {
+  const newest = <A>(key: string, read: Promise<A>, keep: (value: A) => void, fail: (failure: unknown) => void): Promise<void> => {
     reads += 1
     const mine = reads
-    begun.set(key, mine)
-    return read.then((value) => {
-      if (begun.get(key) === mine) keep(value)
+    const landed = read.then((value) => {
+      if (begun.get(key)?.read === mine) keep(value)
     }, fail)
+    begun.set(key, { read: mine, landed })
+    return landed
   }
+  const landed = async (key: string) => {
+    for (let now = begun.get(key); now !== undefined; now = begun.get(key)) {
+      await now.landed
+      if (begun.get(key) === now) return
+    }
+  }
+  return Object.assign(newest, { landed })
 }

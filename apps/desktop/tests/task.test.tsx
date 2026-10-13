@@ -579,6 +579,42 @@ describe('a task', () => {
     await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ body: 'Name the retry' })))
   })
 
+  it('counts what is left to push as soon as a push ends, its button busy until the card read since is shown', async () => {
+    const base = thread()
+    const url = 'https://github.com/meridian/api/pull/12'
+    const ready = (unpushed: number): ThreadSnapshot => ({
+      ...base,
+      task: { ...base.task, phase: 'ready' as const, changes: [change({ draft: false, localHead: 'def456', unpushed })], commits: 10 },
+    })
+    // Each read of the card after the push, answered when the test says.
+    const rereads: Array<(snapshot: ThreadSnapshot) => void> = []
+    const getThread = vi.fn(async () => ready(10))
+    const { client, emit } = fakeClient({
+      getThread,
+      push: vi.fn(async () => {
+        getThread.mockImplementation(() => new Promise<ThreadSnapshot>((resolve) => rereads.push(resolve)))
+      }),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('10 commits aren’t on the pull request yet.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Push 10 commits' }))
+    await waitFor(() => expect(client.push).toHaveBeenCalledWith('t1', 'def456', url))
+    const busy = () => screen.getByRole('button', { name: 'Push 10 commits' }).getAttribute('aria-busy')
+    // The push's own read of the card, then another as the runtime's word of the push arrives, before the first answers.
+    await waitFor(() => expect(rereads).toHaveLength(1))
+    act(() => emit(changed('external_link', 'l1')))
+    await waitFor(() => expect(rereads).toHaveLength(2))
+    // The first answers, and the later read replaces it: Push stays under way, the ten never offered again as if nothing went.
+    act(() => rereads[0]?.(ready(0)))
+    await act(async () => {})
+    expect(busy()).toBe('true')
+    act(() => rereads[1]?.(ready(0)))
+    // Read again, nothing is left: no second press.
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Push \d+ commits?$/ })).toBeNull())
+    expect(screen.queryByText('10 commits aren’t on the pull request yet.')).toBeNull()
+    expect(client.push).toHaveBeenCalledTimes(1)
+  })
+
   it('talks to its lead: sends, queues while it works, sends now, and interrupts', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     const view = withServices(<Task />, client)

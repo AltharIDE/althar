@@ -1703,6 +1703,25 @@ export class Changes extends Context.Service<
         })
 
       /**
+       * A pull request's head as its host says, unless the host hasn't read
+       * Althar's last push to it yet: for a moment after a push, GitHub still
+       * answers with the head before, behind what was pushed. Where the
+       * remote's branch is on what was pushed, that is its head; where it
+       * isn't, someone moved it back, and the host is right.
+       */
+      const caughtUp = (link: LinkRow, read: ChangeRequest, host: CodeHost, repository: Repository) =>
+        Effect.gen(function* () {
+          const said = read.headSha
+          if (said === null || read.state !== 'open') return said
+          const sent = yield* sentTo(link.projectId, read.url)
+          if (sent === null || sent === said) return said
+          const workspace = yield* worktreeOf(link.taskId, read.url)
+          if (workspace === undefined || !(yield* behindAny(workspace.path, [said], [sent]))) return said
+          const target = yield* pushTargetOf(host, repository, workspace.path)
+          return (yield* remoteTip(workspace.path, target, workspace.branch)) === sent ? sent : said
+        }).pipe(Effect.orElseSucceed(() => read.headSha))
+
+      /**
        * One turn of listening to a change: its state, its finished checks, and
        * what was said since the cursor. Whether anything happened on it, so
        * a quiet one is asked less often.
@@ -1716,7 +1735,8 @@ export class Changes extends Context.Service<
           const account = adapters.info.account
           const before = yield* decodeSnapshot(link.snapshot)
           const repository: Repository = yield* host.repository(before.repository)
-          const now = yield* host.change(repository, before.number)
+          const read = yield* host.change(repository, before.number)
+          const now = { ...read, headSha: yield* caughtUp(link, read, host, repository) }
           const name = nameOf(before)
           const forLead: Array<string> = []
           let happened = false
