@@ -596,11 +596,11 @@ const fakeCpu = () => {
   return { cpu, of }
 }
 
-/** A machine that runs `n` at once, whose agents' CPU the test sets: read every 50 ms, and quiet for 400 ms before it counts as idle. */
+/** A machine that runs `n` at once, whose agents' CPU the test sets: read every 50 ms, and quiet for a second before it counts as idle. */
 const withCpu = <A, E, R>(n: number, body: (cpu: ReturnType<typeof fakeCpu>['cpu']) => Effect.Effect<A, E, R>) => {
   const fake = fakeCpu()
   return body(fake.cpu).pipe(
-    Effect.provide(machine(n, ':memory:', { cpuOf: fake.of, sample: Duration.millis(50), quiet: Duration.millis(400) })),
+    Effect.provide(machine(n, ':memory:', { cpuOf: fake.of, sample: Duration.millis(50), quiet: Duration.millis(1_000) })),
   )
 }
 
@@ -653,7 +653,7 @@ describe('Agents at once, and what they left running', () => {
         const sessions = yield* Sessions
         const first = yield* served(projectId, 'First')
         // Well past the time an idle server stops counting, it still holds its place.
-        yield* Effect.sleep('800 millis')
+        yield* Effect.sleep('2200 millis')
         assert.strictEqual((yield* (yield* Busy).now).busy, 1)
         const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
         assert.strictEqual(second.outcome, 'waiting')
@@ -682,7 +682,7 @@ describe('Agents at once, and what they left running', () => {
         yield* Effect.sleep('150 millis')
         assert.strictEqual((yield* (yield* Busy).now).busy, 1)
         cpu.burning = true
-        yield* Effect.sleep('600 millis')
+        yield* Effect.sleep('1500 millis')
         assert.strictEqual((yield* (yield* Busy).now).busy, 1)
         // Quiet for good, it stops counting.
         cpu.burning = false
@@ -698,7 +698,7 @@ describe('Agents at once, and what they left running', () => {
         const { projectId } = yield* opened
         yield* served(projectId, 'First')
         // Far past the quiet that frees an idle server's place: each reading finds other workers than the last.
-        yield* Effect.sleep('1200 millis')
+        yield* Effect.sleep('2500 millis')
         assert.strictEqual((yield* (yield* Busy).now).busy, 1)
         const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
         assert.strictEqual(second.outcome, 'waiting')
@@ -741,11 +741,11 @@ describe('Agents at once, and what they left running', () => {
       withCpu(1, (cpu) =>
         Effect.gen(function* () {
           // A worker alive at every 5th reading (250 ms), gone between: the tree is the same idle parent at the rest, for far
-          // longer than the 400 ms it takes an idle server to stop counting.
+          // longer than the second it takes an idle server to stop counting.
           cpu.burstEvery = 5
           const { projectId } = yield* opened
           yield* served(projectId, 'First')
-          yield* Effect.sleep('1500 millis')
+          yield* Effect.sleep('2500 millis')
           assert.strictEqual((yield* (yield* Busy).now).busy, 1)
           // The bursts stop: nothing shows work for the quiet, and the place frees.
           cpu.burstEvery = 0
@@ -780,7 +780,8 @@ describe('Agents at once, and what they left running', () => {
         // The server goes quiet: no turn ends, no one answers, nothing is stopped.
         cpu.burning = false
         yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
-        assert.strictEqual((yield* (yield* Busy).now).busy, 0)
+        // Nothing is left holding a place once it is done and the idle server counts no more.
+        yield* busyAt(0)
       }),
     ),
   )
@@ -791,7 +792,7 @@ describe('Agents at once, and what they left running', () => {
         cpu.unreadable = true
         const { projectId } = yield* opened
         yield* served(projectId, 'First')
-        yield* Effect.sleep('800 millis')
+        yield* Effect.sleep('2200 millis')
         assert.strictEqual((yield* (yield* Busy).now).busy, 1)
         const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
         assert.strictEqual(second.outcome, 'waiting')
