@@ -23,6 +23,22 @@ export const GoingBack: Story = {
   },
 }
 
+/** The title edits where it is: pressing it turns it into a field, Enter keeps what was typed. */
+export const Renaming: Story = {
+  args: { onRename: fn(), maxLength: 60 },
+  play: async ({ args, canvasElement }) => {
+    const bar = within(canvasElement)
+    await userEvent.click(bar.getByRole('button', { name: /^Rename: / }))
+    const field = bar.getByRole('textbox', { name: 'Rename' })
+    await userEvent.clear(field)
+    await userEvent.type(field, 'Repair token refresh{Enter}')
+    await expect(args.onRename).toHaveBeenCalledWith('Repair token refresh')
+  },
+}
+
+/** Mid-edit, for a still picture. */
+export const Editing: Story = { args: { onRename: fn(), maxLength: 60, editing: true } }
+
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'button', focus: 'button', pressed: 'button' }),
   render: (args) => (

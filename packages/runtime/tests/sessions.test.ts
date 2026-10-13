@@ -459,6 +459,23 @@ describe('sessions', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('keeps what the agent says on its own whole, and apart from the next turn and the next time it wakes', () =>
+    Effect.gen(function* () {
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      const woken = (rows: ReadonlyArray<{ readonly kind: string; readonly content: { readonly text?: unknown } }>) =>
+        rows.filter((item) => item.kind === 'agent_message' && item.content.text === 'Verify finished.').length
+      yield* say(created.threadId, scenarios.wakesItself)
+      // Its first words open the item; the rest is written as it grows and when it closes.
+      yield* until(threadItems(created.threadId), (rows) => rows.some((item) => String(item.content.text ?? '').startsWith('Verify')))
+      // A prompted turn takes over before the agent has gone quiet; what it says next on its own starts a new item.
+      yield* say(created.threadId, scenarios.wakesItself)
+      yield* until(threadItems(created.threadId), (rows) => woken(rows) === 2)
+      const texts = (yield* threadItems(created.threadId)).filter((item) => item.kind !== 'user_message').map((item) => item.content.text)
+      assert.deepStrictEqual(texts, ['Done', 'Verify finished.', 'Done', 'Verify finished.'])
+    }).pipe(Effect.provide(runtime())),
+  )
+
   describe('what a lead leaves running', () => {
     /** What the thread's session has left running, as a client reads it. */
     const shown = (threadId: string) =>
@@ -717,6 +734,22 @@ describe('sessions', () => {
         assert.include(brief, 'The plan:\n- [in_progress] Write the test')
         assert.include(brief, 'Changed since the start:\nREADME.md | 900')
         assert.include(brief, 'Not yet committed:\n?? notes.txt')
+        // Whether its branch is published, as Althar knows it, and that a published one is merged into, never rebased.
+        const branch = execFileSync('git', ['branch', '--show-current'], { cwd: created.worktree }).toString().trim()
+        // Nothing says it was never pushed: unknown, it is merged into all the same.
+        assert.include(brief, `The branch ${branch} isn't on any remote Althar knows of, but it may still have been pushed some other way.`)
+        assert.include(brief, 'Bring the default branch in by merging it, never by rebasing')
+        const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: created.worktree }).toString().trim()
+        execFileSync('git', ['update-ref', `refs/remotes/origin/${branch}`, head], { cwd: created.worktree })
+        yield* sessions.switchAgent({ threadId: created.threadId, agentId: 'codex' })
+        const again = (yield* settled(created.threadId, 4)).at(-1)?.prompt ?? ''
+        assert.include(again, `The branch ${branch} is published: origin/${branch} has it at ${head.slice(0, 12)}.`)
+        // Pushed by Althar, by URL, with no remote-tracking ref: still published.
+        execFileSync('git', ['update-ref', '-d', `refs/remotes/origin/${branch}`], { cwd: created.worktree })
+        execFileSync('git', ['update-ref', `refs/althar/pushed/${branch}`, head], { cwd: created.worktree })
+        yield* sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode' })
+        const pushed = (yield* settled(created.threadId, 5)).at(-1)?.prompt ?? ''
+        assert.include(pushed, `The branch ${branch} is published: Althar pushed it, at ${head.slice(0, 12)}.`)
       }).pipe(Effect.provide(runtime())),
     )
   })

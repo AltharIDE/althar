@@ -20,6 +20,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
+import { leftAsItIs } from './model'
 import {
   type Answer,
   answered,
@@ -80,6 +81,9 @@ const PullAnswer = Schema.Struct({
   additions: Schema.optional(Schema.Number),
   deletions: Schema.optional(Schema.Number),
   changed_files: Schema.optional(Schema.Number),
+  // Worked out in the background: null until GitHub has, and said only when one pull request is read.
+  mergeable: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  mergeable_state: Schema.optional(Schema.NullOr(Schema.String)),
   updated_at: Schema.String,
 })
 type PullAnswer = typeof PullAnswer.Type
@@ -177,6 +181,12 @@ const changeOf = (pull: PullAnswer): ChangeRequest => ({
   deletions: pull.deletions ?? null,
   changedFiles: pull.changed_files ?? null,
   updatedAt: pull.updated_at,
+  // Not mergeable, or `dirty`, is GitHub's way of saying the merge conflicts.
+  ...(pull.mergeable === false || pull.mergeable_state === 'dirty'
+    ? { conflicts: true }
+    : pull.mergeable === true
+      ? { conflicts: false }
+      : {}),
 })
 
 /** A check run's state from its status and conclusion. */
@@ -305,7 +315,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, links: false },
+    capabilities: { drafts: true, checkLogs: true, threads: true, links: false, starts: false },
     account,
     repository: (path) =>
       Effect.map(http.json(RepositoryAnswer, 'GET', repo(path)), (answer) => ({
@@ -479,6 +489,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       }),
     // GitHub's issues have no links: the pull request's mention of the issue links the two.
     link: () => Effect.void,
+    // An issue is open or closed: a project board's Status is that board's own, so a started one is left as it is.
+    start: (issue) => Effect.succeed(leftAsItIs(issue)),
     // The repositories the account is on, last pushed to first; one archived, or with its issues turned off, takes none.
     containers: () =>
       Effect.map(

@@ -93,6 +93,8 @@ export const ThreadItemKind = Schema.Literals([
   'issue_draft',
   /** Althar setting up a task's worktree, in the task's thread, before its lead starts. Althar posts it and keeps it current. */
   'setup',
+  /** The lead asking the person to push its new commits to the task's pull request. Althar posts it and keeps it current. */
+  'push_request',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -159,8 +161,8 @@ export type FindingState = typeof FindingState.Type
 export const SnapshotReason = Schema.Literals(['node_started', 'node_ended', 'switch', 'interrupt'])
 export type SnapshotReason = typeof SnapshotReason.Type
 
-/** Why a node attempt is held without needing a person. */
-export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable'])
+/** Why a node attempt is held without needing a person: `machine_busy` waits for a place among the agents this machine runs at once. */
+export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable', 'machine_busy'])
 export type HoldReason = typeof HoldReason.Type
 
 export const AttentionKind = Schema.Literals([
@@ -227,6 +229,15 @@ export type ExternalKind = typeof ExternalKind.Type
 export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
 export type IssueDraftState = typeof IssueDraftState.Type
 
+/**
+ * Where a lead resolving a conflict on its own stands (docs/architecture/06):
+ * at it (or at fixing the checks that failed on it), pushed and waiting for
+ * the pull request's checks, done, or given back to the person, who settles
+ * it or asks again.
+ */
+export const ConflictResolutionState = Schema.Literals(['resolving', 'checking', 'resolved', 'failed'])
+export type ConflictResolutionState = typeof ConflictResolutionState.Type
+
 /** What an artifact is, which decides how long it is kept: a command's output is a log, a picture an agent hands back an image. */
 export const ArtifactKind = Schema.Literals([
   'brief',
@@ -274,5 +285,7 @@ export const AggregateType = Schema.Literals([
   'policy',
   'agent_account',
   'issue_draft',
+  'conflict_resolution',
+  'project_note',
 ])
 export type AggregateType = typeof AggregateType.Type

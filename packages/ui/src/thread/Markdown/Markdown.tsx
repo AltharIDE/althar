@@ -5,6 +5,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { safeHref } from '../../lib/safeHref'
 import { Code } from '../../primitives/Code/Code'
+import { CopyButton, type CopyButtonText } from '../../primitives/CopyButton/CopyButton'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { Table, type TableText } from '../Table/Table'
@@ -61,6 +62,8 @@ export interface MarkdownText {
   notDone: string
   /** A table's own copy, such as its name for a screen reader. */
   table?: Partial<TableText>
+  /** A code block's copy button. */
+  copy?: Partial<CopyButtonText>
 }
 
 export const markdownText: MarkdownText = { newTab: '(opens in a new tab)', done: 'done', notDone: 'not done' }
@@ -123,10 +126,16 @@ function Block({ token, base, t }: { token: Token; base: HeadingLevel; t: Markdo
       )
     }
     case 'code':
+      /* the copy sits in the block's corner; the code keeps clear of it */
       return (
-        <pre>
-          <code>{token.text}</code>
-        </pre>
+        <div className={s.block}>
+          <pre>
+            <code>{token.text}</code>
+          </pre>
+          <span className={s.copy}>
+            <CopyButton value={token.text} text={t.copy} ghost />
+          </span>
+        </div>
       )
     case 'blockquote':
       return (

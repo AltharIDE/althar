@@ -1,8 +1,11 @@
-import { Menu, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
+import { useRef } from 'react'
+
+import { Menu, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
+import s from './TaskMenu.module.css'
 
 /*
- * What you can do with a task as a whole, from its bar: open its folder in
+ * What you can do with a task as a whole, from its bar: rename it, open its folder in
  * an editor, start its plan now, mark its draft pull request ready, stop it,
  * resume it, abandon it, reopen it. Each item is there when its callback is,
  * and the consumer gives only those that apply where the task stands, so
@@ -11,7 +14,15 @@ import { ChromeButton } from '../ChromeButton/ChromeButton'
  * square stops one turn and the task keeps going; this stops every agent on
  * it until you resume it. Each item says what happens, since none of them is
  * undone by pressing it again.
+ *
+ * Whether its lead resolves a conflict with the default branch on its own
+ * is a choice in it too, while it is open: as its project says, or otherwise.
+ * Where the task says otherwise than its project, a quiet word beside the
+ * button says so; otherwise nothing shows of it until the menu opens.
  */
+
+/** Whether a task's lead resolves conflicts on its own: as its project says, or, otherwise than it, unasked or when asked. */
+export type TaskConflicts = 'project' | 'on' | 'off'
 
 export interface TaskMenuText {
   trigger: string
@@ -22,6 +33,8 @@ export interface TaskMenuText {
   /** Running what it built, with the command it runs. */
   run: (command: string) => string
   runAbout: string
+  rename: string
+  renameAbout: string
   startNow: string
   startNowAbout: string
   markReady: string
@@ -34,6 +47,16 @@ export interface TaskMenuText {
   abandonAbout: string
   reopen: string
   reopenAbout: string
+  conflicts: string
+  /** Going by the project, with what the project says now. */
+  conflictsProject: string
+  conflictsProjectAbout: (on: boolean) => string
+  conflictsOn: string
+  conflictsOnAbout: string
+  conflictsOff: string
+  conflictsOffAbout: string
+  /** Beside the button, where the task says otherwise than its project. */
+  conflictsHint: (on: boolean) => string
 }
 
 export const taskMenuText: TaskMenuText = {
@@ -43,6 +66,8 @@ export const taskMenuText: TaskMenuText = {
   openAbout: 'The task’s folder, on its branch.',
   run: (command) => `Run ${command}`,
   runAbout: 'Althar runs what it built, in its worktree. It shows over the composer.',
+  rename: 'Rename',
+  renameAbout: 'Give it another title. Its branch and folder keep their names.',
   startNow: 'Start now',
   startNowAbout: 'Its plan starts now, without waiting.',
   markReady: 'Mark ready for review',
@@ -55,9 +80,19 @@ export const taskMenuText: TaskMenuText = {
   abandonAbout: 'It ends here, and its change isn’t merged. Its worktree and branch stay.',
   reopen: 'Reopen',
   reopenAbout: 'It opens again, on the same worktree and branch.',
+  conflicts: 'Resolve conflicts automatically',
+  conflictsProject: 'Use the project setting',
+  conflictsProjectAbout: (on) => `It’s ${on ? 'on' : 'off'} for this project.`,
+  conflictsOn: 'On for this task',
+  conflictsOnAbout: 'The lead fixes merge conflicts itself, and Althar pushes the fix to an open pull request.',
+  conflictsOff: 'Off for this task',
+  conflictsOffAbout: 'You ask the lead to fix a conflict when one comes up.',
+  conflictsHint: (on) => `Auto-resolve conflicts: ${on ? 'on' : 'off'}`,
 }
 
 export interface TaskMenuProps {
+  /** Renames it, in any state: the consumer turns its title into a field. */
+  onRename?: () => void
   /** Opens the task's folder in `editor`, the one its files open in. */
   onOpen?: () => void
   /** The editor it opens in, by name. */
@@ -73,6 +108,11 @@ export interface TaskMenuProps {
   /** Abandons it; the consumer asks first, since it settles the task. */
   onAbandon?: () => void
   onReopen?: () => void
+  /**
+   * Whether its lead resolves a conflict on its own: the task's choice, what
+   * its project says (`project`), and changing it. Given while it is open.
+   */
+  conflicts?: { readonly choice: TaskConflicts; readonly project: boolean; readonly onChange: (choice: TaskConflicts) => void }
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
@@ -80,6 +120,7 @@ export interface TaskMenuProps {
 }
 
 export function TaskMenu({
+  onRename,
   onOpen,
   editor,
   run,
@@ -89,15 +130,18 @@ export function TaskMenu({
   onResume,
   onAbandon,
   onReopen,
+  conflicts,
   open,
   defaultOpen,
   onOpenChange,
   text,
 }: TaskMenuProps) {
   const t = { ...taskMenuText, ...text }
+  // Renaming puts the cursor in the title's field: the menu closing doesn't take focus back to its button.
+  const renaming = useRef(false)
   const opener = onOpen !== undefined && editor !== undefined ? { onOpen, editor } : null
   // Ways to look at what it made: in the editor, and running.
-  const opens = opener !== null || run !== undefined
+  const opens = opener !== null || run !== undefined || onRename !== undefined
   // Forward first, then what holds or brings it back, then what settles it, set apart.
   const course = [
     onStartNow && (
@@ -126,17 +170,36 @@ export function TaskMenu({
       </MenuItem>
     ),
   ].filter(Boolean)
-  if (!opens && course.length === 0 && !onAbandon) return null
-  return (
+  if (!opens && course.length === 0 && !onAbandon && !conflicts) return null
+  // Said beside the button only where the task goes otherwise than its project.
+  const differs = conflicts !== undefined && conflicts.choice !== 'project' && (conflicts.choice === 'on') !== conflicts.project
+  const menu = (
     <Menu
       label={t.label}
       align="end"
       width={300}
+      returnFocus={() => {
+        const back = !renaming.current
+        renaming.current = false
+        return back
+      }}
       open={open}
       defaultOpen={defaultOpen}
       onOpenChange={onOpenChange}
       trigger={<ChromeButton icon="more" label={t.trigger} compact />}
     >
+      {onRename && (
+        <MenuItem
+          icon="pencil"
+          description={t.renameAbout}
+          onSelect={() => {
+            renaming.current = true
+            onRename()
+          }}
+        >
+          {t.rename}
+        </MenuItem>
+      )}
       {opener && (
         <MenuItem icon="external" description={t.openAbout} onSelect={opener.onOpen}>
           {t.open(opener.editor)}
@@ -149,14 +212,37 @@ export function TaskMenu({
       )}
       {opens && course.length > 0 && <MenuSeparator />}
       {course}
-      {onAbandon && (
+      {conflicts && (
         <>
           {(opens || course.length > 0) && <MenuSeparator />}
+          <MenuRadioGroup label={t.conflicts} value={conflicts.choice} onChange={(choice) => conflicts.onChange(choice as TaskConflicts)}>
+            <MenuRadioItem value="project" description={t.conflictsProjectAbout(conflicts.project)}>
+              {t.conflictsProject}
+            </MenuRadioItem>
+            <MenuRadioItem value="on" description={t.conflictsOnAbout}>
+              {t.conflictsOn}
+            </MenuRadioItem>
+            <MenuRadioItem value="off" description={t.conflictsOffAbout}>
+              {t.conflictsOff}
+            </MenuRadioItem>
+          </MenuRadioGroup>
+        </>
+      )}
+      {onAbandon && (
+        <>
+          {(opens || course.length > 0 || conflicts) && <MenuSeparator />}
           <MenuItem icon="close" tone="danger" description={t.abandonAbout} onSelect={onAbandon}>
             {t.abandon}
           </MenuItem>
         </>
       )}
     </Menu>
+  )
+  if (!differs) return menu
+  return (
+    <>
+      <span className={s.hint}>{t.conflictsHint(conflicts.choice === 'on')}</span>
+      {menu}
+    </>
   )
 }

@@ -55,6 +55,8 @@ export interface TaskModel {
   /** The files merging it here conflicts in, after a merge that couldn't go ahead for that; null otherwise. */
   readonly conflict: string | null
   readonly dismissConflict: () => void
+  /** The pull request a push was refused by for commits on it that aren't on the branch, by its address; null otherwise. */
+  readonly refused: string | null
   /** An action is on its way to the runtime. */
   readonly pending: boolean
   /** Which of them, where it is one of the outputs' (see `doing`): the others wait, but aren't working. */
@@ -84,10 +86,14 @@ export interface TaskModel {
   readonly stop: () => Promise<void>
   /** Carries the task on from the step it stopped on, with its last lead. */
   readonly resume: () => Promise<void>
+  /** Whether its lead resolves conflicts on its own, otherwise than its project says; null goes back to the project. */
+  readonly setResolveConflicts: (on: boolean | null) => Promise<void>
   /** Settles it without its change; its worktree and branch stay. Whether it was abandoned. */
   readonly abandon: () => Promise<boolean>
   /** Opens it again, once abandoned, on its worktree and branch. */
   readonly reopen: () => Promise<void>
+  /** Gives it another title, in any state; the title shown is Althar's, once it is back. */
+  readonly rename: (title: string) => Promise<void>
   /** Starts its plan now, while it waits to start. */
   readonly startPlan: (planId: string) => Promise<void>
   /** Answers a call; with `always`, the answer is kept in the project's rules by that scope. */
@@ -116,6 +122,15 @@ export interface TaskModel {
   readonly accept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => Promise<void>
   /** Pushes the task's branch to its pull request, up to the commit the person saw: the one at `url`, in a task of several. */
   readonly push: (head: string, url?: string) => Promise<void>
+  /**
+   * Replaces the commits on the task's pull request with its branch, up to
+   * the commit the person saw, once it was rewritten since it was pushed:
+   * a force push they confirmed, only while the pull request is still at
+   * `replaces`.
+   */
+  readonly replace: (head: string, replaces: string, url: string) => Promise<void>
+  /** What to tell the lead so its branch takes the pull request's commits in by merging, fetched to it first; null where that failed, having said why. */
+  readonly mergeNote: (url: string) => Promise<string | null>
   /** Stops listening to the task's pull request at this address. */
   readonly stopListening: (url: string) => Promise<void>
   /** Stops a command its lead left running. */
@@ -144,6 +159,7 @@ export const useTask = (threadId: string): TaskModel => {
   const [pending, setPending] = useState(false)
   const [acting, setActing] = useState<Doing | null>(null)
   const [conflict, setConflict] = useState<string | null>(null)
+  const [refused, setRefused] = useState<string | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [newest] = useState(newestReads)
@@ -343,6 +359,7 @@ export const useTask = (threadId: string): TaskModel => {
     error,
     conflict,
     dismissConflict: () => setConflict(null),
+    refused,
     pending,
     doing: acting,
     loadingEarlier,
@@ -401,6 +418,7 @@ export const useTask = (threadId: string): TaskModel => {
       shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body, ...sentWith(images) }), images, false),
     stop: () => onTask((taskId) => client.stopTask(taskId)),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
+    setResolveConflicts: (on) => onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on })),
     abandon: async () => {
       let abandoned = false
       await onTask(async (taskId) => {
@@ -410,6 +428,7 @@ export const useTask = (threadId: string): TaskModel => {
       return abandoned
     },
     reopen: () => onTask((taskId) => client.reopenTask(taskId)),
+    rename: (title) => onTask((taskId) => client.renameTask(taskId, title)),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     answer: async (attentionId, decision, reason, always) => {
       // Whether it went through: a call whose answer didn't is answerable again.
@@ -470,7 +489,38 @@ export const useTask = (threadId: string): TaskModel => {
         if (snapshot === null) return
         for (const change of changes) await client.merge(snapshot.task.id, change.head, change.url)
       }, doing.accept),
-    push: (head, url) => act(async () => (snapshot === null ? undefined : client.push(snapshot.task.id, head, url)), doing.push(url ?? '')),
+    push: (head, url) =>
+      act(
+        async () => {
+          setRefused(null)
+          if (snapshot === null) return
+          try {
+            await client.push(snapshot.task.id, head, url)
+          } catch (failure) {
+            // Commits on it the branch doesn't have are the lead's to bring in: the card says so, and offers to ask it, in place of an error.
+            if (failure instanceof ApiError && failure.reason === 'PushRefused' && failure.why === 'behind') {
+              setRefused(url ?? snapshot.task.changes[0]?.url ?? '')
+              return
+            }
+            throw failure
+          }
+        },
+        doing.push(url ?? ''),
+      ),
+    replace: (head, replaces, url) =>
+      act(
+        async () => (snapshot === null ? undefined : client.replacePullRequest(snapshot.task.id, head, replaces, url)),
+        doing.replace(url),
+      ),
+    mergeNote: async (url) => {
+      let note: string | null = null
+      await act(async () => {
+        if (snapshot === null) return
+        note = await client.mergeNote(snapshot.task.id, url)
+        setRefused(null)
+      }, doing.bringIn(url))
+      return note
+    },
     stopListening: (url) => onTask((taskId) => client.stopListening(taskId, url)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),

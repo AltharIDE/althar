@@ -212,15 +212,29 @@ export const recommit = (cwd: string, record: CommitRecord, parents: ReadonlyArr
     message,
   )
 
+/** The environment that signs git in to a remote by URL: the header goes through it, so it is in no process's arguments. */
+const signedIn = (target: { readonly header: string | null }): Record<string, string> =>
+  target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header }
+
 /** The commit a remote's branch is on, asked of the remote by URL, as a push would be: null where it has no such branch, or can't be asked. */
 export const remoteTip = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string) =>
+  run(60_000, cwd, ['ls-remote', '--heads', target.url, `refs/heads/${branch}`], signedIn(target)).pipe(
+    Effect.map((listed) => /^[0-9a-f]{40,64}/.exec(listed)?.[0] ?? null),
+    Effect.orElseSucceed(() => null),
+  )
+
+/**
+ * Fetches a remote's branch by URL into a ref here, as a push is signed in:
+ * the commit it is at, or null where it can't be fetched.
+ */
+export const fetchInto = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string, ref: string) =>
   run(
-    60_000,
+    120_000,
     cwd,
-    ['ls-remote', '--heads', target.url, `refs/heads/${branch}`],
+    ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', target.url, `+refs/heads/${branch}:${ref}`],
     target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
   ).pipe(
-    Effect.map((listed) => /^[0-9a-f]{40,64}/.exec(listed)?.[0] ?? null),
+    Effect.andThen(commitOf(cwd, ref)),
     Effect.orElseSucceed(() => null),
   )
 
@@ -377,10 +391,16 @@ export const commitsAhead = (cwd: string, base: string, head = 'HEAD') =>
 export const onHead = (cwd: string, commit: string) =>
   Effect.match(git(cwd, 'merge-base', '--is-ancestor', commit, 'HEAD'), { onFailure: () => false, onSuccess: () => true })
 
+/** Where Althar keeps, by branch, the commit it last pushed of it: evidence the branch is published that git's own refs don't have. */
+export const PUSHED = 'refs/althar/pushed/'
+
 /**
- * Pushes HEAD to a branch of a remote by URL, never forced. The header that
- * signs the push in goes to git through its environment, so it is in no
- * process's arguments.
+ * Pushes HEAD to a branch of a remote by URL, never forced, unless `lease`
+ * names the commit the branch must still be on there: then it replaces what
+ * the branch has, and only that (`--force-with-lease`), so commits someone
+ * else pushed meanwhile are never lost. Pushed, the branch is kept under
+ * `PUSHED`. The header that signs the push in goes to git through its
+ * environment, so it is in no process's arguments.
  */
 export const pushTo = (
   cwd: string,
@@ -388,12 +408,23 @@ export const pushTo = (
   branch: string,
   /** What is pushed: the worktree's head, or a commit the person saw. */
   commit = 'HEAD',
+  lease?: string,
 ) =>
   run(
     120_000,
     cwd,
-    ['push', '--quiet', '--no-verify', target.url, `${commit}:refs/heads/${branch}`],
-    target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
+    [
+      'push',
+      '--quiet',
+      '--no-verify',
+      ...(lease === undefined ? [] : [`--force-with-lease=refs/heads/${branch}:${lease}`]),
+      target.url,
+      `${commit}:refs/heads/${branch}`,
+    ],
+    signedIn(target),
+  ).pipe(
+    // A push by URL moves no remote-tracking ref: Althar keeps its own, so the branch is known here to be published.
+    Effect.tap(() => Effect.ignore(git(cwd, 'update-ref', `${PUSHED}${branch}`, commit))),
   )
 
 /**

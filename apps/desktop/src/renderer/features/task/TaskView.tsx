@@ -19,6 +19,7 @@ import {
   Running,
   TaskFace,
   TaskHeader,
+  type TaskConflicts,
   TaskMenu,
   TaskStatus,
   Finished,
@@ -30,7 +31,7 @@ import {
   TitleBar,
 } from '@althar/ui'
 
-import { waitsWords } from '../../shared/agents'
+import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { useDictation } from '../../shared/dictation/useDictation'
@@ -53,6 +54,7 @@ import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, takesImages, useImages } from '../../shared/useImages'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
+import { PushRequestOf } from '../../shared/PushRequestOf'
 import { behindText, listeningOf, useHeard } from './behind'
 import { PermissionCalls } from './PermissionCall'
 import { StuckCall } from './StuckCall'
@@ -96,9 +98,9 @@ export const text = {
   resolve: (conflicts: ReadonlyArray<{ readonly name: string | null; readonly branch: string; readonly files: string }>) => {
     const [only] = conflicts
     if (conflicts.length === 1 && only !== undefined && only.name === null)
-      return `${only.branch} has moved on, and merging this task's branch into it conflicts in ${only.files}. Bring the branch up to date: merge ${only.branch} into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Then say it's ready to merge again.`
+      return `${only.branch} has moved on, and merging this task's branch into it conflicts in ${only.files}. Bring the branch up to date: merge ${only.branch} into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Merge, don't rebase: a branch that was pushed can't be rewritten. Then say it's ready to merge again.`
     const where = conflicts.map((one) => `in ${one.name ?? 'the repository'}, ${one.branch} conflicts in ${one.files}`).join('; ')
-    return `The default branches have moved on, and merging this task's branches into them conflicts: ${where}. Bring each branch up to date: merge its default branch into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Then say it's ready to merge again.`
+    return `The default branches have moved on, and merging this task's branches into them conflicts: ${where}. Bring each branch up to date: merge its default branch into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Merge, don't rebase: a branch that was pushed can't be rewritten. Then say it's ready to merge again.`
   },
   working: 'Working',
   needsYou: 'Needs you',
@@ -130,6 +132,7 @@ export const text = {
 /**
  * Where a task stands, for its header: the step it is on, by what it does
  * there; a step held for a usage limit says whom it waits for, and until when;
+ * one waiting for a free agent, that every agent this computer runs at once is busy;
  * ready, it waits on the person to accept it.
  */
 export const statusOf = (
@@ -137,8 +140,9 @@ export const statusOf = (
   agentName: (id: string) => string = (id) => id,
 ): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
-  const { waits, phase, step } = snapshot.task
+  const { waits, queued, phase, step } = snapshot.task
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
+  if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
   const doing = step === null ? undefined : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
   // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
@@ -211,6 +215,12 @@ const typing = (event: KeyboardEvent) => {
 
 const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', efforts: [] }
 
+/** The task's own say on its lead resolving conflicts, as its menu offers it: none goes by the project. */
+const conflictsChoice = (own: boolean | null): TaskConflicts => (own === null ? 'project' : own ? 'on' : 'off')
+
+/** How long a title may be, as the runtime keeps it. */
+const TITLE_LENGTH = 60
+
 /** The line of a file's first change, where its diff is read: for an editor to open at. */
 const firstChange = (view: FileView): number | undefined => {
   if (view.state !== 'ready') return undefined
@@ -241,6 +251,8 @@ export function TaskView({
   const [connecting, setConnecting] = useState(false)
   // Abandoning it asks first, saying what happens to its worktree and branch.
   const [abandoning, setAbandoning] = useState(false)
+  // Whether its title is a field, from its menu's Rename or from pressing the title.
+  const [renaming, setRenaming] = useState(false)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
   const [face, setFace] = useState<Face | null>(null)
   // Ready, or merged here with its remote still to have it, it opens on what it made: there is something there to do.
@@ -464,6 +476,7 @@ export function TaskView({
         />
       )}
       <TaskMenu
+        onRename={() => setRenaming(true)}
         // What it built runs with no agent, where its repository says how.
         {...(snapshot.task.runCommand === null ? {} : { run: { command: snapshot.task.runCommand, onRun: () => void model.runProject() } })}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
@@ -479,6 +492,16 @@ export function TaskView({
             }
           : {})}
         {...(can('reopen') ? { onReopen: () => void model.reopen() } : {})}
+        // Whether its lead resolves a conflict unasked, until it settles: as its project says, or otherwise.
+        {...(snapshot.task.phase !== 'settled'
+          ? {
+              conflicts: {
+                choice: conflictsChoice(snapshot.task.resolveConflicts.task),
+                project: snapshot.task.resolveConflicts.project,
+                onChange: (choice: TaskConflicts) => void model.setResolveConflicts(choice === 'project' ? null : choice === 'on'),
+              },
+            }
+          : {})}
         // Its folder opens in the editor files open in, once it has a worktree.
         {...(snapshot.task.branch === null || editor === undefined
           ? {}
@@ -577,7 +600,17 @@ export function TaskView({
           />
         }
       >
-        <BackCrumb to={snapshot.project.name} kbd="esc" title={snapshot.task.title} titleLevel={1} onBack={onBack} />
+        <BackCrumb
+          to={snapshot.project.name}
+          kbd="esc"
+          title={snapshot.task.title}
+          titleLevel={1}
+          maxLength={TITLE_LENGTH}
+          editing={renaming}
+          onEditingChange={setRenaming}
+          onRename={(title) => void model.rename(title)}
+          onBack={onBack}
+        />
       </TitleBar>
       {shown === 'out' && !hasOutputs(snapshot) ? (
         <NoOutputsView snapshot={snapshot} lead={lead.name} />
@@ -595,6 +628,14 @@ export function TaskView({
               onMergeHere={() => void model.mergeHere()}
               onOpenChange={() => void model.openChange()}
               onPush={(head, url) => void model.push(head, url)}
+              refused={model.refused}
+              onReplace={(head, replaces, url) => void model.replace(head, replaces, url)}
+              // Bringing a pull request's commits in is the lead's: Althar fetches them, and the note says how to merge them.
+              onBringIn={(url) =>
+                void model.mergeNote(url).then((note) => {
+                  if (note !== null) void send(note, false)
+                })
+              }
               onMarkReady={(url) => void model.markReady(url)}
               // Sending it back is a note to its lead, which starts it again if it stopped.
               onSendBack={(note) => send(note, false)}
@@ -673,6 +714,16 @@ export function TaskView({
                 {...(asking == null ? {} : { focusQuestion: asking })}
                 run={(run) => (
                   <RunOf run={run} now={now} onStop={(id) => void model.stopLaunch(id)} onRunAgain={() => void model.runProject()} />
+                )}
+                // A push the lead asked for is pushed as the outputs push: up to the head it shows.
+                push={(request, at) => (
+                  <PushRequestOf
+                    request={request}
+                    at={at}
+                    {...(lead.name === '' ? {} : { by: lead.name })}
+                    pushing={model.pending}
+                    onPush={(head, url) => void model.push(head, url)}
+                  />
                 )}
               />
               {closing && finished.built !== null && (

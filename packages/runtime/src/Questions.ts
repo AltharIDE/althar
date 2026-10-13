@@ -53,13 +53,20 @@ export interface QuestionPayload {
   readonly why?: string
   /** What the person said, by field, once answered. */
   readonly answers?: Readonly<Record<string, FieldAnswer>>
+  /**
+   * Answered while every agent this machine runs at once was busy: since
+   * when its answer waits to be told, which it is once there is a place
+   * (Busy.ts). Gone once told.
+   */
+  readonly waitsForPlace?: string
   /** Withdrawn because the agent took it back or its turn was stopped. */
   readonly withdrawn?: 'turn'
 }
 
 /** What answering came to: told to the agent waiting on it, or to be told to the one on the thread next. */
 export type Answered =
-  | { readonly told: true }
+  /** Told; or, `kept`, to be told once there is a place among the agents at work here: nothing more to do now either way. */
+  | { readonly told: true; readonly kept?: true }
   | {
       readonly told: false
       readonly threadId: string
@@ -153,7 +160,11 @@ export class Questions extends Context.Service<
       readonly envelope: CommandEnvelope
       readonly attentionId: string
       readonly answers: Readonly<Record<string, FieldAnswer>>
+      /** Kept, not told yet: there is no place for the agent to carry on (Busy.ts). */
+      readonly keep?: boolean
     }): Effect.Effect<Answered, AttentionClosed | NotFound | QuestionUnanswered>
+    /** Tells an answer that was kept: to the agent waiting on it, or, gone, as what is told to the one on its thread next. */
+    tell(attentionId: string): Effect.Effect<Answered>
     /** A session has gone: what it asked stays open for the person, and is told to the agent on the thread next. */
     release(sessionId: string): Effect.Effect<void>
   }
@@ -271,6 +282,7 @@ export class Questions extends Context.Service<
         readonly envelope: CommandEnvelope
         readonly attentionId: string
         readonly answers: Readonly<Record<string, FieldAnswer>>
+        readonly keep?: boolean
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -305,7 +317,11 @@ export class Questions extends Context.Service<
               const revision = yield* change('attention_requests', input.attentionId, {
                 state: 'answered',
                 answeredAt: at,
-                payload: JSON.stringify({ ...payload, answers } satisfies QuestionPayload),
+                payload: JSON.stringify({
+                  ...payload,
+                  answers,
+                  ...(input.keep === true ? { waitsForPlace: at } : {}),
+                } satisfies QuestionPayload),
               })
               yield* fact({
                 projectId: row.projectId,
@@ -341,22 +357,10 @@ export class Questions extends Context.Service<
               yield* releaseSession(payload.sessionId)
             }),
           })
-          const waiter = waiting.get(input.attentionId)
-          waiting.delete(input.attentionId)
           yield* live.publish({ _tag: 'AttentionClosed', threadId: payload.threadId, attentionId: input.attentionId, outcome: 'answered' })
-          // Told the agent waiting on it, unless its session went meanwhile.
-          const told =
-            waiter !== undefined &&
-            !waiter.released &&
-            (yield* Deferred.succeed(waiter.deferred, { action: 'accept', content: questionContent(waiter.question, answers) }))
-          if (told) return { told: true } as const
-          return {
-            told: false,
-            threadId: payload.threadId,
-            taskId: row.taskId,
-            projectId: row.projectId,
-            body: ['Earlier in this thread, the agent then on it asked the person a question. The person answered:', ...words].join('\n'),
-          } as const
+          // Kept, the agent waiting on it waits on, until there is a place for it to carry on.
+          if (input.keep === true) return { told: true, kept: true } as const
+          return yield* told(input.attentionId, { ...payload, answers }, row)
         }).pipe(
           Effect.catchTags({
             SqlError: Effect.die,
@@ -366,6 +370,52 @@ export class Questions extends Context.Service<
             RevisionConflict: Effect.die,
           }),
         )
+
+      /** Tells the agent waiting on an answer, unless its session went meanwhile; then what its thread is told next. */
+      const told = (
+        attentionId: string,
+        payload: QuestionPayload,
+        row: { readonly taskId: string | null; readonly projectId: ProjectId },
+      ) =>
+        Effect.gen(function* () {
+          const answers = payload.answers ?? {}
+          const waiter = waiting.get(attentionId)
+          waiting.delete(attentionId)
+          const reached =
+            waiter !== undefined &&
+            !waiter.released &&
+            (yield* Deferred.succeed(waiter.deferred, { action: 'accept', content: questionContent(waiter.question, answers) }))
+          if (reached) return { told: true } as const
+          return {
+            told: false,
+            threadId: payload.threadId,
+            taskId: row.taskId,
+            projectId: row.projectId,
+            body: [
+              'Earlier in this thread, the agent then on it asked the person a question. The person answered:',
+              ...answerWords(payload.fields, answers),
+            ].join('\n'),
+          } as const
+        })
+
+      /** An answer that was kept, told now: it no longer waits. One told already, or gone, is told as nothing. */
+      const tell = (attentionId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const kept = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [row] = yield* sql<{ projectId: ProjectId; taskId: string | null; payload: string; state: string }>`
+                SELECT project_id, task_id, payload, state FROM attention_requests WHERE id = ${attentionId} AND kind = 'question'`
+              if (row === undefined || row.state !== 'answered') return undefined
+              const { waitsForPlace, ...payload } = JSON.parse(row.payload) as QuestionPayload
+              if (waitsForPlace === undefined) return undefined
+              yield* change('attention_requests', attentionId, { payload: JSON.stringify(payload satisfies QuestionPayload) })
+              return { row, payload }
+            }),
+          )
+          if (kept === undefined) return { told: true } as const
+          return yield* told(attentionId, kept.payload, kept.row)
+        })
 
       /** The session goes: what it asked waits on the thread, no longer on it, so it is at work until it ends. Nothing where it asked nothing. */
       const release = (sessionId: string) =>
@@ -396,6 +446,7 @@ export class Questions extends Context.Service<
             Effect.catchCause((cause) => (Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.succeed({ action: 'cancel' } as const))),
           ),
         answer: (input) => run(answer(input)),
+        tell: (attentionId) => run(tell(attentionId)).pipe(Effect.orDie),
         release,
       })
     }),

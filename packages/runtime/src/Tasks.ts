@@ -6,6 +6,7 @@ import { Context, type Crypto, Effect, Layer, Option, Schema, Semaphore } from '
 import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
+import { TITLE_LENGTH } from './Coordinator'
 import { NotFound, TaskRefused } from './errors'
 import { branchExists, restoreWorktree } from './git'
 import { Instance } from './Instance'
@@ -86,8 +87,13 @@ export const standingOf = (taskId: string) =>
       SELECT k.project_id, k.state,
         (SELECT id FROM task_plans WHERE task_id = k.id AND state = 'proposed' ORDER BY proposed_at DESC LIMIT 1) AS plan_id,
         (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1) AS run_state,
+        -- An agent on its way: starting, its lead about to be asked about a conflict once it has a place, or a turn of
+        -- its lead or reviewer waiting for one (Busy.ts).
         (SELECT count(*) FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
-          WHERE h.task_id = k.id AND s.state = 'starting') AS starting
+          WHERE h.task_id = k.id AND s.state = 'starting')
+        + (SELECT count(*) FROM conflict_resolutions c WHERE c.task_id = k.id AND c.state = 'resolving' AND c.waiting IS NOT NULL)
+        + (SELECT count(*) FROM threads h WHERE h.task_id = k.id AND h.waits_for_place IS NOT NULL)
+          AS starting
       FROM tasks k WHERE k.id = ${taskId}`
     if (row === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
     const threads = (yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} ORDER BY created_at`).map(
@@ -123,6 +129,11 @@ export class Tasks extends Context.Service<
     abandon(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /** Opens an abandoned task again, on its worktree and branch. Refused for a merged task. */
     reopen(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
+    /**
+     * Gives the task another title, in any state, and records who did. Its slug, its branch, its worktree's
+     * folder and the title of a pull request or an issue already opened for it stay as they were made.
+     */
+    rename(input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly title: string }): Effect.Effect<void, unknown>
     /** Does something in the task's turn: never beside its stopping, resuming, abandoning or reopening. */
     inTurn<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
   }
@@ -244,6 +255,8 @@ export class Tasks extends Context.Service<
           // Suspended first, so no step takes its agents stopping as one going.
           yield* sql.withTransaction(suspend(input.taskId, input.envelope, 'stopped'))
           yield* stopAgents(input.taskId)
+          // A turn of its agents that waited for a place waits no more: what it would have delivered stays in its thread.
+          yield* sql`UPDATE threads SET waits_for_place = NULL WHERE task_id = ${input.taskId} AND waits_for_place IS NOT NULL`
           yield* touchCard(input.taskId)
         })
 
@@ -399,7 +412,46 @@ export class Tasks extends Context.Service<
           yield* touchCard(input.taskId)
         })
 
+      /*
+       * Only the title changes: the slug, the branch and the worktree's folder
+       * were made from the first one and other things find them by it, and a
+       * pull request or issue opened already keeps the title it was opened with.
+       * The event says who renamed it, and what it was, so the person's rename
+       * and a later coordinator's or lead's are one command.
+       */
+      const rename = (input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly title: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const title = input.title.trim()
+          if (title === '') return yield* new TaskRefused({ taskId: input.taskId, why: 'no_title' })
+          if (title.length > TITLE_LENGTH) return yield* new TaskRefused({ taskId: input.taskId, why: 'title_too_long' })
+          const renamed = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const [task] = yield* sql<{
+                projectId: ProjectId
+                title: string
+              }>`SELECT project_id, title FROM tasks WHERE id = ${input.taskId}`
+              if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
+              if (task.title === title) return false
+              const revision = yield* change('tasks', input.taskId, { title })
+              yield* fact({
+                projectId: task.projectId,
+                aggregateType: 'task',
+                aggregateId: input.taskId,
+                revision,
+                type: 'task.renamed',
+                payload: { title, was: task.title },
+                actorId: input.envelope.actorId,
+                commandId: input.envelope.commandId,
+              })
+              return true
+            }),
+          )
+          if (renamed) yield* touchCard(input.taskId)
+        })
+
       return Tasks.of({
+        rename: (input) => provide(rename(input)),
         stop: (input) => oneAtATime(input.taskId, stop(input)),
         resume: (input) => oneAtATime(input.taskId, resume(input)),
         abandon: (input) => oneAtATime(input.taskId, abandon(input)),

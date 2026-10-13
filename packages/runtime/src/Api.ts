@@ -16,7 +16,7 @@ import {
   type SentImage,
 } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
-import { Ledger } from '@althar/persistence-sqlite'
+import { Commands, Ledger } from '@althar/persistence-sqlite'
 import { Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
@@ -38,14 +38,16 @@ import { MachineLoad } from './MachineLoad'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
-import { accountsOf, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from './Policies'
+import { accountsOf, movesIssues, Policies, type ProjectRules, resolvesConflicts, ruleSetOf, usageLimitOf } from './Policies'
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
+import { dropNote, notesOf } from './notes'
 import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
 import { Queries } from './Queries'
+import { Busy } from './Busy'
 import { timestamp } from './records'
 import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
@@ -142,11 +144,14 @@ export const handlers = Api.toLayer(
     const instance = yield* Instance
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
+    // What writes a project's notes needs, as the services have it.
+    const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands>()
     const agents = yield* Agents
     const config = yield* RuntimeConfig
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
+    const busy = yield* Busy
     const envelope = (type: string, payload: unknown, commandId: string) =>
       Effect.provideContext(Runtime.envelope(type, payload, commandId), context)
     const agentName = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
@@ -262,11 +267,13 @@ export const handlers = Api.toLayer(
         alwaysAllow: set.allow,
         commands: set.commands,
         end: rules.end ?? null,
+        resolveConflicts: resolvesConflicts(rules),
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
         onlyAccounts: accounts.only ?? null,
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
+        moveIssues: movesIssues(rules),
       }
     }
 
@@ -593,16 +600,45 @@ export const handlers = Api.toLayer(
       SetModelBlocked: ({ commandId, agentId, model, blocked }) =>
         once(commandId, api(models.setModelBlocked({ agentId, model, blocked }))),
       GetSettings: () =>
-        api(Effect.map(coAuthorOn, (on) => ({ coAuthor: { on, line: coAuthorLine } }))).pipe(
-          Effect.provideService(SqlClient.SqlClient, sql),
-        ),
+        api(
+          Effect.gen(function* () {
+            const on = yield* coAuthorOn
+            const atOnce = yield* busy.atOnce
+            return {
+              coAuthor: { on, line: coAuthorLine },
+              agentsAtOnce: {
+                count: atOnce.count,
+                own: atOnce.own,
+                machine: { count: atOnce.machine.count, cores: atOnce.machine.cores, memory: atOnce.machine.memory },
+              },
+            }
+          }),
+        ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
-      Interrupt: ({ commandId, threadId }) => once(commandId, api(sessions.interrupt(threadId))),
-      StopSession: ({ commandId, threadId }) => once(commandId, api(sessions.stop(threadId))),
+      SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
+      // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
+      Interrupt: ({ commandId, threadId }) =>
+        once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
+      // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
+      StopSession: ({ commandId, threadId }) =>
+        once(commandId, api(Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })))),
+      SetTaskResolveConflicts: ({ commandId, taskId, resolveConflicts }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.set_conflicts', { taskId, resolveConflicts }, commandId), (said) =>
+              pullRequests.setResolveConflicts({ envelope: said, taskId, resolveConflicts }),
+            ),
+          ),
+        ),
       StopTask: ({ commandId, taskId }) =>
         once(
           commandId,
-          api(Effect.flatMap(envelope('task.stop', { taskId }, commandId), (said) => tasks.stop({ envelope: said, taskId }))),
+          api(
+            Effect.flatMap(envelope('task.stop', { taskId }, commandId), (said) =>
+              Effect.andThen(tasks.stop({ envelope: said, taskId }), pullRequests.leadStopped({ taskId })),
+            ),
+          ),
         ),
       ResumeTask: ({ commandId, taskId, agentId, model, effort }) =>
         once(
@@ -622,6 +658,15 @@ export const handlers = Api.toLayer(
         once(
           commandId,
           api(Effect.flatMap(envelope('task.abandon', { taskId }, commandId), (said) => tasks.abandon({ envelope: said, taskId }))),
+        ),
+      RenameTask: ({ commandId, taskId, title }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.rename', { taskId, title }, commandId), (said) =>
+              tasks.rename({ envelope: said, taskId, title }),
+            ),
+          ),
         ),
       ReopenTask: ({ commandId, taskId }) =>
         once(
@@ -689,7 +734,7 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      StartPlan: ({ commandId, planId }) => once(commandId, api(plans.start(planId, instance.personId))),
+      StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
       ChangeIssueDraft: ({ commandId, draftId, title, body, labels }) =>
@@ -714,26 +759,29 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const answer = Effect.gen(function* () {
-                const answered = yield* questions.answer({
-                  envelope: yield* envelope('attention.answer_question', { attentionId, answers }, commandId),
-                  attentionId,
-                  answers,
-                })
-                if (answered.told) return
-                // The agent that asked has gone: the answer is told to the one on its thread next, started for it.
-                const tell = {
-                  envelope: yield* Effect.provideContext(
-                    Runtime.envelope('thread.send', { threadId: answered.threadId, answered: attentionId }),
-                    context,
-                  ),
-                  threadId: answered.threadId,
-                  body: answered.body,
-                }
-                const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${answered.threadId}`
-                if (thread?.kind === 'coordinator') yield* coordinator.say({ ...tell, disposition: 'after_current', quiet: true })
-                else yield* runs.answered(tell)
-              })
+              const said = yield* envelope('attention.answer_question', { attentionId, answers }, commandId)
+              const [on] = yield* sql<{ kind: string | null }>`
+                SELECT t.kind FROM attention_requests q LEFT JOIN threads t ON t.id = json_extract(q.payload, '$.threadId')
+                WHERE q.id = ${attentionId}`
+              // A task's lead or reviewer carries on with the answer once it has a place among the agents at work here (Runs).
+              const answer =
+                on?.kind === 'coordinator'
+                  ? Effect.gen(function* () {
+                      const answered = yield* questions.answer({ envelope: said, attentionId, answers })
+                      if (answered.told) return
+                      // The coordinator that asked has gone: the answer is told to the one on its thread next.
+                      yield* coordinator.say({
+                        envelope: yield* Effect.provideContext(
+                          Runtime.envelope('thread.send', { threadId: answered.threadId, answered: attentionId }),
+                          context,
+                        ),
+                        threadId: answered.threadId,
+                        body: answered.body,
+                        disposition: 'after_current',
+                        quiet: true,
+                      })
+                    })
+                  : runs.answer({ envelope: said, attentionId, answers })
               // A task's question is answered in the task's turn: stopping it comes first, and the question is withdrawn, or
               // after, and the agent the answer started stops.
               const [asked] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM attention_requests WHERE id = ${attentionId}`
@@ -883,6 +931,24 @@ export const handlers = Api.toLayer(
             return yield* rulesView(projectId, yield* policies.current(project.id))
           }),
         ),
+      GetProjectNotes: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const [project] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${projectId}`
+            if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+            return yield* notesOf(projectId)
+          }),
+        ),
+      DropProjectNote: ({ commandId, projectId, noteId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.note.drop', { projectId, noteId }, commandId)
+              yield* Effect.provideContext(dropNote({ envelope: said, projectId, noteId }), store)
+            }),
+          ),
+        ),
       GetVocabulary: ({ projectId }) =>
         api(
           Effect.gen(function* () {
@@ -900,7 +966,8 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const now = accountsOf((yield* policies.current(projectId as ProjectId)).rules)
+              const was = (yield* policies.current(projectId as ProjectId)).rules
+              const now = accountsOf(was)
               const accounts =
                 rotateAccounts === undefined && onlyAccounts === undefined
                   ? {}
@@ -915,7 +982,10 @@ export const handlers = Api.toLayer(
               yield* policies.set(projectId, { ...change, ...accounts }, instance.personId, expectedRevision)
               // A call still waiting that the rules no longer keep for the person is answered by them.
               yield* permissions.reconsider(projectId)
-              return yield* rulesView(projectId, yield* policies.current(projectId as ProjectId))
+              const kept = yield* policies.current(projectId as ProjectId)
+              // Its leads newly resolving conflicts, what conflicts already is resolved now, not at the next (ADR-030).
+              if (!resolvesConflicts(was) && resolvesConflicts(kept.rules)) yield* pullRequests.resolveNow({ projectId })
+              return yield* rulesView(projectId, kept)
             }),
           ),
         ),
@@ -927,6 +997,10 @@ export const handlers = Api.toLayer(
       Merge: ({ commandId, taskId, head, url }) => once(commandId, api(pullRequests.merge(taskId, head, url))),
       MergeHere: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.mergeHere(taskId, heads)))),
       Push: ({ commandId, taskId, head, url }) => once(commandId, api(Effect.asVoid(pullRequests.push(taskId, head, url)))),
+      ReplacePullRequest: ({ commandId, taskId, head, replaces, url }) =>
+        once(commandId, api(Effect.asVoid(pullRequests.replace(taskId, head, replaces, url)))),
+      MergeNote: ({ commandId, taskId, url }) =>
+        once(commandId, api(Effect.map(pullRequests.mergeNote(taskId, url), ({ note }) => ({ note })))),
       PushHere: ({ commandId, taskId }) => once(commandId, api(Effect.asVoid(pullRequests.pushHere(taskId)))),
       PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),

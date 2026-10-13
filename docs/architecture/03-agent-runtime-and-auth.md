@@ -260,8 +260,9 @@ type AgentDefinition = {
 
 - Adapters Althar ships, `claude-agent-acp` and `codex-acp`, are bundled at
   pinned versions. Nothing is fetched with `npx` or a similar tool at run
-  time. Adapters written for Node run on Electron's own Node
-  ([02](02-desktop-runtime.md)).
+  time. Adapters written for Node run on a Node the packaged app ships, and
+  on Electron's own Node in development ([02](02-desktop-runtime.md),
+  ADR-033).
 - Agents the user installs, such as OpenCode, are found by probe, and their
   version is checked against the support matrix.
 - Adding an ACP agent means adding an entry and passing the contract suite.

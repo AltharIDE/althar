@@ -54,9 +54,10 @@ const taskMenu = async (task: Partial<ThreadSnapshot['task']>, session?: ThreadS
   const view = withServices(<Task />, client)
   await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
   // An item's name is its label, without what it says it does.
-  const offered = (await screen.findAllByRole('menuitem')).map(
-    (item) => document.getElementById(item.getAttribute('aria-labelledby') ?? '')?.textContent,
-  )
+  // Renaming is in every task's menu, and has its own test.
+  const offered = (await screen.findAllByRole('menuitem'))
+    .map((item) => document.getElementById(item.getAttribute('aria-labelledby') ?? '')?.textContent)
+    .filter((name) => name !== 'Rename')
   return { client, view, offered }
 }
 
@@ -894,6 +895,39 @@ describe('a task', () => {
     await waitFor(() => expect(client.resumeTask).toHaveBeenCalledWith({ taskId: 't1' }))
   })
 
+  it('offers how its conflicts go, as its project says or otherwise, and nothing beside the menu while it goes by the project', async () => {
+    const { client } = await taskMenu({ resolveConflicts: { task: null, project: true } })
+    expect(screen.getByRole('menuitemradio', { name: /Use the project setting/ }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByText('It’s on for this project.')).toBeTruthy()
+    expect(screen.queryByText('Auto-resolve conflicts: on')).toBeNull()
+    await userEvent.click(screen.getByRole('menuitemradio', { name: /Off for this task/ }))
+    await waitFor(() => expect(client.setTaskResolveConflicts).toHaveBeenCalledWith({ taskId: 't1', resolveConflicts: false }))
+  })
+
+  it('says beside its menu where its lead resolves conflicts otherwise than its project, and not where it is the same', async () => {
+    const shownFor = async (own: boolean, project: boolean) => {
+      const { client } = fakeClient({
+        getThread: vi.fn(async () => thread({ task: { ...thread().task, resolveConflicts: { task: own, project } } })),
+      })
+      const view = withServices(<Task />, client)
+      await screen.findByRole('button', { name: 'More for this task' })
+      const said = [screen.queryByText('Auto-resolve conflicts: on'), screen.queryByText('Auto-resolve conflicts: off')].map(
+        (one) => one !== null,
+      )
+      view.unmount()
+      return said
+    }
+    expect(await shownFor(true, false)).toEqual([true, false])
+    expect(await shownFor(false, true)).toEqual([false, true])
+    expect(await shownFor(true, true)).toEqual([false, false])
+  })
+
+  it('offers no say on its conflicts once it settles', async () => {
+    const { offered } = await taskMenu({ phase: 'settled', state: 'done', actions: [] }, null)
+    expect(offered).toEqual(['Open in Zed'])
+    expect(screen.queryByRole('menuitemradio')).toBeNull()
+  })
+
   it('offers starting its plan now while it waits to start', async () => {
     const { client, offered } = await taskMenu({ phase: 'held', actions: ['start', 'abandon'], planId: 'pln1' }, null)
     expect(offered).toEqual(['Open in Zed', 'Start now', 'Abandon'])
@@ -923,6 +957,40 @@ describe('a task', () => {
     abandoned.view.unmount()
     // Merged, it is done for good.
     expect((await taskMenu({ phase: 'settled', state: 'done', actions: [] }, null)).offered).toEqual(['Open in Zed'])
+  })
+
+  it('renames a task in its header: pressing the title edits it where it is, Enter keeps it and Escape puts it back', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    withServices(<Task />, client)
+    const title = thread().task.title
+    // Escape puts it back, and nothing is sent.
+    await userEvent.click(await screen.findByRole('button', { name: `Rename: ${title}` }))
+    const field = screen.getByRole('textbox', { name: 'Rename' })
+    expect((field as HTMLInputElement).value).toBe(title)
+    expect(field.getAttribute('maxlength')).toBe('60')
+    await userEvent.type(field, ' and more{Escape}')
+    expect(screen.queryByRole('textbox', { name: 'Rename' })).toBeNull()
+    expect(client.renameTask).not.toHaveBeenCalled()
+    // An emptied title isn't kept: Enter says so and stays, and leaving puts it back.
+    await userEvent.click(screen.getByRole('button', { name: `Rename: ${title}` }))
+    await userEvent.clear(screen.getByRole('textbox', { name: 'Rename' }))
+    await userEvent.keyboard('{Enter}')
+    expect(screen.getByRole('alert').textContent).toBe('Give the task a title.')
+    await userEvent.tab()
+    expect(screen.queryByRole('textbox', { name: 'Rename' })).toBeNull()
+    expect(client.renameTask).not.toHaveBeenCalled()
+    // Enter keeps what was typed, trimmed, once.
+    await userEvent.click(screen.getByRole('button', { name: `Rename: ${title}` }))
+    await userEvent.clear(screen.getByRole('textbox', { name: 'Rename' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Rename' }), '  Retry the checkout {Enter}')
+    await waitFor(() => expect(client.renameTask).toHaveBeenCalledTimes(1))
+    expect(client.renameTask).toHaveBeenCalledWith('t1', 'Retry the checkout')
+    expect(screen.queryByRole('textbox', { name: 'Rename' })).toBeNull()
+    // From the menu too.
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Rename/ }))
+    const again = await screen.findByRole('textbox', { name: 'Rename' })
+    await waitFor(() => expect(document.activeElement).toBe(again))
   })
 
   it('asks before abandoning, saying what stays, and abandons on the person’s say-so', async () => {
@@ -1816,6 +1884,14 @@ describe('a task', () => {
       status: TaskStatus.Paused,
       state: `Waits for Codex, back at ${clock(until)}`,
     })
+    // One waiting for a free agent says how many are busy, of how many this Mac runs at once; past that, both.
+    expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 4, atOnce: 4 } } })).toEqual({
+      status: TaskStatus.Queued,
+      state: 'Waiting: 4 of 4 agents busy on this Mac',
+    })
+    expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 6, atOnce: 2 } } }).state).toBe(
+      'Waiting: 6 agents busy on this Mac, which runs 2 at once',
+    )
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
     expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })
     // Ready, accepting it is the person's; settled, it is done.
