@@ -948,7 +948,8 @@ export class Sessions extends Context.Service<
             )
           // A task's card says when its lead or reviewer is at work.
           if (thread.role !== 'coordinator') yield* touchCard(thread.taskId)
-          yield* live.publish({
+          // Said once the agent has the prompt and its turn can be stopped: what hears it may stop it at once, as a spent budget of turns does.
+          const started = live.publish({
             _tag: 'TurnStarted',
             threadId: thread.threadId,
             turnId,
@@ -1018,7 +1019,7 @@ export class Sessions extends Context.Service<
             )
           })
           const images = inputs.flatMap((input) => sent.images.get(input.id) ?? [])
-          const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, images), (event) =>
+          const streamed = yield* Stream.runForEach(running.agent.prompt(prompt, images, started), (event) =>
             Effect.gen(function* () {
               if (event._tag === 'TurnEnded') ended = event
               heardContext(running, event)
