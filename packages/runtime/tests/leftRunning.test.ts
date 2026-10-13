@@ -78,4 +78,19 @@ describe('whether an agent that ended its turn is still at work', () => {
     assert.isFalse(stillBusy({ ...idle, background: [{ ended: null, url: 'http://localhost:5173/' }] }, 1_000, quiet))
     assert.isTrue(stillBusy({ ...idle, background: [{ ended: null, url: 'http://localhost:5173/' }, running] }, 1_000, quiet))
   })
+
+  it('waits for a test run or a build that prints an address, which ends by itself, but not a dev server', () => {
+    const url = 'http://localhost:4173/'
+    assert.isTrue(stillBusy({ ...idle, background: [{ ended: null, url, command: 'bun run test:browser' }] }, 1_000, quiet))
+    assert.isFalse(stillBusy({ ...idle, background: [{ ended: null, url, command: 'bun dev' }] }, 1_000, quiet))
+  })
+
+  it('waits for an agent to wake once what it left running ended, however slow, up to the wake time, then for it to be quiet', () => {
+    const wake = Duration.minutes(5)
+    const slow = { ...idle, background: [ended], workedAt: 10_000, wakeAt: 10_000 }
+    assert.isTrue(stillBusy(slow, 200_000, quiet, wake))
+    assert.isFalse(stillBusy(slow, 311_000, quiet, wake))
+    // Once it has spoken, the quiet applies.
+    assert.isFalse(stillBusy({ ...slow, wakeAt: null }, 200_000, quiet, wake))
+  })
 })

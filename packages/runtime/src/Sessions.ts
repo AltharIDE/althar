@@ -71,6 +71,7 @@ import {
   type LeftRunning,
   printedMore,
   QUIET_FOR,
+  WAKE_FOR,
   servingAt,
   type ShownLeftRunning,
   shownOf,
@@ -225,6 +226,8 @@ interface Running {
   readonly callsOpen: Set<string>
   /** When it last spoke outside a turn, or something it left running ended, in milliseconds; null if not since its last turn began. */
   workedAt: number | null
+  /** When something it left running ended in between turns, if it hasn't spoken since, in milliseconds. */
+  wakeAt: number | null
 }
 
 /** How often, at most, a thread's agent is looked at while a round waits for it to be done. */
@@ -466,6 +469,7 @@ export class Sessions extends Context.Service<
       const setups = yield* Setups
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
       const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
+      const wakeFor = (yield* RuntimeConfig).idle?.wake ?? WAKE_FOR
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
@@ -545,6 +549,7 @@ export class Sessions extends Context.Service<
                 if (left === undefined) return
                 // Claude Code may start a turn of its own now (ADR-022).
                 running.workedAt = yield* Clock.currentTimeMillis
+                if (!running.turnRunning && event.end !== 'stopped') running.wakeAt = running.workedAt
                 // Stopped, it goes, whoever stopped it. Ended by itself, it stays, to say how.
                 if (event.end === 'stopped') running.background.delete(event.id)
                 else {
@@ -584,6 +589,7 @@ export class Sessions extends Context.Service<
               return
           }
           running.workedAt = yield* Clock.currentTimeMillis
+          running.wakeAt = null
         })
 
       /** No agent starts, and nothing is said to one, in a project removed from Althar: a window that hadn't heard yet is told it's gone. */
@@ -857,6 +863,7 @@ export class Sessions extends Context.Service<
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
           running.workedAt = null
+          running.wakeAt = null
           // Images the agent doesn't get are said in the thread as well as to the agent, so none goes missing unsaid.
           const withheld = inputs.reduce((sum, input) => sum + (input.withheld ?? 0), 0)
           if (withheld > 0)
@@ -1352,6 +1359,7 @@ export class Sessions extends Context.Service<
             background: new Map(),
             callsOpen: new Set(),
             workedAt: null,
+            wakeAt: null,
           }
           threads.set(thread.threadId, running)
           yield* Effect.forkIn(run(deliveries(running)), scope)
@@ -1421,9 +1429,11 @@ export class Sessions extends Context.Service<
               background: [...running.background.values()],
               callsOpen: running.callsOpen.size,
               workedAt: running.workedAt,
+              wakeAt: running.wakeAt,
             },
             yield* Clock.currentTimeMillis,
             quietFor,
+            wakeFor,
           )
         })
 

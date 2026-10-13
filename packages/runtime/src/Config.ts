@@ -85,6 +85,10 @@ export interface IdleOptions {
   readonly quiet?: Duration.Duration
   /** How long a round waits for a lead that is still at work before it judges the branch as it is: 45 minutes. */
   readonly within?: Duration.Duration
+  /** How long an agent is given to wake once what it left running ended, before it speaks: five minutes. */
+  readonly wake?: Duration.Duration
+  /** How long after its turn ends a lead is given to report what it left running: two seconds. */
+  readonly reports?: Duration.Duration
 }
 
 export interface SetupOptions {

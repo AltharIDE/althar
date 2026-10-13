@@ -1,3 +1,4 @@
+import { REPORT_FOR } from './leftRunning'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
 
@@ -2384,6 +2385,7 @@ export class Changes extends Context.Service<
        */
       const holding = new Set<string>()
       const busyUpTo = (yield* RuntimeConfig).idle?.within ?? BUSY_UP_TO
+      const reportsWithin = (yield* RuntimeConfig).idle?.reports ?? REPORT_FOR
 
       /**
        * When the lead's turn ends on a round, or its session goes, the round
@@ -2417,7 +2419,8 @@ export class Changes extends Context.Service<
           const [asking] = yield* sql<{ id: string }>`
             SELECT id FROM attention_requests WHERE task_id = ${round.taskId} AND kind = 'question' AND state = 'open' LIMIT 1`
           if (asking !== undefined) return
-          if (event._tag === 'TurnEnded' && !waited && (yield* sessions.busy(event.threadId))) return yield* hold(round.id, event)
+          // Not at once: a lead may report what it left running just after its turn (`REPORT_FOR`).
+          if (event._tag === 'TurnEnded' && !waited) return yield* hold(round.id, event)
           // Stopped by the person, it is theirs: it isn't started again to try once more.
           const stopped = event._tag === 'SessionEnded' && event.state === 'completed'
           yield* locked(round.taskId)(
@@ -2435,7 +2438,8 @@ export class Changes extends Context.Service<
         if (holding.has(id)) return Effect.void
         holding.add(id)
         return Effect.forkIn(
-          sessions.untilIdle(event.threadId, busyUpTo).pipe(
+          Effect.sleep(reportsWithin).pipe(
+            Effect.andThen(sessions.untilIdle(event.threadId, busyUpTo)),
             Effect.flatMap((done) => (done === 'gone' ? Effect.void : look(event, true))),
             Effect.catchCause((cause) => Effect.logWarning('Could not look at a conflict after the lead was done', cause)),
             Effect.ensuring(Effect.sync(() => holding.delete(id))),

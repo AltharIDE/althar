@@ -431,7 +431,9 @@ const playStall = async (
  * uncommitted; when they end it is woken, as Claude Code wakes an agent, and
  * commits the merge outside a turn; `[lead:resolve-tests-fix]` then commits
  * a fix the tests found too, and `[lead:resolve-tests-hang]` has tests that
- * never end. Asked to plan a
+ * never end. `[lead:resolve-tests-codex]` has Codex say the tests are running
+ * just after its turn, `[lead:resolve-tests-slow]` is slow to be woken by
+ * them, and `[lead:resolve-tests-url]` has tests that print a local address. Asked to plan a
  * change with a link in it, the coordinator drafts the task from that issue.
  */
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
@@ -487,12 +489,21 @@ const commitMergeIn = (cwd: string) =>
  * command it sends there. After `lasts` milliseconds they end (never, with
  * no `lasts`), and Claude Code wakes the agent as it does: outside any
  * prompt it speaks and makes a call, `then` done in it, and speaks again.
+ * `reportsAfter` says it that many milliseconds after the turn, as Codex
+ * does; `wakesAfter` has the agent slow to speak once they end, and `prints`
+ * is what they print as they run.
  */
 const leaveTests = async (
   sessionId: string,
   session: SessionState,
   client: acp.AgentContext,
-  plan: { readonly lasts?: number; readonly commits?: () => void },
+  plan: {
+    readonly lasts?: number
+    readonly commits?: () => void
+    readonly reportsAfter?: number
+    readonly wakesAfter?: number
+    readonly prints?: string
+  },
 ) => {
   const notify = (update: Record<string, unknown>) =>
     client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
@@ -510,51 +521,62 @@ const leaveTests = async (
   const folder = join(tmpdir(), 'althar-fake-agent')
   mkdirSync(folder, { recursive: true })
   const outputPath = join(folder, `${sessionId}-${id}.output`)
-  writeFileSync(outputPath, 'running the full tests\n')
-  session.background.set(id, { toolCallId, outputPath })
-  await notify({
-    sessionUpdate: 'async_task_spawned',
-    asyncTaskId: id,
-    name: 'Run the full tests',
-    description: 'Run the full tests',
-    taskType: 'shell',
-    showInTranscript: false,
-    canStop: true,
-    toolCallId,
-  })
-  await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
-  await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
-  if (plan.lasts === undefined) return
-  const timer = setTimeout(() => {
-    // Stopped meanwhile, they have ended already.
-    if (!session.background.delete(id)) return
-    appendFileSync(outputPath, 'all passed\n[exited with code 0]\n')
-    void (async () => {
-      await notify({ sessionUpdate: 'async_task_state_update', asyncTaskId: id, state: 'completed' })
-      if (plan.commits === undefined) return
-      const call = `${toolCallId}-woken`
-      await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'The tests finished. ' } })
-      await notify({
-        sessionUpdate: 'tool_call',
-        toolCallId: call,
-        title: 'git commit',
-        kind: 'execute',
-        status: 'in_progress',
-        rawInput: { command: 'git commit' },
-      })
-      plan.commits()
-      await notify({ sessionUpdate: 'tool_call_update', toolCallId: call, status: 'completed' })
-      await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Committed.' } })
-    })()
-  }, plan.lasts)
-  timer.unref()
+  writeFileSync(outputPath, `running the full tests\n${plan.prints ?? ''}`)
+  const report = async () => {
+    session.background.set(id, { toolCallId, outputPath })
+    await notify({
+      sessionUpdate: 'async_task_spawned',
+      asyncTaskId: id,
+      name: 'Run the full tests',
+      description: 'Run the full tests',
+      taskType: 'shell',
+      showInTranscript: false,
+      canStop: true,
+      toolCallId,
+    })
+    await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
+    await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
+    if (plan.lasts === undefined) return
+    const timer = setTimeout(() => {
+      // Stopped meanwhile, they have ended already.
+      if (!session.background.delete(id)) return
+      appendFileSync(outputPath, 'all passed\n[exited with code 0]\n')
+      void (async () => {
+        await notify({ sessionUpdate: 'async_task_state_update', asyncTaskId: id, state: 'completed' })
+        if (plan.commits === undefined) return
+        if (plan.wakesAfter !== undefined) await pause(plan.wakesAfter)
+        const call = `${toolCallId}-woken`
+        await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'The tests finished. ' } })
+        await notify({
+          sessionUpdate: 'tool_call',
+          toolCallId: call,
+          title: 'git commit',
+          kind: 'execute',
+          status: 'in_progress',
+          rawInput: { command: 'git commit' },
+        })
+        plan.commits()
+        await notify({ sessionUpdate: 'tool_call_update', toolCallId: call, status: 'completed' })
+        await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Committed.' } })
+      })()
+    }, plan.lasts)
+    timer.unref()
+  }
+  if (plan.reportsAfter === undefined) await report()
+  else setTimeout(() => void report(), plan.reportsAfter).unref()
 }
 
 const playRole = async (
   session: SessionState,
   text: string,
   serve: (exits: boolean) => Promise<void>,
-  tests: (plan: { readonly lasts?: number; readonly commits?: () => void }) => Promise<void> = () => Promise.resolve(),
+  tests: (plan: {
+    readonly lasts?: number
+    readonly commits?: () => void
+    readonly reportsAfter?: number
+    readonly wakesAfter?: number
+    readonly prints?: string
+  }) => Promise<void> = () => Promise.resolve(),
 ): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
   const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ')
@@ -688,13 +710,23 @@ const playRole = async (
         }
         if (commitIt) return 'Still waiting for the tests.'
       }
-      const woken = session.markers.has('[lead:resolve-tests]') || session.markers.has('[lead:resolve-tests-fix]')
+      const woken =
+        session.markers.has('[lead:resolve-tests]') ||
+        session.markers.has('[lead:resolve-tests-fix]') ||
+        session.markers.has('[lead:resolve-tests-codex]') ||
+        session.markers.has('[lead:resolve-tests-slow]') ||
+        session.markers.has('[lead:resolve-tests-url]')
       if (merging !== undefined && woken) {
         settleIn(session.cwd, merging)
         const fixes = session.markers.has('[lead:resolve-tests-fix]')
         const cwd = session.cwd
         await tests({
           lasts: 400,
+          ...(session.markers.has('[lead:resolve-tests-codex]') ? { reportsAfter: 300 } : {}),
+          ...(session.markers.has('[lead:resolve-tests-slow]') ? { lasts: 1500, wakesAfter: 1200 } : {}),
+          ...(session.markers.has('[lead:resolve-tests-url]')
+            ? { lasts: 1500, prints: 'serving the browser tests at http://localhost:4173/\n' }
+            : {}),
           commits: () => {
             commitMergeIn(cwd)
             if (fixes) commitIn(cwd, 'tests.txt', 'Fix what the tests found')
