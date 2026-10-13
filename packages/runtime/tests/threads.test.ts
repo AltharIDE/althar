@@ -121,7 +121,9 @@ describe('the thread recorder', () => {
       assert.isTrue(whole.text.startsWith('[codex] echo: You are working on a task'))
       assert.isTrue(whole.text.endsWith('\n[codex] first\n[tool] Read README (completed)\n[note] Plain: with detail'))
       const tail = yield* transcript(where.threadId, 30)
-      assert.deepStrictEqual(tail, { text: '[note] Plain: with detail', omitted: 3 })
+      assert.strictEqual(tail.text, '[note] Plain: with detail')
+      // What came before is counted in parts: the brief's echo, longer than the budget, is several.
+      assert.isAbove(tail.omitted, 3)
       // Steps' results and task cards are written in a line each; a card for a task that's gone, not at all.
       const { projectId } = where
       const [task] = yield* (yield* SqlClient.SqlClient)<{ id: string }>`SELECT task_id AS id FROM threads WHERE id = ${where.threadId}`
@@ -151,6 +153,39 @@ describe('the thread recorder', () => {
           ].join('\n'),
         ),
       )
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('reads further back, only some kinds, at most so many lines, and names the agent as asked', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const writer = recorder(where)
+      for (const text of ['one', 'two', 'three']) {
+        yield* addItem(where, 'notice', { title: `noted ${text}` })
+        yield* writer.record({ _tag: 'AgentMessage', text: `said ${text}` })
+        yield* writer.record({ _tag: 'ToolCall', toolCallId: text, title: `Read ${text}`, kind: 'read', status: 'completed' })
+      }
+      yield* writer.flush
+      // The latest part, then the part before it, by the number the first read gave.
+      const latest = yield* transcript(where.threadId, 60)
+      assert.strictEqual(latest.text, '[codex] said three\n[tool] Read three (completed)')
+      const earlier = yield* transcript(where.threadId, 60, { before: latest.omitted })
+      assert.strictEqual(earlier.text, '[tool] Read two (completed)\n[note] noted three')
+      assert.strictEqual(earlier.omitted, latest.omitted - 2)
+      // Only some kinds, the last few lines, with the agent named as it is to whoever reads it.
+      const said = yield* transcript(where.threadId, 10_000, { kinds: ['notice', 'agent_message'], last: 3, agent: 'you' })
+      assert.deepStrictEqual(said, { text: '[you] said two\n[note] noted three\n[you] said three', omitted: 4 })
+      // A line longer than the whole budget comes in parts, each read in turn, so all of it can be read back.
+      const long = `${'a'.repeat(50)} DECISION ${'b'.repeat(50)}`
+      yield* addItem(where, 'notice', { title: long })
+      const pages: Array<string> = []
+      let before: number | undefined
+      while (pages.length < 4) {
+        const page = yield* transcript(where.threadId, 40, before === undefined ? {} : { before })
+        pages.unshift(page.text)
+        before = page.omitted
+      }
+      assert.isTrue(pages.every((page) => page.length <= 40))
+      assert.strictEqual(pages.map((page) => page.replace(/^\[…\] /, '').replace(/ \[…\]$/, '')).join(''), `[note] ${long}`)
     }).pipe(Effect.provide(runtime())),
   )
 })

@@ -21,7 +21,9 @@ import { type Account, Accounts } from './Accounts'
 import { Artifacts } from './Artifacts'
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
-import { coordinatorNews, modelNamer } from './coordinatorNews'
+import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
+import { dueForHandover, handoverRecord, notesSection, roomFor } from './handover'
+import { notesOf } from './notes'
 import {
   AlreadyDelivered,
   EffortUnchanged,
@@ -38,15 +40,17 @@ import { Instance } from './Instance'
 import { Limits } from './Limits'
 import { Live } from './Live'
 import type { Models } from './Models'
+import type { Policies } from './Policies'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
 import { touchCard } from './cards'
 import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
 import { git, PUSHED } from './git'
-import { reviewCopyOf } from './reviewCopy'
+import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
 import { Setups } from './Setups'
 import type { InputImage } from './sentImages'
+import { evidenceForReview } from './evidence'
 import { defaultEffortOf } from './preferences'
 import { addItem, betweenTurns, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import { commandOfCall, exitCodeIn, type LeftRunning, printedMore, servingAt, type ShownLeftRunning, shownOf, tailOf } from './leftRunning'
@@ -196,6 +200,13 @@ interface Running {
   recording: { readonly outputOf: (itemId: string) => OutputSoFar | undefined } | undefined
   /** What it left running in the background, in the order it started them (leftRunning.ts). */
   readonly background: Map<string, LeftRunning>
+  /**
+   * A coordinator's handover to a fresh session (ADR-031): under way, it
+   * takes no more turns; left, it carries on as it is, its agent compacting
+   * by itself, as one that couldn't start or that its brief would fill
+   * leaves it.
+   */
+  handover: 'none' | 'under_way' | 'left'
 }
 
 /** How often, and for how long, what one left running is read for where it answers. */
@@ -229,6 +240,7 @@ type Store =
   | Limits
   | Models
   | Setups
+  | Policies
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
 
 /** A turn's input was taken back while the turn was being made: it is made again from what still waits. */
@@ -654,6 +666,14 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { thread } = running
+          // A coordinator handing its conversation over takes no more turns. One whose context is filling up hands it over now,
+          // between turns, never in one: what waits goes to the fresh session (ADR-031).
+          if (running.handover === 'under_way') return false
+          if (thread.role === 'coordinator' && running.handover === 'none' && dueForHandover(running.context)) {
+            running.handover = 'under_way'
+            yield* Effect.forkIn(run(handOver(running)), sessionsScope)
+            return false
+          }
           const queued = yield* sql<{ id: string; body: string; disposition: string; author: string; shown: number; cutBy: string | null }>`
             SELECT i.id, i.body, i.disposition, a.kind AS author,
               EXISTS (SELECT 1 FROM thread_items ti WHERE ti.user_input_id = i.id) AS shown,
@@ -1275,6 +1295,7 @@ export class Sessions extends Context.Service<
             recording: undefined,
             settleBetween: Effect.void,
             background: new Map(),
+            handover: 'none',
           }
           threads.set(thread.threadId, running)
           yield* Effect.forkIn(run(deliveries(running)), scope)
@@ -1290,12 +1311,23 @@ export class Sessions extends Context.Service<
                 Effect.andThen(
                   Effect.andThen(
                     Effect.andThen(
-                      Effect.sync(() => heardContext(running, event)),
-                      heard.record(event),
-                    ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
-                    heardBackground(running, event),
+                      Effect.andThen(
+                        Effect.sync(() => heardContext(running, event)),
+                        heard.record(event),
+                      ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
+                      heardBackground(running, event),
+                    ),
+                    live.publish({ _tag: 'Agent', threadId: thread.threadId, event }),
                   ),
-                  live.publish({ _tag: 'Agent', threadId: thread.threadId, event }),
+                  // A coordinator that says between turns its context is filling up is handed over now, not at its next turn.
+                  Effect.suspend(() =>
+                    event._tag === 'ContextUsage' &&
+                    thread.role === 'coordinator' &&
+                    !running.turnRunning &&
+                    dueForHandover(running.context)
+                      ? Queue.offer(running.wake, undefined)
+                      : Effect.void,
+                  ),
                 ),
               ),
             ),
@@ -1621,6 +1653,13 @@ export class Sessions extends Context.Service<
             WHERE t.task_id = ${thread.taskId} AND t.kind = 'task' AND i.kind = 'step_result'
             ORDER BY i.sequence DESC LIMIT 1`
           const summary = lead === undefined ? '' : ((JSON.parse(lead.content) as { summary?: string }).summary ?? '')
+          // The lead's evidence, written beside the copies it reads: what it left uncommitted, or git keeps out, isn't in them.
+          const [taskThread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${thread.taskId} AND kind = 'task'`
+          const [first] = thread.repositories
+          const shown =
+            taskThread === undefined || first === undefined
+              ? ''
+              : yield* evidenceForReview(taskThread.id, evidenceFolderOf(first.worktree)).pipe(Effect.orElseSucceed(() => ''))
           return [
             "You are reviewing another agent's change, in Althar. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
             `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
@@ -1629,7 +1668,8 @@ export class Sessions extends Context.Service<
               ? `The change is in ${thread.repositories[0]?.worktree ?? thread.cwd}: a copy of the lead's work as it stood when this round began, which Althar throws away after; nothing you do there reaches the lead. See the change with \`git diff ${thread.repositories[0]?.baseCommit ?? 'HEAD~1'}\` there; new files are in it.`
               : `The change spans several repositories, each copied as the lead's work stood when this round began, side by side in ${thread.cwd}; Althar throws them away after, and nothing you do there reaches the lead. See each one's change with git diff there; new files are in it:\n${thread.repositories.map((repository) => `- ${repository.name}: ${repository.worktree}, \`git diff ${repository.baseCommit ?? 'HEAD~1'}\``).join('\n')}`,
             ...(summary === '' ? [] : [`The lead says:\n${summary}`]),
-            "Look for what would make the change wrong or unsafe to merge: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Then call Althar's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), where it is, and what is wrong. With no findings worth fixing, the verdict is pass.",
+            ...(shown === '' ? [] : [shown]),
+            "Look for what would make the change wrong or unsafe to merge: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Where the lead's evidence leaves out something important the change should be seen doing, say so as a minor finding; that alone doesn't fail a review. Then call Althar's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), where it is, and what is wrong. With no findings worth fixing, the verdict is pass.",
             ...(yield* threadSoFar(thread.threadId)),
           ].join('\n\n')
         })
@@ -1728,6 +1768,8 @@ export class Sessions extends Context.Service<
                 ]),
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
+            // What the lead shows of its work: evidence that fits the task, and what it couldn't show.
+            "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo or a version bump, a single note saying so is enough. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check.",
             // Althar reaches the code host for the task (ADR-011).
             "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. read_issue reads the issue the task came from, or any other.",
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
@@ -1746,53 +1788,87 @@ export class Sessions extends Context.Service<
           ].join('\n\n')
         })
 
-      /** The coordinator's brief: its role, the project and its repositories, how it picks models for work, and the thread so far. */
+      /** The coordinator's role: what it does, where it reads the project's repositories, its tools, and how it picks models for work. */
+      const coordinatorRole = (thread: CoordinatorThread) => {
+        const repositories = thread.folder.repositories
+        return [
+          `You are the coordinator of the project ${thread.projectName}, in Althar. You talk with the person about the project as a whole: you answer their questions about the code and the work, and you turn the changes they want into tasks. You never change anything yourself, not even a one-line fix: a change is always a task, which its lead, a model you pick, does in a worktree of its own.`,
+          repositories.length === 0
+            ? 'The project has no repositories yet.'
+            : `Your working folder holds read-only copies of the project's repositories, fresh from their default branches:\n${repositories
+                .map((repository) =>
+                  repository.within === null
+                    ? `- ${repository.name}: ${repository.path} (${repository.base})`
+                    : `- ${repository.name}, its folder ${repository.within}: ${repository.path} (${repository.base}). That folder is what the project is about; the rest of the repository is in ${repository.root}.`,
+                )
+                .join(
+                  '\n',
+                )}\nRead and search them to answer questions and to plan. Anything you write there is thrown away. Commands that change anything, such as installing packages or starting a server, are refused there by Althar, for your role, not by the person. To run the project, use run_project.`,
+          [
+            "To get a change made, use Althar's tools:",
+            `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
+            '- list_models, for the models you can give work to now, with how each scores, whether a plan pays for it, and the efforts it takes.',
+            '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial; each with an effort where it matters. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
+            "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built. It shows over the composer with where it answers. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command.",
+            "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
+            '- list_tasks, read_task and read_thread, to see what is under way and how it went. read_thread without a task reads your conversation with the person, back to its start.',
+            "- read_issue and find_issues, for the issues on the person's connected trackers and in the project's repository. When the person points at an issue, read it, and draft the task from it with its link or key as draft_task's issue.",
+            "- draft_issue, when the person wants something tracked rather than done now, such as a bug you found or follow-up work, as an issue on one of their connected trackers. It files nothing: the person sees it as a card, and files it, changes it or discards it there. Once they file it, you hear its key and link, and a task drafted from it later takes that as draft_task's issue.",
+            "- message_lead, to pass something to a task's lead.",
+            "- keep_note, list_notes and drop_note, for the project's notes: decisions the person makes in conversation that the code doesn't show, such as \"issue drafts need an approval card, on every tracker\" or \"dependency setup runs outside the sandbox; don't widen the lead's sandbox\". When the person decides something like that, keep it in a sentence, without asking; drop a note they take back. Every session of yours starts with the notes, and the person sees them in the project's settings.",
+          ].join('\n'),
+          [
+            'How to pick a model for a step: call list_models first, and pick by what the step needs, not by who makes the model. Be impartial between makers; go by the scores and the work.',
+            '- A large, risky or open-ended change, or one that needs careful reasoning: one of the strongest models.',
+            '- A small, well-scoped change, such as a rename, a copy fix or a version bump: a quicker, cheaper model is enough.',
+            '- Prefer a model a plan pays for over one paid per use, when they would do the work as well.',
+            "- Review with a model from a different maker than the lead's, where one can be used.",
+          ].join('\n'),
+          [
+            "How to set a step's effort: by what the step needs, as one of the efforts list_models gives for its model.",
+            '- Open-ended, risky or reasoning-heavy work: a higher effort.',
+            '- A small, well-scoped change: a low effort, or leave it out.',
+            '- A reviewer: usually leave it out.',
+            '- Follow what the person has said they prefer, such as an effort for prototypes.',
+            "- When unsure, leave it out: the step starts at the person's default for its model, or else at the model's own.",
+          ].join('\n'),
+          'Answer questions yourself; changes, and anything to try out, become tasks. Keep your replies short: the person sees each task as a card, so say in a sentence what you planned, and not the plan itself again.',
+        ]
+      }
+
+      /** The coordinator's brief: its role, the project's notes, and the thread so far. */
       const coordinatorBrief = (thread: CoordinatorThread) =>
         Effect.gen(function* () {
-          const repositories = thread.folder.repositories
+          const notes = yield* notesOf(thread.projectId)
           return [
-            `You are the coordinator of the project ${thread.projectName}, in Althar. You talk with the person about the project as a whole: you answer their questions about the code and the work, and you turn the changes they want into tasks. You never change anything yourself, not even a one-line fix: a change is always a task, which its lead, a model you pick, does in a worktree of its own.`,
-            repositories.length === 0
-              ? 'The project has no repositories yet.'
-              : `Your working folder holds read-only copies of the project's repositories, fresh from their default branches:\n${repositories
-                  .map((repository) =>
-                    repository.within === null
-                      ? `- ${repository.name}: ${repository.path} (${repository.base})`
-                      : `- ${repository.name}, its folder ${repository.within}: ${repository.path} (${repository.base}). That folder is what the project is about; the rest of the repository is in ${repository.root}.`,
-                  )
-                  .join(
-                    '\n',
-                  )}\nRead and search them to answer questions and to plan. Anything you write there is thrown away. Commands that change anything, such as installing packages or starting a server, are refused there by Althar, for your role, not by the person. To run the project, use run_project.`,
-            [
-              "To get a change made, use Althar's tools:",
-              `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
-              '- list_models, for the models you can give work to now, with how each scores, whether a plan pays for it, and the efforts it takes.',
-              '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial; each with an effort where it matters. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
-              "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built. It shows over the composer with where it answers. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command.",
-              "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
-              '- list_tasks, read_task and read_thread, to see what is under way and how it went.',
-              "- read_issue and find_issues, for the issues on the person's connected trackers and in the project's repository. When the person points at an issue, read it, and draft the task from it with its link or key as draft_task's issue.",
-              "- draft_issue, when the person wants something tracked rather than done now, such as a bug you found or follow-up work, as an issue on one of their connected trackers. It files nothing: the person sees it as a card, and files it, changes it or discards it there. Once they file it, you hear its key and link, and a task drafted from it later takes that as draft_task's issue.",
-              "- message_lead, to pass something to a task's lead.",
-            ].join('\n'),
-            [
-              'How to pick a model for a step: call list_models first, and pick by what the step needs, not by who makes the model. Be impartial between makers; go by the scores and the work.',
-              '- A large, risky or open-ended change, or one that needs careful reasoning: one of the strongest models.',
-              '- A small, well-scoped change, such as a rename, a copy fix or a version bump: a quicker, cheaper model is enough.',
-              '- Prefer a model a plan pays for over one paid per use, when they would do the work as well.',
-              "- Review with a model from a different maker than the lead's, where one can be used.",
-            ].join('\n'),
-            [
-              "How to set a step's effort: by what the step needs, as one of the efforts list_models gives for its model.",
-              '- Open-ended, risky or reasoning-heavy work: a higher effort.',
-              '- A small, well-scoped change: a low effort, or leave it out.',
-              '- A reviewer: usually leave it out.',
-              '- Follow what the person has said they prefer, such as an effort for prototypes.',
-              "- When unsure, leave it out: the step starts at the person's default for its model, or else at the model's own.",
-            ].join('\n'),
-            'Answer questions yourself; changes, and anything to try out, become tasks. Keep your replies short: the person sees each task as a card, so say in a sentence what you planned, and not the plan itself again.',
+            ...coordinatorRole(thread),
+            ...(notes.length === 0 ? [] : [notesSection(notes)]),
             ...(yield* threadSoFar(thread.threadId)),
           ].join('\n\n')
+        })
+
+      /** Names models by what each agent says of them, or by their ids where that can't be read. */
+      const byId: ModelNamer = (step) => step.model ?? `${step.agentId}'s default model`
+
+      /**
+       * A fresh coordinator session's brief, when Althar hands the
+       * conversation over (ADR-031): its role, then what it takes over, from
+       * the records rather than the raw thread. And how many tasks are open.
+       */
+      const handoverBrief = (thread: CoordinatorThread) =>
+        Effect.gen(function* () {
+          const modelOf = yield* modelNamer.pipe(
+            Effect.catchCause((cause) =>
+              Effect.as(Effect.logWarning('Could not read the models to name for the coordinator', cause), byId),
+            ),
+          )
+          const record = yield* handoverRecord({
+            projectId: thread.projectId,
+            threadId: thread.threadId,
+            modelOf,
+            working: (threadId) => threads.get(threadId)?.turnRunning === true,
+          })
+          return { text: [...coordinatorRole(thread), ...record.sections].join('\n\n'), open: record.open }
         })
 
       /**
@@ -1848,6 +1924,62 @@ export class Sessions extends Context.Service<
             const brief = yield* briefFor(thread, { kind: 'takeover', from })
             return yield* activate(connected, { text: brief, closing: 'Carry on with the task from where it stands.' })
           }),
+        )
+
+      /**
+       * Hands the coordinator's conversation to a fresh session once its
+       * context is filling up (ADR-031): the same agent, account, model and
+       * effort, briefed from Althar's records. It starts between turns: the
+       * old session takes no more, and what the person says meanwhile waits
+       * for the new one. The new session is started before the old one stops,
+       * so a handover that fails leaves the old one carrying on, its agent
+       * compacting its context itself as before.
+       */
+      const handOver = (previous: Running): Effect.Effect<void, never, Store> =>
+        exclusive(
+          previous.thread.threadId,
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const { thread } = previous
+            // Stopped or switched while it waited: nothing is left to hand over.
+            if (thread.role !== 'coordinator' || threads.get(thread.threadId) !== previous || previous.stopping) return
+            const [session] = yield* sql<{ model: string | null; effort: string | null }>`
+              SELECT model, effort FROM provider_sessions WHERE id = ${previous.sessionId}`
+            const model = session?.model ?? undefined
+            const effort = session?.effort ?? undefined
+            // Written first: the old session takes no more turns, so the record already holds everything it did.
+            const brief = yield* handoverBrief(thread)
+            // A brief that would fill a fresh session as far would only be due again: the old one carries on as it is.
+            if (!roomFor(brief.text, previous.context)) {
+              yield* Effect.logWarning('The coordinator is left to compact by itself: its brief would fill a fresh session')
+              previous.handover = 'left'
+              return yield* Queue.offer(previous.wake, undefined)
+            }
+            const sessionId = yield* createSession(thread, previous.entry.definition.id, previous.account, model)
+            const connected = yield* connectSession(thread, sessionId, previous.entry, previous.account, model, effort)
+            yield* stopRunning(previous, { state: 'superseded', by: sessionId })
+            yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title:
+                brief.open === 0
+                  ? 'Started a fresh session.'
+                  : `Started a fresh session; picked up ${brief.open} open ${brief.open === 1 ? 'task' : 'tasks'}.`,
+            })
+            yield* activate(connected, { text: brief.text, closing: 'Carry the conversation on from where it stands.' })
+          }),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Effect.andThen(
+              Effect.logWarning('Could not hand the coordinator to a fresh session', cause),
+              // It carries on as it is, with what waited for it.
+              Effect.suspend(() => {
+                if (threads.get(previous.thread.threadId) !== previous) return Effect.void
+                previous.handover = 'left'
+                return Queue.offer(previous.wake, undefined)
+              }),
+            ),
+          ),
         )
 
       // Quitting stops every session the way `stop` does: the turn ends, the process stops, and both are recorded.
