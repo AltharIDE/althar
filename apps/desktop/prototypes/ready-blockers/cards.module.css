@@ -1,0 +1,195 @@
+/* What each direction adds to the kit's ready card and line, in the kit's own tokens. */
+
+/* the tones: broken, your move, under way, only so you know, and clear */
+.danger {
+  color: var(--danger);
+}
+.signal {
+  color: var(--signal);
+}
+.live {
+  color: var(--live);
+}
+.quiet {
+  color: var(--t-3);
+}
+.ok {
+  color: var(--ok);
+}
+
+.dot {
+  margin: 0 1px;
+}
+
+/* an action on a card sits above the card's own button, which covers it */
+.act {
+  position: relative;
+  z-index: 1;
+  margin-left: auto;
+}
+.goQuiet {
+  color: var(--t-3);
+}
+
+/* ---- A ---- */
+.status {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 0;
+  min-width: 0;
+}
+.part {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.status > .part + .part::before {
+  content: '·';
+  margin: 0 7px;
+  color: var(--t-4);
+}
+/* under way and nothing for you: the card steps back */
+.waitingA {
+  opacity: 0.66;
+}
+.waitingA:hover {
+  opacity: 1;
+}
+
+/* ---- B ---- */
+.chips {
+  display: inline-flex;
+  gap: 5px;
+}
+.chip {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 99px;
+  background: color-mix(in srgb, currentColor 9%, var(--paper));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 22%, transparent);
+  font: 600 11px/1 var(--font, inherit);
+  font-variant-numeric: tabular-nums;
+  outline: 0;
+}
+.chip.ok {
+  background: color-mix(in srgb, var(--ok) 6%, var(--paper));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 16%, transparent);
+}
+.chip:focus-visible {
+  outline: 1.5px solid var(--signal);
+  outline-offset: 1px;
+}
+.count {
+  font-family: var(--mono);
+  font-weight: 550;
+}
+
+/* ---- C ---- */
+.group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 2px -2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.group:first-child {
+  margin-top: 0;
+}
+.groupQuiet {
+  color: var(--t-3);
+}
+.groupDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: currentColor;
+}
+.groupCount {
+  margin-left: auto;
+  font: 500 11px/1 var(--mono);
+  color: var(--t-3);
+}
+.faded {
+  opacity: 0.55;
+}
+.faded:hover {
+  opacity: 1;
+}
+/* the line's kind, in the colour of where it stands */
+.lineC.ok > span:first-child {
+  color: var(--ok);
+}
+.lineC.danger > span:first-child {
+  color: var(--danger);
+}
+.lineC.live > span:first-child {
+  color: var(--live);
+}
+
+/* ---- D ---- */
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 2px 0 0;
+  padding: 2px 0;
+  list-style: none;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 3px 2px;
+  font-size: 12px;
+}
+.row + .row {
+  border-top: 1px solid var(--line);
+}
+.rowMark {
+  display: inline-flex;
+  flex: none;
+  justify-content: center;
+  width: 14px;
+}
+.rowSays {
+  min-width: 0;
+  font-weight: 550;
+}
+.rowDetail {
+  font-weight: 400;
+  color: var(--t-3);
+}
+.good {
+  font-weight: 600;
+}
+.goodDetail {
+  font-weight: 400;
+  color: var(--t-3);
+}
+
+/* ---- the home's line ---- */
+.lineBrief {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.lineList {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+}
+.lineD p {
+  white-space: normal;
+}
