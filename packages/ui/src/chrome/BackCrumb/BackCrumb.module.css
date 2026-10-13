@@ -72,7 +72,9 @@
 .edit {
   display: block;
   min-width: 0;
-  flex: 1 1 280px;
+  flex: 1 1 auto;
+  width: 420px;
+  max-width: 100%;
 }
 .field {
   width: 100%;
