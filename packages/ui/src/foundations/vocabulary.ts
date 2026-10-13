@@ -229,6 +229,17 @@ export enum TaskActivity {
   Still = 'still',
 }
 
+/**
+ * What a task makes, read from what it has (DEV-96): a change ends in a pull
+ * request of its own, or has commits; a review reads someone else's; any
+ * other task is plain, and has no word on its card.
+ */
+export enum TaskKind {
+  Change = 'change',
+  Review = 'review',
+  Plain = 'plain',
+}
+
 /** What a task does with its work when it is done. */
 export enum TaskEnd {
   DraftPr = 'draft',
