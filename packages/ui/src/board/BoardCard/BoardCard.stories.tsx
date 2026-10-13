@@ -174,6 +174,7 @@ export const AllStates: Story = {
       size="wide"
       cells={[
         ...KIND_CARDS.map(({ id, card }) => ({ state: id, node: <BoardCard {...card} onOpen={args.onOpen} /> })),
+        { state: 'done', node: <BoardCard {...args} status={TaskStatus.Done} word="Done" /> },
         { state: 'current', node: <BoardCard {...args} current /> },
         { state: 'nothing opens it', node: <BoardCard {...args} onOpen={undefined} /> },
         { state: 'hover', node: <BoardCard {...args} /> },

@@ -183,6 +183,17 @@ export const CHANGE_STOPPED: Card = {
   track: trackOf(['Implement', 'Review'], 1),
 }
 
+/** Held until an agent's usage limit resets: still, and it carries on by itself. */
+export const CHANGE_PAUSED: Card = {
+  status: TaskStatus.Paused,
+  word: 'Paused',
+  kind: TaskKind.Change,
+  at: '31m',
+  title: 'Refunds rate-limit like charges',
+  why: 'Waits for Codex, back at 14:00',
+  track: trackOf(['Implement', 'Review'], 1),
+}
+
 /** Every kind's cards, in the order the board's lanes take them. */
 export const KIND_CARDS: ReadonlyArray<{ readonly id: string; readonly card: Card }> = [
   { id: 'change running', card: CHANGE_RUNNING },
@@ -200,5 +211,6 @@ export const KIND_CARDS: ReadonlyArray<{ readonly id: string; readonly card: Car
   { id: 'plain, a picture being made', card: PLAIN_PICTURES_MAKING },
   { id: 'plain, its files', card: PLAIN_FILES },
   { id: 'waiting for an agent', card: CHANGE_QUEUED },
+  { id: 'paused', card: CHANGE_PAUSED },
   { id: 'stopped', card: CHANGE_STOPPED },
 ]
