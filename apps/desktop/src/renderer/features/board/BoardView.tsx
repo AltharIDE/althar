@@ -5,6 +5,7 @@ import {
   BoardColumn,
   BoardLane,
   BoardList,
+  Button,
   CallCard,
   NextRow,
   Outcome,
@@ -14,11 +15,12 @@ import {
   WorkCard,
 } from '@althar/ui'
 
-import { waitsWords } from '../../shared/agents'
+import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
-import { callKindOf, kindWords, whereOf } from '../../shared/calls'
+import { callKindOf, kindWords, readyKindOf, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
+import { afterSteps, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import { type Lanes } from './lanes'
@@ -40,6 +42,7 @@ export const text = {
     [TaskStatus.Yours]: 'Waiting on you',
     [TaskStatus.Done]: 'Done',
     [TaskStatus.Paused]: 'Paused',
+    [TaskStatus.Queued]: 'Waiting',
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   stopped: 'No agent is working on it',
@@ -50,6 +53,7 @@ export const text = {
   merged: (name: string) => `${name} merged`,
   closed: (name: string) => `${name} closed`,
   abandoned: 'Abandoned',
+  showOlder: 'Show older',
 }
 
 /** What the home's dock holds: a task, by its id, or a call. */
@@ -60,8 +64,10 @@ export const trackOf = (task: BoardTask) => {
   const planned = (task.plan?.steps ?? []).filter((step) => !step.skipped).map((step) => step.key)
   if (planned.length === 0) return { steps: [text.conversation], at: 0 }
   // Settling a review's findings is part of the review.
-  const on = task.step === 'implement' ? 'implement' : task.step === null || task.step === 'publish' ? null : 'review'
-  const at = on === null ? (task.step === 'publish' ? planned.length - 1 : 0) : Math.max(0, planned.indexOf(on))
+  const on =
+    task.step === 'implement' ? 'implement' : task.step === null || task.step === 'publish' || afterSteps(task.step) ? null : 'review'
+  // Publishing, and a conflict round, come after the steps.
+  const at = on === null ? (task.step === 'publish' || afterSteps(task.step) ? planned.length - 1 : 0) : Math.max(0, planned.indexOf(on))
   return { steps: planned.map((key) => text.step[key]), at }
 }
 
@@ -79,6 +85,7 @@ export function BoardView({
   agents,
   now,
   onOpen,
+  onShowOlder,
 }: {
   lanes: Lanes
   agents: ReadonlyArray<AgentStatus>
@@ -86,6 +93,8 @@ export function BoardView({
   now: string
   /** Opens a task, by its thread. */
   onOpen: (threadId: string) => void
+  /** Loads the next page of settled work; absent where every settled task is already shown. */
+  onShowOlder?: () => void
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   const named = useModelNames()
@@ -118,7 +127,8 @@ export function BoardView({
       <BoardColumn lane={BoardLane.Running} count={lanes.running.length}>
         {lanes.running.map((work) => {
           const { steps, at } = trackOf(work)
-          const status = STATUS[work.phase] ?? TaskStatus.Running
+          // Waiting for a free agent, it says so, rather than that it runs.
+          const status = work.queued !== null ? TaskStatus.Queued : (STATUS[work.phase] ?? TaskStatus.Running)
           return (
             <WorkCard
               key={work.taskId}
@@ -129,13 +139,17 @@ export function BoardView({
               at={at}
               elapsed={work.startedAt === null ? '' : running(work.startedAt, now)}
               lead={lead(work)}
-              {...(work.waits !== null
-                ? { note: waitsWords(name(work.waits.agentId), clock(work.waits.until)) }
-                : status === TaskStatus.Stopped
-                  ? { note: text.stopped }
-                  : steps.length === 1
-                    ? { note: '' }
-                    : {})}
+              {...(work.queued !== null
+                ? { note: queuedWords(work.queued) }
+                : work.waits !== null
+                  ? { note: waitsWords(name(work.waits.agentId), clock(work.waits.until)) }
+                  : status === TaskStatus.Stopped
+                    ? { note: text.stopped }
+                    : afterSteps(work.step)
+                      ? { note: stepText.now[work.step ?? ''] ?? '' }
+                      : steps.length === 1
+                        ? { note: '' }
+                        : {})}
               onOpen={() => onOpen(work.threadId)}
               text={{ status: text.status, task: unnamed }}
             />
@@ -171,14 +185,20 @@ export function BoardView({
                     host: { name: productName(change.product), ...(brand === undefined ? {} : { brand }) },
                     checks: change.checks?.passed ?? 0,
                   })}
+              // Its lead couldn't resolve a conflict: it is stuck, and the card says why.
+              {...(work.handedBack == null ? {} : { note: work.handedBack })}
               onOpen={() => onOpen(work.threadId)}
-              text={{ task: unnamed, ...(change === null ? {} : { number: (n: number) => `${change.prefix}${n}` }) }}
+              text={{
+                task: unnamed,
+                ...(work.handedBack == null ? {} : { kind: readyKindOf(work) }),
+                ...(change === null ? {} : { number: (n: number) => `${change.prefix}${n}` }),
+              }}
             />
           )
         })}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Settled} count={lanes.settled.length}>
+      <BoardColumn lane={BoardLane.Settled} count={lanes.settledTotal}>
         <BoardList>
           {lanes.settled.map((work) => {
             const change = work.change
@@ -202,6 +222,11 @@ export function BoardView({
             )
           })}
         </BoardList>
+        {onShowOlder !== undefined && (
+          <Button variant="quiet" size="small" onClick={onShowOlder}>
+            {text.showOlder}
+          </Button>
+        )}
       </BoardColumn>
     </Board>
   )

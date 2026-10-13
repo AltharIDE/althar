@@ -136,6 +136,7 @@ const board = (overrides: Partial<BoardSnapshot> = {}): BoardSnapshot => ({
     }),
   ],
   calls: [permission],
+  settledTotal: 2,
   ...overrides,
 })
 
@@ -169,6 +170,18 @@ describe('the board’s lanes', () => {
     expect(trackOf(task({ step: 'implement' }))).toEqual({ steps: ['Implement', 'Review'], at: 0 })
     // A task with no plan is a conversation with its lead.
     expect(trackOf(task({ plan: null }))).toEqual({ steps: ['Conversation'], at: 0 })
+    // Resolving a conflict, or fixing the checks on the merge, comes after the steps.
+    expect(trackOf(task({ step: 'conflict' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
+    expect(trackOf(task({ step: 'checks' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
+  })
+
+  it('lists work its lead couldn’t resolve a conflict for as stuck, with why, among what needs the person', () => {
+    const why = 'The lead couldn’t resolve the conflict with main, in README.md. The merge of origin/main isn’t committed.'
+    const lanes = lanesOf(
+      board({ tasks: [task({ taskId: 't8', threadId: 'th8', title: 'Add a limit', phase: 'ready', handedBack: why })], calls: [] }),
+    )
+    expect(lanes.ready.map((work) => work.taskId)).toEqual(['t8'])
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([['Stuck', 'Add a limit', why]])
   })
 })
 
@@ -190,6 +203,90 @@ describe('the board', () => {
     const front = screen.getByRole('heading', { level: 1, name: 'meridian' }).closest('header')
     expect(front?.textContent).toMatch(/3 need you·2 in progress·PR 7 merged \S/)
     expect(screen.queryByText(/running/)).toBeNull()
+  })
+
+  it('counts every settled task, loads only the latest, and loads the older ones on request', async () => {
+    const settledAt = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, n)).toISOString()
+    const settledTask = (n: number) =>
+      task({
+        taskId: `s${n}`,
+        threadId: `ths${n}`,
+        title: `Settled ${n}`,
+        slug: `settled-${n}`,
+        phase: 'settled',
+        state: 'done',
+        settledAt: settledAt(n),
+      })
+    const latest = Array.from({ length: 30 }, (_, i) => settledTask(i + 5))
+    const older = Array.from({ length: 5 }, (_, i) => settledTask(4 - i))
+    const getBoard = vi.fn(async () => board({ tasks: latest, calls: [], settledTotal: 35 }))
+    const getOlderSettled = vi.fn(async () => older)
+    const { client, emit } = fakeClient({ getBoard, getOlderSettled })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    const work = await screen.findByRole('region', { name: 'The project’s work' })
+    const column = within(work).getByRole('heading', { name: 'Settled' }).closest('section') as HTMLElement
+    // 35 in all, though 30 are loaded.
+    expect(within(column).getByText('35')).toBeTruthy()
+    expect(within(column).getAllByRole('listitem')).toHaveLength(30)
+    expect(within(column).queryByText('Settled 0')).toBeNull()
+
+    await userEvent.click(within(column).getByRole('button', { name: 'Show older' }))
+    expect(await within(column).findByText('Settled 0')).toBeTruthy()
+    // Asked for what came before the oldest it had.
+    expect(getOlderSettled).toHaveBeenCalledWith('p1', settledAt(5), 's5')
+    expect(within(column).getAllByRole('listitem')).toHaveLength(35)
+    expect(within(column).getByText('35')).toBeTruthy()
+    // Everything is shown: nothing more to ask for.
+    expect(within(column).queryByRole('button', { name: 'Show older' })).toBeNull()
+
+    // One more settles: 36 in all, the older ones still there.
+    getBoard.mockImplementation(async () => board({ tasks: [settledTask(35), ...latest.slice(1)], calls: [], settledTotal: 36 }))
+    emit(changed('task', 's35'))
+    expect(await within(column).findByText('36')).toBeTruthy()
+    // Every card stays, the one that aged out of the snapshot (5) among them.
+    expect(within(column).getAllByRole('listitem')).toHaveLength(36)
+    expect(within(column).getByText('Settled 0')).toBeTruthy()
+    expect(within(column).getByText('Settled 5')).toBeTruthy()
+    expect(within(column).queryByRole('button', { name: 'Show older' })).toBeNull()
+  })
+
+  it('asks for a page of older settled tasks once, however often it is pointed at, and says when it fails', async () => {
+    const settledAt = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, n)).toISOString()
+    const settledTask = (n: number) =>
+      task({
+        taskId: `s${n}`,
+        threadId: `ths${n}`,
+        title: `Settled ${n}`,
+        slug: `settled-${n}`,
+        phase: 'settled',
+        state: 'done',
+        settledAt: settledAt(n),
+      })
+    const latest = Array.from({ length: 30 }, (_, i) => settledTask(i + 35))
+    const first = Array.from({ length: 30 }, (_, i) => settledTask(34 - i))
+    let release: (tasks: BoardTask[]) => void = () => {}
+    const getOlderSettled = vi
+      .fn<() => Promise<BoardTask[]>>()
+      .mockReturnValueOnce(new Promise((resolve) => (release = resolve)))
+      .mockRejectedValueOnce(new ApiError({ reason: 'SqlError', message: 'Broken.' }))
+      .mockResolvedValue([])
+    const { client } = fakeClient({ getBoard: vi.fn(async () => board({ tasks: latest, calls: [], settledTotal: 65 })), getOlderSettled })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    const work = await screen.findByRole('region', { name: 'The project’s work' })
+    const column = within(work).getByRole('heading', { name: 'Settled' }).closest('section') as HTMLElement
+    const more = within(column).getByRole('button', { name: 'Show older' })
+    await userEvent.click(more)
+    await userEvent.click(more)
+    expect(getOlderSettled).toHaveBeenCalledTimes(1)
+    release(first)
+    await waitFor(() => expect(within(column).getAllByRole('listitem')).toHaveLength(60))
+    // The next page fails: it says so, and the board stays.
+    await userEvent.click(within(column).getByRole('button', { name: 'Show older' }))
+    expect(await screen.findByText(/couldn’t load older tasks\. Broken\./)).toBeTruthy()
+    expect(within(column).getAllByRole('listitem')).toHaveLength(60)
+    expect(within(column).getByRole('button', { name: 'Show older' })).toBeTruthy()
   })
 
   it('opens the first thing that needs you in its task, from the front page, and shows the rest when pointed at', async () => {
@@ -430,6 +527,13 @@ describe('every state the board shows', () => {
         step: 'implement',
         waits: { agentId: 'codex', until: '2026-10-01T13:40:00.000Z' },
       }),
+      task({
+        taskId: 'q',
+        title: 'Waiting for a free agent',
+        phase: 'running',
+        step: 'implement',
+        queued: { busy: 4, atOnce: 4 },
+      }),
       task({ taskId: 'f', title: 'No branch yet', phase: 'ready', branch: null }),
       task({
         taskId: 'g',
@@ -460,11 +564,50 @@ describe('every state the board shows', () => {
     expect(screen.getByText('Claude Code stopped before the step was done.')).toBeTruthy()
     // A step held for a usage limit says whom it waits for, and when they're back.
     expect(screen.getByText(`Waits for Codex, back at ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
+    // One waiting for a free agent says what for.
+    expect(screen.getByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
     expect(screen.getByText("Althar couldn't open the pull request.")).toBeTruthy()
     expect(screen.getByText(/isn't connected to this repository's host/)).toBeTruthy()
     expect(screen.getByText('PR #12 closed')).toBeTruthy()
     expect(screen.getAllByText('althar/add-a-retry').length).toBeGreaterThan(0)
     return userEvent.click(screen.getByRole('button', { name: 'Held plan' })).then(() => expect(onOpen).toHaveBeenCalledWith('th1'))
+  })
+
+  it('shows work its lead is resolving a conflict for at work, and what it couldn’t resolve as stuck, with why', () => {
+    const why = 'The lead couldn’t resolve the conflict with main, in README.md. The merge of origin/main isn’t committed.'
+    const lanes = lanesOf(
+      board({
+        tasks: [
+          task({
+            taskId: 'r1',
+            threadId: 'thr1',
+            title: 'Resolving it',
+            phase: 'running',
+            step: 'conflict',
+            startedAt: '2026-10-01T09:30:00.000Z',
+          }),
+          task({
+            taskId: 'r2',
+            threadId: 'thr2',
+            title: 'Fixing its checks',
+            phase: 'running',
+            step: 'checks',
+            startedAt: '2026-10-01T09:30:00.000Z',
+          }),
+          task({ taskId: 'r3', threadId: 'thr3', title: 'Handed back', phase: 'ready', handedBack: why }),
+          task({ taskId: 'r4', threadId: 'thr4', title: 'Ready as ever', phase: 'ready' }),
+        ],
+        calls: [],
+      }),
+    )
+    withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+    // At work, on the board's running lane, saying what it does where the step count would be.
+    expect(screen.getByText('Resolving a conflict')).toBeTruthy()
+    expect(screen.getByText('Fixing the checks')).toBeTruthy()
+    // Handed back, it is Stuck with the reason; the other is ready to accept, as ever.
+    expect(screen.getByText('Stuck')).toBeTruthy()
+    expect(screen.getByText(why)).toBeTruthy()
+    expect(screen.getAllByText('Ready to accept')).toHaveLength(1)
   })
 
   it('says how long work has run', () => {

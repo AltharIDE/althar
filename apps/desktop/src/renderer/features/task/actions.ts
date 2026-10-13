@@ -7,6 +7,8 @@ export type Doing = string
 
 export const doing = {
   push: (url: string): Doing => `push:${url}`,
+  replace: (url: string): Doing => `replace:${url}`,
+  bringIn: (url: string): Doing => `bring-in:${url}`,
   markReady: (url: string): Doing => `ready:${url}`,
   openChange: 'open',
   accept: 'accept',

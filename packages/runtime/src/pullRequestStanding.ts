@@ -77,6 +77,7 @@ export const changeWords = (seen: SeenChange, several: boolean): string => {
     change.state === 'open' ? (change.draft ? 'draft' : 'ready for review') : change.state,
     checksWords(change),
     change.state === 'open' && change.unpushed > 0 ? `${change.unpushed} unpushed` : null,
+    change.state === 'open' && change.diverged !== null ? `diverged from ${change.short}` : null,
     stale === null ? null : `as last seen (${stale})`,
   ].filter((part): part is string => part !== null)
   const where = several ? whereOf(change) : null
@@ -128,6 +129,14 @@ const checkSection = (change: ChangeSummary): string | null => {
   return `Checks: passing (${checks.passed} of ${checks.total}).`
 }
 
+/** How the task's branch parted from its pull request, so no plain push would be taken: rewritten here, or moved on there. */
+const divergedWords = (change: ChangeSummary): string | null => {
+  if (change.diverged === null) return null
+  if (change.diverged.kind === 'rewritten')
+    return `The task's branch was rewritten since it was pushed: ${plural(change.diverged.local, 'commit')} in place of ${plural(Number(change.diverged.onPullRequest), 'commit')} on the ${change.noun}, so it takes no plain push. The person replaces its commits from the task's outputs, or has the lead merge instead.`
+  return `The ${change.noun} has commits pushed from elsewhere that the task's branch doesn't, so it takes no plain push. The person has the lead merge them in, from the task's outputs.`
+}
+
 const changeSection = (seen: SeenChange, several: boolean): string => {
   const { change } = seen
   const stale = staleWords(seen)
@@ -143,6 +152,7 @@ const changeSection = (seen: SeenChange, several: boolean): string => {
     change.state === 'open' && change.unpushed > 0
       ? `${plural(change.unpushed, 'commit')} on the task's branch ${change.unpushed === 1 ? 'is' : 'are'} not on the ${change.noun} yet; the person pushes them.`
       : null,
+    change.state === 'open' ? divergedWords(change) : null,
     // The host snapshot doesn't carry whether it merges cleanly: Althar finds out only when it merges the task here.
     change.state === 'open' ? 'Conflicts with the base: not known (Althar does not ask the host).' : null,
     stale === null ? null : `Possibly out of date: ${stale}, so this is as last seen.`,
@@ -163,9 +173,7 @@ export const sectionWords = (facts: PullRequestFacts): string => {
   return [
     `Pull request${several ? 's' : ''}:\n${sections.join('\n\n')}`,
     facts.unmerged > 0 ? `${unmergedWords(facts.unmerged)}: the task is not done.` : null,
-    finished === null
-      ? null
-      : `The task is finished (${finished === 'merged' ? 'merged' : 'closed without merging'}): nothing waits on the person.`,
+    finished === null ? null : `The task is finished (${finished}): nothing waits on the person.`,
   ]
     .filter((part): part is string => part !== null)
     .join('\n\n')

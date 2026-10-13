@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import type { HomeCall, HomeTask } from '@althar/contracts'
 import { Button, type EdgeWork, NeedLine, type ProjectRef } from '@althar/ui'
 
-import { callKindOf, kindWords, whereOf } from '../../shared/calls'
+import { callKindOf, kindWords, readyKindOf, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
 import { text as stuckText } from '../task/StuckCall'
@@ -198,7 +198,16 @@ export const needsOf = ({
     const project = refs.get(task.projectId)
     return project === undefined
       ? []
-      : [{ id: task.taskId, threadId: task.threadId, kind: kindWords.ready, project, title: task.title, brief: briefOf(task) }]
+      : [
+          {
+            id: task.taskId,
+            threadId: task.threadId,
+            kind: readyKindOf(task),
+            project,
+            title: task.title,
+            brief: task.handedBack ?? briefOf(task),
+          },
+        ]
   }),
 ]
 

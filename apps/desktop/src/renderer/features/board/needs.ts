@@ -1,6 +1,6 @@
 import type { WorkNeed } from '@althar/ui'
 
-import { kindWords, whereOf } from '../../shared/calls'
+import { readyKindOf, whereOf } from '../../shared/calls'
 import { callCardOf } from './BoardView'
 import type { Lanes } from './lanes'
 
@@ -35,9 +35,9 @@ export const needsOf = (
     const meta = change === null ? (work.branch ?? undefined) : `${change.short} ${change.prefix}${change.number}`
     return {
       id: work.taskId,
-      kind: kindWords.ready,
+      kind: readyKindOf(work),
       title: work.title,
-      ...(meta === undefined ? {} : { meta }),
+      ...(work.handedBack != null ? { meta: work.handedBack } : meta === undefined ? {} : { meta }),
       ...(work.threadId === here ? { here: true } : {}),
       onOpen: () => onTask(work.threadId),
     }

@@ -1,6 +1,6 @@
 import { type ChildProcessWithoutNullStreams, execFile, spawn } from 'node:child_process'
 
-import { asNode } from './process'
+import { adapterNode, asNode } from './process'
 import type { AgentDefinition, LaunchSpec } from './registry'
 
 /*
@@ -106,7 +106,7 @@ export const startSignInFlow = (
 ): SignInFlowHandle | null => {
   const inApp = agent.signIn.inApp
   if (inApp === undefined || !inApp.ways.includes(options.way)) return null
-  const node = options.node ?? process.execPath
+  const node = options.node ?? adapterNode()
   const spec = inApp.run(node)
   const env = { ...process.env, ...asNode({ command: spec.command, args: spec.args }), ...options.home }
   // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled.
@@ -171,7 +171,7 @@ const claude = (
   child.on('exit', (code) => {
     if (code !== 0) return end({ kind: 'failed', message: lastLine(stderr) ?? lastLine(said) ?? 'Claude Code stopped signing in.' })
     // Signed in: its status says who as.
-    const status = agent.signIn.status(process.execPath)
+    const status = agent.signIn.status(adapterNode())
     const ran = status.onDevice === undefined ? status : status.onDevice({ env })
     execFile(ran.command, [...ran.args], { env, timeout: 15_000 }, (_error, stdout) => end({ kind: 'done', ...claudeWho(stdout) }))
   })

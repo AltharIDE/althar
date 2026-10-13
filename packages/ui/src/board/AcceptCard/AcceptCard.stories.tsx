@@ -38,6 +38,17 @@ export const LinesUncounted: Story = {
     await expect(within(canvasElement).getByText(UNCOUNTED[0]?.repo ?? '')).toBeInTheDocument()
   },
 }
+/** Its lead couldn't resolve a conflict with the default branch, so it's yours before it can be accepted: the kind is Stuck, and the card says why. */
+const HANDED_BACK = 'The lead couldn’t resolve the conflict with main, in README.md. The merge of origin/main isn’t committed.'
+
+export const HandedBack: Story = {
+  args: { note: HANDED_BACK, text: { kind: 'Stuck' } },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('Stuck')).toBeInTheDocument()
+    await expect(within(canvasElement).getByText(HANDED_BACK)).toBeInTheDocument()
+    await expect(within(canvasElement).queryByText('Ready to accept')).not.toBeInTheDocument()
+  },
+}
 /** A pull request no checks ran on. */
 export const NoChecks: Story = {
   args: { checks: 0 },
@@ -62,6 +73,7 @@ export const AllStates: Story = {
         { state: 'one repository', node: <AcceptCard {...args} /> },
         { state: 'two repositories', node: <AcceptCard {...args} {...READY_TWO_REPOS} /> },
         { state: 'current', node: <AcceptCard {...args} current /> },
+        { state: 'handed back', node: <AcceptCard {...args} note={HANDED_BACK} text={{ kind: 'Stuck' }} /> },
         { state: 'lines uncounted', node: <AcceptCard {...args} prs={UNCOUNTED} /> },
         { state: 'nothing opens it', node: <AcceptCard {...args} onOpen={undefined} /> },
         { state: 'hover', node: <AcceptCard {...args} /> },

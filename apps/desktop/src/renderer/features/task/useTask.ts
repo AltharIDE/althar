@@ -55,6 +55,8 @@ export interface TaskModel {
   /** The files merging it here conflicts in, after a merge that couldn't go ahead for that; null otherwise. */
   readonly conflict: string | null
   readonly dismissConflict: () => void
+  /** The pull request a push was refused by for commits on it that aren't on the branch, by its address; null otherwise. */
+  readonly refused: string | null
   /** An action is on its way to the runtime. */
   readonly pending: boolean
   /** Which of them, where it is one of the outputs' (see `doing`): the others wait, but aren't working. */
@@ -90,6 +92,8 @@ export interface TaskModel {
   readonly abandon: () => Promise<boolean>
   /** Opens it again, once abandoned, on its worktree and branch. */
   readonly reopen: () => Promise<void>
+  /** Gives it another title, in any state; the title shown is Althar's, once it is back. */
+  readonly rename: (title: string) => Promise<void>
   /** Starts its plan now, while it waits to start. */
   readonly startPlan: (planId: string) => Promise<void>
   /** Answers a call; with `always`, the answer is kept in the project's rules by that scope. */
@@ -118,10 +122,21 @@ export interface TaskModel {
   readonly accept: (changes: ReadonlyArray<{ readonly head: string; readonly url: string }>) => Promise<void>
   /** Pushes the task's branch to its pull request, up to the commit the person saw: the one at `url`, in a task of several. */
   readonly push: (head: string, url?: string) => Promise<void>
+  /**
+   * Replaces the commits on the task's pull request with its branch, up to
+   * the commit the person saw, once it was rewritten since it was pushed:
+   * a force push they confirmed, only while the pull request is still at
+   * `replaces`.
+   */
+  readonly replace: (head: string, replaces: string, url: string) => Promise<void>
+  /** What to tell the lead so its branch takes the pull request's commits in by merging, fetched to it first; null where that failed, having said why. */
+  readonly mergeNote: (url: string) => Promise<string | null>
   /** Stops listening to the task's pull request at this address. */
   readonly stopListening: (url: string) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
+  /** Stops a command another task's lead left running, which keeps a place this task waits for. */
+  readonly stopHolding: (threadId: string, id: string) => Promise<void>
   /** Clears one that ended by itself from the list. */
   readonly clearBackground: (id: string) => Promise<void>
   /** Runs what it built, with no agent, in its worktree. */
@@ -146,6 +161,7 @@ export const useTask = (threadId: string): TaskModel => {
   const [pending, setPending] = useState(false)
   const [acting, setActing] = useState<Doing | null>(null)
   const [conflict, setConflict] = useState<string | null>(null)
+  const [refused, setRefused] = useState<string | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const [newest] = useState(newestReads)
@@ -271,7 +287,12 @@ export const useTask = (threadId: string): TaskModel => {
     }
   }, [client, threadId, snapshot, setSnapshot, fail])
 
-  /** Runs an action, says what went wrong if it did, and reads the thread's head again. */
+  /**
+   * Runs an action, says what went wrong if it did, and reads the thread's
+   * head again. It stays under way until that read, or one begun after it,
+   * is shown, so what it changed shows as it ends: a Push never shows its
+   * count from before it went.
+   */
   const act = useCallback(
     async (action: () => Promise<unknown>, which: Doing | null = null) => {
       setError(null)
@@ -282,12 +303,14 @@ export const useTask = (threadId: string): TaskModel => {
       } catch (failure) {
         fail(failure)
       } finally {
+        await readHead()
+        // A read begun since, as the runtime's word of the push arrives, replaces it: shown once that lands.
+        await newest.landed('head')
         setPending(false)
         setActing(null)
-        await readHead()
       }
     },
-    [readHead, fail],
+    [readHead, newest, fail],
   )
 
   /** Runs an action on the task, once it has been read. */
@@ -345,6 +368,7 @@ export const useTask = (threadId: string): TaskModel => {
     error,
     conflict,
     dismissConflict: () => setConflict(null),
+    refused,
     pending,
     doing: acting,
     loadingEarlier,
@@ -413,6 +437,7 @@ export const useTask = (threadId: string): TaskModel => {
       return abandoned
     },
     reopen: () => onTask((taskId) => client.reopenTask(taskId)),
+    rename: (title) => onTask((taskId) => client.renameTask(taskId, title)),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     answer: async (attentionId, decision, reason, always) => {
       // Whether it went through: a call whose answer didn't is answerable again.
@@ -473,9 +498,41 @@ export const useTask = (threadId: string): TaskModel => {
         if (snapshot === null) return
         for (const change of changes) await client.merge(snapshot.task.id, change.head, change.url)
       }, doing.accept),
-    push: (head, url) => act(async () => (snapshot === null ? undefined : client.push(snapshot.task.id, head, url)), doing.push(url ?? '')),
+    push: (head, url) =>
+      act(
+        async () => {
+          setRefused(null)
+          if (snapshot === null) return
+          try {
+            await client.push(snapshot.task.id, head, url)
+          } catch (failure) {
+            // Commits on it the branch doesn't have are the lead's to bring in: the card says so, and offers to ask it, in place of an error.
+            if (failure instanceof ApiError && failure.reason === 'PushRefused' && failure.why === 'behind') {
+              setRefused(url ?? snapshot.task.changes[0]?.url ?? '')
+              return
+            }
+            throw failure
+          }
+        },
+        doing.push(url ?? ''),
+      ),
+    replace: (head, replaces, url) =>
+      act(
+        async () => (snapshot === null ? undefined : client.replacePullRequest(snapshot.task.id, head, replaces, url)),
+        doing.replace(url),
+      ),
+    mergeNote: async (url) => {
+      let note: string | null = null
+      await act(async () => {
+        if (snapshot === null) return
+        note = await client.mergeNote(snapshot.task.id, url)
+        setRefused(null)
+      }, doing.bringIn(url))
+      return note
+    },
     stopListening: (url) => onTask((taskId) => client.stopListening(taskId, url)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
+    stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),
     runProject: () => act(async () => (snapshot === null ? undefined : client.runProject(snapshot.project.id, snapshot.task.id, threadId))),
     stopLaunch: (id) => act(() => client.stopLaunch(id)),

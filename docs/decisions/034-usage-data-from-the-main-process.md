@@ -1,4 +1,4 @@
-# ADR-031: Anonymous usage data goes from the main process, named events only
+# ADR-034: Anonymous usage data goes from the main process, named events only
 
 - **Status:** Accepted
 - **Date:** 2026-10-12

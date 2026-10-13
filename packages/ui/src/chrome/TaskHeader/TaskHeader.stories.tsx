@@ -39,6 +39,7 @@ const menuFor = (status: TaskStatus) => {
     case TaskStatus.Running:
     case TaskStatus.Yours:
     case TaskStatus.Paused:
+    case TaskStatus.Queued:
       return { onStop: fn(), onAbandon: fn() }
     case TaskStatus.Stopped:
       return { onResume: fn(), onAbandon: fn() }

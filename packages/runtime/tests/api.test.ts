@@ -40,7 +40,7 @@ import { Secrets } from '../src/Secrets'
 import { ConnectorFailed, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 
-import { fakeAgents, fakeConnectors, HOST, hosted, repository } from './support'
+import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository, ROOMY } from './support'
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
 
@@ -57,6 +57,8 @@ const connected = (
     readonly noTerminal?: boolean
     /** The editors a task's files open in, and what opening one does. */
     readonly editors?: RuntimeOptions['editors']
+    /** The machine how many agents are at work at once comes from: a large one unless a test says. */
+    readonly machine?: { readonly cores: number; readonly memory: number }
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -78,6 +80,7 @@ const connected = (
           : { openTerminal: (line: string) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(true)) }),
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
+        busy: { machine: options.machine ?? ROOMY },
       }),
     )
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
@@ -88,7 +91,7 @@ const connected = (
     const grant = (path: string) => Context.get(context, Folders).allow(path)
     /** Reads or writes the runtime's store directly, for what no client does. */
     const store = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) => effect.pipe(Effect.provideContext(context))
-    return { client, grant, store }
+    return { client, grant, store, context }
   })
 
 const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
@@ -459,6 +462,28 @@ describe('the API', () => {
     ),
   )
 
+  it.live("reads a project's notes, and drops one as the person, for good", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant, context } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const access = { role: 'coordinator' as const, projectId: project.id, threadId: 'none', sessionId: 'none', taskId: null }
+        yield* callTool(access, 'keep_note', { note: 'Issue drafts need an approval card.' }).pipe(Effect.provideContext(context))
+        const [note] = yield* client.GetProjectNotes({ projectId: project.id })
+        assert.deepInclude(note, { body: 'Issue drafts need an approval card.', keptBy: 'coordinator' })
+        yield* client.DropProjectNote({ commandId: commandId(), projectId: project.id, noteId: note?.id ?? '' })
+        assert.deepStrictEqual(yield* client.GetProjectNotes({ projectId: project.id }), [])
+        // The coordinator doesn't see it again.
+        assert.strictEqual(yield* callTool(access, 'list_notes').pipe(Effect.provideContext(context)), 'The project has no notes yet.')
+        // One that isn't there, or a project that isn't, says so.
+        const missing = yield* Effect.flip(client.DropProjectNote({ commandId: commandId(), projectId: project.id, noteId: 'note_gone' }))
+        assert.strictEqual(missing.reason, 'NotFound')
+        const gone = yield* Effect.flip(client.GetProjectNotes({ projectId: 'proj_gone' }))
+        assert.strictEqual(gone.reason, 'NotFound')
+      }),
+    ),
+  )
+
   it.live('keeps an always answer as a rule, and a call the rules screen now covers is answered by it', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -710,11 +735,34 @@ describe('settings, through the API', () => {
       Effect.gen(function* () {
         const { client } = yield* connected()
         const line = 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>'
-        assert.deepStrictEqual(yield* client.GetSettings({}), { coAuthor: { on: true, line } })
+        assert.deepStrictEqual((yield* client.GetSettings({})).coAuthor, { on: true, line })
         yield* client.SetCoAuthor({ commandId: commandId(), on: false })
-        assert.deepStrictEqual(yield* client.GetSettings({}), { coAuthor: { on: false, line } })
+        assert.deepStrictEqual((yield* client.GetSettings({})).coAuthor, { on: false, line })
         yield* client.SetCoAuthor({ commandId: commandId(), on: true })
         assert.isTrue((yield* client.GetSettings({})).coAuthor.on)
+      }),
+    ),
+  )
+
+  it.live('says how many agents this Mac runs at once and why, takes the person’s number at once, and goes back to the default', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, store } = yield* connected({ machine: { cores: 10, memory: 16 * 1024 ** 3 } })
+        const machine = { count: 4, cores: 10, memory: 16 }
+        assert.deepStrictEqual((yield* client.GetSettings({})).agentsAtOnce, { count: 4, own: null, machine })
+        // The default isn't kept: only what the person sets.
+        const kept = store(
+          Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ value: string }>`SELECT value FROM settings WHERE key = 'agents_at_once'`),
+        )
+        assert.deepStrictEqual(yield* kept, [])
+        yield* client.SetAgentsAtOnce({ commandId: commandId(), count: 2 })
+        assert.deepStrictEqual((yield* client.GetSettings({})).agentsAtOnce, { count: 2, own: 2, machine })
+        assert.deepStrictEqual(yield* kept, [{ value: '2' }])
+        yield* client.SetAgentsAtOnce({ commandId: commandId(), count: 9 })
+        assert.deepStrictEqual((yield* client.GetSettings({})).agentsAtOnce, { count: 9, own: 9, machine })
+        yield* client.SetAgentsAtOnce({ commandId: commandId(), count: null })
+        assert.deepStrictEqual((yield* client.GetSettings({})).agentsAtOnce, { count: 4, own: null, machine })
+        assert.deepStrictEqual(yield* kept, [])
       }),
     ),
   )
@@ -758,6 +806,7 @@ describe('project rules, through the API', () => {
           onlyAccounts: null,
           branchPattern: null,
           titlePattern: null,
+          moveIssues: true,
         })
         // A repository that says nothing of its pull requests: Althar's own names, and no template.
         assert.deepStrictEqual(
@@ -1466,6 +1515,15 @@ describe('the coordinator, through the API', () => {
         yield* client.ResumeTask({ commandId: commandId(), taskId: task.id, agentId: 'codex', model: 'large', effort: 'high' })
         const resumed = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (thread) => thread.session !== null)
         assert.strictEqual(resumed.session?.agentId, 'codex')
+        // Renamed by the person, even now; a retry is one rename, and an empty title is refused.
+        const rename = { commandId: commandId(), taskId: task.id, title: ' Retry the checkout ' }
+        yield* client.RenameTask(rename)
+        yield* client.RenameTask(rename)
+        assert.strictEqual((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).task.title, 'Retry the checkout')
+        assert.strictEqual(
+          (yield* Effect.flip(client.RenameTask({ commandId: commandId(), taskId: task.id, title: ' ' }))).message,
+          'Give the task a title.',
+        )
         yield* client.AbandonTask({ commandId: commandId(), taskId: task.id })
         const abandoned = yield* client.GetThread({ threadId: task.threadId, limit: 0 })
         assert.deepStrictEqual([abandoned.task.state, abandoned.task.phase, abandoned.task.actions], ['abandoned', 'settled', ['reopen']])
@@ -1876,10 +1934,12 @@ describe('words', () => {
     )
     // A push the remote refused says how to put it right.
     assert.deepStrictEqual(
-      (['behind', 'denied'] as const).map((why) => said(new PushRefused({ taskId: 't', why, remote: 'origin/main' }))),
+      (['behind', 'denied', 'moved', 'never'] as const).map((why) => said(new PushRefused({ taskId: 't', why, remote: 'origin/main' }))),
       [
-        'origin/main has commits that aren’t here yet, so it didn’t take the push. Pull them in, then push again.',
+        'origin/main has commits that aren’t here yet, so it didn’t take the push. Bring them in, then push again.',
         'git couldn’t sign in to push to origin/main. Push once from a terminal so your sign-in is kept, then push again here.',
+        'origin/main has commits pushed since you looked, so nothing was replaced. Look again before replacing them.',
+        'The project’s rules never allow force pushes, so origin/main’s commits stay. Ask the lead to merge instead.',
       ],
     )
     assert.strictEqual(
@@ -1905,7 +1965,8 @@ describe('words', () => {
     // A merge that conflicts carries its files, for the window to have the lead settle them.
     assert.deepStrictEqual(words(new CantMerge({ taskId: 't', why: 'conflicts', detail: 'README.md' }), name), {
       reason: 'CantMerge',
-      message: 'It conflicts with the default branch, in README.md. Tell the lead to bring its branch up to date, then merge again.',
+      message:
+        'It conflicts with the default branch, in README.md. Tell the lead to merge the default branch into its branch (merge, don’t rebase), then merge again.',
       why: 'conflicts',
       detail: 'README.md',
     })
@@ -2075,6 +2136,9 @@ describe('thread items', () => {
           { severity: 'blocking', file: 'a.ts', line: null, claim: 'y' },
           { severity: 'nit', file: null, line: null, claim: 'z' },
         ],
+        built: null,
+        evidence: [],
+        unverified: null,
         agentId: 'codex',
         change: null,
       },
@@ -2085,8 +2149,59 @@ describe('thread items', () => {
       summary: 'Done.',
       verdict: null,
       findings: [],
+      built: null,
+      evidence: [],
+      unverified: null,
       agentId: null,
       change: null,
     })
+    // Evidence as the lead's step keeps it: a picture by its digest, a command with its exit, and what wasn't shown; what it can't read is left out.
+    const digest = 'a'.repeat(64)
+    assert.deepStrictEqual(
+      itemOf(
+        row('step_result', {
+          summary: 'Done.',
+          evidence: [
+            {
+              kind: 'screenshot',
+              caption: 'The Evidence section',
+              picture: { artifactId: 'art_1', sha256: digest, mediaType: 'image/png', bytes: 10, width: 4, height: 2, name: 'shot.png' },
+              path: 'shot.png',
+              command: null,
+              exit: null,
+              text: null,
+              dropped: 0,
+            },
+            { kind: 'command', caption: 'The tests', picture: null, command: 'bun test', exit: 0, text: '3 passed\n', dropped: 2 },
+            { kind: 'magic', caption: 'Unknown' },
+            { kind: 'note', caption: '' },
+          ],
+          unverified: ['Not tried with a real microphone', 4],
+        }),
+      )?.content,
+      {
+        step: 'implement',
+        round: 0,
+        summary: 'Done.',
+        verdict: null,
+        findings: [],
+        built: null,
+        evidence: [
+          {
+            kind: 'screenshot',
+            caption: 'The Evidence section',
+            picture: { digest, mediaType: 'image/png', bytes: 10, width: 4, height: 2, name: 'shot.png', unkept: null },
+            command: null,
+            exit: null,
+            text: null,
+            dropped: 0,
+          },
+          { kind: 'command', caption: 'The tests', picture: null, command: 'bun test', exit: 0, text: '3 passed\n', dropped: 2 },
+        ],
+        unverified: ['Not tried with a real microphone'],
+        agentId: null,
+        change: null,
+      },
+    )
   })
 })

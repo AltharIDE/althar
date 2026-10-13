@@ -28,4 +28,7 @@ export const checksums: Readonly<Record<string, string>> = {
   '0022_connection_cli': 'a2e1df1a078b718b1c1c24bf23f3e93ad97407339a670cd2a70cdf80477f26ae',
   '0023_worktree_setup': 'ef93df218253666f4a3b019511eb45a1caa64d8fb213e841738e7b47014d7eca',
   '0024_conflict_resolutions': '750de1a3f6049f24a5b71a23d5f29fede532aeb5f3baec767484a3b7645925d5',
+  '0025_push_requests': '043e2c48c3fa275cc8b62b52219e44347ae8a1e6098dd01c42d12b35edb7ca2e',
+  '0026_project_notes': '194f17139bc027eb2a4433ee8249a3b464c8e1d3c22a97bceea3797b95e668c8',
+  '0027_agents_at_once': '19be6d16c97bcfc46c09c029cc423d89a4ceee687a36bca612edfd26d4d17eb0',
 }

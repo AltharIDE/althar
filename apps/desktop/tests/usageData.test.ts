@@ -166,17 +166,21 @@ describe('sending', () => {
   it('holds events until the switch has been shown, then sends them if it is still on', async () => {
     const { fetch, requests } = posthog()
     const usage = sender(() => true, fetch, 'phc_test', { held: true })
+    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
     usage.record({ name: 'app_opened' })
+    await pause(5)
     usage.record({ name: 'agent_signed_in', properties: { agent: 'codex', how: 'found' } })
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    await pause(50)
     expect(fetch).not.toHaveBeenCalled()
+    const shown = Date.now()
     usage.shown()
+    await pause(5)
     usage.record({ name: 'project_made', properties: { repositories: 1 } })
     await usage.stop()
-    expect(sent(requests).map((event) => event.event)).toEqual(['app_opened', 'agent_signed_in', 'project_made'])
-    // Each as when it happened, not when it went.
-    const [opened] = sent(requests)
-    expect(Date.parse(String(opened?.timestamp))).toBeLessThan(Date.now() - 40)
+    // The requests go at once, in any order; each is stamped when it happened, not when it went, so PostHog reads them in order.
+    const events = sent(requests).map((event) => ({ name: event.event, at: Date.parse(String(event.timestamp)) }))
+    expect(events.toSorted((a, b) => a.at - b.at).map((event) => event.name)).toEqual(['app_opened', 'agent_signed_in', 'project_made'])
+    expect(events.find((event) => event.name === 'agent_signed_in')?.at).toBeLessThan(shown)
 
     // Turned off before it was shown: nothing that waited goes.
     const off = posthog()

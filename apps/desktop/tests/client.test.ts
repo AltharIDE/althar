@@ -107,6 +107,8 @@ describe('the client', () => {
     // Stopped as a task: every agent on it stops, and nothing is left to stop.
     await client.stopTask(task.id)
     expect((await client.getThread(task.threadId, { limit: 0 })).session).toBeNull()
+    await client.renameTask(task.id, 'A better title')
+    expect((await client.getThread(task.threadId, { limit: 0 })).task.title).toBe('A better title')
     await client.abandonTask(task.id)
     expect((await client.getThread(task.threadId, { limit: 0 })).task.actions).toEqual(['reopen'])
     await client.reopenTask(task.id)
@@ -207,11 +209,14 @@ describe('the client', () => {
           Status: () => Effect.die('unused'),
           GetFileDiff: () => Effect.die('unused'),
           GetBoard: () => Effect.die('unused'),
+          GetOlderSettled: () => Effect.die('unused'),
           GetHome: () => Effect.die('unused'),
           LeftHome: () => Effect.die('unused'),
           Merge: () => Effect.die('unused'),
           ReadFolder: () => Effect.die('unused'),
           Push: () => Effect.die('unused'),
+          ReplacePullRequest: () => Effect.die('unused'),
+          MergeNote: () => Effect.die('unused'),
           MergeHere: () => Effect.die('unused'),
           PushHere: () => Effect.die('unused'),
           PushBranch: () => Effect.die('unused'),
@@ -240,6 +245,7 @@ describe('the client', () => {
           SetModelBlocked: () => Effect.die('unused'),
           GetSettings: () => Effect.die('unused'),
           SetCoAuthor: () => Effect.die('unused'),
+          SetAgentsAtOnce: () => Effect.die('unused'),
           StartAccountSignIn: () => Effect.die('unused'),
           GetAccountSignIn: () => Effect.die('unused'),
           PasteAccountSignInCode: () => Effect.die('unused'),
@@ -254,6 +260,7 @@ describe('the client', () => {
           SetTaskResolveConflicts: () => Effect.die('unused'),
           ResumeTask: () => Effect.die('unused'),
           AbandonTask: () => Effect.die('unused'),
+          RenameTask: () => Effect.die('unused'),
           ReopenTask: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
           TakeBack: () => Effect.die('unused'),
@@ -282,6 +289,8 @@ describe('the client', () => {
           MarkReady: () => Effect.die('unused'),
           SetUsageLimit: () => Effect.die('unused'),
           GetProjectRules: () => Effect.die('unused'),
+          GetProjectNotes: () => Effect.die('unused'),
+          DropProjectNote: () => Effect.die('unused'),
           GetVocabulary: () => Effect.die('unused'),
           RenameProject: () => Effect.die('unused'),
           SetProjectInk: () => Effect.die('unused'),

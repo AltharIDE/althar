@@ -1,9 +1,11 @@
+import { useRef } from 'react'
+
 import { Menu, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import s from './TaskMenu.module.css'
 
 /*
- * What you can do with a task as a whole, from its bar: open its folder in
+ * What you can do with a task as a whole, from its bar: rename it, open its folder in
  * an editor, start its plan now, mark its draft pull request ready, stop it,
  * resume it, abandon it, reopen it. Each item is there when its callback is,
  * and the consumer gives only those that apply where the task stands, so
@@ -31,6 +33,8 @@ export interface TaskMenuText {
   /** Running what it built, with the command it runs. */
   run: (command: string) => string
   runAbout: string
+  rename: string
+  renameAbout: string
   startNow: string
   startNowAbout: string
   markReady: string
@@ -62,6 +66,8 @@ export const taskMenuText: TaskMenuText = {
   openAbout: 'The task’s folder, on its branch.',
   run: (command) => `Run ${command}`,
   runAbout: 'Althar runs what it built, in its worktree. It shows over the composer.',
+  rename: 'Rename',
+  renameAbout: 'Give it another title. Its branch and folder keep their names.',
   startNow: 'Start now',
   startNowAbout: 'Its plan starts now, without waiting.',
   markReady: 'Mark ready for review',
@@ -85,6 +91,8 @@ export const taskMenuText: TaskMenuText = {
 }
 
 export interface TaskMenuProps {
+  /** Renames it, in any state: the consumer turns its title into a field. */
+  onRename?: () => void
   /** Opens the task's folder in `editor`, the one its files open in. */
   onOpen?: () => void
   /** The editor it opens in, by name. */
@@ -112,6 +120,7 @@ export interface TaskMenuProps {
 }
 
 export function TaskMenu({
+  onRename,
   onOpen,
   editor,
   run,
@@ -128,9 +137,11 @@ export function TaskMenu({
   text,
 }: TaskMenuProps) {
   const t = { ...taskMenuText, ...text }
+  // Renaming puts the cursor in the title's field: the menu closing doesn't take focus back to its button.
+  const renaming = useRef(false)
   const opener = onOpen !== undefined && editor !== undefined ? { onOpen, editor } : null
   // Ways to look at what it made: in the editor, and running.
-  const opens = opener !== null || run !== undefined
+  const opens = opener !== null || run !== undefined || onRename !== undefined
   // Forward first, then what holds or brings it back, then what settles it, set apart.
   const course = [
     onStartNow && (
@@ -167,11 +178,28 @@ export function TaskMenu({
       label={t.label}
       align="end"
       width={300}
+      returnFocus={() => {
+        const back = !renaming.current
+        renaming.current = false
+        return back
+      }}
       open={open}
       defaultOpen={defaultOpen}
       onOpenChange={onOpenChange}
       trigger={<ChromeButton icon="more" label={t.trigger} compact />}
     >
+      {onRename && (
+        <MenuItem
+          icon="pencil"
+          description={t.renameAbout}
+          onSelect={() => {
+            renaming.current = true
+            onRename()
+          }}
+        >
+          {t.rename}
+        </MenuItem>
+      )}
       {opener && (
         <MenuItem icon="external" description={t.openAbout} onSelect={opener.onOpen}>
           {t.open(opener.editor)}

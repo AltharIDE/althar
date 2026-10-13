@@ -35,6 +35,7 @@ const change = (more: Partial<ChangeSummary> = {}): ChangeSummary => ({
   listening: true,
   localHead: 'abc',
   unpushed: 0,
+  diverged: null,
   ...more,
 })
 const facts = (
@@ -117,6 +118,72 @@ describe('how a task’s pull request is told to the coordinator', () => {
     assert.match(section, /Checks: failing \(lint\); 1 of 2 passed\./)
     assert.match(section, /1 commit on the task's branch is not on the pull request yet/)
     assert.match(section, /Conflicts with the base: not known/)
+  })
+
+  it('says a branch that parted from its pull request, rewritten here or moved on there, and what the person can do', () => {
+    const rewritten = facts([change({ diverged: { kind: 'rewritten', local: 5, onPullRequest: 4 } })])
+    assert.strictEqual(listWords(rewritten), 'PR #113 draft, checks passing, diverged from PR')
+    assert.match(
+      sectionWords(rewritten),
+      /The task's branch was rewritten since it was pushed: 5 commits in place of 4 commits on the pull request, so it takes no plain push\. The person replaces its commits from the task's outputs, or has the lead merge instead\./,
+    )
+    const moved = facts([change({ diverged: { kind: 'moved', local: 0, onPullRequest: null } })])
+    assert.strictEqual(listWords(moved), 'PR #113 draft, checks passing, diverged from PR')
+    assert.match(sectionWords(moved), /The pull request has commits pushed from elsewhere that the task's branch doesn't/)
+    // A finished one has nothing to push.
+    assert.strictEqual(
+      listWords(facts([change({ state: 'merged', diverged: { kind: 'moved', local: 0, onPullRequest: null } })])),
+      'PR #113 merged',
+    )
+  })
+
+  it('names failing checks from the list where the host named none, and says what still runs', () => {
+    const failed = checks({
+      outcome: 'failed',
+      failed: 1,
+      passed: 0,
+      running: 1,
+      list: [
+        { name: 'e2e', state: 'failed', summary: null },
+        { name: 'unit', state: 'running', summary: null },
+      ],
+    })
+    assert.match(sectionWords(facts([change({ checks: failed })])), /Checks: failing \(e2e\); 0 of 2 passed, 1 pending\./)
+    assert.match(
+      sectionWords(facts([change({ checks: checks({ outcome: 'failed', failed: 1, passed: 1 }) })])),
+      /Checks: failing; 1 of 2 passed\./,
+    )
+  })
+
+  it('reads a task of several: each pull request by its repository, one merged here, and the repositories left', () => {
+    const several: PullRequestFacts = {
+      changes: [
+        { change: change({ repository: 'acme/api', number: 7, state: 'merged', title: '', url: '' }), seenAt: null, host: connected },
+        { change: change({ repository: '', number: 9, unpushed: 2 }), seenAt: null, host: null },
+      ],
+      merged: [{ name: 'docs', branch: 'main', remote: 'origin/main', ahead: 0 }],
+      unmerged: 2,
+    }
+    assert.strictEqual(
+      listWords(several),
+      'acme/api: PR #7 merged; PR #9 draft, checks passing, 2 unpushed, as last seen (its host is not known); docs: merged locally into main, no pull request; 2 repositories with work not merged or in a pull request yet',
+    )
+    assert.strictEqual(
+      sectionWords(several),
+      [
+        'Pull requests:\nacme/api: PR #7 merged\nMerged.',
+        [
+          'PR #9 draft, checks passing, 2 unpushed, as last seen (its host is not known): Add a retry',
+          'URL: https://github.com/acme/app/pull/113',
+          'Checks: passing (2 of 2).',
+          "2 commits on the task's branch are not on the pull request yet; the person pushes them.",
+          'Conflicts with the base: not known (Althar does not ask the host).',
+          'Possibly out of date: its host is not known, so this is as last seen.',
+        ].join('\n'),
+        'docs: merged locally into main, no pull request',
+        '2 repositories with work not merged or in a pull request yet: the task is not done.',
+      ].join('\n\n'),
+    )
   })
 
   it('reads checks pending, none and never fetched', () => {

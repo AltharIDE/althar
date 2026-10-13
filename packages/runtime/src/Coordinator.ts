@@ -7,11 +7,13 @@ import { knownModelName } from '@althar/contracts'
 import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Busy } from './Busy'
 import { Changes } from './Changes'
 import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { Agents } from './Config'
 import { NotFound } from './errors'
+import { taskShown } from './evidence'
 import { Instance } from './Instance'
 import { DraftUntitled, IssueDrafts, IssueTargetNeeded } from './IssueDrafts'
 import { Issues } from './Issues'
@@ -20,19 +22,19 @@ import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
 import { Plans } from './Plans'
 import { finishedBy, listWords, type PullRequestFacts, sectionWords } from './pullRequestStanding'
-import { Policies, ruleSetOf } from './Policies'
+import type { Policies } from './Policies'
 import { Projects } from './Projects'
-import { sayRules } from './rules'
+import { notesSection, projectOverview } from './handover'
+import { dropNote, keepNote, NOTE_LENGTH, NoteRefused, NOTES_KEPT, notesOf, sayNotes } from './notes'
 import { envelope } from './envelope'
 import { type PlanStep } from './Runs'
 import { type Disposition, Sessions } from './Sessions'
 import { blockedModelsOf } from './preferences'
-import { withRole } from './roles'
 import type { InputImage } from './sentImages'
 import { SignIns } from './SignIns'
 import { addItem, transcript } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
-import { describeModels, routeTo, usableModels } from './usableModels'
+import { describeModels, type Route, routeTo, usableModels } from './usableModels'
 
 /*
  * The project's coordinator (docs/architecture/04; docs/plans/mvp.md, "The
@@ -78,6 +80,7 @@ type Store =
   | Models
   | ModelFacts
   | Limits
+  | Busy
   | Accounts
 
 const Drafted = Schema.Struct({
@@ -94,8 +97,15 @@ const DraftedIssue = Schema.Struct({
   container: Schema.optional(Schema.String),
   labels: Schema.optional(Schema.Array(Schema.String)),
 })
-/* A step's model, as list_models names it; or, as plans once did, an agent and its own id for the model. */
-const StepPick = Schema.Struct({ model: Schema.optional(Schema.String), agent: Schema.optional(Schema.String) })
+/*
+ * A step's model, as list_models names it; or, as plans once did, an agent and its own id for the model. And how hard it
+ * thinks, where named: one of the model's efforts as list_models writes them.
+ */
+const StepPick = Schema.Struct({
+  model: Schema.optional(Schema.String),
+  agent: Schema.optional(Schema.String),
+  effort: Schema.optional(Schema.NullOr(Schema.String)),
+})
 const Proposed = Schema.Struct({
   task: Schema.String,
   lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
@@ -109,6 +119,10 @@ const Started = Schema.Struct({
   repositories: Schema.optional(Schema.Array(Schema.String)),
 })
 const Named = Schema.Struct({ task: Schema.String })
+/* A thread to read: a task's, or, with none, the coordinator's own; and, to read further back, where the part read before began. */
+const Reading = Schema.Struct({ task: Schema.optional(Schema.String), before: Schema.optional(Schema.Int) })
+const Noted = Schema.Struct({ note: Schema.String })
+const Dropped = Schema.Struct({ id: Schema.String })
 const Passed = Schema.Struct({ task: Schema.String, message: Schema.String, now: Schema.optional(Schema.Boolean) })
 
 const read = <A>(schema: Schema.Codec<A, unknown>, input: unknown) =>
@@ -150,6 +164,7 @@ export class Coordinator extends Context.Service<
       const sessions = yield* Sessions
       const projects = yield* Projects
       const plans = yield* Plans
+      const busy = yield* Busy
       const toolServer = yield* ToolServer
       const changes = yield* Changes
       const issues = yield* Issues
@@ -200,12 +215,15 @@ export class Coordinator extends Context.Service<
               return yield* new CoordinatorUnavailable({ agentId: pick?.agentId ?? '', agentName: pick?.agentName ?? 'The agent' })
             // Queued first, so the coordinator's first turn is its brief with what the person said.
             if (input.quiet !== true) yield* sessions.send(input)
-            yield* sessions.start({
-              threadId: input.threadId,
-              agentId: pick.agentId,
-              ...(pick.model === null ? {} : { model: pick.model }),
-              ...(pick.effort === null ? {} : { effort: pick.effort }),
-            })
+            yield* sessions
+              .start({
+                threadId: input.threadId,
+                agentId: pick.agentId,
+                ...(pick.model === null ? {} : { model: pick.model }),
+                ...(pick.effort === null ? {} : { effort: pick.effort }),
+              })
+              // One started meanwhile, as a fresh session taking the conversation over does: what was said waits for it.
+              .pipe(Effect.catchTag('SessionRunning', () => Effect.void))
             return
           }
           yield* sessions.send(input)
@@ -235,28 +253,10 @@ export class Coordinator extends Context.Service<
               }),
             )
 
+      /** The project, as project_overview gives it: its repositories, its tasks, its rules, and its notes. */
       const overview = (access: ToolAccess) =>
         Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const [project] = yield* sql<{ name: string }>`SELECT name FROM projects WHERE id = ${access.projectId}`
-          const repositories = yield* sql<{ name: string; role: string; base: string | null; within: string | null; path: string }>`
-            SELECT b.display_name AS name, b.role, b.default_base_ref AS base, b.folder AS within, l.path FROM repository_bindings b
-            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE b.project_id = ${access.projectId} AND b.detached_at IS NULL
-            ORDER BY b.created_at, b.rowid`
-          const [counts] = yield* sql<{ open: number; drafts: number }>`
-            SELECT sum(state = 'open') AS open, sum(state = 'draft') AS drafts FROM tasks WHERE project_id = ${access.projectId}`
-          return [
-            `Project: ${project?.name ?? ''}`,
-            `Repositories:\n${repositories
-              .map(
-                (repository) =>
-                  `- ${withRole(repository.name, repository.role)} (${repository.base ?? 'main'}), on this Mac at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
-              )
-              .join('\n')}`,
-            `Tasks: ${counts?.open ?? 0} open, ${counts?.drafts ?? 0} planned and not yet started.`,
-            `Rules: ${sayRules(ruleSetOf((yield* (yield* Policies).current(access.projectId as ProjectId)).rules))}`,
-          ].join('\n\n')
+          return [yield* projectOverview(access.projectId), notesSection(yield* notesOf(access.projectId))].join('\n\n')
         })
 
       const list = (access: ToolAccess) =>
@@ -302,9 +302,14 @@ export class Coordinator extends Context.Service<
             WHERE w.task_id = ${task.id} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
           const seen = yield* pullRequests(task.id)
           const found = task.state === 'done' && seen !== undefined ? { ...seen, unmerged: 0 } : seen
+          // What it built, as its lead last said it: what to tell the person it delivered, without reading every round.
+          const { built, unverified } = yield* taskShown(task.threadId)
           return [
             `${task.slug}: ${task.title}`,
             task.description === '' ? '' : task.description,
+            built === null ? '' : `What it built, as its lead says it now stands:\n${built}`,
+            unverified.length === 0 ? '' : `What its lead couldn't show working:\n${unverified.map((line) => `- ${line}`).join('\n')}`,
+            yield* issueWords(task.id),
             workspaces.length === 1
               ? `Branch ${workspaces[0]?.branch ?? ''}, in ${workspaces[0]?.path ?? ''}.`
               : workspaces.map((workspace) => `${workspace.name}: branch ${workspace.branch}, in ${workspace.path}.`).join('\n'),
@@ -318,14 +323,84 @@ export class Coordinator extends Context.Service<
             .join('\n\n')
         })
 
+      /** The issue a task came from, where it stands as last seen, and whether Althar moved it to In Progress as the task started. */
+      const issueWords = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [link] = yield* sql<{ key: string; url: string; snapshot: string; type: string | null; payload: string | null }>`
+            SELECT x.key, x.url, x.snapshot, e.type, e.payload FROM external_links x
+            LEFT JOIN record_events e ON e.aggregate_id = x.id
+              AND e.type IN ('external_link.issue_started', 'external_link.issue_start_failed')
+            WHERE x.task_id = ${taskId} AND x.kind = 'issue' ORDER BY x.created_at, e.sequence DESC LIMIT 1`
+          if (link === undefined) return ''
+          const status = (JSON.parse(link.snapshot) as { status?: { name?: string } }).status?.name
+          const said = JSON.parse(link.payload ?? '{}') as { moved?: boolean; error?: string }
+          const issue = `Issue: ${link.key}${status === undefined ? '' : `, ${status}`}, ${link.url}.`
+          if (link.type === 'external_link.issue_started' && said.moved === true)
+            return `${issue} Althar moved it to In Progress as the task started: the person needn’t.`
+          if (link.type === 'external_link.issue_start_failed')
+            return `${issue} Althar couldn’t move it to In Progress as the task started: ${said.error ?? ''}.`
+          return issue
+        })
+
+      /** A task's thread, or the coordinator's own conversation: its latest part, or the part before an earlier read. */
       const readThread = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
-          const { task: reference } = yield* read(Named, input)
-          const task = yield* taskOf(access, reference)
-          const record = yield* transcript(task.threadId, 30_000)
+          const { task: reference, before } = yield* read(Reading, input)
+          const threadId = reference === undefined ? access.threadId : (yield* taskOf(access, reference)).threadId
+          const record = yield* transcript(threadId, 30_000, {
+            ...(before === undefined ? {} : { before }),
+            // In its own conversation, what it said is its own.
+            ...(reference === undefined ? { agent: 'you' } : {}),
+          })
+          if (record.text === '') return before === undefined ? 'The thread is empty.' : 'Nothing comes before that.'
           return record.omitted > 0
-            ? `(The ${record.omitted} earliest items are left out.)\n${record.text}`
-            : record.text || 'The thread is empty.'
+            ? `(The ${record.omitted} earliest items are left out: read_thread with before ${record.omitted} reads back from there.)\n${record.text}`
+            : record.text
+        })
+
+      /** Keeps a decision the person made as one of the project's notes; the same words as one kept now are that note. */
+      const keep = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const { note } = yield* read(Noted, input)
+          const kept = yield* keepNote({
+            // A command of its own each time: the same words kept already are found as the note they are, and kept again once dropped.
+            envelope: yield* envelope('project.note.keep', { note }, undefined, instance.coordinatorId),
+            projectId: access.projectId as ProjectId,
+            body: note,
+          }).pipe(
+            Effect.catchTag('NoteRefused', (refused: NoteRefused) =>
+              Effect.fail(
+                new ToolRefused({
+                  message: {
+                    empty: 'Say what the person decided, in a sentence.',
+                    long: `That note is ${note.trim().length} characters. Keep it to ${NOTE_LENGTH}: the decision, in a sentence or two.`,
+                    full: `The project keeps ${NOTES_KEPT} notes at most. Drop one that no longer holds with drop_note first; list_notes lists them.`,
+                  }[refused.why],
+                }),
+              ),
+            ),
+          )
+          return kept.kept ? `Kept as ${kept.noteId}.` : `The project has that note already, as ${kept.noteId}.`
+        })
+
+      const listNotes = (access: ToolAccess) =>
+        Effect.map(notesOf(access.projectId), (notes) => (notes.length === 0 ? 'The project has no notes yet.' : sayNotes(notes)))
+
+      const drop = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const { id } = yield* read(Dropped, input)
+          yield* dropNote({
+            // Dropped already, a note stays dropped: dropping it again does nothing.
+            envelope: yield* envelope('project.note.drop', { noteId: id }, undefined, instance.coordinatorId),
+            projectId: access.projectId,
+            noteId: id,
+          }).pipe(
+            Effect.catchTag('NotFound', () =>
+              Effect.fail(new ToolRefused({ message: `The project has no note ${id}. list_notes lists them, by their ids.` })),
+            ),
+          )
+          return `Dropped ${id}.`
         })
 
       /** Drafts a task, from an issue where one is named: the task made, or the one this session made under that title before. */
@@ -415,7 +490,11 @@ export class Coordinator extends Context.Service<
             end: null,
             held: true,
           })
-          yield* plans.start(planId, instance.coordinatorId)
+          const started = yield* plans.start(planId, instance.coordinatorId)
+          if (started === 'waiting') {
+            const { busy: atWork, atOnce } = yield* busy.now
+            return `Started ${created.slug}, but it waits for a free agent: ${atWork} of the ${atOnce} this computer runs at once are busy. Its lead starts on it by itself when one is free, with no review, and nothing goes outside the project when it is done. The person sees it as a card, waiting; say in a sentence what it does, and that it waits its turn.`
+          }
           return `Started ${created.slug}: its lead is on it now, with no review, and nothing goes outside the project when it is done. The person sees it as a card; say in a sentence what it does.`
         })
 
@@ -423,15 +502,47 @@ export class Coordinator extends Context.Service<
       const listModels = (access: ToolAccess) => Effect.map(usableModels(access.projectId), describeModels)
 
       /**
-       * A step's agent and model, from what the plan names (ADR-015): a model
-       * as list_models writes it, taken the best way there is; or an agent, on
-       * its own id for a model or on its own default.
+       * A step's effort, where the plan names one: one of the levels its model
+       * takes the way it goes, by its id or its name, kept as its id. Any other
+       * is refused, with the ones it takes. Left out, the step starts at the
+       * person's default for the model, or else at the model's own.
+       */
+      const effortOf = (
+        named: string,
+        levels: ReadonlyArray<{ readonly id: string; readonly name: string }>,
+        asked: string | null | undefined,
+      ): Effect.Effect<string | null, ToolRefused> => {
+        if (asked == null) return Effect.succeed(null)
+        const wanted = asked.trim().toLowerCase()
+        const level = levels.find((one) => one.id.toLowerCase() === wanted || one.name.toLowerCase() === wanted)
+        if (level !== undefined) return Effect.succeed(level.id)
+        return Effect.fail(
+          new ToolRefused({
+            message:
+              levels.length === 0
+                ? `${named} has no effort to set. Leave effort out.`
+                : `${named} has no effort ${asked}. Name one of its efforts, as list_models writes them: ${levels.map((one) => one.id).join(', ')}; or leave effort out.`,
+          }),
+        )
+      }
+
+      /**
+       * A step's agent, model and effort, from what the plan names (ADR-015):
+       * a model as list_models writes it, taken the best way there is; or an
+       * agent, on its own id for a model or on its own default.
        */
       const stepOf = (projectId: string, pick: typeof StepPick.Type) =>
         Effect.gen(function* () {
+          // On the way it goes, at an effort that model takes there; named as the plan names it.
+          const on = (route: Route, named: string) =>
+            Effect.map(effortOf(named, route.efforts, pick.effort), (effort) => ({
+              agentId: route.agentId,
+              model: route.model,
+              ...(effort === null ? {} : { effort }),
+            }))
           if (pick.model !== undefined) {
             const route = routeTo(yield* usableModels(projectId), pick.model, pick.agent)
-            if (route !== null) return { agentId: route.agentId, model: route.model }
+            if (route !== null) return yield* on(route, pick.model)
             if (pick.agent === undefined)
               return yield* new ToolRefused({
                 message: `No model called ${pick.model} can be used now. ${describeModels(yield* usableModels(projectId))}`,
@@ -449,12 +560,19 @@ export class Coordinator extends Context.Service<
               offered === undefined
                 ? null
                 : routeTo(yield* usableModels(projectId), knownModelName({ id: agentId, name: agentName }, offered))
-            if (elsewhere !== null) return { agentId: elsewhere.agentId, model: elsewhere.model }
+            if (elsewhere !== null) return yield* on(elsewhere, pick.model)
             return yield* new ToolRefused({
               message: `The person switched ${pick.model} off. ${describeModels(yield* usableModels(projectId))}`,
             })
           }
-          return { agentId, model: pick.model ?? null }
+          // Its efforts as the agent offers that model; on its own default, they aren't known, so none is taken.
+          const levels =
+            pick.effort == null || pick.model === undefined
+              ? []
+              : ((yield* (yield* Models).catalog).find((one) => one.agentId === agentId)?.models.find((model) => model.id === pick.model)
+                  ?.efforts ?? [])
+          const effort = yield* effortOf(pick.model ?? `${nameOf(agentId)}'s default model`, levels, pick.effort)
+          return { agentId, model: pick.model ?? null, ...(effort === null ? {} : { effort }) }
         })
 
       const propose = (access: ToolAccess, input: unknown) =>
@@ -607,9 +725,14 @@ export class Coordinator extends Context.Service<
         properties: { task: { type: 'string', description: "The task's slug, as list_tasks shows it." } },
         required: ['task'],
       }
+      const effort = {
+        type: 'string',
+        description:
+          "How hard it thinks: one of the efforts list_models gives for its model. Left out, it starts at the person's default for the model, or else at the model's own.",
+      }
 
       yield* toolServer.serve('coordinator', [
-        tool('project_overview', 'The project: its repositories, how many tasks it has, and its rules.', nothing, (access) =>
+        tool('project_overview', 'The project: its repositories, how many tasks it has, its rules, and its notes.', nothing, (access) =>
           overview(access),
         ),
         tool(
@@ -620,11 +743,22 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'read_task',
-          "A task: what it is, its branch, what each of its steps reported, and its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date.",
+          "A task: what it is, what it built as its lead last said it (and what it couldn't show working), its branch, what each of its steps reported, and its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date.",
           named,
           readTask,
         ),
-        tool('read_thread', "A task's thread as text: what the person, the lead and Althar said, oldest first.", named, readThread),
+        tool(
+          'read_thread',
+          "A thread as text, oldest first: a task's, with what the person, its lead and Althar said; or, without a task, your own conversation with the person. It reads the latest part; to read further back, pass before as it says.",
+          {
+            type: 'object',
+            properties: {
+              task: { type: 'string', description: "The task's slug, as list_tasks shows it. Leave it out for your own conversation." },
+              before: { type: 'integer', description: 'To read further back: the number an earlier read_thread gave.' },
+            },
+          },
+          readThread,
+        ),
         tool(
           'draft_task',
           `Drafts a task for a change: its title, saying what should change in a few words (at most ${TITLE_LENGTH} characters), and a description with what the lead needs: the context, where to look, constraints, and what done looks like. When it comes from an issue, pass the issue's link or key as issue. Then propose its plan.`,
@@ -683,26 +817,27 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'list_models',
-          'The models you can give work to now, by who makes them, with how each scores and whether a plan pays for it.',
+          'The models you can give work to now, by who makes them, with how each scores, whether a plan pays for it, and the efforts it takes: their ids, the one it starts at by itself, and the person’s default where they set one.',
           nothing,
           (access) => listModels(access),
         ),
         tool(
           'propose_plan',
-          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. Name each model as list_models writes it. It starts on its own after 25 seconds unless the person holds or changes it.",
+          "Proposes a drafted task's plan: the model that implements it (its lead), with why in a sentence; and the model that reviews it, which only reads, or null for something trivial. Name each model as list_models writes it, and, where it matters, one of the efforts it lists for that model. It starts on its own after 25 seconds unless the person holds or changes it.",
           {
             type: 'object',
             properties: {
               task: { type: 'string', description: "The task's slug." },
               lead: {
                 type: 'object',
-                properties: { model: { type: 'string', description: 'As list_models writes it.' }, reason: { type: 'string' } },
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort, reason: { type: 'string' } },
                 required: ['model'],
               },
               review: {
                 type: ['object', 'null'],
                 properties: {
                   model: { type: 'string', description: 'As list_models writes it; another maker’s than the lead’s where there is one.' },
+                  effort,
                 },
                 required: ['model'],
               },
@@ -713,7 +848,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'start_task',
-          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. A change worth reviewing, or that should end in a pull request, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
+          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it, and an effort it lists where it matters; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. A change worth reviewing, or that should end in a pull request, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
           {
             type: 'object',
             properties: {
@@ -721,7 +856,7 @@ export class Coordinator extends Context.Service<
               description: { type: 'string' },
               lead: {
                 type: 'object',
-                properties: { model: { type: 'string', description: 'As list_models writes it.' }, reason: { type: 'string' } },
+                properties: { model: { type: 'string', description: 'As list_models writes it.' }, effort, reason: { type: 'string' } },
                 required: ['model'],
               },
               repositories: {
@@ -743,6 +878,19 @@ export class Coordinator extends Context.Service<
             required: ['task', 'message'],
           },
           message,
+        ),
+        tool(
+          'keep_note',
+          `Keeps one of the project's notes: a decision the person made in conversation that the code doesn't show, in a sentence (at most ${NOTE_LENGTH} characters), such as "Issue drafts need an approval card, on every tracker." Every session of yours starts with the project's notes, and the person sees them in the project's settings.`,
+          { type: 'object', properties: { note: { type: 'string', maxLength: NOTE_LENGTH } }, required: ['note'] },
+          keep,
+        ),
+        tool('list_notes', "The project's notes, oldest first, each with its id.", nothing, (access) => listNotes(access)),
+        tool(
+          'drop_note',
+          "Drops one of the project's notes that no longer holds, such as a decision the person took back, by its id as list_notes gives it.",
+          { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+          drop,
         ),
       ])
 

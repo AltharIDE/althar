@@ -1,4 +1,15 @@
-export { Agents, type AgentEntry, RuntimeConfig, type RuntimeOptions, type SetupOptions, type StallOptions, WebCrypto } from './Config'
+export {
+  Agents,
+  type AgentEntry,
+  type BusyOptions,
+  RuntimeConfig,
+  type RuntimeOptions,
+  type SetupOptions,
+  type StallOptions,
+  WebCrypto,
+} from './Config'
+export { type AtOnce, Busy } from './Busy'
+export { type AtOnceDefault, atOnceFor, type Machine } from './atOnce'
 export * from './errors'
 export { Instance, type InstanceInfo } from './Instance'
 export { Live, type LiveEvent } from './Live'

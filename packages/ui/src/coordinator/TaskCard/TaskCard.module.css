@@ -95,6 +95,10 @@
   color: var(--t-1);
   font-weight: 550;
 }
+/* Beside its model, as the model picker says it. */
+.effort {
+  color: var(--t-3);
+}
 .sep {
   width: 1px;
   height: 12px;

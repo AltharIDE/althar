@@ -156,6 +156,14 @@ const options = {
   deviceName: hostname(),
 }
 
+/** The machine the end-to-end tests name in `ALTHAR_MACHINE`, as `cores,GB`; without one, a large one: 64 cores and 256 GB. */
+const machineIn = (named: string | undefined) => {
+  const [cores, memory] = (named ?? '').split(',').map(Number)
+  return cores !== undefined && memory !== undefined && cores > 0 && memory > 0
+    ? { cores, memory: memory * 1024 ** 3 }
+    : { cores: 64, memory: 256 * 1024 ** 3 }
+}
+
 /* Ports and folders that arrive before the runtime is ready wait here. */
 const early: Array<Port> = []
 let accept = (port: Port) => void early.push(port)
@@ -191,6 +199,8 @@ const program = Effect.gen(function* () {
           // Nothing opens in Terminal while the tests drive the app.
           openTerminal: () => Effect.succeed(false),
           openUrl: () => Effect.succeed(false),
+          // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
+          busy: { machine: machineIn(process.env.ALTHAR_MACHINE) },
         }
       : undefined
   const context = yield* Layer.build(

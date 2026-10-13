@@ -14,7 +14,16 @@ import type { FakeService } from '@althar/connectors/testing'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
-import { Agents, type AgentEntry, Connectors, type RuntimeOptions, type SetupOptions, type StallOptions } from '../src/Config'
+import {
+  Agents,
+  type AgentEntry,
+  type BusyOptions,
+  Connectors,
+  type IdleOptions,
+  type RuntimeOptions,
+  type SetupOptions,
+  type StallOptions,
+} from '../src/Config'
 import type { CliUnanswered } from '../src/errors'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
@@ -189,8 +198,12 @@ export const runtime = (
     readonly setups?: SetupOptions
     /** How this computer's load is read. */
     readonly load?: LoadOptions
+    /** When a lead that ended its turn counts as done, and how long a round waits for one that isn't. */
+    readonly idle?: IdleOptions
     /** The device outside a sandbox, as for a Flatpak. */
     readonly onDevice?: RuntimeOptions['onDevice']
+    /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
+    readonly busy?: BusyOptions
   } = {},
 ) =>
   Runtime.layer({
@@ -214,8 +227,13 @@ export const runtime = (
     ...(more.editors === undefined ? {} : { editors: more.editors }),
     setups: { shell: '/bin/sh', ...more.setups },
     ...(more.load === undefined ? {} : { load: more.load }),
+    ...(more.idle === undefined ? {} : { idle: more.idle }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
+    busy: { machine: ROOMY, ...more.busy },
   })
+
+/** A machine with room for as many agents at once as Althar runs: 64 cores and 256 GB. */
+export const ROOMY = { cores: 64, memory: 256 * 1024 ** 3 }
 
 /** A GitHub instance that never answers: `.test` names nothing, so git's fetches fail at once, and the fake service stands in for its API. */
 export const HOST = 'https://github.test'

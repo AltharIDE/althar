@@ -12,6 +12,12 @@
   margin-top: 2px;
   font-size: 14px;
 }
+.note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--t-2);
+}
 .prs {
   display: flex;
   flex-direction: column;

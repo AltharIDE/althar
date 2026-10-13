@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 
-import type { AgentStatus, ConnectionList } from '@althar/contracts'
+import { type AgentStatus, type ConnectionList, MOST_AT_ONCE } from '@althar/contracts'
 import {
   type AgentGlance,
+  AgentsAtOnce,
   type AgentTab,
   AgentInstall,
   AgentTabList,
@@ -73,13 +74,15 @@ import s from './Settings.module.css'
 import { type AppIconModel, useAppIcon } from './useAppIcon'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { type CoAuthorModel, useCoAuthor } from './useCoAuthor'
+import { type AgentsAtOnceModel, useAgentsAtOnce } from './useAgentsAtOnce'
 
 /*
  * Settings, as a panel from the home's bar, over the home: the kit's Control
  * Center, each part as large as it matters. Round switches across the top,
  * for keeping the Mac awake while work runs and for notifications, each
- * opening out to the rest of its settings: on battery too and the editor
- * files open in, and which notifications, the Dock's count and a sound.
+ * opening out to the rest of its settings: on battery too, how many agents
+ * work at once on this Mac and why, and the editor files open in; and which
+ * notifications, the Dock's count and a sound.
  * Under them the agents, large, each with a word on where it stands; the
  * code hosts and trackers, tall, by their marks, with what needs the person;
  * and, small, where Althar shows while you're in another app, on every
@@ -134,6 +137,14 @@ export const text = {
   withSound: 'With sound',
   awakeTitle: `Keep ${device.this} awake while work runs`,
   awakeNote: `Work stops when ${device.the} sleeps. The display can still sleep.`,
+  atOnceNote: (n: number, { count, memory, cores }: { count: number; memory: number; cores: number }) => {
+    if (n === count) return `${n}: ${device.this} has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`
+    if (n === 1) return `1: one at a time. The calmest ${device.this} can be.`
+    if (n < count) return `${n}: fewer than ${device.this} could carry.`
+    if (n <= count + 2) return `${n}: a little more than ${device.this}’s ${memory} GB suggests. Tests may slow down.`
+    return `${n}: well past what ${device.this}’s ${memory} GB suggests. Expect it to run hot.`
+  },
+  atOnceMark: ({ count }: { count: number }) => `${count} · ${device.this}`,
   loadTitle: `Show how hard ${device.this} works`,
   loadNote: 'CPU and memory in the bar, and how much of each Althar’s work uses.',
   badge: `Count them on ${device.count ?? 'the icon'}`,
@@ -233,6 +244,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
       appIcon={useAppIcon()}
       edge={useEdgePlace(props.open)}
       coAuthor={useCoAuthor()}
+      atOnce={useAgentsAtOnce()}
       preferences={usePreferences()}
       doNotTrack={useServices().host.doNotTrack === true}
       onUsageShown={useServices().host.usageShown}
@@ -251,6 +263,7 @@ export function SettingsView({
   appIcon,
   edge,
   coAuthor,
+  atOnce,
   preferences: kept,
   doNotTrack = false,
   onUsageShown,
@@ -268,6 +281,8 @@ export function SettingsView({
   edge: EdgePlaceModel
   /** Null until the settings are read. */
   coAuthor: CoAuthorModel | null
+  /** How many agents work at once on this Mac, and why; null until the settings are read. */
+  atOnce: AgentsAtOnceModel | null
   preferences: PreferencesModel
   /** DO_NOT_TRACK is set where Althar started: usage data is off, whatever its switch says. */
   doNotTrack?: boolean
@@ -593,6 +608,16 @@ export function SettingsView({
                 onBatteryChange={(on) => set('awakeOnBattery', on)}
                 text={{ title: text.awakeTitle, note: text.awakeNote }}
               />
+              {atOnce !== null && (
+                <AgentsAtOnce
+                  count={atOnce.atOnce.count}
+                  own={atOnce.atOnce.own !== null}
+                  machine={atOnce.atOnce.machine}
+                  most={MOST_AT_ONCE}
+                  onChange={atOnce.set}
+                  text={{ note: text.atOnceNote, mark: text.atOnceMark }}
+                />
+              )}
               <SettingSwitch
                 title={text.loadTitle}
                 note={text.loadNote}
@@ -613,6 +638,11 @@ export function SettingsView({
               )}
             </SettingList>
             {failed}
+            {atOnce?.failed === true && (
+              <p role="alert" className={s.failed}>
+                {text.preferenceFailed}
+              </p>
+            )}
           </ControlSheet>
         </ControlDetail>
       )}

@@ -1,4 +1,4 @@
-import { type SignInCheck, signInCheck, type SignInStatus } from '@althar/provider-adapters'
+import { adapterNode, type SignInCheck, signInCheck, type SignInStatus } from '@althar/provider-adapters'
 import { Context, Duration, Effect, Layer, PubSub, Stream } from 'effect'
 import type { SqlError } from 'effect/sql'
 
@@ -58,7 +58,7 @@ export class SignIns extends Context.Service<
           const entry = agents.list.find((candidate) => candidate.definition.id === of.agentId)
           if (entry === undefined) return UNKNOWN
           yield* accounts.prepare(of)
-          const checked = yield* signInCheck(entry.definition, process.execPath, accounts.env(of))
+          const checked = yield* signInCheck(entry.definition, adapterNode(), accounts.env(of))
           // As it stands now, not as it stood when this check began: another may have finished meanwhile and said it.
           const before = known.get(of.id)?.check.status
           known.set(of.id, { check: checked, at: Date.now() })

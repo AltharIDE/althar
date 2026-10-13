@@ -127,6 +127,61 @@ describe('a project’s settings', () => {
     expect(panel.getByRole('textbox', { name: 'Name' })).toHaveProperty('value', 'meridian')
   })
 
+  it('shows the notes its coordinator keeps, and drops one that no longer holds', async () => {
+    const notes = [
+      {
+        id: 'note_1',
+        body: 'Issue drafts need an approval card, on every tracker.',
+        createdAt: '2026-10-01T09:00:00.000Z',
+        keptBy: 'coordinator' as const,
+      },
+      {
+        id: 'note_2',
+        body: 'Dependency setup runs outside the sandbox.',
+        createdAt: '2026-10-02T09:00:00.000Z',
+        keptBy: 'coordinator' as const,
+      },
+    ]
+    let kept = notes
+    const { client } = windowAt('/projects/p1', {
+      getProjectNotes: vi.fn(async () => kept),
+      dropProjectNote: vi.fn(async (_projectId: string, noteId: string) => {
+        kept = kept.filter((note) => note.id !== noteId)
+      }),
+    })
+    const panel = await openSettings()
+    // At a glance: how many, and the latest.
+    const module = await panel.findByRole('button', { name: /^Notes/ })
+    expect(module.textContent).toContain('2')
+    expect(module.textContent).toContain('Dependency setup runs outside the sandbox.')
+    await userEvent.click(module)
+    expect(panel.getByRole('heading', { name: 'Notes', level: 2 })).toBeTruthy()
+    await userEvent.click(panel.getByRole('button', { name: 'Remove “Issue drafts need an approval card, on every tracker.”' }))
+    await waitFor(() => expect(client.dropProjectNote).toHaveBeenCalledWith('p1', 'note_1'))
+    await waitFor(() => expect(panel.getAllByRole('listitem')).toHaveLength(1))
+    expect(panel.getByRole('button', { name: 'Remove “Dependency setup runs outside the sandbox.”' })).toBe(document.activeElement)
+  })
+
+  it('puts a note back and says why when dropping it doesn’t hold', async () => {
+    const note = {
+      id: 'note_1',
+      body: 'Issue drafts need an approval card.',
+      createdAt: '2026-10-01T09:00:00.000Z',
+      keptBy: 'coordinator' as const,
+    }
+    windowAt('/projects/p1', {
+      getProjectNotes: vi.fn(async () => [note]),
+      dropProjectNote: vi.fn(async () => {
+        throw new ApiError({ reason: 'NotFound', message: 'That project isn’t there any more.' })
+      }),
+    })
+    const panel = await openSettings()
+    await userEvent.click(await panel.findByRole('button', { name: /^Notes/ }))
+    await userEvent.click(panel.getByRole('button', { name: 'Remove “Issue drafts need an approval card.”' }))
+    expect(await panel.findByRole('alert')).toHaveProperty('textContent', 'That project isn’t there any more.')
+    await waitFor(() => expect(panel.getAllByRole('listitem')).toHaveLength(1))
+  })
+
   it('says where each thing stands, and opens its repositories and its rules', async () => {
     const { router } = windowAt('/projects/p1')
     let panel = await openSettings()
@@ -175,6 +230,34 @@ describe('a project’s settings', () => {
     expect(await panel.findByText('The rules changed meanwhile.')).toBeTruthy()
     expect(client.setProjectRules).toHaveBeenCalledOnce()
     await waitFor(() => expect(conflicts.getAttribute('aria-checked')).toBe('false'))
+  })
+
+  it('moves a task’s issue to In Progress as it starts unless switched off, a rule kept at once', async () => {
+    const { client } = windowAt('/projects/p1')
+    const panel = await openSettings()
+    const move = await panel.findByRole('switch', { name: 'Move issues to In Progress when their task starts' })
+    expect(move.getAttribute('aria-checked')).toBe('true')
+    expect(panel.getByText('On: Althar moves the issue as its task starts')).toBeTruthy()
+    await userEvent.click(move)
+    // Off at once, before the runtime has said so.
+    expect(move.getAttribute('aria-checked')).toBe('false')
+    expect(panel.getByText('Off: you move issues yourself')).toBeTruthy()
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenCalledWith({ projectId: 'p1', moveIssues: false }))
+    expect(move.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('switches issues back, saying why, where the rule didn’t hold, and the other switch says nothing of it', async () => {
+    windowAt('/projects/p1', {
+      setProjectRules: vi.fn(async () => {
+        throw new ApiError({ reason: 'RulesChanged', message: 'The rules changed meanwhile.' })
+      }),
+    })
+    const panel = await openSettings()
+    const move = panel.getByRole('switch', { name: 'Move issues to In Progress when their task starts' })
+    await userEvent.click(move)
+    expect(await panel.findByText('The rules changed meanwhile.')).toBeTruthy()
+    await waitFor(() => expect(move.getAttribute('aria-checked')).toBe('true'))
+    expect(panel.getByText('Off: you ask the lead to fix them')).toBeTruthy()
   })
 
   it('removes the project after saying what happens, and goes home; its tab goes', async () => {

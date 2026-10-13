@@ -144,6 +144,17 @@ export enum Verdict {
   Blocked = 'blocked',
 }
 
+/** What a piece of evidence is: what a lead shows to say its change does what it should. */
+export enum EvidenceKind {
+  Screenshot = 'screenshot',
+  Recording = 'recording',
+  Command = 'command',
+  TestRun = 'test_run',
+  Response = 'response',
+  Log = 'log',
+  Note = 'note',
+}
+
 /**
  * Where a review finding stands. The lead settles findings by default: it
  * fixes what holds and sets aside what does not. A finding reaches you when
@@ -202,6 +213,8 @@ export enum TaskStatus {
   Done = 'done',
   /** Held for a usage limit. */
   Paused = 'paused',
+  /** Waits for a free agent: every one this machine runs at once is busy. It starts on its own. */
+  Queued = 'queued',
   /** Stopped by you. */
   Stopped = 'stopped',
 }
@@ -403,6 +416,27 @@ export enum Outcome {
   Knowledge = 'knowledge',
   /** Given up on; the reasoning kept. */
   Abandoned = 'abandoned',
+}
+
+/** Where a push the lead asked the person for stands. */
+export enum PushState {
+  /** Waiting for the person to push. */
+  Open = 'open',
+  Pushed = 'pushed',
+  /** The lead asked again, with more, further down. */
+  Replaced = 'replaced',
+  /** Its pull request was merged or closed first. */
+  Closed = 'closed',
+}
+
+/** Why what is on the branch now can't go up, where it changed since the lead asked. */
+export enum PushBlocked {
+  /** The branch no longer has what the pull request has: a push would need forcing. */
+  Rewritten = 'rewritten',
+  /** The pull request has commits the branch doesn't, pushed from elsewhere. */
+  Behind = 'behind',
+  /** Althar can't tell what the pull request has. */
+  Unknown = 'unknown',
 }
 
 /** Where a task's change stands. */

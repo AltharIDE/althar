@@ -85,7 +85,7 @@ function TabsBar({ tabs, endRef }: { tabs: ReturnType<typeof useTabs>; endRef: (
   const { host } = useServices()
   const chrome = useWindowChrome()
   const update = useUpdate()
-  const load = useLoad()
+  const load = useLoad(tabs.tabs.length > 0 || tabs.others.length > 0)
   const { select, current } = tabs
   return (
     <ProjectTabs

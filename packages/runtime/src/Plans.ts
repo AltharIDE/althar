@@ -41,11 +41,19 @@ export class Plans extends Context.Service<
       /** Held from the start: it waits until someone starts it, with no countdown. */
       readonly held?: boolean
     }): Effect.Effect<string, unknown>
-    /** Starts a proposed plan now. */
-    start(planId: string, actorId: ActorId): Effect.Effect<void, unknown>
+    /**
+     * Starts a proposed plan now: its first step is under way (`running`), or
+     * waits for a place among the agents at work on this machine (`waiting`);
+     * null where it no longer stood to start.
+     */
+    start(planId: string, actorId: ActorId): Effect.Effect<'running' | 'waiting' | null, unknown>
     /** Holds a proposed plan until someone starts it. */
     hold(planId: string, actorId: ActorId): Effect.Effect<void, unknown>
-    /** Changes a proposed plan's steps (who does them, or which are skipped), and what happens when the work is done. */
+    /**
+     * Changes a proposed plan's steps (who does them, or which are skipped),
+     * and what happens when the work is done; or a started one's, while its
+     * first step waits for a place among the agents at work here (ADR-032).
+     */
     change(planId: string, steps: ReadonlyArray<PlanStep>, actorId: ActorId, end?: TaskEnd | null): Effect.Effect<void, unknown>
   }
 >()('@althar/runtime/Plans') {
@@ -166,7 +174,7 @@ export class Plans extends Context.Service<
             'task_plan.accepted',
             actorId,
           )
-          if (accepted) yield* runs.run(planId)
+          return accepted ? yield* runs.run(planId) : null
         })
 
       // The countdown: the next plan due starts when its time comes, or sooner if a plan changes.
@@ -208,24 +216,45 @@ export class Plans extends Context.Service<
           provide(Effect.asVoid(transition(planId, counting, () => ({ startsAt: null }), 'task_plan.held', actorId))),
         change: (planId, steps, actorId, end) =>
           provide(
-            Effect.asVoid(
-              transition(
-                planId,
-                (plan) => plan.state === 'proposed',
-                (plan) => {
-                  const before = JSON.parse(plan.parameters) as { reason?: string | null; end?: TaskEnd | null }
-                  return {
-                    parameters: JSON.stringify({
-                      steps,
-                      reason: before.reason ?? null,
-                      end: end === undefined ? (before.end ?? null) : end,
-                    }),
-                  }
-                },
-                'task_plan.changed',
-                actorId,
-              ),
-            ),
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              const changed = (plan: PlanRow) => {
+                const before = JSON.parse(plan.parameters) as { reason?: string | null; end?: TaskEnd | null }
+                return JSON.stringify({ steps, reason: before.reason ?? null, end: end === undefined ? (before.end ?? null) : end })
+              }
+              const plan = yield* load(planId)
+              if (plan.state === 'proposed') {
+                yield* transition(
+                  planId,
+                  (now) => now.state === 'proposed',
+                  (now) => ({ parameters: changed(now) }),
+                  'task_plan.changed',
+                  actorId,
+                )
+                return
+              }
+              // Started, it can still be changed while its first step waits for a place, nothing of it begun: its run with it.
+              if (plan.state !== 'accepted') return
+              const done = yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  const now = yield* load(planId)
+                  if (now.state !== 'accepted') return false
+                  const parameters = changed(now)
+                  if (!(yield* runs.changeWaiting(now.taskId, parameters, actorId))) return false
+                  const revision = yield* change('task_plans', planId, { parameters })
+                  yield* fact({
+                    projectId: now.projectId,
+                    aggregateType: 'task_plan',
+                    aggregateId: planId,
+                    revision,
+                    type: 'task_plan.changed',
+                    actorId,
+                  })
+                  return true
+                }),
+              )
+              if (done) yield* touchCard(plan.taskId)
+            }),
           ),
       })
     }),

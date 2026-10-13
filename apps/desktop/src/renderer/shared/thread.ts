@@ -61,6 +61,7 @@ export type QuestionContent = Extract<ThreadItem, { kind: 'question' }>['content
 export type RunContent = Extract<ThreadItem, { kind: 'run' }>['content']
 export type IssueDraftContent = Extract<ThreadItem, { kind: 'issue_draft' }>['content']
 export type SetupContent = Extract<ThreadItem, { kind: 'setup' }>['content']
+export type PushRequestContent = Extract<ThreadItem, { kind: 'push_request' }>['content']
 
 export type Block =
   | {
@@ -107,6 +108,8 @@ export type Block =
   | { readonly kind: 'draft'; readonly id: string; readonly draft: IssueDraftContent }
   /** Althar setting up the task's worktree, before its lead starts (ADR-023). */
   | { readonly kind: 'setup'; readonly id: string; readonly setup: SetupContent }
+  /** The lead asking the person to push its new commits to the task's pull request: when it asked, or when it settled. */
+  | { readonly kind: 'push'; readonly id: string; readonly at: string; readonly request: PushRequestContent }
 
 /** ACP's tool kinds, as the kit's. */
 /** The notice earlier versions left in a thread when Althar restarted under its lead. */
@@ -420,6 +423,9 @@ export const blocksOf = (
       case 'setup':
         blocks.push({ kind: 'setup', id: item.id, setup: item.content })
         continue
+      case 'push_request':
+        blocks.push({ kind: 'push', id: item.id, at: ago(item.content.settledAt ?? item.createdAt), request: item.content })
+        continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
         if (item.content.source === 'runtime' && item.content.title === RESTARTED) continue
@@ -443,13 +449,18 @@ export const blocksOf = (
         : { kind: 'message', id, text: streamed.text, pictures: [], files: [] },
     )
   }
-  // What an agent says after its step's result, closing its turn, folds with the work that led to it.
+  // What an agent says after its step's result, closing its turn, folds with the work that led to it. A run it starts on its own after, with tool calls or a plan, is work of its own: it folds under its own time, and its last message shows.
   const lastTurn = blocks.findLastIndex((block) => block.kind === 'turn')
   const merged: Array<Block> = []
   blocks.forEach((block, index) => {
     const step = merged.at(-1)
     const before = merged.at(-2)
-    const closing = block.kind === 'turn' && step?.kind === 'step' && before?.kind === 'turn' && before.agentId === block.agentId
+    const closing =
+      block.kind === 'turn' &&
+      step?.kind === 'step' &&
+      before?.kind === 'turn' &&
+      before.agentId === block.agentId &&
+      !block.parts.some((part) => part.kind === 'tool' || part.kind === 'plan')
     if (!closing || (turnRunning && index === lastTurn)) return void merged.push(block)
     const span = spans.get(before.id)
     const after = spans.get(block.id)

@@ -7,6 +7,7 @@ import { EdgeSpot } from '../../foundations/vocabulary'
 import { States } from '../../storybook/States'
 import { EdgeMini } from '../EdgeMini/EdgeMini'
 import {
+  AgentsAtOnce,
   EdgeHere,
   EdgePlaces,
   EdgeScene,
@@ -31,7 +32,11 @@ const SOUNDS = ['Basso', 'Blow', 'Glass', 'Ping', 'Pop', 'Purr', 'Tink']
 
 const ALL_ON: NotifyChoices = { calls: true, ready: true, stopped: true, badge: true }
 
+/* A 16 GB Mac with 10 cores, which runs four at once by default. */
+const MACHINE = { count: 4, memory: 16, cores: 10 }
+
 /* What the stories' play functions look for, as a consumer would hear it. */
+const onAtOnce = fn()
 const onAwake = fn()
 const onNotify = fn()
 const onPlay = fn()
@@ -77,6 +82,21 @@ const menuMark = (
   </>
 )
 
+/* How many agents at once, as a consumer keeps it: the person's number, or none for the default. */
+function AtOnce() {
+  const [own, setOwn] = useState<number | null>(null)
+  return (
+    <AgentsAtOnce
+      count={own ?? MACHINE.count}
+      machine={MACHINE}
+      onChange={(count) => {
+        setOwn(count)
+        onAtOnce(count)
+      }}
+    />
+  )
+}
+
 /* The sections as a consumer keeps them: each change shows at once and goes out. */
 function General() {
   const [awake, setAwake] = useState(true)
@@ -93,6 +113,7 @@ function General() {
         onBattery={battery}
         onBatteryChange={setBattery}
       />
+      <AtOnce />
       <OpenFilesIn editors={EDITORS} value={editor} onChange={setEditor} />
     </SettingList>
   )
@@ -201,6 +222,40 @@ export const UsageDataSwitch: Story = {
   },
 }
 
+/** How many agents work at once, and why: the default from this Mac's memory and cores, a number of the person's own, and back to the default. */
+export const AgentsAtOnceSetting: Story = {
+  render: () => (
+    <SettingList>
+      <AtOnce />
+    </SettingList>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const count = c.getByRole('slider', { name: 'Agents at once' })
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
+    await expect(c.getByText('4: this Mac has 16 GB and 10 cores. More tasks than that wait their turn.')).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Use the default' })).toBeNull()
+    count.focus()
+    await userEvent.keyboard('{ArrowRight}{ArrowRight}')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(6)
+    await expect(count).toHaveAttribute('aria-valuenow', '6')
+    await expect(c.getByText(/^6: a little more than this Mac’s 16 GB suggests\./)).toBeInTheDocument()
+    await userEvent.keyboard('{End}')
+    await expect(c.getByText(/^16: well past what this Mac’s 16 GB suggests\./)).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Use the default' }))
+    await expect(onAtOnce).toHaveBeenLastCalledWith(null)
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
+    // Back on the default by the keys: the default again, not a number of the person's own.
+    count.focus()
+    await userEvent.keyboard('{ArrowLeft}')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(3)
+    await expect(count).toHaveAttribute('aria-valuenow', '3')
+    await userEvent.keyboard('{ArrowRight}')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(null)
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
+  },
+}
+
 /** What comes as a notification, each switch by its own key, and the sound, heard as it is chosen. */
 export const NotificationChoices: Story = {
   render: () => <Notifications />,
@@ -288,6 +343,18 @@ export const AllStates: Story = {
           node: (
             <SettingList>
               <KeepAwake on={false} onChange={fn()} onBattery={false} onBatteryChange={fn()} />
+            </SettingList>
+          ),
+        },
+        {
+          state: 'agents at once: the default, fewer, well past it, a small Mac past its one, and a big Mac under its sixteen',
+          node: (
+            <SettingList>
+              <AgentsAtOnce count={4} machine={MACHINE} onChange={fn()} />
+              <AgentsAtOnce count={2} machine={MACHINE} onChange={fn()} />
+              <AgentsAtOnce count={11} machine={MACHINE} onChange={fn()} />
+              <AgentsAtOnce count={2} machine={{ count: 1, memory: 8, cores: 8 }} onChange={fn()} />
+              <AgentsAtOnce count={12} machine={{ count: 16, memory: 128, cores: 16 }} onChange={fn()} />
             </SettingList>
           ),
         },

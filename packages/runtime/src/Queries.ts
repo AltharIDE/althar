@@ -24,6 +24,7 @@ import {
   type DocumentText,
   FieldAnswer,
   type OutputText,
+  PushRequestItem,
   QuestionField,
   type ThreadItem,
   type ThreadSnapshot,
@@ -31,19 +32,22 @@ import {
 import { Context, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
+import { Busy } from './Busy'
+import { planWaits } from './Runs'
 import { Agents, RuntimeConfig } from './Config'
 import { questionTitle } from './Questions'
 import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
+import { builtIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { documentText, outputText } from './reading'
 import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
-import { commitsAhead, commitsOf, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
+import { commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
 import { commandIn, shortCommand } from './rules'
 import { Sessions } from './Sessions'
 import { actionsOf, standingOf } from './Tasks'
@@ -63,6 +67,9 @@ const LIVE = ['starting', 'active', 'waiting_approval', 'cancelling']
 
 /** How many tasks, or cards, a screen reads at once: each may start git. */
 const AT_ONCE = 8
+
+/** How many of the lead's reports a thread reads beside its page, newest first: far more than a task's rounds. */
+const REPORTS = 200
 
 /** A worktree on this device, and the task it is for: what is kept of it goes when its task leaves the screens. */
 interface Owner {
@@ -279,11 +286,13 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
     listening,
     localHead: null,
     unpushed: 0,
+    diverged: null,
   }
 }
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
 const decodeDraft = Schema.decodeUnknownOption(IssueDraftCard)
+const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
 const PRODUCTS = ['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'] as const
@@ -398,6 +407,9 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
               claim: text(finding, 'claim'),
             }
           }),
+          built: builtIn(field(content, 'built')),
+          evidence: evidenceOf(field(content, 'evidence')),
+          unverified: unverifiedIn(field(content, 'unverified')),
           agentId: agentId === '' ? null : agentId,
         },
       }
@@ -479,6 +491,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         onNone: () => undefined,
         onSome: (card) => ({ ...base, kind: 'issue_draft' as const, content: card }),
       })
+    case 'push_request':
+      // Althar writes it whole, as the contract has it; one that doesn't read so is left out.
+      return Option.match(decodePushRequest(content), {
+        onNone: () => undefined,
+        onSome: (asked): ThreadItem => ({ ...base, kind: 'push_request', content: asked }),
+      })
     case 'setup': {
       const ended = field(content, 'ended')
       const code = field(ended, 'code')
@@ -517,7 +535,7 @@ export interface ThreadChange {
   readonly threadId: string | null
 }
 
-type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig | Artifacts | Launches
+type Store = SqlClient.SqlClient | Instance | Agents | Sessions | Coordinator | Changes | RuntimeConfig | Artifacts | Launches | Busy
 
 export class Queries extends Context.Service<
   Queries,
@@ -539,6 +557,8 @@ export class Queries extends Context.Service<
     fileDiff(taskId: string, path: string): Effect.Effect<FileDiff, unknown>
     /** A project's board: its tasks, by card, and the calls that wait on the person. */
     board(projectId: string): Effect.Effect<BoardSnapshot, unknown>
+    /** The next page of a project's settled tasks, as cards: the ones settled before `before` (`taskId` breaking a tie), most recent first. */
+    olderSettled(projectId: string, before: string, taskId: string): Effect.Effect<ReadonlyArray<BoardSnapshot['tasks'][number]>, unknown>
     /** The home: every project, and across them what waits on the person, what runs, and what the loop did since `since` or they last left it. */
     home(since?: string): Effect.Effect<HomeSnapshot, unknown>
     /** The project's coordinator thread, with the newest `limit` items before `before`. */
@@ -638,7 +658,10 @@ export class Queries extends Context.Service<
             ORDER BY k.created_at DESC, k.id DESC`
         })
 
-      const itemRows = (threadId: string, where: { readonly before?: number; readonly itemId?: string; readonly limit: number }) =>
+      const itemRows = (
+        threadId: string,
+        where: { readonly before?: number; readonly itemId?: string; readonly limit: number; readonly reports?: boolean },
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<ItemRow>`
@@ -663,6 +686,7 @@ export class Queries extends Context.Service<
               -- A message taken back takes no place on a page; read by id, it says it was taken back.
               AND ${where.itemId === undefined ? sql`(u.state IS NULL OR u.state <> 'withdrawn')` : sql`i.id = ${where.itemId}`}
               AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}
+              AND ${where.reports === true ? sql`i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('implement', 'settle')` : sql`1 = 1`}
             ORDER BY i.sequence DESC LIMIT ${where.limit + 1}`
           // One more than asked for says whether there are earlier ones.
           return { items: rows.slice(0, where.limit).toReversed(), earlier: rows.length > where.limit }
@@ -734,8 +758,12 @@ export class Queries extends Context.Service<
       const filesKept = keeper<ReadonlyArray<ChangedFile>>(owners)
       /** Whether a worktree's head is in its default branch here: by both commits. */
       const mergedKept = keeper<boolean>(owners)
-      /** How many commits a worktree's head has that its pull request doesn't: by both commits. */
-      const unpushedKept = keeper<number>(owners)
+      /** How a worktree's head stands against its pull request's (`againstPullRequest`): by the commits it follows from. */
+      const unpushedKept = keeper<{
+        readonly localHead: string
+        readonly unpushed: number
+        readonly diverged: ChangeSummary['diverged']
+      }>(owners)
 
       /** Lets go of what is kept of the worktrees of tasks `gone` says the screens no longer show. */
       const forget = (gone: (owner: Owner) => boolean) => {
@@ -881,6 +909,10 @@ export class Queries extends Context.Service<
                 SELECT count(*) || ':' || coalesce(sum(revision), 0) AS calls FROM thread_items
                 WHERE thread_id = (SELECT id FROM threads WHERE task_id = ${taskId} AND kind = 'task') AND kind = 'tool_call'`
             : []
+          // A screenshot the lead handed as evidence, left uncommitted, isn't part of what it changed.
+          const pictures = wants.changed ? yield* evidencePaths(taskId) : () => false
+          const shown = (worktree: string) => (file: ChangedFile) =>
+            !(file.uncommitted && file.status === 'added' && pictures(worktree, file.path))
           const each = yield* Effect.forEach(
             worktrees,
             (worktree) =>
@@ -942,12 +974,12 @@ export class Queries extends Context.Service<
           return {
             files: each.flatMap(({ worktree, changed }) =>
               worktrees.length > 1
-                ? changed.files.map((file) => ({
+                ? changed.files.filter(shown(worktree.path)).map((file) => ({
                     ...file,
                     path: `${worktree.slug}/${file.path}`,
                     from: file.from === null ? null : `${worktree.slug}/${file.from}`,
                   }))
-                : changed.files,
+                : changed.files.filter(shown(worktree.path)),
             ),
             commits: each.reduce((sum, { changed }) => sum + changed.commits, 0),
             here: each.flatMap(({ here }) => here),
@@ -955,27 +987,65 @@ export class Queries extends Context.Service<
           }
         })
 
+      /** How many commits `from` has that none of `not` has; failing, so it isn't kept, where git can't tell. */
+      const countOnly = (cwd: string, from: string, not: ReadonlyArray<string>) =>
+        Effect.map(git(cwd, 'rev-list', '--count', from, '--not', ...not), Number)
+
       /**
-       * A worktree's head, and how many commits on it what was pushed doesn't
-       * have: what is still the person's to push. What was pushed is the first
-       * of `pushed` the worktree knows, such as the pull request's head, else
-       * the commit Althar last pushed. None, where it can't be told. The head
-       * and which of them it knows are one look; the count is kept by the two
-       * commits.
+       * A worktree's head against its pull request: how many commits on it the
+       * pull request doesn't have, what is still the person's to push; or,
+       * where the branch no longer adds to it, how they parted. The pull
+       * request's head is what it was pushed from, else the commit Althar last
+       * pushed (`sent`). Where its head isn't under the branch's, but what
+       * crediting made it from is, the branch is still on its commits as the
+       * lead made them, and counts from there. Otherwise either Althar pushed
+       * it and the branch was rewritten since (counted without the default
+       * branch's commits, which a rebase brings in), or it came from
+       * elsewhere, counted where it is here. A plain push of either would be
+       * refused, so neither has anything to push. One look at the commits;
+       * what follows from them is kept by them.
        */
-      const unpushedOf = (owner: Owner, pushed: ReadonlyArray<string | null>) =>
+      const againstPullRequest = (owner: Owner, pullRequestHead: string | null, sent: string | null, base: string | null) =>
         Effect.gen(function* () {
-          const [localHead = null, ...known] = yield* commitsOf(owner.path, [
+          const sql = yield* SqlClient.SqlClient
+          // One not known, as an empty revision, is null.
+          const [localHead = null, there = null, ours = null, tip = null] = yield* commitsOf(owner.path, [
             'HEAD',
-            ...pushed.filter((commit): commit is string => commit !== null),
+            ...[pullRequestHead, sent, base].map((commit) => commit ?? ''),
           ])
-          const from = known.find((commit): commit is string => commit !== null)
-          if (localHead === null || from === undefined) return { localHead, unpushed: 0 }
+          const none = { localHead, unpushed: 0, diverged: null }
+          if (localHead === null) return none
+          const from = there ?? ours
+          // Its head a commit unknown here, and not what Althar pushed: someone else pushed to it.
+          if (pullRequestHead !== null && /^[0-9a-f]{40,64}$/.test(pullRequestHead) && there === null && pullRequestHead !== sent)
+            return { localHead, unpushed: 0, diverged: { kind: 'moved' as const, local: 0, onPullRequest: null } }
+          if (from === null) return none
+          // What crediting made the head from (credit.ts): a push sends the branch's commits made again, and the branch stays on
+          // them as the lead made them where it couldn't be moved onto what went, such as mid-merge. A push credits them again.
+          const madeFrom = yield* sql<{ original: string }>`
+            SELECT original FROM credited_commits WHERE credited = ${from} AND original != credited`.pipe(Effect.orElseSucceed(() => []))
           // Counted up to the head looked at, not HEAD again: the lead may commit in between.
-          const unpushed = yield* unpushedKept
-            .of(owner, `${from} ${localHead}`, commitsAhead(owner.path, from, localHead))
-            .pipe(Effect.orElseSucceed(() => 0))
-          return { localHead, unpushed }
+          return yield* unpushedKept
+            .of(
+              owner,
+              `${from} ${ours} ${tip} ${localHead}`,
+              Effect.gen(function* () {
+                for (const counted of [from, ...madeFrom.map((row) => row.original)])
+                  if (yield* inHistory(owner.path, counted, localHead))
+                    return { localHead, unpushed: yield* commitsAhead(owner.path, counted, localHead), diverged: null }
+                const others = [tip].filter((commit): commit is string => commit !== null)
+                return {
+                  localHead,
+                  unpushed: 0,
+                  diverged: {
+                    kind: from === ours ? ('rewritten' as const) : ('moved' as const),
+                    local: yield* countOnly(owner.path, localHead, [from, ...others]),
+                    onPullRequest: yield* countOnly(owner.path, from, [localHead, ...others]),
+                  },
+                }
+              }),
+            )
+            .pipe(Effect.orElseSucceed(() => none))
         })
 
       /** One file a task changed, as a diff from its base to its worktree on this device; in several repositories, named under its repository's. */
@@ -1064,16 +1134,22 @@ export class Queries extends Context.Service<
                     ? Effect.succeed(change)
                     : Effect.gen(function* () {
                         // Its repository's worktree, as the record of the push says; the task's first, where it doesn't.
-                        const [here] = yield* sql<{ path: string; taskId: string; projectId: string; headCommit: string | null }>`
+                        const [here] = yield* sql<{
+                          path: string
+                          taskId: string
+                          projectId: string
+                          headCommit: string | null
+                          base: string | null
+                        }>`
                       SELECT w.path, w.task_id, w.project_id, (SELECT c.head_commit FROM repository_changes c WHERE c.pull_request_url = ${change.url}
-                          ORDER BY c.updated_at DESC LIMIT 1) AS head_commit
+                          ORDER BY c.updated_at DESC LIMIT 1) AS head_commit, coalesce(b.default_base_ref, w.base_ref) AS base
                       FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
                       WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
                       ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${change.url} LIMIT 1) DESC,
                         b.created_at, b.rowid
                       LIMIT 1`
                         if (here === undefined || !existsSync(here.path)) return change
-                        return { ...change, ...(yield* unpushedOf(here, [change.head, here.headCommit])) }
+                        return { ...change, ...(yield* againstPullRequest(here, change.head, here.headCommit, here.base)) }
                       }),
                 ),
               ),
@@ -1134,6 +1210,30 @@ export class Queries extends Context.Service<
             : { id: row.id, sequence: row.sequence, agentId: null, createdAt: row.createdAt, kind: 'task', content },
         )
 
+      /** Why work waits for a place: how many are busy, and who holds them. What a holder left running is listed where it alone keeps the place, to stop it from here. */
+      const queuedNow = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const sessions = yield* Sessions
+        const { busy, atOnce, holders } = yield* (yield* Busy).now
+        return {
+          busy,
+          atOnce,
+          holders: yield* Effect.forEach(holders, (holder) =>
+            Effect.gen(function* () {
+              const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${holder.taskId}`
+              const live = holder.kept && holder.threadId !== null ? yield* sessions.running(holder.threadId) : Option.none()
+              return {
+                taskId: holder.taskId,
+                title: task?.title ?? '',
+                threadId: holder.threadId,
+                kept: holder.kept,
+                running: Option.isSome(live) ? live.value.background.filter((left) => left.ended === null) : [],
+              }
+            }),
+          ),
+        }
+      })
+
       /** Where a task stands, read from it, its plan, its run and its sessions: what its card and its header show. Its links, where they are read already. */
       const cardFor = (taskId: string, links?: { readonly issue: IssueSummary | null; readonly changes: ReadonlyArray<ChangeSummary> }) =>
         Effect.gen(function* () {
@@ -1156,22 +1256,38 @@ export class Queries extends Context.Service<
             review: string | null
             lead: string | null
             leadModel: string | null
+            leadEffort: string | null
             firstSession: string | null
             starting: number
             held: string | null
+            heldFor: string | null
+            roundWaits: number
+            answersWait: number
+            turnWaits: number
           }>`
             SELECT t.id AS thread_id, k.title, k.slug, k.state, w.branch,
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
               r.state AS run_state, r.created_at AS run_at,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
-              -- A step held until an agent's usage limit resets.
+              -- A step held until an agent's usage limit resets, or until a place among the agents at work here frees.
               (SELECT a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state = 'held' ORDER BY a.admitted_at DESC LIMIT 1) AS held,
+              (SELECT a.hold_reason FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+                WHERE e.run_id = r.id AND a.state = 'held' ORDER BY a.admitted_at DESC LIMIT 1) AS held_for,
+              -- A conflict, or the checks on one, its lead is to be asked about once it has a place.
+              (SELECT count(*) FROM conflict_resolutions c WHERE c.task_id = k.id AND c.state = 'resolving' AND c.waiting IS NOT NULL)
+                AS round_waits,
+              -- An answer kept until its agent has a place to carry on.
+              (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.kind = 'question' AND x.state = 'answered'
+                AND json_extract(x.payload, '$.waitsForPlace') IS NOT NULL) AS answers_wait,
+              -- A turn of its lead or reviewer that waits for a place.
+              (SELECT count(*) FROM threads h WHERE h.task_id = k.id AND h.waits_for_place IS NOT NULL) AS turn_waits,
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') AS waiting,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
               (SELECT model FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_model,
+              (SELECT effort FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead_effort,
               (SELECT min(started_at) FROM provider_sessions WHERE thread_id = t.id) AS first_session,
               -- A step admitted and not yet running, or a session still starting: its agent is on its way.
               (SELECT count(*) FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
@@ -1188,6 +1304,9 @@ export class Queries extends Context.Service<
           const [latest] = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result'
               AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
+          // A conflict round: its lead is at work on it, though between turns, or it is the person's now.
+          const round = yield* (yield* Changes).conflictStanding(taskId)
+          const resolving = round?.state === 'resolving' ? round : undefined
           const lead = yield* sessions.running(task.threadId)
           const reviewer = task.review === null ? Option.none() : yield* sessions.running(task.review)
           const working = task.starting > 0 || Option.isSome(lead) || Option.isSome(reviewer)
@@ -1196,13 +1315,15 @@ export class Queries extends Context.Service<
             task.starting > 0 ||
             Option.exists(lead, (session) => session.turnRunning) ||
             Option.exists(reviewer, (session) => session.turnRunning)
+          // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
+          const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
           const phase = ((): TaskPhase => {
             if (task.state === 'done' || task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
             // A call waiting on the person, and work under way, come before being ready: work sent back isn't ready again
             // until its lead is done with the note.
             if (task.waiting > 0) return 'waiting'
-            if (task.runState === 'succeeded') return busy ? 'running' : 'ready'
+            if (task.runState === 'succeeded') return busy || queued || resolving !== undefined ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
             return working || task.held !== null ? 'running' : 'stopped'
@@ -1211,14 +1332,21 @@ export class Queries extends Context.Service<
           const steps = field(parameters, 'steps')
           const planned = (Array.isArray(steps) ? steps : []).map((step) => {
             const model = field(step, 'model')
+            // Its effort, whoever chose it, so the card shows it and a change made there keeps it.
+            const effort = field(step, 'effort')
             return {
               key: text(step, 'key') === 'review' ? ('review' as const) : ('implement' as const),
               agentId: text(step, 'agentId'),
               model: typeof model === 'string' ? model : null,
+              ...(typeof effort === 'string' ? { effort } : {}),
               skipped: field(step, 'skipped') === true,
             }
           })
           const end = text(parameters, 'end')
+          // How hard its lead thinks: what its session is on, which it says once started; until then the plan's, while its lead is the plan's.
+          const implement = planned.find((step) => step.key === 'implement')
+          const onPlan = task.lead === null || (task.lead === implement?.agentId && task.leadModel === implement.model)
+          const leadEffort = task.leadEffort ?? (onPlan ? (implement?.effort ?? null) : null)
           const { issue, changes } = links ?? (yield* linksOf(taskId))
           return {
             taskId,
@@ -1239,14 +1367,19 @@ export class Queries extends Context.Service<
             issue: issue === null ? null : { product: issue.product, key: issue.key, title: issue.title, url: issue.url },
             // The first still open, for the person to act on: one merged while another isn't leaves the other.
             change: changes.find((candidate) => candidate.state === 'open') ?? changes[0] ?? null,
-            step: task.step,
+            // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
+            step: task.step ?? (resolving === undefined || phase !== 'running' ? null : resolving.checks ? 'checks' : 'conflict'),
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
-            lead: task.lead ?? (planned.find((step) => step.key === 'implement')?.agentId || null),
+            lead: task.lead ?? (implement?.agentId || null),
             // Its session's model once one started; the plan's until then.
-            leadModel: task.lead === null ? (planned.find((step) => step.key === 'implement')?.model ?? null) : task.leadModel,
+            leadModel: task.lead === null ? (implement?.model ?? null) : task.leadModel,
+            leadEffort,
             branch: task.branch,
             startedAt: task.runAt ?? task.firstSession,
-            waits: waitsOf(task.held),
+            waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
+            queued: queued && task.state !== 'done' && task.state !== 'abandoned' ? yield* queuedNow : null,
+            ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
+            ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
 
@@ -1357,8 +1490,11 @@ export class Queries extends Context.Service<
             FROM tasks k LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE k.project_id = ${projectId} AND (k.state NOT IN ('done', 'abandoned') OR k.id IN (
               SELECT id FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')
-              ORDER BY settled_at DESC LIMIT ${SETTLED_SHOWN}))
+              ORDER BY settled_at DESC, id DESC LIMIT ${SETTLED_SHOWN}))
             ORDER BY k.created_at, k.id`
+          const [counted] = yield* sql<{
+            total: number
+          }>`SELECT COUNT(*) AS total FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')`
           const tasks = yield* Effect.forEach(rows, onBoard, { concurrency: AT_ONCE })
           // Only what the board still shows is kept.
           const shown = new Set(rows.map((row) => `${row.id}:${row.settledAt}`))
@@ -1370,7 +1506,26 @@ export class Queries extends Context.Service<
             cursor: at,
             tasks: tasks.flat(),
             calls: calls.map((one) => one.call),
+            settledTotal: counted?.total ?? 0,
           } satisfies BoardSnapshot
+        })
+
+      /** The next page of a project's settled tasks, older than the one settled at `before` (`taskId` breaking a tie), most recent first. */
+      const olderSettled = (projectId: string, before: string, taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{
+            id: string
+            state: string
+            createdAt: string
+            settledAt: string | null
+          }>`
+            SELECT id, state, created_at, settled_at FROM tasks
+            WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')
+              AND (settled_at < ${before} OR (settled_at = ${before} AND id < ${taskId}))
+            ORDER BY settled_at DESC, id DESC LIMIT ${SETTLED_SHOWN}`
+          const tasks = yield* Effect.forEach(rows, onBoard, { concurrency: AT_ONCE })
+          return tasks.flat()
         })
 
       /** The phases the home shows a task in: running, stopped or waiting on a call, and ready to accept. */
@@ -1513,6 +1668,8 @@ export class Queries extends Context.Service<
           if (head === undefined) return yield* new NotFound({ kind: 'task thread', id: threadId })
           // What the store says comes first, together, so it is as of the cursor; git after.
           const { items, earlier } = yield* pageOf(threadId, page)
+          // The lead's reports, whatever page they're on: the task's finished view is read from them.
+          const reports = (yield* itemRows(threadId, { reports: true, limit: REPORTS })).items.map(itemOf)
           const attention = yield* sql<{
             id: string
             kind: string
@@ -1563,7 +1720,9 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               baseRef: head.baseRef,
               phase: card?.phase ?? null,
+              handedBack: card?.handedBack ?? null,
               waits: card?.waits ?? null,
+              queued: card?.queued ?? null,
               steps: card?.plan?.steps ?? [],
               lead: last ?? (planned === undefined ? null : { agentId: planned.agentId, model: planned.model, account: null }),
               step: card?.step ?? null,
@@ -1588,6 +1747,7 @@ export class Queries extends Context.Service<
             attention: attention.map(callOf),
             items,
             earlier,
+            reports: reports.flatMap((item) => (item === undefined ? [] : [item])),
           } satisfies ThreadSnapshot
         })
 
@@ -1684,6 +1844,7 @@ export class Queries extends Context.Service<
         thread: (threadId, page) => run(thread(threadId, page)),
         fileDiff: (taskId, path) => run(diffOf(taskId, path)),
         board: (projectId) => run(board(projectId)),
+        olderSettled: (projectId, before, taskId) => run(olderSettled(projectId, before, taskId)),
         home: (since) => run(home(since)),
         item: (threadId, itemId) => run(item(threadId, itemId)),
         // A command still running is read from what it has printed so far; one that ended, from what was kept.

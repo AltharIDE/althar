@@ -14,12 +14,12 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
 - [x] **Where usage data goes from, and what can.** The main process, with
   posthog-node: named events and properties only, never a name, a path or
   anything written; the window has no SDK
-  ([ADR-031](decisions/031-usage-data-from-the-main-process.md)).
+  ([ADR-034](decisions/034-usage-data-from-the-main-process.md)).
 - [x] **On or off at first.** On, with the switch and its line on the first
-  screen and in Settings; `DO_NOT_TRACK` keeps it off (ADR-031).
+  screen and in Settings; `DO_NOT_TRACK` keeps it off (ADR-034).
 - [x] **US or EU.** US (`us.i.posthog.com`), where the project already is;
   the ticket had leaned to the EU cloud (settled with the person, 12
-  October; ADR-031).
+  October; ADR-034).
 - [x] **Installs from before.** None: no one has Althar with a project yet,
   so every install sees the switch on the first screen before anything is
   sent (settled with the person, 12 October).
@@ -258,9 +258,11 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   (started, in review, done). Althar could move it; the tracker's own Git
   integration may already move it, by the key in the branch (Linear does,
   Jira's apps link it); or the person does. Two of them moving the same field
-  fight. A product question to try out before deciding. For now Althar
-  puts the key in the branch and the pull request's title and moves no
-  status.
+  fight. A product question to try out before deciding. Althar puts the key
+  in the branch and the pull request's title. Since 12 October it moves the
+  issue to In Progress as its task's first step starts, once, on Linear and
+  Jira, unless the project's rules turn it off; it never moves one back from
+  further along. In review and done are still open.
 - [ ] **What reaches the lead from a pull request.** Settled on 1 October,
   after review: failed checks, and what the person and the repository's own
   people (those who can write to it) say. Anyone else, as on a public
@@ -327,21 +329,22 @@ never under running work.
 - [ ] **Adapters over the air** (DEV-46). Today a new adapter means an app
   release. Shipping adapter bundles alone needs them verified before they
   run as Althar's identity.
-- [ ] **One entitlements file for every helper.** electron-builder gives all
+- [x] **One entitlements file for every helper.** electron-builder gives all
   of them the agents' entitlements (JIT, unsigned executable memory, no
-  library validation). Leaning: sign the agents' binaries apart once the
-  adapters leave Electron's binary (the runAsNode question below).
+  library validation). Decided in ADR-033: each executable is signed with
+  its own, and only Claude Code's binary may load any library.
 - [ ] **A download link that stays the same.** The site and the README link
   the Releases page. A fixed asset name (`Althar-arm64.dmg`) would let
   `releases/latest/download/…` start the download directly.
 
 ## The desktop app, 29 September
 
-- [ ] **Running the bundled adapters once the app is signed.** They run on
+- [x] **Running the bundled adapters once the app is signed.** They run on
   Electron's own binary as Node (`ELECTRON_RUN_AS_NODE`), so the RunAsNode
   fuse has to stay on, and then anything can run Althar's signed binary as
-  Node with the app's entitlements. Leaning: ship a separate Node for the
-  adapters and turn the fuse off. Decide before the first signed build.
+  Node with the app's entitlements. Decided in ADR-033: the app ships Node
+  for them and the fuse is off. A utility process per adapter was tried
+  and can't own the adapter's process group.
 
 - [ ] **Task numbers.** The kit's header and crumb show a task's number
   (#418); tasks have slugs, not numbers, so the app shows the title alone.
@@ -655,10 +658,15 @@ never under running work.
   removes the wait. Open: should the coordinator move an optional step to a
   free agent by itself, and only leave rule-pinned steps waiting?
   *Prototype:* Coordinator → "Plan, an agent is out".
-- [ ] **Effort in the plan.** Each step carries its own model and effort,
-  which the person sets on the plan's card; the coordinator proposes neither,
-  so a step starts on the agent's own. Does the coordinator recommend effort
-  per step, or always start at the model's default?
+- [x] **Effort in the plan.** Each step carries its own model and effort,
+  which the person sets on the plan's card. Does the coordinator recommend
+  effort per step, or always start at the model's default?
+  Settled on 12 October 2026: the coordinator may name an effort for each
+  step, from the ones `list_models` gives for its model, by what the step
+  needs and what the person has said they prefer; it shows on the card as
+  the person's own would, and they can change it. Left out, which its brief
+  asks when unsure, a step starts at the person's default for the model, or
+  else the model's own (docs/architecture/04).
 - [x] **Allow all, with always-ask items in the stack.** "Allow all 7"
   currently covers pushing to main too. Should items the rules keep for you
   be left out of Allow all?
