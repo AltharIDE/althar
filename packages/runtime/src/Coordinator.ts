@@ -274,8 +274,14 @@ export class Coordinator extends Context.Service<
             .map((task, at) => {
               // A done task was settled as merged, so no repository of it is left out.
               const found = task.state === 'done' && facts[at] !== undefined ? { ...facts[at], unmerged: 0 } : facts[at]
-              // Whose pull requests are all merged (or closed, as far as Althar can tell) is finished, whatever its last run said.
-              const finished = task.state === 'done' ? 'merged' : task.state === 'open' && found !== undefined ? finishedBy(found) : null
+              // Whose pull requests are all merged (or closed, as far as Althar can tell) is finished, whatever its last run said; not
+              // one with commits after them in none yet (ADR-034).
+              const finished =
+                task.state === 'done' && (found?.unshipped ?? 0) === 0
+                  ? 'merged'
+                  : (task.state === 'open' || task.state === 'done') && found !== undefined
+                    ? finishedBy(found)
+                    : null
               const state =
                 task.state === 'draft'
                   ? 'planned'

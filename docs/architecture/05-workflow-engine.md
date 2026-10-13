@@ -200,7 +200,8 @@ stateDiagram-v2
     abandoned --> open: reopened
     abandoned --> draft: reopened, its plan never started
     abandoned --> done: its pull requests merged on the host after all
-    done --> [*]
+    done --> open: its lead goes back to work on it
+    open --> done: a round of work made nothing new, or its next pull request merged
 ```
 
 ```mermaid
@@ -254,7 +255,9 @@ stateDiagram-v2
   deleted or closed on the host. A pull request it opened stays open there,
   and should every one merge there after all, the task is done.
 - **Reopen** applies only to an abandoned task, never to a merged one: a task
-  is `done` once every repository is merged, for good, abandoned or not. It opens the task
+  is `done` once every repository is merged, and nothing after its pull
+  requests is left out of them, abandoned or not. A merged task opens again
+  only as its lead goes back to work on it, below. Reopen opens the task
   again, on the same worktree and branch, without replaying the plan: a
   worktree whose folder went is put back from its branch first (and with the
   branch gone too, it can't be reopened). Where its run was cut short, the
@@ -263,6 +266,28 @@ stateDiagram-v2
   draft again, its plan proposed anew and held. Nothing starts on its own.
   While a task is abandoned no agent starts on it; writing to it reopens it
   first, refused as Reopen is, and what was written is the lead's first word.
+
+### Rounds of work after the plan
+
+A task is a conversation that outlives its plan
+([ADR-034](../decisions/034-a-task-goes-back-to-work-and-ships-again.md)).
+When a turn of its lead delivers the person's own words and its latest run is
+over, Althar opens a **round**: a run with no plan, whose steps and ending
+are the plan's run's, its Implement step under way on the lead's session as
+the turn begins; a merged task is open again for it. Althar's own messages to
+the lead (what its pull request heard, a conflict to resolve) open none. A
+round ends as any of the lead's steps does, with `finish_step`, its review
+where the plan has one (the person can skip it from the menu); with nothing
+new, when the lead finishes or its turn ends, it closes and the task is back
+where it was, a merged one done at the time it first settled. A round never
+publishes by itself: what it commits goes to the task's open pull request
+when the person pushes it, or, once the last merged or closed, into a **new
+pull request** the person opens from the task, on a new branch from the
+default branch as the host has it, its new commits cherry-picked onto it,
+never forced. Between turns a round takes no place among the agents at work
+([ADR-032](../decisions/032-agents-at-once-on-this-machine.md)). Whenever an
+agent on a task is in a turn, starting, or waiting for a place, its card says
+Running, whatever the task was.
 
 ## Dynamic graph evolution
 

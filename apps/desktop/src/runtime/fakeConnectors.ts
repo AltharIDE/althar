@@ -16,17 +16,23 @@ import { Effect, Layer } from 'effect'
 /*
  * A code host for the end-to-end tests: GitHub, answered by the connectors'
  * fake service in the runtime's own process, on an instance at
- * https://github.test, which no network reaches. Its repository is
- * meridian/api, with one issue; what is pushed to it goes to the bare
- * repository ALTHAR_FAKE_REMOTE names. A pasted token connects it, and so
+ * https://github.test, which no network reaches. Its repositories are
+ * meridian/api, with one issue, and meridian/web where
+ * ALTHAR_FAKE_REMOTE_WEB is set; what is pushed to one goes to the bare
+ * repository ALTHAR_FAKE_REMOTE_API or _WEB names, else ALTHAR_FAKE_REMOTE. A pasted token connects it, and so
  * does gh's sign-in, which is signed in to it. Loaded only when
  * ALTHAR_FAKE_AGENTS is set.
  */
 
 export const HOST = 'https://github.test'
 
-const github = makeFakeService({ pushUrl: () => process.env.ALTHAR_FAKE_REMOTE ?? '' })
+// A repository's pushes go to ALTHAR_FAKE_REMOTE_<NAME> where that is set, as a test of several repositories gives each its own.
+const github = makeFakeService({
+  pushUrl: (path) => process.env[`ALTHAR_FAKE_REMOTE_${(path.at(-1) ?? '').toUpperCase()}`] ?? process.env.ALTHAR_FAKE_REMOTE ?? '',
+})
 github.addRepository(['meridian', 'api'])
+// Only for a test that gives it somewhere to push: every other sees the one repository it always did.
+if (process.env.ALTHAR_FAKE_REMOTE_WEB !== undefined) github.addRepository(['meridian', 'web'])
 github.addIssue({ ref: 'meridian/api#12', title: 'Checkout gives up after one try', body: 'It should retry.' })
 
 export const fakeConnectors = Layer.succeed(

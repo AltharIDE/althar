@@ -253,6 +253,8 @@ export class Busy extends Context.Service<
           JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task'
           LEFT JOIN threads s ON s.task_id = r.task_id AND s.kind = 'step' AND s.node_key = 'review'
           WHERE r.state = 'running' AND a.state IN ('admitted', 'running') AND n.node_key IN ('implement', 'settle', 'review')
+            -- A round of work after the plan counts as its lead's turns do (ADR-034): in one, or starting, not between them.
+            AND NOT (r.plan_id IS NULL AND n.node_key = 'implement' AND a.state = 'running')
           UNION ALL
           SELECT c.task_id, t.id, 0 FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
           WHERE c.state = 'resolving' AND c.waiting IS NULL
@@ -418,13 +420,14 @@ export class Busy extends Context.Service<
        * threads: once there is one, the agent last on the thread, as the
        * person last started or switched to it, starts again, and its first
        * turn delivers what waited. Not where a session is on the thread (its
-       * own turn waits in `turns`), or its task is stopped or settled.
+       * own turn waits in `turns`), or its task is stopped or abandoned; a
+       * merged one's lead goes back to work for it (ADR-034).
        */
       const restored = Effect.gen(function* () {
         const rows = yield* sql<{ threadId: string; taskId: string; kind: string; since: string }>`
           SELECT h.id AS thread_id, h.task_id, h.kind, h.waits_for_place AS since FROM threads h
           JOIN tasks k ON k.id = h.task_id JOIN projects p ON p.id = h.project_id
-          WHERE h.waits_for_place IS NOT NULL AND k.state IN ('draft', 'open') AND p.archived_at IS NULL
+          WHERE h.waits_for_place IS NOT NULL AND k.state IN ('draft', 'open', 'done') AND p.archived_at IS NULL
             AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = h.task_id AND r.state = 'suspended'
               AND r.created_at = (SELECT max(created_at) FROM runs WHERE task_id = h.task_id))`
         const live = new Set((yield* sessions.onTasks).map((session) => session.threadId))

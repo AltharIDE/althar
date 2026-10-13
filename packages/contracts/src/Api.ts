@@ -1044,6 +1044,18 @@ export type Holder = typeof Holder.Type
 export const Queued = Schema.Struct({ busy: Schema.Int, atOnce: Schema.Int, holders: Schema.optional(Schema.Array(Holder)) })
 export type Queued = typeof Queued.Type
 
+/**
+ * Commits on a task's branch after its last pull request merged or closed,
+ * in none yet: what Open a new pull request opens one with (ADR-034).
+ */
+export const Unshipped = Schema.Struct({
+  commits: Schema.Int,
+  /** Lines they add and remove, all together. */
+  add: Schema.Int,
+  del: Schema.Int,
+})
+export type Unshipped = typeof Unshipped.Type
+
 /** Where a task stands, as the coordinator's thread shows it. */
 export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting', 'ready', 'stopped', 'settled'])
 export type TaskPhase = typeof TaskPhase.Type
@@ -1082,10 +1094,16 @@ export const TaskCard = Schema.Struct({
   ),
   /** The issue it came from. */
   issue: Schema.NullOr(Schema.Struct({ product: Product, key: Schema.String, title: Schema.String, url: Schema.String })),
-  /** Its pull request, once opened. */
+  /** Its pull request, once opened: the open one, else its latest. */
   change: Schema.NullOr(ChangeSummary),
+  /** Its other pull requests, newest first: those of earlier rounds of its work, merged or closed (ADR-034). */
+  earlier: Schema.optional(Schema.Array(ChangeSummary)),
+  /** Commits after its last pull request merged or closed, in none yet; null or absent where there are none. */
+  unshipped: Schema.optional(Schema.NullOr(Unshipped)),
   /** The step it is on, by key, while it runs. */
   step: Schema.NullOr(Schema.String),
+  /** It runs a round of work after its plan, as the person asked its lead for more (ADR-034). */
+  followUp: Schema.optional(Schema.Boolean),
   /** The latest summary the lead reported. */
   summary: Schema.NullOr(Schema.String),
   /** The agent that leads it, or last did: the plan's lead until one starts. */
@@ -1532,8 +1550,14 @@ export const ThreadSnapshot = Schema.Struct({
     settledAt: Schema.NullOr(Schema.String),
     /** The issue it came from. */
     issue: Schema.NullOr(IssueSummary),
-    /** Its pull requests, as last seen. */
+    /** Its pull requests, as last seen, oldest first. */
     changes: Schema.Array(ChangeSummary),
+    /** Commits after its last pull request merged or closed, in none yet: what Open a new pull request opens one with. */
+    unshipped: Schema.optional(Schema.NullOr(Unshipped)),
+    /** The review of its run under way can still be skipped, as the person may (ADR-034). */
+    skipReview: Schema.optional(Schema.Boolean),
+    /** It runs a round of work after its plan. */
+    followUp: Schema.optional(Schema.Boolean),
     /** What it changed since it started, committed or not, file by file, and in how many commits; empty without a worktree here. */
     files: Schema.Array(ChangedFile),
     commits: Schema.Number,
@@ -2199,8 +2223,14 @@ export const Api = RpcGroup.make(
   ),
   /** What the project does when an agent reaches its usage limit. */
   command('SetUsageLimit', { projectId: Schema.String, policy: UsageLimit }, Schema.Void),
-  /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */
+  /**
+   * Opens the pull request of a task whose work ended on its branch: a
+   * draft, as the person said. A task whose last pull request merged or
+   * closed opens its next, for the commits after it, on a new branch (ADR-034).
+   */
   command('OpenChange', { taskId: Schema.String }, Schema.Void),
+  /** Skips the review of the task's run under way: a review under way stops, and work whose lead is done is ready (ADR-034). */
+  command('SkipReview', { taskId: Schema.String }, Schema.Void),
   /**
    * Merges the task's pull request at the head the person saw, because they
    * said to; a draft is marked ready first. A pull request that moved on

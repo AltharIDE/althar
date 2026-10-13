@@ -870,6 +870,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     listIssues: vi.fn(async () => ({ issues: [] })),
     markReady: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
+    skipReview: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
     stopListening: vi.fn(async () => {}),
     stopBackground: vi.fn(async () => {}),

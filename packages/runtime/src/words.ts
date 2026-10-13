@@ -206,7 +206,7 @@ export const words = (
         return cantMerge[text(error, 'why') as CantMerge['why']]?.(detail) ?? `Althar couldn't merge it. ${detail}`
       }
       case 'NoChangeToOpen':
-        return noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working
+        return (noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working)(text(error, 'detail'))
       case 'LaunchRefused':
         return text(error, 'message')
       case 'TaskRefused':
@@ -297,13 +297,18 @@ const cantMerge = {
   missing: (branch: string) => `This Mac has no ${branch} branch to merge into.`,
 } as const satisfies Record<CantMerge['why'], (detail: string) => string>
 
-/** Why a task has no pull request to open, by reason. */
+/** Why a task has no pull request to open, by reason, with the files it concerns where it says them. */
 const noChangeToOpen = {
-  working: "The task's work isn't done yet. Its pull request opens when it is.",
-  stopped: 'The task’s work stopped before it was done, so it has no pull request to open.',
-  settled: 'The task is settled, so its branch stays as it is.',
-  opened: 'The task already has its pull request.',
-} as const satisfies Record<NoChangeToOpen['why'], string>
+  working: () => "The task's work isn't done yet. Its pull request opens when it is.",
+  stopped: () => 'The task’s work stopped before it was done, so it has no pull request to open.',
+  settled: () => 'The task is settled, so its branch stays as it is.',
+  opened: () => 'The task already has its pull request.',
+  nothing: () => 'Every commit on the task’s branch is in a pull request already, so there’s nothing new to open one for.',
+  uncommitted: (files: string) =>
+    `The lead left changes it didn’t commit${files === '' ? '' : `, in ${files}`}. Ask it to commit them or clear them away, then open the pull request again.`,
+  conflicts: (files: string) =>
+    `The new commits don’t apply on the default branch as it is now: they conflict${files === '' ? '' : ` in ${files}`}. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.`,
+} as const satisfies Record<NoChangeToOpen['why'], (detail: string) => string>
 
 /** Why a task can't be abandoned, reopened or renamed, by reason. */
 const taskRefused = {

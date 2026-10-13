@@ -412,7 +412,8 @@ const playStall = async (
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
  * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round;
- * `[lead:settle-quietly]` settles without reporting.
+ * `[lead:settle-quietly]` settles without reporting. `[lead:slowly]` takes some
+ * seconds over what it was asked before it plays its part.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
  * Althar says it isn't committed; `[lead:evidence]` saves a screenshot in
@@ -611,7 +612,7 @@ const playRole = async (
   }) => Promise<void> = () => Promise.resolve(),
 ): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
-  const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ')
+  const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ') || text.startsWith('More to review')
   if (session.tools === undefined || !asked) return undefined
   const client = new Client({ name: 'fake-agent', version: '1.0.0' })
   const transport = new StreamableHTTPClientTransport(new URL(session.tools.url), { requestInit: { headers: session.tools.headers } })
@@ -651,11 +652,14 @@ const playRole = async (
           summary: `The heading needs fixing.${looked}`,
           findings: [{ severity: 'major', file: 'README.md', line: 1, claim: 'The heading is wrong.' }],
         })
-      if (text.includes('[review:') || text.startsWith('Round '))
+      // A round of work after the plan is reviewed for what changed since, as a later round is.
+      if (text.includes('[review:') || text.startsWith('Round ') || text.startsWith('More to review'))
         return await call('report_review', { verdict: 'pass', summary: `The change holds.${looked}` })
       return undefined
     }
     if (available.has('finish_step')) {
+      // A lead that takes a while over what it was asked, `[lead:slowly]`: long enough to be seen at work.
+      if (text.includes('[lead:slowly]')) for (let waited = 0; !session.cancelled && waited < 6_000; waited += 10) await pause(10)
       // A lead that leaves a dev server running, once, then carries on as its other markers say.
       if (text.includes('[lead:serve') && !session.played.has('[lead:serve]')) {
         session.played.add('[lead:serve]')
@@ -858,11 +862,15 @@ const playRole = async (
           .split(/[.!?]/)[0]
           ?.trim() || 'Add a retry'
       const link = /https?:\/\/\S+/.exec(asked)?.[0]
-      const drafted = await call('draft_task', {
+      const draft = {
         title,
         description: `Retry the checkout call. ${markers.join(' ')}`,
         ...(link === undefined ? {} : { issue: link }),
-      })
+      }
+      // In a project of several repositories, asked which it changes, it names every one it is told of.
+      const first = await call('draft_task', draft)
+      const which = /as repositories: (.+)\.$/.exec(first)?.[1]
+      const drafted = which === undefined ? first : await call('draft_task', { ...draft, repositories: which.split(', ') })
       const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
       return await call('propose_plan', {
         task: slug,
