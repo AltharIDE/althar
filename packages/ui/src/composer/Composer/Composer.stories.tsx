@@ -334,6 +334,28 @@ export const EnterEndsDictationAtItsSize: Story = {
     await expect(height('dictated-short')).toBeLessThan(height('dictated-long'))
   },
 }
+/** A dictation grown past the composer's max height: it stays at 200px with the newest words in view, and the earlier text scrolls under the wheel. */
+export const LongDictation: Story = {
+  render: () => (
+    <Example
+      recording
+      streaming
+      initial="Keep the limiter where it is."
+      transcript={Array.from({ length: 30 }, () => SAID).flat()}
+      pace={12}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const field = within(canvasElement).getByRole('textbox', { name: 'Tell the lead' })
+    const overlay = field.previousElementSibling as HTMLElement
+    await waitFor(() => expect(overlay.scrollHeight).toBeGreaterThan(overlay.clientHeight + 40), { timeout: 10000 })
+    await expect(overlay.clientHeight).toBeLessThanOrEqual(200)
+    await waitFor(() => expect(overlay.scrollTop).toBeGreaterThan(0))
+    /* earlier text can be read by wheel while it goes on */
+    fireEvent.wheel(field, { deltaY: -60 })
+    await waitFor(() => expect(overlay.scrollTop).toBeLessThan(overlay.scrollHeight - overlay.clientHeight - 20))
+  },
+}
 /** Which microphone it hears, from the menu beside it: the system's default first, then each the system names. */
 export const ChoosingTheMicrophone: Story = {
   render: () => <Example />,
