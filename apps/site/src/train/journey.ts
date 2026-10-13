@@ -18,17 +18,16 @@ export const SPEED = {
 
 /** When things happen, in seconds from the page opening. */
 export const AT = {
-  /** The carriage comes up out of the dark. */
+  /** The carriage comes up out of the dark, the view at first too bright, as eyes find it. */
   open: 0,
-  opened: 1.1,
-  /** The headline's first words, then the rest but its last. */
-  first: 0.5,
-  second: 1.5,
+  opened: 1.0,
+  /** The headline's words, one after another, while the train still rolls slowly. */
+  words: 0.45,
+  /** The ways in and the lead, close behind the headline: nobody waits for the train to read them. */
+  rest: 1.3,
   /** The train gathers speed over this span, a lurch at its start. */
-  pull: 3.1,
-  flat: 7.6,
-  /** The lead and the ways in, once it is flying. */
-  rest: 6.9,
+  pull: 2.1,
+  flat: 5.6,
 } as const
 
 /** Of the way from slow to fast, by how far through the pull it is: gentle at first, building, then settling. */

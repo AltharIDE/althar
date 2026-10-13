@@ -7,10 +7,11 @@ import { HERO } from './home'
  */
 
 export const TRAIN = {
-  kicker: HERO.kicker,
-  /** "Building software has never felt so fast.", its last word arriving with the speed. */
-  title: ['Building software', 'has never felt so'],
+  /** "Building software has never felt so fast.": a line, then its last word, large, arriving with the speed. */
+  title: 'Building software has never felt so',
   last: 'fast.',
+  /** The speed readout's unit. The number is the train's own, as it goes. */
+  unit: 'km/h',
   lead: 'Althar runs Claude Code, Codex and OpenCode as one crew, on the plans you already pay for. One plans, one builds, another reviews, and when one runs out the next takes over.',
   /** The lead on a phone, where the first screen has less room. */
   short: 'Claude Code, Codex and OpenCode as one crew, on the plans you already have.',
