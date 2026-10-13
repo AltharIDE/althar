@@ -839,7 +839,7 @@ export class Runs extends Context.Service<
                 severity: 'info',
                 title: `${after.map((one) => `${one.change.words.short} ${one.change.words.prefix}${one.change.number}`).join(' and ')} ${
                   after.length > 1 ? 'are' : first.change.state === 'merged' ? 'is merged' : 'was closed'
-                }${after.length > 1 ? ' merged or closed' : ''}, so what this round committed isn't in a pull request yet.`,
+                }${after.length > 1 ? ' merged or closed' : ''}, so what the follow-up committed isn't in a pull request yet.`,
                 description: 'Open a new pull request for it from the task.',
               })
             yield* finish(run, 'succeeded')

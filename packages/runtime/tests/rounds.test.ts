@@ -162,7 +162,7 @@ describe('a task that goes back to work', () => {
       assert.include(told?.body, `git diff ${mergedHead.slice(0, 12)}`)
       assert.isTrue(
         (yield* notices(task.threadId)).some(
-          (notice) => notice.title === "PR #1 is merged, so what this round committed isn't in a pull request yet.",
+          (notice) => notice.title === "PR #1 is merged, so what the follow-up committed isn't in a pull request yet.",
         ),
       )
 

@@ -240,6 +240,26 @@ describe('how a task’s pull request is told to the coordinator', () => {
     )
   })
 
+  it('says a task’s latest pull request first, the earlier ones of its rounds of work after it, and commits in none (ADR-034)', () => {
+    const merged = change({ number: 142, state: 'merged', draft: false })
+    const next = change({ number: 150 })
+    const both = facts([merged, next])
+    assert.strictEqual(listWords(both), 'PR #150 draft, checks passing; earlier PR #142 merged')
+    assert.strictEqual(finishedBy(both), null)
+    const section = sectionWords(both)
+    assert.match(section, /^Pull requests, the latest first:\nPR #150 draft/)
+    assert.match(section, /Earlier: PR #142 merged: Add a retry/)
+    // Merged, with a commit after it in none yet: not finished, and the person opens a new pull request for it.
+    const after = facts([merged], { unshipped: 1 })
+    assert.strictEqual(listWords(after), 'PR #142 merged; 1 commit after its last pull request, in none yet')
+    assert.strictEqual(finishedBy(after), null)
+    assert.match(
+      sectionWords(after),
+      /1 commit on the task's branch is after its last pull request, which merged or closed, and in none yet: the person opens a new pull request for it from the task\./,
+    )
+    assert.notMatch(sectionWords(after), /The task is finished/)
+  })
+
   it('says a stale open pull request may be out of date', () => {
     assert.match(
       sectionWords(facts([change()], { host: offline })),
