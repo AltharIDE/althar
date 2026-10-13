@@ -17,6 +17,14 @@ export const kindWords = {
   ready: 'Ready to accept',
 } as const
 
+/**
+ * The word for work that is ready: ready to accept; or, where its lead couldn't
+ * resolve a conflict, or fix the checks on the merge, and it is the person's
+ * now, stuck, as any step that can't go on without them is.
+ */
+export const readyKindOf = (task: { readonly handedBack?: string | null | undefined }): string =>
+  task.handedBack == null ? kindWords.ready : kindWords.stuck
+
 /** A call's kind, in its word: an agent's question; out of usage or stuck if it is about a step; else a permission. */
 export const callKindOf = (call: { readonly kind: string; readonly stuck: { readonly why: string } | null }): string =>
   call.kind === 'question'

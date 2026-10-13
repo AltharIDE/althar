@@ -244,6 +244,11 @@ type Store =
   | Policies
   | Live
 
+/** Where a task's conflict round stands, as its card says it (`Changes.conflictStanding`). */
+export type ConflictStanding =
+  | { readonly state: 'resolving'; readonly checks: boolean }
+  | { readonly state: 'handed_back'; readonly why: string }
+
 interface RoundRow {
   readonly id: string
   readonly projectId: ProjectId
@@ -377,6 +382,15 @@ export class Changes extends Context.Service<
       readonly taskId: string
       readonly resolveConflicts: boolean | null
     }): Effect.Effect<void, unknown>
+    /**
+     * Where a task's latest conflict round stands, for its card: the lead at
+     * work on one (`resolving`; `checks` where it is fixing the checks that
+     * failed on what Althar pushed rather than the conflict), or handed back
+     * to the person, saying why, for as long as the task's branches are as
+     * the lead left them. Null otherwise, such as while Althar waits for the
+     * checks on what it pushed.
+     */
+    conflictStanding(taskId: string): Effect.Effect<ConflictStanding | null>
     /** Does something with a task's pull request as one action: one at a time with replying, pushing, marking ready and merging. */
     exclusive<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
     /**
@@ -1816,6 +1830,25 @@ export class Changes extends Context.Service<
           return 'yes' as const
         })
 
+      /** Where a task's latest round stands, for its card (`Changes.conflictStanding`). */
+      const standingOfRound = (taskId: string): Effect.Effect<ConflictStanding | null, unknown, Store> =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [latest] = yield* sql<{ id: string }>`
+            SELECT id FROM conflict_resolutions WHERE task_id = ${taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`
+          const round = latest === undefined ? undefined : yield* roundOf({ id: latest.id })
+          if (round === undefined) return null
+          if (round.state === 'resolving') return { state: 'resolving', checks: round.pushedHead !== null }
+          if (round.state !== 'failed' || round.ended === null || round.failure === null) return null
+          // Still the person's while the branches are as the lead left them, as `askable` reads it.
+          const conflicts = yield* decodeConflicts(round.conflicts)
+          const left = yield* decodeEnded(round.ended)
+          const now = yield* endedOf(taskId, conflicts)
+          if (!left.every((one) => now.some((head) => head.repository === one.repository && head.head === one.head))) return null
+          const couldnt = round.pushedHead === null ? `resolve the conflict with ${whereLine(conflicts)}` : 'fix the checks on the merge'
+          return { state: 'handed_back', why: `The lead couldn’t ${couldnt}. ${round.failure}` }
+        })
+
       /** Where a round is, in its words: its pull request (`PR #1`), or none for merging here. */
       const placeOf = (taskId: string, url: string | null): Effect.Effect<Place, unknown, Store> =>
         Effect.gen(function* () {
@@ -2849,6 +2882,7 @@ export class Changes extends Context.Service<
           ),
         hostFor: (projectId) => provide(hostFor(projectId)),
         hostsFor: (projectId, taskId) => provide(hostsFor(projectId, taskId)).pipe(Effect.orElseSucceed(() => [])),
+        conflictStanding: (taskId) => provide(standingOfRound(taskId)).pipe(Effect.orElseSucceed(() => null)),
       })
     }),
   )

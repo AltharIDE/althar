@@ -14,8 +14,14 @@ export const stepText = {
     review: 'Reviewing',
     settle: 'Settling the review',
     publish: 'Opening the pull request',
+    // A conflict round's lead, once the task's steps are done: the conflict with its default branch, or the checks on the merge.
+    conflict: 'Resolving a conflict',
+    checks: 'Fixing the checks',
   } as Readonly<Record<string, string>>,
 }
+
+/** Whether a step is a conflict round's, after the plan's steps. */
+export const afterSteps = (step: string | null) => step === 'conflict' || step === 'checks'
 
 /** The names of the steps it takes. */
 export const stepNames = (steps: ReadonlyArray<PlanStep>): ReadonlyArray<string> =>
@@ -23,7 +29,11 @@ export const stepNames = (steps: ReadonlyArray<PlanStep>): ReadonlyArray<string>
 
 /** Which of those it is on, from the step's key: settling a review's findings, and what follows, are part of the review. */
 export const stepIndex = (names: ReadonlyArray<string>, step: string | null): number =>
-  step === null ? 0 : Math.max(0, names.indexOf(stepText.label[step === 'implement' ? 'implement' : 'review']))
+  step === null
+    ? 0
+    : afterSteps(step)
+      ? Math.max(0, names.length - 1)
+      : Math.max(0, names.indexOf(stepText.label[step === 'implement' ? 'implement' : 'review']))
 
 /** Its track: every step done once it is, else done up to the one it is on. */
 export const trackFor = (steps: ReadonlyArray<PlanStep>, step: string | null, done: boolean): TrackItem[] => {

@@ -87,6 +87,17 @@ const cards = (projectId: string) =>
     return snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : []))
   })
 
+/** The task's card now: where it stands, the step it is on, and why the lead handed a round back, if it did. */
+const cardOf = (projectId: string) =>
+  Effect.map(cards(projectId), ([card]) => ({ phase: card?.phase, step: card?.step, handedBack: card?.handedBack ?? null }))
+
+/** Whether the task's lead is in a turn Althar sent: not, between turns, waiting on what it left running. */
+const inTurn = (threadId: string) =>
+  Effect.map(
+    Effect.flatMap(Sessions, (sessions) => sessions.running(threadId)),
+    (running) => Option.exists(running, (session) => session.turnRunning),
+  )
+
 /** The task's worktree, by its repository's slug. */
 const worktreeOf = (taskId: string) =>
   Effect.gen(function* () {
@@ -1089,6 +1100,64 @@ describe('a conflict its pull request’s host reports', () => {
       assert.deepStrictEqual([round?.state, round?.attempt], ['resolved', 2])
       assert.strictEqual(round?.pushedHead, git(bare, 'rev-parse', 'althar/add-a-retry'))
       assert.strictEqual(git(bare, 'merge-base', '--is-ancestor', 'main', 'althar/add-a-retry'), '')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('shows the card at work while the lead resolves a conflict, between its turns too, and ready again once it is done', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened(working, '[lead:resolve-tests]')
+      assert.deepStrictEqual(yield* cardOf(projectId), { phase: 'ready', step: null, handedBack: null })
+      moveHostMainOn(working, bare)
+      // At work on the conflict: its turn over, the full tests still running, and the card says so, not "ready".
+      yield* until(
+        Effect.map(Effect.all([cardOf(projectId), inTurn(threadId)]), ([card, turn]) => [{ ...card, turn }]),
+        ([seen]) => seen?.phase === 'running' && seen.step === 'conflict' && !seen.turn,
+        Duration.seconds(20),
+      )
+      // Pushed, it waits for the checks on what Althar pushed: ready for the person to accept once they pass.
+      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      assert.deepStrictEqual(yield* cardOf(projectId), { phase: 'ready', step: null, handedBack: null })
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('shows the card at work while the lead fixes the checks that failed on the merge, between its turns too', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, (sha) => (holdsMain(bare, sha) && !holdsFix(bare, sha) ? FAILED : PASSED))
+    return Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened(working, '[lead:resolve] [lead:fix-late]')
+      moveHostMainOn(working, bare)
+      yield* titled(threadId, 'The checks failed on what Althar pushed to PR #1: test.')
+      yield* until(
+        Effect.map(Effect.all([cardOf(projectId), inTurn(threadId)]), ([card, turn]) => [{ ...card, turn }]),
+        ([seen]) => seen?.phase === 'running' && seen.step === 'checks' && !seen.turn,
+        Duration.seconds(20),
+      )
+      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      assert.deepStrictEqual(yield* cardOf(projectId), { phase: 'ready', step: null, handedBack: null })
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('puts the card in Needs you with why when the lead couldn’t resolve the conflict, until the branch moves', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { projectId, taskId, threadId } = yield* opened(working, '[lead:resolve-fails]')
+      moveHostMainOn(working, bare)
+      yield* titled(threadId, 'The lead couldn’t resolve the conflict with main, in change.txt')
+      const card = yield* cardOf(projectId)
+      assert.strictEqual(card.phase, 'ready')
+      assert.strictEqual(
+        card.handedBack,
+        "The lead couldn’t resolve the conflict with main, in change.txt. origin/main isn't merged into the branch.",
+      )
+      // The thread header says so as well, from the same card.
+      const queries = yield* Queries
+      assert.strictEqual((yield* Effect.orDie(queries.thread(threadId))).task.handedBack, card.handedBack)
+      // Once its branch moves it is the person's own again, and the card says nothing of the round.
+      git((yield* worktreeOf(taskId)).path, 'commit', '-q', '--allow-empty', '-m', 'Look again')
+      assert.deepStrictEqual(yield* cardOf(projectId), { phase: 'ready', step: null, handedBack: null })
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 

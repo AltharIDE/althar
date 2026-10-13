@@ -60,12 +60,14 @@ export interface AcceptCardProps {
   checks?: number
   /** When it became ready: 9m ago. */
   at?: string
+  /** Why it needs you before it can be accepted, such as a conflict its lead couldn't resolve: a line under the title. */
+  note?: string
   current?: boolean
   onOpen?: () => void
   text?: Partial<AcceptCardText>
 }
 
-export function AcceptCard({ task, title, prs = [], host, branch, checks, at, current, onOpen, text }: AcceptCardProps) {
+export function AcceptCard({ task, title, prs = [], host, branch, checks, at, note, current, onOpen, text }: AcceptCardProps) {
   const t = { ...acceptCardText, ...text }
   return (
     <article className={cx(b.card, s.accept)} aria-current={current || undefined}>
@@ -77,6 +79,7 @@ export function AcceptCard({ task, title, prs = [], host, branch, checks, at, cu
       <CardTitle className={s.title} onOpen={onOpen}>
         {title}
       </CardTitle>
+      {note && <p className={s.note}>{note}</p>}
       <ul className={s.prs}>
         {prs.map((pr) => (
           <li key={`${pr.repo}${pr.number}`} className={s.pr}>

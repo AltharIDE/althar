@@ -169,6 +169,18 @@ describe('the board’s lanes', () => {
     expect(trackOf(task({ step: 'implement' }))).toEqual({ steps: ['Implement', 'Review'], at: 0 })
     // A task with no plan is a conversation with its lead.
     expect(trackOf(task({ plan: null }))).toEqual({ steps: ['Conversation'], at: 0 })
+    // Resolving a conflict, or fixing the checks on the merge, comes after the steps.
+    expect(trackOf(task({ step: 'conflict' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
+    expect(trackOf(task({ step: 'checks' }))).toEqual({ steps: ['Implement', 'Review'], at: 1 })
+  })
+
+  it('lists work its lead couldn’t resolve a conflict for as stuck, with why, among what needs the person', () => {
+    const why = 'The lead couldn’t resolve the conflict with main, in README.md. The merge of origin/main isn’t committed.'
+    const lanes = lanesOf(
+      board({ tasks: [task({ taskId: 't8', threadId: 'th8', title: 'Add a limit', phase: 'ready', handedBack: why })], calls: [] }),
+    )
+    expect(lanes.ready.map((work) => work.taskId)).toEqual(['t8'])
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([['Stuck', 'Add a limit', why]])
   })
 })
 
@@ -465,6 +477,43 @@ describe('every state the board shows', () => {
     expect(screen.getByText('PR #12 closed')).toBeTruthy()
     expect(screen.getAllByText('althar/add-a-retry').length).toBeGreaterThan(0)
     return userEvent.click(screen.getByRole('button', { name: 'Held plan' })).then(() => expect(onOpen).toHaveBeenCalledWith('th1'))
+  })
+
+  it('shows work its lead is resolving a conflict for at work, and what it couldn’t resolve as stuck, with why', () => {
+    const why = 'The lead couldn’t resolve the conflict with main, in README.md. The merge of origin/main isn’t committed.'
+    const lanes = lanesOf(
+      board({
+        tasks: [
+          task({
+            taskId: 'r1',
+            threadId: 'thr1',
+            title: 'Resolving it',
+            phase: 'running',
+            step: 'conflict',
+            startedAt: '2026-10-01T09:30:00.000Z',
+          }),
+          task({
+            taskId: 'r2',
+            threadId: 'thr2',
+            title: 'Fixing its checks',
+            phase: 'running',
+            step: 'checks',
+            startedAt: '2026-10-01T09:30:00.000Z',
+          }),
+          task({ taskId: 'r3', threadId: 'thr3', title: 'Handed back', phase: 'ready', handedBack: why }),
+          task({ taskId: 'r4', threadId: 'thr4', title: 'Ready as ever', phase: 'ready' }),
+        ],
+        calls: [],
+      }),
+    )
+    withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+    // At work, on the board's running lane, saying what it does where the step count would be.
+    expect(screen.getByText('Resolving a conflict')).toBeTruthy()
+    expect(screen.getByText('Fixing the checks')).toBeTruthy()
+    // Handed back, it is Stuck with the reason; the other is ready to accept, as ever.
+    expect(screen.getByText('Stuck')).toBeTruthy()
+    expect(screen.getByText(why)).toBeTruthy()
+    expect(screen.getAllByText('Ready to accept')).toHaveLength(1)
   })
 
   it('says how long work has run', () => {

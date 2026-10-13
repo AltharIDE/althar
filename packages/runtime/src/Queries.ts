@@ -1198,6 +1198,9 @@ export class Queries extends Context.Service<
           const [latest] = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result'
               AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
+          // A conflict round: its lead is at work on it, though between turns, or it is the person's now.
+          const round = yield* (yield* Changes).conflictStanding(taskId)
+          const resolving = round?.state === 'resolving' ? round : undefined
           const lead = yield* sessions.running(task.threadId)
           const reviewer = task.review === null ? Option.none() : yield* sessions.running(task.review)
           const working = task.starting > 0 || Option.isSome(lead) || Option.isSome(reviewer)
@@ -1212,7 +1215,7 @@ export class Queries extends Context.Service<
             // A call waiting on the person, and work under way, come before being ready: work sent back isn't ready again
             // until its lead is done with the note.
             if (task.waiting > 0) return 'waiting'
-            if (task.runState === 'succeeded') return busy ? 'running' : 'ready'
+            if (task.runState === 'succeeded') return busy || resolving !== undefined ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
             return working || task.held !== null ? 'running' : 'stopped'
@@ -1256,7 +1259,8 @@ export class Queries extends Context.Service<
             issue: issue === null ? null : { product: issue.product, key: issue.key, title: issue.title, url: issue.url },
             // The first still open, for the person to act on: one merged while another isn't leaves the other.
             change: changes.find((candidate) => candidate.state === 'open') ?? changes[0] ?? null,
-            step: task.step,
+            // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
+            step: task.step ?? (resolving === undefined || phase !== 'running' ? null : resolving.checks ? 'checks' : 'conflict'),
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (implement?.agentId || null),
             // Its session's model once one started; the plan's until then.
@@ -1265,6 +1269,7 @@ export class Queries extends Context.Service<
             branch: task.branch,
             startedAt: task.runAt ?? task.firstSession,
             waits: waitsOf(task.held),
+            ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
 
@@ -1581,6 +1586,7 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               baseRef: head.baseRef,
               phase: card?.phase ?? null,
+              handedBack: card?.handedBack ?? null,
               waits: card?.waits ?? null,
               steps: card?.plan?.steps ?? [],
               lead: last ?? (planned === undefined ? null : { agentId: planned.agentId, model: planned.model, account: null }),

@@ -16,9 +16,10 @@ import {
 
 import { waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
-import { callKindOf, kindWords, whereOf } from '../../shared/calls'
+import { callKindOf, kindWords, readyKindOf, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
+import { afterSteps, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import { type Lanes } from './lanes'
@@ -60,8 +61,10 @@ export const trackOf = (task: BoardTask) => {
   const planned = (task.plan?.steps ?? []).filter((step) => !step.skipped).map((step) => step.key)
   if (planned.length === 0) return { steps: [text.conversation], at: 0 }
   // Settling a review's findings is part of the review.
-  const on = task.step === 'implement' ? 'implement' : task.step === null || task.step === 'publish' ? null : 'review'
-  const at = on === null ? (task.step === 'publish' ? planned.length - 1 : 0) : Math.max(0, planned.indexOf(on))
+  const on =
+    task.step === 'implement' ? 'implement' : task.step === null || task.step === 'publish' || afterSteps(task.step) ? null : 'review'
+  // Publishing, and a conflict round, come after the steps.
+  const at = on === null ? (task.step === 'publish' || afterSteps(task.step) ? planned.length - 1 : 0) : Math.max(0, planned.indexOf(on))
   return { steps: planned.map((key) => text.step[key]), at }
 }
 
@@ -133,9 +136,11 @@ export function BoardView({
                 ? { note: waitsWords(name(work.waits.agentId), clock(work.waits.until)) }
                 : status === TaskStatus.Stopped
                   ? { note: text.stopped }
-                  : steps.length === 1
-                    ? { note: '' }
-                    : {})}
+                  : afterSteps(work.step)
+                    ? { note: stepText.now[work.step ?? ''] ?? '' }
+                    : steps.length === 1
+                      ? { note: '' }
+                      : {})}
               onOpen={() => onOpen(work.threadId)}
               text={{ status: text.status, task: unnamed }}
             />
@@ -171,8 +176,14 @@ export function BoardView({
                     host: { name: productName(change.product), ...(brand === undefined ? {} : { brand }) },
                     checks: change.checks?.passed ?? 0,
                   })}
+              // Its lead couldn't resolve a conflict: it is stuck, and the card says why.
+              {...(work.handedBack == null ? {} : { note: work.handedBack })}
               onOpen={() => onOpen(work.threadId)}
-              text={{ task: unnamed, ...(change === null ? {} : { number: (n: number) => `${change.prefix}${n}` }) }}
+              text={{
+                task: unnamed,
+                ...(work.handedBack == null ? {} : { kind: readyKindOf(work) }),
+                ...(change === null ? {} : { number: (n: number) => `${change.prefix}${n}` }),
+              }}
             />
           )
         })}

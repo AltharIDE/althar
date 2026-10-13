@@ -141,6 +141,8 @@ export const statusOf = (
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
   const doing = step === null ? undefined : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
+  // Ready, but its lead couldn't resolve a conflict with its default branch: it needs the person before it can be accepted.
+  if (phase === 'ready' && snapshot.task.handedBack != null) return { status: TaskStatus.Yours, state: text.needsYou }
   // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
   if (phase === 'ready') return { status: TaskStatus.Yours, state: text.ready }
   // Abandoned, it says so in place of where it stood, as stopped does.
@@ -184,6 +186,7 @@ export const sinceOf = (snapshot: ThreadSnapshot, now: string): string | null =>
     return settledAt === null
       ? null
       : (snapshot.task.state === 'abandoned' ? text.since.abandoned : text.since.done)(ago(settledAt, new Date(now)))
+  if (phase === 'ready' && snapshot.task.handedBack != null) return null
   if (phase === 'ready') {
     const reported = snapshot.items.findLast((item) => item.kind === 'step_result')
     return reported === undefined ? null : text.since.ready(ago(reported.createdAt, new Date(now)))

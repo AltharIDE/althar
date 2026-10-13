@@ -415,8 +415,9 @@ const playStall = async (
  * Told what people said on its pull
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
- * publishes it, `[lead:fix-more]` commits other work after it, and
- * `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
+ * publishes it, `[lead:fix-more]` commits other work after it,
+ * `[lead:fix-late]` leaves the full tests running and commits it once they
+ * end, and `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
  * `[lead:push]` commits what it has and asks the person to push it. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
@@ -704,6 +705,12 @@ const playRole = async (
       // Fixed and committed, for the person to push.
       const fixMore = session.markers.has('[lead:fix-more]')
       const fixHold = session.markers.has('[lead:fix-hold]')
+      // Leaves the full tests running before it commits the fix, which it does once they end, woken outside a turn.
+      if (session.markers.has('[lead:fix-late]') && text.startsWith('Checks failed')) {
+        const cwd = session.cwd
+        await tests({ lasts: 400, commits: () => commitIn(cwd, 'fixed.txt', 'Fix the failing check') })
+        return "I'll wait for the tests, then commit the fix."
+      }
       if ((session.markers.has('[lead:fix]') || fixMore || fixHold) && text.startsWith('Checks failed')) {
         commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
         if (fixHold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
