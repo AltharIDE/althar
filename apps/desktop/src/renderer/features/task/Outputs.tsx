@@ -50,9 +50,9 @@ export const text = {
   markReadyIn: (repository: string) => `Mark ${repository} ready for review`,
   openChange: 'Open a pull request',
   openNewChange: 'Open a new pull request',
-  /** One of the task's earlier pull requests, before its latest: merged or closed. */
-  earlier: (change: ChangeSummary, host: string) =>
-    `Before this: ${change.short} ${change.prefix}${change.number}, ${change.state === 'open' ? 'open' : change.state} on ${host}.`,
+  /** One of the task's earlier pull requests, before its latest: merged or closed. In a task of several repositories, by its own. */
+  earlier: (change: ChangeSummary, host: string, repository: string | undefined) =>
+    `Before this: ${repository === undefined ? '' : `${repository} `}${change.short} ${change.prefix}${change.number}, ${change.state === 'open' ? 'open' : change.state} on ${host}.`,
   /** Commits after its last pull request merged or closed, in none yet. */
   /** In a task of several repositories, by none: they may be in a repository that has had no pull request yet. */
   unshipped: (n: number, change: ChangeSummary | undefined) =>
@@ -414,7 +414,7 @@ export function Outputs({
         ))}
         {earlier.map((one) => (
           <p key={`earlier-${one.url}`} className={s.quiet}>
-            {text.earlier(one, productName(one.product))}{' '}
+            {text.earlier(one, productName(one.product), several ? nameOf(one.repository) : undefined)}{' '}
             <a className={s.external} href={one.url} target="_blank" rel="noreferrer">
               {text.openOn(productName(one.product))}
             </a>

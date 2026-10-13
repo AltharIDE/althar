@@ -37,11 +37,12 @@
     pushes what the lead commits for them. Nor does anything while a
     conflict round is under way. A lead that calls `finish_step` after its
     plan with no step open opens one and finishes it in the same call: that
-    round starts where the last run left the task (the nearer of what its
-    pull request was last sent and what its last review read, else its
-    branch when that run ended), so what the lead committed before it
-    reported, as a fix for checks Althar told it of, is the round's, and is
-    reviewed as the plan says.
+    round starts where the last run left the task: the nearest, on its
+    branch, of where the branch stood as that run ended (Althar marks it
+    then, in a ref of its own), what its pull request was last sent and
+    what its last review read, else where the branch started. So what the
+    lead committed before it reported, as a fix for checks Althar told it
+    of, is the round's, and is reviewed as the plan says.
   - **A round is a real round.** It ends as any of the lead's steps does,
     with `finish_step`, its summary and its evidence. With new work, it goes
     on to its review, if it has one, settled as ever. New work is new
@@ -74,7 +75,9 @@
   - **A task has as many pull requests as it needs.** Opening a new one
     works in each of the task's repositories whose last pull request is
     merged or closed and whose branch has commits after that pull request's
-    head:
+    head, and in each that never had one and has commits now, on a host
+    Althar knows, where its first opens from its branch as the plan's would
+    have:
     - after a merge, Althar starts a new branch from the default branch as
       the host has it now (fetched, signed in as a push is, from the
       repository the pull request opens on: for one from a fork into the
@@ -109,12 +112,16 @@
     merged is history) and nothing after them changes anything. One whose
     branch has commits after the last one's head in any repository stays
     open and ready, offering the new pull request, rather than settling with
-    work no pull request has.
+    work no pull request has; so does one with commits in a repository that
+    never had a pull request.
   - **The task keeps every pull request,** one external link each, and a
     change set per round. Its card and its header show the latest (the open
-    one first, else the most recent) and the earlier ones under it;
-    `read_task` and `list_tasks` say each, the latest first, and how many
-    commits are in none.
+    one first, else the most recent) and the earlier ones under it, each by
+    its repository where the task has several; `read_task` and
+    `list_tasks` say each, the latest first, and how many commits are in
+    none. On the board, a task with one repository's pull request open and
+    commits in none in another shows that pull request, to accept, and its
+    branch under it with what no pull request has.
   - **A merged task with commits after its pull requests is never only
     Settled.** One that was done before rounds existed, with work its lead
     committed afterwards, as DEV-58's was, shows as Ready, offering the new
@@ -132,7 +139,8 @@
 
   The states and transitions, tested in `packages/runtime/tests/rounds.test.ts`, with an
   interrupted round in `changes.test.ts` and a restart after a completed turn in
-  `busy.test.ts`; `apps/desktop/e2e/rounds.spec.ts` walks the first and the last in the window:
+  `busy.test.ts`; `apps/desktop/e2e/rounds.spec.ts` walks the first and the last in the window, and a task of
+  two repositories: one's pull request open beside the other's next, and a try whose push one host refused:
 
   ```mermaid
   stateDiagram-v2

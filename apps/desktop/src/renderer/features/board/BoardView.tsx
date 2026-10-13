@@ -158,8 +158,10 @@ export function BoardView({
         ))}
         {lanes.ready.map((work) => {
           // Commits after its last pull request merged or closed: its branch, as for work with none, until a new one opens; with
-          // another of its repositories' pull requests open, that one, to accept.
+          // another of its repositories' pull requests open, that one, to accept, and the branch under it with what is in none.
           const change = work.unshipped == null || work.change?.state === 'open' ? work.change : null
+          const after =
+            work.unshipped == null || work.branch === null ? null : { name: work.branch, add: work.unshipped.add, del: work.unshipped.del }
           const brand = change === null ? undefined : productBrand(change.product)
           return (
             <AcceptCard
@@ -187,6 +189,7 @@ export function BoardView({
                     ],
                     host: { name: productName(change.product), ...(brand === undefined ? {} : { brand }) },
                     checks: change.checks?.passed ?? 0,
+                    ...(after === null ? {} : { branch: after }),
                   })}
               onOpen={() => onOpen(work.threadId)}
               text={{

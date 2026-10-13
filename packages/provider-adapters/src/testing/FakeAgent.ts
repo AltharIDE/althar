@@ -646,11 +646,15 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
           .split(/[.!?]/)[0]
           ?.trim() || 'Add a retry'
       const link = /https?:\/\/\S+/.exec(asked)?.[0]
-      const drafted = await call('draft_task', {
+      const draft = {
         title,
         description: `Retry the checkout call. ${markers.join(' ')}`,
         ...(link === undefined ? {} : { issue: link }),
-      })
+      }
+      // In a project of several repositories, asked which it changes, it names every one it is told of.
+      const first = await call('draft_task', draft)
+      const which = /as repositories: (.+)\.$/.exec(first)?.[1]
+      const drafted = which === undefined ? first : await call('draft_task', { ...draft, repositories: which.split(', ') })
       const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
       return await call('propose_plan', {
         task: slug,
