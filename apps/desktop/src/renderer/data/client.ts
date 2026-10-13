@@ -120,6 +120,8 @@ export interface Client {
   readonly getHome: (since?: string) => Promise<HomeSnapshot>
   /** The person left the home: what the loop does from now on is new to them. */
   readonly leftHome: () => Promise<void>
+  /** The person opened a task's screen: a plain task that finished is done once seen. */
+  readonly seeTask: (taskId: string) => Promise<void>
   readonly startSession: (input: Start) => Promise<string>
   /** Hands the thread to another agent; with `body`, what the person said, and any images, its first turn after the brief. */
   readonly switchAgent: (input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage> }) => Promise<string>
@@ -428,6 +430,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getOlderSettled: (projectId, before, taskId) => settle(api.GetOlderSettled({ projectId, before, taskId })).then((older) => older.tasks),
     getHome: (since) => settle(api.GetHome(since === undefined ? {} : { since })),
     leftHome: () => command((commandId) => api.LeftHome({ commandId })),
+    seeTask: (taskId) => command((commandId) => api.SeeTask({ commandId, taskId })),
     startSession: (input) => command((commandId) => api.StartSession({ commandId, ...input })),
     switchAgent: (input) => command((commandId) => api.SwitchAgent({ commandId, ...input })),
     setModel: (input) => command((commandId) => api.SetModel({ commandId, ...input })),

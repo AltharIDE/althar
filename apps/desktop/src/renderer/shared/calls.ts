@@ -37,3 +37,11 @@ export const callKindOf = (call: { readonly kind: string; readonly stuck: { read
 
 /** Where a call waits, in words: its task, or the conversation with the coordinator, for a question the coordinator asks. */
 export const whereOf = (call: { readonly taskTitle: string | null }): string => call.taskTitle ?? 'Coordinator'
+
+/**
+ * A plain task that finished (DEV-96): it waits on its board, as Finished,
+ * until the person opens it, and asks nothing of them, so nothing else
+ * lists or counts it: not the home, the edge, the tabs or the Dock.
+ */
+export const isFinished = (task: { readonly kind: string; readonly phase: string }): boolean =>
+  task.kind === 'plain' && task.phase === 'ready'

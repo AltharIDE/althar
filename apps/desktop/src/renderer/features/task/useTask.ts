@@ -183,6 +183,11 @@ export const useTask = (threadId: string): TaskModel => {
     if (taskId !== null && hasChange) client.refreshTask(taskId).catch(() => undefined)
   }, [client, taskId, hasChange])
 
+  // Its screen open, the task is seen, once: a plain task that finished is done then (DEV-96). Seeing it again does nothing more.
+  useEffect(() => {
+    if (taskId !== null) client.seeTask(taskId).catch(() => undefined)
+  }, [client, taskId])
+
   useEffect(() => () => clearTimeout(timer.current), [])
 
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])

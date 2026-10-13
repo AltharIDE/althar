@@ -333,6 +333,16 @@ describe('the home', () => {
     expect(within(needs).getByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })).toBeTruthy()
   })
 
+  it('leaves out a plain task that finished: it waits on its board, and asks nothing of the person here', async () => {
+    const one = busy()
+    const finished = task({ taskId: 't20', threadId: 'th20', title: 'Which partners call v1?', slug: 'v1', phase: 'ready', kind: 'plain' })
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...one, tasks: [...one.tasks, finished] })) })
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
+    expect(within(needs).getByRole('article', { name: 'Name it better' })).toBeTruthy()
+    expect(screen.queryByText('Which partners call v1?')).toBeNull()
+  })
+
   it('lists a task with a call on its line alone, not again in its project, until the call is answered', async () => {
     const one = busy()
     const { client } = fakeClient({

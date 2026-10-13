@@ -533,6 +533,7 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   title: 'Add a retry',
   slug: 'add-a-retry',
   phase: 'planned',
+  kind: 'change',
   plan: {
     id: 'pln1',
     steps: [
@@ -769,6 +770,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     getOlderSettled: vi.fn(async () => []),
     getHome: vi.fn(async () => home()),
     leftHome: vi.fn(async () => {}),
+    seeTask: vi.fn(async () => {}),
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
     replacePullRequest: vi.fn(async () => {}),
