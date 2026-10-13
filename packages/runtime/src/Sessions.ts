@@ -429,7 +429,7 @@ export class Sessions extends Context.Service<
      */
     gateTurns(
       gate: (
-        agent: { readonly taskId: string; readonly threadId: string; readonly review: boolean },
+        agent: { readonly taskId: string; readonly threadId: string; readonly sessionId: string; readonly review: boolean },
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) => Effect.Effect<boolean>,
     ): Effect.Effect<void>
@@ -453,7 +453,7 @@ export class Sessions extends Context.Service<
       const threads = new Map<string, Running>()
       /* What a lead's or a reviewer's turns wait for, once Busy says (gateTurns): until then, nothing. */
       let gate = (
-        _agent: { readonly taskId: string; readonly threadId: string; readonly review: boolean },
+        _agent: { readonly taskId: string; readonly threadId: string; readonly sessionId: string; readonly review: boolean },
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) => Effect.as(work(Effect.void), true)
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
@@ -1046,26 +1046,32 @@ export class Sessions extends Context.Service<
             // A lead's first turn waits for its worktrees to be set up (Setups.ts), and so has what was said meanwhile. It
             // waits before it holds the turn, so the lead can be stopped meanwhile.
             if (running.thread.role === 'task' && running.brief !== undefined) yield* setups.ready(running.thread.taskId)
-            const work = running.delivering.withPermits(1)(
-              Effect.gen(function* () {
-                while (!running.stopping && (yield* deliver(running))) {
-                  // Each turn may leave more input queued, such as what arrived while it ran.
-                }
-              }),
-            )
             const { thread } = running
-            // A lead's or a reviewer's turn, with something to deliver, waits for a place among the agents at work here.
-            if (thread.role === 'coordinator' || !(running.brief !== undefined || (yield* hasQueued(thread.threadId)))) yield* work
-            else
-              yield* gate({ taskId: thread.taskId, threadId: thread.threadId, review: thread.role === 'reviewer' }, (begun) =>
+            if (thread.role === 'coordinator')
+              return yield* running.delivering.withPermits(1)(
+                Effect.gen(function* () {
+                  while (!running.stopping && (yield* deliver(running))) {
+                    // Each turn may leave more input queued, such as what arrived while it ran.
+                  }
+                }),
+              )
+            // A lead's or a reviewer's turns, one at a time, each waiting for a place among the agents at work here: what
+            // is still queued after one wakes it again, and asks again.
+            if (running.stopping || !(running.brief !== undefined || (yield* hasQueued(thread.threadId)))) return
+            yield* gate(
+              { taskId: thread.taskId, threadId: thread.threadId, sessionId: running.sessionId, review: thread.role === 'reviewer' },
+              (begun) =>
                 Effect.suspend(() => {
+                  if (running.stopping) return Effect.succeed(false)
                   running.begun = begun
-                  return run(work)
+                  return run(running.delivering.withPermits(1)(deliver(running)))
                 }).pipe(
+                  Effect.flatMap((delivered) => (delivered ? Queue.offer(running.wake, undefined) : Effect.succeed(false))),
+                  Effect.asVoid,
                   Effect.catchCause((cause) => Effect.logWarning('Could not deliver a turn', cause)),
                   Effect.ensuring(Effect.sync(() => (running.begun = undefined))),
                 ),
-              )
+            )
           }),
         )
 

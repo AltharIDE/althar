@@ -113,9 +113,10 @@ export class Busy extends Context.Service<
      * agent is at work already or a place is free, else once one frees, the
      * input waiting in its thread meanwhile. True where it ran now.
      */
-    turn(agent: Agent & { readonly threadId: string }, work: (begun: Effect.Effect<void>) => Effect.Effect<void>): Effect.Effect<boolean>
-    /** Whether one of the task's agents has a turn waiting for a place. */
-    waits(taskId: string): Effect.Effect<boolean>
+    turn(
+      agent: Agent & { readonly threadId: string; readonly sessionId: string },
+      work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
+    ): Effect.Effect<boolean>
     /** Adds where waiting work is read from: each time the queue is looked at, every source is read, and what waited longest starts first. */
     queue(waiting: Effect.Effect<ReadonlyArray<Waiter>, unknown>): Effect.Effect<void>
     /** Looks at the queue again: a place may have freed, or something waits. */
@@ -157,8 +158,11 @@ export class Busy extends Context.Service<
           return release(key)
         })
       }
-      /* Turns waiting for a place, by their thread: only while Althar runs, as what they deliver waits in the thread's queue. */
-      const turns = new Map<string, Waiter>()
+      /*
+       * Turns waiting for a place, by their thread, with the session they are for. Each is kept on its thread too
+       * (`waits_for_place`), what it delivers in the thread's queue, so a restart starts its agent again once there is one.
+       */
+      const turns = new Map<string, Waiter & { readonly sessionId: string }>()
       /* What the cards of waiting tasks last said, so they are read again when it changes. */
       let said = ''
 
@@ -279,18 +283,67 @@ export class Busy extends Context.Service<
           }
         }),
       )
+      /**
+       * A session that ended takes the turn it waited to give with it: one
+       * stopped, or gone on its own, waits no more, and its task says so; one
+       * another agent took over from asks again in the new session.
+       */
+      const ended = (threadId: string, sessionId: string, state: string) =>
+        Effect.gen(function* () {
+          const waited = turns.get(threadId)
+          if (waited === undefined || waited.sessionId !== sessionId) return
+          turns.delete(threadId)
+          if (state !== 'superseded') yield* sql`UPDATE threads SET waits_for_place = NULL WHERE id = ${threadId}`
+          yield* Effect.ignore(provide(touchCard(waited.taskId)))
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not let a waiting turn go', cause)))
+
       const events = yield* live.subscribe
       yield* Effect.forkScoped(
         Stream.runForEach(events, (event) =>
-          event._tag === 'TurnEnded' ||
-          event._tag === 'SessionEnded' ||
-          event._tag === 'Background' ||
-          event._tag === 'AttentionNeeded' ||
-          event._tag === 'AttentionClosed'
-            ? wake
-            : Effect.void,
+          event._tag === 'SessionEnded'
+            ? Effect.andThen(ended(event.threadId, event.sessionId, event.state), wake)
+            : event._tag === 'TurnEnded' ||
+                event._tag === 'Background' ||
+                event._tag === 'AttentionNeeded' ||
+                event._tag === 'AttentionClosed'
+              ? wake
+              : Effect.void,
         ),
       )
+
+      /**
+       * Turns that waited for a place when Althar stopped, kept on their
+       * threads: once there is one, the agent last on the thread, as the
+       * person last started or switched to it, starts again, and its first
+       * turn delivers what waited. Not where a session is on the thread (its
+       * own turn waits in `turns`), or its task is stopped or settled.
+       */
+      const restored = Effect.gen(function* () {
+        const rows = yield* sql<{ threadId: string; taskId: string; kind: string; since: string }>`
+          SELECT h.id AS thread_id, h.task_id, h.kind, h.waits_for_place AS since FROM threads h
+          JOIN tasks k ON k.id = h.task_id JOIN projects p ON p.id = h.project_id
+          WHERE h.waits_for_place IS NOT NULL AND k.state IN ('draft', 'open') AND p.archived_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = h.task_id AND r.state = 'suspended'
+              AND r.created_at = (SELECT max(created_at) FROM runs WHERE task_id = h.task_id))`
+        const live = new Set((yield* sessions.onTasks).map((session) => session.threadId))
+        return rows
+          .filter((row) => !live.has(row.threadId))
+          .map((row) => ({
+            taskId: row.taskId,
+            review: row.kind === 'step',
+            since: row.since,
+            // Its place held until its first turn is under way, or waits again in its own session's queue.
+            start: Effect.gen(function* () {
+              if (!(yield* sessions.startLast(row.threadId))) return
+              for (let waited = 0; waited < 30_000; waited += 100) {
+                const on = (yield* sessions.onTasks).find((session) => session.threadId === row.threadId)
+                if (on === undefined || on.turnRunning || turns.has(row.threadId)) return
+                yield* Effect.sleep(Duration.millis(100))
+              }
+            }),
+          }))
+      })
+      sources.push(restored)
 
       const enter = <A, E, R>(taskId: string, then: (room: boolean) => Effect.Effect<A, E, R>, how: Entering<A> = {}) =>
         Effect.gen(function* () {
@@ -314,7 +367,10 @@ export class Busy extends Context.Service<
           return decided.done
         })
 
-      const turn = (agent: Agent & { readonly threadId: string }, work: (begun: Effect.Effect<void>) => Effect.Effect<void>) =>
+      const turn = (
+        agent: Agent & { readonly threadId: string; readonly sessionId: string },
+        work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
+      ) =>
         Effect.gen(function* () {
           const key = keyOf(agent.taskId, agent.review)
           const room = yield* lock.withPermits(1)(
@@ -323,10 +379,13 @@ export class Busy extends Context.Service<
               if (room) {
                 hold(key)
                 turns.delete(agent.threadId)
+                yield* sql`UPDATE threads SET waits_for_place = NULL WHERE id = ${agent.threadId} AND waits_for_place IS NOT NULL`
                 return true
               }
-              const was = turns.get(agent.threadId)
-              turns.set(agent.threadId, { ...agent, since: was?.since ?? (yield* timestamp), start: work })
+              // Since when it waits, kept where it was first said: a turn asked again keeps its place in the queue.
+              yield* sql`UPDATE threads SET waits_for_place = coalesce(waits_for_place, ${yield* timestamp}) WHERE id = ${agent.threadId}`
+              const [kept] = yield* sql<{ since: string }>`SELECT waits_for_place AS since FROM threads WHERE id = ${agent.threadId}`
+              turns.set(agent.threadId, { ...agent, since: kept?.since ?? (yield* timestamp), start: work })
               return false
             }),
           )
@@ -363,7 +422,7 @@ export class Busy extends Context.Service<
         }),
         enter,
         turn,
-        waits: (taskId) => Effect.sync(() => [...turns.values()].some((waiter) => waiter.taskId === taskId)),
+
         queue: (source) =>
           Effect.suspend(() => {
             sources.push(source)

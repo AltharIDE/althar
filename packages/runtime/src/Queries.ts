@@ -1173,6 +1173,7 @@ export class Queries extends Context.Service<
             heldFor: string | null
             roundWaits: number
             answersWait: number
+            turnWaits: number
           }>`
             SELECT t.id AS thread_id, k.title, k.slug, k.state, w.branch,
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
@@ -1190,6 +1191,8 @@ export class Queries extends Context.Service<
               -- An answer kept until its agent has a place to carry on.
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.kind = 'question' AND x.state = 'answered'
                 AND json_extract(x.payload, '$.waitsForPlace') IS NOT NULL) AS answers_wait,
+              -- A turn of its lead or reviewer that waits for a place.
+              (SELECT count(*) FROM threads h WHERE h.task_id = k.id AND h.waits_for_place IS NOT NULL) AS turn_waits,
               (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') AS waiting,
               (SELECT s.id FROM threads s WHERE s.task_id = k.id AND s.kind = 'step' LIMIT 1) AS review,
               (SELECT agent_id FROM provider_sessions WHERE thread_id = t.id ORDER BY started_at DESC LIMIT 1) AS lead,
@@ -1220,8 +1223,7 @@ export class Queries extends Context.Service<
             Option.exists(lead, (session) => session.turnRunning) ||
             Option.exists(reviewer, (session) => session.turnRunning)
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
-          const queued =
-            task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || (yield* (yield* Busy).waits(taskId))
+          const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
           const phase = ((): TaskPhase => {
             if (task.state === 'done' || task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'

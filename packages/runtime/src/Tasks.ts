@@ -247,6 +247,8 @@ export class Tasks extends Context.Service<
           // Suspended first, so no step takes its agents stopping as one going.
           yield* sql.withTransaction(suspend(input.taskId, input.envelope, 'stopped'))
           yield* stopAgents(input.taskId)
+          // A turn of its agents that waited for a place waits no more: what it would have delivered stays in its thread.
+          yield* sql`UPDATE threads SET waits_for_place = NULL WHERE task_id = ${input.taskId} AND waits_for_place IS NOT NULL`
           yield* touchCard(input.taskId)
         })
 

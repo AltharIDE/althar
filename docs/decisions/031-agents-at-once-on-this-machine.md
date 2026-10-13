@@ -53,15 +53,20 @@
     goes first. That holds for a plan's first step when its countdown ends,
     a quick task, a step carried on after a restart or resumed by the
     person, a step back from a usage limit, a conflict or check-fix round,
-    and the step after another. What the person does waits too, where it
-    would set an agent not at work going: their answer to a question is
-    kept at once and told once there is a place, and what they say to an
-    idle lead, or an agent they start, waits in its thread until then. A
-    lead at work on a step takes no other place for their messages.
+    the step after another, and a stuck step the person answered (handed
+    to another agent, or told what to do), which is held with their answer.
+    What the person does waits too, where it would set an agent not at work
+    going: their answer to a question is kept at once and told once there
+    is a place, and what they say to an idle lead, or an agent they start
+    or switch to, waits in its thread until then. Each turn of a lead or a
+    reviewer asks again, so a second message doesn't ride on the first's
+    place. A lead at work on a step takes no other place for its turns.
   - **Waiting is a state Althar shows and keeps.** A waiting step is written
     in the store as held for a busy machine, and a waiting round keeps what
     it will ask its lead, so a restart doesn't lose either: after one, they
-    wait on, in the same order; so does a kept answer. The person can still
+    wait on, in the same order; so do a kept answer and a turn that waits,
+    kept on its thread, which starts its agent again once there is a place.
+    Stopping an agent lets its waiting turn go. The person can still
     stop a waiting task (resumed, it waits again for a place), and change
     its plan while its first step waits, nothing of it started yet: who
     leads, who reviews, and how it ends. The home, the task's card, the

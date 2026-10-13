@@ -231,6 +231,8 @@ export type Place =
   | { readonly how: 'resume'; readonly lead: Lead; readonly reviewer?: PlanStep }
   /** The step after the one before it, as a review after the lead's, or the lead settling after a review. */
   | { readonly how: 'next'; readonly reviewer?: PlanStep }
+  /** A lead's step that needed the person, carried on as they answered once it has a place. */
+  | { readonly how: 'answered'; readonly info: StuckInfo; readonly answer: Exclude<StuckAnswer, { readonly kind: 'wait' }> }
   | { readonly how: 'reset'; readonly agentId: string; readonly accountId: string | null; readonly model: string | null }
 
 /** What a step waiting for a place keeps in its output: how it starts, and since when it waits. */
@@ -2033,7 +2035,45 @@ export class Runs extends Context.Service<
           if (current === undefined) return
           const info = JSON.parse(call.payload) as StuckInfo
           if (answer.kind === 'wait') return yield* waitForReset(current, call.attemptId, info, input.envelope)
-          yield* carryOn(current, call.attemptId, info, answer, input.envelope)
+          yield* carryOnPlaced(current, call.attemptId, info, answer, input.envelope)
+        })
+
+      /**
+       * Carries on a lead's step that needed the person, as they answered,
+       * once its lead has a place among the agents at work on this machine
+       * (Busy.ts): without one, the step is held with the answer, and carries
+       * on as answered once one frees, after a restart too. A review asks for
+       * its place as it starts again; abandoning, and publishing, which is
+       * Althar's own, take none.
+       */
+      const carryOnPlaced = (
+        current: RunRow,
+        attemptId: string | null,
+        info: StuckInfo,
+        answer: Exclude<StuckAnswer, { readonly kind: 'wait' }>,
+        envelope: CommandEnvelope,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          if (attemptId === null || answer.kind === 'abandon' || (info.step !== 'implement' && info.step !== 'settle'))
+            return yield* carryOn(current, attemptId, info, answer, envelope)
+          yield* busy.enter(
+            current.taskId,
+            (room) =>
+              room
+                ? Effect.succeed(true)
+                : sql.withTransaction(
+                    Effect.gen(function* () {
+                      // Stopped since the answer, the step is the person's to resume, not to carry on.
+                      const [still] = yield* sql<{ state: string }>`SELECT state FROM node_attempts WHERE id = ${attemptId}`
+                      if (still?.state !== 'waiting_attention' || !(yield* going(current))) return false
+                      yield* waitForPlace(current, attemptId, { how: 'answered', info, answer })
+                      return false
+                    }),
+                  ),
+            { next: (room) => (room ? provide(carryOn(current, attemptId, info, answer, envelope)) : Effect.void) },
+          )
+          yield* touchCard(current.taskId)
         })
 
       /**
@@ -2047,7 +2087,7 @@ export class Runs extends Context.Service<
           const until = info.limit?.resetsAt
           if (attemptId === null || info.agentId === null || until == null) return
           if (Date.parse(until) <= Date.parse(yield* timestamp))
-            return yield* carryOn(current, attemptId, info, { kind: 'retry', agentId: info.agentId }, envelope)
+            return yield* carryOnPlaced(current, attemptId, info, { kind: 'retry', agentId: info.agentId }, envelope)
           const agentId = info.agentId
           const from = (yield* limits.named(agentId, null, info.limit?.accountId)).agent
           const model = yield* modelOnStep(current.taskId, info.step, agentId)
@@ -2172,6 +2212,8 @@ export class Runs extends Context.Service<
               answer.kind === 'retry' ? answer.agentId : undefined,
               on,
               accountId,
+              // As the person said: a place of its own, not the lead's.
+              yield* lastLead(current),
             )
             if (answer.kind === 'tell') {
               const [thread] = yield* sql<{
@@ -2796,6 +2838,14 @@ export class Runs extends Context.Service<
             }
             case 'reset':
               return yield* resumeHeld({ ...row, agentId: place.agentId, accountId: place.accountId, model: place.model }, true)
+            case 'answered':
+              return yield* carryOn(
+                current,
+                row.attemptId,
+                place.info,
+                place.answer,
+                yield* envelope('thread.send', { placed: row.attemptId }),
+              )
             case 'next': {
               if (row.nodeKey === 'review') {
                 const step = place.reviewer ?? (JSON.parse(row.config) as PlanStep)
