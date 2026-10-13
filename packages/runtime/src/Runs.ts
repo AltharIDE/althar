@@ -35,7 +35,7 @@ import { filesLine, templateAsk } from './pullRequestWords'
 import { evidenceFolderOf, reviewCopyOf, snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
-import { type Answered, Questions } from './Questions'
+import { type Answered, Questions, touchQuestion } from './Questions'
 import {
   builtAsk,
   builtIn,
@@ -1396,9 +1396,27 @@ export class Runs extends Context.Service<
           if (Object.entries(now.heads).some(([path, head]) => start.heads[path] !== head)) return true
           if (now.digest === start.digest) return false
           const pictures = yield* evidencePaths(taskId)
-          return Object.entries(now.uncommitted).some(([path, files]) =>
-            files.some((file) => !pictures(path, file) && !(start.uncommitted[path] ?? []).includes(file)),
-          )
+          // What each worktree held then and now are trees: the files that differ between them, whether or not they had
+          // changes before. Where the start kept none, as a round the lead's report opens, the files changed that weren't then.
+          const then = start.digest.split(' ')
+          const held = now.digest.split(' ')
+          const worktrees = yield* worktreesOf(taskId)
+          for (const [index, worktree] of worktrees.entries()) {
+            const from = then[index] ?? ''
+            const to = held[index] ?? ''
+            if (from === to && from !== '') continue
+            const differ =
+              from === '' || to === '' || then.length !== held.length
+                ? undefined
+                : yield* git(worktree.path, '-c', 'core.quotePath=false', 'diff', '--name-only', from, to).pipe(
+                    Effect.map((listed) => listed.split('\n').filter((file) => file !== '')),
+                    Effect.orElseSucceed(() => undefined),
+                  )
+            const files =
+              differ ?? (now.uncommitted[worktree.path] ?? []).filter((file) => !(start.uncommitted[worktree.path] ?? []).includes(file))
+            if (files.some((file) => !pictures(worktree.path, file))) return true
+          }
+          return false
         })
 
       /* One round opens at a time on a task: the person's turn and its lead's finish_step don't open two. */
@@ -1555,13 +1573,19 @@ export class Runs extends Context.Service<
        * card says what it said before, and a merged task is done again, at the
        * time it first settled.
        */
-      const backWhereItWas = (run: RunRow, back: RoundBack, why: 'nothing_new' | 'abandoned' = 'nothing_new') =>
+      const backWhereItWas = (
+        run: RunRow,
+        back: RoundBack,
+        why: 'nothing_new' | 'abandoned' = 'nothing_new',
+        /** Given up having committed: what it committed is in no pull request yet, so a merged task stays open for its next. */
+        committed = false,
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           yield* ends(run, back.ended)
           yield* change('runs', run.runId, { endReason: why })
           const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${run.taskId}`
-          if (back.state !== 'done' || task?.state !== 'open') return
+          if (back.state !== 'done' || task?.state !== 'open' || committed) return
           const state = yield* transition(taskLifecycle, 'open', 'done')
           const revision = yield* change('tasks', run.taskId, { state, settledAt: back.settledAt })
           yield* fact({
@@ -2822,7 +2846,9 @@ export class Runs extends Context.Service<
             const round = info.step === 'implement' ? yield* roundStartOf(current) : undefined
             if (round !== undefined) {
               yield* endAttempt('cancelled', { abandoned: true })
-              yield* sql.withTransaction(backWhereItWas(current, round.round, 'abandoned'))
+              const now = yield* startOf(current.taskId)
+              const committed = Object.entries(now.heads).some(([path, head]) => round.start.heads[path] !== head)
+              yield* sql.withTransaction(backWhereItWas(current, round.round, 'abandoned', committed))
               yield* rest(current.taskId)
               yield* Effect.ignore(changes.settleIfMerged(current.taskId))
               return yield* touchCard(current.taskId)
@@ -3606,6 +3632,27 @@ export class Runs extends Context.Service<
                 SELECT id FROM attention_requests WHERE task_id = ${input.taskId} AND kind = 'stuck' AND state = 'open'
                   AND json_extract(payload, '$.step') = 'review'`
               if (reviews.length > 0 || called !== undefined) yield* unstuck(current)
+              // And what its reviewer asked the person: there is no review left to answer it for.
+              const asked = yield* sql<{ id: string; payload: string }>`
+                SELECT a.id, a.payload FROM attention_requests a JOIN threads t ON t.id = json_extract(a.payload, '$.threadId')
+                WHERE a.task_id = ${input.taskId} AND a.kind = 'question' AND a.state = 'open' AND t.kind = 'step' AND t.node_key = 'review'`
+              for (const question of asked) {
+                // Said as the agent going on without an answer: the task goes on.
+                const revision = yield* change('attention_requests', question.id, {
+                  state: 'withdrawn',
+                  payload: JSON.stringify({ ...(JSON.parse(question.payload) as object), withdrawn: 'turn' }),
+                })
+                yield* fact({
+                  projectId: current.projectId,
+                  aggregateType: 'attention_request',
+                  aggregateId: question.id,
+                  revision,
+                  type: 'attention_request.withdrawn',
+                  actorId: input.envelope.actorId,
+                  commandId: input.envelope.commandId,
+                })
+                yield* touchQuestion(question.id)
+              }
               return reviews.length > 0 || called !== undefined
             }),
           )

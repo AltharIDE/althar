@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -16,6 +17,7 @@ import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
+import { Questions } from '../src/Questions'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
@@ -272,6 +274,27 @@ describe('a task that goes back to work', () => {
   )
 
   it.live(
+    'counts an edit to a file left uncommitted before the round as new work',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const task = yield* merged(working, bare, github)
+        writeFileSync(join(task.path, 'notes.txt'), 'before\n')
+        yield* say(task.threadId, 'Note what you found. [lead:slowly]')
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'running')
+        // The lead changes the file it had left uncommitted, and its turn ends without a report: not nothing new.
+        appendFileSync(join(task.path, 'notes.txt'), 'and after\n')
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'waiting', Duration.seconds(30))
+        const [call] = yield* sql<{ payload: string }>`
+          SELECT payload FROM attention_requests WHERE task_id = ${task.taskId} AND kind = 'stuck' AND state = 'open'`
+        assert.include(call?.payload, '"why":"no_report"')
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
     'needs the person when its lead asks them something in a round, and goes on with their answer',
     () => {
       const { working, bare, github } = onGitHub()
@@ -319,10 +342,11 @@ describe('a task that goes back to work', () => {
           attentionId: call?.id ?? '',
           answer: { kind: 'abandon' },
         })
-        // Back where it was, merged and done at the time it settled; its commit is in no pull request, so it is offered one.
+        // Back where it was, but its commit is in no pull request: it stays open, offered one, so the home and the board keep it.
         const [card] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
         assert.deepStrictEqual(card?.unshipped, { commits: 1, add: 1, del: 0 })
-        assert.deepStrictEqual(yield* taskRow(task.taskId), before)
+        assert.strictEqual(before?.state, 'done')
+        assert.deepStrictEqual(yield* taskRow(task.taskId), { state: 'open', settledAt: null })
         const [, round] = yield* runsOf(task.taskId)
         assert.deepStrictEqual([round?.state, round?.endReason], ['succeeded', 'abandoned'])
       }).pipe(Effect.provide(runtimeWith(github)))
@@ -355,6 +379,60 @@ describe('a task that goes back to work', () => {
             (step) => step.key === 'review',
           )?.skipped
         assert.deepStrictEqual([reviewOf(plan?.parameters), reviewOf(round?.parameters)], [false, true])
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
+    'withdraws what the reviewer asked when its review is skipped, so the task doesn’t wait on it',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const runs = yield* Runs
+        const questions = yield* Questions
+        const sql = yield* SqlClient.SqlClient
+        yield* connect()
+        const projects = yield* Projects
+        const coordinator = yield* Coordinator
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+        const threadId = yield* coordinator.thread(project.projectId)
+        const body = 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:wait]'
+        yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+        // The reviewer is at work, and asks the person something.
+        const review = yield* until(
+          sql<{ projectId: ProjectId; taskId: string; threadId: string; sessionId: string }>`
+            SELECT t.project_id, t.task_id, t.id AS thread_id, s.id AS session_id FROM threads t JOIN provider_sessions s ON s.thread_id = t.id
+            WHERE t.kind = 'step' AND t.node_key = 'review' AND s.state = 'active'`,
+          (rows) => rows.length > 0,
+          Duration.seconds(30),
+        ).pipe(Effect.map(([row]) => row ?? assert.fail('no reviewer')))
+        yield* Effect.forkChild(
+          questions.ask(
+            { projectId: review.projectId, threadId: review.threadId, taskId: review.taskId, sessionId: review.sessionId },
+            {
+              message: 'Which cache?',
+              fields: [
+                {
+                  id: 'cache',
+                  question: 'Which cache?',
+                  type: 'choice',
+                  options: [{ value: 'Postgres', label: 'Postgres' }],
+                  multiple: false,
+                  required: true,
+                },
+              ],
+            },
+          ),
+        )
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'waiting')
+        yield* runs.skipReview({ envelope: yield* Runtime.envelope('task.skip_review', {}), taskId: review.taskId })
+        // Its question goes with it, as one the agent went on without, and the task goes on to its end.
+        const [asked] = yield* sql<{ state: string; payload: string }>`
+          SELECT state, payload FROM attention_requests WHERE task_id = ${review.taskId} AND kind = 'question'`
+        assert.strictEqual(asked?.state, 'withdrawn')
+        assert.include(asked?.payload, '"withdrawn":"turn"')
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
       }).pipe(Effect.provide(runtimeWith(github)))
     },
     60_000,

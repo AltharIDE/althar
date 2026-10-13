@@ -59,7 +59,8 @@
     - New work and the lead's turn ended without `finish_step`: it is
       reminded once, then the round needs the person, as any step. Given up
       there, the task goes back where it was too, and what the round
-      committed stays on its branch, offered as below.
+      committed stays on its branch, offered as below: a merged task with
+      such commits stays open for them, so it isn't lost among the settled.
     - A question the lead asked: Needs you, as any step, and the answer
       carries the round on.
     - New work, finished (and its review passed or settled): ready. A round
@@ -155,7 +156,8 @@
       round --> settled: nothing new, from done (its settled time kept)
       round --> asking: the lead asks a question, or new work and no report after a reminder
       asking --> round: answered
-      asking --> settled: given up, from done (its commits offered where in no pull request)
+      asking --> settled: given up, from done, nothing committed
+      asking --> after: given up, from done, with commits in no pull request
       round --> after: finished with new commits, review passed
       after --> ready: Open a new pull request (a new branch, cherry-picked, pushed plainly)
       ready --> settled: every pull request merged, nothing after them
@@ -172,7 +174,7 @@
   | Round, Implement | `finish_step`, nothing new | the same, with its summary in the thread | as before the round |
   | Round, Implement | the lead asks a question | waits on it | Needs you |
   | Round, Implement | turn ends with new work, no report, twice | needs the person | Needs you |
-  | Round, needing the person | Give it up | back where it was, its commits on its branch | as before, or Ready offering a new pull request |
+  | Round, needing the person | Give it up | back where it was, its commits on its branch; a merged task with commits stays `open` | as before, or Ready offering a new pull request |
   | Round, Implement | `finish_step` with new work | its review, or the round passes | Running, then Ready |
   | Round, Review | Skip the review | the round passes | Ready |
   | Round, its lead in a turn | Althar restarts | the step carries on after the restart | Running |
