@@ -793,6 +793,7 @@ describe('each kind’s card', () => {
           pictures: [
             { digest: 'a'.repeat(64), mediaType: 'image/png', bytes: 9, width: 4, height: 3, name: 'one.png', unkept: null },
             { digest: null, mediaType: 'image/png', bytes: 9, width: null, height: null, name: 'big.png', unkept: 'too_large' },
+            { digest: 'b'.repeat(64), mediaType: 'image/png', bytes: 9, width: 4, height: 3, name: null, unkept: null },
           ],
           files: [{ path: '/tmp/notes.md', add: null }],
         },
@@ -877,7 +878,11 @@ describe('each kind’s card', () => {
     // A plain task that finished: its pictures, small, drawn from the store; or else its files.
     const pictures = within(cardOf('Prototype the empty state'))
     expect(pictures.getByText('Finished')).toBeTruthy()
-    expect(pictures.getAllByRole('img').map((img) => img.getAttribute('src'))).toEqual([pictureUrl('a'.repeat(64), true)])
+    // One that wasn't kept isn't drawn; one with no name is called as the thread calls it.
+    expect(pictures.getAllByRole('img').map((img) => [img.getAttribute('src'), img.getAttribute('alt')])).toEqual([
+      [pictureUrl('a'.repeat(64), true), 'one.png'],
+      [pictureUrl('b'.repeat(64), true), 'Image 3'],
+    ])
     expect(pictures.queryByText('notes.md')).toBeNull()
     const files = within(cardOf('Draft the notes'))
     expect(files.getByText('notes-0.4.md')).toBeTruthy()

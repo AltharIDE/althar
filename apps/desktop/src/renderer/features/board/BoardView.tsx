@@ -82,6 +82,8 @@ export const text = {
     soFar: (passed: number, total: number) => `${passed} of ${total} checks passed`,
     failed: (n: number) => (n === 1 ? '1 check failed' : `${n} checks failed`),
   },
+  /** A picture it handed back with no name, as the thread says it. */
+  picture: (n: number) => `Image ${n}`,
   findingsSoFar: (n: number) => (n === 1 ? '1 finding so far' : `${n} findings so far`),
   blocking: (n: number) => `${n} blocking`,
   verdict: { approve: 'approve', changes: 'request changes', comment: 'comment' } satisfies Record<
@@ -287,7 +289,7 @@ export const readyCardOf = (work: BoardTask): Card => {
       const pictures = (work.handed?.pictures ?? []).flatMap((picture, index) =>
         picture.digest === null
           ? []
-          : [{ id: `${index}-${picture.digest}`, src: pictureUrl(picture.digest, true), name: picture.name ?? '' }],
+          : [{ id: `${index}-${picture.digest}`, src: pictureUrl(picture.digest, true), name: picture.name ?? text.picture(index + 1) }],
       )
       const files = work.handed?.files ?? []
       return {
