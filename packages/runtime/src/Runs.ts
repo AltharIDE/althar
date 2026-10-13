@@ -1085,22 +1085,13 @@ export class Runs extends Context.Service<
       const watch = (event: LiveEvent) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          // What the person says to a task's lead after its plan opens a round of work (ADR-034); Althar's own words don't.
-          if (event._tag === 'TurnStarted') {
-            if (event.byPerson !== true) return
-            const [thread] = yield* sql<{
-              taskId: string | null
-              kind: string
-            }>`SELECT task_id, kind FROM threads WHERE id = ${event.threadId}`
-            const live = yield* sessions.running(event.threadId)
-            if (thread?.kind !== 'task' || thread.taskId === null || Option.isNone(live)) return
-            const [turn] = yield* sql<{ requestedAt: string }>`SELECT requested_at FROM turn_deliveries WHERE id = ${event.turnId}`
-            yield* openRound(thread.taskId, live.value.sessionId, turn?.requestedAt)
+          if (event._tag !== 'TurnEnded' && event._tag !== 'SessionEnded') return
+          const on = yield* stepOn(event.threadId)
+          // A turn the person interrupted is theirs to carry on; a round of work it left with nothing new goes back where it was.
+          if (event._tag === 'TurnEnded' && event.state === 'interrupted') {
+            if (on !== undefined) yield* quietly(on.run, { id: on.attemptId, nodeId: on.nodeId, nodeKey: on.nodeKey, input: on.input })
             return
           }
-          if (event._tag !== 'TurnEnded' && event._tag !== 'SessionEnded') return
-          if (event._tag === 'TurnEnded' && event.state === 'interrupted') return
-          const on = yield* stepOn(event.threadId)
           if (event._tag === 'TurnEnded' && event.errorClass === 'usage_limit') {
             // Only the live session's turn speaks for the thread; one another agent took over from is history.
             const [turn] = yield* sql<{ sessionId: string | null; agentId: string; accountId: string | null }>`
@@ -1354,11 +1345,10 @@ export class Runs extends Context.Service<
        * lead's session, which is at work already in its turn. A merged task
        * opens again for it. None while a run runs or is stopped, the task is
        * a draft or abandoned, its project removed, or a conflict round is
-       * under way, which is its own course; nor for a turn (`since` it was
-       * asked for) whose lead opened one already, reporting in it. The round's
-       * run and its attempt, or undefined where none opened.
+       * under way, which is its own course. The round's run and its attempt,
+       * or undefined where none opened.
        */
-      const openRound = (taskId: string, sessionId: string, since?: string) =>
+      const openRound = (taskId: string, sessionId: string) =>
         oneRound(
           taskId,
           Effect.gen(function* () {
@@ -1368,7 +1358,6 @@ export class Runs extends Context.Service<
               ORDER BY created_at DESC, rowid DESC LIMIT 1`
             if (last === undefined || (last.state !== 'succeeded' && last.state !== 'failed' && last.state !== 'cancelled'))
               return undefined
-            if (since !== undefined && last.createdAt >= since) return undefined
             const ended: RoundBack['ended'] = last.state
             const [task] = yield* sql<{
               state: string
@@ -1391,6 +1380,11 @@ export class Runs extends Context.Service<
               (step) => step.key === 'implement',
             )
             if (implement === undefined) return undefined
+            // Only for its lead, on the task's own thread.
+            const [lead] = yield* sql<{ id: string }>`
+              SELECT s.id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
+              WHERE s.id = ${sessionId} AND t.task_id = ${taskId} AND t.kind = 'task'`
+            if (lead === undefined) return undefined
             const start = yield* startOf(taskId)
             const policyId = yield* policyOf(task.projectId)
             const runId = yield* newId(Ids.run)
@@ -3007,8 +3001,9 @@ export class Runs extends Context.Service<
             ranOn: string | null
             ranModel: string | null
             admittedAt: string
+            input: string
           }>`
-            SELECT r.task_id, n.node_key, n.id AS node_id, a.id AS attempt_id, n.iteration, a.admitted_at,
+            SELECT r.task_id, n.node_key, n.id AS node_id, a.id AS attempt_id, n.iteration, a.admitted_at, a.input,
               -- The agent it ran on, on its model; one not started yet, the plan's for the step (Althar's own, none).
               coalesce(s.agent_id, json_extract(n.config, '$.agentId')) AS ran_on,
               CASE WHEN s.id IS NULL THEN json_extract(n.config, '$.model') ELSE s.model END AS ran_model
@@ -3032,6 +3027,19 @@ export class Runs extends Context.Service<
                 actorId: instance.systemId,
               })
               continue
+            }
+            // A round of work whose lead had no turn under way as Althar stopped waited on the person: as its turn's end would have,
+            // it ends where it made nothing new (ADR-034), and is carried on, to report, where it made something.
+            if (current.planId === null && step.nodeKey === 'implement') {
+              const [turn] = yield* sql<{ state: string }>`
+                SELECT state FROM turn_deliveries WHERE thread_id = ${current.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+              if (
+                turn !== undefined &&
+                turn.state !== 'pending' &&
+                turn.state !== 'delivered' &&
+                (yield* quietly(current, { id: step.attemptId, nodeId: step.nodeId, nodeKey: step.nodeKey, input: step.input }))
+              )
+                continue
             }
             if (yield* restartedAgain(current, step)) {
               yield* stuck(
@@ -3256,6 +3264,9 @@ export class Runs extends Context.Service<
         }
       })
       yield* Effect.forkScoped(provide(holds))
+
+      // What the person says to a task's lead after its plan opens a round of work, as the turn begins (ADR-034); Althar's own words don't.
+      yield* sessions.onPersonsTurn((lead) => provide(Effect.asVoid(openRound(lead.taskId, lead.sessionId))).pipe(Effect.ignore))
 
       // Each turn a step's agent ends, and each session that goes, is checked for the report its step needs.
       const events = yield* live.subscribe

@@ -141,7 +141,9 @@ export const statusOf = (
   const { waits, queued, phase, step } = snapshot.task
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
   if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
-  const doing = step === null ? undefined : stepText.now[step]
+  // A round of work after its plan is its lead following up, as the person asked (ADR-034).
+  const doing =
+    step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
   // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
   if (phase === 'ready') return { status: TaskStatus.Yours, state: text.ready }
@@ -196,7 +198,10 @@ export const sinceOf = (snapshot: ThreadSnapshot, now: string): string | null =>
   }
   if (step === null || stepAt === null) return null
   // By the step's name, as its track says it: settling a review is part of the review.
-  const [name] = stepNames([{ key: step === 'implement' ? 'implement' : 'review', agentId: '', model: null, skipped: false }])
+  const [name] = stepNames(
+    [{ key: step === 'implement' ? 'implement' : 'review', agentId: '', model: null, skipped: false }],
+    snapshot.task.followUp === true,
+  )
   return name === undefined ? null : text.since.step(name.toLowerCase(), running(stepAt, now))
 }
 
@@ -470,6 +475,7 @@ export function TaskView({
         {...(snapshot.task.runCommand === null ? {} : { run: { command: snapshot.task.runCommand, onRun: () => void model.runProject() } })}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
+        {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
         {...(can('stop') ? { onStop: () => void model.stop() } : {})}
         {...(can('resume') ? { onResume: () => void model.resume() } : {})}
         {...(can('abandon')
@@ -581,7 +587,12 @@ export function TaskView({
             {...(snapshot.task.branch === null ? {} : { branch: snapshot.task.branch })}
             {...(since === null ? {} : { since })}
             {...(elapsed === null ? {} : { elapsed })}
-            steps={trackFor(snapshot.task.steps, snapshot.task.step, snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled')}
+            steps={trackFor(
+              snapshot.task.steps,
+              snapshot.task.step,
+              snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled',
+              snapshot.task.followUp === true,
+            )}
             faces={(['talk', 'out'] as const).map((value) => ({ value, label: text.faces[value], kbd: text.facesKbd[value] }))}
             face={shown}
             onFace={setFace}

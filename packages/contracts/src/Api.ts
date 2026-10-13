@@ -1011,7 +1011,12 @@ export type Queued = typeof Queued.Type
  * Commits on a task's branch after its last pull request merged or closed,
  * in none yet: what Open a new pull request opens one with (ADR-034).
  */
-export const Unshipped = Schema.Struct({ commits: Schema.Int })
+export const Unshipped = Schema.Struct({
+  commits: Schema.Int,
+  /** Lines they add and remove, all together. */
+  add: Schema.Int,
+  del: Schema.Int,
+})
 export type Unshipped = typeof Unshipped.Type
 
 /** Where a task stands, as the coordinator's thread shows it. */

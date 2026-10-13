@@ -221,6 +221,9 @@ export interface Unshipped {
   readonly head: string
   /** The commits after it, oldest first, merges left out. */
   readonly commits: ReadonlyArray<string>
+  /** Lines they add and remove, all together. */
+  readonly add: number
+  readonly del: number
 }
 
 /** How long a pull request with nothing new counts as quiet, and how much less often a quiet one is asked. */
@@ -2025,6 +2028,15 @@ export class Changes extends Context.Service<
             )
             const commits = listed.split('\n').filter((line) => line !== '')
             if (commits.length === 0) continue
+            // How big they are together, as a diff from that head says: a binary file counts no lines.
+            const counted = yield* git(repository.path, 'diff', '--numstat', head, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
+            const lines = counted
+              .split('\n')
+              .map((line) => line.split('\t'))
+              .reduce((sum, [add = '', del = '']) => ({ add: sum.add + (Number(add) || 0), del: sum.del + (Number(del) || 0) }), {
+                add: 0,
+                del: 0,
+              })
             found.push({
               workspaceId: repository.workspaceId,
               path: repository.path,
@@ -2035,6 +2047,7 @@ export class Changes extends Context.Service<
               change: { ...seen, linkId: repository.linkId, product: repository.product, listening: repository.listening === 1 },
               head,
               commits,
+              ...lines,
             })
           }
           return found

@@ -801,14 +801,26 @@ export class Queries extends Context.Service<
       /**
        * Where a task's change starts, as `baseOf` has it: where its head meets
        * its default branch, or where its worktree started when they never
-       * meet, or the default branch isn't known here.
+       * meet, or the default branch isn't known here. Where it started after
+       * they meet, as a branch for its next pull request starts from the
+       * default branch as its host has it, newer than here (ADR-034), from
+       * there.
        */
       const forkOf = (cwd: string, head: string, base: string | null, started: string) => {
         if (base === null) return Effect.succeed(started)
         const args = ['merge-base', base, head]
-        return Effect.flatMap(gitOutcome(cwd, ...args), ({ code, stdout }) =>
-          code === 0 ? Effect.succeed(stdout) : code === 1 ? Effect.succeed(started) : unclear(cwd, args, code),
-        )
+        return Effect.flatMap(gitOutcome(cwd, ...args), ({ code, stdout }) => {
+          if (code === 1) return Effect.succeed(started)
+          if (code !== 0) return unclear(cwd, args, code)
+          if (stdout === started) return Effect.succeed(stdout)
+          return Effect.map(
+            Effect.all([
+              gitOutcome(cwd, 'merge-base', '--is-ancestor', stdout, started),
+              gitOutcome(cwd, 'merge-base', '--is-ancestor', started, head),
+            ]),
+            ([before, on]) => (before.code === 0 && on.code === 0 ? started : stdout),
+          )
+        })
       }
 
       /** What a task changed in one worktree, committed or not, and in how many commits, from where its change starts; nothing, where git can't tell. */
@@ -1292,7 +1304,14 @@ export class Queries extends Context.Service<
             task.changes > 0 && task.openChanges === 0 && task.state !== 'abandoned'
               ? yield* (yield* Changes).unshipped(taskId).pipe(Effect.orElseSucceed(() => []))
               : []
-          const unshipped = after.length === 0 ? null : { commits: after.reduce((sum, one) => sum + one.commits.length, 0) }
+          const unshipped =
+            after.length === 0
+              ? null
+              : {
+                  commits: after.reduce((sum, one) => sum + one.commits.length, 0),
+                  add: after.reduce((sum, one) => sum + one.add, 0),
+                  del: after.reduce((sum, one) => sum + one.del, 0),
+                }
           const phase = ((): TaskPhase => {
             if (task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'

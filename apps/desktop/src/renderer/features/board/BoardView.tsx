@@ -34,6 +34,10 @@ export const text = {
   startsIn: (seconds: number) => (seconds <= 0 ? 'Starting' : `Starts in ${seconds}s`),
   held: 'Held. Starts when you say',
   step: { implement: 'Implement', review: 'Review' } satisfies Record<PlanStep['key'], string>,
+  /** A round of work after its plan, in place of Implement, as the person asked its lead for more. */
+  followUp: 'Follow-up',
+  /** Ready with commits after its last pull request, in none yet: a new one is the person's to open. */
+  unshipped: 'Ready for a new pull request',
   conversation: 'Conversation',
   status: {
     [TaskStatus.Running]: 'Running',
@@ -63,7 +67,8 @@ export const trackOf = (task: BoardTask) => {
   // Settling a review's findings is part of the review.
   const on = task.step === 'implement' ? 'implement' : task.step === null || task.step === 'publish' ? null : 'review'
   const at = on === null ? (task.step === 'publish' ? planned.length - 1 : 0) : Math.max(0, planned.indexOf(on))
-  return { steps: planned.map((key) => text.step[key]), at }
+  // A round of work after its plan is its lead's follow-up, then its review where the plan has one.
+  return { steps: planned.map((key) => (key === 'implement' && task.followUp === true ? text.followUp : text.step[key])), at }
 }
 
 /** A card names its task by its title alone: its slug says the same again, in code. */
@@ -152,7 +157,8 @@ export function BoardView({
           <CallCard key={waiting.id} {...callCardOf(waiting, name)} onOpen={() => onOpen(waiting.threadId)} />
         ))}
         {lanes.ready.map((work) => {
-          const change = work.change
+          // Commits after its last pull request merged or closed: its branch, as for work with none, until a new one opens.
+          const change = work.unshipped == null ? work.change : null
           const brand = change === null ? undefined : productBrand(change.product)
           return (
             <AcceptCard
@@ -162,7 +168,13 @@ export function BoardView({
               {...(change === null
                 ? work.branch === null
                   ? {}
-                  : { branch: { name: work.branch, add: work.changed?.add ?? 0, del: work.changed?.del ?? 0 } }
+                  : {
+                      branch: {
+                        name: work.branch,
+                        add: work.unshipped?.add ?? work.changed?.add ?? 0,
+                        del: work.unshipped?.del ?? work.changed?.del ?? 0,
+                      },
+                    }
                 : {
                     prs: [
                       {
@@ -176,7 +188,11 @@ export function BoardView({
                     checks: change.checks?.passed ?? 0,
                   })}
               onOpen={() => onOpen(work.threadId)}
-              text={{ task: unnamed, ...(change === null ? {} : { number: (n: number) => `${change.prefix}${n}` }) }}
+              text={{
+                task: unnamed,
+                ...(change === null ? {} : { number: (n: number) => `${change.prefix}${n}` }),
+                ...(work.unshipped == null ? {} : { kind: text.unshipped }),
+              }}
             />
           )
         })}

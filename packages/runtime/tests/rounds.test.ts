@@ -141,7 +141,7 @@ describe('a task that goes back to work', () => {
       // The lead finishes the round with its summary, the review the plan has looks at what is new, and the task is ready, with
       // a commit that is in no pull request yet.
       const [ready] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
-      assert.deepStrictEqual(ready?.unshipped, { commits: 1 })
+      assert.deepStrictEqual(ready?.unshipped, { commits: 1, add: 1, del: 0 })
       assert.deepStrictEqual([ready?.change?.number, ready?.change?.state], [1, 'merged'])
       assert.isFalse(ready?.followUp)
       const all = yield* runsOf(task.taskId)
@@ -325,7 +325,7 @@ describe('a task that goes back to work', () => {
       github.mergeByHand(1)
       yield* (yield* Changes).refresh(taskId)
       const [after] = yield* until(cards(project.projectId), (all) => all[0]?.unshipped != null, Duration.seconds(10))
-      assert.deepStrictEqual([after?.phase, after?.unshipped], ['ready', { commits: 1 }])
+      assert.deepStrictEqual([after?.phase, after?.unshipped], ['ready', { commits: 1, add: 1, del: 0 }])
       assert.strictEqual((yield* taskRow(taskId))?.state, 'open')
       assert.isTrue(
         (yield* notices(ready?.threadId ?? '')).some(

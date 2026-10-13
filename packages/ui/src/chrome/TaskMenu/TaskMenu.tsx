@@ -4,8 +4,9 @@ import s from './TaskMenu.module.css'
 
 /*
  * What you can do with a task as a whole, from its bar: open its folder in
- * an editor, start its plan now, mark its draft pull request ready, stop it,
- * resume it, abandon it, reopen it. Each item is there when its callback is,
+ * an editor, start its plan now, mark its draft pull request ready, skip
+ * the review of the work under way, stop it, resume it, abandon it, reopen
+ * it. Each item is there when its callback is,
  * and the consumer gives only those that apply where the task stands, so
  * the menu never offers what the task can't do. With nothing to offer, there
  * is no button. Stopping a task is not interrupting its lead: the composer's
@@ -35,6 +36,8 @@ export interface TaskMenuText {
   startNowAbout: string
   markReady: string
   markReadyAbout: string
+  skipReview: string
+  skipReviewAbout: string
   stop: string
   stopAbout: string
   resume: string
@@ -66,6 +69,8 @@ export const taskMenuText: TaskMenuText = {
   startNowAbout: 'Its plan starts now, without waiting.',
   markReady: 'Mark ready for review',
   markReadyAbout: 'Its draft pull request is no longer a draft.',
+  skipReview: 'Skip the review',
+  skipReviewAbout: 'Its work is ready once its lead is done, unreviewed this time. A review under way stops.',
   stop: 'Stop the task',
   stopAbout: 'Every agent on it stops. The branch and what it found stay, and you can resume it.',
   resume: 'Resume',
@@ -95,6 +100,8 @@ export interface TaskMenuProps {
   onStartNow?: () => void
   /** Marks its draft pull request ready for review. */
   onMarkReady?: () => void
+  /** Skips the review of the work under way, while it still has one to come or under way. */
+  onSkipReview?: () => void
   onStop?: () => void
   onResume?: () => void
   /** Abandons it; the consumer asks first, since it settles the task. */
@@ -117,6 +124,7 @@ export function TaskMenu({
   run,
   onStartNow,
   onMarkReady,
+  onSkipReview,
   onStop,
   onResume,
   onAbandon,
@@ -141,6 +149,11 @@ export function TaskMenu({
     onMarkReady && (
       <MenuItem key="ready" icon="pr" description={t.markReadyAbout} onSelect={onMarkReady}>
         {t.markReady}
+      </MenuItem>
+    ),
+    onSkipReview && (
+      <MenuItem key="skip-review" icon="after" description={t.skipReviewAbout} onSelect={onSkipReview}>
+        {t.skipReview}
       </MenuItem>
     ),
     onStop && (

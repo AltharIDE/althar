@@ -111,6 +111,8 @@ describe('the coordinator loop', () => {
         Effect.map(touches, (revision) => (revision >= before + 2 ? [revision] : [])),
         (rows) => rows.length === 1,
       )
+      // What the person said opened a round of work after the plan, which made nothing new: the task is ready as it was (ADR-034).
+      yield* until(sql<{ state: string }>`SELECT state FROM runs WHERE plan_id IS NULL`, (rows) => rows[0]?.state === 'succeeded')
       assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'ready')
 
       // Implement, a review with a finding, the lead settling it, and a second review that passes.
@@ -133,13 +135,15 @@ describe('the coordinator loop', () => {
           ['review', 0, 'succeeded'],
           ['settle', 0, 'succeeded'],
           ['review', 1, 'succeeded'],
+          // The round "hello" opened.
+          ['implement', 0, 'succeeded'],
         ],
       )
       // The lead said what became of the finding, and the record keeps it with the settling that did it.
       const [finding] = yield* sql<{ severity: string; claim: string; state: string; settled: number }>`
         SELECT severity, claim, state, settled_in_attempt_id IS NOT NULL AS settled FROM findings`
       assert.deepStrictEqual({ ...finding }, { severity: 'major', claim: 'The heading is wrong.', state: 'fixed', settled: 1 })
-      const [run] = yield* sql<{ state: string }>`SELECT state FROM runs`
+      const [run] = yield* sql<{ state: string }>`SELECT state FROM runs WHERE plan_id IS NOT NULL`
       assert.strictEqual(run?.state, 'succeeded')
       // Each round read a copy of the work as it stood, and the record keeps which code that was; the lead's branch is untouched.
       const snapshots = yield* sql<{ commitSha: string; nodeKey: string }>`

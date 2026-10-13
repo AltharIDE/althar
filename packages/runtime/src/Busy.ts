@@ -185,6 +185,8 @@ export class Busy extends Context.Service<
           JOIN threads t ON t.task_id = r.task_id AND t.kind = 'task'
           LEFT JOIN threads s ON s.task_id = r.task_id AND s.kind = 'step' AND s.node_key = 'review'
           WHERE r.state = 'running' AND a.state IN ('admitted', 'running') AND n.node_key IN ('implement', 'settle', 'review')
+            -- A round of work after the plan counts as its lead's turns do (ADR-034): in one, or starting, not between them.
+            AND NOT (r.plan_id IS NULL AND n.node_key = 'implement' AND a.state = 'running')
           UNION ALL
           SELECT c.task_id, t.id, 0 FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
           WHERE c.state = 'resolving' AND c.waiting IS NULL

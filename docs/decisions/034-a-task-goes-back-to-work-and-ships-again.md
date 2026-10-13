@@ -44,8 +44,8 @@
     that aren't evidence; what was there when the round opened doesn't
     count.
   - **Where a round ends depends on what is there:**
-    - Nothing new, when the lead's turn ends without `finish_step` or when
-      it finishes: the round closes, and the task goes back where it was. A
+    - Nothing new, when the lead's turn ends without `finish_step`, the
+      person interrupts it, or it finishes: the round closes, and the task goes back where it was. A
       merged task is done again, at the time it first settled, so it keeps
       its place among the settled; a ready one is ready, a stopped one
       stopped (the round's run ends as the run before it did).
@@ -100,9 +100,11 @@
     Settled.** One that was done before rounds existed, with work its lead
     committed afterwards, as DEV-58's was, shows as Ready, offering the new
     pull request.
-  - **A round counts as any work does** toward the agents at work on this
-    machine (ADR-032): its Implement step is the lead at work, in the place
-    its turn took, and its review asks for a place as any review. A round
+  - **A round counts as any turn does** toward the agents at work on this
+    machine (ADR-032): its lead takes a place while it is in a turn, in the
+    place its turn asked for, and none between turns, when it waits on the
+    person as a lead after its plan always has; its review asks for a place
+    as any review. A round
     under way when Althar stops carries on after the restart as any step,
     its lead told to carry on with what the person asked.
 

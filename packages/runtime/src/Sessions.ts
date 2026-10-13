@@ -441,6 +441,15 @@ export class Sessions extends Context.Service<
      * delivers what the thread has queued; the gate runs it now, or once
      * there is a place.
      */
+    /**
+     * What happens as a lead's turn that delivers the person's own words
+     * begins, before the agent reads them: a round of work after its task's
+     * plan opens (Runs.ts, ADR-034). It is done once, and never fails the
+     * turn.
+     */
+    onPersonsTurn(
+      next: (lead: { readonly taskId: string; readonly threadId: string; readonly sessionId: string }) => Effect.Effect<void>,
+    ): Effect.Effect<void>
     gateTurns(
       gate: (
         agent: { readonly taskId: string; readonly threadId: string; readonly sessionId: string; readonly review: boolean },
@@ -465,6 +474,9 @@ export class Sessions extends Context.Service<
       // Sessions live in a scope of their own, closed only after the finalizer below has stopped each one and recorded it.
       const sessionsScope = yield* Scope.fork(yield* Effect.scope, 'sequential')
       const threads = new Map<string, Running>()
+      /* What a lead's turn that delivers the person's words starts, once Runs says (onPersonsTurn): until then, nothing. */
+      let personsTurn = (_lead: { readonly taskId: string; readonly threadId: string; readonly sessionId: string }): Effect.Effect<void> =>
+        Effect.void
       /* What a lead's or a reviewer's turns wait for, once Busy says (gateTurns): until then, nothing. */
       let gate = (
         _agent: { readonly taskId: string; readonly threadId: string; readonly sessionId: string; readonly review: boolean },
@@ -832,6 +844,12 @@ export class Sessions extends Context.Service<
               }
             }),
           )
+          // What the person says to a task's lead after its plan opens a round of work, before the lead reads it, or its card says it
+          // works (ADR-034).
+          if (thread.role === 'task' && inputs.some((input) => input.shown === 1))
+            yield* personsTurn({ taskId: thread.taskId, threadId: thread.threadId, sessionId: running.sessionId }).pipe(
+              Effect.catchCause((cause) => Effect.logWarning('Could not open a round of work for the person’s turn', cause)),
+            )
           running.brief = undefined
           running.turnRunning = true
           const begun = running.begun
@@ -2139,6 +2157,10 @@ export class Sessions extends Context.Service<
         gateTurns: (next) =>
           Effect.sync(() => {
             gate = next
+          }),
+        onPersonsTurn: (next) =>
+          Effect.sync(() => {
+            personsTurn = next
           }),
         onTasks: Effect.sync(() =>
           [...threads.values()].flatMap((running) =>

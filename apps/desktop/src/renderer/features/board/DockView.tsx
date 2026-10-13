@@ -41,6 +41,7 @@ export const text = {
   openTask: 'Open the task',
   review: 'Review the changes',
   openChange: 'Open a pull request',
+  openNewChange: 'Open a new pull request',
   stepNote: { now: 'now', done: 'done' },
 }
 
@@ -107,7 +108,7 @@ export function DockView({
   const board = model.board
   const call = target.kind === 'call' ? board?.calls.find((candidate) => candidate.id === target.id) : undefined
   const task = target.kind === 'task' ? board?.tasks.find((candidate) => candidate.taskId === target.id) : undefined
-  const head = useHead(task?.phase === 'ready' && task.change !== null ? task.threadId : null, board?.cursor ?? 0)
+  const head = useHead(task?.phase === 'ready' && task.change?.state === 'open' ? task.threadId : null, board?.cursor ?? 0)
   useThreadAhead(call?.threadId ?? task?.threadId ?? null)
   const named = useModelNames()
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
@@ -146,7 +147,8 @@ export function DockView({
   const sub = task.branch ?? task.slug
   const change = task.change
 
-  if (task.phase === 'ready' && change !== null) {
+  // Ready with its pull request open, it is accepted here; one merged or closed, with commits after it, opens a new one below.
+  if (task.phase === 'ready' && change !== null && change.state === 'open') {
     const brand = productBrand(change.product)
     return (
       <Dock label={label} name={text.phase.ready} sub={sub} onClose={onClose}>
@@ -241,6 +243,12 @@ export function DockView({
         {task.phase === 'ready' && change === null && (
           <ActionButton icon="pr" disabled={model.opening === task.taskId} onClick={() => void model.openChange(task.taskId)}>
             {text.openChange}
+          </ActionButton>
+        )}
+        {/* Its last pull request merged or closed, the commits after it go in a new one (ADR-034). */}
+        {task.phase === 'ready' && change !== null && task.unshipped != null && (
+          <ActionButton icon="pr" disabled={model.opening === task.taskId} onClick={() => void model.openChange(task.taskId)}>
+            {text.openNewChange}
           </ActionButton>
         )}
         <ActionButton icon="arrow" onClick={() => onTask(task.threadId)}>
