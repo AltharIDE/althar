@@ -141,13 +141,16 @@ export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
 }) {}
 
 /**
- * A default branch merged here that its remote won't take: it has commits
- * this one doesn't (`behind`), git couldn't sign in there (`denied`), or the
- * remote itself said no, such as a protected branch (`refused`, with what it said).
+ * A push its remote won't take: it has commits this one doesn't (`behind`),
+ * git couldn't sign in there (`denied`), or the remote itself said no, such
+ * as a protected branch (`refused`, with what it said). Replacing a pull
+ * request's commits also stops where the pull request moved on from the
+ * head the person saw (`moved`), and where the project's rules never allow
+ * a force push (`never`).
  */
 export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['behind', 'denied', 'refused']),
+  why: Schema.Literals(['behind', 'denied', 'refused', 'moved', 'never']),
   /** The branch it follows: origin/main. */
   remote: Schema.String,
   /** What the remote said, for one it refused. */
@@ -195,11 +198,11 @@ export class ImageRefused extends Schema.TaggedError<ImageRefused>()('ImageRefus
  * A task that can't take that turn in its course: a merged task is done for
  * good, so it is never abandoned or reopened; one whose worktree went with
  * its branch can't be reopened on it; and an abandoned one has no agent on
- * it until it is reopened.
+ * it until it is reopened. A title can't be empty or longer than a title may be.
  */
 export class TaskRefused extends Schema.TaggedError<TaskRefused>()('TaskRefused', {
   taskId: Schema.String,
-  why: Schema.Literals(['merged', 'branch_gone', 'abandoned']),
+  why: Schema.Literals(['merged', 'branch_gone', 'abandoned', 'no_title', 'title_too_long']),
 }) {}
 
 /** gh or glab didn't get to say whether it is signed in: it timed out, or couldn't be started. */

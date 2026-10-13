@@ -6,7 +6,7 @@ import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, W
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { waitsWords } from '../../shared/agents'
+import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
 import { callKindOf, whereOf } from '../../shared/calls'
 import { checkOf } from '../../shared/checks'
@@ -200,19 +200,23 @@ export function DockView({
         title={task.title}
         {...(waiting !== null
           ? { note: waiting }
-          : task.waits !== null
-            ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until)) }
-            : task.summary === null
-              ? {}
-              : { note: task.summary.split('\n')[0] ?? '' })}
+          : task.queued !== null
+            ? { note: queuedWords(task.queued) }
+            : task.waits !== null
+              ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until)) }
+              : task.summary === null
+                ? {}
+                : { note: task.summary.split('\n')[0] ?? '' })}
         status={
           task.phase === 'waiting'
             ? TaskStatus.Yours
-            : task.phase === 'stopped'
-              ? TaskStatus.Stopped
-              : task.phase === 'running'
-                ? TaskStatus.Running
-                : TaskStatus.Done
+            : task.queued !== null
+              ? TaskStatus.Queued
+              : task.phase === 'stopped'
+                ? TaskStatus.Stopped
+                : task.phase === 'running'
+                  ? TaskStatus.Running
+                  : TaskStatus.Done
         }
         steps={stepsOf(task)}
         lead={lead}

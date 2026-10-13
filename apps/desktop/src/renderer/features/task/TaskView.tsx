@@ -22,6 +22,7 @@ import {
   type TaskConflicts,
   TaskMenu,
   TaskStatus,
+  Finished,
   Thread,
   ThreadDivider,
   ThreadShellProvider,
@@ -30,7 +31,7 @@ import {
   TitleBar,
 } from '@althar/ui'
 
-import { waitsWords } from '../../shared/agents'
+import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { useDictation } from '../../shared/dictation/useDictation'
@@ -46,6 +47,7 @@ import { stepNames, stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
+import { taskEvidence } from '../../shared/evidence'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
@@ -96,9 +98,9 @@ export const text = {
   resolve: (conflicts: ReadonlyArray<{ readonly name: string | null; readonly branch: string; readonly files: string }>) => {
     const [only] = conflicts
     if (conflicts.length === 1 && only !== undefined && only.name === null)
-      return `${only.branch} has moved on, and merging this task's branch into it conflicts in ${only.files}. Bring the branch up to date: merge ${only.branch} into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Then say it's ready to merge again.`
+      return `${only.branch} has moved on, and merging this task's branch into it conflicts in ${only.files}. Bring the branch up to date: merge ${only.branch} into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Merge, don't rebase: a branch that was pushed can't be rewritten. Then say it's ready to merge again.`
     const where = conflicts.map((one) => `in ${one.name ?? 'the repository'}, ${one.branch} conflicts in ${one.files}`).join('; ')
-    return `The default branches have moved on, and merging this task's branches into them conflicts: ${where}. Bring each branch up to date: merge its default branch into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Then say it's ready to merge again.`
+    return `The default branches have moved on, and merging this task's branches into them conflicts: ${where}. Bring each branch up to date: merge its default branch into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Merge, don't rebase: a branch that was pushed can't be rewritten. Then say it's ready to merge again.`
   },
   working: 'Working',
   needsYou: 'Needs you',
@@ -130,6 +132,7 @@ export const text = {
 /**
  * Where a task stands, for its header: the step it is on, by what it does
  * there; a step held for a usage limit says whom it waits for, and until when;
+ * one waiting for a free agent, that every agent this computer runs at once is busy;
  * ready, it waits on the person to accept it.
  */
 export const statusOf = (
@@ -137,8 +140,9 @@ export const statusOf = (
   agentName: (id: string) => string = (id) => id,
 ): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
-  const { waits, phase, step } = snapshot.task
+  const { waits, queued, phase, step } = snapshot.task
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
+  if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
   const doing = step === null ? undefined : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
   // Ready, but its lead couldn't resolve a conflict with its default branch: it needs the person before it can be accepted.
@@ -217,6 +221,9 @@ const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, r
 /** The task's own say on its lead resolving conflicts, as its menu offers it: none goes by the project. */
 const conflictsChoice = (own: boolean | null): TaskConflicts => (own === null ? 'project' : own ? 'on' : 'off')
 
+/** How long a title may be, as the runtime keeps it. */
+const TITLE_LENGTH = 60
+
 /** The line of a file's first change, where its diff is read: for an editor to open at. */
 const firstChange = (view: FileView): number | undefined => {
   if (view.state !== 'ready') return undefined
@@ -247,6 +254,8 @@ export function TaskView({
   const [connecting, setConnecting] = useState(false)
   // Abandoning it asks first, saying what happens to its worktree and branch.
   const [abandoning, setAbandoning] = useState(false)
+  // Whether its title is a field, from its menu's Rename or from pressing the title.
+  const [renaming, setRenaming] = useState(false)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
   const [face, setFace] = useState<Face | null>(null)
   // Ready, or merged here with its remote still to have it, it opens on what it made: there is something there to do.
@@ -374,6 +383,9 @@ export function TaskView({
       now,
     ),
   ]
+  // What the task built, as its lead last said it, closes its thread once no step is under way, with what its steps showed gathered under it.
+  const finished = taskEvidence(snapshot.items, snapshot.reports)
+  const closing = finished.built !== null && !busy && snapshot.task.step === null && snapshot.task.phase !== 'waiting'
   // What each document was last changed by, so one open beside the thread follows its edits.
   const versionOf = documentVersions(
     blocks.flatMap((block) => (block.kind === 'turn' ? block.parts : [])),
@@ -467,6 +479,7 @@ export function TaskView({
         />
       )}
       <TaskMenu
+        onRename={() => setRenaming(true)}
         // What it built runs with no agent, where its repository says how.
         {...(snapshot.task.runCommand === null ? {} : { run: { command: snapshot.task.runCommand, onRun: () => void model.runProject() } })}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
@@ -590,36 +603,57 @@ export function TaskView({
           />
         }
       >
-        <BackCrumb to={snapshot.project.name} kbd="esc" title={snapshot.task.title} titleLevel={1} onBack={onBack} />
+        <BackCrumb
+          to={snapshot.project.name}
+          kbd="esc"
+          title={snapshot.task.title}
+          titleLevel={1}
+          maxLength={TITLE_LENGTH}
+          editing={renaming}
+          onEditingChange={setRenaming}
+          onRename={(title) => void model.rename(title)}
+          onBack={onBack}
+        />
       </TitleBar>
       {shown === 'out' && !hasOutputs(snapshot) ? (
         <NoOutputsView snapshot={snapshot} lead={lead.name} />
       ) : shown === 'out' ? (
         <div className={connecting ? s.withPanel : s.outputsFace}>
-          <Outputs
-            snapshot={snapshot}
-            lead={lead}
-            pending={model.pending}
-            doing={model.doing}
-            error={model.error}
-            onAccept={(changes) => void model.accept(changes)}
-            onMergeHere={() => void model.mergeHere()}
-            onOpenChange={() => void model.openChange()}
-            onPush={(head, url) => void model.push(head, url)}
-            onMarkReady={(url) => void model.markReady(url)}
-            // Sending it back is a note to its lead, which starts it again if it stopped.
-            onSendBack={(note) => send(note, false)}
-            onOpenFile={changes.show}
-            conflict={model.conflict}
-            onPushHere={() => void model.pushHere()}
-            onPushBranch={() => void model.pushBranch()}
-            onConnect={() => setConnecting(true)}
-            // So is a conflict to settle, in words the lead acts on.
-            onResolve={() => {
-              model.dismissConflict()
-              void send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
-            }}
-          />
+          {/* Its evidence's screenshots open in the lightbox, as the thread's pictures do. */}
+          <ThreadShellProvider value={host.shell}>
+            <Outputs
+              snapshot={snapshot}
+              lead={lead}
+              pending={model.pending}
+              doing={model.doing}
+              error={model.error}
+              onAccept={(changes) => void model.accept(changes)}
+              onMergeHere={() => void model.mergeHere()}
+              onOpenChange={() => void model.openChange()}
+              onPush={(head, url) => void model.push(head, url)}
+              refused={model.refused}
+              onReplace={(head, replaces, url) => void model.replace(head, replaces, url)}
+              // Bringing a pull request's commits in is the lead's: Althar fetches them, and the note says how to merge them.
+              onBringIn={(url) =>
+                void model.mergeNote(url).then((note) => {
+                  if (note !== null) void send(note, false)
+                })
+              }
+              onMarkReady={(url) => void model.markReady(url)}
+              // Sending it back is a note to its lead, which starts it again if it stopped.
+              onSendBack={(note) => send(note, false)}
+              onOpenFile={changes.show}
+              conflict={model.conflict}
+              onPushHere={() => void model.pushHere()}
+              onPushBranch={() => void model.pushBranch()}
+              onConnect={() => setConnecting(true)}
+              // So is a conflict to settle, in words the lead acts on.
+              onResolve={() => {
+                model.dismissConflict()
+                void send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
+              }}
+            />
+          </ThreadShellProvider>
           {connecting && snapshot.host !== null && (
             <ConnectPanel service={serviceOfProduct(snapshot.host.product)} onClose={() => setConnecting(false)} />
           )}
@@ -675,6 +709,7 @@ export function TaskView({
                 threadId={snapshot.threadId}
                 worktree={snapshot.task.worktree}
                 {...(openFile === undefined ? {} : { openFile })}
+                gathered={closing}
                 session={session}
                 project={snapshot.project.name}
                 onPassOn={(words) => void model.send(words)}
@@ -694,6 +729,9 @@ export function TaskView({
                   />
                 )}
               />
+              {closing && finished.built !== null && (
+                <Finished built={finished.built} pieces={finished.pieces} unverified={finished.unverified} />
+              )}
             </ThreadShellProvider>
             {snapshot.attention.map((request) =>
               request.kind === 'stuck' && request.stuck !== null ? (

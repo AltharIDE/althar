@@ -106,6 +106,8 @@ export const noteFor = (
     place.change === null
       ? 'If the full tests then find something, fix it in a follow-up commit on top of the merge.'
       : `If the full tests then find something, fix it in one follow-up commit on top of the merge, and commit nothing else on top of it: Althar pushes the merge and that fix to ${place.change}. Don't push it yourself.`
+  // A rebase would rewrite what was pushed, and the pull request take no plain push of it.
+  const merge = "Merge, don't rebase: a branch that was pushed can't be rewritten."
   const after = place.change === null ? "Then say it's ready to merge again." : ''
   const stuck =
     "If you can't settle a conflict, or the quick checks fail and you can't fix them, don't commit the merge: undo it with git merge --abort, and say why."
@@ -119,6 +121,7 @@ export const noteFor = (
     return [
       resolved,
       "Don't end your turn with the merge uncommitted, or while you wait on something running in the background.",
+      merge,
       followUp,
       after,
     ]
@@ -128,6 +131,7 @@ export const noteFor = (
   return [
     ...(failure === null ? [] : [`The conflict isn't resolved yet: ${failure} Try once more.`]),
     asked,
+    merge,
     commitFirst,
     followUp,
     after,

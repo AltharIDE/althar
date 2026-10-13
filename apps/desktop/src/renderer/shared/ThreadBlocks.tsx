@@ -4,6 +4,7 @@ import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
   Arrived,
   CodeBlock,
+  Evidence,
   FindingState,
   Issue,
   LinkButton,
@@ -29,6 +30,7 @@ import {
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
+import { piecesOf } from './evidence'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
 import { sentAttachments } from './images'
@@ -210,8 +212,8 @@ function PartView({ part, threadId }: { part: Part; threadId: string }) {
   }
 }
 
-/** What a step reported: the lead's summary, open under its work, or the review's verdict and findings. */
-function StepView({ id, result, of }: { id: string; result: StepResult; of: number }) {
+/** What a step reported: the lead's summary, open under its work, with what it showed unless the task's closing card gathers it; or the review's verdict and findings. */
+function StepView({ id, result, of, gathered }: { id: string; result: StepResult; of: number; gathered: boolean }) {
   const named = useModelNames()
   // Implement is the first step, a review and settling it the second, and the pull request the last.
   const n = result.step === 'implement' ? 1 : result.step === 'publish' ? of : 2
@@ -252,7 +254,12 @@ function StepView({ id, result, of }: { id: string; result: StepResult; of: numb
         state={StepState.Done}
         {...(model === undefined ? {} : { model })}
         defaultOpen
-        detail={<Markdown source={result.summary} />}
+        detail={
+          <>
+            <Markdown source={result.summary} />
+            {!gathered && <Evidence pieces={piecesOf(id, result.evidence)} unverified={result.unverified ?? []} headingLevel={4} />}
+          </>
+        }
       />
     )
   // The lead settles findings on its own for now: what the review found is left to it.
@@ -426,6 +433,7 @@ export function ThreadBlocks({
   draft,
   push,
   queued,
+  gathered = false,
   onPassOn,
   onAnswerQuestion,
   focusQuestion,
@@ -458,6 +466,8 @@ export function ThreadBlocks({
   push?: (request: PushRequestContent, at: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
+  /** What the lead's steps showed is in the task's closing card, after these, so its steps don't show it again. */
+  gathered?: boolean
 }) {
   // A task that was reviewed has two steps, the review and settling it being the second; its pull request, once opened, is one more.
   const done = new Set(blocks.flatMap((block) => (block.kind === 'step' ? [block.result.step] : [])))
@@ -503,7 +513,7 @@ export function ThreadBlocks({
           </ThreadDivider>
         )
       case 'step':
-        return <StepView key={block.id} id={block.id} result={block.result} of={of} />
+        return <StepView key={block.id} id={block.id} result={block.result} of={of} gathered={gathered} />
       case 'card':
         return <Fragment key={block.id}>{card?.(block.card)}</Fragment>
       case 'question':

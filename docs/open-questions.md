@@ -240,9 +240,11 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   (started, in review, done). Althar could move it; the tracker's own Git
   integration may already move it, by the key in the branch (Linear does,
   Jira's apps link it); or the person does. Two of them moving the same field
-  fight. A product question to try out before deciding. For now Althar
-  puts the key in the branch and the pull request's title and moves no
-  status.
+  fight. A product question to try out before deciding. Althar puts the key
+  in the branch and the pull request's title. Since 12 October it moves the
+  issue to In Progress as its task's first step starts, once, on Linear and
+  Jira, unless the project's rules turn it off; it never moves one back from
+  further along. In review and done are still open.
 - [ ] **What reaches the lead from a pull request.** Settled on 1 October,
   after review: failed checks, and what the person and the repository's own
   people (those who can write to it) say. Anyone else, as on a public
@@ -309,21 +311,22 @@ never under running work.
 - [ ] **Adapters over the air** (DEV-46). Today a new adapter means an app
   release. Shipping adapter bundles alone needs them verified before they
   run as Althar's identity.
-- [ ] **One entitlements file for every helper.** electron-builder gives all
+- [x] **One entitlements file for every helper.** electron-builder gives all
   of them the agents' entitlements (JIT, unsigned executable memory, no
-  library validation). Leaning: sign the agents' binaries apart once the
-  adapters leave Electron's binary (the runAsNode question below).
+  library validation). Decided in ADR-033: each executable is signed with
+  its own, and only Claude Code's binary may load any library.
 - [ ] **A download link that stays the same.** The site and the README link
   the Releases page. A fixed asset name (`Althar-arm64.dmg`) would let
   `releases/latest/download/…` start the download directly.
 
 ## The desktop app, 29 September
 
-- [ ] **Running the bundled adapters once the app is signed.** They run on
+- [x] **Running the bundled adapters once the app is signed.** They run on
   Electron's own binary as Node (`ELECTRON_RUN_AS_NODE`), so the RunAsNode
   fuse has to stay on, and then anything can run Althar's signed binary as
-  Node with the app's entitlements. Leaning: ship a separate Node for the
-  adapters and turn the fuse off. Decide before the first signed build.
+  Node with the app's entitlements. Decided in ADR-033: the app ships Node
+  for them and the fuse is off. A utility process per adapter was tried
+  and can't own the adapter's process group.
 
 - [ ] **Task numbers.** The kit's header and crumb show a task's number
   (#418); tasks have slugs, not numbers, so the app shows the title alone.

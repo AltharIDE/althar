@@ -260,7 +260,21 @@ export interface NewIssue {
 export interface TrackerCapabilities {
   /** A link can be attached to an issue, as a pull request's is. */
   readonly links: boolean
+  /** An issue can be moved to the tracker's own "in progress": a Linear team's started state, a Jira transition into In Progress. */
+  readonly starts: boolean
 }
+
+/** What `Tracker.start` did: moved the issue, or left it as it was; and the status it is in now. */
+export interface Started {
+  readonly moved: boolean
+  readonly status: Issue['status']
+}
+
+/** Whether an issue's work hasn't started: what `Tracker.start` may move on, and nothing else. */
+export const unstarted = (category: StatusCategory): boolean => category === 'triage' || category === 'backlog' || category === 'todo'
+
+/** An issue left as it is, by a tracker that has no "in progress" to move it to, or as it is past one. */
+export const leftAsItIs = (issue: Issue): Started => ({ moved: false, status: issue.status })
 
 /** What a tracker offers Althar (docs/architecture/06). */
 export interface Tracker {
@@ -274,6 +288,13 @@ export interface Tracker {
   comment(issue: Issue, body: string): Effect.Effect<void, ConnectorFailed>
   /** Attaches a link to an issue, where the tracker has links. */
   link(issue: Issue, link: { readonly url: string; readonly title: string }): Effect.Effect<void, ConnectorFailed>
+  /**
+   * Moves an issue to the tracker's "in progress", where the tracker has one
+   * (`capabilities.starts`), as its task starts. Only from triage, the
+   * backlog or to do: one started, done or cancelled is left as it is, never
+   * moved back. A tracker without one leaves every issue as it is.
+   */
+  start(issue: Issue): Effect.Effect<Started, ConnectorFailed>
   /** Where the account can file issues, most recently active first where the tracker says; page after page, to a bound. */
   containers(): Effect.Effect<ReadonlyArray<Container>, ConnectorFailed>
   /**

@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
+import { BUILT, BUILT_FIXED, BUILT_SETTLED } from '@althar/provider-adapters/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Artifacts } from '../src/Artifacts'
 import { Changes } from '../src/Changes'
 import { coAuthorLine, setCoAuthor } from '../src/credit'
 import { ChangedSinceSeen } from '../src/errors'
@@ -19,11 +21,12 @@ import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
+import { taskShown } from '../src/evidence'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import { Sessions } from '../src/Sessions'
 import * as Runtime from '../src/Runtime'
-import { callTool, fakeConnectors, HOST, hosted, items, repository, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, repository, runtime, turns, until } from './support'
 
 /*
  * A task that ends in a pull request (docs/plans/integrations.md): when its
@@ -102,12 +105,12 @@ describe('a task that ends in a pull request', () => {
       assert.isTrue(change?.draft)
       assert.strictEqual(`${change?.short} ${change?.prefix}${change?.number}`, 'PR #1')
 
-      // The branch is on the host, with what the steps reported as its description.
+      // The branch is on the host, its description leading with what the task built, then what the steps reported.
       const opened = github.changes[0]
       assert.strictEqual(opened?.source, 'althar/add-a-retry')
       assert.strictEqual(opened?.target, 'main')
       assert.isTrue(opened?.draft)
-      assert.include(opened?.body, 'Did the task.')
+      assert.isTrue(opened?.body.startsWith(BUILT))
       assert.include(opened?.body, 'Passed after one round of review.')
       // What it pushed is what the lead committed; Althar commits nothing of its own, and is its co-author.
       assert.strictEqual(git(bare, 'log', '-1', '--format=%an %s', 'althar/add-a-retry'), 'Fake Change it')
@@ -208,11 +211,32 @@ describe('a task that ends in a pull request', () => {
       yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       const opened = github.changes[0]
       assert.strictEqual(opened?.source, 'feature/add-a-retry')
-      // The lead's description, in the template: its headings and checklist kept, the box it ticked unticked, Althar's own below.
+      // What the task built, then the lead's description, in the template: its headings and checklist kept, the box it ticked
+      // unticked, Althar's own below.
       assert.strictEqual(
         opened?.body,
-        '## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\n### Review\n\nPassed after one round of review.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+        `${BUILT}\n\n## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\n### Review\n\nPassed after one round of review.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>`,
       )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('leads a description written in the template with what the task built as settling last said it', () => {
+    const { working, bare } = hosted()
+    mkdirSync(join(working, '.github'))
+    writeFileSync(join(working, '.github', 'pull_request_template.md'), '## What changed\n\n<!-- A line or two. -->\n')
+    git(working, '-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'add', '-A')
+    git(working, '-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'commit', '-q', '-m', 'Template')
+    git(working, 'push', '-q', bare, 'main')
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      // The description is written finishing; settling then changes the work, and says again what it built.
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:findings]')
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
+      const body = github.changes[0]?.body ?? ''
+      assert.isTrue(body.startsWith(`${BUILT_SETTLED}\n\n## What changed\n\nDid the task, in the template.`))
+      assert.notInclude(body, BUILT)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -231,6 +255,13 @@ describe('a task that ends in a pull request', () => {
       // The lead fixes and commits it; nothing goes up until the person pushes it.
       const [fixed] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1, Duration.seconds(20))
       assert.notInclude(git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry'), 'fixed.txt')
+      // Its plan done, it says again what the task built, and that is how the task now ends.
+      const [shown] = yield* until(
+        Effect.map(taskShown(fixed?.threadId ?? ''), (now) => [now]),
+        ([now]) => now?.built === BUILT_FIXED,
+        Duration.seconds(20),
+      )
+      assert.strictEqual(shown?.built, BUILT_FIXED)
       const changes = yield* Changes
       yield* changes.push(fixed?.taskId ?? '', fixed?.change?.localHead ?? '')
       assert.include(git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry'), 'fixed.txt')
@@ -537,6 +568,164 @@ describe('a task that ends in a pull request', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('keeps the evidence the lead hands, its screenshot uncommitted, and describes it in the pull request', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:evidence]',
+      )
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const queries = yield* Queries
+      const thread = yield* queries.thread(ready?.threadId ?? '')
+      const implement = thread.items.find((item) => item.kind === 'step_result' && item.content.step === 'implement')
+      assert(implement?.kind === 'step_result')
+      const [shot, tests] = implement.content.evidence
+      // The screenshot is kept as a picture an agent hands back is: by its digest, in the store.
+      assert.strictEqual(shot?.kind, 'screenshot')
+      assert.strictEqual(shot?.caption, 'The retry button after a failed checkout')
+      assert.match(shot?.picture?.digest ?? '', /^[0-9a-f]{64}$/)
+      assert.deepStrictEqual([shot?.picture?.width, shot?.picture?.height], [480, 300])
+      assert.isNotNull(yield* (yield* Artifacts).read(shot?.picture?.digest ?? ''))
+      assert.deepStrictEqual(tests, {
+        kind: 'test_run',
+        caption: 'The checkout tests',
+        picture: null,
+        command: 'bun test checkout',
+        exit: 0,
+        text: 'checkout.test.ts\n  ✓ retries once\n\n1 passed\n',
+        dropped: 0,
+      })
+      assert.deepStrictEqual(implement.content.unverified, ['Not tried against the real payment provider: no sandbox account'])
+      // Its screenshot needn't be committed, isn't pushed, and isn't part of what the task changed.
+      assert.deepStrictEqual(
+        thread.task.files.map((file) => file.path),
+        ['change.txt'],
+      )
+      const published = thread.items.find((item) => item.kind === 'step_result' && item.content.step === 'publish')
+      assert.strictEqual(published?.kind === 'step_result' ? published.content.summary : null, 'Opened draft pull request #1.')
+      const sql = yield* SqlClient.SqlClient
+      const [workspace] = yield* sql<{ branch: string }>`SELECT branch FROM workspaces`
+      assert.deepStrictEqual(git(bare, 'ls-tree', '--name-only', workspace?.branch ?? '').split('\n'), ['README.md', 'change.txt'])
+      // The pull request says what the task built, then what was shown, in words: the screenshot is in Althar.
+      const body = github.changes[0]?.body ?? ''
+      assert.include(
+        body,
+        [
+          BUILT,
+          '',
+          '### Evidence',
+          '',
+          '- Screenshot: The retry button after a failed checkout',
+          '- Test run: The checkout tests: `bun test checkout`, exit 0',
+          '  ~~~~',
+          '  checkout.test.ts',
+          '    ✓ retries once',
+          '  ',
+          '  1 passed',
+          '  ~~~~',
+          '',
+          'Screenshots are in Althar, on the task.',
+          '',
+          '### Unverified',
+          '',
+          '- Not tried against the real payment provider: no sandbox account',
+        ].join('\n'),
+      )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('lets the reviewer read the evidence, and keeps it across settling, which needn’t hand the screenshot again', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:evidence] [lead:set-aside] [review:findings] [review:evidence]',
+      )
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
+      const all = yield* items(ready?.threadId ?? '')
+      const results = all.flatMap((item) => (item.kind === 'step_result' ? [item.content] : []))
+      // The reviewer read the screenshot, which isn't in its copy, and the run's output, each from where its brief said.
+      const review = results.find((result) => result.step === 'review')
+      assert.match(String(review?.summary), / Read: 1-retry\.png \(\d+ bytes\), 2-test_run\.txt \(\d+ bytes\)\./)
+      // Settling, the lead handed a new run and an empty list of what it couldn't show, not its screenshot again: Althar took it.
+      const settled = results.find((result) => result.step === 'settle')
+      assert.deepStrictEqual(settled?.unverified, [])
+      assert.strictEqual(results.find((result) => result.step === 'publish')?.summary, 'Opened draft pull request #1.')
+      // The pull request has all it showed, and nothing left unverified: settling cleared it.
+      const body = github.changes[0]?.body ?? ''
+      assert.include(body, '- Screenshot: The retry button after a failed checkout\n- Test run: The checkout tests')
+      assert.include(body, '- Test run: The heading test: `bun test heading`, exit 0')
+      assert.notInclude(body, '### Unverified')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('leads its description with what the task built as it ended: a settling that changed the work says it again', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      // Settling commits a fix but leaves what it built unsaid, until Althar asks for it again.
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:built-unsaid] [review:findings]',
+      )
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
+      const results = (yield* items(ready?.threadId ?? '')).flatMap((item) => (item.kind === 'step_result' ? [item.content] : []))
+      assert.deepStrictEqual(
+        results.map((result) => [result.step, result.built ?? null]),
+        [
+          ['implement', BUILT],
+          ['review', null],
+          ['settle', BUILT_SETTLED],
+          ['review', null],
+          ['publish', null],
+        ],
+      )
+      // The pull request leads with it as it now stands, never as it was first said.
+      const body = github.changes[0]?.body ?? ''
+      assert.isTrue(body.startsWith(BUILT_SETTLED))
+      assert.notInclude(body, BUILT)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live(
+    'gives a reviewer carrying on to another round the evidence the lead handed settling',
+    () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare })
+      github.addRepository(['meridian', 'api'])
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        // Settling commits a fix, so the review looks again, in the same session.
+        const projectId = yield* ask(
+          working,
+          'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:evidence] [review:findings] [review:evidence]',
+        )
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
+        const reviews = (yield* items(ready?.threadId ?? '')).flatMap((item) =>
+          item.kind === 'step_result' && item.content.step === 'review' ? [String(item.content.summary)] : [],
+        )
+        assert.lengthOf(reviews, 2)
+        assert.notInclude(reviews[0] ?? '', '3-test_run')
+        // The second round read the run the lead handed settling, written out for it then.
+        assert.match(reviews[1] ?? '', / Read: 1-retry\.png \(\d+ bytes\), 2-test_run\.txt \(\d+ bytes\), 3-test_run\.txt \(\d+ bytes\)\./)
+        const sql = yield* SqlClient.SqlClient
+        const [sessions] = yield* sql<{ n: number }>`
+        SELECT count(*) AS n FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.kind = 'step' AND t.node_key = 'review'`
+        assert.strictEqual(sessions?.n, 1)
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    },
+    60_000,
+  )
+
   it.live('goes on without its pull request when the person says so', () => {
     const { working } = hosted()
     return Effect.gen(function* () {
@@ -689,6 +878,364 @@ describe('a pull request, by the person and the lead', () => {
       assert.lengthOf(yield* changes.ofTask(created.taskId), 0)
       assert.isNull(yield* changes.endFor(project.projectId))
     }).pipe(Effect.provide(runtimeWith({})))
+  })
+})
+
+describe('a branch that parted from its pull request', () => {
+  it.live('is said in a new lead’s brief to be published, by its pull request', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null, Duration.seconds(20))
+      const threadId = ready?.threadId ?? ''
+      const [workspace] = yield* (yield* SqlClient.SqlClient)<{
+        branch: string
+      }>`SELECT branch FROM workspaces WHERE task_id = ${ready?.taskId ?? ''}`
+      const before = (yield* turns(threadId)).length
+      yield* (yield* Sessions).switchAgent({ threadId, agentId: 'opencode' })
+      const briefed = yield* until(
+        turns(threadId),
+        (rows) => rows.length > before && rows.every((row) => !['pending', 'delivered'].includes(row.state)),
+      )
+      assert.include(
+        briefed.at(before)?.prompt ?? '',
+        `The branch ${workspace?.branch ?? ''} is published: its pull request, ${ready?.change?.url ?? ''}, has it at ${(ready?.change?.head ?? '').slice(0, 12)}.`,
+      )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('is told apart from one that only adds to it, replaced only under a lease, or brought back by merging', () => {
+    const { working, bare } = hosted()
+    const tip = tipOf(bare)
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tip })
+    github.addRepository(['meridian', 'api'])
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      yield* setCoAuthor(false)
+      const changes = yield* Changes
+      const sql = yield* SqlClient.SqlClient
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      const taskId = ready?.taskId ?? ''
+      const [workspace] = yield* sql<{ path: string; branch: string }>`SELECT path, branch FROM workspaces WHERE task_id = ${taskId}`
+      const here = workspace?.path ?? ''
+      const branch = workspace?.branch ?? ''
+      const at = (cwd: string, ...args: Array<string>) => execFileSync('git', args, { cwd }).toString().trim()
+      const refused = (error: unknown) => (error instanceof Error && 'why' in error ? `${error.name}:${String(error.why)}` : String(error))
+
+      // A commit on top: a plain fast-forward, as it always was.
+      at(here, 'commit', '-q', '--allow-empty', '-m', 'More')
+      const [ahead] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1)
+      assert.isNull(ahead?.change?.diverged)
+      yield* changes.push(taskId, ahead?.change?.localHead ?? '')
+      assert.strictEqual(tip(), at(here, 'rev-parse', 'HEAD'))
+      // Pushed by URL, with no remote-tracking ref: Althar keeps its own, for the brief to say the branch is published.
+      assert.strictEqual(at(here, 'rev-parse', `refs/althar/pushed/${branch}`), tip())
+
+      // The lead rewrites what was pushed: the card says so, with nothing to push plainly.
+      const published = tip() ?? ''
+      at(here, 'commit', '-q', '--amend', '--allow-empty', '-m', 'More, reworded')
+      at(here, 'commit', '-q', '--allow-empty', '-m', 'Then this')
+      const [rewritten] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged != null)
+      assert.deepStrictEqual(rewritten?.change?.diverged, { kind: 'rewritten', local: 2, onPullRequest: 1 })
+      assert.strictEqual(rewritten?.change?.unpushed, 0)
+      const local = rewritten?.change?.localHead ?? ''
+
+      // A plain push is refused in a sentence, not git's hint.
+      const plain = yield* Effect.flip(changes.push(taskId, local))
+      assert.strictEqual(refused(plain), 'PushRefused:behind')
+      assert.strictEqual(
+        words(plain, String).message,
+        'PR #1 has commits that aren’t here yet, so it didn’t take the push. Bring them in, then push again.',
+      )
+
+      // Asking the lead to merge instead: the note has it start again from what was pushed, and merge, never rebase;
+      // what it hasn't committed is committed, and the backup checked, before any reset.
+      assert.notInclude((yield* changes.mergeNote(taskId)).note, 'not committed now')
+      writeFileSync(join(here, 'half-done.ts'), 'export {}\n')
+      const asked = yield* changes.mergeNote(taskId)
+      rmSync(join(here, 'half-done.ts'))
+      assert.strictEqual(asked.head, published)
+      assert.include(asked.note, 'was rewritten after it was pushed')
+      assert.include(asked.note, '(not committed now: half-done.ts)')
+      const order = ['Commit everything not committed yet', `git rev-parse ${branch}-rewritten HEAD`, `git reset --hard ${published}`]
+      assert.deepStrictEqual(
+        order.map((step) => asked.note.indexOf(step)),
+        order.map((step) => asked.note.indexOf(step)).toSorted((a, b) => a - b),
+      )
+      assert.notInclude(
+        order.map((step) => asked.note.indexOf(step)),
+        -1,
+      )
+      assert.include(asked.note, 'Merge, never rebase')
+      assert.strictEqual(at(here, 'rev-parse', `refs/althar/pull-request/${branch}`), published)
+
+      // Someone pushed meanwhile: replacing under the lease of the head seen refuses, and nothing on the host moves.
+      at(bare, 'update-ref', `refs/heads/${branch}`, `${published}~1`)
+      // Only from a head seen, as a commit: anything else replaces nothing.
+      assert.instanceOf(yield* Effect.flip(changes.replace(taskId, local, 'not-a-commit')), ChangedSinceSeen)
+      const stale = yield* Effect.flip(changes.replace(taskId, local, published))
+      assert.strictEqual(refused(stale), 'PushRefused:moved')
+      assert.strictEqual(tip(), at(bare, 'rev-parse', `${published}~1`))
+      at(bare, 'update-ref', `refs/heads/${branch}`, published)
+
+      // Still where the person saw it: their branch replaces it, and the record says it was their force push.
+      yield* changes.replace(taskId, local, published)
+      assert.strictEqual(tip(), local)
+      const [forced] = yield* sql<{ payload: string; actorId: string }>`
+        SELECT payload, actor_id FROM record_events WHERE type = 'external_link.force_pushed'`
+      assert.deepInclude(JSON.parse(forced?.payload ?? '{}'), {
+        replaced: published,
+        head: local,
+        rule: 'force-push',
+        answeredBy: 'person',
+      })
+      assert.strictEqual(forced?.actorId, (yield* Instance).personId)
+      yield* until(cards(projectId), (all) => all[0]?.change?.diverged === null && all[0]?.change?.unpushed === 0)
+
+      // Someone pushes to the pull request from elsewhere: it moved, and a plain push is refused the same way.
+      const tree = at(bare, 'rev-parse', `${local}^{tree}`)
+      const theirs = execFileSync('git', ['commit-tree', tree, '-p', local, '-m', 'Update branch'], {
+        cwd: bare,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 'Dana',
+          GIT_AUTHOR_EMAIL: 'dana@x',
+          GIT_COMMITTER_NAME: 'Dana',
+          GIT_COMMITTER_EMAIL: 'dana@x',
+        },
+      })
+        .toString()
+        .trim()
+      at(bare, 'update-ref', `refs/heads/${branch}`, theirs)
+      at(here, 'commit', '-q', '--allow-empty', '-m', 'Mine')
+      const [moved] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged?.kind === 'moved', Duration.seconds(20))
+      assert.deepStrictEqual(moved?.change?.diverged, { kind: 'moved', local: 0, onPullRequest: null })
+      assert.strictEqual(refused(yield* Effect.flip(changes.push(taskId, moved?.change?.localHead ?? ''))), 'PushRefused:behind')
+      // Bringing its commits in: fetched here, and the lead merges them.
+      const bringing = yield* changes.mergeNote(taskId)
+      assert.strictEqual(bringing.head, theirs)
+      assert.include(bringing.note, `git merge ${theirs}`)
+      const [counted] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged?.onPullRequest === 1)
+      assert.deepStrictEqual(counted?.change?.diverged, { kind: 'moved', local: 1, onPullRequest: 1 })
+      at(here, 'merge', '-q', '--no-edit', theirs)
+      const [merged] = yield* until(cards(projectId), (all) => all[0]?.change?.diverged === null && all[0]?.change?.unpushed === 2)
+      yield* changes.push(taskId, merged?.change?.localHead ?? '')
+      assert.strictEqual(tip(), merged?.change?.localHead)
+
+      // A host that takes no forced push says so in its own words, and nothing moves there.
+      at(bare, 'config', 'receive.denyNonFastForwards', 'true')
+      const kept = tip() ?? ''
+      at(here, 'commit', '-q', '--amend', '--allow-empty', '-m', 'Merged, reworded first')
+      const denied = yield* Effect.flip(changes.replace(taskId, at(here, 'rev-parse', 'HEAD'), kept))
+      assert.strictEqual(refused(denied), 'PushRefused:refused')
+      assert.strictEqual(tip(), kept)
+      at(bare, 'config', 'receive.denyNonFastForwards', 'false')
+
+      // Where the project never allows a force push, nothing is replaced.
+      const policies = yield* Policies
+      yield* policies.set(
+        projectId,
+        { alwaysAsk: ['default-branch', 'many-branches', 'delete-branch', 'deploy', 'outside'], never: ['force-push'] },
+        (yield* Instance).personId,
+      )
+      const before = tip() ?? ''
+      at(here, 'commit', '-q', '--amend', '--allow-empty', '-m', 'Merged, reworded')
+      const never = yield* Effect.flip(changes.replace(taskId, at(here, 'rev-parse', 'HEAD'), before))
+      assert.strictEqual(refused(never), 'PushRefused:never')
+      assert.strictEqual(tip(), before)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
+describe('the Push button', () => {
+  /** An agent's commit, as Claude Code makes one: with its own credit line, which Althar makes again without. */
+  const agentCommit = (cwd: string, subject: string) =>
+    git(cwd, 'commit', '-q', '--allow-empty', '-m', subject, '-m', 'Co-Authored-By: Claude <noreply@anthropic.com>')
+
+  /**
+   * A task with its draft pull request open, on a host that can be held at a
+   * head, as GitHub answers for a moment after a push it hasn't read yet.
+   */
+  const pushable = () => {
+    const { working, bare } = hosted()
+    const tip = tipOf(bare)
+    const held: { head: string | null } = { head: null }
+    const github = makeFakeService({ pushUrl: () => bare, headOf: () => held.head ?? tip() })
+    github.addRepository(['meridian', 'api'])
+    git(working, 'config', 'user.name', 'Fake')
+    git(working, 'config', 'user.email', 'fake@althar.test')
+    const opened = Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && all[0]?.change != null, Duration.seconds(20))
+      const taskId = ready?.taskId ?? ''
+      const [workspace] = yield* (yield* SqlClient.SqlClient)<{
+        path: string
+        branch: string
+      }>`SELECT path, branch FROM workspaces WHERE task_id = ${taskId}`
+      return { projectId, taskId, here: workspace?.path ?? '', branch: workspace?.branch ?? '' }
+    })
+    /** Once the host has been asked of the pull request twice more: a whole look of Althar's since. */
+    const looked = Effect.gen(function* () {
+      const asked = () => github.calls.filter((call) => call === 'change').length
+      const before = asked()
+      yield* until(
+        Effect.sync(() => [asked()]),
+        ([now = 0]) => now >= before + 2,
+      )
+    })
+    /** A hook the bare repository runs as it takes a push, in the task's worktree, once. */
+    const whilePushing = (hook: 'pre-receive', here: string, script: string) => {
+      const path = join(bare, 'hooks', hook)
+      writeFileSync(
+        path,
+        [
+          '#!/bin/sh',
+          // What git sets for the repository taking the push isn't the worktree's.
+          'unset GIT_DIR GIT_QUARANTINE_PATH GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_PUSH_OPTION_COUNT',
+          `rm -- "$0"`,
+          `cd '${here}' || exit 1`,
+          script,
+          '',
+        ].join('\n'),
+        { mode: 0o755 },
+      )
+    }
+    return { working, bare, tip, held, github, opened, looked, whilePushing }
+  }
+
+  it.live('pushes ten commits in one click, and counts none left at once, though the host hasn’t read the push yet', () => {
+    const { bare, tip, held, github, opened, looked } = pushable()
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      const { projectId, taskId, here, branch } = yield* opened
+      const before = tip()
+      // The host answers with what it had before, until it reads the push.
+      held.head = before
+      for (let n = 1; n <= 10; n++) agentCommit(here, `Step ${n}`)
+      const [seen] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 10)
+      yield* changes.push(taskId, seen?.change?.localHead ?? '')
+
+      // All ten went up, credited, and the branch is on what went: nothing is left, at once.
+      assert.strictEqual(git(bare, 'rev-list', '--count', `${before}..${branch}`), '10')
+      assert.notInclude(git(bare, 'log', '--format=%B', `${before}..${branch}`), 'Claude')
+      assert.strictEqual(git(here, 'rev-parse', 'HEAD'), tip())
+      const [pushed] = yield* cards(projectId)
+      assert.strictEqual(pushed?.change?.unpushed, 0)
+      assert.strictEqual(pushed?.change?.head, tip())
+
+      // The host's next looks, still on what it had, don't put the ten back.
+      yield* looked
+      const [after] = yield* cards(projectId)
+      assert.strictEqual(after?.change?.unpushed, 0)
+      assert.strictEqual(after?.change?.head, tip())
+      assert.isNull(after?.change?.diverged)
+      held.head = null
+      yield* looked
+      assert.strictEqual((yield* cards(projectId))[0]?.change?.unpushed, 0)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('leaves only what the lead committed during the push, credited onto what went, for the next push', () => {
+    const { tip, github, opened, whilePushing } = pushable()
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      const { projectId, taskId, here } = yield* opened
+      for (let n = 1; n <= 3; n++) agentCommit(here, `Step ${n}`)
+      const [seen] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 3)
+      // The lead commits while git sends the three.
+      whilePushing(
+        'pre-receive',
+        here,
+        `git commit -q --allow-empty -m 'During the push' -m 'Co-Authored-By: Claude <noreply@anthropic.com>'`,
+      )
+      yield* changes.push(taskId, seen?.change?.localHead ?? '')
+
+      // The three went; the lead's commit is left, made again on top of what went, and counted at once.
+      assert.strictEqual(git(here, 'log', '-1', '--format=%s', 'HEAD'), 'During the push')
+      assert.strictEqual(git(here, 'rev-parse', 'HEAD~1'), tip())
+      assert.notInclude(git(here, 'log', '-1', '--format=%B', 'HEAD'), 'Claude')
+      const [left] = yield* cards(projectId)
+      assert.strictEqual(left?.change?.unpushed, 1)
+      assert.isNull(left?.change?.diverged)
+
+      yield* changes.push(taskId, left?.change?.localHead ?? '')
+      assert.strictEqual(tip(), git(here, 'rev-parse', 'HEAD'))
+      assert.strictEqual((yield* cards(projectId))[0]?.change?.unpushed, 0)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live(
+    'pushes what the lead commits on top of commits the push credited but couldn’t move the branch onto, a merge of main among them',
+    () => {
+      const { working, bare, tip, github, opened, whilePushing } = pushable()
+      return Effect.gen(function* () {
+        const changes = yield* Changes
+        const { projectId, taskId, here, branch } = yield* opened
+        // Main moves on, and the lead merges it in while the push is under way: the worktree is mid-merge as the push ends, so the
+        // branch stays on the commits as the lead made them.
+        writeFileSync(join(working, 'main.txt'), 'main\n')
+        git(working, 'add', 'main.txt')
+        git(working, 'commit', '-q', '-m', 'On main')
+        for (let n = 1; n <= 3; n++) agentCommit(here, `Step ${n}`)
+        const [seen] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 3)
+        const made = seen?.change?.localHead ?? ''
+        whilePushing('pre-receive', here, 'git merge -q --no-ff --no-commit main')
+        yield* changes.push(taskId, made)
+        assert.strictEqual(git(here, 'rev-parse', 'HEAD'), made)
+        assert.notStrictEqual(tip(), made)
+
+        // What went is what the branch has, as the lead made it: nothing to push, and nothing parted.
+        const [pushed] = yield* cards(projectId)
+        assert.strictEqual(pushed?.change?.unpushed, 0)
+        assert.isNull(pushed?.change?.diverged)
+
+        // The lead commits the merge, and more on top: those are what is left, and Push takes them.
+        git(here, 'commit', '-q', '--no-edit')
+        agentCommit(here, 'After the merge')
+        const [left] = yield* until(cards(projectId), (all) => all[0]?.change?.localHead !== made)
+        // The merge, its commit from main, and the one after.
+        assert.strictEqual(left?.change?.unpushed, 3)
+        assert.isNull(left?.change?.diverged)
+        yield* changes.push(taskId, left?.change?.localHead ?? '')
+        assert.strictEqual(tip(), git(here, 'rev-parse', 'HEAD'))
+        assert.strictEqual((yield* cards(projectId))[0]?.change?.unpushed, 0)
+        assert.strictEqual(git(bare, 'log', '-1', '--format=%s', `${branch}~1`), `Merge branch 'main' into ${branch}`)
+        assert.strictEqual(git(bare, 'log', '-1', '--format=%s', `${branch}~1^2`), 'On main')
+        assert.notInclude(git(bare, 'log', '--format=%B', `${branch}~5..${branch}`), 'Claude')
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    },
+  )
+
+  it.live('says why the host refused a push, leaves the count as it was, and pushes once it takes it', () => {
+    const { bare, tip, github, opened } = pushable()
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      const { projectId, taskId, here } = yield* opened
+      for (let n = 1; n <= 2; n++) agentCommit(here, `Step ${n}`)
+      const [seen] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 2)
+      const before = tip()
+      writeFileSync(join(bare, 'hooks', 'pre-receive'), '#!/bin/sh\necho "protected branch" >&2\nexit 1\n', { mode: 0o755 })
+      const refused = yield* Effect.flip(changes.push(taskId, seen?.change?.localHead ?? ''))
+      assert.strictEqual(refused instanceof Error ? refused.name : String(refused), 'PushRefused')
+      assert.strictEqual(words(refused, String).message, 'PR #1 refused the push: pre-receive hook declined.')
+      // Nothing went, and the card says so: the same two to push.
+      assert.strictEqual(tip(), before)
+      const [still] = yield* cards(projectId)
+      assert.strictEqual(still?.change?.unpushed, 2)
+      assert.strictEqual(still?.change?.head, before)
+
+      rmSync(join(bare, 'hooks', 'pre-receive'))
+      yield* changes.push(taskId, still?.change?.localHead ?? '')
+      assert.strictEqual((yield* cards(projectId))[0]?.change?.unpushed, 0)
+      assert.strictEqual(tip(), git(here, 'rev-parse', 'HEAD'))
+    }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })
 

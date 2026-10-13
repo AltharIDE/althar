@@ -1,7 +1,9 @@
+import { existsSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
 
 import { locate, namesOf, programName, quoted, usingLocated, usualDirs } from '../src/installs'
-import { agents, bundledClaude, isMusl, type LaunchSpec, type OutOnDevice } from '../src/registry'
+import { agents, bundledClaude, bundledCodex, isMusl, type LaunchSpec, type OutOnDevice } from '../src/registry'
 
 /* Finding an agent's command, on a Mac, Windows or Linux: the person's own first, then Althar's copies. */
 
@@ -146,5 +148,12 @@ describe('finding an agent’s command', () => {
     expect(bundledClaude()).toMatch(/claude-agent-sdk-[a-z0-9-]+\/claude(\.exe)?$/)
     expect(bundledClaude('plan9', 'mips')).toBeNull()
     expect(isMusl('darwin')).toBe(false)
+  })
+
+  it('finds the Codex its adapter ships as its own program, which needs no Node on the PATH', () => {
+    const codex = bundledCodex()
+    expect(codex).toMatch(/\/vendor\/[a-z0-9_-]+\/bin\/codex(\.exe)?$/)
+    expect(existsSync(codex ?? '')).toBe(true)
+    expect(bundledCodex('plan9', 'mips')).toBeNull()
   })
 })

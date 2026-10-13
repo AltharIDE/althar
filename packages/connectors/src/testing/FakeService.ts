@@ -17,6 +17,7 @@ import type {
   Tracker,
   Verdict,
 } from '../model'
+import { leftAsItIs, unstarted } from '../model'
 
 /*
  * A code host and tracker that lives in memory, for tests and the desktop's
@@ -52,6 +53,8 @@ export interface FakeControls {
     readonly title: string
     readonly body?: string
     readonly assigned?: boolean
+    /** Where its work stands: To do unless said. */
+    readonly status?: Issue['status']
   }): Issue
   /**
    * A place issues can be filed, such as a Linear team (`{ id: 'team-1', key:
@@ -171,7 +174,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const service: FakeService = {
     product,
     words: product === 'gitlab' ? { noun: 'merge request', short: 'MR', prefix: '!' } : { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, links: true },
+    capabilities: { drafts: true, checkLogs: true, threads: true, links: true, starts: true },
     account: Effect.andThen(called('account'), Effect.succeed(account)),
     repository: (path) =>
       Effect.andThen(called('repository'), () => {
@@ -329,6 +332,15 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         links.set(issue.ref, [...(links.get(issue.ref) ?? []), link])
         return Effect.void
       }),
+    // Into In Progress from where the tracker has it, as Linear's adapter moves one.
+    start: (issue) =>
+      Effect.andThen(called('start'), () => {
+        const found = issues.get(issue.ref) ?? issue
+        if (!unstarted(found.status.category)) return Effect.succeed(leftAsItIs(found))
+        const status: Issue['status'] = { name: 'In Progress', category: 'started' }
+        issues.set(found.ref, { ...found, status, updatedAt: now() })
+        return Effect.succeed({ moved: true, status })
+      }),
     containers: () => Effect.andThen(called('containers'), () => Effect.succeed(filable())),
     create: (id, draft) =>
       Effect.andThen(called('create'), () => {
@@ -406,7 +418,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         url: input.ref.includes('#')
           ? `https://github.com/${input.ref.replace('#', '/issues/')}`
           : `https://linear.app/fake/issue/${input.ref}/${input.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-        status: { name: 'Todo', category: 'todo' },
+        status: input.status ?? { name: 'Todo', category: 'todo' },
         priority: input.ref.includes('#') ? null : { level: 'high', name: 'High' },
         assignees: input.assigned === false ? [] : [me],
         labels: [],

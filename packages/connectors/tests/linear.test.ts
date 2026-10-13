@@ -183,6 +183,89 @@ describe('Linear', () => {
     }),
   )
 
+  describe('moving an issue to In Progress', () => {
+    const todo = {
+      id: 'uuid-231',
+      ref: 'MER-231',
+      key: 'MER-231',
+      title: 't',
+      body: '',
+      url: '',
+      status: { name: 'Todo', category: 'todo' as const },
+      priority: null,
+      assignees: [],
+      labels: [],
+      container: null,
+      updatedAt: '',
+    }
+    const states = [
+      { id: 's-review', name: 'In Review', type: 'started', position: 3 },
+      { id: 's-todo', name: 'Todo', type: 'unstarted', position: 1 },
+      { id: 's-progress', name: 'In Progress', type: 'started', position: 2 },
+      { id: 's-done', name: 'Done', type: 'completed', position: 4 },
+    ]
+    const board = (nodes: ReadonlyArray<unknown>, updated: unknown = { issueUpdate: { success: true } }): Route => [
+      'POST',
+      URL,
+      (request) => ({
+        json: {
+          data: String((request.body as { query: string }).query).includes('issueUpdate')
+            ? updated
+            : { issue: { team: { states: { nodes } } } },
+        },
+      }),
+    ]
+
+    it.effect('moves it into its team’s first started state on the board, not one further along', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = linear([board(states)])
+        assert.deepStrictEqual(yield* tracker.start(todo), { moved: true, status: { name: 'In Progress', category: 'started' } })
+        assert.deepStrictEqual(sent.map(variablesOf), [{ id: 'uuid-231' }, { id: 'uuid-231', stateId: 's-progress' }])
+        assert.isTrue(tracker.capabilities.starts)
+      }),
+    )
+
+    it.effect('moves one from triage or the backlog too', () =>
+      Effect.gen(function* () {
+        for (const category of ['triage', 'backlog'] as const) {
+          const { tracker } = linear([board(states)])
+          assert.isTrue((yield* tracker.start({ ...todo, status: { name: category, category } })).moved)
+        }
+      }),
+    )
+
+    it.effect('leaves one started, done or cancelled as it is, asking Linear nothing', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = linear([board(states)])
+        for (const status of [
+          { name: 'In Review', category: 'started' as const },
+          { name: 'Done', category: 'done' as const },
+          { name: 'Canceled', category: 'cancelled' as const },
+        ]) {
+          assert.deepStrictEqual(yield* tracker.start({ ...todo, status }), { moved: false, status })
+        }
+        assert.lengthOf(sent, 0)
+      }),
+    )
+
+    it.effect('fails when its team has no started state, or Linear doesn’t move it, or refuses', () =>
+      Effect.gen(function* () {
+        const none = linear([board(states.filter((state) => state.type !== 'started'))])
+        const stateless = yield* Effect.flip(none.tracker.start(todo))
+        assert.deepStrictEqual([stateless.reason, stateless.message], ['rejected', 'Its team has no started state'])
+        assert.lengthOf(none.sent, 1)
+        const unmoved = yield* Effect.flip(linear([board(states, { issueUpdate: { success: false } })]).tracker.start(todo))
+        assert.strictEqual(unmoved.reason, 'rejected')
+        const refused = yield* Effect.flip(
+          linear([
+            ['POST', URL, { status: 400, json: { errors: [{ message: 'You don’t have access', extensions: { code: 'FORBIDDEN' } }] } }],
+          ]).tracker.start(todo),
+        )
+        assert.deepStrictEqual([refused.reason, refused.message], ['forbidden', 'You don’t have access'])
+      }),
+    )
+  })
+
   it.effect('says when the key is no longer good', () =>
     Effect.gen(function* () {
       const { tracker } = linear([

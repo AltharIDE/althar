@@ -36,6 +36,7 @@ export const taskCardText: TaskCardText = {
     [TaskStatus.Yours]: 'Waiting on you',
     [TaskStatus.Done]: 'Done',
     [TaskStatus.Paused]: 'Paused',
+    [TaskStatus.Queued]: 'Waiting',
     [TaskStatus.Stopped]: 'Stopped by you',
   },
   task: (task, started) => `Task ${task} · ${started}`,

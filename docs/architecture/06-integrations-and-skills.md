@@ -443,7 +443,13 @@ for the person, as above.
 - **Status by category.** Althar asks for a category, and the adapter
   picks the tracker's state. A Jira transition that needs fields becomes a
   call for the person. Trello's lists are mapped by the person, once per
-  board. Who moves an issue's status, and when, is an open question.
+  board. Althar moves an issue to In Progress as its task's first step
+  starts (Linear: the team's first `started` state; Jira: the first
+  transition offered into the In Progress category), once, and leaves one
+  already started, done or cancelled as it is. GitHub's, GitLab's and
+  Trello's issues have no standard In Progress and are left alone. A
+  project's rules can turn it off. Who moves an issue to in review or done,
+  and when, is an open question.
 - **The key goes in the branch and the PR's title,** so the trackers' own
   Git integrations link them. Field ownership (above) decides whether
   Althar also moves a status those integrations move.

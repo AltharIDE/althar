@@ -11,6 +11,7 @@ import type {
   HomeSnapshot,
   Load,
   Picture,
+  ProjectNote,
   ProjectRulesView,
   ProjectRepository,
   ProjectSummary,
@@ -58,6 +59,7 @@ export const projectRules: ProjectRulesView = {
   onlyAccounts: null,
   branchPattern: null,
   titlePattern: null,
+  moveIssues: true,
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
 }
 
@@ -375,6 +377,9 @@ export const items = {
       summary: 'Added the retry.',
       verdict: null,
       findings: [],
+      built: null,
+      evidence: [],
+      unverified: null,
       agentId: null,
       change: null,
       ...content,
@@ -548,6 +553,7 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   branch: 'althar/add-a-retry',
   startedAt: null,
   waits: null,
+  queued: null,
   ...overrides,
 })
 
@@ -598,6 +604,7 @@ export const change = (overrides: Partial<ChangeSummary> = {}): ChangeSummary =>
   listening: true,
   localHead: null,
   unpushed: 0,
+  diverged: null,
   ...overrides,
 })
 
@@ -618,6 +625,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     baseRef: 'main',
     phase: 'running',
     waits: null,
+    queued: null,
     steps: [],
     lead: null,
     step: null,
@@ -652,6 +660,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
   attention: [],
   items: [],
   earlier: false,
+  reports: [],
   ...overrides,
 })
 
@@ -761,6 +770,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     leftHome: vi.fn(async () => {}),
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
+    replacePullRequest: vi.fn(async () => {}),
+    mergeNote: vi.fn(async () => 'Merge them.'),
     mergeHere: vi.fn(async () => {}),
     pushHere: vi.fn(async () => {}),
     pushBranch: vi.fn(async () => {}),
@@ -789,14 +800,17 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setModelBlocked: vi.fn(async () => {}),
     getSettings: vi.fn(async () => ({
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
+      agentsAtOnce: { count: 4, own: null, machine: { count: 4, cores: 10, memory: 16 } },
     })),
     setCoAuthor: vi.fn(async () => {}),
+    setAgentsAtOnce: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
     setTaskResolveConflicts: vi.fn(async () => {}),
     resumeTask: vi.fn(async () => {}),
     abandonTask: vi.fn(async () => {}),
     reopenTask: vi.fn(async () => {}),
+    renameTask: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
     takeBack: vi.fn(async () => {}),
     answer: vi.fn(async () => {}),
@@ -834,6 +848,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     leaveOutRepository: vi.fn(async () => {}),
     setRepository: vi.fn(async () => {}),
     getProjectRules: vi.fn(async (projectId: string) => ({ ...projectRules, projectId })),
+    getProjectNotes: vi.fn(async (): Promise<ReadonlyArray<ProjectNote>> => []),
+    dropProjectNote: vi.fn(async () => {}),
     getVocabulary: vi.fn(async () => ['RefundLedger', 'useEffect']),
     setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({ ...projectRules, ...change, projectId })),
     addAccount: vi.fn(async (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => ({

@@ -4,9 +4,10 @@ import { homedir, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 import { available, type Fetch, type Product, type ProductInfo } from '@althar/connectors'
-import { agents, type AgentDefinition, type Transport, usingLocated } from '@althar/provider-adapters'
+import { adapterNode, agents, type AgentDefinition, type Transport, usingLocated } from '@althar/provider-adapters'
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
+import type { Machine } from './atOnce'
 import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
@@ -77,6 +78,8 @@ export interface RuntimeOptions {
   readonly setups?: SetupOptions
   /** When a lead that ended its turn counts as done, and how long a round waits for one that isn't (`leftRunning.ts`, `conflicts.ts`). */
   readonly idle?: IdleOptions
+  /** How many tasks are at work at once here, and how what waits for a place is looked at (`Busy.ts`). */
+  readonly busy?: BusyOptions
 }
 
 /** Each is the default unless a test says otherwise. */
@@ -89,6 +92,13 @@ export interface IdleOptions {
   readonly wake?: Duration.Duration
   /** How long after its turn ends a lead is given to report what it left running: two seconds. */
   readonly reports?: Duration.Duration
+}
+
+export interface BusyOptions {
+  /** The machine the default is worked out from: this one, as Node says it, unless a test says. */
+  readonly machine?: Machine
+  /** How often what waits is looked at, besides whenever an agent's turn or session ends: every 5 seconds. */
+  readonly every?: Duration.Duration
 }
 
 export interface SetupOptions {
@@ -176,7 +186,7 @@ export class Agents extends Context.Service<
         .map((definition) => ({
           definition,
           transport: (cwd: string, env: Readonly<Record<string, string>> = {}) => {
-            const spec = definition.launch(process.execPath)
+            const spec = definition.launch(adapterNode())
             const own = definition.withoutOwnTools?.({ env: { ...process.env, ...env }, homeDir: homedir(), cwd }) ?? {}
             return { _tag: 'Process' as const, spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...env } }, cwd }
           },

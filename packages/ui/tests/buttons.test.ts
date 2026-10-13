@@ -23,6 +23,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'chrome/WindowButtons/WindowButtons.tsx': 'the traffic lights, whose shape is the system’s own',
   'chrome/WorkStatus/WorkStatus.tsx': 'a row of what needs you, in the count’s preview',
   'chrome/LoadMeter/LoadPeek.tsx': 'a piece of work’s row, which opens it',
+  'chrome/ProjectFront/ProjectFront.tsx': 'a repository’s or tracker’s mark and name, which opens it',
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',
@@ -31,6 +32,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'thread/Document/Document.tsx': 'the fold at the foot of a document',
   'thread/Step/Step.tsx': 'the caret that opens a step',
   'thread/Diff/Diff.tsx': 'a folded stretch of unchanged lines, which opens in place',
+  'thread/Evidence/Evidence.tsx': 'the row of a run or a response, which folds what it printed',
   'screens/Home/Home.tsx': 'the line that folds what the loop did since you looked',
   /* an option in a list or a rail */
   'composer/ModelPick/ModelPick.tsx': 'the picker and its options',
