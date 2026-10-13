@@ -250,7 +250,12 @@ export class Busy extends Context.Service<
             }
             busy.add(key)
             hold(key)
-            for (const [threadId, turn] of turns) if (turn === waiter) turns.delete(threadId)
+            // A turn that waited has its place now: it waits no more, here or on its thread.
+            for (const [threadId, turn] of turns)
+              if (turn === waiter) {
+                turns.delete(threadId)
+                yield* sql`UPDATE threads SET waits_for_place = NULL WHERE id = ${threadId}`
+              }
             const done = releaseOnce(key)
             yield* Effect.forkIn(
               (typeof waiter.start === 'function' ? waiter.start(done) : waiter.start).pipe(
@@ -334,7 +339,9 @@ export class Busy extends Context.Service<
             since: row.since,
             // Its place held until its first turn is under way, or waits again in its own session's queue.
             start: Effect.gen(function* () {
-              if (!(yield* sessions.startLast(row.threadId))) return
+              // No agent was ever on it to start again: nothing waits.
+              if (!(yield* sessions.startLast(row.threadId)))
+                return yield* sql`UPDATE threads SET waits_for_place = NULL WHERE id = ${row.threadId}`
               for (let waited = 0; waited < 30_000; waited += 100) {
                 const on = (yield* sessions.onTasks).find((session) => session.threadId === row.threadId)
                 if (on === undefined || on.turnRunning || turns.has(row.threadId)) return

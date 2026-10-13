@@ -212,6 +212,14 @@ const idle = (threadId: string) =>
     ),
   )
 
+/** Since when a turn on the thread waits for a place, as the thread keeps it; null where none waits. */
+const waitsOn = (threadId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [row] = yield* sql<{ since: string | null }>`SELECT waits_for_place AS since FROM threads WHERE id = ${threadId}`
+    return row?.since ?? null
+  })
+
 /** Waits until the task's card says it waits for a free agent. */
 const queuedOn = (projectId: string, taskId: string) =>
   until(
@@ -624,6 +632,73 @@ describe('Agents at once, across a restart', () => {
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
         yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1)
         assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
+      }).pipe(Effect.provide(machine(1, file)))
+    }),
+  )
+
+  it.live('let what waited go once it is delivered: nothing of it starts again after a restart', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const before = yield* Effect.gen(function* () {
+        const tasks = yield* Tasks
+        const { projectId } = yield* opened
+        const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+        yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+        yield* idle(first.threadId)
+        const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
+        yield* working(second.taskId)
+        const turns = (yield* turnsOn(first.threadId)).length
+        yield* say(first.threadId, 'Look again.', 'after_current')
+        yield* queuedOn(projectId, first.taskId)
+        assert.isNotNull(yield* waitsOn(first.threadId))
+        // The second stops: what waited is delivered, and nothing of it waits any more, on the card or the thread.
+        yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
+        yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1 && rows.every((row) => row.state !== 'delivered'))
+        assert.isNull(yield* waitsOn(first.threadId))
+        assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
+        return { projectId, first, turns: turns + 1, sessions: (yield* sessionsOn(first.threadId)).length }
+      }).pipe(Effect.provide(machine(1, file)))
+
+      yield* Effect.gen(function* () {
+        const { projectId, first, turns, sessions } = before
+        yield* Effect.sleep('1 second')
+        assert.lengthOf(yield* turnsOn(first.threadId), turns)
+        assert.lengthOf(yield* sessionsOn(first.threadId), sessions)
+        assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
+      }).pipe(Effect.provide(machine(1, file)))
+    }),
+  )
+
+  it.live('let the person stop a task whose idle lead waits for a place after a restart: it never starts', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const before = yield* Effect.gen(function* () {
+        const { projectId } = yield* opened
+        const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+        yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+        yield* idle(first.threadId)
+        const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
+        yield* working(second.taskId)
+        yield* say(first.threadId, 'Look again.', 'after_current')
+        yield* queuedOn(projectId, first.taskId)
+        return { projectId, first, second, turns: (yield* turnsOn(first.threadId)).length }
+      }).pipe(Effect.provide(machine(1, file)))
+
+      yield* Effect.gen(function* () {
+        const { projectId, first, second, turns } = before
+        const tasks = yield* Tasks
+        yield* until(sessionsOn(second.threadId), (rows) => rows.length === 2)
+        // Nothing is on the first, but it waits: the person can stop it, and then it waits no more.
+        assert.include(yield* tasksActions(first.threadId), 'stop')
+        yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
+        assert.isNull(yield* waitsOn(first.threadId))
+        assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
+        const sessions = (yield* sessionsOn(first.threadId)).length
+        // A place frees: the first isn't started for it.
+        yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
+        yield* Effect.sleep('1 second')
+        assert.lengthOf(yield* turnsOn(first.threadId), turns)
+        assert.lengthOf(yield* sessionsOn(first.threadId), sessions)
       }).pipe(Effect.provide(machine(1, file)))
     }),
   )
