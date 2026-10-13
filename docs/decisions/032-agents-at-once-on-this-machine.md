@@ -105,13 +105,12 @@
 - **Decision.** What an agent left running takes a place only while its
   process tree **does work**, read the way the CPU and memory meter reads it
   (`ps`, the agent's process and everything it started, `processTree.ts`).
-  Every 5 seconds, while any session has something running, Althar reads each
+  Every 2 seconds, while any session has something running, Althar reads each
   process of the tree with its CPU time and compares it with the last
-  reading. It is work if a process started or ended since (a test runner's
-  short-lived workers are gone by the next reading, and the tree's total
-  falls when one ends, so totals can't be subtracted), or if the CPU time of
-  the processes present in both rose by at least 5% of one core over that
-  time. Work counts at once. It stops counting only after **30 seconds
+  reading. It is work if a process started or ended since, or if the CPU time
+  of the processes present in both rose by at least 5% of one core over that
+  time (the tree's total falls when a process ends, so totals can't be
+  subtracted). Work counts at once. It stops counting only after **30 seconds
   without** any, so a test run that pauses for a moment doesn't flip back and
   forth, and a server that starts working again (a request, a rebuild)
   counts again at the next reading. A server just started counts until it
@@ -147,8 +146,17 @@
   - *A longer or shorter quiet time.* 30 seconds covers a test run waiting on
     a network call or a build step between suites; it is an option
     (`busy.quiet`), with the reading interval (`busy.sample`).
-- **Trade-off.** A server idle for 30 seconds still holds its place for those
-  30 seconds, and one that serves a burst of requests holds it while they
+- **Trade-off.** `ps` can't show a worker that starts, works and ends
+  entirely between two readings: its CPU time goes with it, and on macOS its
+  parent's own time doesn't include it (checked). Such work is seen only by a
+  reading that finds the worker alive, so a tree whose only work is bursts
+  that each dodge every reading for 30 seconds (15 readings) is taken for
+  idle and releases its place. Readings every 2 seconds, and counting until
+  none has shown work for 30, make that unlikely for a test run or a build,
+  whose workers live seconds, and cost about a `ps` listing (15 ms) a
+  reading; closing it for good needs the kernel's own accounting of reaped
+  children, which `ps` doesn't give on macOS. A server idle for 30 seconds
+  still holds its place for those 30 seconds, and one that serves a burst of requests holds it while they
   last. The 5% line is a guess: a server that always burns a little (a
   watcher polling), or whose tree keeps starting a process, counts, which
   errs toward waiting, not toward load.

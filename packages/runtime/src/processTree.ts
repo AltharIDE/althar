@@ -51,12 +51,16 @@ export const treeCpuOf = (listing: string, pid: number): number | null => {
 }
 
 /**
- * Whether a process tree did work between two readings `ms` apart. The total
- * of a tree falls when a process in it ends, taking its time with it, so it
- * can't be told by subtracting totals: work is a process that started or
- * ended since (a runner's short-lived workers, which a reading may never
- * catch alive), or CPU time rising, process by process, by at least `share`
- * of a core over the time.
+ * Whether a process tree did work between two readings `ms` apart, as far as
+ * `ps` shows it. The total of a tree falls when a process in it ends, taking
+ * its time with it, so it can't be told by subtracting totals: work is a
+ * process that started or ended since, or CPU time rising, process by
+ * process, by at least `share` of a core over the time. What `ps` can't show
+ * is a worker that started, worked and ended between the two readings: its
+ * time is gone with it, and its parent's own time doesn't include it. That
+ * work is caught only by a reading that finds the worker alive, so the readings
+ * are often (Busy.ts) and a tree counts until none has shown work for a
+ * while.
  */
 export const workedBetween = (before: ReadonlyMap<number, number>, after: ReadonlyMap<number, number>, ms: number, share: number) => {
   if (before.size !== after.size) return true

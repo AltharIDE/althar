@@ -150,7 +150,7 @@ export class Busy extends Context.Service<
       const live = yield* Live
       const options = (yield* RuntimeConfig).busy ?? {}
       const every = options.every ?? Duration.seconds(5)
-      const sampleEvery = options.sample ?? Duration.seconds(5)
+      const sampleEvery = options.sample ?? Duration.seconds(2)
       const quiet = Duration.toMillis(options.quiet ?? Duration.seconds(30))
       const cpuOf =
         options.cpuOf ??

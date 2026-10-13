@@ -85,7 +85,7 @@ export interface BusyOptions {
   readonly machine?: Machine
   /** How often what waits is looked at, besides whenever an agent's turn or session ends: every 5 seconds. */
   readonly every?: Duration.Duration
-  /** How often the CPU of what agents left running is read, while any is: every 5 seconds. */
+  /** How often the CPU of what agents left running is read, while any is: every 2 seconds. */
   readonly sample?: Duration.Duration
   /** How long what an agent left running must stay below real CPU before it stops taking a place: 30 seconds. */
   readonly quiet?: Duration.Duration

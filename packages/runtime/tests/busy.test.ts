@@ -578,15 +578,18 @@ describe('Agents at once', () => {
  * by a second a reading while `burning`, else stands still; with `churning`, a short-lived worker besides, a new one each reading.
  */
 const fakeCpu = () => {
-  const cpu = { burning: false, churning: false, total: 0, unreadable: false, workers: 0 }
+  const cpu = { burning: false, churning: false, total: 0, unreadable: false, workers: 0, burstEvery: 0, reads: 0 }
   const of: NonNullable<BusyOptions['cpuOf']> = (agents) =>
     Effect.sync(() => {
       if (cpu.burning) cpu.total += 1_000
       if (cpu.churning) cpu.workers += 1
+      cpu.reads += 1
+      // A burst of work that a reading finds only now and then: a worker alive at every n-th reading, gone at the rest.
+      const burst = cpu.burstEvery > 0 && cpu.reads % cpu.burstEvery === 0
       return new Map(
         agents.map((agent) => [
           agent.threadId,
-          cpu.unreadable ? null : new Map([[1, cpu.total], ...(cpu.churning ? [[1_000 + cpu.workers, 0] as [number, number]] : [])]),
+          cpu.unreadable ? null : new Map([[1, cpu.total], ...(cpu.churning || burst ? [[1_000 + cpu.reads, 0] as [number, number]] : [])]),
         ]),
       )
     })
@@ -730,6 +733,25 @@ describe('Agents at once, and what they left running', () => {
         assert.isTrue(first.serverId !== '')
       }),
     ),
+  )
+
+  it.live(
+    'keep counting a runner whose bursts are seen only now and then, while they come more often than the quiet, and free it once they stop',
+    () =>
+      withCpu(1, (cpu) =>
+        Effect.gen(function* () {
+          // A worker alive at every 5th reading (250 ms), gone between: the tree is the same idle parent at the rest, for far
+          // longer than the 400 ms it takes an idle server to stop counting.
+          cpu.burstEvery = 5
+          const { projectId } = yield* opened
+          yield* served(projectId, 'First')
+          yield* Effect.sleep('1500 millis')
+          assert.strictEqual((yield* (yield* Busy).now).busy, 1)
+          // The bursts stop: nothing shows work for the quiet, and the place frees.
+          cpu.burstEvery = 0
+          yield* busyAt(0)
+        }),
+      ),
   )
 
   it.live('count a server again once it starts working', () =>
