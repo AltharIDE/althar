@@ -755,6 +755,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     openProject: vi.fn(async () => project),
     readFolder: vi.fn(async () => ({ kind: 'repository' as const, name: 'meridian', repositories: [], project: null })),
     listTasks: vi.fn(async () => ({ cursor: 4, tasks: [task] })),
+    searchTasks: vi.fn(async () => ({ tasks: [] })),
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
