@@ -1061,6 +1061,54 @@ export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting
 export type TaskPhase = typeof TaskPhase.Type
 
 /**
+ * What a task makes, read from what it has and never stored (DEV-96): a
+ * change has a pull request of its own, commits or changes on its branch, or
+ * a plan that ends in one; a review reads someone else's pull request and
+ * has no branch of its own; any other task is plain: a question, a
+ * prototype, a release from this Mac. A task only moves toward change.
+ */
+export const TaskKind = Schema.Literals(['change', 'review', 'plain'])
+export type TaskKind = typeof TaskKind.Type
+
+/**
+ * What a plain task handed back, for its card while it waits for the person:
+ * the pictures its lead showed when it last reported, and the files it wrote
+ * or pointed at in what it last said, with the lines each added where git
+ * can say.
+ */
+export const Handed = Schema.Struct({
+  pictures: Schema.Array(Picture),
+  files: Schema.Array(Schema.Struct({ path: Schema.String, add: Schema.NullOr(Schema.Number) })),
+})
+export type Handed = typeof Handed.Type
+
+/**
+ * Someone else's pull request a review task reads, and how its review
+ * stands: whose it is and whether it comes from outside (a fork, or an
+ * author the host doesn't name a member or collaborator), how big it is,
+ * what the review found so far, the verdict it drafted, and where it was
+ * posted, once it was.
+ */
+export const ReviewBrief = Schema.Struct({
+  /** owner/name. */
+  repository: Schema.String,
+  number: Schema.Number,
+  url: Schema.String,
+  title: Schema.String,
+  author: Schema.String,
+  outside: Schema.Boolean,
+  additions: Schema.NullOr(Schema.Number),
+  deletions: Schema.NullOr(Schema.Number),
+  findings: Schema.Number,
+  /** Of them, how many block it. */
+  blocking: Schema.Number,
+  /** The verdict drafted or posted; null until there is one. */
+  verdict: Schema.NullOr(Schema.Literals(['approve', 'changes', 'comment'])),
+  posted: Schema.NullOr(Schema.Struct({ url: Schema.String, at: Schema.String })),
+})
+export type ReviewBrief = typeof ReviewBrief.Type
+
+/**
  * What the person can do to a task as a whole, where it stands now, as its
  * menu offers it (docs/architecture/05, "Task and run lifecycle"): start its
  * plan now, stop it, resume what stopping cut short, abandon it, or reopen
@@ -1080,6 +1128,12 @@ export const TaskCard = Schema.Struct({
   title: Schema.String,
   slug: Schema.String,
   phase: TaskPhase,
+  /** What it makes, read from what it has now: its card's word, and what the card shows. */
+  kind: TaskKind,
+  /** A plain task's pictures and files, while it has some; null or absent otherwise. */
+  handed: Schema.optional(Schema.NullOr(Handed)),
+  /** The pull request a review task reads, and how its review stands; null or absent for any other task. */
+  reviewing: Schema.optional(Schema.NullOr(ReviewBrief)),
   plan: Schema.NullOr(
     Schema.Struct({
       id: Schema.String,
@@ -1941,6 +1995,11 @@ export const Api = RpcGroup.make(
   call('GetHome', { since: Schema.optional(Schema.String) }, HomeSnapshot),
   /** The person left the home: what the loop does from now on is new to them. */
   command('LeftHome', {}, Schema.Void),
+  /**
+   * The person opened a task's screen. A plain task that finished, with
+   * nothing to accept and nothing waiting on them, is done once seen.
+   */
+  command('SeeTask', { taskId: Schema.String }, Schema.Void),
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
   /** What a command in a thread printed, as kept once it ended. */
   call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
