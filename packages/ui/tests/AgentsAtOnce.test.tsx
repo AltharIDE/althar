@@ -5,7 +5,7 @@ import { AgentsAtOnce } from '../src/setup/Preferences/Preferences'
 
 const MACHINE = { count: 4, memory: 16, cores: 10 }
 
-/* A 150px track from x=0, so one agent is 10px: 1 at x=0, 16 at x=150. */
+/* A 150px track from x=0, so the number is 1 + x/10: 1 at x=0, 16 at x=150. */
 function track(props: Partial<Parameters<typeof AgentsAtOnce>[0]> = {}) {
   const onChange = vi.fn()
   render(<AgentsAtOnce count={4} machine={MACHINE} onChange={onChange} {...props} />)
@@ -18,7 +18,7 @@ describe('AgentsAtOnce pointer', () => {
   it('shows the number under the pointer while dragging and sends it once the pointer is let go', () => {
     const { slider, onChange } = track()
     fireEvent.pointerDown(slider, { clientX: 100 })
-    expect(slider.getAttribute('aria-valuenow')).toBe('8')
+    expect(slider.getAttribute('aria-valuenow')).toBe('11')
     fireEvent.pointerMove(slider, { clientX: 150 })
     expect(slider.getAttribute('aria-valuenow')).toBe('16')
     expect(onChange).not.toHaveBeenCalled()
