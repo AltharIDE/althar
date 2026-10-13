@@ -29,6 +29,7 @@ import { statements as conflictResolutions } from './0024_conflict_resolutions'
 import { statements as pushRequests } from './0025_push_requests'
 import { statements as projectNotes } from './0026_project_notes'
 import { statements as agentsAtOnce } from './0027_agents_at_once'
+import { statements as reviewDrafts } from './0029_review_drafts'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -75,6 +76,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0025_push_requests', statements: pushRequests },
   { key: '0026_project_notes', statements: projectNotes },
   { key: '0027_agents_at_once', statements: agentsAtOnce },
+  { key: '0029_review_drafts', statements: reviewDrafts },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

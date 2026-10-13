@@ -10,7 +10,7 @@ import { SqlClient } from 'effect/sql'
 import { canonicalJson, sha256Hex } from '../src/canonicalJson'
 import * as Database from '../src/Database'
 import { ForeignKeyViolations } from '../src/Database'
-import { migrations } from '../src/migrations'
+import { idOf, migrations } from '../src/migrations'
 import { checksums } from '../src/migrations/checksums'
 import { seed } from './fixtures'
 import { InMemory, WebCrypto } from './support'
@@ -127,7 +127,8 @@ describe('schema', () => {
         })
         yield* Effect.provide(referenced, Layer.fresh(Database.layer({ filename })))
         const rebuildDevices = {
-          key: `${String(migrations.length + 1).padStart(4, '0')}_rebuild_devices`,
+          // After the latest, whatever its number: a number may be left free for a migration on another branch.
+          key: `${String(idOf(migrations[migrations.length - 1] ?? { key: '0', statements: [] }) + 1).padStart(4, '0')}_rebuild_devices`,
           statements: [
             'CREATE TABLE devices_new (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, created_at TEXT NOT NULL) STRICT',
             'INSERT INTO devices_new SELECT id, name, created_at FROM devices',
