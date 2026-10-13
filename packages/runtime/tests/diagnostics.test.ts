@@ -51,15 +51,11 @@ describe('what a failed command printed', () => {
   })
 
   it('reads a long output in time that grows with its length, not its square', () => {
-    // A run of letters with no name in it (minified code, base64) once took minutes: these end in milliseconds.
-    for (const printed of [
-      'a'.repeat(1024 * 1024),
-      `token${'a'.repeat(256 * 1024)}`,
-      `http://${'a:'.repeat(128 * 1024)}`,
-      'sk-'.repeat(64 * 1024),
-    ]) {
+    // A run of letters with no name in it (minified code, base64) once took minutes at 256 KB, and seconds at these sizes;
+    // they stay within what is read for credentials, so the reading itself is timed.
+    for (const printed of ['a'.repeat(60_000), `token${'a'.repeat(60_000)}`, `http://${'a:'.repeat(30_000)}`, 'sk-'.repeat(20_000)]) {
       const started = performance.now()
-      assert.isTrue(failed({ printed })?.truncated)
+      assert.isDefined(failed({ printed }))
       assert.isBelow(performance.now() - started, 1_000)
     }
   })
