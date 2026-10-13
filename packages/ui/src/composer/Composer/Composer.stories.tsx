@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useEffect, useRef, useState } from 'react'
-import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fireEvent, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { MODEL_LIST, model, useModelPrefs } from '../../fixtures/models'
+import { SHOT_AFTER, SHOT_BEFORE } from '../../fixtures/shots'
 import { Brand } from '../../foundations/brands/brands'
 import { DictationSetup } from '../../foundations/vocabulary'
 import { ContextRing } from '../ContextRing/ContextRing'
@@ -10,7 +11,7 @@ import { DictationTray, type DictationState } from '../DictationTray/DictationTr
 import { Listening } from '../Listening/Listening'
 import { Running } from '../Running/Running'
 import { ModelPick } from '../ModelPick/ModelPick'
-import { Composer, type ComposerProps, type DictationInput } from './Composer'
+import { Composer, type ComposerImage, type ComposerProps, type DictationInput } from './Composer'
 import { States, statesOn } from '../../storybook/States'
 
 const clock = (n: number) => `0:${String(n).padStart(2, '0')}`
@@ -50,20 +51,52 @@ const INPUTS: readonly DictationInput[] = [
   { id: 'usb', label: 'Shure MV7' },
 ]
 
+/* Images as the host has read them: the two screenshots, as small copies. */
+const SHOTS: ComposerImage[] = [
+  { id: 'i1', name: 'refunds-before.png', src: SHOT_BEFORE.src },
+  { id: 'i2', name: 'refunds-after.png', src: SHOT_AFTER.src },
+]
+
+/* What the host says of a file that isn't a picture it can send. */
+const refusedNote = (name: string) => `${name} isn’t a PNG, JPEG, GIF or WebP image, so it can’t be sent.`
+
 function Example(
   props: Partial<ComposerProps> & {
     initial?: string
     recording?: boolean
     streaming?: boolean
-    waiting?: string[]
+    /** The words the transcriber hears and writes on stopping (default: one sentence). */
+    transcript?: readonly string[]
+    /** Words heard per step of the streaming transcriber (default: one). */
+    pace?: number
+    waiting?: (string | { text: string; attached: string })[]
     at?: number
     inputs?: readonly DictationInput[]
+    /** Images already added. */
+    pictures?: ComposerImage[]
+    /** Takes images: what is dropped, pasted or picked is read as the host would, and anything that isn't an image refused. */
+    takesImages?: boolean
   },
 ) {
-  const { initial = '', recording = false, streaming = false, waiting = [], at, inputs = INPUTS, onSendNow = () => {}, ...rest } = props
+  const {
+    initial = '',
+    recording = false,
+    streaming = false,
+    transcript = SAID,
+    pace = 1,
+    waiting = [],
+    at,
+    inputs = INPUTS,
+    pictures = [],
+    takesImages = false,
+    onSendNow = () => {},
+    ...rest
+  } = props
   const [value, setValue] = useState(initial)
   const [input, setInput] = useState<string | null>(null)
-  const [queue, setQueue] = useState(waiting.map((text, i) => ({ id: `q${i}`, text })))
+  const [images, setImages] = useState(pictures)
+  const [note, setNote] = useState<string | undefined>(undefined)
+  const [queue, setQueue] = useState(waiting.map((said, i) => ({ id: `q${i}`, ...(typeof said === 'string' ? { text: said } : said) })))
   const [seconds, setSeconds] = useState<number | null>(recording ? 4 : null)
   const [tick, setTick] = useState(0)
   const running = seconds !== null
@@ -77,16 +110,37 @@ function Example(
     }
   }, [running])
   /* a streaming transcriber: a word every few ticks, until the sentence is out */
-  const heard = streaming ? SAID.slice(0, Math.min(SAID.length, 3 + Math.floor(tick / 4))).join(' ') : undefined
+  const heard = streaming ? transcript.slice(0, Math.min(transcript.length, 3 + pace * Math.floor(tick / 4))).join(' ') : undefined
   return (
     <div style={{ maxWidth: 700, paddingTop: 60 }}>
       <Composer
         value={value}
         onChange={setValue}
         onSubmit={(text) => {
-          if (rest.busy) setQueue([...queue, { id: `q${queue.length}-${text.length}`, text }])
+          if (rest.busy)
+            setQueue([
+              ...queue,
+              { id: `q${queue.length}-${text.length}`, text, ...(images.length > 0 ? { attached: `${images.length} images` } : {}) },
+            ])
           setValue('')
+          setImages([])
         }}
+        images={images}
+        {...(takesImages
+          ? {
+              onAddImages: (files: readonly File[]) => {
+                const refused = files.find((file) => !file.type.startsWith('image/'))
+                setNote(refused === undefined ? undefined : refusedNote(refused.name))
+                const added = files.filter((file) => file.type.startsWith('image/'))
+                setImages((now) => [
+                  ...now,
+                  ...added.map((file, i) => ({ id: `added-${now.length + i}`, name: file.name, src: SHOT_BEFORE.src })),
+                ])
+              },
+              onRemoveImage: (id: string) => setImages((now) => now.filter((image) => image.id !== id)),
+              imageNote: note,
+            }
+          : {})}
         placeholder="Tell the lead"
         hint="/"
         picker={<Picker />}
@@ -103,7 +157,7 @@ function Example(
           onStart: () => setSeconds(0),
           onStop: () => {
             setSeconds(null)
-            setValue((v) => `${v ? `${v.trimEnd()} ` : ''}${SAID.join(' ')}`)
+            setValue((v) => `${v ? `${v.trimEnd()} ` : ''}${transcript.join(' ')}`)
           },
         }}
         queued={queue}
@@ -236,6 +290,72 @@ export const SendingNow: Story = {
 export const Dictating: Story = { render: () => <Example recording /> }
 /** A transcriber that streams: the words arrive faint in the field as you say them. */
 export const DictatingWordByWord: Story = { render: () => <Example recording streaming initial="Keep the limiter where it is." /> }
+/** Enter while dictating stops without sending, and the field is the size the same text typed would be: one row for a short transcript. */
+export const EnterEndsDictationAtItsSize: Story = {
+  render: () => {
+    const said = SAID.join(' ')
+    const longWords = Array.from({ length: 12 }, () => SAID).flat()
+    const long = longWords.join(' ')
+    return (
+      <>
+        <div data-testid="dictated-short">
+          <Example recording streaming />
+        </div>
+        <div data-testid="typed-short">
+          <Example initial={said} />
+        </div>
+        <div data-testid="dictated-long">
+          <Example recording streaming transcript={longWords} pace={10} />
+        </div>
+        <div data-testid="typed-long">
+          <Example initial={long} />
+        </div>
+      </>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const box = (id: string) => within(c.getByTestId(id)).getByRole('textbox') as HTMLTextAreaElement
+    const height = (id: string) => box(id).getBoundingClientRect().height
+    for (const kind of ['short', 'long']) {
+      const field = box(`dictated-${kind}`)
+      /* the long transcript is still arriving: stop with its faint words several rows tall over the field */
+      if (kind === 'long')
+        await waitFor(() => expect((field.previousElementSibling as HTMLElement).getBoundingClientRect().height).toBeGreaterThan(80), {
+          timeout: 10000,
+        })
+      await userEvent.type(field, '{Enter}')
+      await expect(within(c.getByTestId(`dictated-${kind}`)).queryByRole('button', { name: /^Stop dictating/ })).not.toBeInTheDocument()
+      /* stopped, not sent: the words are in the field, and it is as tall as the same text typed */
+      await expect(field.value).toBe(box(`typed-${kind}`).value)
+      await expect(height(`dictated-${kind}`)).toBeCloseTo(height(`typed-${kind}`), 0)
+    }
+    /* a short transcript stays one row; a long one is capped like typed text */
+    await expect(height('dictated-short')).toBeLessThan(height('dictated-long'))
+  },
+}
+/** A dictation grown past the composer's max height: it stays at 200px with the newest words in view, and the earlier text scrolls under the wheel. */
+export const LongDictation: Story = {
+  render: () => (
+    <Example
+      recording
+      streaming
+      initial="Keep the limiter where it is."
+      transcript={Array.from({ length: 30 }, () => SAID).flat()}
+      pace={12}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const field = within(canvasElement).getByRole('textbox', { name: 'Tell the lead' })
+    const overlay = field.previousElementSibling as HTMLElement
+    await waitFor(() => expect(overlay.scrollHeight).toBeGreaterThan(overlay.clientHeight + 40), { timeout: 10000 })
+    await expect(overlay.clientHeight).toBeLessThanOrEqual(200)
+    await waitFor(() => expect(overlay.scrollTop).toBeGreaterThan(0))
+    /* earlier text can be read by wheel while it goes on */
+    fireEvent.wheel(field, { deltaY: -60 })
+    await waitFor(() => expect(overlay.scrollTop).toBeLessThan(overlay.scrollHeight - overlay.clientHeight - 20))
+  },
+}
 /** Which microphone it hears, from the menu beside it: the system's default first, then each the system names. */
 export const ChoosingTheMicrophone: Story = {
   render: () => <Example />,
@@ -397,6 +517,112 @@ export const ListeningAndRunning: Story = {
 /** Nothing in the lower row but send: no picker, no meter, no dictation. */
 export const Minimal: Story = { render: () => <Example picker={undefined} meter={undefined} dictation={undefined} hint={undefined} /> }
 
+/** Images to send with what you write, drawn small above the field, each with a way off. */
+export const WithImages: Story = {
+  render: () => <Example takesImages pictures={SHOTS} initial="The refund button moved; put it back where it was." />,
+}
+/** Images alone are something to send: the button shows, and Enter sends them with nothing written. */
+export const ImagesOnly: Story = {
+  args: { onSubmit: fn() },
+  render: (args) => <Example takesImages pictures={SHOTS.slice(0, 1)} onSubmit={args.onSubmit} />,
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('button', { name: 'Send' })).toBeInTheDocument()
+    await userEvent.click(c.getByRole('textbox', { name: 'Tell the lead' }))
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onSubmit).toHaveBeenCalledWith('')
+  },
+}
+/** Dropped on it, pasted into it or picked with Add images: each goes to the host, which adds it, and takes it off again. */
+export const AddingImages: Story = {
+  render: () => <Example takesImages />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const field = c.getByRole('textbox', { name: 'Tell the lead' })
+    const shot = new File(['png'], 'shot.png', { type: 'image/png' })
+    // Held over it, it says what dropping does; carried away, it doesn't.
+    await fireEvent.dragEnter(field, { dataTransfer: { types: ['Files'], files: [shot] } })
+    await expect(c.getByText('Drop to add them to your message')).toBeInTheDocument()
+    await fireEvent.dragLeave(field, { dataTransfer: { types: ['Files'], files: [shot] } })
+    await expect(c.queryByText('Drop to add them to your message')).toBeNull()
+    await fireEvent.dragEnter(field, { dataTransfer: { types: ['Files'], files: [shot] } })
+    await fireEvent.drop(field, { dataTransfer: { types: ['Files'], files: [shot] } })
+    await expect(c.getByRole('list', { name: '1 image to send' })).toBeInTheDocument()
+    await expect(c.getByRole('img', { name: 'shot.png' })).toBeInTheDocument()
+    // A picture on the clipboard is added, not pasted as words.
+    await fireEvent.paste(field, { clipboardData: { files: [new File(['jpg'], 'photo.jpg', { type: 'image/jpeg' })], types: ['Files'] } })
+    await expect(c.getByRole('list', { name: '2 images to send' })).toBeInTheDocument()
+    await expect(field).toHaveValue('')
+    // Words on the clipboard paste as words.
+    await fireEvent.paste(field, { clipboardData: { files: [], types: ['text/plain'] } })
+    await expect(c.getByRole('list', { name: '2 images to send' })).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Remove shot.png' }))
+    await expect(c.getByRole('list', { name: '1 image to send' })).toBeInTheDocument()
+    // Picked with the button, from the file input it opens.
+    const input = canvasElement.querySelector<HTMLInputElement>('input[type="file"]')
+    await expect(input).toHaveAttribute('accept', 'image/png,image/jpeg,image/gif,image/webp')
+    if (input !== null) await userEvent.upload(input, new File(['gif'], 'loop.gif', { type: 'image/gif' }))
+    await expect(c.getByRole('list', { name: '2 images to send' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Add images' })).toBeInTheDocument()
+  },
+}
+/** A file the host won't send: it says why in a line over the field, and the rest are added. */
+export const ImageRefused: Story = {
+  render: () => <Example takesImages />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const files = [new File(['%PDF'], 'notes.pdf', { type: 'application/pdf' }), new File(['png'], 'shot.png', { type: 'image/png' })]
+    await fireEvent.drop(c.getByRole('textbox', { name: 'Tell the lead' }), { dataTransfer: { types: ['Files'], files } })
+    await expect(c.getByRole('status')).toHaveTextContent(refusedNote('notes.pdf'))
+    await expect(c.getByRole('list', { name: '1 image to send' })).toBeInTheDocument()
+  },
+}
+/** One still being read or made smaller turns until it is ready. */
+export const ReadingImage: Story = {
+  render: () => (
+    <Example takesImages pictures={[SHOTS[0] ?? { id: 'i1', name: 'refunds-before.png' }, { id: 'i3', name: 'huge.png', reading: true }]} />
+  ),
+  play: async ({ canvasElement }) => {
+    // Said as a status, in place of its picture.
+    await expect(within(canvasElement).getByText('Reading huge.png').closest('[role="status"]')).toBeInTheDocument()
+    await expect(within(canvasElement).queryByRole('img', { name: 'huge.png' })).toBeNull()
+  },
+}
+/** The host says the agent doesn't take images: the line says so over the images waiting, before anything is sent. */
+export const AgentTakesNoImages: Story = {
+  render: () => (
+    <Example
+      takesImages
+      pictures={SHOTS}
+      imageNote="Codex doesn’t take images. Remove them to send this, or pick an agent that does."
+      initial="Why does it look like this?"
+    />
+  ),
+}
+/** Without an image the placeholder stands in its place; without onAddImages there is no button, and nothing is taken. */
+export const NoImageSource: Story = {
+  render: () => <Example pictures={[{ id: 'i1', name: 'refunds-before.png' }]} />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('img', { name: 'refunds-before.png' })).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Add images' })).toBeNull()
+    await expect(c.queryByRole('button', { name: /^Remove/ })).toBeNull()
+  },
+}
+/** Sent with images while the lead worked: the queue says what went with each. */
+export const QueuedWithImages: Story = {
+  render: () => (
+    <Example
+      busy
+      onStopAgent={() => {}}
+      waiting={[
+        { text: 'Like this one.', attached: '2 images' },
+        { text: '', attached: '1 image' },
+      ]}
+    />
+  ),
+}
+
 export const SendsOnEnter: Story = {
   render: function Render(args) {
     const [value, setValue] = useState('')
@@ -409,6 +635,51 @@ export const SendsOnEnter: Story = {
     await expect(c.getByText('Shift+Enter for a new line')).toBeInTheDocument()
     await userEvent.keyboard('{Enter}')
     await expect(args.onSubmit).toHaveBeenCalledWith('First line\nsecond line')
+  },
+}
+
+/** Enter while dictating wraps up and writes down what was said, and does not send; with ⌘Enter the same. */
+export const EnterStopsDictating: Story = {
+  args: { onSubmit: fn(), onSendNow: fn(), busy: true, dictation: { elapsed: '0:04', onStart: () => {}, onStop: fn() } },
+  render: (args) => <Composer {...args} value="Keep the limiter where it is." onChange={() => {}} />,
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    const field = c.getByRole('textbox', { name: 'Tell the lead' })
+    await userEvent.click(field)
+    await userEvent.keyboard('{Enter}')
+    await userEvent.keyboard('{Meta>}{Enter}{/Meta}')
+    await expect(args.dictation?.onStop).toHaveBeenCalledTimes(2)
+    await expect(args.onSubmit).not.toHaveBeenCalled()
+    await expect(args.onSendNow).not.toHaveBeenCalled()
+  },
+}
+/** Enter while what was said is written down does nothing: a half-finished message cannot go. */
+export const EnterWhileWritingDoesNothing: Story = {
+  args: { onSubmit: fn(), onSendNow: fn(), dictation: { elapsed: null, busy: true, onStart: () => {}, onStop: fn() } },
+  render: (args) => <Composer {...args} value="Keep the limiter where it is." onChange={() => {}} />,
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('textbox', { name: 'Tell the lead' }))
+    await userEvent.keyboard('{Enter}')
+    await expect(args.dictation?.onStop).not.toHaveBeenCalled()
+    await expect(args.onSubmit).not.toHaveBeenCalled()
+  },
+}
+/** Once the text is in the field and dictation has ended, Enter sends as usual. */
+export const EnterSendsAfterDictating: Story = {
+  args: { onSubmit: fn() },
+  render: (args) => (
+    <Composer
+      {...args}
+      value="Keep the limiter where it is."
+      onChange={() => {}}
+      dictation={{ elapsed: null, onStart: () => {}, onStop: () => {} }}
+    />
+  ),
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('textbox', { name: 'Tell the lead' }))
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onSubmit).toHaveBeenCalledWith('Keep the limiter where it is.')
   },
 }
 
@@ -437,6 +708,26 @@ export const AllStates: Story = {
         { state: 'dictating', node: <Example recording /> },
         { state: 'dictating, word by word', node: <Example recording streaming initial="Keep the limiter where it is." /> },
         { state: 'minimal', node: <Example picker={undefined} meter={undefined} dictation={undefined} hint={undefined} /> },
+        { state: 'images', node: <Example takesImages pictures={SHOTS} initial="Put the button back." /> },
+        { state: 'images only', node: <Example takesImages pictures={SHOTS.slice(0, 1)} /> },
+        {
+          state: 'reading an image',
+          node: <Example takesImages pictures={[{ id: 'i3', name: 'huge.png', reading: true }]} />,
+        },
+        {
+          state: 'agent takes no images',
+          node: (
+            <Example
+              takesImages
+              pictures={SHOTS}
+              imageNote="Codex doesn’t take images. Remove them to send this, or pick an agent that does."
+            />
+          ),
+        },
+        {
+          state: 'queued, with images',
+          node: <Example busy onStopAgent={() => {}} waiting={[{ text: 'Like this one.', attached: '2 images' }]} />,
+        },
       ]}
     />
   ),

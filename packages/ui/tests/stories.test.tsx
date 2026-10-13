@@ -17,13 +17,16 @@ const files = import.meta.glob<StoryFile>('../src/**/*.stories.tsx', { eager: tr
  * Plays that need what only a browser has run in Storybook only. A closed
  * Fold is inert, which removes it from the accessibility tree in a browser;
  * Testing Library in jsdom does not know inert, so it still finds what is
- * inside. And a click on a label forwards a pointer event jsdom cannot clone.
+ * inside. A click on a label forwards a pointer event jsdom cannot clone.
+ * And jsdom lays nothing out, so a play that measures a size reads 0.
  */
 const BROWSER_ONLY = new Set<string>([
   'primitives/Fold/Fold.stories.tsx#Opening',
   'thread/Snippet/Snippet.stories.tsx#ShowingAll',
   'thread/WorkedFor/WorkedFor.stories.tsx#Opening',
   'primitives/CheckList/CheckList.stories.tsx#Default',
+  'composer/Composer/Composer.stories.tsx#EnterEndsDictationAtItsSize',
+  'composer/Composer/Composer.stories.tsx#LongDictation',
 ])
 
 for (const [path, file] of Object.entries(files)) {

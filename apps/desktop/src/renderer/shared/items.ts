@@ -1,5 +1,6 @@
-import type { ThreadItem } from '@althar/contracts'
+import type { Picture, ThreadItem } from '@althar/contracts'
 
+import { text as imagesText } from './images'
 import type { Streamed } from './thread'
 
 /* A thread's items as a window holds them: read a page at a time, and changed one by one. */
@@ -14,7 +15,13 @@ export const isSending = (id: string) => id.startsWith(SENDING)
 /** A message the window shows the moment it is sent, after what it holds, until the store's copy arrives. */
 export const sending = (
   items: ReadonlyArray<ThreadItem>,
-  message: { readonly text: string; readonly queued: boolean; readonly interrupting: boolean },
+  message: {
+    readonly text: string
+    readonly queued: boolean
+    readonly interrupting: boolean
+    /** The images sent with it. */
+    readonly pictures?: ReadonlyArray<Picture>
+  },
 ): { readonly id: string; readonly items: ReadonlyArray<ThreadItem> } => {
   sent += 1
   const id = `${SENDING}${sent}`
@@ -24,7 +31,7 @@ export const sending = (
     sequence: (items.at(-1)?.sequence ?? 0) + 0.5,
     agentId: null,
     createdAt: new Date().toISOString(),
-    content: { text: message.text, links: [] },
+    content: { text: message.text, links: [], pictures: message.pictures ?? [] },
     input: { state: message.queued ? 'queued' : 'delivered', interrupting: message.interrupting },
   }
   return { id, items: [...items, item] }
@@ -64,8 +71,9 @@ export const mergeItems = (current: ReadonlyArray<ThreadItem>, incoming: Readonl
 /**
  * An item that can't change any more: a tool call that completed or failed,
  * a message delivered (or never queued), a plan with every entry done, a
- * task settled, a question answered or withdrawn, a run ended, an issue
- * draft filed or discarded. What an agent
+ * task settled, a question answered or withdrawn, a run or a setup ended, an issue
+ * draft filed or discarded, a push the lead asked for pushed, asked again
+ * or closed. What an agent
  * said, a notice, a step's result and what arrived from outside are settled
  * once written.
  */
@@ -82,9 +90,12 @@ export const settled = (item: ThreadItem): boolean => {
     case 'question':
       return item.content.state !== 'open'
     case 'run':
+    case 'setup':
       return item.content.ended !== null
     case 'issue_draft':
       return item.content.state === 'filed' || item.content.state === 'discarded'
+    case 'push_request':
+      return item.content.state !== 'open'
     case 'agent_message':
     case 'agent_thought':
     case 'notice':
@@ -127,18 +138,26 @@ export const queueShown = (session: { readonly turnRunning: boolean } | null, se
 
 /**
  * What waits its turn, oldest first, in the composer where the person can
- * edit it or take it back, when the queue shows. A message sent now isn't
- * there: it goes first, as soon as the turn stops.
+ * edit it or take it back, when the queue shows, with the images that went
+ * with it. A message sent now isn't there: it goes first, as soon as the
+ * turn stops.
  */
 export const queuedOf = (
   items: ReadonlyArray<ThreadItem>,
   shown: boolean,
-): ReadonlyArray<{ readonly id: string; readonly text: string }> =>
+): ReadonlyArray<{ readonly id: string; readonly text: string; readonly attached?: string; readonly pictures: ReadonlyArray<Picture> }> =>
   !shown
     ? []
     : items.flatMap((item) =>
         item.kind === 'user_message' && item.input?.state === 'queued' && !item.input.interrupting
-          ? [{ id: item.id, text: item.content.text }]
+          ? [
+              {
+                id: item.id,
+                text: item.content.text,
+                ...(item.content.pictures.length === 0 ? {} : { attached: imagesText.attached(item.content.pictures.length) }),
+                pictures: item.content.pictures,
+              },
+            ]
           : [],
       )
 

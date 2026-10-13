@@ -13,15 +13,17 @@ import {
   serverProtocol,
   type WatchEvent,
   type ProjectRulesView,
+  type SentImage,
 } from '@althar/contracts'
 import type { ProjectId } from '@althar/domain'
-import { Ledger } from '@althar/persistence-sqlite'
+import { Commands, Ledger } from '@althar/persistence-sqlite'
 import { Cause, Crypto, Deferred, Duration, Effect, Exit, Layer, Option, Stream } from 'effect'
 import { RpcServer } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
 import { type Account, Accounts } from './Accounts'
 import { AccountSignIns } from './AccountSignIns'
+import { Artifacts } from './Artifacts'
 import { Changes } from './Changes'
 import { NotFound } from './errors'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
@@ -32,17 +34,20 @@ import { vocabulary } from './vocabulary'
 import { conventionsOnBase } from './conventions'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
+import { MachineLoad } from './MachineLoad'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
-import { accountsOf, Policies, type ProjectRules, ruleSetOf, usageLimitOf } from './Policies'
+import { accountsOf, movesIssues, Policies, type ProjectRules, resolvesConflicts, ruleSetOf, usageLimitOf } from './Policies'
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
+import { dropNote, notesOf } from './notes'
 import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
 import { Queries } from './Queries'
+import { Busy } from './Busy'
 import { timestamp } from './records'
 import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
@@ -51,6 +56,7 @@ import { Plans } from './Plans'
 import { Runs } from './Runs'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
+import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
 import { expected, words } from './words'
 
@@ -113,9 +119,11 @@ const requestOf = (title: string, description: string | undefined, issue: string
 export const handlers = Api.toLayer(
   Effect.gen(function* () {
     const context = yield* Effect.context<Instance | Crypto.Crypto>()
+    const artifacts = yield* Artifacts
     const projects = yield* Projects
     const sessions = yield* Sessions
     const launches = yield* Launches
+    const machine = yield* MachineLoad
     const permissions = yield* Permissions
     const questions = yield* Questions
     const queries = yield* Queries
@@ -136,14 +144,26 @@ export const handlers = Api.toLayer(
     const instance = yield* Instance
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
+    // What writes a project's notes needs, as the services have it.
+    const store = yield* Effect.context<SqlClient.SqlClient | Ledger | Commands>()
     const agents = yield* Agents
     const config = yield* RuntimeConfig
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
+    const busy = yield* Busy
     const envelope = (type: string, payload: unknown, commandId: string) =>
       Effect.provideContext(Runtime.envelope(type, payload, commandId), context)
     const agentName = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
+    /** The images sent with a message to a thread, read, checked and kept in the thread's project's store, in order. */
+    const keptFor = (threadId: string, images: ReadonlyArray<SentImage>) =>
+      Effect.gen(function* () {
+        const [thread] = yield* sql<{ projectId: ProjectId }>`SELECT project_id FROM threads WHERE id = ${threadId}`
+        if (thread === undefined) return yield* new NotFound({ kind: 'thread', id: threadId })
+        return yield* keepSent(thread.projectId, images)
+      }).pipe(Effect.provideService(Artifacts, artifacts), Effect.provideService(SqlClient.SqlClient, sql))
+    /** What a message's command says of its images: their digests, in order, where it has any; nothing where it has none, as before images. */
+    const imagesSaid = (kept: ReadonlyArray<InputImage>) => (kept.length === 0 ? {} : { images: kept.map((image) => image.sha256) })
 
     /** A call's failure as the window gets it: in words, and in the log when it isn't the person's to put right. */
     const api = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, ApiError, R> =>
@@ -247,11 +267,13 @@ export const handlers = Api.toLayer(
         alwaysAllow: set.allow,
         commands: set.commands,
         end: rules.end ?? null,
+        resolveConflicts: resolvesConflicts(rules),
         usageLimit: usageLimitOf(rules),
         rotateAccounts: accounts.rotate,
         onlyAccounts: accounts.only ?? null,
         branchPattern: rules.branchPattern ?? null,
         titlePattern: rules.titlePattern ?? null,
+        moveIssues: movesIssues(rules),
       }
     }
 
@@ -536,11 +558,13 @@ export const handlers = Api.toLayer(
             sessions.start({ threadId, agentId, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }) }),
           ),
         ),
-      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body }) =>
+      SwitchAgent: ({ commandId, threadId, agentId, model, effort, body, images }) =>
         once(
           commandId,
           api(
             Effect.gen(function* () {
+              // Its images are read and kept first, outside any transaction; one that can't be sent refuses the switch.
+              const kept = body === undefined || images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
               // What the person said with it is said to the thread, under a command of its own.
               const message =
                 body === undefined
@@ -549,10 +573,11 @@ export const handlers = Api.toLayer(
                       // Its own command id, made from the switch's, so a retry of the switch is a retry of it too.
                       envelope: yield* envelope(
                         'thread.send',
-                        { threadId, body, disposition: 'after_current' },
+                        { threadId, body, disposition: 'after_current', ...imagesSaid(kept) },
                         `cmd_${createHash('sha256').update(`${commandId}\u0000said`).digest('hex').slice(0, 32)}`,
                       ),
                       body,
+                      ...(kept.length === 0 ? {} : { images: kept }),
                     }
               const sessionId = yield* sessions.switchAgent({
                 threadId,
@@ -575,16 +600,45 @@ export const handlers = Api.toLayer(
       SetModelBlocked: ({ commandId, agentId, model, blocked }) =>
         once(commandId, api(models.setModelBlocked({ agentId, model, blocked }))),
       GetSettings: () =>
-        api(Effect.map(coAuthorOn, (on) => ({ coAuthor: { on, line: coAuthorLine } }))).pipe(
-          Effect.provideService(SqlClient.SqlClient, sql),
-        ),
+        api(
+          Effect.gen(function* () {
+            const on = yield* coAuthorOn
+            const atOnce = yield* busy.atOnce
+            return {
+              coAuthor: { on, line: coAuthorLine },
+              agentsAtOnce: {
+                count: atOnce.count,
+                own: atOnce.own,
+                machine: { count: atOnce.machine.count, cores: atOnce.machine.cores, memory: atOnce.machine.memory },
+              },
+            }
+          }),
+        ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
-      Interrupt: ({ commandId, threadId }) => once(commandId, api(sessions.interrupt(threadId))),
-      StopSession: ({ commandId, threadId }) => once(commandId, api(sessions.stop(threadId))),
+      SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
+      // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
+      Interrupt: ({ commandId, threadId }) =>
+        once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
+      // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
+      StopSession: ({ commandId, threadId }) =>
+        once(commandId, api(Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })))),
+      SetTaskResolveConflicts: ({ commandId, taskId, resolveConflicts }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.set_conflicts', { taskId, resolveConflicts }, commandId), (said) =>
+              pullRequests.setResolveConflicts({ envelope: said, taskId, resolveConflicts }),
+            ),
+          ),
+        ),
       StopTask: ({ commandId, taskId }) =>
         once(
           commandId,
-          api(Effect.flatMap(envelope('task.stop', { taskId }, commandId), (said) => tasks.stop({ envelope: said, taskId }))),
+          api(
+            Effect.flatMap(envelope('task.stop', { taskId }, commandId), (said) =>
+              Effect.andThen(tasks.stop({ envelope: said, taskId }), pullRequests.leadStopped({ taskId })),
+            ),
+          ),
         ),
       ResumeTask: ({ commandId, taskId, agentId, model, effort }) =>
         once(
@@ -610,14 +664,18 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.reopen', { taskId }, commandId), (said) => tasks.reopen({ envelope: said, taskId }))),
         ),
-      Send: ({ commandId, threadId, body, disposition }) =>
+      Send: ({ commandId, threadId, body, disposition, images }) =>
         api(
           Effect.gen(function* () {
+            // Its images are read, checked and kept first, outside the command's transaction: one that can't be sent refuses the message.
+            const kept = images === undefined || images.length === 0 ? [] : yield* keptFor(threadId, images)
             const message = {
-              envelope: yield* envelope('thread.send', { threadId, body, disposition }, commandId),
+              // The command says its images by their digests, never their bytes.
+              envelope: yield* envelope('thread.send', { threadId, body, disposition, ...imagesSaid(kept) }, commandId),
               threadId,
               body,
               disposition,
+              ...(kept.length === 0 ? {} : { images: kept }),
             }
             // What the person says to the coordinator starts it, if it isn't running.
             const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${threadId}`
@@ -667,7 +725,7 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      StartPlan: ({ commandId, planId }) => once(commandId, api(plans.start(planId, instance.personId))),
+      StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
       ChangeIssueDraft: ({ commandId, draftId, title, body, labels }) =>
@@ -692,26 +750,29 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const answer = Effect.gen(function* () {
-                const answered = yield* questions.answer({
-                  envelope: yield* envelope('attention.answer_question', { attentionId, answers }, commandId),
-                  attentionId,
-                  answers,
-                })
-                if (answered.told) return
-                // The agent that asked has gone: the answer is told to the one on its thread next, started for it.
-                const tell = {
-                  envelope: yield* Effect.provideContext(
-                    Runtime.envelope('thread.send', { threadId: answered.threadId, answered: attentionId }),
-                    context,
-                  ),
-                  threadId: answered.threadId,
-                  body: answered.body,
-                }
-                const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${answered.threadId}`
-                if (thread?.kind === 'coordinator') yield* coordinator.say({ ...tell, disposition: 'after_current', quiet: true })
-                else yield* runs.answered(tell)
-              })
+              const said = yield* envelope('attention.answer_question', { attentionId, answers }, commandId)
+              const [on] = yield* sql<{ kind: string | null }>`
+                SELECT t.kind FROM attention_requests q LEFT JOIN threads t ON t.id = json_extract(q.payload, '$.threadId')
+                WHERE q.id = ${attentionId}`
+              // A task's lead or reviewer carries on with the answer once it has a place among the agents at work here (Runs).
+              const answer =
+                on?.kind === 'coordinator'
+                  ? Effect.gen(function* () {
+                      const answered = yield* questions.answer({ envelope: said, attentionId, answers })
+                      if (answered.told) return
+                      // The coordinator that asked has gone: the answer is told to the one on its thread next.
+                      yield* coordinator.say({
+                        envelope: yield* Effect.provideContext(
+                          Runtime.envelope('thread.send', { threadId: answered.threadId, answered: attentionId }),
+                          context,
+                        ),
+                        threadId: answered.threadId,
+                        body: answered.body,
+                        disposition: 'after_current',
+                        quiet: true,
+                      })
+                    })
+                  : runs.answer({ envelope: said, attentionId, answers })
               // A task's question is answered in the task's turn: stopping it comes first, and the question is withdrawn, or
               // after, and the agent the answer started stops.
               const [asked] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM attention_requests WHERE id = ${attentionId}`
@@ -861,6 +922,24 @@ export const handlers = Api.toLayer(
             return yield* rulesView(projectId, yield* policies.current(project.id))
           }),
         ),
+      GetProjectNotes: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const [project] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${projectId}`
+            if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+            return yield* notesOf(projectId)
+          }),
+        ),
+      DropProjectNote: ({ commandId, projectId, noteId }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const said = yield* envelope('project.note.drop', { projectId, noteId }, commandId)
+              yield* Effect.provideContext(dropNote({ envelope: said, projectId, noteId }), store)
+            }),
+          ),
+        ),
       GetVocabulary: ({ projectId }) =>
         api(
           Effect.gen(function* () {
@@ -878,7 +957,8 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const now = accountsOf((yield* policies.current(projectId as ProjectId)).rules)
+              const was = (yield* policies.current(projectId as ProjectId)).rules
+              const now = accountsOf(was)
               const accounts =
                 rotateAccounts === undefined && onlyAccounts === undefined
                   ? {}
@@ -893,7 +973,10 @@ export const handlers = Api.toLayer(
               yield* policies.set(projectId, { ...change, ...accounts }, instance.personId, expectedRevision)
               // A call still waiting that the rules no longer keep for the person is answered by them.
               yield* permissions.reconsider(projectId)
-              return yield* rulesView(projectId, yield* policies.current(projectId as ProjectId))
+              const kept = yield* policies.current(projectId as ProjectId)
+              // Its leads newly resolving conflicts, what conflicts already is resolved now, not at the next (ADR-030).
+              if (!resolvesConflicts(was) && resolvesConflicts(kept.rules)) yield* pullRequests.resolveNow({ projectId })
+              return yield* rulesView(projectId, kept)
             }),
           ),
         ),
@@ -905,9 +988,14 @@ export const handlers = Api.toLayer(
       Merge: ({ commandId, taskId, head, url }) => once(commandId, api(pullRequests.merge(taskId, head, url))),
       MergeHere: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.mergeHere(taskId, heads)))),
       Push: ({ commandId, taskId, head, url }) => once(commandId, api(Effect.asVoid(pullRequests.push(taskId, head, url)))),
+      ReplacePullRequest: ({ commandId, taskId, head, replaces, url }) =>
+        once(commandId, api(Effect.asVoid(pullRequests.replace(taskId, head, replaces, url)))),
+      MergeNote: ({ commandId, taskId, url }) =>
+        once(commandId, api(Effect.map(pullRequests.mergeNote(taskId, url), ({ note }) => ({ note })))),
       PushHere: ({ commandId, taskId }) => once(commandId, api(Effect.asVoid(pullRequests.pushHere(taskId)))),
       PushBranch: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.pushBranch(taskId, heads)))),
       ListEditors: () => Effect.succeed(config.editors?.list() ?? []),
+      GetLoad: () => api(machine.now),
       // Done once the copy is ready; its version and its models are asked again, as it is a new one.
       InstallAgent: ({ agentId }) =>
         api(

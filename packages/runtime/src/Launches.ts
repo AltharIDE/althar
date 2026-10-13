@@ -15,7 +15,7 @@ import { addItem, updateItem } from './threads'
 import { Live } from './Live'
 import { change, fact, timestamp } from './records'
 import { shortCommand } from './rules'
-import { lineOf, type RunCommand, runCommandIn } from './runCommand'
+import { lineOf, type RunCommand, runOf } from './runCommand'
 import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServer'
 
 /*
@@ -52,6 +52,8 @@ interface Launch {
   readonly command: string
   readonly startedAt: string
   readonly scope: Scope.Closeable
+  /** Its process, the leader of its group. */
+  readonly pid: number
   /** Its card, in the thread it was asked for in; null where it was asked for in none. */
   card: string | null
   /** The end of what it printed, both streams. */
@@ -111,6 +113,8 @@ export class Launches extends Context.Service<
     clear(id: string): Effect.Effect<void>
     /** The project's runs, in the order they started. */
     ofProject(projectId: string): Effect.Effect<ReadonlyArray<ShownLaunch>>
+    /** Every run still running, by its process, in every project: for how hard each works (`MachineLoad.ts`). */
+    processes(): Effect.Effect<ReadonlyArray<{ readonly pid: number; readonly projectId: string; readonly taskId: string | null }>>
     /** What running would run, for the task or the default branch; null where no repository says how. */
     commandFor(projectId: string, taskId: string | null): Effect.Effect<string | null, unknown>
     /** Keeps how a repository runs, or, with null, goes back to working it out. Says which repository. */
@@ -186,8 +190,8 @@ export class Launches extends Context.Service<
       const within = (binding: Binding, root: string) => (binding.within === null ? root : join(root, binding.within))
 
       /** How a repository runs in a folder: as kept for it, else as what is in the folder says. */
-      const runOf = (binding: Binding, folder: string, root: string): RunCommand | null =>
-        binding.runCommand !== null ? { command: binding.runCommand, setup: binding.runSetup } : runCommandIn(folder, root)
+      const runIn = (binding: Binding, folder: string, root: string): RunCommand | null =>
+        runOf({ command: binding.runCommand, setup: binding.runSetup }, folder, root)
 
       /** The repositories a run can be in, the one named first and alone, each with the root it runs from now. */
       const placesOf = (projectId: string, taskId: string | null, named: string | undefined) =>
@@ -213,7 +217,7 @@ export class Launches extends Context.Service<
         provide(
           Effect.gen(function* () {
             for (const { binding, root } of yield* placesOf(projectId, taskId, undefined)) {
-              const run = runOf(binding, within(binding, root), root)
+              const run = runIn(binding, within(binding, root), root)
               if (run !== null) return run.command
             }
             return null
@@ -300,7 +304,7 @@ export class Launches extends Context.Service<
             let chosen: { readonly binding: Binding; readonly folder: string; readonly run: RunCommand } | undefined
             for (const { binding, root } of places) {
               const at = input.taskId === null ? yield* runCopy(input.projectId, binding) : root
-              const run = runOf(binding, within(binding, at), at)
+              const run = runIn(binding, within(binding, at), at)
               if (run !== null) {
                 chosen = { binding, folder: within(binding, at), run }
                 break
@@ -359,6 +363,7 @@ export class Launches extends Context.Service<
               command: run.command,
               startedAt: yield* timestamp,
               scope,
+              pid: owned.pid,
               card: null,
               printed: '',
               url: null,
@@ -516,7 +521,7 @@ export class Launches extends Context.Service<
       const keepTool = (actorOf: (access: ToolAccess) => ActorId): Tool => ({
         name: 'set_run_command',
         description:
-          "Keeps how the project runs, for Althar to run it for the person with no agent: the command that runs it (such as `bun run dev`), and what makes a fresh copy ready first, run each time before it (such as `test -d node_modules || bun install --frozen-lockfile`), or null. Use it when Althar can't work out how it runs, or works it out wrong, or when you change how it runs. A null command goes back to working it out from the repository. In a project of several repositories, say which, as repository.",
+          "Keeps how the project runs, for Althar to run it for the person with no agent: the command that runs it (such as `bun run dev`), and setup, what makes a fresh copy ready (such as `test -d node_modules || bun install --frozen-lockfile`). Althar runs the setup itself, outside any agent's sandbox: before each run, and in each new task's worktree as it is made, before its lead starts, so the lead finds its dependencies installed. Without a setup, Althar works it out: installing the packages the lockfile names, never changing the lockfile. Use it when Althar can't work out how it runs, or works it out wrong, or when you change how it runs or what it needs installed first. A null command goes back to working both out from the repository. In a project of several repositories, say which, as repository.",
         input: {
           type: 'object',
           properties: {
@@ -540,7 +545,7 @@ export class Launches extends Context.Service<
               })
               return command === ''
                 ? `Althar works out how ${repository} runs from the repository again.`
-                : `Kept: ${repository} runs with \`${command}\`${setup === '' ? '' : `, after \`${setup}\``}.`
+                : `Kept: ${repository} runs with \`${command}\`${setup === '' ? '' : `, after \`${setup}\`, which sets up each new task's worktree too`}.`
             }),
           ),
       })
@@ -606,6 +611,12 @@ export class Launches extends Context.Service<
         stop,
         clear,
         ofProject: (projectId) => Effect.sync(() => ofProject(projectId)),
+        processes: () =>
+          Effect.sync(() =>
+            [...launches.values()].flatMap((launch) =>
+              launch.ended === null ? [{ pid: launch.pid, projectId: launch.projectId, taskId: launch.taskId }] : [],
+            ),
+          ),
         commandFor,
         keep,
       })

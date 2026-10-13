@@ -53,6 +53,8 @@ say the right. When something new needs a name on screen, add it here first.
 | Listening to | `external_links.listening` | Over a task's composer: the pull requests Althar asks for news while it runs, what they last said, and, for a moment, what just came. Stop stops it: nothing said there after reaches the thread or the lead. |
 | Running, Ran | what an agent left running (`LeftRunning`, ADR-022), and Althar's own runs (`Launches`, ADR-023) | Over a task's composer: commands its lead sent to the background, such as a dev server, and what Althar runs of the task itself; over the coordinator's, every run Althar has going in the project, each saying where it runs. Each with where it answers, which opens in your browser. Stop stops one. One that ended by itself says how ("exited 1") until you clear it. What a lead left runs as long as its session does; Althar's runs until you stop it or quit. |
 | Run card | a `run` thread item (`RunCard`, ADR-023) | What a run of the project leaves in the thread it was asked for in: where it runs, the command, where it answers, as a link, and how long it has been up, with Stop. It stays once the run is over, saying how it ended, with Run again. |
+| Installing dependencies in meridian…, Installed dependencies in meridian | a `setup` thread item (`Setups.ts`, ADR-023) | A line across a task's thread: Althar setting up the task's worktree before its lead starts, with the install its lockfile names, or "Setting up meridian…" with the setup kept for it. Failed, the end of what it printed stands under it, and the lead is told. Not "bootstrap" or "provision". |
+| Asks you to push | a `push_request` thread item (`PushRequest`) | The lead asking you to push what it committed to the task's pull request, in the task's thread: the commits that would go up, with Push. Nothing goes up until you press it, and then only what it shows. It stays once pushed, asked again or closed. |
 | Run `bun run dev` | `RunProject`, ADR-023 | In a task's menu, what it built, in its worktree; on the project's front, its default branch, in a copy of Althar's. Althar runs it, with no agent, with the command the repository says or that's kept for it. |
 | Hold | plan held | On a plan waiting to start: its countdown stops, and it starts when you say. |
 | Start now | plan accepted | Starts a plan waiting to start, from its card or the task menu. |
@@ -62,7 +64,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Resume | run resumed | From the task menu, or by writing to a stopped task: the lead carries on the step it was on, with what you wrote first. |
 | Abandon | task abandoned, its run suspended | From the task menu, asked first. Ends the task without its change. It moves to Settled. Its worktree and branch stay. |
 | Reopen | an abandoned task open again | Only for an abandoned task, never a merged one. It opens on the same worktree and branch, where it was: a step cut short resumes, work that had passed is ready again. Writing to an abandoned task reopens it too. |
-| Althar restarted | reconciliation after process loss | Not said in threads: a lead that stopped with Althar starts again when the person next writes to it, and nothing it was doing runs twice. A step that was running asks the person to carry it on. |
+| Althar restarted | reconciliation after process loss | Not said in threads: a lead that stopped with Althar starts again when the person next writes to it, and nothing it was doing runs twice. A step that was running carries on by itself, with a line in its thread; it asks the person only if its lead can't start, or a restart stops it again soon after the last one carried it on. |
 
 A call's kind reads the same everywhere it shows: on the board, in the bar's preview and on the home.
 
@@ -83,10 +85,11 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Findings | review findings | What a review step found. By default the lead settles them. |
 | Artifacts | artifacts | What a task wrote that is worth keeping and isn't in a repository. |
 | Screenshots, Image | artifact of kind `image` | Pictures an agent hands back, under what it said, full size on a click. One without a name is "Image 1". |
+| Add images, Drop to add them to your message | `user_input_images`, artifacts of kind `image` | Images you send with a message: dropped on the composer, pasted, or picked with Add images; shown small above what you write, each with Remove, and above your message once sent. PNG, JPEG, GIF or WebP, up to ten a message; one wider than 2000 pixels or over 5 MB is made smaller first. An agent that doesn't take images gets none: the composer says so. One copied with no name is "Pasted image". |
 | Document | a markdown file an agent wrote or pointed at | Its card stands under what it said; "Read in the panel" opens it beside the thread, as it is now in the worktree. |
 | Output | artifact of kind `log` | What a command printed, in its tool call: its last lines, "N earlier lines" a click away. |
 | Knowledge | knowledge claims | Everything the project holds. It has two parts: |
-| Notes | canonical claims | What every task starts with: decisions, conventions, architecture. |
+| Notes | project notes, `project_notes`; later, canonical claims | Decisions the person made in conversation that the code doesn't show, a sentence each, which the coordinator keeps and every session of it starts with (ADR-031). Shown in the project's settings, where one that no longer holds is removed. Later, what every task starts with too: decisions, conventions, architecture. |
 | Seen in tasks | episodic claims | What one task observed. It can be proposed as a note. |
 | Project rules | execution policy, `ProjectRules` | When agents need a yes, what always asks, what is never allowed, how a task ends, how its branches and pull requests are named, what a usage limit does, and which accounts work runs on (ADR-013). |
 | Always ask me, Ask me | `alwaysAsk` kinds, `ask` command rules | What waits for the person whoever would answer: kinds of request, and commands they named by how they start or exactly. The rules screen's sentence for it is "Ask me". |
@@ -104,6 +107,7 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Althar 0.1.1 is ready, Restart | an update Squirrel has in place (`main/updates.ts`) | A newer Althar, downloaded in the background, said in one quiet line in the window's bar and Settings' foot. Restart is there only while no work runs; otherwise the line says it installs when you quit. Checking and downloading never show. |
 | Check for Updates… | `checkNow` | In the app menu: looks now, and says in a dialog what it found. |
 | What's new | a release's notes | In Settings' foot, beside the version: that version's GitHub Release, in the browser. |
+| CPU, MEM; This Mac's load | `GetLoad`, `LoadMeter` (ADR-029) | How hard the computer works, as two short meters in the window's bar, Althar's work's part of each in cobalt; "Memory is tight" or "Memory is short" beside them when macOS says so. Clicked, the last two minutes, the figures, and what each task, coordinator and default branch running uses. On by default; "Show how hard this Mac works" in Settings, or "Show in the bar" in the peek, turns it off for every window. |
 
 ## Words the interface doesn't use
 

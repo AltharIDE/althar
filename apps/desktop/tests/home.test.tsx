@@ -92,6 +92,8 @@ const result: StepResult = {
   change: null,
   verdict: null,
   findings: [],
+  evidence: [],
+  unverified: null,
   agentId: null,
 }
 
@@ -341,6 +343,27 @@ describe('the home', () => {
     expect(within(projects).getByText('1 stopped')).toBeTruthy()
     await userEvent.click(within(needs).getByRole('button', { name: 'Allow once' }))
     expect(await within(projects).findByText('1 stopped · 1 waiting')).toBeTruthy()
+  })
+
+  it('says under its project what tasks waiting for a free agent wait for, and doesn’t count them as moving', async () => {
+    const queued = { busy: 4, atOnce: 4 }
+    const { client } = fakeClient({
+      getHome: vi.fn(async () =>
+        home({
+          tasks: [
+            task({ taskId: 't1', threadId: 'th1', title: 'At work', phase: 'running', step: 'implement' }),
+            task({ taskId: 't2', threadId: 'th2', title: 'Next', phase: 'running', step: 'implement', projectId: 'p2', queued }),
+            task({ taskId: 't3', threadId: 'th3', title: 'After it', phase: 'running', step: 'implement', projectId: 'p2', queued }),
+          ],
+          projects: [project, halyard],
+        }),
+      ),
+    })
+    withServices(<Home />, client)
+    const projects = await screen.findByRole('complementary', { name: 'Projects' })
+    expect(within(projects).getByText('2 waiting: 4 of 4 agents busy')).toBeTruthy()
+    // Only the one at work moves.
+    expect(screen.getByText('1 task moving in 1 project.')).toBeTruthy()
   })
 
   it('gathers what needs you under its project, says what is off in each, and opens what the loop did', async () => {
@@ -676,6 +699,40 @@ describe('settings', () => {
     ])
   })
 
+  it('says how many agents work at once on this Mac and why, takes another number at once, and goes back to the default', async () => {
+    const { client } = fakeClient()
+    withServices(<Settings />, client)
+    const panel = await openModule(/^Keep awake/)
+    const count = await within(panel).findByRole('slider', { name: 'Agents at once' })
+    expect(count.getAttribute('aria-valuenow')).toBe('4')
+    expect(within(panel).getByText('4: this Mac has 16 GB and 10 cores. More tasks than that wait their turn.')).toBeTruthy()
+    // Settings stays calm: nothing in it says how many are busy now.
+    expect(within(panel).queryByText(/busy/)).toBeNull()
+    expect(within(panel).queryByRole('button', { name: 'Use the default' })).toBeNull()
+    count.focus()
+    await userEvent.keyboard('{ArrowRight}{ArrowRight}')
+    expect(client.setAgentsAtOnce).toHaveBeenLastCalledWith(6)
+    await waitFor(() => expect(count.getAttribute('aria-valuenow')).toBe('6'))
+    expect(within(panel).getByText(/^6: a little more than this Mac’s 16 GB suggests\. Tests may slow down\./)).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Use the default' }))
+    expect(client.setAgentsAtOnce).toHaveBeenLastCalledWith(null)
+    await waitFor(() => expect(count.getAttribute('aria-valuenow')).toBe('4'))
+  })
+
+  it('says when a number of agents at once can’t be kept, and shows what was kept', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.setAgentsAtOnce).mockRejectedValue(new Error('disk full'))
+    withServices(<Settings />, client)
+    const panel = await openModule(/^Keep awake/)
+    const count = await within(panel).findByRole('slider', { name: 'Agents at once' })
+    const reads = vi.mocked(client.getSettings).mock.calls.length
+    count.focus()
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}')
+    expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(vi.mocked(client.getSettings).mock.calls.length).toBeGreaterThan(reads))
+    await waitFor(() => expect(count.getAttribute('aria-valuenow')).toBe('4'))
+  })
+
   it('has Althar as co-author of what it sends until the person turns it off, and then says once, large, why it would stay', async () => {
     const { client } = fakeClient({ listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection] })) })
     withServices(<Settings />, client)
@@ -949,6 +1006,12 @@ describe('the app’s own preferences in settings', () => {
     expect(host.setPreference).toHaveBeenLastCalledWith('keepAwake', true)
     await userEvent.click(battery)
     expect(host.setPreference).toHaveBeenLastCalledWith('awakeOnBattery', true)
+    // How hard the Mac works shows in the bar until it is turned off here, for every window.
+    const load = within(panel).getByRole('switch', { name: 'Show how hard this Mac works' })
+    expect(load.getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(load)
+    expect(host.setPreference).toHaveBeenLastCalledWith('showLoad', false)
+    await waitFor(() => expect(load.getAttribute('aria-checked')).toBe('false'))
     // Each editor by its own icon; the first one found until one is chosen.
     const editors = within(panel).getByRole('radiogroup', { name: 'Open files in' })
     expect(within(editors).getByRole('radio', { name: 'Cursor' }).getAttribute('aria-checked')).toBe('true')

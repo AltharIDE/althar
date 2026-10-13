@@ -190,6 +190,12 @@ const credentialReason = (words: ReadonlyArray<string>): string | undefined => {
   return (words[index] ?? '').startsWith('credential') ? CREDENTIALS_REFUSED : undefined
 }
 
+/** The Flatpak grants the app a broad host bridge; agents must not invoke it directly. */
+const deviceBridgeReason = (words: ReadonlyArray<string>): string | undefined =>
+  (words[0] ?? '').split('/').at(-1) === 'flatpak-spawn'
+    ? 'Agents do not run commands on the device through Flatpak; Althar uses that bridge only for commands it prepares.'
+    : undefined
+
 /** What `gh` and `glab` may do: their read-only commands, by command and subcommand. */
 const HOST_LOOKS: Readonly<Record<string, ReadonlySet<string>>> = {
   pr: new Set(['view', 'list', 'diff', 'checks', 'status']),
@@ -234,7 +240,7 @@ const hostReason = (words: ReadonlyArray<string>): string | undefined => {
   if ((command === 'pr' || command === 'mr') && (subcommand === 'comment' || subcommand === 'review' || subcommand === 'note'))
     return "Answer on the task's pull request with Althar's reply_on_pull_request tool."
   if (command === 'pr' || command === 'mr')
-    return "Althar opens the task's pull request itself, and the person pushes what you commit to it once they've looked. Commit; read it with read_pull_request."
+    return "Althar opens the task's pull request itself, and the person pushes what you commit to it once they've looked; only a merge Althar asked you to make to resolve a conflict, Althar pushes itself. Commit, then ask them to push it with push_to_pull_request; read it with read_pull_request."
   if (command === 'issue') return "Althar doesn't change issues from a task. Read one with read_issue, and tell the person what it needs."
   if (command === 'auth') return "Agents run without the person's sign-in to the code host; Althar's tools reach it for the task."
   return "Agents don't change things on the code host themselves; Althar does that for the task. Tell the person what's needed."
@@ -1044,7 +1050,7 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   if (request.kind === 'execute' || request.kind === 'other') {
     // A code host is reached through Althar: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
     const refused = parseCommandLine(commandOf(request))
-      .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)))
+      .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
       .find((reason) => reason !== undefined)
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
     if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
@@ -1682,7 +1688,7 @@ export const decideReader = (request: PermissionRequest): ReaderVerdict => {
       if (command === undefined || command === '') return deny("Althar can't tell what this does, and this role only reads.")
       const reason =
         parseCommandLine(command)
-          .commands.map((words) => credentialReason(unwrap(words)))
+          .commands.map((words) => credentialReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
           .find((found) => found !== undefined) ?? readerCommandReason(command)
       return reason === undefined ? ALLOW : deny(reason)
     }

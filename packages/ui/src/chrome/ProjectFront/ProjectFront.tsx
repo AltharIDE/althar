@@ -7,6 +7,7 @@ import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Button } from '../../primitives/Button/Button'
+import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { type WorkNeed, WorkStatus } from '../WorkStatus/WorkStatus'
 import s from './ProjectFront.module.css'
@@ -42,6 +43,10 @@ export interface ProjectPart {
   name: string
   /** Its host's or tracker's mark; without one, an empty place where it would be. */
   brand?: Brand
+  /** Opens it where it lives (its repository on its host, its tracker's space); without it, it is words. */
+  onOpen?: () => void
+  /** What opening it says, on hover: Open on GitHub. */
+  openLabel?: string
 }
 
 export type ProjectFrontProps = RootProps<
@@ -133,8 +138,15 @@ export function ProjectFront({
           <ul className={s.parts} aria-label={t.madeOf}>
             {parts.map((part) => (
               <li key={part.id} className={s.part}>
-                {part.brand === undefined ? <span className={s.noMark} aria-hidden="true" /> : <BrandMark brand={part.brand} size={11} />}
-                {part.name}
+                {part.onOpen === undefined ? (
+                  <PartLabel part={part} />
+                ) : (
+                  <Tooltip label={part.openLabel ?? part.name} placement="below">
+                    <button type="button" className={s.open} onClick={part.onOpen}>
+                      <PartLabel part={part} />
+                    </button>
+                  </Tooltip>
+                )}
               </li>
             ))}
           </ul>
@@ -151,5 +163,15 @@ export function ProjectFront({
         </div>
       )}
     </header>
+  )
+}
+
+/** A part's mark, or the empty place for one, and its name. */
+function PartLabel({ part }: { part: ProjectPart }) {
+  return (
+    <>
+      {part.brand === undefined ? <span className={s.noMark} aria-hidden="true" /> : <BrandMark brand={part.brand} size={11} />}
+      {part.name}
+    </>
   )
 }

@@ -166,6 +166,17 @@ export const HeldByTheRuntime: Story = {
   },
 }
 
+/** Started, it waits for a free agent: it says so where the clock was, with nothing to start or hold, and its steps can still change. */
+export const WaitingForAFreeAgent: Story = {
+  render: () => <Launch queued="Waiting: 4 of 4 agents busy on this Mac" />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('status')).toHaveTextContent('Waiting: 4 of 4 agents busy on this Mac')
+    await expect(c.queryByRole('button', { name: /Start/ })).toBeNull()
+    await expect(c.queryByRole('button', { name: 'Hold' })).toBeNull()
+  },
+}
+
 /** A runtime is out: its steps wait for the reset, unless you move them. */
 export const AgentOut: Story = {
   render: () => (

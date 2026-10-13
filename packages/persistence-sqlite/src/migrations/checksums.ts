@@ -24,4 +24,11 @@ export const checksums: Readonly<Record<string, string>> = {
   '0018_questions': 'f775a6417512859d6167b73c4df83d7d76a8c5ffaf338dfd83d1c0aad6d84dc0',
   '0019_run_commands': '1d99bf7dd390bcd630320a9e9aea75197fbc143257737bd8c197f2ee4ab32cbd',
   '0020_issue_drafts': '060cf883456f697c925ccc0befd5c87d1ce01901c5a2a4f87c65975aa6a1bd98',
+  '0021_input_images': '048b5727048aae868c44a6f3a7640775f2311fd3852bdfd81e414aa857b4a82b',
+  '0022_connection_cli': 'a2e1df1a078b718b1c1c24bf23f3e93ad97407339a670cd2a70cdf80477f26ae',
+  '0023_worktree_setup': 'ef93df218253666f4a3b019511eb45a1caa64d8fb213e841738e7b47014d7eca',
+  '0024_conflict_resolutions': '750de1a3f6049f24a5b71a23d5f29fede532aeb5f3baec767484a3b7645925d5',
+  '0025_push_requests': '043e2c48c3fa275cc8b62b52219e44347ae8a1e6098dd01c42d12b35edb7ca2e',
+  '0026_project_notes': '194f17139bc027eb2a4433ee8249a3b464c8e1d3c22a97bceea3797b95e668c8',
+  '0027_agents_at_once': '19be6d16c97bcfc46c09c029cc423d89a4ceee687a36bca612edfd26d4d17eb0',
 }

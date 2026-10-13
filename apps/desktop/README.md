@@ -32,7 +32,7 @@ From `apps/desktop`:
 | --- | --- |
 | `bun run build` | Builds the main process, the runtime, the preload and the window into `dist/` |
 | `bun run build:package` | The same, without the end-to-end tests' hooks, as a packaged app will be built |
-| `bun run package` | Builds that and packages it in `out/dist`: `mac-arm64/Althar.app`, with Cobalt as its icon, signed with Althar's Developer ID under the hardened runtime and notarized where the credentials are given; a dmg and a zip of it, about 370 MB each; and `latest-mac.yml`, the updater's feed. About 850 MB unpacked, most of it Claude Code's and Codex's own binaries, which the agent adapters bring |
+| `bun run package` | Builds that and packages it in `out/dist`: on macOS, `mac-arm64/Althar.app`, signed and notarized where credentials are given, with a dmg, zip and `latest-mac.yml`; on Linux, an AppImage, `.deb`, `.rpm` and `latest-linux.yml`. About 850 MB unpacked, most of it Claude Code's and Codex's own binaries, which the agent adapters bring |
 | `bun run release` | Packages, signs and notarizes a release, and checks it, as CI does on a version tag. Releases are published from CI only. See below |
 | `bun run start` | Opens what was last built |
 | `bun run check` | Format, type-aware lint and type checks |
@@ -48,19 +48,71 @@ On a Mac, the end-to-end tests run quietly, so you can keep working while they r
 ALTHAR_E2E_FOREGROUND=1 bun run test:e2e
 ```
 
+### On Linux
+
+`bun run package` makes an AppImage, a deb and an rpm of the app (Linux
+only). Off a Mac the window is frameless and draws its own chrome: the tabs'
+strip is the title bar, with the window's own buttons, and the screens with
+no tabs carry them too. A trimmed menu is kept for its accelerators (text
+zoom, full screen, quit; reload and devtools while developing), and its bar
+is hidden on every window, as Electron would otherwise draw it above the
+app's own chrome. Sign-ins are sealed in the desktop's keyring;
+where Electron wouldn't find one, the app asks for libsecret, which
+gnome-keyring, KeePassXC and KWallet all serve — see
+[ADR-028](../../docs/decisions/028-linux-windows-packages-and-the-keyring.md).
+
+The packaged app is checked on a real desktop, not under CI's Xvfb:
+`scripts/x11-smoke.sh` needs `xdotool`, `xprop` and `wmctrl` on a running X11
+session, `scripts/flatpak-smoke.sh` checks the Flatpak's own environment, and
+[DEVELOPMENT.md](../../DEVELOPMENT.md#reviewing-on-linux) lists the legs
+(X11, Wayland, packages, Flatpak, keyring).
+
+The AppImage is the Linux package that can update itself. The `.deb` and
+`.rpm` still need later install, menu-entry, icon and keyring checks on real
+Debian- and RPM-based desktops; see the Linux review table in
+`DEVELOPMENT.md`.
+
+### The Flatpak
+
+**The Flatpak is experimental**: a task running under GNOME and KDE is still
+being measured. `scripts/flatpak.sh` builds the Flatpak from what `bun run package` staged
+and installs it for the user; `scripts/flatpak-smoke.sh` runs the checks that
+are its own environment's (git inside, the device outside, the window's entry
+and its permissions). The permission to talk to `org.freedesktop.Flatpak` is
+broad: it lets the app run commands on the device, which is how the app
+reaches the person's tools. The other permissions cover network, display,
+GPU and the keyring. What the Flatpak reaches and what it does not is in
+[ADR-027](../../docs/decisions/027-what-the-flatpak-reaches.md). In short:
+
+- The person's own OpenCode and Codex, and editors, are found and run on the
+  device through `flatpak-spawn`, with the environment an agent should have
+  and no ssh agent or signed-in tool in it. Claude Code's sessions use the
+  bundled adapter, and its usual account keeps one persistent home under the
+  profile, so a host `claude`'s status and sign-in inspect what its sessions
+  use. Everything is gated on `FLATPAK_ID`; dev, macOS, AppImage, deb and rpm
+  are unchanged.
+- Codex's own sandbox cannot run inside the Flatpak (no user namespaces); its
+  adapter drives the person's own Codex on the device instead
+  (`flatpak/codex-host.sh`). Without one installed there, a session says so.
+- Project folders reach the app through the document portal, and a path is
+  translated only at the device boundary (`/run/flatpak/doc/<id>` ↔
+  `/run/user/<uid>/doc/<id>`).
+- The Flatpak keeps its own profile (`~/.var/app/dev.althar.app/data/althar`)
+  with worktrees beside it, separate from the CLI's.
+
 ### The packaged app
 
-The app is for Apple silicon, for now. Releases are made and published by CI alone, from a version tag on main ([ADR-024](../../docs/decisions/024-signed-releases-and-updates.md)).
+The app is packaged for Apple silicon on macOS and x86_64 Linux. Releases are made and published by CI alone, from a version tag on main ([ADR-024](../../docs/decisions/024-signed-releases-and-updates.md)).
 
-- **Signing.** `bun run package` signs every executable in the app on its own, deepest first, with the hardened runtime and a secure timestamp: Althar's binary with `resources/entitlements.mac.plist`, and everything else (Electron's helpers, Claude Code's and Codex's binaries, the speech engine) with `entitlements.mac.inherit.plist`. It signs with `ALTHAR_MAC_IDENTITY` where that names a certificate; else with the Developer ID in `CSC_LINK` and `CSC_KEY_PASSWORD` (the certificate and its key as a base64 `.p12`), where they're set; else with Althar's Developer ID where a keychain has it. CI puts the release environment's certificate in a keychain of the job's own and points electron-builder at it (`CSC_KEYCHAIN`). Without any, or with `ALTHAR_MAC_IDENTITY=-`, the app is signed ad hoc, still hardened, and opens only on the Mac that built it. In CI that fails instead. On a Mac, the first time codesign uses the key, macOS asks for the login password: choose Always Allow, or signing waits for an answer.
+- **Signing.** `bun run package` signs every executable in the app on its own, deepest first, with the hardened runtime and a secure timestamp, each with only the entitlements it needs (`scripts/entitlements.ts`, ADR-033). It signs with `ALTHAR_MAC_IDENTITY` where that names a certificate; else with the Developer ID in `CSC_LINK` and `CSC_KEY_PASSWORD` (the certificate and its key as a base64 `.p12`), where they're set; else with Althar's Developer ID where a keychain has it. CI puts the release environment's certificate in a keychain of the job's own and points electron-builder at it (`CSC_KEYCHAIN`). Without any, or with `ALTHAR_MAC_IDENTITY=-`, the app is signed ad hoc, still hardened, and opens only on the Mac that built it. In CI that fails instead. On a Mac, the first time codesign uses the key, macOS asks for the login password: choose Always Allow, or signing waits for an answer.
 - **Notarizing.** With Apple's credentials in the environment, the signed app is sent to Apple's notary service and stapled before the dmg and the zip are made of it, then the dmg is too. Every submission's log is kept in `out/notary/`; a rejected one names each file it found wrong. The credentials are an App Store Connect API key (`APPLE_API_KEY`, the path to its `.p8`, with `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`), or a profile notarytool keeps in the keychain (`APPLE_KEYCHAIN_PROFILE`). Without them nothing is notarized, macOS refuses the app on any other Mac, and in CI the run fails.
-- **Updates.** A packaged app checks the latest published release ten seconds after it starts, every four hours, and from Check for Updates… in the app menu. A newer version downloads in the background, and Squirrel puts it in place only if it is signed as the running app is. Then a line in the window's bar and in Settings' foot says it is ready. Restart is there only while no work runs; otherwise it installs when Althar quits. Settings' foot shows the version, with What's new opening its release notes.
+- **Updates.** The macOS app and Linux AppImage check the latest published release ten seconds after they start and every four hours. On macOS, Check for Updates… in the app menu checks on demand. A newer version downloads in the background and is offered in the window's bar and Settings. The `.deb` and `.rpm` are updated by their package managers.
 - **Trying an update.** Package one version and keep its app; package a newer one, serve its zip and `latest-mac.yml` from a folder (`python3 -m http.server 8765 --bind 127.0.0.1`), and open the older app with `ALTHAR_UPDATE_FEED=http://127.0.0.1:8765/`. Both must be signed by the same Developer ID.
-- **Running as Node.** The runtime starts the agent adapters on Althar's own binaries as Node (`ELECTRON_RUN_AS_NODE`; in the packaged app, on Althar Helper), so Electron's `runAsNode` fuse stays on, and any process can run code as Althar's signed identity, the one its keychain entry trusts. Before launch, the adapters run on a Node of their own (bundled, or a utility process bridging their stdio) and the fuse goes off. `NODE_OPTIONS` and the inspector's flags are off already.
+- **Node.** The packaged app ships Node for the agent adapters, at Electron's Node version, in `Contents/Resources/node/bin/node` (ADR-033). `bun run package` fetches it from nodejs.org once, into `node_modules/.cache/althar-node`, and checks it against the digests in `scripts/node.ts`; raise those with Electron, and for Node's security releases. Electron's `runAsNode` fuse is off, with `NODE_OPTIONS` and the inspector's flags, so nothing can run Althar's binary as Node: `ELECTRON_RUN_AS_NODE=1` starts the app instead. In dev the adapters run on Electron's binary as Node.
 
 #### Cutting a release
 
-[`release.yml`](../../.github/workflows/release.yml) runs on a tag `v<version>` pushed on a commit on main. It checks the tag against `package.json`'s version, waits for a reviewer to approve the `release` environment, then builds, signs, notarizes and checks Althar on GitHub's Apple silicon runner (`macos-26`), and leaves one draft GitHub Release with the dmg, the zip, their blockmaps and `latest-mac.yml`. It never runs on a pull request, and it is the only workflow that makes a desktop release: each platform's packaging is a job in it. When PR #78 lands, its packaging becomes the Linux job here, and its own publish job in `desktop.yml` goes, since it would publish a release of its own on the same tag.
+[`release.yml`](../../.github/workflows/release.yml) runs on a tag `v<version>` pushed on a commit on main. It checks the tag against `package.json`'s version, waits for a reviewer to approve the `release` environment, builds macOS and Linux packages in platform jobs, and leaves one draft GitHub Release with each platform's files. It never runs on a pull request, and it is the only workflow that publishes a desktop release; `desktop.yml` checks Linux packages on pull requests but does not publish them.
 
 1. On main: raise `version` in `apps/desktop/package.json`, and write a few plain lines for testers in `apps/desktop/release-notes/<version>.md`. No commit dump.
 2. Tag that commit and push the tag: `git tag v0.1.1 && git push origin v0.1.1`.

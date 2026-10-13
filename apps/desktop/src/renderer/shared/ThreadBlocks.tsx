@@ -4,6 +4,7 @@ import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
   Arrived,
   CodeBlock,
+  Evidence,
   FindingState,
   Issue,
   LinkButton,
@@ -18,6 +19,7 @@ import {
   Severity,
   Step,
   StepState,
+  Terminal,
   ThreadDivider,
   Tool,
   ToolState,
@@ -28,13 +30,26 @@ import {
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
+import { piecesOf } from './evidence'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
+import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
 import { RuleReceipt } from './RuleReceipt'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
 import { answersOf, partsOf, pickedOf, questionText } from './questions'
-import type { ArrivalContent, Block, IssueDraftContent, Part, QuestionContent, RunContent, StepResult, TaskCardContent } from './thread'
+import type {
+  ArrivalContent,
+  Block,
+  IssueDraftContent,
+  Part,
+  PushRequestContent,
+  QuestionContent,
+  RunContent,
+  SetupContent,
+  StepResult,
+  TaskCardContent,
+} from './thread'
 import s from './ThreadBlocks.module.css'
 
 /*
@@ -76,6 +91,15 @@ export const text = {
   failing: (names: ReadonlyArray<string>) => `Failed: ${names.join(', ')}`,
   outsider: (from: string) => `Not passed to the lead: ${from} can’t write to the repository.`,
   passOn: 'Pass it on',
+  /** Althar setting up a repository's worktree: installing the dependencies its lockfile names, or the setup kept for it. */
+  setup: {
+    running: (setup: SetupContent) => (setup.kept ? `Setting up ${setup.repository}…` : `Installing dependencies in ${setup.repository}…`),
+    done: (setup: SetupContent) => (setup.kept ? `Set up ${setup.repository}` : `Installed dependencies in ${setup.repository}`),
+    failed: (setup: SetupContent) =>
+      `${setup.kept ? `Couldn’t set up ${setup.repository}` : `Couldn’t install dependencies in ${setup.repository}`}. The lead is told.`,
+    stopped: (setup: SetupContent) => `Setting up ${setup.repository} stopped as Althar quit. It runs again before the lead starts.`,
+    timedOut: 'It took too long, and was stopped.',
+  },
   /** What passing it on says to the lead, in the person's name. */
   passed: (said: string, text: string) =>
     `${said}:\n\n${text
@@ -90,6 +114,37 @@ const SEVERITY: Readonly<Record<StepResult['findings'][number]['severity'], Seve
   major: Severity.High,
   minor: Severity.Medium,
   nit: Severity.Low,
+}
+
+/**
+ * Althar setting up the task's worktree before its lead starts (ADR-023): a
+ * line across the thread while it runs, and once it went through. Failed,
+ * the end of what it printed shows under it, as a command's output does.
+ */
+function SetupView({ setup }: { setup: SetupContent }) {
+  const { ended } = setup
+  const failed = ended !== null && !ended.stopped && ended.code !== 0
+  const line =
+    ended === null
+      ? text.setup.running(setup)
+      : ended.stopped
+        ? text.setup.stopped(setup)
+        : failed
+          ? text.setup.failed(setup)
+          : text.setup.done(setup)
+  return (
+    <>
+      <ThreadDivider icon="terminal">{line}</ThreadDivider>
+      {failed && (
+        <Terminal
+          command={setup.command}
+          lines={ended.last?.split('\n') ?? []}
+          {...(ended.code === null ? {} : { exit: ended.code })}
+          {...(ended.timedOut ? { failure: text.setup.timedOut } : {})}
+        />
+      )}
+    </>
+  )
 }
 
 /**
@@ -199,7 +254,12 @@ function StepView({ id, result, of }: { id: string; result: StepResult; of: numb
         state={StepState.Done}
         {...(model === undefined ? {} : { model })}
         defaultOpen
-        detail={<Markdown source={result.summary} />}
+        detail={
+          <>
+            <Markdown source={result.summary} />
+            <Evidence pieces={piecesOf(id, result.evidence)} unverified={result.unverified ?? []} headingLevel={4} />
+          </>
+        }
       />
     )
   // The lead settles findings on its own for now: what the review found is left to it.
@@ -371,6 +431,7 @@ export function ThreadBlocks({
   card,
   run,
   draft,
+  push,
   queued,
   onPassOn,
   onAnswerQuestion,
@@ -400,6 +461,8 @@ export function ThreadBlocks({
   run?: (run: RunContent) => ReactNode
   /** Draws an issue the coordinator drafted, in its thread. */
   draft?: (draft: IssueDraftContent) => ReactNode
+  /** Draws a push the lead asked for, in a task's thread, with when it was asked or settled. */
+  push?: (request: PushRequestContent, at: string) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
 }) {
@@ -420,7 +483,13 @@ export function ThreadBlocks({
       case 'you':
         return (
           <Fragment key={block.id}>
-            <You at={block.at} delivery={block.delivery} {...(queued === undefined ? {} : { text: { queued } })}>
+            <You
+              at={block.at}
+              delivery={block.delivery}
+              {...(queued === undefined ? {} : { text: { queued } })}
+              // The images sent with it, each opening full size with the others.
+              {...(block.pictures.length === 0 ? {} : { attach: sentAttachments(block.pictures) })}
+            >
               {block.text}
             </You>
             {block.links.length > 0 && (
@@ -457,6 +526,10 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{run?.(block.run)}</Fragment>
       case 'draft':
         return <Fragment key={block.id}>{draft?.(block.draft)}</Fragment>
+      case 'setup':
+        return <SetupView key={block.id} setup={block.setup} />
+      case 'push':
+        return <Fragment key={block.id}>{push?.(block.request, block.at)}</Fragment>
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')

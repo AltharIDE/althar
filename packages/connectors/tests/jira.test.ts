@@ -435,6 +435,84 @@ describe('Jira Cloud', () => {
     }),
   )
 
+  describe('moving an issue to In Progress', () => {
+    const todo = issue({ status: { name: 'To Do', category: 'todo' } })
+    const transition = (id: string, name: string, category: string, more: Record<string, unknown> = {}) => ({
+      id,
+      name,
+      to: { self: `${CLOUD}/status/${id}`, name, id, statusCategory: { id: 2, key: category, name: category } },
+      hasScreen: false,
+      ...more,
+    })
+    const transitions = [
+      transition('11', 'Backlog', 'new'),
+      transition('21', 'In Progress', 'indeterminate', { isAvailable: false }),
+      transition('31', 'In Development', 'indeterminate', { isAvailable: true }),
+      transition('41', 'In Review', 'indeterminate'),
+      transition('51', 'Done', 'done'),
+    ]
+
+    it.effect('takes the first transition the workflow offers it now into In Progress’s category', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = cloud([
+          ['GET', `${CLOUD}/issue/HHH-20844/transitions`, { json: { expand: 'transitions', transitions } }],
+          ['POST', `${CLOUD}/issue/HHH-20844/transitions`, { status: 204 }],
+        ])
+        assert.deepStrictEqual(yield* tracker.start(todo), { moved: true, status: { name: 'In Development', category: 'started' } })
+        assert.deepStrictEqual(sent[1]?.body, { transition: { id: '31' } })
+        assert.isTrue(tracker.capabilities.starts)
+      }),
+    )
+
+    it.effect('moves one on Data Center the same way', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = dataCenter([
+          ['GET', `${DC}/issue/KAFKA-21043/transitions`, { json: { transitions: [transition('4', 'Start Progress', 'indeterminate')] } }],
+          ['POST', `${DC}/issue/KAFKA-21043/transitions`, { status: 204 }],
+        ])
+        const found = issue({ id: '13665242', ref: 'KAFKA-21043', key: 'KAFKA-21043', status: { name: 'Open', category: 'todo' } })
+        assert.isTrue((yield* tracker.start(found)).moved)
+        assert.deepStrictEqual(sent[1]?.body, { transition: { id: '4' } })
+      }),
+    )
+
+    it.effect('leaves one started, done or cancelled as it is, asking Jira nothing', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = cloud([])
+        for (const status of [
+          { name: 'Waiting for review', category: 'started' as const },
+          { name: 'Closed', category: 'done' as const },
+          { name: 'Rejected', category: 'cancelled' as const },
+        ]) {
+          assert.deepStrictEqual(yield* tracker.start(issue({ status })), { moved: false, status })
+        }
+        assert.lengthOf(sent, 0)
+      }),
+    )
+
+    it.effect('fails when the workflow has no way into In Progress from here, or Jira refuses the transition', () =>
+      Effect.gen(function* () {
+        const stuck = cloud([
+          ['GET', `${CLOUD}/issue/HHH-20844/transitions`, { json: { transitions: [transitions[0], transitions[1], transitions[4]] } }],
+        ])
+        const nowhere = yield* Effect.flip(stuck.tracker.start(todo))
+        assert.deepStrictEqual([nowhere.reason, nowhere.message], ['rejected', 'Its workflow has no way into In Progress from here'])
+        assert.lengthOf(stuck.sent, 1)
+        const refused = yield* Effect.flip(
+          cloud([
+            ['GET', `${CLOUD}/issue/HHH-20844/transitions`, { json: { transitions } }],
+            [
+              'POST',
+              `${CLOUD}/issue/HHH-20844/transitions`,
+              { status: 403, json: { errorMessages: ['You do not have permission to transition this issue.'], errors: {} } },
+            ],
+          ]).tracker.start(todo),
+        )
+        assert.deepStrictEqual([refused.reason, refused.message], ['forbidden', 'You do not have permission to transition this issue.'])
+      }),
+    )
+  })
+
   it.effect('says when the token is no longer good, or the issue isn’t there, in Jira’s words', () =>
     Effect.gen(function* () {
       const { tracker, sent } = cloud([

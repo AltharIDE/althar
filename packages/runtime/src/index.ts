@@ -1,7 +1,19 @@
-export { Agents, type AgentEntry, RuntimeConfig, type RuntimeOptions, type StallOptions, WebCrypto } from './Config'
+export {
+  Agents,
+  type AgentEntry,
+  type BusyOptions,
+  RuntimeConfig,
+  type RuntimeOptions,
+  type SetupOptions,
+  type StallOptions,
+  WebCrypto,
+} from './Config'
+export { type AtOnce, Busy } from './Busy'
+export { type AtOnceDefault, atOnceFor, type Machine } from './atOnce'
 export * from './errors'
 export { Instance, type InstanceInfo } from './Instance'
 export { Live, type LiveEvent } from './Live'
+export { type LoadOptions, MachineLoad } from './MachineLoad'
 export { Permissions } from './Permissions'
 export { Questions } from './Questions'
 export { CreatedTask, OpenedProject, Projects, slugify } from './Projects'
@@ -25,4 +37,4 @@ export { factFor, factsIn, type ModelFact, ModelFacts, type ModelFactsOptions } 
 export { Limits, type Out } from './Limits'
 export { Policies, type ProjectRules, type UsageLimit } from './Policies'
 export { backupsIn, databaseIn, defaultProfile, defaultWorktrees } from './locations'
-export { InstallFailed, Installs } from './Installs'
+export { InstallFailed, Installs, type OnDevice } from './Installs'

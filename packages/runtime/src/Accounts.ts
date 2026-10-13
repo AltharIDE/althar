@@ -4,7 +4,7 @@ import { isAbsolute, join, relative, sep } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
 import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
-import { type AgentDefinition, signOut } from '@althar/provider-adapters'
+import { adapterNode, type AgentDefinition, signOut } from '@althar/provider-adapters'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -223,7 +223,7 @@ export class Accounts extends Context.Service<
         Effect.gen(function* () {
           const definition = definitionOf(account.agentId)
           const logout = definition?.signIn.logout
-          if (definition !== undefined && logout !== undefined && !(yield* signOut(definition, process.execPath, env(account))))
+          if (definition !== undefined && logout !== undefined && !(yield* signOut(definition, adapterNode(), env(account))))
             return yield* new SignOutFailed({
               line: `${definition.home.variable}=${quoted(folder)} ${logout.line}`,
             })
@@ -232,7 +232,18 @@ export class Accounts extends Context.Service<
 
       const env = (account: Account): Readonly<Record<string, string>> => {
         const definition = definitionOf(account.agentId)
-        return account.home === null || definition === undefined ? {} : { [definition.home.variable]: account.home }
+        if (definition === undefined) return {}
+        // The host Claude CLI cannot see the Flatpak's fresh home. Keep its
+        // usual account in Althar's persistent profile and point both the
+        // host CLI and bundled ACP at that same config directory.
+        if (
+          account.home === null &&
+          account.agentId === 'claude-code' &&
+          config.onDevice !== undefined &&
+          config.accountsRoot !== undefined
+        )
+          return { [definition.home.variable]: join(config.accountsRoot, 'claude-usual') }
+        return account.home === null ? {} : { [definition.home.variable]: account.home }
       }
 
       const found = (agentId: string) =>
@@ -312,6 +323,17 @@ export class Accounts extends Context.Service<
             const definition = definitionOf(account.agentId)
             const made = madeHere(account)
             if (definition !== undefined && made !== undefined) link(definition, made)
+            else if (
+              definition !== undefined &&
+              account.home === null &&
+              account.agentId === 'claude-code' &&
+              config.onDevice !== undefined &&
+              config.accountsRoot !== undefined
+            ) {
+              const home = join(config.accountsRoot, 'claude-usual')
+              mkdirSync(home, { recursive: true, mode: 0o700 })
+              link(definition, home)
+            }
           }),
         add: (input) => provide(add(input)),
         rename: (accountId, name) =>

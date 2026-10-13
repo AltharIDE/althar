@@ -6,7 +6,7 @@ import { type Question, type QuestionAnswer, questionContent } from '../src/ques
 import { AgentRequestFailed, OptionUnavailable, TurnInProgress } from '../src/errors'
 import type { SessionEvent } from '../src/events'
 import type { Classified } from '../src/failures'
-import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, scenarios, WHY } from '../src/testing'
+import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, SCREENSHOT_PNG, scenarios, WHY } from '../src/testing'
 import { type ContractSubject, type Decide, text, withConnection } from './contract'
 
 const fake: ContractSubject = {
@@ -158,6 +158,7 @@ describe('AgentConnection', () => {
           steering: true,
           mcp: { http: true, sse: false },
           authMethods: [],
+          images: true,
         })
         assert.isUndefined(connection.process)
       }),
@@ -762,6 +763,29 @@ describe('AgentConnection', () => {
       }),
     )
 
+    it.live('sends images after the prompt’s text, in their order, to an agent that takes them, and none to one that doesn’t', () =>
+      Effect.gen(function* () {
+        const png = Buffer.from(SCREENSHOT_PNG, 'base64')
+        const images = [
+          { data: SCREENSHOT_PNG, mimeType: 'image/png' },
+          { data: Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString('base64'), mimeType: 'image/jpeg' },
+        ]
+        const said = (subject: ContractSubject) =>
+          withConnection(subject, (connection) =>
+            Effect.gen(function* () {
+              const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+              return { takes: connection.info.images, text: text(yield* Stream.runCollect(session.prompt('look at these', images))) }
+            }),
+          )
+        assert.deepStrictEqual(yield* said(fake), {
+          takes: true,
+          text: `saw images: image/png ${png.length} B, image/jpeg 4 B\n\necho: look at these`,
+        })
+        // One that doesn't say it takes images gets the words alone: the caller says what became of them.
+        assert.deepStrictEqual(yield* said(variant({ images: false })), { takes: false, text: 'echo: look at these' })
+      }),
+    )
+
     it.live('fills in what a bare agent leaves out', () =>
       withConnection(variant({ bare: true }), (connection) =>
         Effect.sync(() => {
@@ -773,6 +797,7 @@ describe('AgentConnection', () => {
             steering: false,
             mcp: { http: false, sse: false },
             authMethods: [],
+            images: false,
           })
         }),
       ),

@@ -3,8 +3,8 @@ import { useState } from 'react'
 import type { AgentStatus, PlanStep, TaskEnd as End } from '@althar/contracts'
 import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@althar/ui'
 
-import { waitsWords } from '../../shared/agents'
-import { type NameModel, useModelNames } from '../../shared/modelNames'
+import { queuedWords, waitsWords } from '../../shared/agents'
+import { type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { productBrand } from '../../shared/products'
 import { stepIndex, stepNames, stepText } from '../../shared/steps'
@@ -29,6 +29,7 @@ export const text = {
     [TaskStatus.Yours]: 'Needs you',
     [TaskStatus.Done]: 'Ready',
     [TaskStatus.Paused]: 'Paused',
+    [TaskStatus.Queued]: 'Waiting',
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   now: stepText.now,
@@ -76,7 +77,18 @@ const launchSteps = (plan: Plan, named: NameModel): ReadonlyArray<LaunchStep> =>
     skipped: step.skipped,
   }))
 
-function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; actions: CardActions }) {
+function PlanCard({
+  card,
+  plan,
+  actions,
+  queued,
+}: {
+  card: TaskCardContent
+  plan: Plan
+  actions: CardActions
+  /** Started, waiting for a free agent: what for. */
+  queued?: string
+}) {
   const named = useModelNames()
   // What the person changed shows at once; the runtime's copy replaces it when it comes back.
   const [shown, setShown] = useState<{ readonly from: Plan; readonly steps: ReadonlyArray<PlanStep>; readonly end: End | null }>({
@@ -117,6 +129,7 @@ function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; 
         )
       }}
       wait={COUNTDOWN}
+      {...(queued === undefined ? {} : { queued })}
       {...(plan.startsAt === null ? {} : { startsAt: Date.parse(plan.startsAt) })}
       held={card.phase === 'held'}
       onHeldChange={(held) => {
@@ -133,21 +146,30 @@ function PlanCard({ card, plan, actions }: { card: TaskCardContent; plan: Plan; 
 
 export function Card({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
   const named = useModelNames()
+  const effortOf = useEffortNames()
   if ((card.phase === 'planned' || card.phase === 'held') && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} />
+  // Started, its first step waiting for a free agent, the plan can still be changed: it says what it waits for where the clock was.
+  if (card.planWaits === true && card.queued !== null && card.plan !== null)
+    return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={queuedWords(card.queued)} />
   const steps = stepNames(card.plan?.steps ?? [])
   const at = stepIndex(steps, card.step)
-  const status = STATUS[card.phase]
-  // A step held for a usage limit says what it waits for, rather than what it does.
+  // Waiting for a free agent, it says so, rather than that it runs.
+  const status = card.queued !== null ? TaskStatus.Queued : STATUS[card.phase]
+  // A step held for a usage limit, or waiting for a free agent, says what it waits for, rather than what it does.
   const now =
     status === TaskStatus.Done
       ? card.summary?.split('\n')[0]
-      : card.waits !== null
-        ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until))
-        : card.step === null
-          ? undefined
-          : text.now[card.step]
+      : card.queued !== null
+        ? queuedWords(card.queued)
+        : card.waits !== null
+          ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until))
+          : card.step === null
+            ? undefined
+            : text.now[card.step]
   const from = fromOf(card)
+  // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
+  const effort = effortOf(card.lead, card.leadModel, card.leadEffort)
   return (
     <TaskCard
       task={card.slug}
@@ -158,6 +180,7 @@ export function Card({ card, actions }: { card: TaskCardContent; actions: CardAc
       {...(now === undefined ? {} : { now })}
       started={card.startedAt === null ? '' : ago(card.startedAt)}
       lead={named(card.lead, card.leadModel)}
+      {...(effort === null ? {} : { effort })}
       {...(card.branch === null ? {} : { branch: card.branch })}
       {...(from === undefined ? {} : { from })}
       {...(card.change === null ? {} : { pr: `${card.change.short} ${card.change.prefix}${card.change.number}` })}

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
-import { hostname } from 'node:os'
+import { existsSync, mkdirSync } from 'node:fs'
+import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
@@ -9,6 +9,7 @@ import { backupsIn, connection, databaseIn, Folders, Nudges, Secrets, SecretsUna
 import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Queue, Stream } from 'effect'
 import { net } from 'electron'
 import { editorsHere, openInEditor } from './editors'
+import { type Device, deviceHere } from './onDevice'
 import { openInBrowser, openInTerminal } from './terminal'
 
 /*
@@ -65,7 +66,7 @@ const githubApp =
   process.env.ALTHAR_GITHUB_APP === undefined || process.env.ALTHAR_GITHUB_APP === '' ? undefined : process.env.ALTHAR_GITHUB_APP
 
 /* Secrets the main process is sealing or opening, by request. */
-const sealing = new Map<string, (answer: { readonly value?: string; readonly error?: string }) => void>()
+const sealing = new Map<string, (answer: { readonly value?: string; readonly error?: string; readonly keyring?: boolean }) => void>()
 
 /** Asks the main process to seal a secret, or open one; it alone holds the key. */
 const askMain = (type: 'seal' | 'open', value: string) =>
@@ -74,7 +75,12 @@ const askMain = (type: 'seal' | 'open', value: string) =>
     sealing.set(requestId, (answer) =>
       resume(
         answer.value === undefined
-          ? Effect.fail(new SecretsUnavailable({ reason: answer.error ?? 'Althar couldn’t open its keychain.' }))
+          ? Effect.fail(
+              new SecretsUnavailable({
+                reason: answer.error ?? 'Althar couldn’t open its keychain.',
+                ...(answer.keyring === true ? { keyring: true } : {}),
+              }),
+            )
           : Effect.succeed(answer.value),
       ),
     )
@@ -103,6 +109,8 @@ const appFetch: Fetch = (input, init) => net.fetch(input, init)
 /** OpenRouter's public list of models, with each one's scores and prices (ADR-015). */
 const MODEL_LIST = 'https://openrouter.ai/api/v1/models'
 
+/* The device outside a Flatpak, once its reach is measured at startup; everything is local until then, and anywhere but a Flatpak (onDevice.ts). */
+let device: Device | undefined
 /*
  * The end-to-end tests' update that can't move the store: a migration after
  * every real one that always fails, so it is never recorded. Packaged builds
@@ -126,9 +134,32 @@ const options = {
   agentsRoot: join(profile, 'agents'),
   openTerminal: openInTerminal,
   openUrl: openInBrowser,
-  editors: { list: () => editorsHere(), open: openInEditor },
+  editors: {
+    list: () =>
+      device === undefined
+        ? editorsHere()
+        : editorsHere(homedir(), existsSync, process.platform, (known) =>
+            known.cli === undefined ? null : (device?.onDevice.where(known.cli.name) ?? null),
+          ),
+    open: (editor: string, folder: string, file: string | null, line: number | null) =>
+      device === undefined
+        ? openInEditor(editor, folder, file, line)
+        : openInEditor(editor, folder, file, line, process.platform, {
+            find: (name) => device?.onDevice.where(name) ?? null,
+            start: device.start,
+            path: device.path,
+          }),
+  },
   appVersion: process.env.ALTHAR_APP_VERSION ?? '0.0.0',
   deviceName: hostname(),
+}
+
+/** The machine the end-to-end tests name in `ALTHAR_MACHINE`, as `cores,GB`; without one, a large one: 64 cores and 256 GB. */
+const machineIn = (named: string | undefined) => {
+  const [cores, memory] = (named ?? '').split(',').map(Number)
+  return cores !== undefined && memory !== undefined && cores > 0 && memory > 0
+    ? { cores, memory: memory * 1024 ** 3 }
+    : { cores: 64, memory: 256 * 1024 ** 3 }
 }
 
 /* Ports and folders that arrive before the runtime is ready wait here. */
@@ -147,6 +178,10 @@ const storeStopped = (stopped: 'moving' | 'copying', backup: string | null, reas
   )
 
 const program = Effect.gen(function* () {
+  // In a Flatpak, the person's own agents and editors live outside the sandbox: where they are, and how to run them there.
+  device = yield* deviceHere()
+  // The Codex its adapter drives, out on the device, where Codex's own sandbox works (flatpak/codex-host.sh says why, and what to do without one).
+  if (process.env.FLATPAK_ID !== undefined) process.env.CODEX_PATH = '/app/bin/althar-host-codex'
   // The end-to-end tests drive the app against a scripted agent and a fake code host, keeping tokens in memory. Packaged builds leave this out.
   const fake =
     __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_AGENTS === '1'
@@ -162,13 +197,15 @@ const program = Effect.gen(function* () {
           // Nothing opens in Terminal while the tests drive the app.
           openTerminal: () => Effect.succeed(false),
           openUrl: () => Effect.succeed(false),
+          // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
+          busy: { machine: machineIn(process.env.ALTHAR_MACHINE) },
         }
       : undefined
   const context = yield* Layer.build(
     services(
       fake === undefined
         ? {
-            ...options,
+            ...(device === undefined ? options : { ...options, onDevice: device.onDevice, probeRoot: join(profile, 'probe') }),
             clientIds,
             ...(githubApp === undefined ? {} : { githubApp }),
             secrets,

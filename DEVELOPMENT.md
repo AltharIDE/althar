@@ -28,7 +28,7 @@ From the repository root:
 | --- | --- |
 | `bun run dev` | The pitch site, at `http://localhost:5290` |
 | `bun --filter @althar/desktop dev` | Builds the desktop app and opens it |
-| `bun --filter @althar/ui storybook` | The UI package's Storybook, at `http://localhost:6006` |
+| `bun --filter @althar/ui storybook` | The UI package's Storybook, at `http://localhost:6006` (see [Showing a change works](#showing-a-change-works) for a port of a task's own) |
 | `bun run check` | Format, type-aware lint and type checks, in every package |
 | `bun run fix` | The same, fixing what can be fixed |
 | `bun run test` | Unit and component tests, in every package |
@@ -88,6 +88,58 @@ Start from [the overview](docs/architecture/README.md), then:
 6. [Integrations and skills](docs/architecture/06-integrations-and-skills.md)
 7. [Persistence, security and cloud](docs/architecture/07-persistence-security-and-cloud.md)
 8. [Precedents and validation](docs/architecture/08-precedents-and-validation.md)
+
+## Showing a change works
+
+A change to what someone sees is shown with screenshots of the states it
+changed; a change behind the screen, with the test run or command that shows
+it. An agent leading a task in Althar hands them with `finish_step` as
+evidence, and lists what it couldn't show as unverified.
+
+There are two ways to screenshot this repository's interface, both headless:
+
+- **A component, in its Storybook story.** Start Storybook on a port of the
+  task's own (another worktree may have 6006, with its own code), and shoot the
+  story's frame with Playwright, which the desktop app already has:
+
+  ```bash
+  cd packages/ui && bunx storybook dev --port 6116 --ci --no-open &
+  cd apps/desktop && bunx playwright screenshot --viewport-size=900,900 --full-page \
+    --wait-for-selector "#storybook-root > *" --wait-for-timeout 800 \
+    "http://localhost:6116/iframe.html?id=thread-evidence--shown&viewMode=story" test-results/evidence.png
+  ```
+
+  The story's id is its title and name in kebab case (`Thread/Evidence`,
+  `Shown`); a `play` function runs first, so a story can open what it shows.
+  Add a story for a state that has none.
+
+- **The desktop app, with the fake agent.** An end-to-end spec drives the
+  built app and saves what it shows with `page.screenshot`, as
+  `apps/desktop/e2e/evidence.spec.ts` does; `bun run test:e2e e2e/your.spec.ts`
+  builds the app and runs it.
+
+Shots go in `test-results/`, which git ignores. In an agent's sandbox on a
+Mac, Chromium and Electron can't start (Chromium exits with `SIGTRAP`), so run
+the shooting command outside the sandbox; Storybook itself runs inside it,
+since a lead may listen on localhost.
+
+## Reviewing on Linux
+
+A Mac can't stand in for every Linux leg; these are run on a real
+distribution (the packaged app, not a dev build):
+
+| Leg | How | What it covers |
+| --- | --- | --- |
+| X11 | `apps/desktop/scripts/x11-smoke.sh` under a real X server and window manager (`DISPLAY=:0 ALTHAR_BIN=/usr/bin/althar`, with `ALTHAR_ARGS=--no-sandbox` where the desktop runs as root) | the window's identity, its own buttons, moving, resizing, maximizing, closing |
+| Wayland | run the packaged app on a GNOME or KDE Wayland session | the same through the compositor, and the window's own chrome under it |
+| packages | `bun run package` in `apps/desktop`, then install the deb and rpm on their real target distributions (or run the AppImage) | The AppImage build is covered in CI; `.deb` and `.rpm` installation, menu entry, icon and keyring still need later real-desktop checks. Track those follow-ups in `docs/plans/package-linux.md`. |
+| Flatpak | `apps/desktop/scripts/flatpak.sh`, then `apps/desktop/scripts/flatpak-smoke.sh` | the sandbox's own environment, the device's own tools, the keyring over the secret service (see [ADR-027](docs/decisions/027-what-the-flatpak-reaches.md); the Flatpak is experimental until a task has run under GNOME and KDE) |
+| keyring | a GNOME session (gnome-keyring) and a KDE one (KWallet 5.97+) | sealing a sign-in, and reopening it after a restart |
+
+CI runs the end-to-end suite with the fake agent under Xvfb instead; the legs
+above are for a real desktop, and what each covers is what the Linux packaging
+change promises.
+
 
 ## Changes and CI
 

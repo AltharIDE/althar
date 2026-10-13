@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -20,6 +20,11 @@ import { servicesFor, withServices } from './render'
 function Task({ onBack = vi.fn() }: { onBack?: () => void }) {
   return <TaskView model={useTask('th1')} onBack={onBack} />
 }
+
+/** A PNG's signature and header, 1 by 1: enough for the window to read it as one. */
+const PNG = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0,
+])
 
 const thread = (overrides: Partial<ThreadSnapshot> = {}) =>
   snapshot({
@@ -594,6 +599,185 @@ describe('a task', () => {
     )
   })
 
+  it('sends images dropped on its composer with what the person says, and shows them in the thread at once', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'shot.png' })).toBeTruthy()
+    await userEvent.type(box, 'Look at this{Enter}')
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'th1',
+        body: 'Look at this',
+        disposition: 'after_current',
+        images: [{ data: Buffer.from(PNG).toString('base64'), name: 'shot.png' }],
+      }),
+    )
+    // Out of the composer, and on the message in the thread, drawn from its own bytes.
+    expect(screen.queryByRole('list', { name: /to send/ })).toBeNull()
+    expect(screen.getByRole('button', { name: 'View shot.png' })).toBeTruthy()
+    // Words sent on their own go as before.
+    await userEvent.type(box, 'And this{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenLastCalledWith({ threadId: 'th1', body: 'And this', disposition: 'after_current' }))
+  })
+
+  it('puts a message Althar didn’t take back in the composer, its words and its images, to send again', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    vi.mocked(client.send).mockRejectedValueOnce(
+      new ApiError({ reason: 'ImageRefused', message: 'Althar has nowhere to keep images here.' }),
+    )
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'shot.png' })).toBeTruthy()
+    await userEvent.type(box, 'Look at this{Enter}')
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('Look at this'))
+    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'View shot.png' })).toBeNull()
+    // Sent again, it goes as it was.
+    await userEvent.type(box, '{Enter}')
+    await waitFor(() =>
+      expect(client.send).toHaveBeenLastCalledWith({
+        threadId: 'th1',
+        body: 'Look at this',
+        disposition: 'after_current',
+        images: [{ data: Buffer.from(PNG).toString('base64'), name: 'shot.png' }],
+      }),
+    )
+  })
+
+  it('keeps a message Althar queued where it is when the lead it starts or resumes doesn’t, so it is never sent twice', async () => {
+    const base = snapshot()
+    const stopped = (actions: ThreadSnapshot['task']['actions']) =>
+      thread({ task: { ...base.task, lead: { agentId: 'claude-code', model: 'claude-opus-5', account: null }, actions }, session: null })
+    for (const [actions, starting] of [
+      [[], 'startSession'],
+      [['resume'], 'resumeTask'],
+    ] as const) {
+      const { client } = fakeClient({ getThread: vi.fn(async () => stopped([...actions])) })
+      vi.mocked(client[starting]).mockRejectedValueOnce(new ApiError({ reason: 'SessionFailed', message: "Claude Code couldn't start." }))
+      const view = withServices(<Task />, client)
+      await waitFor(() => expect(client.status).toHaveBeenCalled())
+      const box = await screen.findByRole('textbox', { name: /^Tell .* something$/ })
+      fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+      expect(await screen.findByRole('img', { name: 'shot.png' })).toBeTruthy()
+      await userEvent.type(box, 'Carry on{Enter}')
+      expect(await screen.findByText("Claude Code couldn't start.")).toBeTruthy()
+      expect(client[starting]).toHaveBeenCalled()
+      // Queued, it stays in the thread, and the composer stays empty: nothing to send again.
+      expect(screen.getByText('Carry on', { selector: 'p' })).toBeTruthy()
+      expect((box as HTMLTextAreaElement).value).toBe('')
+      expect(screen.queryByRole('list', { name: /to send/ })).toBeNull()
+      await userEvent.type(box, '{Enter}')
+      expect(client.send).toHaveBeenCalledTimes(1)
+      view.unmount()
+    }
+  })
+
+  it('keeps the agent picked to take over, and what was said, when the handover doesn’t go', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    vi.mocked(client.switchAgent).mockRejectedValueOnce(new Error('Althar is restarting.'))
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    await userEvent.keyboard('{Escape}')
+    await userEvent.type(box, 'Over to you{Enter}')
+    expect(await screen.findByRole('alert')).toBeTruthy()
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('Over to you'))
+    expect(screen.getByText(/gpt-5\.2-codex takes over from Claude Opus when you send\./)).toBeTruthy()
+  })
+
+  it('leaves a queued message in the queue when its images wouldn’t fit beside those waiting', async () => {
+    const picture = (n: number) => ({
+      digest: n.toString(16).padStart(64, '0'),
+      mediaType: 'image/png',
+      bytes: 68,
+      width: 1,
+      height: 1,
+      name: `${n}.png`,
+      unkept: null,
+    })
+    const queued = items.you(
+      'All of these',
+      { state: 'queued', interrupting: false },
+      [],
+      Array.from({ length: 10 }, (_, n) => picture(n)),
+    )
+    const { client } = fakeClient({ getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })) })
+    withServices(<Task />, client)
+    const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the lead' })
+    fireEvent.drop(busy, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'shot.png' })).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    expect(
+      await screen.findByText('Its images don’t fit beside these: a message can carry at most 10 images. Remove some first.'),
+    ).toBeTruthy()
+    expect(client.takeBack).not.toHaveBeenCalled()
+    expect(screen.getByRole('region', { name: 'Queued; the lead reads it next' })).toBeTruthy()
+    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+  })
+
+  it('takes no images for a lead that doesn’t take them, and holds back those added before another was picked', async () => {
+    const base = thread()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({
+        ...base,
+        session: base.session === null ? null : { ...base.session, agentId: 'codex', agentName: 'Codex' },
+      })),
+    })
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell Codex something' })
+    await waitFor(() => expect(client.getModels).toHaveBeenCalled())
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await screen.findByText('Codex doesn’t take images, so they can’t be sent to it.')).toBeTruthy()
+    expect(screen.queryByRole('img', { name: 'shot.png' })).toBeNull()
+  })
+
+  it('holds a message back, saying why, when the agent picked to take over doesn’t take images', async () => {
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    withServices(<Task />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell Claude Code something' })
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'shot.png' })).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Lead: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
+    await userEvent.keyboard('{Escape}')
+    expect(await screen.findByText('Codex doesn’t take images. Remove them to send this, or pick an agent that does.')).toBeTruthy()
+    await userEvent.type(box, 'Over to you{Enter}')
+    expect(client.switchAgent).not.toHaveBeenCalled()
+    expect((box as HTMLTextAreaElement).value).toBe('Over to you')
+    // Taken off, the message goes.
+    await userEvent.click(screen.getByRole('button', { name: 'Remove shot.png' }))
+    await userEvent.type(box, '{Enter}')
+    await waitFor(() =>
+      expect(client.switchAgent).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2-codex', body: 'Over to you' }),
+    )
+  })
+
+  it('puts a queued message back in the composer with its images, which go again by their digests', async () => {
+    const picture = { digest: 'f'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null }
+    const queued = items.you('Like this', { state: 'queued', interrupting: false }, [], [picture])
+    const { client } = fakeClient({ getThread: vi.fn(async () => running({ items: [items.you('Add a retry'), queued] })) })
+    withServices(<Task />, client)
+    const busy = await screen.findByRole('textbox', { name: 'Add to the queue, or interrupt the lead' })
+    // The queue says what went with it.
+    expect(screen.getByText('1 image')).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    expect(await screen.findByRole('img', { name: 'shot.png' })).toHaveProperty('src', `althar-picture://shot/${'f'.repeat(64)}?w=1120`)
+    await userEvent.type(busy, ' too{Enter}')
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'th1',
+        body: 'Like this too',
+        disposition: 'after_current',
+        images: [{ digest: 'f'.repeat(64), name: 'shot.png' }],
+      }),
+    )
+  })
+
   it('names its lead by model, with the agent and account it runs on said on hover, and switches a model off from every model', async () => {
     const base = thread()
     const { client } = fakeClient({
@@ -613,7 +797,7 @@ describe('a task', () => {
     expect(client.setModelBlocked).toHaveBeenLastCalledWith({ agentId: 'claude-code', model: 'sonnet', blocked: true })
   })
 
-  it('shows what the person sends at once, before Althar has it, and takes it out again if the send fails', async () => {
+  it('shows what the person sends at once, before Althar has it, and takes it out of the thread again if the send fails', async () => {
     let answer: () => void = () => undefined
     let refuse: (failure: Error) => void = () => undefined
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
@@ -628,8 +812,10 @@ describe('a task', () => {
     await userEvent.type(box, 'Never mind{Enter}')
     expect(screen.getByText('Never mind')).toBeTruthy()
     refuse(new Error('Althar is restarting.'))
-    await waitFor(() => expect(screen.queryByText('Never mind')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Never mind', { selector: 'p' })).toBeNull())
     expect(await screen.findByRole('alert')).toBeTruthy()
+    // Back in the composer, to send again.
+    expect((box as HTMLTextAreaElement).value).toBe('Never mind')
   })
 
   it('takes back a queued message, or puts it back in the composer to change', async () => {
@@ -706,6 +892,39 @@ describe('a task', () => {
     expect(screen.getByText('Stopped')).toBeTruthy()
     await userEvent.click(screen.getByRole('menuitem', { name: /Resume/ }))
     await waitFor(() => expect(client.resumeTask).toHaveBeenCalledWith({ taskId: 't1' }))
+  })
+
+  it('offers how its conflicts go, as its project says or otherwise, and nothing beside the menu while it goes by the project', async () => {
+    const { client } = await taskMenu({ resolveConflicts: { task: null, project: true } })
+    expect(screen.getByRole('menuitemradio', { name: /Use the project setting/ }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByText('It’s on for this project.')).toBeTruthy()
+    expect(screen.queryByText('Auto-resolve conflicts: on')).toBeNull()
+    await userEvent.click(screen.getByRole('menuitemradio', { name: /Off for this task/ }))
+    await waitFor(() => expect(client.setTaskResolveConflicts).toHaveBeenCalledWith({ taskId: 't1', resolveConflicts: false }))
+  })
+
+  it('says beside its menu where its lead resolves conflicts otherwise than its project, and not where it is the same', async () => {
+    const shownFor = async (own: boolean, project: boolean) => {
+      const { client } = fakeClient({
+        getThread: vi.fn(async () => thread({ task: { ...thread().task, resolveConflicts: { task: own, project } } })),
+      })
+      const view = withServices(<Task />, client)
+      await screen.findByRole('button', { name: 'More for this task' })
+      const said = [screen.queryByText('Auto-resolve conflicts: on'), screen.queryByText('Auto-resolve conflicts: off')].map(
+        (one) => one !== null,
+      )
+      view.unmount()
+      return said
+    }
+    expect(await shownFor(true, false)).toEqual([true, false])
+    expect(await shownFor(false, true)).toEqual([false, true])
+    expect(await shownFor(true, true)).toEqual([false, false])
+  })
+
+  it('offers no say on its conflicts once it settles', async () => {
+    const { offered } = await taskMenu({ phase: 'settled', state: 'done', actions: [] }, null)
+    expect(offered).toEqual(['Open in Zed'])
+    expect(screen.queryByRole('menuitemradio')).toBeNull()
   })
 
   it('offers starting its plan now while it waits to start', async () => {
@@ -1208,7 +1427,7 @@ describe('a task', () => {
       stuckWords.what({ step: 'implement', why, detail, agentId: null, round: 0, open }, 'Codex')
     expect([at('session_ended'), at('restarted'), at('failed_to_start'), at('round_limit', null, 1), at('usage_limit')]).toEqual([
       'Codex stopped before the step was done.',
-      'Althar restarted while this step was running.',
+      'Althar stopped again soon after it carried this step on after a restart, so it waits for you rather than start Codex once more.',
       "Codex couldn't start.",
       "Three rounds of review are done, and the lead's last changes haven't been reviewed. One finding is still open.",
       "Codex reached its usage limit and didn't say when it resets.",
@@ -1263,6 +1482,25 @@ describe('a task', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Start Codex again' }))
     await waitFor(() =>
       expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st7', answer: { kind: 'retry', agentId: 'codex' } }),
+    )
+  })
+
+  it('starts a step restarts kept stopping again, on its agent, as the person says', async () => {
+    const restarted = {
+      id: 'st8',
+      kind: 'stuck' as const,
+      title: 'Implement',
+      reason: '',
+      command: null,
+      createdAt: '2026-09-29T12:00:00.000Z',
+      stuck: { step: 'implement' as const, why: 'restarted' as const, detail: null, agentId: 'codex', round: 0, open: 0 },
+    }
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [restarted] })) })
+    withServices(<Task />, client)
+    await screen.findByText(/Althar stopped again soon after it carried this step on after a restart/)
+    await userEvent.click(screen.getByRole('button', { name: 'Start Codex again' }))
+    await waitFor(() =>
+      expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st8', answer: { kind: 'retry', agentId: 'codex' } }),
     )
   })
 
@@ -1611,6 +1849,14 @@ describe('a task', () => {
       status: TaskStatus.Paused,
       state: `Waits for Codex, back at ${clock(until)}`,
     })
+    // One waiting for a free agent says how many are busy, of how many this Mac runs at once; past that, both.
+    expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 4, atOnce: 4 } } })).toEqual({
+      status: TaskStatus.Queued,
+      state: 'Waiting: 4 of 4 agents busy on this Mac',
+    })
+    expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 6, atOnce: 2 } } }).state).toBe(
+      'Waiting: 6 agents busy on this Mac, which runs 2 at once',
+    )
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
     expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })
     // Ready, accepting it is the person's; settled, it is done.

@@ -3,16 +3,45 @@ name: desktop
 on:
   push:
     branches: [main]
-    paths: ['apps/desktop/**', 'packages/connectors/**', 'packages/contracts/**', 'packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/desktop.yml']
+    paths:
+      [
+        'apps/desktop/**',
+        'packages/connectors/**',
+        'packages/contracts/**',
+        'packages/domain/**',
+        'packages/persistence-sqlite/**',
+        'packages/provider-adapters/**',
+        'packages/runtime/**',
+        'packages/ui/**',
+        'package.json',
+        'bun.lock',
+        'vite.config.ts',
+        '.github/workflows/desktop.yml',
+      ]
   pull_request:
-    paths: ['apps/desktop/**', 'packages/connectors/**', 'packages/contracts/**', 'packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/desktop.yml']
+    paths:
+      [
+        'apps/desktop/**',
+        'packages/connectors/**',
+        'packages/contracts/**',
+        'packages/domain/**',
+        'packages/persistence-sqlite/**',
+        'packages/provider-adapters/**',
+        'packages/runtime/**',
+        'packages/ui/**',
+        'package.json',
+        'bun.lock',
+        'vite.config.ts',
+        '.github/workflows/desktop.yml',
+      ]
 
 permissions:
   contents: read
 
 concurrency:
   group: desktop-${{ github.ref }}
-  cancel-in-progress: true
+  # A run for main runs to the end; everywhere else a newer push takes over.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   verify:
@@ -35,11 +64,41 @@ jobs:
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: bun run check
       - run: bun run test:coverage
-      # The end-to-end tests run the built app, with the fake agent, on a virtual display.
-      - run: xvfb-run --auto-servernum bun run test:e2e
+      # The end-to-end tests run the built app, with the fake agent, on a virtual display, with a keyring:
+      # a runner's desktop isn't one Electron recognises, so it would fall back to plain text, which Althar
+      # refuses; the main process asks for libsecret (keyring.ts), and gnome-keyring answers.
+      - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0
+      - run: dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e'
       - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: desktop-e2e
           path: apps/desktop/test-results
           retention-days: 7
+
+  # The packages as a build test on every branch: a broken package shows on the pull request.
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run package
+      - uses: actions/upload-artifact@v6
+        with:
+          name: desktop-packages
+          path: |
+            apps/desktop/out/dist/Althar-*.AppImage
+            apps/desktop/out/dist/althar_*.deb
+            apps/desktop/out/dist/althar-*.rpm
+          if-no-files-found: error

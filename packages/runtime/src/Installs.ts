@@ -4,7 +4,15 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, r
 import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
-import { type AgentDefinition, type AgentDownload, isMusl, locate, type Located, programName } from '@althar/provider-adapters'
+import {
+  type AgentDefinition,
+  type AgentDownload,
+  isMusl,
+  type LaunchSpec,
+  locate,
+  type Located,
+  programName,
+} from '@althar/provider-adapters'
 import { Context, Effect, Layer, Ref, Schema } from 'effect'
 
 /*
@@ -40,6 +48,21 @@ export interface InstallState {
   readonly installing: boolean
 }
 
+/**
+ * The device outside this process's sandbox: where the person's own commands
+ * are, and how one runs there. A Flatpak's app fills it in — the sandbox
+ * cannot see the person's installs, `flatpak-spawn` reaches them — and every
+ * other way of running has none, so nothing changes (the desktop binds it).
+ */
+export interface OnDevice {
+  /** Whether the device can be reached at all; where it can't, a run still goes out there so the failure says what to put right (`words.ts`). */
+  readonly reachable: boolean
+  /** Where a command by this name is on the device: its full path, or null where it isn't there. */
+  where(command: string): string | null
+  /** How a launch that names one of the person's own commands runs on the device, with this cwd and environment. */
+  run(spec: LaunchSpec, at: { readonly cwd?: string; readonly env: Readonly<Record<string, string | undefined>> }): LaunchSpec
+}
+
 export interface InstallsOptions {
   /** Where downloaded agents are kept; without it, Althar downloads none. */
   readonly root?: string | undefined
@@ -50,6 +73,12 @@ export interface InstallsOptions {
   readonly musl?: boolean
   /** Where the person's own commands are looked for: their PATH and the usual places; tests give their own. */
   readonly search?: { readonly env: Readonly<Record<string, string | undefined>>; readonly dirs: ReadonlyArray<string> }
+  /**
+   * The device outside a sandbox that cannot see it (a Flatpak): the person's
+   * own commands are found and run out there, before any copy that is here;
+   * without it, everything is looked for and run here, as always.
+   */
+  readonly onDevice?: OnDevice | undefined
 }
 
 interface Release {
@@ -119,11 +148,29 @@ export class Installs extends Context.Service<
         const locateOf = (definition: AgentDefinition): Located | null => {
           const cli = definition.cli
           if (cli === undefined) return null
-          const copies = { bundled: cli.bundled?.() ?? null, kept: cli.download === undefined ? null : kept(definition, cli.name) }
-          return locate(cli.name, copies, {
+          const onDevice = options.onDevice
+          const outThere = (command: string): Located =>
+            onDevice === undefined
+              ? { command, whose: 'theirs' }
+              : { command, whose: 'theirs', out: (spec) => (at) => onDevice.run(spec, at) }
+          const keptCopy = cli.download === undefined ? null : kept(definition, cli.name)
+          // In a sandbox that cannot see the device, a copy downloaded at the person's asking keeps running in the sandbox, where it was kept;
+          // the person's own install on the device is the one that runs where they have none of Althar's.
+          if (onDevice?.reachable === true) {
+            const downloaded =
+              keptCopy === null ? null : locate(cli.name, { bundled: null, kept: keptCopy }, { platform, env: {}, dirs: [] })
+            if (downloaded !== null) return downloaded
+            const there = onDevice.where(cli.name)
+            if (there !== null) return outThere(there)
+          }
+          const copies = { bundled: cli.bundled?.() ?? null, kept: keptCopy }
+          const here = locate(cli.name, copies, {
             platform,
             ...(options.search === undefined ? {} : { env: options.search.env, dirs: options.search.dirs }),
           })
+          if (here !== null || onDevice === undefined || onDevice.reachable) return here
+          // The device cannot be reached, and there is no copy here: the run goes out there anyway, so the person hears what to put right, not "isn't installed".
+          return outThere(cli.name)
         }
 
         /** The agent's latest release, and its file for this device with the digest GitHub gives it. */

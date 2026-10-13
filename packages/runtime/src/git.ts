@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
 import { Effect } from 'effect'
@@ -13,8 +13,28 @@ import { GitFailed } from './errors'
  * prompt: a command that would ask for a password fails instead. They run
  * with the repository's hooks off (docs/architecture/07): adding a worktree
  * would otherwise run its `post-checkout` hook, code from the repository, on
- * the person's machine.
+ * the person's machine. A picked folder's path is the document portal's FUSE
+ * mount inside a Flatpak, where git's own getcwd fails — `git -C <portal>
+ * status` answers "unable to get current working directory" — so exactly
+ * there the git directory and work tree are named outright, and the child is
+ * given the app home as a known-existing cwd. Inheriting the app's cwd is not
+ * safe: it may itself be a document-portal path whose grant has gone away.
+ * Everywhere else the process starts in the folder, as it always has.
  */
+
+/** Where a picked folder is inside a Flatpak: the document portal's FUSE mount, where a cwd makes getcwd fail. */
+const PORTAL = '/run/flatpak/doc'
+
+/**
+ * How a git command runs in `cwd`: for the portal's FUSE mount, its git
+ * directory and work tree are named, and the child starts in the app home,
+ * never inheriting a possibly stale portal cwd; everywhere else it starts in
+ * the folder itself.
+ */
+export const gitIn = (cwd: string, args: ReadonlyArray<string>): { readonly args: ReadonlyArray<string>; readonly cwd?: string } =>
+  cwd === PORTAL || cwd.startsWith(`${PORTAL}/`)
+    ? { args: ['--git-dir', join(cwd, '.git'), '--work-tree', cwd, ...args], cwd: homedir() }
+    : { args, cwd }
 
 export const git = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> => gitWithin(60_000, cwd, ...args)
 
@@ -28,10 +48,16 @@ export const gitOutcome = (
   ...args: ReadonlyArray<string>
 ): Effect.Effect<{ readonly code: number; readonly stdout: string }> =>
   Effect.callback<{ readonly code: number; readonly stdout: string }>((resume) => {
+    const at = gitIn(cwd, ['-c', 'core.hooksPath=/dev/null', ...args])
     execFile(
       'git',
-      ['-c', 'core.hooksPath=/dev/null', ...args],
-      { cwd, timeout: 60_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' } },
+      [...at.args],
+      {
+        ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
+        timeout: 60_000,
+        maxBuffer: 16 * 1024 * 1024,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+      },
       (error, stdout) =>
         resume(Effect.succeed({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 128, stdout: stdout.trim() })),
     )
@@ -51,10 +77,16 @@ const run = (
   input?: string,
 ): Effect.Effect<string, GitFailed> =>
   Effect.callback<string, GitFailed>((resume) => {
+    const at = gitIn(cwd, ['-c', 'core.hooksPath=/dev/null', ...args])
     const child = execFile(
       'git',
-      ['-c', 'core.hooksPath=/dev/null', ...args],
-      { cwd, timeout, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...env } },
+      [...at.args],
+      {
+        ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
+        timeout,
+        maxBuffer: 16 * 1024 * 1024,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...env },
+      },
       (error, stdout, stderr) =>
         resume(
           error === null
@@ -180,15 +212,29 @@ export const recommit = (cwd: string, record: CommitRecord, parents: ReadonlyArr
     message,
   )
 
+/** The environment that signs git in to a remote by URL: the header goes through it, so it is in no process's arguments. */
+const signedIn = (target: { readonly header: string | null }): Record<string, string> =>
+  target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header }
+
 /** The commit a remote's branch is on, asked of the remote by URL, as a push would be: null where it has no such branch, or can't be asked. */
 export const remoteTip = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string) =>
+  run(60_000, cwd, ['ls-remote', '--heads', target.url, `refs/heads/${branch}`], signedIn(target)).pipe(
+    Effect.map((listed) => /^[0-9a-f]{40,64}/.exec(listed)?.[0] ?? null),
+    Effect.orElseSucceed(() => null),
+  )
+
+/**
+ * Fetches a remote's branch by URL into a ref here, as a push is signed in:
+ * the commit it is at, or null where it can't be fetched.
+ */
+export const fetchInto = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string, ref: string) =>
   run(
-    60_000,
+    120_000,
     cwd,
-    ['ls-remote', '--heads', target.url, `refs/heads/${branch}`],
+    ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', target.url, `+refs/heads/${branch}:${ref}`],
     target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
   ).pipe(
-    Effect.map((listed) => /^[0-9a-f]{40,64}/.exec(listed)?.[0] ?? null),
+    Effect.andThen(commitOf(cwd, ref)),
     Effect.orElseSucceed(() => null),
   )
 
@@ -345,10 +391,16 @@ export const commitsAhead = (cwd: string, base: string, head = 'HEAD') =>
 export const onHead = (cwd: string, commit: string) =>
   Effect.match(git(cwd, 'merge-base', '--is-ancestor', commit, 'HEAD'), { onFailure: () => false, onSuccess: () => true })
 
+/** Where Althar keeps, by branch, the commit it last pushed of it: evidence the branch is published that git's own refs don't have. */
+export const PUSHED = 'refs/althar/pushed/'
+
 /**
- * Pushes HEAD to a branch of a remote by URL, never forced. The header that
- * signs the push in goes to git through its environment, so it is in no
- * process's arguments.
+ * Pushes HEAD to a branch of a remote by URL, never forced, unless `lease`
+ * names the commit the branch must still be on there: then it replaces what
+ * the branch has, and only that (`--force-with-lease`), so commits someone
+ * else pushed meanwhile are never lost. Pushed, the branch is kept under
+ * `PUSHED`. The header that signs the push in goes to git through its
+ * environment, so it is in no process's arguments.
  */
 export const pushTo = (
   cwd: string,
@@ -356,12 +408,23 @@ export const pushTo = (
   branch: string,
   /** What is pushed: the worktree's head, or a commit the person saw. */
   commit = 'HEAD',
+  lease?: string,
 ) =>
   run(
     120_000,
     cwd,
-    ['push', '--quiet', '--no-verify', target.url, `${commit}:refs/heads/${branch}`],
-    target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
+    [
+      'push',
+      '--quiet',
+      '--no-verify',
+      ...(lease === undefined ? [] : [`--force-with-lease=refs/heads/${branch}:${lease}`]),
+      target.url,
+      `${commit}:refs/heads/${branch}`,
+    ],
+    signedIn(target),
+  ).pipe(
+    // A push by URL moves no remote-tracking ref: Althar keeps its own, so the branch is known here to be published.
+    Effect.tap(() => Effect.ignore(git(cwd, 'update-ref', `${PUSHED}${branch}`, commit))),
   )
 
 /**

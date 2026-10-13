@@ -1,4 +1,4 @@
-import { type SignInCheck, signInCheck, type SignInStatus } from '@althar/provider-adapters'
+import { adapterNode, type SignInCheck, signInCheck, type SignInStatus } from '@althar/provider-adapters'
 import { Context, Duration, Effect, Layer } from 'effect'
 import type { SqlError } from 'effect/sql'
 
@@ -43,7 +43,8 @@ export class SignIns extends Context.Service<
           if (!recheck && last !== undefined && Date.now() - last.at < Duration.toMillis(TTL)) return last.check
           const entry = agents.list.find((candidate) => candidate.definition.id === of.agentId)
           if (entry === undefined) return UNKNOWN
-          const checked = yield* signInCheck(entry.definition, process.execPath, accounts.env(of))
+          yield* accounts.prepare(of)
+          const checked = yield* signInCheck(entry.definition, adapterNode(), accounts.env(of))
           known.set(of.id, { check: checked, at: Date.now() })
           return checked
         })

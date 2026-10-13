@@ -421,6 +421,9 @@ describe('Trello', () => {
       const link = { url: 'https://github.com/meridian/api/pull/12', title: 'PR #12' }
       yield* tracker.link(found, link)
       yield* tracker.link(found, link)
+      // Which list is in progress is the board's own: a card stays in its list.
+      assert.deepStrictEqual(yield* tracker.start(found), { moved: false, status: found.status })
+      assert.isFalse(tracker.capabilities.starts)
       assert.deepStrictEqual(
         sent.map((request) => [request.method, request.url.replace(`${API}/cards/5c4a1edbee21d48246c126b2`, ''), request.body]),
         [

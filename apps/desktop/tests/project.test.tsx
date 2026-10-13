@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -345,6 +345,88 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledWith('pln1')
   })
 
+  it('lets the person change a started plan while its first step waits for a free agent, saying what it waits for', async () => {
+    const waitingCard = card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4 }, planWaits: true })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
+    withServices(<Project />, client)
+    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
+    // Nothing to start or hold: it starts on its own once an agent is free.
+    expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Hold' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    await waitFor(() =>
+      expect(client.changePlan).toHaveBeenLastCalledWith(
+        'pln1',
+        [
+          { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        null,
+      ),
+    )
+  })
+
+  it('shows the effort the coordinator picked for a step as one the person chose, keeps it, and lets the person change it', async () => {
+    const plan = {
+      ...card().plan!,
+      steps: [
+        { key: 'implement' as const, agentId: 'claude-code', model: 'opus', effort: 'high', skipped: false },
+        { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+      ],
+    }
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(card({ plan }))] })) })
+    withServices(<Project />, client)
+    // The lead at the coordinator's effort; the review, which it left out, at the model's own.
+    expect(await screen.findByRole('button', { name: 'Lead for this task: Claude Opus High' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Review: gpt-5.2-codex Medium' })).toBeTruthy()
+    // Skipping the review keeps it.
+    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    await waitFor(() =>
+      expect(client.changePlan).toHaveBeenLastCalledWith(
+        'pln1',
+        [
+          { key: 'implement', agentId: 'claude-code', model: 'opus', effort: 'high', skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        null,
+      ),
+    )
+    // The person changes it as they would their own.
+    await userEvent.click(screen.getByRole('button', { name: 'Lead for this task: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'Low' }))
+    await waitFor(() =>
+      expect(client.changePlan).toHaveBeenLastCalledWith(
+        'pln1',
+        [
+          { key: 'implement', agentId: 'claude-code', model: 'opus', effort: 'low', skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        null,
+      ),
+    )
+  })
+
+  it('says beside a running task’s lead how hard it thinks, and nothing where that isn’t known', async () => {
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          items: [
+            // A mini task, which has no plan's card to show it.
+            items.card(card({ phase: 'running', step: 'implement', plan: null, leadModel: 'opus', leadEffort: 'high' })),
+            items.card(card({ taskId: 't2', slug: 'tidy', title: 'Tidy', phase: 'running', step: 'review', leadModel: 'sonnet' })),
+          ],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    const running = await screen.findByRole('article', { name: 'Add a retry' })
+    expect(within(running).getByText('Claude Opus')).toBeTruthy()
+    expect(within(running).getByText('High')).toBeTruthy()
+    const tidy = screen.getByRole('article', { name: 'Tidy' })
+    expect(within(tidy).getByText('Claude Sonnet')).toBeTruthy()
+    expect(within(tidy).queryByText(/^(Low|Medium|High)$/)).toBeNull()
+  })
+
   it('talks to the coordinator on the agent last used, or on another the person picks', async () => {
     const { client } = fakeClient()
     withServices(<Project />, client)
@@ -352,7 +434,9 @@ describe('the Talk room', () => {
     const box = screen.getByRole('textbox', { name: 'Tell the coordinator something' })
     await userEvent.type(box, 'Add a retry{Enter}')
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Add a retry', disposition: 'after_current' }))
-    expect(client.startSession).not.toHaveBeenCalled()
+    // Started first, as it ran last, so a send that fails was never queued.
+    expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code' })
+    expect(vi.mocked(client.startSession).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.send).mock.invocationCallOrder[0] ?? 0)
 
     await userEvent.click(screen.getByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
     await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
@@ -391,6 +475,61 @@ describe('the Talk room', () => {
     expect(await screen.findByRole('button', { name: 'Coordinator: Claude Sonnet Medium' })).toBeTruthy()
     await userEvent.type(screen.getByRole('textbox', { name: 'Tell the coordinator something' }), 'Hello{Enter}')
     await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code', model: 'sonnet' }))
+  })
+
+  it('sends images dropped on its composer with what the person says to it', async () => {
+    const { client } = fakeClient()
+    withServices(<Project />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 2,
+    ])
+    fireEvent.paste(box, { clipboardData: { files: [new File([png], '', { type: 'image/png' })], types: ['Files'] } })
+    expect(await screen.findByRole('img', { name: 'Pasted image' })).toBeTruthy()
+    await userEvent.type(box, 'This is the bug{Enter}')
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'thc',
+        body: 'This is the bug',
+        disposition: 'after_current',
+        images: [{ data: Buffer.from(png).toString('base64'), name: 'Pasted image' }],
+      }),
+    )
+    expect(screen.getByRole('button', { name: 'View Pasted image' })).toBeTruthy()
+  })
+
+  it('puts what the person said, and its images, back in its composer when Althar didn’t take it', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.send).mockRejectedValueOnce(new Error('Althar is restarting.'))
+    withServices(<Project />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 2,
+    ])
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([png], 'bug.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'bug.png' })).toBeTruthy()
+    await userEvent.type(box, 'This is the bug{Enter}')
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('This is the bug'))
+    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+    expect(screen.getByRole('img', { name: 'bug.png' })).toBeTruthy()
+  })
+
+  it('puts what was said back when the coordinator didn’t start, since nothing was queued, and sends on past one already starting', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.startSession).mockRejectedValueOnce(new ApiError({ reason: 'SessionFailed', message: "Claude Code couldn't start." }))
+    withServices(<Project />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    await userEvent.type(box, 'Plan it{Enter}')
+    expect(await screen.findByText("Claude Code couldn't start.")).toBeTruthy()
+    expect(client.send).not.toHaveBeenCalled()
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('Plan it'))
+    // One already starting, as from a message just before, takes this one next.
+    vi.mocked(client.startSession).mockRejectedValueOnce(
+      new ApiError({ reason: 'SessionRunning', message: 'An agent is already working on this task.' }),
+    )
+    await userEvent.type(box, '{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Plan it', disposition: 'after_current' }))
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe(''))
   })
 
   it("says when the agent it last ran on isn't signed in, and starts it on one that is", async () => {
@@ -597,12 +736,14 @@ describe('what can go wrong', () => {
 })
 
 describe('a send to the coordinator that fails', () => {
-  it('takes its copy out of the conversation again, and says why', async () => {
+  it('takes its copy out of the conversation again, says why, and puts what was said back in the composer', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     vi.mocked(client.send).mockRejectedValueOnce(new ApiError({ reason: 'NotFound', message: 'The project went away.' }))
     withServices(<Project />, client)
-    await userEvent.type(await screen.findByRole('textbox', { name: 'Tell the coordinator something' }), 'Plan it{Enter}')
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    await userEvent.type(box, 'Plan it{Enter}')
     expect(await screen.findByText('The project went away.')).toBeTruthy()
-    expect(screen.queryByText('Plan it')).toBeNull()
+    expect(screen.queryByText('Plan it', { selector: 'p' })).toBeNull()
+    expect((box as HTMLTextAreaElement).value).toBe('Plan it')
   })
 })

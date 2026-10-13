@@ -5,7 +5,17 @@ import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
 import { AdfNode, adfOf, markdownOfAdf, markdownOfWiki, wikiOf } from './jiraText'
-import type { Account, Container, Issue, Person, Priority, StatusCategory, Tracker } from './model'
+import {
+  type Account,
+  type Container,
+  type Issue,
+  leftAsItIs,
+  type Person,
+  type Priority,
+  type StatusCategory,
+  type Tracker,
+  unstarted,
+} from './model'
 import { type Answer, answered, failedOf, probe, readAs, refusalOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
@@ -136,6 +146,17 @@ const Project = Schema.Struct({ id: Schema.String, key: Schema.String, name: Sch
 const IssueType = Schema.Struct({ id: Schema.String, name: Schema.String, subtask: Schema.optional(Schema.Boolean) })
 const IssueTypes = Schema.Struct({ issueTypes: Schema.optional(Schema.Array(IssueType)), values: Schema.optional(Schema.Array(IssueType)) })
 
+/** The transitions an issue's workflow offers it now, each into a status and its category. */
+const Transitions = Schema.Struct({
+  transitions: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      isAvailable: Schema.optional(Schema.Boolean),
+      to: Schema.Struct({ name: Schema.String, statusCategory: Schema.optional(Schema.Struct({ key: Schema.String })) }),
+    }),
+  ),
+})
+
 /** The type an issue Althar files is: a Task where the project has one, or else its first that isn't a sub-task, which needs a parent. */
 const issueTypeOf = (types: typeof IssueTypes.Type) => {
   const all = types.issueTypes ?? types.values ?? []
@@ -240,7 +261,7 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
 
   return {
     product,
-    capabilities: { links: true },
+    capabilities: { links: true, starts: true },
     account,
     issue,
     mine: (options = {}) => {
@@ -272,6 +293,19 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
           }),
         ),
       ),
+    // By the first transition the workflow offers it into a status of In Progress's category, as Jira lists them.
+    start: (issue) =>
+      Effect.gen(function* () {
+        if (!unstarted(issue.status.category)) return leftAsItIs(issue)
+        const { transitions } = yield* call((root) => http.json(Transitions, 'GET', `${root}${issuePath(issue.ref)}/transitions`))
+        const into = transitions.find((each) => each.isAvailable !== false && each.to.statusCategory?.key === 'indeterminate')
+        if (into === undefined)
+          return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Its workflow has no way into In Progress from here' })
+        yield* call((root) =>
+          http.json(Schema.Unknown, 'POST', `${root}${issuePath(issue.ref)}/transitions`, { transition: { id: into.id } }),
+        )
+        return { moved: true, status: { name: into.to.name, category: 'started' } }
+      }),
     // A project, by its key, is where a Jira issue is filed: on Cloud, those with the latest issue first, a page at a time; Data Center lists them all at once.
     containers: () =>
       Effect.map(

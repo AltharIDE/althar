@@ -228,6 +228,23 @@ describe('GitHub as a code host', () => {
     }),
   )
 
+  it.effect('says when a pull request conflicts with its target, once GitHub has worked it out', () =>
+    Effect.gen(function* () {
+      const { host } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ mergeable: false, mergeable_state: 'dirty' }) }],
+        ['GET', `${REPO}/pulls/13`, { json: pull({ number: 13, mergeable: true, mergeable_state: 'blocked' }) }],
+        ['GET', `${REPO}/pulls/14`, { json: pull({ number: 14, mergeable: null, mergeable_state: 'unknown' }) }],
+        ['GET', `${REPO}/pulls/15`, { json: pull({ number: 15 }) }],
+      ])
+      assert.isTrue((yield* host.change(repository, 12)).conflicts)
+      // Blocked by a rule is not a conflict.
+      assert.isFalse((yield* host.change(repository, 13)).conflicts)
+      // Still working it out, or not said at all, as in a list: nothing is claimed.
+      assert.notProperty(yield* host.change(repository, 14), 'conflicts')
+      assert.notProperty(yield* host.change(repository, 15), 'conflicts')
+    }),
+  )
+
   it.effect('marks a draft ready through GraphQL, on github.com and on an instance', () =>
     Effect.gen(function* () {
       const cloud = github([
@@ -584,8 +601,11 @@ describe('GitHub as a tracker', () => {
       yield* host.comment(found, 'Picked up by Althar')
       assert.deepStrictEqual(sent[0]?.body, { body: 'Picked up by Althar' })
       yield* host.link(found, { url: 'https://x', title: 'x' })
+      // An issue has no In Progress of its own: it is left open, as it is.
+      assert.deepStrictEqual(yield* host.start(found), { moved: false, status: { name: 'Open', category: 'todo' } })
       assert.lengthOf(sent, 1)
       assert.isFalse(host.capabilities.links)
+      assert.isFalse(host.capabilities.starts)
     }),
   )
   it.effect('lists the repositories it can file issues in, last pushed first, leaving out the archived and those without issues', () =>

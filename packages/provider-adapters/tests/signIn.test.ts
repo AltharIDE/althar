@@ -2,6 +2,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import { type AgentDefinition, agents } from '../src/registry'
+import { usingLocated } from '../src/installs'
 import { signInCheck, signInStatus, signOut } from '../src/signIn'
 
 const withStatus = (script: string): AgentDefinition => ({
@@ -152,11 +153,13 @@ describe('signInStatus', () => {
     }),
   )
 
-  it.live('runs bundled status commands on the Node it is given', () =>
+  it.live('resolves Codex status through the CLI the session uses', () =>
     Effect.sync(() => {
       const spec = agents.codex.signIn.status('/path/to/node')
-      assert.strictEqual(spec.command, '/path/to/node')
-      assert.match(spec.args[0] ?? '', /@openai\/codex\/bin\/codex\.js$/)
+      assert.strictEqual(spec.command, 'codex')
+      assert.deepStrictEqual(spec.args, ['login', 'status'])
+      const bundled = usingLocated(agents.codex, () => ({ command: '/bundle/codex', whose: 'bundled' }))
+      assert.deepStrictEqual(bundled.signIn.status('/path/to/node'), { command: '/bundle/codex', args: ['login', 'status'] })
     }),
   )
 })
