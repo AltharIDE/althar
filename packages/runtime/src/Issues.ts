@@ -11,6 +11,7 @@ import { Instance } from './Instance'
 import { outward } from './outward'
 import { movesIssues, Policies } from './Policies'
 import { change, fact, timestamp } from './records'
+import { indexTask } from './Search'
 import { addItem, updateItem } from './threads'
 import { ToolRefused, ToolServer } from './ToolServer'
 
@@ -276,6 +277,7 @@ export class Issues extends Context.Service<
                 payload: { key: issue.key, url: issue.url },
                 actorId: instance.personId,
               })
+              yield* indexTask(input.taskId)
             }),
           )
           yield* touchCard(input.taskId)

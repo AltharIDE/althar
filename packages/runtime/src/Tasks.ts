@@ -13,6 +13,7 @@ import { Instance } from './Instance'
 import { Plans } from './Plans'
 import { touchQuestion } from './Questions'
 import { change, fact, timestamp } from './records'
+import { indexTask } from './Search'
 import { type Lead, PlanParameters, Runs } from './Runs'
 import { Sessions } from './Sessions'
 import { Setups } from './Setups'
@@ -444,6 +445,7 @@ export class Tasks extends Context.Service<
                 actorId: input.envelope.actorId,
                 commandId: input.envelope.commandId,
               })
+              yield* indexTask(input.taskId)
               return true
             }),
           )

@@ -54,6 +54,7 @@ import { Coordinator } from './Coordinator'
 import { IssueDrafts } from './IssueDrafts'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
+import { findTasks } from './Search'
 import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
 import { type InputImage, keepSent } from './sentImages'
@@ -514,6 +515,14 @@ export const handlers = Api.toLayer(
           ),
         ),
       ListTasks: ({ projectId }) => api(queries.tasks(projectId)),
+      SearchTasks: ({ projectId, text, limit }) =>
+        api(
+          Effect.gen(function* () {
+            const working = new Set((yield* sessions.onTasks).map((session) => session.taskId))
+            const input = { text, ...(projectId === undefined ? {} : { projectId }), ...(limit === undefined ? {} : { limit }) }
+            return { tasks: yield* findTasks(input, working) }
+          }),
+        ),
       CreateTask: ({ commandId, projectId, title, description, issue, repositories }) =>
         api(
           Effect.gen(function* () {

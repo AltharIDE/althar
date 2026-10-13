@@ -10,6 +10,7 @@ import {
   ApiError,
   AtOnceCount,
   CommandId,
+  FOUND_MOST,
   Load,
   NewProjectId,
   PAGE,
@@ -308,6 +309,26 @@ describe('the API', () => {
               OpenProject: ({ grant }) => Effect.fail(new ApiError({ reason: 'NotFound', message: `No folder was chosen as ${grant}.` })),
               ReadFolder: () => Effect.die('unused'),
               ListTasks: () => Effect.succeed({ cursor: 0, tasks: [] }),
+              SearchTasks: ({ text, projectId }) =>
+                Effect.succeed({
+                  tasks: [
+                    {
+                      taskId: 'task_1',
+                      threadId: 'th1',
+                      projectId: projectId ?? 'p1',
+                      title: 'Retry the checkout',
+                      slug: 'retry-the-checkout',
+                      phase: 'ready' as const,
+                      state: 'open',
+                      pullRequest: '#143',
+                      changedAt: '2026-10-14T09:00:00.000Z',
+                      matched: [
+                        { text: '…the card ', hit: false },
+                        { text, hit: true },
+                      ],
+                    },
+                  ],
+                }),
               CreateTask: () => Effect.die('unused'),
               GetThread: () => Effect.die('unused'),
               GetFileDiff: () => Effect.die('unused'),
@@ -455,6 +476,11 @@ describe('the API', () => {
         assert.throws(() => Schema.decodeUnknownSync(Product)('gitea'))
         // Where Althar's processes can't be read, its work's part is unknown, not none.
         assert.strictEqual((yield* client.GetLoad({})).shares, null)
+        // A search crosses with what matched; one asking for too many, or for pages of text, never leaves.
+        const [found] = (yield* client.SearchTasks({ text: 'retr', projectId: 'p2' })).tasks
+        assert.deepStrictEqual([found?.projectId, found?.matched?.[1]], ['p2', { text: 'retr', hit: true }])
+        assert.isTrue((yield* Effect.exit(client.SearchTasks({ text: 'retr', limit: FOUND_MOST + 1 })))._tag === 'Failure')
+        assert.isTrue((yield* Effect.exit(client.SearchTasks({ text: 'x'.repeat(501) })))._tag === 'Failure')
         const refused = yield* Effect.flip(client.OpenProject({ commandId, grant: 'g1' }))
         assert.strictEqual(refused.message, 'No folder was chosen as g1.')
         assert.deepStrictEqual(

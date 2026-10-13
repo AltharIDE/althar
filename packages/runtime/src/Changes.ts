@@ -82,6 +82,7 @@ import {
   standing,
 } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
+import { indexTask } from './Search'
 import { Policies, resolvesConflictsFor, ruleSetOf } from './Policies'
 import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
@@ -861,6 +862,7 @@ export class Changes extends Context.Service<
                 payload: { from: task.branch, to: fresh, base, after: next.change.url, commits: next.commits.length },
                 actorId: instance.personId,
               })
+              yield* indexTask(taskId)
             }),
           )
           return { ...task, branch: fresh, baseCommit: base }
@@ -1070,6 +1072,7 @@ export class Changes extends Context.Service<
                 payload: { url: opened.url, number: opened.number, draft: opened.draft },
                 actorId: instance.systemId,
               })
+              yield* indexTask(input.taskId)
               return id
             }),
           )
