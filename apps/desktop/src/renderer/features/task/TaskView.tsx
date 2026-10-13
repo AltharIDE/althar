@@ -216,6 +216,9 @@ const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, r
 /** The task's own say on its lead resolving conflicts, as its menu offers it: none goes by the project. */
 const conflictsChoice = (own: boolean | null): TaskConflicts => (own === null ? 'project' : own ? 'on' : 'off')
 
+/** How long a title may be, as the runtime keeps it. */
+const TITLE_LENGTH = 60
+
 /** The line of a file's first change, where its diff is read: for an editor to open at. */
 const firstChange = (view: FileView): number | undefined => {
   if (view.state !== 'ready') return undefined
@@ -246,6 +249,8 @@ export function TaskView({
   const [connecting, setConnecting] = useState(false)
   // Abandoning it asks first, saying what happens to its worktree and branch.
   const [abandoning, setAbandoning] = useState(false)
+  // Whether its title is a field, from its menu's Rename or from pressing the title.
+  const [renaming, setRenaming] = useState(false)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
   const [face, setFace] = useState<Face | null>(null)
   // Ready, or merged here with its remote still to have it, it opens on what it made: there is something there to do.
@@ -466,6 +471,7 @@ export function TaskView({
         />
       )}
       <TaskMenu
+        onRename={() => setRenaming(true)}
         // What it built runs with no agent, where its repository says how.
         {...(snapshot.task.runCommand === null ? {} : { run: { command: snapshot.task.runCommand, onRun: () => void model.runProject() } })}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
@@ -589,7 +595,17 @@ export function TaskView({
           />
         }
       >
-        <BackCrumb to={snapshot.project.name} kbd="esc" title={snapshot.task.title} titleLevel={1} onBack={onBack} />
+        <BackCrumb
+          to={snapshot.project.name}
+          kbd="esc"
+          title={snapshot.task.title}
+          titleLevel={1}
+          maxLength={TITLE_LENGTH}
+          editing={renaming}
+          onEditingChange={setRenaming}
+          onRename={(title) => void model.rename(title)}
+          onBack={onBack}
+        />
       </TitleBar>
       {shown === 'out' && !hasOutputs(snapshot) ? (
         <NoOutputsView snapshot={snapshot} lead={lead.name} />

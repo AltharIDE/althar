@@ -659,6 +659,15 @@ export const handlers = Api.toLayer(
           commandId,
           api(Effect.flatMap(envelope('task.abandon', { taskId }, commandId), (said) => tasks.abandon({ envelope: said, taskId }))),
         ),
+      RenameTask: ({ commandId, taskId, title }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.rename', { taskId, title }, commandId), (said) =>
+              tasks.rename({ envelope: said, taskId, title }),
+            ),
+          ),
+        ),
       ReopenTask: ({ commandId, taskId }) =>
         once(
           commandId,

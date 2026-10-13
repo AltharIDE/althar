@@ -151,6 +151,8 @@ export interface Client {
   readonly abandonTask: (taskId: string) => Promise<void>
   /** Opens an abandoned task again, on its worktree and branch. */
   readonly reopenTask: (taskId: string) => Promise<void>
+  /** Gives the task another title, in any state; its slug, branch and folder stay. */
+  readonly renameTask: (taskId: string, title: string) => Promise<void>
   readonly send: (input: {
     readonly threadId: string
     readonly body: string
@@ -436,6 +438,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     resumeTask: (input) => command((commandId) => api.ResumeTask({ commandId, ...input })),
     abandonTask: (taskId) => command((commandId) => api.AbandonTask({ commandId, taskId })),
     reopenTask: (taskId) => command((commandId) => api.ReopenTask({ commandId, taskId })),
+    renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
     send: (input) => command((commandId) => api.Send({ commandId, ...input })),
     takeBack: (itemId) => command((commandId) => api.TakeBack({ commandId, itemId })),
     answer: (input) => command((commandId) => api.Answer({ commandId, ...input })),

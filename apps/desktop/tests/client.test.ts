@@ -107,6 +107,8 @@ describe('the client', () => {
     // Stopped as a task: every agent on it stops, and nothing is left to stop.
     await client.stopTask(task.id)
     expect((await client.getThread(task.threadId, { limit: 0 })).session).toBeNull()
+    await client.renameTask(task.id, 'A better title')
+    expect((await client.getThread(task.threadId, { limit: 0 })).task.title).toBe('A better title')
     await client.abandonTask(task.id)
     expect((await client.getThread(task.threadId, { limit: 0 })).task.actions).toEqual(['reopen'])
     await client.reopenTask(task.id)
@@ -257,6 +259,7 @@ describe('the client', () => {
           SetTaskResolveConflicts: () => Effect.die('unused'),
           ResumeTask: () => Effect.die('unused'),
           AbandonTask: () => Effect.die('unused'),
+          RenameTask: () => Effect.die('unused'),
           ReopenTask: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
           TakeBack: () => Effect.die('unused'),

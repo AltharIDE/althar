@@ -363,6 +363,7 @@ describe('the API', () => {
               SetTaskResolveConflicts: () => Effect.void,
               ResumeTask: () => Effect.void,
               AbandonTask: () => Effect.void,
+              RenameTask: () => Effect.void,
               ReopenTask: () => Effect.void,
               // What was sent, said back in the error, so the test reads what crossed the port.
               Send: ({ body, images }) =>
