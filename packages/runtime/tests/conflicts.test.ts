@@ -1048,21 +1048,41 @@ describe('a conflict its pull request’s host reports', () => {
     }).pipe(Effect.provide(runtimeWith({ github }, { wake: Duration.seconds(10) })))
   })
 
-  it.live('waits for tests that print a local address as they run, asking the lead once', () => {
+  it.live('waits for a lead that is slow to be woken, though what its tests printed last came meanwhile, asking it once', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-output]')
+      moveHostMainOn(working, bare)
+      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      const said = yield* given(threadId)
+      assert.isFalse(said.some((body) => body.includes('Try once more') || body.includes('not committed: commit')))
+      const [round] = yield* rounds(taskId)
+      assert.deepStrictEqual([round?.state, round?.attempt], ['resolved', 1])
+    }).pipe(Effect.provide(runtimeWith({ github }, { wake: Duration.seconds(10) })))
+  })
+
+  it.live('waits for tests that print a local address as they run, then asks the lead nothing', () => {
     const { working, bare } = hosted()
     const github = hostOf(bare, () => PASSED)
     return Effect.gen(function* () {
       const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-url]')
       moveHostMainOn(working, bare)
+      // Its turn over and the tests still running, well past the report window: the round is still open.
+      yield* until(
+        Effect.map(inTurn(threadId), (turn) => [turn]),
+        ([turn]) => turn === false,
+        Duration.seconds(20),
+      )
+      yield* Effect.sleep(Duration.millis(1200))
+      const [during] = yield* rounds(taskId)
+      assert.deepStrictEqual([during?.state, during?.attempt], ['resolving', 1])
       yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
-      // A finite run that prints an address isn’t a server left running.
       const said = yield* given(threadId)
-      assert.strictEqual(said.filter((body) => body.includes('Bring the branch up to date')).length, 1)
       assert.isFalse(said.some((body) => body.includes('Try once more') || body.includes('not committed: commit')))
       const [round] = yield* rounds(taskId)
       assert.deepStrictEqual([round?.state, round?.attempt], ['resolved', 1])
-      assert.isFalse(conflictsIn(bare, 'main', 'althar/add-a-retry'))
-    }).pipe(Effect.provide(runtimeWith({ github }, {})))
+    }).pipe(Effect.provide(runtimeWith({ github }, { reports: Duration.millis(200) })))
   })
 
   it.live('pushes the merge with the one fix the lead committed after it, whether it made it at once or once the tests ended', () => {

@@ -583,6 +583,8 @@ export class Sessions extends Context.Service<
               else running.callsOpen.delete(event.toolCallId)
               break
             case 'ToolCallUpdate':
+              // What a command it left running prints isn't the agent at work.
+              if ([...running.background.values()].some((left) => left.toolCallId === event.toolCallId)) return
               if (event.status === 'completed' || event.status === 'failed') running.callsOpen.delete(event.toolCallId)
               break
             default:

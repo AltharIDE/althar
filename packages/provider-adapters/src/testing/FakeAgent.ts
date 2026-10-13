@@ -433,7 +433,7 @@ const playStall = async (
  * a fix the tests found too, and `[lead:resolve-tests-hang]` has tests that
  * never end. `[lead:resolve-tests-codex]` has Codex say the tests are running
  * just after its turn, `[lead:resolve-tests-slow]` is slow to be woken by
- * them, and `[lead:resolve-tests-url]` has tests that print a local address. Asked to plan a
+ * them (`[lead:resolve-tests-output]` too, after they print once more), and `[lead:resolve-tests-url]` has tests that print a local address. Asked to plan a
  * change with a link in it, the coordinator drafts the task from that issue.
  */
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
@@ -503,6 +503,7 @@ const leaveTests = async (
     readonly reportsAfter?: number
     readonly wakesAfter?: number
     readonly prints?: string
+    readonly printsAfterEnd?: boolean
   },
 ) => {
   const notify = (update: Record<string, unknown>) =>
@@ -543,6 +544,9 @@ const leaveTests = async (
       appendFileSync(outputPath, 'all passed\n[exited with code 0]\n')
       void (async () => {
         await notify({ sessionUpdate: 'async_task_state_update', asyncTaskId: id, state: 'completed' })
+        // What it printed last, on its own call, as Codex streams it: not the agent speaking.
+        if (plan.printsAfterEnd === true)
+          await notify({ sessionUpdate: 'tool_call_update', toolCallId, _meta: { terminal_output_delta: { data: 'all passed\n' } } })
         if (plan.commits === undefined) return
         if (plan.wakesAfter !== undefined) await pause(plan.wakesAfter)
         const call = `${toolCallId}-woken`
@@ -576,6 +580,7 @@ const playRole = async (
     readonly reportsAfter?: number
     readonly wakesAfter?: number
     readonly prints?: string
+    readonly printsAfterEnd?: boolean
   }) => Promise<void> = () => Promise.resolve(),
 ): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
@@ -715,7 +720,8 @@ const playRole = async (
         session.markers.has('[lead:resolve-tests-fix]') ||
         session.markers.has('[lead:resolve-tests-codex]') ||
         session.markers.has('[lead:resolve-tests-slow]') ||
-        session.markers.has('[lead:resolve-tests-url]')
+        session.markers.has('[lead:resolve-tests-url]') ||
+        session.markers.has('[lead:resolve-tests-output]')
       if (merging !== undefined && woken) {
         settleIn(session.cwd, merging)
         const fixes = session.markers.has('[lead:resolve-tests-fix]')
@@ -724,8 +730,9 @@ const playRole = async (
           lasts: 400,
           ...(session.markers.has('[lead:resolve-tests-codex]') ? { reportsAfter: 300 } : {}),
           ...(session.markers.has('[lead:resolve-tests-slow]') ? { lasts: 1500, wakesAfter: 1200 } : {}),
+          ...(session.markers.has('[lead:resolve-tests-output]') ? { lasts: 1500, wakesAfter: 1200, printsAfterEnd: true } : {}),
           ...(session.markers.has('[lead:resolve-tests-url]')
-            ? { lasts: 1500, prints: 'serving the browser tests at http://localhost:4173/\n' }
+            ? { lasts: 3000, prints: 'serving the browser tests at http://localhost:4173/\n' }
             : {}),
           commits: () => {
             commitMergeIn(cwd)
