@@ -92,6 +92,8 @@ export interface TaskModel {
   readonly abandon: () => Promise<boolean>
   /** Opens it again, once abandoned, on its worktree and branch. */
   readonly reopen: () => Promise<void>
+  /** Gives it another title, in any state; the title shown is Althar's, once it is back. */
+  readonly rename: (title: string) => Promise<void>
   /** Starts its plan now, while it waits to start. */
   readonly startPlan: (planId: string) => Promise<void>
   /** Answers a call; with `always`, the answer is kept in the project's rules by that scope. */
@@ -426,6 +428,7 @@ export const useTask = (threadId: string): TaskModel => {
       return abandoned
     },
     reopen: () => onTask((taskId) => client.reopenTask(taskId)),
+    rename: (title) => onTask((taskId) => client.renameTask(taskId, title)),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     answer: async (attentionId, decision, reason, always) => {
       // Whether it went through: a call whose answer didn't is answerable again.
