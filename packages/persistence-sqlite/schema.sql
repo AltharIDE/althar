@@ -1074,3 +1074,42 @@ CREATE TABLE project_notes (
 ) STRICT;
 
 CREATE INDEX project_notes_kept ON project_notes (project_id) WHERE dropped_at IS NULL;
+
+CREATE TABLE task_search_rows (
+  id INTEGER PRIMARY KEY NOT NULL,
+  task_id TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  title TEXT NOT NULL DEFAULT '',
+  asked TEXT NOT NULL DEFAULT '',
+  summaries TEXT NOT NULL DEFAULT '',
+  refs TEXT NOT NULL DEFAULT '',
+  files TEXT NOT NULL DEFAULT '',
+  changed_at TEXT NOT NULL CHECK (changed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  UNIQUE (task_id),
+  FOREIGN KEY (task_id, project_id) REFERENCES tasks (id, project_id)
+) STRICT;
+
+CREATE INDEX task_search_rows_by_project ON task_search_rows (project_id);
+
+CREATE VIRTUAL TABLE task_search USING fts5(title, asked, summaries, refs, files, content='task_search_rows', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
+
+CREATE TABLE 'task_search_data'(id INTEGER PRIMARY KEY, block BLOB);
+
+CREATE TABLE 'task_search_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID;
+
+CREATE TABLE 'task_search_docsize'(id INTEGER PRIMARY KEY, sz BLOB);
+
+CREATE TABLE 'task_search_config'(k PRIMARY KEY, v) WITHOUT ROWID;
+
+CREATE TRIGGER task_search_added AFTER INSERT ON task_search_rows BEGIN
+  INSERT INTO task_search (rowid, title, asked, summaries, refs, files) VALUES (new.id, new.title, new.asked, new.summaries, new.refs, new.files);
+END;
+
+CREATE TRIGGER task_search_removed AFTER DELETE ON task_search_rows BEGIN
+  INSERT INTO task_search (task_search, rowid, title, asked, summaries, refs, files) VALUES ('delete', old.id, old.title, old.asked, old.summaries, old.refs, old.files);
+END;
+
+CREATE TRIGGER task_search_changed AFTER UPDATE ON task_search_rows BEGIN
+  INSERT INTO task_search (task_search, rowid, title, asked, summaries, refs, files) VALUES ('delete', old.id, old.title, old.asked, old.summaries, old.refs, old.files);
+  INSERT INTO task_search (rowid, title, asked, summaries, refs, files) VALUES (new.id, new.title, new.asked, new.summaries, new.refs, new.files);
+END;
