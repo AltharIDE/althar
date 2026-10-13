@@ -1264,6 +1264,9 @@ export class Queries extends Context.Service<
         }
       })
 
+      /* A settled task's kind, by the task and when it settled: it is read from git once, not each time its card is. */
+      const settledKinds = new Map<string, TaskCard['kind']>()
+
       /** Whether a task has made something on its branch: commits, or changes not committed yet, its evidence aside. */
       const madeOf = (taskId: string) =>
         Effect.map(gitOf(taskId, { changed: true, here: false }), (said) => said.commits > 0 || said.files.length > 0).pipe(
@@ -1329,6 +1332,7 @@ export class Queries extends Context.Service<
             title: string
             slug: string
             state: string
+            settledAt: string | null
             branch: string | null
             planId: string | null
             planState: string | null
@@ -1351,7 +1355,7 @@ export class Queries extends Context.Service<
             turnWaits: number
             runPlan: string | null
           }>`
-            SELECT t.id AS thread_id, k.title, k.slug, k.state, w.branch,
+            SELECT t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, w.branch,
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
               r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
@@ -1448,9 +1452,13 @@ export class Queries extends Context.Service<
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // Someone else's pull request it reviews: none yet, until reviews are read (DEV-96).
           const reviewing = null
-          // What it makes: where its pull requests and its plan don't say, git does, by what is on its branch.
+          // What it makes: where its pull requests and its plan don't say, git does, by what is on its branch; for a task that
+          // settled, once, as nothing changes it until it opens again.
           const decided = changes.length > 0 || (reviewing === null && endsInChange(end))
-          const kind = kindOf({ reviewing, end, changes: changes.length, made: decided ? false : yield* madeOf(taskId) })
+          const settledAs = task.state === 'done' || task.state === 'abandoned' ? `${taskId}:${task.settledAt}` : null
+          const kept = settledAs === null ? undefined : settledKinds.get(settledAs)
+          const kind = kept ?? kindOf({ reviewing, end, changes: changes.length, made: decided ? false : yield* madeOf(taskId) })
+          if (settledAs !== null) settledKinds.set(settledAs, kind)
           return {
             taskId,
             threadId: task.threadId,
