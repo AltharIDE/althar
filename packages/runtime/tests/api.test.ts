@@ -2136,6 +2136,7 @@ describe('thread items', () => {
           { severity: 'blocking', file: 'a.ts', line: null, claim: 'y' },
           { severity: 'nit', file: null, line: null, claim: 'z' },
         ],
+        built: null,
         evidence: [],
         unverified: null,
         agentId: 'codex',
@@ -2148,6 +2149,7 @@ describe('thread items', () => {
       summary: 'Done.',
       verdict: null,
       findings: [],
+      built: null,
       evidence: [],
       unverified: null,
       agentId: null,
@@ -2183,6 +2185,7 @@ describe('thread items', () => {
         summary: 'Done.',
         verdict: null,
         findings: [],
+        built: null,
         evidence: [
           {
             kind: 'screenshot',

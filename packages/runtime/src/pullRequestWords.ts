@@ -123,14 +123,18 @@ export const evidenceText = (evidence: ReadonlyArray<EvidenceLine>, unverified: 
 }
 
 /**
- * The pull request's description: the lead's summary, what it showed of
- * its change working, how review went, the issue it is for, and who opened
+ * The pull request's description: what the task built, as the lead last
+ * said it (else its last step's summary), what it showed of its change working, how review went, the issue it is for, and who opened
  * it, unless the person turned Althar's credit off. Where the repository has
  * a template, it's written in that: the lead's own description where it keeps the
- * template, with every box unticked, else the template with the lead's
- * summary in its place for one, or under a heading of its own below.
+ * template, with every box unticked, under what the task built, which may be
+ * newer; else the template with that in its place for a summary, or under a
+ * heading of its own below.
  */
 export const bodyOf = (input: {
+  /** What the task built, as the lead last said it: the description leads with it, template or not. */
+  readonly built?: string | null
+  /** The lead's last step summary, where it never said what the task built. */
   readonly lead: string | null
   readonly review: { readonly rounds: number; readonly verdict: string | null } | null
   readonly findings: ReadonlyArray<FindingLine>
@@ -145,13 +149,16 @@ export const bodyOf = (input: {
   readonly credit?: boolean
 }) => {
   const parts: Array<string> = []
-  const lead = input.lead !== null && input.lead !== '' ? input.lead : null
+  const built = input.built !== undefined && input.built !== null && input.built !== '' ? input.built : null
+  const lead = built ?? (input.lead !== null && input.lead !== '' ? input.lead : null)
   const template = input.template ?? null
   const written = input.written ?? null
   if (template === null) {
     if (lead !== null) parts.push(lead)
-  } else if (written !== null && keepsTemplate(template, written)) parts.push(untick(written).trim())
-  else {
+  } else if (written !== null && keepsTemplate(template, written)) {
+    if (built !== null) parts.push(built)
+    parts.push(untick(written).trim())
+  } else {
     const placed = lead === null ? null : placeSummary(template, lead)
     parts.push(untick(placed ?? template).trim())
     if (placed === null && lead !== null) parts.push(`### Summary\n\n${lead}`)

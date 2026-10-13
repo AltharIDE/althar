@@ -29,7 +29,9 @@ import { device } from '../../shared/device'
  * pushed here, and sending it back is a note to the lead. A branch its pull
  * request won't take a plain push of says why, and offers what puts it
  * right. Before it is ready, the same card shows what it has changed so far.
- * Under it, what the lead showed of it working, and what it couldn't.
+ * Above it, what the task built, as its lead last said it, what the lead
+ * showed of it working, and what it couldn't: its finished view, as its
+ * thread ends with.
  */
 
 export const text = {
@@ -382,11 +384,12 @@ export function Outputs({
   const drafts = open.filter((one) => one.state === 'open' && one.draft)
   // A pull request needs its host connected: without, there is nothing a press could open.
   const unpublished = ready && first === undefined && task.commits > 0 && snapshot.host?.connected === true
-  // What the lead showed of it working, under what it changed: what the person reads before accepting it.
-  const shown = taskEvidence(snapshot.items)
+  // What it built and what the lead showed of it working, above what it changed: what the person reads before accepting it.
+  const shown = taskEvidence(snapshot.items, snapshot.reports)
   return (
     <div className={s.outputs}>
       <ThreadMeasure className={s.outputsBody}>
+        <Evidence built={shown.built} pieces={shown.pieces} unverified={shown.unverified} headingLevel={2} />
         {change}
         {local}
         {done && <p className={s.quiet}>{text.mergedAll(task.merged)}</p>}
@@ -455,7 +458,6 @@ export function Outputs({
             ))}
           </div>
         )}
-        <Evidence pieces={shown.pieces} unverified={shown.unverified} headingLevel={2} />
       </ThreadMeasure>
     </div>
   )

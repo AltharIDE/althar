@@ -377,6 +377,7 @@ export const items = {
       summary: 'Added the retry.',
       verdict: null,
       findings: [],
+      built: null,
       evidence: [],
       unverified: null,
       agentId: null,
@@ -659,6 +660,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
   attention: [],
   items: [],
   earlier: false,
+  reports: [],
   ...overrides,
 })
 

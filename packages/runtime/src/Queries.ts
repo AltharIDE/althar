@@ -40,7 +40,7 @@ import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
-import { evidenceOf, evidencePaths, unverifiedIn } from './evidence'
+import { builtIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
 import { filesOf, outputOf, picturesOf } from './handed'
 import { documentText, outputText } from './reading'
 import type { Artifacts } from './Artifacts'
@@ -67,6 +67,9 @@ const LIVE = ['starting', 'active', 'waiting_approval', 'cancelling']
 
 /** How many tasks, or cards, a screen reads at once: each may start git. */
 const AT_ONCE = 8
+
+/** How many of the lead's reports a thread reads beside its page, newest first: far more than a task's rounds. */
+const REPORTS = 200
 
 /** A worktree on this device, and the task it is for: what is kept of it goes when its task leaves the screens. */
 interface Owner {
@@ -404,6 +407,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
               claim: text(finding, 'claim'),
             }
           }),
+          built: builtIn(field(content, 'built')),
           evidence: evidenceOf(field(content, 'evidence')),
           unverified: unverifiedIn(field(content, 'unverified')),
           agentId: agentId === '' ? null : agentId,
@@ -652,7 +656,10 @@ export class Queries extends Context.Service<
             ORDER BY k.created_at DESC, k.id DESC`
         })
 
-      const itemRows = (threadId: string, where: { readonly before?: number; readonly itemId?: string; readonly limit: number }) =>
+      const itemRows = (
+        threadId: string,
+        where: { readonly before?: number; readonly itemId?: string; readonly limit: number; readonly reports?: boolean },
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<ItemRow>`
@@ -677,6 +684,7 @@ export class Queries extends Context.Service<
               -- A message taken back takes no place on a page; read by id, it says it was taken back.
               AND ${where.itemId === undefined ? sql`(u.state IS NULL OR u.state <> 'withdrawn')` : sql`i.id = ${where.itemId}`}
               AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}
+              AND ${where.reports === true ? sql`i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('implement', 'settle')` : sql`1 = 1`}
             ORDER BY i.sequence DESC LIMIT ${where.limit + 1}`
           // One more than asked for says whether there are earlier ones.
           return { items: rows.slice(0, where.limit).toReversed(), earlier: rows.length > where.limit }
@@ -1607,6 +1615,8 @@ export class Queries extends Context.Service<
           if (head === undefined) return yield* new NotFound({ kind: 'task thread', id: threadId })
           // What the store says comes first, together, so it is as of the cursor; git after.
           const { items, earlier } = yield* pageOf(threadId, page)
+          // The lead's reports, whatever page they're on: the task's finished view is read from them.
+          const reports = (yield* itemRows(threadId, { reports: true, limit: REPORTS })).items.map(itemOf)
           const attention = yield* sql<{
             id: string
             kind: string
@@ -1683,6 +1693,7 @@ export class Queries extends Context.Service<
             attention: attention.map(callOf),
             items,
             earlier,
+            reports: reports.flatMap((item) => (item === undefined ? [] : [item])),
           } satisfies ThreadSnapshot
         })
 

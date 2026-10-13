@@ -417,14 +417,17 @@ const playStall = async (
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
  * Althar says it isn't committed; `[lead:evidence]` saves a screenshot in
  * the worktree, uncommitted, and finishes with it, a test run and something
- * it couldn't try, and settling, a new run and nothing left untried;
+ * it couldn't try, and settling, a new run and nothing left untried.
+ * Finishing, it says what the task built, and says it again settling a
+ * review that changed the work (with `[lead:built-unsaid]`, only once told
+ * to); set aside, it leaves what it said standing;
  * `[review:evidence]` reads each evidence file its brief names, and says so
  * in its summary. Asked for its pull request's description
  * in the repository's template, it fills it in, ticking a box it shouldn't.
  * Told what people said on its pull
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
- * publishes it, `[lead:fix-more]` commits other work after it, and
+ * says again what the task built, `[lead:fix-more]` commits other work after it, and
  * `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
  * `[lead:push]` commits what it has and asks the person to push it. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
@@ -434,6 +437,14 @@ const playStall = async (
  * does so once it has committed the merge. Asked to plan a
  * change with a link in it, the coordinator drafts the task from that issue.
  */
+/** What the fake says its task built when it finishes, and again once settling a review changed it. */
+export const BUILT = 'Checkout retries once when the payment call fails, in `src/checkout.ts`. Try a checkout with the network off.'
+export const BUILT_SETTLED =
+  'Checkout retries once when the payment call fails, in `src/checkout.ts`, and the README heading names it. Try a checkout with the network off.'
+/** What it says the task built once it fixed a failed check, after its plan was done. */
+export const BUILT_FIXED =
+  'Checkout retries once when the payment call fails, in `src/checkout.ts`, and its check passes again. Push the fix.'
+
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
 const commitIn = (cwd: string, file: string, message: string) => {
   appendFileSync(join(cwd, file), `${file.replace(/\.txt$/, '')}\n`)
@@ -530,7 +541,13 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
               unverified: [],
             }
           : {}
-        return await call('finish_step', { summary: 'Fixed the heading.', findings, ...shown })
+        // What the task built, said again where settling changed it; or, unsaid, once Althar asks for it.
+        const built = aside ? {} : { built: BUILT_SETTLED }
+        if (session.markers.has('[lead:built-unsaid]') && !aside) {
+          const answer = await call('finish_step', { summary: 'Fixed the heading.', findings, ...shown })
+          if (!answer.startsWith('Settling changed the work')) return answer
+        }
+        return await call('finish_step', { summary: 'Fixed the heading.', findings, ...built, ...shown })
       }
       // Told to carry on, as a lead that took a step over is, it finishes as it was told to at first.
       // Told to carry on, or to try another way, as Althar tells one that stalled or went round in circles.
@@ -556,11 +573,11 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         }
       }
       const finish = async () => {
-        const answer = await call('finish_step', { summary: 'Did the task.', ...evidence() })
+        const answer = await call('finish_step', { summary: 'Did the task.', built: BUILT, ...evidence() })
         const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
         if (template === undefined) return answer
         const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
-        return await call('finish_step', { summary: 'Did the task.', descriptions: [{ text }] })
+        return await call('finish_step', { summary: 'Did the task.', built: BUILT, descriptions: [{ text }] })
       }
       // Asked to resolve a conflict, as a fresh session is with its brief after a restart, it does that rather than finish.
       const resolving = /Bring the branch up to date: merge \S+ into it/.test(text)
@@ -568,7 +585,7 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         if (session.markers.has('[lead:edit]')) commitIn(session.cwd, 'change.txt', 'Change it')
         if (!session.markers.has('[lead:scratch]')) return await finish()
         appendFileSync(join(session.cwd, 'scratch.log'), 'trying things\n')
-        const answer = await call('finish_step', { summary: 'Did the task.' })
+        const answer = await call('finish_step', { summary: 'Did the task.', built: BUILT })
         if (!/These aren.t committed/.test(answer)) return answer
         rmSync(join(session.cwd, 'scratch.log'))
         return await finish()
@@ -608,6 +625,7 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
       const fixHold = session.markers.has('[lead:fix-hold]')
       if ((session.markers.has('[lead:fix]') || fixMore || fixHold) && text.startsWith('Checks failed')) {
         commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
+        await call('finish_step', { summary: 'Fixed the failing check, and committed it.', built: BUILT_FIXED })
         if (fixHold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
         if (!fixMore) return 'Fixed the failing check, and committed it.'
         commitIn(session.cwd, 'more.txt', 'Tidy up while here')

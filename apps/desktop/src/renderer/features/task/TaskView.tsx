@@ -22,6 +22,7 @@ import {
   type TaskConflicts,
   TaskMenu,
   TaskStatus,
+  Finished,
   Thread,
   ThreadDivider,
   ThreadShellProvider,
@@ -46,6 +47,7 @@ import { stepNames, stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
+import { taskEvidence } from '../../shared/evidence'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
@@ -378,6 +380,9 @@ export function TaskView({
       now,
     ),
   ]
+  // What the task built, as its lead last said it, closes its thread once no step is under way, with what its steps showed gathered under it.
+  const finished = taskEvidence(snapshot.items, snapshot.reports)
+  const closing = finished.built !== null && !busy && snapshot.task.step === null && snapshot.task.phase !== 'waiting'
   // What each document was last changed by, so one open beside the thread follows its edits.
   const versionOf = documentVersions(
     blocks.flatMap((block) => (block.kind === 'turn' ? block.parts : [])),
@@ -701,6 +706,7 @@ export function TaskView({
                 threadId={snapshot.threadId}
                 worktree={snapshot.task.worktree}
                 {...(openFile === undefined ? {} : { openFile })}
+                gathered={closing}
                 session={session}
                 project={snapshot.project.name}
                 onPassOn={(words) => void model.send(words)}
@@ -720,6 +726,9 @@ export function TaskView({
                   />
                 )}
               />
+              {closing && finished.built !== null && (
+                <Finished built={finished.built} pieces={finished.pieces} unverified={finished.unverified} />
+              )}
             </ThreadShellProvider>
             {snapshot.attention.map((request) =>
               request.kind === 'stuck' && request.stuck !== null ? (

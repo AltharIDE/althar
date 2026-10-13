@@ -232,10 +232,20 @@ export const evidenceOf = (value: unknown): ReadonlyArray<Evidence> =>
 export const unverifiedIn = (value: unknown): ReadonlyArray<string> | null =>
   Array.isArray(value) ? value.flatMap((line) => (typeof line === 'string' && line !== '' ? [line] : [])) : null
 
+/** What a step result says the task built, as it stood then; null where it didn't say, as a round that changed nothing needn't. */
+export const builtIn = (value: unknown): string | null => (typeof value === 'string' && value.trim() !== '' ? value.trim() : null)
+
+/** What the lead is told when it finishes without saying what the task built; or, settling, when its round changed the work. */
+export const builtAsk = (changed: boolean) =>
+  `${changed ? 'Settling changed the work, so say again' : 'Say'} what the task has built, as it stands now, in \`built\`: what it does for the person now, the main changes and where they are, anything left open or decided along the way, and what they should do next. A few lines or a short list, about where it ended, not how it got there. Then call finish_step again.`
+
 /**
- * What a task's lead showed across its steps, in order, and what it last said
- * it couldn't show: a step that says nothing of it leaves the last list
- * standing, and one that says none clears it.
+ * A task's finished view, from its lead's steps: what it last said the task
+ * built, which a step that changed the work says again (finish_step refuses
+ * it otherwise), so it is never older than the work; what it showed across
+ * its steps, in order; and what it last said it couldn't show: a step that
+ * says nothing of it leaves the last list standing, and one that says none
+ * clears it.
  */
 export const taskShown = (threadId: string) =>
   Effect.gen(function* () {
@@ -245,6 +255,7 @@ export const taskShown = (threadId: string) =>
         AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence`
     const reported = rows.map((row) => recordIn(JSON.parse(row.content)))
     return {
+      built: reported.map((report) => builtIn(report.built)).findLast((said) => said !== null) ?? null,
       evidence: reported.flatMap((report) => evidenceOf(report.evidence)),
       unverified: reported.map((report) => unverifiedIn(report.unverified)).findLast((list) => list !== null) ?? [],
     }

@@ -13,6 +13,7 @@ import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { Agents } from './Config'
 import { NotFound } from './errors'
+import { taskShown } from './evidence'
 import { Instance } from './Instance'
 import { DraftUntitled, IssueDrafts, IssueTargetNeeded } from './IssueDrafts'
 import { Issues } from './Issues'
@@ -301,9 +302,13 @@ export class Coordinator extends Context.Service<
             WHERE w.task_id = ${task.id} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
           const seen = yield* pullRequests(task.id)
           const found = task.state === 'done' && seen !== undefined ? { ...seen, unmerged: 0 } : seen
+          // What it built, as its lead last said it: what to tell the person it delivered, without reading every round.
+          const { built, unverified } = yield* taskShown(task.threadId)
           return [
             `${task.slug}: ${task.title}`,
             task.description === '' ? '' : task.description,
+            built === null ? '' : `What it built, as its lead says it now stands:\n${built}`,
+            unverified.length === 0 ? '' : `What its lead couldn't show working:\n${unverified.map((line) => `- ${line}`).join('\n')}`,
             yield* issueWords(task.id),
             workspaces.length === 1
               ? `Branch ${workspaces[0]?.branch ?? ''}, in ${workspaces[0]?.path ?? ''}.`
@@ -738,7 +743,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'read_task',
-          "A task: what it is, its branch, what each of its steps reported, and its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date.",
+          "A task: what it is, what it built as its lead last said it (and what it couldn't show working), its branch, what each of its steps reported, and its pull request: link, checks (passing, failing with names, pending), commits not pushed yet, when it was merged or closed, and what isn't known or may be out of date.",
           named,
           readTask,
         ),

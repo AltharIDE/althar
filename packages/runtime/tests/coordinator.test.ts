@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
-import { scenarios } from '@althar/provider-adapters/testing'
+import { BUILT, BUILT_SETTLED, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -12,6 +12,7 @@ import { RuntimeConfig, type StallOptions } from '../src/Config'
 import { Coordinator, CoordinatorUnavailable } from '../src/Coordinator'
 import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotFound } from '../src/errors'
+import { builtAsk } from '../src/evidence'
 import { Instance } from '../src/Instance'
 import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
@@ -64,7 +65,7 @@ const results = (threadId: string) =>
     const rows = yield* sql<{
       content: string
     }>`SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result' ORDER BY sequence`
-    return rows.map((row) => JSON.parse(row.content) as { step: string; verdict?: string; summary: string })
+    return rows.map((row) => JSON.parse(row.content) as { step: string; verdict?: string; summary: string; built?: string })
   })
 
 describe('the coordinator loop', () => {
@@ -122,6 +123,14 @@ describe('the coordinator loop', () => {
           ['review', 'changes_requested', 'The heading needs fixing.'],
           ['settle', null, 'Fixed the heading.'],
           ['review', 'pass', 'The change holds.'],
+        ],
+      )
+      // What the task built, said finishing, and said again by the settling that changed the work.
+      assert.deepStrictEqual(
+        steps.flatMap((step) => (step.built === undefined ? [] : [[step.step, step.built]])),
+        [
+          ['implement', BUILT],
+          ['settle', BUILT_SETTLED],
         ],
       )
       const nodes = yield* sql<{ nodeKey: string; iteration: number; state: string }>`
@@ -216,11 +225,14 @@ describe('the coordinator loop', () => {
       )
       yield* sql`DELETE FROM external_links WHERE task_id = ${taskRow?.id ?? ''}`
       assert.match(task, /Branch \S+, in \S+\./)
+      // What it built, as it now stands, before the rounds that got it there.
+      assert.include(task, `What it built, as its lead says it now stands:\n${BUILT_SETTLED}`)
+      assert.isBelow(task.indexOf(BUILT_SETTLED), task.indexOf('implement: Did the task.'))
       assert.match(task, /review \(changes_requested\): The heading needs fixing\.\n\nsettle: Fixed the heading\./)
       assert.match(yield* callTool(access, 'read_thread', { task: 'add-a-retry' }), /\[review, pass\] The change holds\./)
       assert.match(yield* callTool(access, 'propose_plan', { task: 'add-a-retry', lead: { agent: 'codex' } }), /has started already/)
       assert.match(yield* callTool(access, 'message_lead', { task: 'add-a-retry', message: 'Stop.', now: true }), /^Passed on/)
-      // With no step waiting, a lead's summary isn't kept.
+      // Its plan done, a lead that changes the work after says again what the task built: without it, Althar asks.
       const lead: ToolAccess = {
         role: 'lead',
         projectId,
@@ -228,10 +240,7 @@ describe('the coordinator loop', () => {
         sessionId: 'none',
         taskId: ready?.taskId ?? null,
       }
-      assert.strictEqual(
-        yield* callTool(lead, 'finish_step', { summary: 'Again.' }),
-        'No step is waiting on you, so Althar keeps no summary now.',
-      )
+      assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Again.' }), builtAsk(false))
       // What the person says to a task goes to its lead, not the coordinator.
       assert.instanceOf(yield* Effect.flip(say(ready?.threadId ?? '', 'Hello')), NotFound)
       // Where its pull requests can't be read just now, the list says nothing of them and the task says so, rather than guessing.
@@ -1191,7 +1200,7 @@ describe("the coordinator's tools", () => {
       // A lead has its own tools, not the coordinator's; with no step waiting, its summary is still kept.
       const lead: ToolAccess = { role: 'lead', projectId, threadId, sessionId: 'none', taskId: null }
       assert.strictEqual(yield* callTool(lead, 'draft_task', { title: 'x' }), 'Althar has no tool called draft_task.')
-      assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Did it.' }), 'Althar has your summary.')
+      assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Did it.', built: 'A hello.' }), 'Althar has your summary.')
       const reviewer: ToolAccess = { role: 'reviewer', projectId, threadId, sessionId: 'none', taskId: null }
       assert.strictEqual(yield* callTool(reviewer, 'report_review', { verdict: 'pass', summary: 'Fine.' }), 'No review is waiting on you.')
       // What goes wrong inside Althar is told as such, not as the agent's mistake.
@@ -1201,7 +1210,7 @@ describe("the coordinator's tools", () => {
         'Althar could not do that. Try again, or tell the person.',
       )
       assert.strictEqual(
-        yield* callTool({ ...lead, threadId: 'thr_missing' }, 'finish_step', { summary: 'Did it.' }),
+        yield* callTool({ ...lead, threadId: 'thr_missing' }, 'finish_step', { summary: 'Did it.', built: 'A hello.' }),
         'Althar could not record that. Try again.',
       )
     }).pipe(Effect.provide(withQueries())),

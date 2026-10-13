@@ -27,6 +27,8 @@ import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
 import { type Answered, Questions } from './Questions'
 import {
+  builtAsk,
+  builtIn,
   EVIDENCE_KINDS,
   EvidenceGiven,
   evidenceFiles,
@@ -108,6 +110,8 @@ type Finding = typeof Finding.Type
 
 const Finished = Schema.Struct({
   summary: Schema.String,
+  /** What the task built, as it stands now: the task's own summary, which the person reads at its end. */
+  built: Schema.optional(Schema.String),
   /** The pull request's description, in the repository's template: by repository, which a task of one needn't name. */
   descriptions: Schema.optional(Schema.Array(Schema.Struct({ repository: Schema.optional(Schema.String), text: Schema.String }))),
   /** What shows the change does what it should; and what couldn't be shown. */
@@ -1292,7 +1296,7 @@ export class Runs extends Context.Service<
 
       /** What the lead is told to settle a review's findings. */
       const settling = (findings: ReadonlyArray<Finding & { readonly id: string }>) =>
-        `The review found:\n\n${findingsText(findings)}\n\nSettle each: fix what holds, and set aside what doesn't, with a reason. Then call finish_step with a summary, and in \`findings\` what became of each, by its id: fixed, or set_aside with the reason.`
+        `The review found:\n\n${findingsText(findings)}\n\nSettle each: fix what holds, and set aside what doesn't, with a reason. Then call finish_step with a summary, and in \`findings\` what became of each, by its id: fixed, or set_aside with the reason. If settling changes the work, say again in \`built\` what the task has built, as it now stands.`
 
       /**
        * Whether a session kept for a step is on the model the step asks for,
@@ -1725,7 +1729,10 @@ export class Runs extends Context.Service<
             descriptions: given = [],
             evidence: handed = [],
             unverified,
+            built: said,
           } = yield* read(Finished, input)
+          const built = builtIn(said)
+          const builds = built === null ? {} : { built }
           const worktrees = access.taskId === null ? [] : yield* worktreesOf(access.taskId)
           // What it shows of its work: its pictures read now, and kept once the step is taken.
           const evidence = yield* readEvidence(
@@ -1746,14 +1753,18 @@ export class Runs extends Context.Service<
           const kept = { ...givenBefore.get(access.threadId), ...now.descriptions }
           const descriptions = Object.keys(kept).length === 0 ? {} : { descriptions: kept }
           const current = access.taskId === null ? undefined : yield* currentRun(access.taskId)
-          const [planned] =
-            access.taskId === null ? [] : yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${access.taskId} LIMIT 1`
-          if (current === undefined && planned === undefined) {
-            // A task started without a plan has no steps: the summary is still what the person reads.
+          const [last] =
+            access.taskId === null
+              ? []
+              : yield* sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${access.taskId} ORDER BY created_at DESC LIMIT 1`
+          // A task started without a plan has no steps; one whose plan is done may still change, for a failed check or what people
+          // said on its pull request. Either way the summary is what the person reads, and what it built, as it now stands, its end.
+          if (current === undefined && (last === undefined || last.state === 'succeeded')) {
+            if (built === null) return yield* new ToolRefused({ message: builtAsk(false) })
             yield* addItem(
               { projectId: access.projectId as ProjectId, threadId: access.threadId },
               'step_result',
-              { step: 'implement', summary, ...descriptions, ...(yield* shows) },
+              { step: 'implement', summary, ...builds, ...descriptions, ...(yield* shows) },
               { id: itemId },
             )
             return 'Althar has your summary.'
@@ -1762,6 +1773,11 @@ export class Runs extends Context.Service<
           if (current === undefined || attempt === undefined)
             return yield* new ToolRefused({ message: 'No step is waiting on you, so Althar keeps no summary now.' })
           const step = attempt.nodeKey === 'settle' ? 'settle' : 'implement'
+          // Whether settling changed the work: then what the task built is said again, so its end is never older than its work.
+          const before = step === 'settle' ? ((JSON.parse(attempt.input) as { before?: string }).before ?? '') : ''
+          const after = step === 'settle' ? yield* digestAll(current.taskId) : ''
+          if (built === null && (step === 'implement' || after !== before))
+            return yield* new ToolRefused({ message: builtAsk(step === 'settle') })
           // A task that ends on its host pushes commits only: what isn't committed is the lead's to commit or clear away first.
           const end = (yield* stepsOf(current)).end ?? (yield* changes.endFor(current.projectId, current.taskId))
           if (end !== null) {
@@ -1800,7 +1816,7 @@ export class Runs extends Context.Service<
               // Read before the looks at git above: stopped and resumed meanwhile, the report is dropped.
               if (!(yield* keeps(current, attempt.id, { step, summary }))) return false
               yield* ended(current, attempt, 'succeeded', { summary })
-              yield* result(current, { step, round: attempt.iteration, summary, ...descriptions, ...showing }, itemId)
+              yield* result(current, { step, round: attempt.iteration, summary, ...builds, ...descriptions, ...showing }, itemId)
               // What became of each finding, as the lead says: the input to the next round, and to what reviews learn.
               if (step === 'settle') yield* settleFindings(current, attempt.id, settled)
               // A step that needed the person and reported after all no longer does.
@@ -1816,8 +1832,6 @@ export class Runs extends Context.Service<
               : 'Althar has your summary. A review starts now; wait for its findings.'
           }
           // Another round only if settling changed the code, and rounds are left.
-          const before = (JSON.parse(attempt.input) as { before?: string }).before ?? ''
-          const after = yield* digestAll(current.taskId)
           if (after !== before && attempt.iteration + 1 < ROUNDS) {
             yield* review(current, attempt.iteration + 1, summary)
             return 'Althar has your summary. The review looks again.'
@@ -1951,11 +1965,16 @@ export class Runs extends Context.Service<
       yield* toolServer.serve('lead', [
         tool(
           'finish_step',
-          "Tells Althar you have done your step: the task, or settling a review's findings. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open. With it, the evidence you gathered that the change does what it should, and in `unverified` what you couldn't show.",
+          "Tells Althar you have done your step: the task, or settling a review's findings. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open. In `built`, what the task has built as it stands now, which the person reads at its end. With it, the evidence you gathered that the change does what it should, and in `unverified` what you couldn't show.",
           {
             type: 'object',
             properties: {
               summary: { type: 'string' },
+              built: {
+                type: 'string',
+                description:
+                  'What the task has built, as it stands now, for the person: what it does for them now, the main changes and where they are, anything left open or decided along the way and why, and what they should do next (try something, check it on a real device). A few lines or a short list, about the end state, not this step: a fixed review finding belongs only if it changed what was built. Needed when you finish the task, and again after settling a review that changed the work.',
+              },
               evidence: {
                 type: 'array',
                 description:
