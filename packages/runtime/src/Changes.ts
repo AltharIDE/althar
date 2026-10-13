@@ -363,9 +363,10 @@ export class Changes extends Context.Service<
     /** The task's repositories whose last pull request merged or closed with commits after it: what a next pull request would have. */
     unshipped(taskId: string): Effect.Effect<ReadonlyArray<Unshipped>, unknown>
     /**
-     * Settles the task as done where every repository of it is merged and no
-     * commit is left after its pull requests, as a merge seen on its host
-     * does: for a round of work that ended (ADR-034).
+     * Settles a task with pull requests as done where every repository of it
+     * is merged and no commit is left after its pull requests, as a merge
+     * seen on its host does: for a round of work that ended (ADR-034). One
+     * with none stays as it is.
      */
     settleIfMerged(taskId: string): Effect.Effect<void, unknown>
     /**
@@ -1983,9 +1984,10 @@ export class Changes extends Context.Service<
        * Each of the task's repositories here whose last pull request merged
        * or closed, with commits on its branch after that pull request's head:
        * what a new pull request would have (ADR-034). Merges are left out of
-       * them, since what a merge brought in is the default branch's. One
-       * whose worktree doesn't have its pull request's head can't tell, and
-       * has none.
+       * them, since what a merge brought in is the default branch's, and
+       * commits that change nothing together have nothing to ship. One whose
+       * worktree doesn't have its pull request's head can't tell, and has
+       * none.
        */
       const unshippedOf = (taskId: string) =>
         Effect.gen(function* () {
@@ -2031,7 +2033,8 @@ export class Changes extends Context.Service<
               Effect.orElseSucceed(() => ''),
             )
             const commits = listed.split('\n').filter((line) => line !== '')
-            if (commits.length === 0) continue
+            // Commits that change nothing, all together, have nothing to ship.
+            if (commits.length === 0 || (yield* gitOutcome(repository.path, 'diff', '--quiet', head, 'HEAD')).code === 0) continue
             // How big they are together, as a diff from that head says: a binary file counts no lines.
             const counted = yield* git(repository.path, 'diff', '--numstat', head, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
             const lines = counted
@@ -3235,7 +3238,15 @@ export class Changes extends Context.Service<
       return Changes.of({
         publish: (input) => provide(publish(input)),
         unshipped: (taskId) => provide(unshippedOf(taskId)),
-        settleIfMerged: (taskId) => provide(locked(taskId)(settleIfDone(taskId))),
+        // Only a task with pull requests: one with none is settled by merging it here, as the person says.
+        settleIfMerged: (taskId) =>
+          provide(
+            locked(taskId)(
+              Effect.gen(function* () {
+                if ((yield* linksOf(taskId)).length > 0) yield* settleIfDone(taskId)
+              }),
+            ),
+          ),
         push: (taskId, head, url) => provide(locked(taskId)(push(taskId, head, url))),
         replace: (taskId, head, replaces, url) => provide(locked(taskId)(replace(taskId, head, replaces, url))),
         mergeNote: (taskId, url) => provide(locked(taskId)(mergeNote(taskId, url))),
