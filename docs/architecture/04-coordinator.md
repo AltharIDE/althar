@@ -106,6 +106,7 @@ provisional.
 | `list_models` | The models it can use now, by maker, with their scores and each one's efforts: the ids a step takes, the one it starts at by itself, and the person's default where they set one | Query |
 | `propose_plan` | Steps, a model per step and, where it matters, an effort that model offers, optional steps. An effort it doesn't offer is refused with the ones it does; left out, the step starts at the person's default for the model, or else the model's own | Command |
 | `start_task` | Drafts a mini task and starts it at once: one lead, at an effort as `propose_plan` takes one, no review, nothing outside the project when it is done | Command |
+| `review_pull_request` | Starts a review of someone else's pull request, by its link or its number in the project's repository, with the lead it picks: a task on a read-only copy of the pull request's head, whose lead drafts a review the person posts ([06](06-integrations-and-skills.md#reviewing-someone-elses-pull-request)). Asked again, the task already reviewing it | Command |
 | `run_project` | Runs the project with no agent: the default branch in a copy of its own, or a task's worktree (ADR-023) | Command |
 | `set_run_command` | Keeps how the project runs, for Althar to run it; leads have it too (ADR-023) | Command |
 | `order_tasks` | Orders a batch | Command |

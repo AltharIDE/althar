@@ -507,6 +507,60 @@ read and write, GitLab's for `api`, Trello's token for `read,write`; a Jira
 token files where the account has Create Issues, and Althar's GitHub App
 needs Issues: Read and write, which is set on the app itself.
 
+### Reviewing someone else's pull request
+
+A review is a task. The coordinator starts one (`review_pull_request`, [04](04-coordinator.md))
+when the person asks for a review, or pastes a pull request's link and
+asks; its thread opens with what they said and the pull request under it.
+
+- **Its lead reads a copy, fetched by Althar.** Althar fetches the pull
+  request's head (`refs/pull/<n>/head`) and its target branch into refs of
+  its own (`refs/althar/reviews/…`), signed in as a push is, and checks the
+  head out detached in a folder of the task's: a workspace with access
+  `read`, on no branch. The lead never fetches. Nothing Althar sets up a task
+  with touches the copy: no install, no run of the project, no merge here, no
+  conflict round, nothing published.
+- **It runs nothing of it.** The lead's session is in reader mode, under the
+  reader rules, as the coordinator's and a reviewer's are (04, "Read-only by
+  construction"): it reads, searches and runs commands that only look.
+- **From outside, it has no network.** A pull request from a fork, or by an
+  author GitHub doesn't name its owner, a member or a collaborator, is from
+  outside the team: its code and its words may try to steer whoever reads
+  them. Its lead's reader rules then refuse every fetch as well. What each
+  agent is held to beyond that: Claude Code has WebFetch and WebSearch denied
+  and every command asking, and its sandbox lets a command reach only the
+  domains its settings allow, which are none (as its documentation says, not
+  yet checked against a real session); Codex's read-only sandbox has no
+  network, and what would reach it asks and is refused, though its own web
+  search, where the person's config turns it on, is OpenAI's and not switched
+  off yet; OpenCode has no sandbox, so the rules alone hold it. Each review
+  task's view says what its lead can reach, in a sentence under its header.
+- **It reads the pull request through Althar.** `read_pull_request` reads it
+  the pull request as GitHub has it now: its description, its checks with the
+  end of a failed one's log, and what everyone said, those who aren't the
+  repository's people marked so. Whether its head moved since the copy is
+  said too.
+- **It drafts, and the person posts.** The lead's `draft_review` (a verdict:
+  approve, changes or comment; a summary; comments on lines of the change as
+  it now reads, each with a severity) is kept (`review_drafts`) and shown as a
+  card in the thread. A comment on a file the pull request hasn't, or a line
+  its diff doesn't show, is refused before anything is kept, since GitHub
+  would refuse the whole review for it. Drafting again replaces the draft
+  that waits. The person keeps or drops each comment, rewords them, and
+  chooses the verdict: the lead's is a suggestion, and on a pull request from
+  outside, Approve is never chosen for them. Nothing reaches GitHub until they
+  press Post, which posts the review with their verdict and the comments
+  kept, of the commit the lead read, signed as Althar's replies are. Posting
+  is guarded as filing an issue draft is: marked first, refused or perhaps
+  posted said on the card, never posted again unasked. Posted, the card folds
+  to a line with the review's link, and the task is done.
+- **A setting of the person's own** posts a review of their team's pull
+  request as soon as it is drafted, with the lead's verdict ("Post reviews of
+  my team's pull requests without asking", off by default). A pull request
+  from outside always waits for Post.
+- **Other hosts** don't take reviews yet: the code host model's
+  `capabilities.reviews` is GitHub's alone, and the coordinator says so.
+
 ### Signing in
 
 A desktop app can't keep a secret, so each service's way in depends on
@@ -588,7 +642,9 @@ Agents reach code hosts and trackers only through Althar:
   checks with their logs) and an issue, and reply on a pull request. They
   reach only the task's own repository, and every call is recorded.
 - **The coordinator drafts issues,** and the person files them: no agent
-  files an issue, or anything else on a tracker, on its own word.
+  files an issue, or anything else on a tracker, on its own word. A review's
+  lead drafts a review, which the person posts, or their setting posts for
+  their team's pull requests (Reviewing someone else's pull request, above).
 - **Agents run without the person's ways into a host:** `gh` and `glab`
   signed out, git's credential helpers reset (`credential.helper` empty, in
   git's environment), git's prompts off, and no SSH agent. Althar pushes
