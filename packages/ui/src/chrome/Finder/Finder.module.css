@@ -96,7 +96,12 @@
   cursor: default;
 }
 .row[aria-selected='true'] {
-  background: var(--n-3);
+  background: var(--n-2);
+}
+/* on the shaded row, the quiet words a step darker, so they still read */
+.row[aria-selected='true'] .meta,
+.row[aria-selected='true'] .state:not(.live, .signal) {
+  color: var(--t-2);
 }
 .row:active {
   background: var(--n-4);
@@ -130,7 +135,7 @@
 }
 .meta {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
   min-width: 0;
   font-size: 12px;
@@ -139,6 +144,7 @@
 .project {
   display: inline-flex;
   flex: none;
+  align-self: flex-start;
   align-items: center;
   gap: 5px;
   font-weight: 500;
@@ -150,12 +156,16 @@
   font-variant-numeric: tabular-nums;
   color: var(--t-2);
 }
+/* what matched keeps to two lines at most */
 .matched {
   flex: 1;
   min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 /* the words that matched: darker, never a highlighter */
 .hit {

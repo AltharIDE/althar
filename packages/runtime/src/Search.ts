@@ -329,7 +329,12 @@ export const findTasks = Effect.fn('Search.findTasks')(function* (input: SearchI
     matched: (() => {
       if (inTitle(input.text, row.title)) return null
       const marked = [row.asked, row.summaries, row.refs, row.files].find((one): one is string => one?.includes(OPEN) === true)
-      return marked === undefined ? null : [...partsOf(marked)]
+      if (marked === undefined) return null
+      const parts = partsOf(marked)
+      // Nor where all that matched is the number of the pull request it shows.
+      const number = row.pullRequest?.replace(/\D/g, '')
+      const hits = parts.flatMap((part) => (part.hit ? [part.text.replace(/\D/g, '')] : []))
+      return marked === row.refs && number !== undefined && hits.every((hit) => hit === number) ? null : [...parts]
     })(),
   }))
 })

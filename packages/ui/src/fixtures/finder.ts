@@ -58,7 +58,6 @@ export const ACROSS: FoundRow[] = [
     state: FoundState.Running,
     project: MERIDIAN,
     pullRequest: '#1206',
-    matched: [{ text: '#1206', hit: true }],
   },
   {
     id: 'h212',

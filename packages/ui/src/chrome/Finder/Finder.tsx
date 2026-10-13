@@ -58,7 +58,7 @@ export interface FinderText {
   /** Said as an answer arrives. */
   count: (n: number) => string
   state: Record<FoundState, string>
-  keys: { escape: string; up: string; down: string; enter: string }
+  keys: { up: string; down: string; enter: string }
   move: string
   open: string
 }
@@ -80,7 +80,7 @@ export const finderText: FinderText = {
     [FoundState.Done]: 'Done',
     [FoundState.Abandoned]: 'Abandoned',
   },
-  keys: { escape: 'esc', up: '↑', down: '↓', enter: '↵' },
+  keys: { up: '↑', down: '↓', enter: '↵' },
   move: 'move',
   open: 'open',
 }
@@ -198,7 +198,6 @@ export function Finder({ results, searching = false, query, defaultQuery = '', o
               }}
               onKeyDown={onKeyDown}
             />
-            <Kbd>{t.keys.escape}</Kbd>
           </div>
           {/* said once an answer comes, never for the one on its way */}
           <span aria-live="polite" className={s.said}>

@@ -169,7 +169,14 @@ describe('finding tasks', () => {
       yield* indexTask(created.taskId)
       for (const text of ['#143', '143', 'meridian/api#143'])
         assert.deepStrictEqual(yield* found(text), ['Back off between attempts'], text)
-      assert.strictEqual((yield* findTasks({ text: '143' }, none))[0]?.pullRequest, '#143')
+      // The pull request it shows is all that matched: nothing more is said. Its repository's name matched, it is.
+      assert.deepStrictEqual(
+        (yield* findTasks({ text: '#143' }, none)).map((task) => [task.pullRequest, task.matched]),
+        [['#143', null]],
+      )
+      assert.isTrue(
+        (yield* findTasks({ text: 'meridian/api' }, none))[0]?.matched?.some((part) => part.hit && part.text === 'meridian/api'),
+      )
 
       // Written again with nothing changed, it stays as it was.
       const before = yield* sql<{ changedAt: string }>`SELECT changed_at FROM task_search_rows WHERE task_id = ${created.taskId}`
