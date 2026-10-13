@@ -29,6 +29,7 @@ say the right. When something new needs a name on screen, add it here first.
 |---|---|---|
 | Coordinator | coordinator | The project's agent in the Talk room. It plans tasks and hands them out, but writes no code itself. |
 | Task | `Task` | One piece of work with an outcome, usually one change. |
+| Change, Review (a card's kind) | a task's kind, `TaskCard.kind`, read from what it has and never stored (DEV-96) | The word after where a task stands on its card and in its row. Change: its plan ends in a pull request or a pushed branch, or it has a pull request, commits or changes on its branch. Review: it reads someone else's pull request, with nothing of its own. Any other task is plain and has no word: a question, a prototype, a release from this Mac. A task only moves toward Change: a plain task that writes becomes one. |
 | Lead | the task's primary agent (the docs sometimes say worker) | The agent that owns a task: it implements, runs the steps and answers them. Never "worker" on screen. |
 | Step | workflow node | One stage of a task: Implement, Review, Verify. Steps report back to the lead. |
 | Steps, the plan | workflow graph | A task's steps before it starts (the plan) and while it runs. |
@@ -39,7 +40,7 @@ say the right. When something new needs a name on screen, add it here first.
 | On screen | In the model | What it is |
 |---|---|---|
 | Call | attention request | Something only a person can decide. Violet. |
-| Needs you | attention requests addressed to you, and tasks ready to accept | The board lane, the count at the top of a project's screen, and the violet number on a project's tab (the home's tab counts every project). |
+| Needs you | attention requests addressed to you, and tasks ready to accept | The board lane, the count at the top of a project's screen, and the violet number on a project's tab (the home's tab counts every project). A task waiting on a call shows in it once, as its own card saying the call's kind and why; a call no task waits on, such as the coordinator's question, is a card of its own. A task that is Finished sits in the lane, but no count includes it. |
 | Tab | a project the window keeps open | One per project the person keeps open, at the top of the window, after the home's. It goes back to where in the project they last were. ⌘1 is the home, ⌘2 onwards the projects. |
 | Round the notch, In the menu bar | the edge (`main/edge.ts`) | Where Althar shows what needs you while you're in another app: an island round the notch on a Mac that has one, which is the notch alone until something needs you, or Althar's mark in the menu bar, with a dot while something needs you. Either opens to what needs you, where a permission is answered in place, with the work in progress counted in one line under it. Settings calls it "In other apps" and shows it on every system: off a Mac with a notch it is the menu bar, the system tray, or, on a desktop with no tray, only Althar's window, and there is nothing to choose. |
 | Permission | permission attention request | A call asking whether an agent may do something, such as run a command or change a file. Allow it once or always, or don't: with what to do instead, or never (on the edge, once or not). Several at once stack, with Allow all. |
@@ -47,6 +48,8 @@ say the right. When something new needs a name on screen, add it here first.
 | Question, Needs your answer | question attention request | A call where an agent asks the person to choose: one or more questions, each with its options, each option with what it means, and room for your own words. Answered in the task, where it was asked. The home and the edge list it calmly, by what it asks and why, in what the agent said just before (or else who asks, and where), and Answer takes you to it, its first choice in hand; the board's card shows its options' names. Answered, it folds to what you said; withdrawn, it says "Not answered" and why. |
 | Stuck | attention request at the end of the repair ladder | A task that can't finish without you. There is no Failed status. |
 | Ready to accept | task phase `ready` | Work that is done and waits for you to accept it. |
+| Finished | a plain task's phase `ready`, not seen since (`tasks.seen_at`) | A plain task whose lead is done, in its project's Needs you until you open it, with the pictures or files it handed back, small. Not on the home, the edge, the Dock's count or in notifications: it asks nothing of you. |
+| Done | a plain task settled once seen (`task.done`, `seen: true`) | A Finished task you opened: it moves to Settled. Writing to its lead later opens it again as a follow-up. |
 | Queue, "Enter queues it; the lead reads it next" | `after_current` | What you write while the lead works. It waits for the lead's current turn to end. |
 | Send now | `interrupt_and_continue` | Stops the lead's turn to read your message, then it carries on with both. |
 | Interrupt the lead | turn interrupt | The composer's square. Ends the lead's turn; the task stays open. The line in the thread reads "Interrupted by you". |
@@ -101,7 +104,7 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | The rest | the mode, `permissions` | What happens to what no rule keeps: allowed, the coordinator decides, ask me, or allow everything. A kind of request on no list is with the rest. |
 | Allow always, Never allow | an answer that keeps a rule, by its scope | An answer that is also kept in the project's rules: for this exact command, commands starting the same way, or the kind of request. Offered only where the rule would hold. |
 | Allowed by the project's rules | a decision a rule made | The quiet line under a turn for what an allow rule let through, opening to each command and its rule. |
-| Settled | terminal states | Calls answered, changes accepted, tasks abandoned. |
+| Settled | terminal states | Calls answered, changes accepted, tasks abandoned, plain tasks seen (Done). |
 
 ## Althar itself
 

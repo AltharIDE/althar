@@ -62,6 +62,27 @@ const taskMenu = async (task: Partial<ThreadSnapshot['task']>, session?: ThreadS
 }
 
 describe('a task', () => {
+  it('is seen once as its screen opens, however often it reads its thread again', async () => {
+    const { client, emit } = fakeClient({ getThread: vi.fn(async () => thread()) })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Carrying on.')).toBeTruthy()
+    await waitFor(() => expect(client.seeTask).toHaveBeenCalledWith(snapshot().task.id))
+    act(() => emit(changed('task', snapshot().task.id)))
+    await waitFor(() => expect(client.getThread).toHaveBeenCalledTimes(2))
+    expect(client.seeTask).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens whether or not seeing it goes through', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread()),
+      seeTask: vi.fn(async () => Promise.reject(new ApiError({ reason: 'NotFound', message: 'No such task.' }))),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Carrying on.')).toBeTruthy()
+    await waitFor(() => expect(client.seeTask).toHaveBeenCalledTimes(1))
+    expect(screen.queryByText('No such task.')).toBeNull()
+  })
+
   it('catches up on what changed between its route reading it and its first listening', async () => {
     const meanwhile = items.says('Said meanwhile', 'claude-code', 'i-meanwhile')
     const getThread = vi

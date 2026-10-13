@@ -4,7 +4,7 @@ import { Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } from 'e
 import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
-import { field, parse, stuckOf, text } from './Queries'
+import { field, parse, Queries, stuckOf, text } from './Queries'
 import { programOf } from './rules'
 import { Sessions } from './Sessions'
 
@@ -16,7 +16,8 @@ import { Sessions } from './Sessions'
  * things wait, for the app's badge. Never for progress. With them, whether
  * any work runs, so the app can keep the Mac awake while it does. Read from
  * the store whenever a change that can bear on it is recorded; what already
- * waited when Althar started isn't nudged again.
+ * waited when Althar started isn't nudged again. A plain task that finished
+ * is neither nudged nor counted: it waits on its board to be seen.
  */
 
 /** How long changes are gathered, so a burst is read once. */
@@ -92,13 +93,14 @@ export class Nudges extends Context.Service<
     readonly events: Stream.Stream<NudgeEvent>
   }
 >()('@althar/runtime/Nudges') {
-  static readonly layer: Layer.Layer<Nudges, never, SqlClient.SqlClient | Ledger | Sessions | Agents> = Layer.effect(
+  static readonly layer: Layer.Layer<Nudges, never, SqlClient.SqlClient | Ledger | Sessions | Agents | Queries> = Layer.effect(
     Nudges,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const ledger = yield* Ledger
       const sessions = yield* Sessions
       const agents = yield* Agents
+      const queries = yield* Queries
       const published = yield* PubSub.unbounded<NudgeEvent>()
       const waiting = yield* Ref.make(0)
       const working = yield* Ref.make(false)
@@ -147,7 +149,10 @@ export class Nudges extends Context.Service<
             AND NOT EXISTS (SELECT 1 FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
               WHERE h.task_id = k.id AND s.state = 'starting')
           ORDER BY k.created_at, k.id`
+        // A plain task that finished waits on its board to be seen, and asks nothing of the person (DEV-96).
+        const finished = ready.length === 0 ? new Set<string>() : yield* queries.finished
         for (const task of ready) {
+          if (finished.has(task.taskId)) continue
           const turning = (threadId: string | null) =>
             threadId === null
               ? Effect.succeed(false)

@@ -5,6 +5,7 @@ import { type IconName, PermissionAnswers, ProjectInk, type ProjectRef, TaskStat
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
 import { queuedOfWords } from '../../shared/agents'
+import { isFinished } from '../../shared/calls'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import { ago, clock, useNow } from '../../shared/time'
 import { BarEnd, useNewTab } from '../tabs/TabsFrame'
@@ -126,7 +127,8 @@ export function HomeView({
   const refs = new Map(projects.map((project) => [project.id, refOf(project)]))
   const tasks = home?.tasks ?? []
   // In progress is every task not ready to accept; only those with an agent on them, or held for a reset, are running.
-  const ready = tasks.filter((task) => task.phase === 'ready')
+  // A plain task that finished waits on its board, not here (the runtime leaves it out too).
+  const ready = tasks.filter((task) => task.phase === 'ready' && !isFinished(task))
   const calls = (home?.calls ?? []).filter((call) => !answered.some((one) => one.call.id === call.id))
   // What has a card above isn't listed again under it.
   const carded = new Set(calls.map((call) => call.threadId))
@@ -194,7 +196,7 @@ export function HomeView({
   })
 
   const list: ReadonlyArray<HomeProject> = projects.map((project) => {
-    const ready = tasks.filter((task) => task.projectId === project.id && task.phase === 'ready').length
+    const ready = tasks.filter((task) => task.projectId === project.id && task.phase === 'ready' && !isFinished(task)).length
     return {
       id: project.id,
       project: refOf(project),

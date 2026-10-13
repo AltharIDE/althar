@@ -212,6 +212,7 @@ describe('the client', () => {
           GetOlderSettled: () => Effect.die('unused'),
           GetHome: () => Effect.die('unused'),
           LeftHome: () => Effect.die('unused'),
+          SeeTask: () => Effect.die('unused'),
           Merge: () => Effect.die('unused'),
           ReadFolder: () => Effect.die('unused'),
           Push: () => Effect.die('unused'),

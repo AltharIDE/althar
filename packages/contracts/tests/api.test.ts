@@ -16,6 +16,7 @@ import {
   Product,
   type SentImage,
   SentImages,
+  TaskCard,
   ThreadItem,
   WatchEvent,
 } from '../src/Api'
@@ -219,6 +220,7 @@ describe('the API', () => {
         title: 'Add a retry',
         slug: 'add-a-retry',
         phase: 'planned',
+        kind: 'change',
         plan: {
           id: 'plan_1',
           steps: [
@@ -244,6 +246,68 @@ describe('the API', () => {
     })
     assert.strictEqual(task.kind === 'task' && task.content.plan?.steps.length, 2)
     assert.throws(() => decode({ ...base, kind: 'task', content: { taskId: 't1' } }))
+  })
+
+  it('says what a task makes on its card: a plain task with what it handed back, a review with the pull request it reads', () => {
+    const card = Schema.decodeUnknownSync(TaskCard)
+    const plain = {
+      taskId: 't2',
+      threadId: 'th2',
+      title: 'Which partners still call v1?',
+      slug: 'which-partners-still-call-v1',
+      phase: 'ready',
+      kind: 'plain',
+      plan: null,
+      issue: null,
+      change: null,
+      step: null,
+      summary: 'Two do.',
+      lead: 'claude-code',
+      leadModel: null,
+      leadEffort: null,
+      branch: null,
+      startedAt: at,
+      waits: null,
+      queued: null,
+    }
+    const picture = { digest: 'a'.repeat(64), mediaType: 'image/png', bytes: 10, width: 4, height: 3, name: 'home.png', unkept: null }
+    const handed = card({
+      ...plain,
+      handed: {
+        pictures: [picture],
+        files: [
+          { path: 'notes/partners.md', add: 12 },
+          { path: '/tmp/x.csv', add: null },
+        ],
+      },
+    })
+    assert.deepStrictEqual(
+      handed.handed?.files.map((file) => file.add),
+      [12, null],
+    )
+    // Older runtimes said nothing of either.
+    assert.strictEqual(card(plain).handed, undefined)
+    // A file says the lines it added, or that git can't say.
+    assert.throws(() => card({ ...plain, handed: { pictures: [], files: [{ path: 'a.md' }] } }))
+    assert.throws(() => card({ ...plain, kind: 'question' }))
+    assert.throws(() => card({ ...plain, kind: undefined }))
+    const brief = {
+      repository: 'meridian/api',
+      number: 1199,
+      url: 'https://github.com/meridian/api/pull/1199',
+      title: 'Send back won’t restart a dead lead session',
+      author: 'ninemate',
+      outside: true,
+      additions: 58,
+      deletions: 20,
+      findings: 3,
+      blocking: 1,
+      verdict: 'changes',
+      posted: null,
+    }
+    assert.strictEqual(card({ ...plain, kind: 'review', reviewing: brief }).reviewing?.author, 'ninemate')
+    assert.strictEqual(card({ ...plain, kind: 'review', reviewing: { ...brief, verdict: null, additions: null } }).reviewing?.verdict, null)
+    assert.throws(() => card({ ...plain, kind: 'review', reviewing: { ...brief, verdict: 'request_changes' } }))
   })
 
   it('takes a command id only in its own shape, and a change with its cursor', () => {
@@ -315,6 +379,7 @@ describe('the API', () => {
               GetOlderSettled: () => Effect.die('unused'),
               GetHome: () => Effect.die('unused'),
               LeftHome: () => Effect.die('unused'),
+              SeeTask: () => Effect.die('unused'),
               Merge: () => Effect.die('unused'),
               Push: () => Effect.die('unused'),
               ReplacePullRequest: () => Effect.die('unused'),

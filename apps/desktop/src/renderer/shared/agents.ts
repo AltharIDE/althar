@@ -24,10 +24,11 @@ export const waitsWords = (agent: string, at: string) => `Waits for ${agent}, ba
  * computer runs at once is busy. More busy than that, after the person
  * lowered the number, says both.
  */
-export const queuedWords = ({ busy, atOnce }: Queued, where: string = device.this) =>
-  busy > atOnce
-    ? `Waiting: ${busy} agents busy on ${where}, which runs ${atOnce} at once`
-    : `Waiting: ${busy} of ${atOnce} agents busy on ${where}`
+export const queuedWords = (queued: Queued, where: string = device.this) => `Waiting: ${busyWords(queued, where)}`
+
+/** How busy this computer's agents are, as work that waits for one says it. */
+export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this) =>
+  busy > atOnce ? `${busy} agents busy on ${where}, which runs ${atOnce} at once` : `${busy} of ${atOnce} agents busy on ${where}`
 
 /**
  * The same, short, for a project's tasks on the home, which is this

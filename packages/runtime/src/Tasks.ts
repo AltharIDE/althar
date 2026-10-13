@@ -134,6 +134,13 @@ export class Tasks extends Context.Service<
      * folder and the title of a pull request or an issue already opened for it stay as they were made.
      */
     rename(input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly title: string }): Effect.Effect<void, unknown>
+    /**
+     * The person opened the task's screen: when, kept. One that finished as
+     * a plain task (`finished`, as its card reads), with no pull request,
+     * nothing waiting on the person and no plan to start, is done once seen:
+     * settled now. Writing to its lead later opens it again (ADR-034).
+     */
+    see(input: { readonly taskId: string; readonly finished: boolean }): Effect.Effect<void, unknown>
     /** Does something in the task's turn: never beside its stopping, resuming, abandoning or reopening. */
     inTurn<A, E, R>(taskId: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R>
   }
@@ -450,7 +457,42 @@ export class Tasks extends Context.Service<
           if (renamed) yield* touchCard(input.taskId)
         })
 
+      const see = (input: { readonly taskId: string; readonly finished: boolean }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const at = yield* timestamp
+          yield* sql`UPDATE tasks SET seen_at = ${at} WHERE id = ${input.taskId}`
+          if (!input.finished) return
+          const settled = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              // Read again where it is written: a round opened, a call came or a pull request opened meanwhile, and it stays.
+              const [task] = yield* sql<{ projectId: ProjectId; state: string; run: string | null; open: number }>`
+                SELECT k.project_id, k.state,
+                  (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS run,
+                  (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
+                  + (SELECT count(*) FROM task_plans p WHERE p.task_id = k.id AND p.state = 'proposed')
+                  + (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change') AS open
+                FROM tasks k WHERE k.id = ${input.taskId}`
+              if (task === undefined || task.state !== 'open' || task.run !== 'succeeded' || task.open > 0) return false
+              const state = yield* transition(taskLifecycle, 'open', 'done')
+              const revision = yield* change('tasks', input.taskId, { state, settledAt: at })
+              yield* fact({
+                projectId: task.projectId,
+                aggregateType: 'task',
+                aggregateId: input.taskId,
+                revision,
+                type: 'task.done',
+                payload: { seen: true },
+                actorId: instance.personId,
+              })
+              return true
+            }),
+          )
+          if (settled) yield* touchCard(input.taskId)
+        })
+
       return Tasks.of({
+        see: (input) => oneAtATime(input.taskId, see(input)),
         rename: (input) => provide(rename(input)),
         stop: (input) => oneAtATime(input.taskId, stop(input)),
         resume: (input) => oneAtATime(input.taskId, resume(input)),

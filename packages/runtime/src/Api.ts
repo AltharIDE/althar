@@ -553,6 +553,14 @@ export const handlers = Api.toLayer(
             yield* sql`UPDATE devices SET home_looked_at = ${yield* timestamp} WHERE id = ${instance.deviceId}`
           }),
         ),
+      // The person opened a task: a plain task that finished is done once seen.
+      SeeTask: ({ taskId }) =>
+        api(
+          Effect.gen(function* () {
+            const card = yield* queries.card(taskId)
+            yield* tasks.see({ taskId, finished: card.kind === 'plain' && card.phase === 'ready' })
+          }),
+        ),
       StartSession: ({ commandId, threadId, agentId, model, effort }) =>
         once(
           commandId,

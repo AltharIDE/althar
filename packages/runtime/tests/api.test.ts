@@ -1328,6 +1328,47 @@ describe('the coordinator, through the API', () => {
     ),
   )
 
+  it.live('settles a plain task that finished once the person opens it, and leaves a change ready', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const start = (title: string, description: string) =>
+          client.StartTask({
+            commandId: commandId(),
+            projectId: project.id,
+            title,
+            description,
+            steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+          })
+        const question = yield* start('Which partners still call v1?', '[lead:finish]')
+        const change = yield* start('Retry', '[lead:finish] [lead:edit]')
+        const both = yield* eventually(client.GetBoard({ projectId: project.id }), (board) =>
+          [question.id, change.id].every((id) => board.tasks.some((one) => one.taskId === id && one.phase === 'ready')),
+        )
+        assert.deepStrictEqual(
+          both.tasks.map((one) => [one.title, one.kind]),
+          [
+            ['Which partners still call v1?', 'plain'],
+            ['Retry', 'change'],
+          ],
+        )
+        yield* client.SeeTask({ commandId: commandId(), taskId: question.id })
+        yield* client.SeeTask({ commandId: commandId(), taskId: change.id })
+        const board = yield* client.GetBoard({ projectId: project.id })
+        assert.deepStrictEqual(
+          board.tasks.map((one) => [one.title, one.phase]),
+          [
+            ['Which partners still call v1?', 'settled'],
+            ['Retry', 'ready'],
+          ],
+        )
+        const unknown = yield* Effect.flip(client.SeeTask({ commandId: commandId(), taskId: 'task_nothing' }))
+        assert.strictEqual(unknown.reason, 'NotFound')
+      }),
+    ),
+  )
+
   it.live('has the project’s leads resolve what already conflicts as soon as its rules say they do, and a task say otherwise', () =>
     Effect.scoped(
       Effect.gen(function* () {

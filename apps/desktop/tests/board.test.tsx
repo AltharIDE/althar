@@ -6,8 +6,9 @@ import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@a
 
 import { BoardView, trackOf } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
+import { pictureUrl } from '../src/main/pictureAddress'
 import { clock, running } from '../src/renderer/shared/time'
-import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
+import { inYoursOf, lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
 import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
 import { useBoard } from '../src/renderer/features/board/useBoard'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
@@ -144,10 +145,52 @@ describe('the board’s lanes', () => {
   it('puts each task and call where it belongs', () => {
     const lanes = lanesOf(board())
     expect(lanes.next.map((work) => work.taskId)).toEqual(['t1'])
-    expect(lanes.running.map((work) => work.taskId)).toEqual(['t2', 't3'])
+    expect(lanes.running.map((work) => work.taskId)).toEqual(['t2'])
+    // A task waiting on a call is in Needs you, once, with its call: the call isn't a card of its own.
+    expect(lanes.waiting.map(({ task: work, call }) => [work.taskId, call?.id])).toEqual([['t3', 'a1']])
+    expect(lanes.calls).toEqual([])
     expect(lanes.ready.map((work) => work.taskId)).toEqual(['t4', 't5'])
     expect(lanes.settled.map((work) => work.taskId)).toEqual(['t6', 't7'])
     expect(yoursOf(lanes)).toBe(3)
+  })
+
+  it('keeps a call its own card where no task on the board waits on it, and a waiting task whose call isn’t read yet', () => {
+    const question: BoardCall = { ...permission, id: 'q1', kind: 'question', taskId: null, taskTitle: null, threadId: 'thc' }
+    const held: BoardCall = { ...permission, id: 'a2', taskId: 't1', threadId: 'th1' }
+    const lanes = lanesOf(
+      board({
+        tasks: [
+          task({ taskId: 't1', threadId: 'th1', phase: 'held' }),
+          task({ taskId: 't9', threadId: 'th9', title: 'Asks soon', phase: 'waiting' }),
+        ],
+        calls: [question, held],
+      }),
+    )
+    expect(lanes.calls.map((call) => call.id)).toEqual(['q1', 'a2'])
+    expect(lanes.waiting.map(({ task: work, call }) => [work.taskId, call])).toEqual([['t9', null]])
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title])).toEqual([
+      ['Waiting on you', 'Asks soon'],
+      ['Question', 'Run make deploy'],
+      ['Permission', 'Run make deploy'],
+    ])
+    expect(yoursOf(lanes)).toBe(3)
+  })
+
+  it('shows a plain task that finished in Needs you, but counts it nowhere and opens it from nothing else', () => {
+    const lanes = lanesOf(
+      board({
+        tasks: [
+          task({ taskId: 'p1', threadId: 'thp1', title: 'Which partners call v1?', phase: 'ready', kind: 'plain', branch: null }),
+          task({ taskId: 't4', threadId: 'th4', title: 'Rate-limit refunds', phase: 'ready', change: change() }),
+        ],
+        calls: [],
+      }),
+    )
+    expect(lanes.ready.map((work) => work.taskId)).toEqual(['p1', 't4'])
+    expect(inYoursOf(lanes)).toBe(2)
+    expect(yoursOf(lanes)).toBe(1)
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => need.title)).toEqual(['Rate-limit refunds'])
+    expect(firstNeedOf(lanes)).toBe('th4')
   })
 
   it('lists what needs the person, the task on screen among them but opening nothing, and opens the first of the others', () => {
@@ -193,15 +236,19 @@ describe('the board', () => {
     const work = await screen.findByRole('region', { name: 'The project’s work' })
     expect(within(work).getByText('Add a retry')).toBeTruthy()
     expect(within(work).getByText('Fix the limit')).toBeTruthy()
-    expect(within(work).getByText('Run make deploy')).toBeTruthy()
+    // The task waiting on a call is one card, saying the call and why, with the command it asks to run.
+    const asking = within(work).getByRole('button', { name: 'Ship it' }).closest('article') as HTMLElement
+    expect(within(asking).getByText('Permission')).toBeTruthy()
+    expect(within(asking).getByText('Run make deploy')).toBeTruthy()
+    expect(within(asking).getByText('make deploy')).toBeTruthy()
     expect(within(work).getByText('Rate-limit refunds')).toBeTruthy()
     // Ready on its branch, with no pull request: the branch, and how big its change is.
     expect(within(work).getByText('althar/tidy-the-docs')).toBeTruthy()
     expect(within(work).getByText('PR #7 merged')).toBeTruthy()
-    // On the front page: three things that need you, two in progress, and what settled last; nothing says what runs.
+    // On the front page: three things that need you, one in progress, and what settled last; nothing says what runs.
     expect(screen.getByRole('button', { name: '3 need you' })).toBeTruthy()
     const front = screen.getByRole('heading', { level: 1, name: 'meridian' }).closest('header')
-    expect(front?.textContent).toMatch(/3 need you·2 in progress·PR 7 merged \S/)
+    expect(front?.textContent).toMatch(/3 need you·1 in progress·PR 7 merged \S/)
     expect(screen.queryByText(/running/)).toBeNull()
   })
 
@@ -319,7 +366,7 @@ describe('the board', () => {
     for (const [title, thread] of [
       ['Add a retry', 'th1'],
       ['Fix the limit', 'th2'],
-      ['Run make deploy', 'th3'],
+      ['Ship it', 'th3'],
       ['Rate-limit refunds', 'th4'],
       ['Old work', 'th6'],
     ] as const) {
@@ -564,8 +611,9 @@ describe('every state the board shows', () => {
     expect(screen.getByText('Claude Code stopped before the step was done.')).toBeTruthy()
     // A step held for a usage limit says whom it waits for, and when they're back.
     expect(screen.getByText(`Waits for Codex, back at ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
-    // One waiting for a free agent says what for.
-    expect(screen.getByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
+    // One waiting for a free agent says so, and what for.
+    expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
+    expect(screen.getByText('Waiting')).toBeTruthy()
     expect(screen.getByText("Althar couldn't open the pull request.")).toBeTruthy()
     expect(screen.getByText(/isn't connected to this repository's host/)).toBeTruthy()
     expect(screen.getByText('PR #12 closed')).toBeTruthy()
@@ -604,8 +652,8 @@ describe('every state the board shows', () => {
     // At work, on the board's running lane, saying what it does where the step count would be.
     expect(screen.getByText('Resolving a conflict')).toBeTruthy()
     expect(screen.getByText('Fixing the checks')).toBeTruthy()
-    // Handed back, it is Stuck with the reason; the other is ready to accept, as ever.
-    expect(screen.getByText('Stuck')).toBeTruthy()
+    // Handed back, it is a merge conflict, its reason warm at its foot; the other is ready to accept, as ever.
+    expect(screen.getByText('Merge conflict')).toBeTruthy()
     expect(screen.getByText(why)).toBeTruthy()
     expect(screen.getAllByText('Ready to accept')).toHaveLength(1)
   })
@@ -693,6 +741,180 @@ describe('every state the board shows', () => {
     })
     withServices(<Docked target={{ kind: 'task', id: 't9' }} />, client)
     expect(await screen.findByText('It can be accepted once its checks pass')).toBeTruthy()
+  })
+})
+
+describe('each kind’s card', () => {
+  const NOW = '2026-10-01T10:00:00.000Z'
+  const reviewing = {
+    repository: 'meridian/api',
+    number: 1199,
+    url: 'https://github.com/meridian/api/pull/1199',
+    title: 'Send back won’t restart a dead lead session',
+    author: 'ninemate',
+    outside: true,
+    additions: 58,
+    deletions: 20,
+    findings: 3,
+    blocking: 1,
+    verdict: 'changes' as const,
+    posted: null,
+  }
+  const passed = (n: number) => ({ outcome: 'passed' as const, passed: n, failed: 0, running: 0, total: n, failing: [], list: [] })
+  const kinds = board({
+    tasks: [
+      task({ taskId: 'k1', title: 'On its branch', phase: 'running', step: 'implement', changed: { files: 2, add: 84, del: 6 } }),
+      task({
+        taskId: 'k2',
+        title: 'With its pull request',
+        phase: 'running',
+        step: 'implement',
+        followUp: true,
+        change: change({ checks: { ...passed(8), passed: 6, running: 2, outcome: 'running' } }),
+      }),
+      task({ taskId: 'k3', title: 'Just looking', phase: 'running', kind: 'plain', plan: null, branch: null }),
+      task({
+        taskId: 'k4',
+        title: 'Review #1202',
+        phase: 'running',
+        kind: 'review',
+        reviewing: { ...reviewing, number: 1202, findings: 1 },
+      }),
+      task({ taskId: 'k5', title: 'Ready with checks', phase: 'ready', change: change({ checks: passed(8) }) }),
+      task({ taskId: 'k6', title: 'Checks failed', phase: 'ready', change: change() }),
+      task({ taskId: 'k7', title: 'Unchecked', phase: 'ready', change: change({ checks: null }) }),
+      task({ taskId: 'k8', title: 'Review #1199', phase: 'ready', kind: 'review', reviewing }),
+      task({
+        taskId: 'k9',
+        title: 'Prototype the empty state',
+        phase: 'ready',
+        kind: 'plain',
+        handed: {
+          pictures: [
+            { digest: 'a'.repeat(64), mediaType: 'image/png', bytes: 9, width: 4, height: 3, name: 'one.png', unkept: null },
+            { digest: null, mediaType: 'image/png', bytes: 9, width: null, height: null, name: 'big.png', unkept: 'too_large' },
+            { digest: 'b'.repeat(64), mediaType: 'image/png', bytes: 9, width: 4, height: 3, name: null, unkept: null },
+          ],
+          files: [{ path: '/tmp/notes.md', add: null }],
+        },
+      }),
+      task({
+        taskId: 'k10',
+        title: 'Draft the notes',
+        phase: 'ready',
+        kind: 'plain',
+        handed: { pictures: [], files: [{ path: 'docs/releases/notes-0.4.md', add: 64 }] },
+      }),
+      task({ taskId: 'k11', title: 'Which partners call v1?', phase: 'ready', kind: 'plain', branch: null }),
+      task({ taskId: 'k12', title: 'Asked a question', threadId: 'thk12', phase: 'waiting', kind: 'plain' }),
+      task({ taskId: 'k13', title: 'Gave up', threadId: 'thk13', phase: 'waiting' }),
+      task({ taskId: 'k14', title: 'Settled plainly', phase: 'settled', state: 'done', kind: 'plain', settledAt: NOW }),
+      task({ taskId: 'k15', title: 'Up next, a change', phase: 'held', plan: { ...card().plan!, startsAt: null } }),
+      task({
+        taskId: 'k16',
+        title: 'Merged, then more',
+        phase: 'ready',
+        change: change({ state: 'merged' }),
+        unshipped: { commits: 2, add: 395, del: 383 },
+      }),
+      task({
+        taskId: 'k17',
+        title: 'Two repositories',
+        phase: 'ready',
+        change: change({ checks: passed(2) }),
+        unshipped: { commits: 1, add: 7, del: 1 },
+      }),
+      task({ taskId: 'k18', title: 'Review, read', phase: 'ready', kind: 'review' }),
+    ],
+    calls: [
+      { ...permission, id: 'c1', kind: 'question', title: 'Which database?', command: null, taskId: 'k12', threadId: 'thk12' },
+      {
+        ...permission,
+        id: 'c2',
+        kind: 'stuck',
+        title: '',
+        command: null,
+        taskId: 'k13',
+        threadId: 'thk13',
+        stuck: { step: 'implement', why: 'session_ended', detail: null, agentId: 'claude-code', round: 0, open: 0 },
+      },
+    ],
+  })
+  const cardOf = (title: string) => screen.getByRole('button', { name: title }).closest('article') as HTMLElement
+
+  it('says where each stands in a word, its kind’s word, and at most one card in the card and one fact', () => {
+    withServices(<BoardView lanes={lanesOf(kinds)} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+    // A change at work: its step, its kind, its track, its branch with how big it is so far.
+    const branch = within(cardOf('On its branch'))
+    expect(branch.getAllByText('Implement')).toHaveLength(2)
+    expect(branch.getByText('Change')).toBeTruthy()
+    expect(branch.getByText('althar/add-a-retry')).toBeTruthy()
+    expect(branch.getByText('+84')).toBeTruthy()
+    // With its pull request open: the pull request, and its checks so far.
+    const pr = within(cardOf('With its pull request'))
+    expect(pr.getAllByText('Follow-up')).toHaveLength(2)
+    expect(pr.getByText('#12')).toBeTruthy()
+    expect(pr.getByText('6 of 8 checks passed')).toBeTruthy()
+    // A plain task at work says only that it works.
+    const plain = within(cardOf('Just looking'))
+    expect(plain.getByText('Working')).toBeTruthy()
+    expect(plain.queryByText('Change')).toBeNull()
+    expect(plain.queryByRole('list', { name: 'Steps' })).toBeNull()
+    // A review reads someone else's pull request: its number, whose, and what it found so far.
+    const reading = within(cardOf('Review #1202'))
+    expect(reading.getByText('Reading')).toBeTruthy()
+    expect(reading.getByText('Review')).toBeTruthy()
+    expect(reading.getByText('ninemate')).toBeTruthy()
+    expect(reading.getByText('1 finding so far')).toBeTruthy()
+    // Ready to accept, and how its checks went.
+    expect(within(cardOf('Ready with checks')).getByText('All 8 checks passed')).toBeTruthy()
+    expect(within(cardOf('Checks failed')).getByText('1 check failed')).toBeTruthy()
+    expect(within(cardOf('Unchecked')).getByText('No checks ran')).toBeTruthy()
+    // A review drafted: its findings, louder, then what they come to.
+    const drafted = within(cardOf('Review #1199'))
+    expect(drafted.getByText('Review drafted')).toBeTruthy()
+    expect(drafted.getByText('3 findings')).toBeTruthy()
+    expect(drafted.getByText('1 blocking · request changes')).toBeTruthy()
+    // A plain task that finished: its pictures, small, drawn from the store; or else its files.
+    const pictures = within(cardOf('Prototype the empty state'))
+    expect(pictures.getByText('Finished')).toBeTruthy()
+    // One that wasn't kept isn't drawn; one with no name is called as the thread calls it.
+    expect(pictures.getAllByRole('img').map((img) => [img.getAttribute('src'), img.getAttribute('alt')])).toEqual([
+      [pictureUrl('a'.repeat(64), true), 'one.png'],
+      [pictureUrl('b'.repeat(64), true), 'Image 3'],
+    ])
+    expect(pictures.queryByText('notes.md')).toBeNull()
+    const files = within(cardOf('Draft the notes'))
+    expect(files.getByText('notes-0.4.md')).toBeTruthy()
+    expect(files.getByText('+64')).toBeTruthy()
+    expect(within(cardOf('Which partners call v1?')).getByText('Finished')).toBeTruthy()
+    // Waiting on a call: the call's kind, and why.
+    const question = within(cardOf('Asked a question'))
+    expect(question.getByText('Question')).toBeTruthy()
+    expect(question.getByText('Which database?')).toBeTruthy()
+    const stuck = within(cardOf('Gave up'))
+    expect(stuck.getByText('Stuck')).toBeTruthy()
+    expect(stuck.getByText('Claude Code stopped before the step was done.')).toBeTruthy()
+    // Merged, with commits after it: its branch, with what is in no pull request yet.
+    const after = within(cardOf('Merged, then more'))
+    expect(after.getByText('Ready for a new pull request')).toBeTruthy()
+    expect(after.getByText('+395')).toBeTruthy()
+    expect(after.queryByText('#12')).toBeNull()
+    // One repository's pull request open, another's commits in none: both.
+    const two = within(cardOf('Two repositories'))
+    expect(two.getByText('Ready to accept')).toBeTruthy()
+    expect(two.getByText('#12')).toBeTruthy()
+    expect(two.getByText('+7')).toBeTruthy()
+    // A review whose pull request isn't read yet says only where it stands.
+    expect(within(cardOf('Review, read')).getByText('Review drafted')).toBeTruthy()
+    // Nothing on any card is pressed but the card itself.
+    for (const article of screen.getAllByRole('article')) expect(within(article).getAllByRole('button')).toHaveLength(1)
+    // Rows say their kind's word, and a plain task's none.
+    const settled = screen.getByRole('button', { name: 'Settled plainly' }).closest('li') as HTMLElement
+    expect(within(settled).queryByText('Change')).toBeNull()
+    expect(within(settled).getByText('Done')).toBeTruthy()
+    const next = screen.getByRole('button', { name: 'Up next, a change' }).closest('li') as HTMLElement
+    expect(within(next).getByText('Change')).toBeTruthy()
   })
 })
 
