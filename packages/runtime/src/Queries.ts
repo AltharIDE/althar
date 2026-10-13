@@ -557,6 +557,8 @@ export class Queries extends Context.Service<
     fileDiff(taskId: string, path: string): Effect.Effect<FileDiff, unknown>
     /** A project's board: its tasks, by card, and the calls that wait on the person. */
     board(projectId: string): Effect.Effect<BoardSnapshot, unknown>
+    /** The next page of a project's settled tasks, as cards: the ones settled before `before` (`taskId` breaking a tie), most recent first. */
+    olderSettled(projectId: string, before: string, taskId: string): Effect.Effect<ReadonlyArray<BoardSnapshot['tasks'][number]>, unknown>
     /** The home: every project, and across them what waits on the person, what runs, and what the loop did since `since` or they last left it. */
     home(since?: string): Effect.Effect<HomeSnapshot, unknown>
     /** The project's coordinator thread, with the newest `limit` items before `before`. */
@@ -1459,8 +1461,11 @@ export class Queries extends Context.Service<
             FROM tasks k LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE k.project_id = ${projectId} AND (k.state NOT IN ('done', 'abandoned') OR k.id IN (
               SELECT id FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')
-              ORDER BY settled_at DESC LIMIT ${SETTLED_SHOWN}))
+              ORDER BY settled_at DESC, id DESC LIMIT ${SETTLED_SHOWN}))
             ORDER BY k.created_at, k.id`
+          const [counted] = yield* sql<{
+            total: number
+          }>`SELECT COUNT(*) AS total FROM tasks WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')`
           const tasks = yield* Effect.forEach(rows, onBoard, { concurrency: AT_ONCE })
           // Only what the board still shows is kept.
           const shown = new Set(rows.map((row) => `${row.id}:${row.settledAt}`))
@@ -1472,7 +1477,26 @@ export class Queries extends Context.Service<
             cursor: at,
             tasks: tasks.flat(),
             calls: calls.map((one) => one.call),
+            settledTotal: counted?.total ?? 0,
           } satisfies BoardSnapshot
+        })
+
+      /** The next page of a project's settled tasks, older than the one settled at `before` (`taskId` breaking a tie), most recent first. */
+      const olderSettled = (projectId: string, before: string, taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{
+            id: string
+            state: string
+            createdAt: string
+            settledAt: string | null
+          }>`
+            SELECT id, state, created_at, settled_at FROM tasks
+            WHERE project_id = ${projectId} AND state IN ('done', 'abandoned')
+              AND (settled_at < ${before} OR (settled_at = ${before} AND id < ${taskId}))
+            ORDER BY settled_at DESC, id DESC LIMIT ${SETTLED_SHOWN}`
+          const tasks = yield* Effect.forEach(rows, onBoard, { concurrency: AT_ONCE })
+          return tasks.flat()
         })
 
       /** The phases the home shows a task in: running, stopped or waiting on a call, and ready to accept. */
@@ -1790,6 +1814,7 @@ export class Queries extends Context.Service<
         thread: (threadId, page) => run(thread(threadId, page)),
         fileDiff: (taskId, path) => run(diffOf(taskId, path)),
         board: (projectId) => run(board(projectId)),
+        olderSettled: (projectId, before, taskId) => run(olderSettled(projectId, before, taskId)),
         home: (since) => run(home(since)),
         item: (threadId, itemId) => run(item(threadId, itemId)),
         // A command still running is read from what it has printed so far; one that ended, from what was kept.

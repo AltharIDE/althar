@@ -456,7 +456,13 @@ export function ProjectView({
         {boarding && (
           <div className={s.board}>
             {lanes !== null ? (
-              <BoardView lanes={lanes} agents={model.agents} now={now} onOpen={onTask} />
+              <BoardView
+                lanes={lanes}
+                agents={model.agents}
+                now={now}
+                onOpen={onTask}
+                {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
+              />
             ) : board.error === null ? (
               <PartPending label={text.boardReading} />
             ) : (

@@ -136,6 +136,7 @@ const board = (overrides: Partial<BoardSnapshot> = {}): BoardSnapshot => ({
     }),
   ],
   calls: [permission],
+  settledTotal: 2,
   ...overrides,
 })
 
@@ -190,6 +191,48 @@ describe('the board', () => {
     const front = screen.getByRole('heading', { level: 1, name: 'meridian' }).closest('header')
     expect(front?.textContent).toMatch(/3 need you·2 in progress·PR 7 merged \S/)
     expect(screen.queryByText(/running/)).toBeNull()
+  })
+
+  it('counts every settled task, loads only the latest, and loads the older ones on request', async () => {
+    const settledAt = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, n)).toISOString()
+    const settledTask = (n: number) =>
+      task({
+        taskId: `s${n}`,
+        threadId: `ths${n}`,
+        title: `Settled ${n}`,
+        slug: `settled-${n}`,
+        phase: 'settled',
+        state: 'done',
+        settledAt: settledAt(n),
+      })
+    const latest = Array.from({ length: 30 }, (_, i) => settledTask(i + 5))
+    const older = Array.from({ length: 5 }, (_, i) => settledTask(4 - i))
+    const getBoard = vi.fn(async () => board({ tasks: latest, calls: [], settledTotal: 35 }))
+    const getOlderSettled = vi.fn(async () => older)
+    const { client, emit } = fakeClient({ getBoard, getOlderSettled })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    const work = await screen.findByRole('region', { name: 'The project’s work' })
+    const column = within(work).getByRole('heading', { name: 'Settled' }).closest('section') as HTMLElement
+    // 35 in all, though 30 are loaded.
+    expect(within(column).getByText('35')).toBeTruthy()
+    expect(within(column).getAllByRole('listitem')).toHaveLength(30)
+    expect(within(column).queryByText('Settled 0')).toBeNull()
+
+    await userEvent.click(within(column).getByRole('button', { name: 'Show older' }))
+    expect(await within(column).findByText('Settled 0')).toBeTruthy()
+    // Asked for what came before the oldest it had.
+    expect(getOlderSettled).toHaveBeenCalledWith('p1', settledAt(5), 's5')
+    expect(within(column).getAllByRole('listitem')).toHaveLength(35)
+    expect(within(column).getByText('35')).toBeTruthy()
+    // Everything is shown: nothing more to ask for.
+    expect(within(column).queryByRole('button', { name: 'Show older' })).toBeNull()
+
+    // One more settles: 36 in all, the older ones still there.
+    getBoard.mockImplementation(async () => board({ tasks: [settledTask(35), ...latest.slice(1)], calls: [], settledTotal: 36 }))
+    emit(changed('task', 's35'))
+    expect(await within(column).findByText('36')).toBeTruthy()
+    expect(within(column).getByText('Settled 0')).toBeTruthy()
   })
 
   it('opens the first thing that needs you in its task, from the front page, and shows the rest when pointed at', async () => {
