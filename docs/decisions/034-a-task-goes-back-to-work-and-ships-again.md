@@ -45,12 +45,15 @@
     count.
   - **Where a round ends depends on what is there:**
     - Nothing new, when the lead's turn ends without `finish_step`, the
-      person interrupts it, or it finishes: the round closes, and the task goes back where it was. A
-      merged task is done again, at the time it first settled, so it keeps
-      its place among the settled; a ready one is ready, a stopped one
-      stopped (the round's run ends as the run before it did).
+      person interrupts it, or it finishes: the round closes, and the task
+      goes back where it was. A merged task is done again, at the time it
+      first settled, so it keeps its place among the settled; a ready one is
+      ready, a stopped one stopped (the round's run ends as the run before it
+      did).
     - New work and the lead's turn ended without `finish_step`: it is
-      reminded once, then the round needs the person, as any step.
+      reminded once, then the round needs the person, as any step. Given up
+      there, the task goes back where it was too, and what the round
+      committed stays on its branch, offered as below.
     - A question the lead asked: Needs you, as any step, and the answer
       carries the round on.
     - New work, finished (and its review passed or settled): ready. A round
@@ -73,7 +76,10 @@
       there), and cherry-picks the new commits onto it, merges left out
       since the default branch has what they brought, in the task's
       worktree, which moves to the new branch; its base is now that commit
-      of the default branch;
+      of the default branch. Where the lead merged that default branch into
+      its own since, the new branch is the task's branch as it is. Where the
+      default branch can't be fetched, nothing moves: this Mac's may not have
+      what merged;
     - after a pull request was closed unmerged, nothing of the branch is in,
       so the new branch is the task's branch as it is, under a new name.
 
@@ -84,9 +90,11 @@
     evidence), and linked to the task and its issue as the first was. A
     cherry-pick that conflicts with the default branch stops, puts the
     worktree back on its branch, and says which files, for the lead to bring
-    the default branch in first. It is refused while the lead's round is
-    under way, while a pull request of the repository is open (the card
-    pushes to that), and with nothing new.
+    the default branch in first. A push that doesn't go through leaves the
+    worktree on the new branch, its commits still offered, and the next try
+    takes that branch. It is refused while the lead's round is under way,
+    while a pull request of the repository is open (the card pushes to
+    that), and with nothing new.
   - **Merged with work after it isn't done.** A task whose pull requests
     have all merged, but whose branch has commits after the last one's head
     in any repository, stays open and ready, offering the new pull request,
@@ -104,11 +112,16 @@
     machine (ADR-032): its lead takes a place while it is in a turn, in the
     place its turn asked for, and none between turns, when it waits on the
     person as a lead after its plan always has; its review asks for a place
-    as any review. A round
-    under way when Althar stops carries on after the restart as any step,
-    its lead told to carry on with what the person asked.
+    as any review.
+  - **Across a restart,** a round whose lead was in a turn as Althar stopped
+    carries on as any step, its lead told to carry on with what the person
+    asked; one whose lead's last turn had completed is judged as that turn's
+    end would have been, so one that made nothing new goes back where it
+    was.
 
-  The states and transitions, each tested in `packages/runtime/tests/rounds.test.ts`:
+  The states and transitions, tested in `packages/runtime/tests/rounds.test.ts`, with an
+  interrupted round in `changes.test.ts` and a restart after a completed turn in
+  `busy.test.ts`; `apps/desktop/e2e/rounds.spec.ts` walks the first and the last in the window:
 
   ```mermaid
   stateDiagram-v2
@@ -123,6 +136,7 @@
       round --> settled: nothing new, from done (its settled time kept)
       round --> asking: the lead asks a question, or new work and no report after a reminder
       asking --> round: answered
+      asking --> settled: given up, from done (its commits offered where in no pull request)
       round --> after: finished with new commits, review passed
       after --> ready: Open a new pull request (a new branch, cherry-picked, pushed plainly)
       ready --> settled: every pull request merged, nothing after them
@@ -135,13 +149,15 @@
   | `done`, run passed | the person writes to the lead | `open`, a round runs | Running |
   | `open`, run passed, failed or given up | the person writes to the lead | a round runs | Running |
   | `open`, run stopped | the person writes to the lead | the run resumes, as before | Running |
-  | Round, Implement | the lead's turn ends, nothing new | the run before's end; `done` again where it was | as before the round |
+  | Round, Implement | the lead's turn ends, or the person interrupts it, nothing new | the run before's end; `done` again where it was | as before the round |
   | Round, Implement | `finish_step`, nothing new | the same, with its summary in the thread | as before the round |
   | Round, Implement | the lead asks a question | waits on it | Needs you |
   | Round, Implement | turn ends with new work, no report, twice | needs the person | Needs you |
+  | Round, needing the person | Give it up | back where it was, its commits on its branch | as before, or Ready offering a new pull request |
   | Round, Implement | `finish_step` with new work | its review, or the round passes | Running, then Ready |
   | Round, Review | Skip the review | the round passes | Ready |
-  | Round | Althar restarts | the step carries on after the restart | Running |
+  | Round, its lead in a turn | Althar restarts | the step carries on after the restart | Running |
+  | Round, its lead's last turn completed | Althar restarts | as that turn's end would have it | as above |
   | Passed, last pull request merged or closed, commits after it | Open a new pull request | a new draft on a new branch | Ready, with both pull requests |
   | Passed, pull request open | Push | as before | Ready |
   | Every pull request merged, nothing after | (the host says so) | `done` | Settled |
