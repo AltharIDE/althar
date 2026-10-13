@@ -99,9 +99,9 @@
 /* Giving way to the landscape: at once as the train sets off in the dark, softly if it comes after. */
 .hero[data-drawn] .glass { opacity: 0; visibility: hidden; transition: opacity 0.5s ease-out, visibility 0s 0.5s; }
 
-/* The words, set by the look (Looks.module.css). They wait for the train to set off, as the launch has them; crawlers read them in the HTML all the same. */
-.words { display: contents; }
-@media (scripting: enabled) { .hero:not([data-begun]) .words { visibility: hidden; } }
+/* The words, set by the look (Looks.module.css): those in the scene, and those that stand still in front of it. They wait for the train to set off, as the launch has them; crawlers read them in the HTML all the same. */
+.words, .steady { display: contents; }
+@media (scripting: enabled) { .hero:not([data-begun]) :is(.words, .steady) { visibility: hidden; } }
 
 @media (max-width: 760px) {
   .stage { --fx: var(--fx-phone); }

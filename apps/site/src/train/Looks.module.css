@@ -1,6 +1,7 @@
-/* The look's words (looks.tsx). Everything is set inside the stage,
-   by the photograph's measure: --px, --py (where the plate stands), --u (a
-   plate px in CSS px), --wx, --wy, --ww, --wh (the middle window). */
+/* The look's words (looks.tsx). Those in the scene are set inside the
+   stage, by the photograph's measure: --px, --py (where the plate stands),
+   --u (a plate px in CSS px), --wx, --wy, --ww, --wh (the middle window).
+   Those that stand still (the foot) are set on the first screen itself. */
 
 /* The middle window, kept on the screen when a phone crops it. */
 .window {

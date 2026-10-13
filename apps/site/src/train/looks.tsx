@@ -45,7 +45,10 @@ export interface Beats {
 
 export interface Look {
   name: string
+  /** The words in the scene, moved with it by the camera. */
   Words: FC
+  /** What stands still in front of the scene: the lead and the ways in, which the camera's knocks and trembling leave be, so they can be read and pressed. */
+  Steady?: FC
   beats: Beats
   /** Brings the headline in, from the moment the train sets off; returns the animations, to pause and cancel. */
   arrive: (within: HTMLElement) => Animation[]
@@ -123,20 +126,24 @@ const Depth: FC = () => (
         <Words text={TRAIN.title} /> <span className={s.hidden}>{TRAIN.last}</span>
       </h1>
     </header>
-    <footer className={s.depthFoot}>
-      <p className={s.lead} data-arrive={rest(0)}>
-        {TRAIN.lead}
-      </p>
-      <div className={s.depthWays} data-arrive={rest(120)}>
-        <Get tone="blue" />
-      </div>
-    </footer>
   </>
+)
+
+const DepthFoot: FC = () => (
+  <footer className={s.depthFoot}>
+    <p className={s.lead} data-arrive={rest(0)}>
+      {TRAIN.lead}
+    </p>
+    <div className={s.depthWays} data-arrive={rest(120)}>
+      <Get tone="blue" />
+    </div>
+  </footer>
 )
 
 const depth: Look = {
   name: 'Depth',
   Words: Depth,
+  Steady: DepthFoot,
   passer: true,
   sceneWord: TRAIN.last,
   beats: {

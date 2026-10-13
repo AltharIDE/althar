@@ -386,7 +386,7 @@ export function TrainHero({ nav, look = 'depth' }: { nav?: ReactNode; look?: Loo
     }
   }, [look, windId])
 
-  const Words = LOOKS[look].Words
+  const { Words, Steady } = LOOKS[look]
   return (
     <div ref={root} className={s.hero} data-ready={hydrated || undefined} data-drawn={drawn || undefined}>
       {/* What the camera sees: the view, its light, and the carriage and the words in it. */}
@@ -411,13 +411,19 @@ export function TrainHero({ nav, look = 'depth' }: { nav?: ReactNode; look?: Loo
           {/* The film's grain and the lens's dark corners: over the photograph, under the words. */}
           <div ref={grain} className={s.grain} aria-hidden="true" />
           <div className={s.vignette} aria-hidden="true" />
-          {/* Until the landscape is drawn, and without scripts, a plain sky in the window. */}
+          {/* Until the landscape is drawn, and without scripts, the view as the train sets off. */}
           <div className={s.glass} style={{ backgroundImage: `url(${PLATE.view})` }} aria-hidden="true" />
           <div className={s.words}>
             <Words />
           </div>
         </div>
       </div>
+      {/* In front of the camera, so its knocks leave them be: the lead and the ways in. */}
+      {Steady && (
+        <div className={s.steady}>
+          <Steady />
+        </div>
+      )}
       {/* The blur the speed puts along the headline. */}
       <svg className={s.defs} aria-hidden="true">
         <defs>
