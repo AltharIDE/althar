@@ -217,8 +217,10 @@ export interface Unshipped {
   readonly change: ChangeSummary
   /** When that pull request opened: its next is described from what came after. */
   readonly openedAt: string
-  /** That pull request's head, as the branch has it. */
+  /** That pull request's head, as the branch has it; or, `moved`, where the branch made for its next one started. */
   readonly head: string
+  /** The worktree is on a branch made for its next pull request already, which didn't open: it goes on that one. */
+  readonly moved: boolean
   /** The commits after it, oldest first, merges left out. */
   readonly commits: ReadonlyArray<string>
   /** Lines they add and remove, all together. */
@@ -772,6 +774,8 @@ export class Changes extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // Made for it already, by a try that didn't open it, the branch is the one.
+          if (next.moved) return task
           const changed = (yield* git(task.path, '-c', 'core.quotePath=false', 'diff', '--name-only', 'HEAD'))
             .split('\n')
             .filter((file) => file !== '')
@@ -779,13 +783,9 @@ export class Changes extends Context.Service<
           const fresh = yield* nextBranch(task, pushTarget)
           let base = task.baseCommit
           if (next.change.state === 'merged') {
-            // The default branch as its host has it now; else as this Mac last saw it.
-            const fetched = yield* fetchInto(task.path, pushTarget, target, `refs/althar/base/${target}`)
-            const [known] = (yield* commitsOf(task.path, [`refs/remotes/origin/${target}`, `refs/heads/${target}`])).filter(
-              (commit) => commit !== null,
-            )
-            const tip = fetched ?? known
-            if (tip === undefined || tip === null)
+            // The default branch as its host has it now, with what merged: as this Mac last saw it, it may not have that yet.
+            const tip = yield* fetchInto(task.path, pushTarget, target, `refs/althar/base/${target}`)
+            if (tip === null)
               return yield* new GitFailed({ args: ['fetch', target], cwd: task.path, stderr: `Couldn't fetch ${target} from the host.` })
             base = tip
             if (yield* onHead(task.path, tip)) yield* git(task.path, 'checkout', '-q', '-b', fresh)
@@ -1994,9 +1994,11 @@ export class Changes extends Context.Service<
             workspaceId: string
             path: string
             branch: string
+            baseCommit: string | null
             name: string
             slug: string
             sent: string | null
+            changeBranch: string
             linkId: string
             projectId: ProjectId
             connectionId: string | null
@@ -2006,8 +2008,8 @@ export class Changes extends Context.Service<
             listening: number
             openedAt: string
           }>`
-            SELECT w.id AS workspace_id, w.path, w.branch, b.display_name AS name, b.slug, c.head_commit AS sent,
-              l.id AS link_id, l.project_id, l.connection_id, l.product, l.snapshot, l.cursor, l.listening, l.created_at AS opened_at
+            SELECT w.id AS workspace_id, w.path, w.branch, w.base_commit, b.display_name AS name, b.slug, c.head_commit AS sent,
+              c.branch AS change_branch, l.id AS link_id, l.project_id, l.connection_id, l.product, l.snapshot, l.cursor, l.listening, l.created_at AS opened_at
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_changes c ON c.id = (SELECT id FROM repository_changes WHERE workspace_id = w.id
               AND pull_request_url IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1)
@@ -2018,9 +2020,11 @@ export class Changes extends Context.Service<
           for (const repository of repositories) {
             const seen = Option.getOrUndefined(yield* Effect.option(decodeSnapshot(repository.snapshot)))
             if (seen === undefined || seen.state === 'open' || !existsSync(repository.path)) continue
-            // Its head as the host has it, else as Althar pushed it: the first the branch has.
-            let head: string | undefined
-            for (const candidate of [seen.headSha, repository.sent])
+            // Its head as the host has it, else as Althar pushed it: the first the branch has. A worktree on a branch of its own
+            // since, made for its next pull request that didn't open, counts from where that branch started.
+            const moved = repository.branch !== repository.changeBranch
+            let head: string | undefined = moved && repository.baseCommit !== null ? repository.baseCommit : undefined
+            for (const candidate of moved ? [] : [seen.headSha, repository.sent])
               if (candidate !== null && head === undefined && (yield* onHead(repository.path, candidate))) head = candidate
             if (head === undefined) continue
             const listed = yield* git(repository.path, 'rev-list', '--reverse', '--no-merges', `${head}..HEAD`).pipe(
@@ -2047,6 +2051,7 @@ export class Changes extends Context.Service<
               change: { ...seen, linkId: repository.linkId, product: repository.product, listening: repository.listening === 1 },
               head,
               commits,
+              moved,
               ...lines,
             })
           }

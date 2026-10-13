@@ -1480,11 +1480,11 @@ export class Runs extends Context.Service<
        * card says what it said before, and a merged task is done again, at the
        * time it first settled.
        */
-      const backWhereItWas = (run: RunRow, back: RoundBack) =>
+      const backWhereItWas = (run: RunRow, back: RoundBack, why: 'nothing_new' | 'abandoned' = 'nothing_new') =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           yield* ends(run, back.ended)
-          yield* change('runs', run.runId, { endReason: 'nothing_new' })
+          yield* change('runs', run.runId, { endReason: why })
           const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${run.taskId}`
           if (back.state !== 'done' || task?.state !== 'open') return
           const state = yield* transition(taskLifecycle, 'open', 'done')
@@ -2726,6 +2726,14 @@ export class Runs extends Context.Service<
             return
           }
           if (answer.kind === 'abandon') {
+            // Given up, a round of work after the plan leaves the task where it was before it (ADR-034); what it committed stays.
+            const round = info.step === 'implement' ? yield* roundStartOf(current) : undefined
+            if (round !== undefined) {
+              yield* endAttempt('cancelled', { abandoned: true })
+              yield* sql.withTransaction(backWhereItWas(current, round.round, 'abandoned'))
+              yield* Effect.ignore(changes.settleIfMerged(current.taskId))
+              return yield* touchCard(current.taskId)
+            }
             yield* endAttempt('cancelled', { abandoned: true })
             return yield* finish(current, 'cancelled')
           }
@@ -3028,15 +3036,13 @@ export class Runs extends Context.Service<
               })
               continue
             }
-            // A round of work whose lead had no turn under way as Althar stopped waited on the person: as its turn's end would have,
-            // it ends where it made nothing new (ADR-034), and is carried on, to report, where it made something.
+            // A round of work whose lead's last turn had completed as Althar stopped waited on the person: as that turn's end would
+            // have, it ends where it made nothing new (ADR-034). One cut short by the stop is carried on, as any step.
             if (current.planId === null && step.nodeKey === 'implement') {
               const [turn] = yield* sql<{ state: string }>`
                 SELECT state FROM turn_deliveries WHERE thread_id = ${current.threadId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
               if (
-                turn !== undefined &&
-                turn.state !== 'pending' &&
-                turn.state !== 'delivered' &&
+                turn?.state === 'completed' &&
                 (yield* quietly(current, { id: step.attemptId, nodeId: step.nodeId, nodeKey: step.nodeKey, input: step.input }))
               )
                 continue
@@ -3266,7 +3272,11 @@ export class Runs extends Context.Service<
       yield* Effect.forkScoped(provide(holds))
 
       // What the person says to a task's lead after its plan opens a round of work, as the turn begins (ADR-034); Althar's own words don't.
-      yield* sessions.onPersonsTurn((lead) => provide(Effect.asVoid(openRound(lead.taskId, lead.sessionId))).pipe(Effect.ignore))
+      yield* sessions.onPersonsTurn((lead) =>
+        provide(Effect.asVoid(openRound(lead.taskId, lead.sessionId))).pipe(
+          Effect.catchCause((cause) => Effect.logWarning('Could not open a round of work for the person’s turn', cause)),
+        ),
+      )
 
       // Each turn a step's agent ends, and each session that goes, is checked for the report its step needs.
       const events = yield* live.subscribe

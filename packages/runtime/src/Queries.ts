@@ -1217,6 +1217,18 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
+          // Commits after its last pull request merged or closed, in none yet: something for the person to ship (ADR-034). Read
+          // from git before the store, so a round of work that opens meanwhile shows as it is, not a settled task with its commit.
+          const [shipping] = yield* sql<{ state: string; changes: number; openChanges: number }>`
+            SELECT k.state,
+              (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change') AS changes,
+              (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change'
+                AND json_extract(l.snapshot, '$.state') = 'open') AS open_changes
+            FROM tasks k WHERE k.id = ${taskId}`
+          const after =
+            shipping !== undefined && shipping.changes > 0 && shipping.openChanges === 0 && shipping.state !== 'abandoned'
+              ? yield* (yield* Changes).unshipped(taskId).pipe(Effect.orElseSucceed(() => []))
+              : []
           const [task] = yield* sql<{
             threadId: string
             title: string
@@ -1243,16 +1255,10 @@ export class Queries extends Context.Service<
             answersWait: number
             turnWaits: number
             runPlan: string | null
-            changes: number
-            openChanges: number
           }>`
             SELECT t.id AS thread_id, k.title, k.slug, k.state, w.branch,
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
               r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
-              -- Its pull requests, and how many are open: one merged or closed with commits after it offers its next (ADR-034).
-              (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change') AS changes,
-              (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change'
-                AND json_extract(l.snapshot, '$.state') = 'open') AS open_changes,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
               -- A step held until an agent's usage limit resets, or until a place among the agents at work here frees.
@@ -1299,11 +1305,6 @@ export class Queries extends Context.Service<
             Option.exists(reviewer, (session) => session.turnRunning)
           // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
           const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
-          // Commits after its last pull request merged or closed, in none yet: something for the person to ship (ADR-034).
-          const after =
-            task.changes > 0 && task.openChanges === 0 && task.state !== 'abandoned'
-              ? yield* (yield* Changes).unshipped(taskId).pipe(Effect.orElseSucceed(() => []))
-              : []
           const unshipped =
             after.length === 0
               ? null
