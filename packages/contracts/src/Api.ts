@@ -877,6 +877,26 @@ export const Finding = Schema.Struct({
 export type Finding = typeof Finding.Type
 
 /**
+ * Something the lead shows to say its change does what it should, with a
+ * caption saying what it shows: a screenshot or a recording, as a picture
+ * kept like one an agent hands back; a command or a test run, with its exit
+ * code and the end of what it printed; or a response, a log or a note, as
+ * text.
+ */
+export const Evidence = Schema.Struct({
+  kind: Schema.Literals(['screenshot', 'recording', 'command', 'test_run', 'response', 'log', 'note']),
+  caption: Schema.String,
+  picture: Schema.NullOr(Picture),
+  command: Schema.NullOr(Schema.String),
+  exit: Schema.NullOr(Schema.Number),
+  /** What it printed or said: its end, where it was long. */
+  text: Schema.NullOr(Schema.String),
+  /** Lines from the start of the text that weren't kept. */
+  dropped: Schema.Number,
+})
+export type Evidence = typeof Evidence.Type
+
+/**
  * What a step reported when it ended: the lead's summary of its work or of
  * settling a review, or the review's verdict and findings. The person reads
  * this rather than the work itself.
@@ -893,6 +913,10 @@ export const StepResultItem = Schema.Struct({
     change: Schema.NullOr(ChangeSummary),
     verdict: Schema.NullOr(Schema.Literals(['pass', 'changes_requested'])),
     findings: Schema.Array(Finding),
+    /** For the lead's steps: what it showed of its change working. */
+    evidence: Schema.Array(Evidence),
+    /** For the lead's steps: what it couldn't show, as it said it; null where it didn't say, so an earlier step's list stands. */
+    unverified: Schema.NullOr(Schema.Array(Schema.String)),
     /** Who reported it, for a review. */
     agentId: Schema.NullOr(Schema.String),
   }),

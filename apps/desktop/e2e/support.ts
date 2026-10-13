@@ -38,10 +38,15 @@ export const mainWindow = async (electronApp: ElectronApplication): Promise<Page
 const quiet = process.platform === 'darwin' && process.env.ALTHAR_E2E_FOREGROUND !== '1'
 
 export const launch = async (home: string, env: Record<string, string> = {}) => {
+  // Run from inside an Electron app, as a lead in Althar is, the shell says to run Electron as Node; the app must run as itself.
+  // And from inside an agent's sandbox, git is configured for the agent (its proxy, its safe folders): the app's git is its own.
+  const inherited = Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('GIT_')),
+  )
   const electronApp = await electron.launch({
     args: [app],
     env: {
-      ...process.env,
+      ...inherited,
       ALTHAR_PROFILE: join(home, 'profile'),
       ALTHAR_WORKTREES: join(home, 'worktrees'),
       ALTHAR_FAKE_AGENTS: '1',

@@ -1,0 +1,86 @@
+.evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.label {
+  margin: 4px 0 -2px;
+  font: 500 10.5px/1 var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+
+/* each command, test run or note: its kind in the margin, what it shows, how it exited */
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  min-height: 28px;
+  padding: 5px 8px;
+  margin: 0 -8px;
+  box-sizing: content-box;
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-align: left;
+  color: var(--t-1);
+}
+.opens:hover {
+  background: var(--n-1);
+}
+.opens:active {
+  background: var(--n-2);
+}
+.opens > :last-child {
+  align-self: center;
+  color: var(--t-3);
+}
+.kind {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.caption {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.said {
+  color: var(--t-2);
+}
+.exit {
+  font: 11px var(--mono);
+  color: var(--t-3);
+}
+.bad {
+  color: var(--danger);
+}
+.printed {
+  padding: 4px 0 8px;
+}
+
+/* what couldn't be shown: plain lines, for the person to check */
+.unverified {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0 0 16px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-1);
+}
+.unverified li::marker {
+  color: var(--t-3);
+}

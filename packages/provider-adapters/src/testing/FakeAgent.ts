@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -415,7 +415,11 @@ const playStall = async (
  * `[lead:settle-quietly]` settles without reporting.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
- * Althar says it isn't committed. Asked for its pull request's description
+ * Althar says it isn't committed; `[lead:evidence]` saves a screenshot in
+ * the worktree, uncommitted, and finishes with it, a test run and something
+ * it couldn't try, and settling, a new run and nothing left untried;
+ * `[review:evidence]` reads each evidence file its brief names, and says so
+ * in its summary. Asked for its pull request's description
  * in the repository's template, it fills it in, ticking a box it shouldn't.
  * Told what people said on its pull
  * request, `[lead:answer]`
@@ -487,14 +491,20 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
             { severity: 'nit', file: 'README.md', claim: 'A typo.' },
           ],
         })
+      // Asked to look at the lead's evidence, it reads each file its brief names, and says what it found.
+      const looked = session.markers.has('[review:evidence]')
+        ? ` Read: ${[...text.matchAll(/^- [^\n]*: (\/[^\n]+)$/gm)]
+            .map(([, path = '']) => `${path.split('/').at(-1) ?? ''} (${statSync(path).size} bytes)`)
+            .join(', ')}.`
+        : ''
       if (text.includes('[review:findings]') && !text.startsWith('Round '))
         return await call('report_review', {
           verdict: 'changes_requested',
-          summary: 'The heading needs fixing.',
+          summary: `The heading needs fixing.${looked}`,
           findings: [{ severity: 'major', file: 'README.md', line: 1, claim: 'The heading is wrong.' }],
         })
       if (text.includes('[review:') || text.startsWith('Round '))
-        return await call('report_review', { verdict: 'pass', summary: 'The change holds.' })
+        return await call('report_review', { verdict: 'pass', summary: `The change holds.${looked}` })
       return undefined
     }
     if (available.has('finish_step')) {
@@ -511,14 +521,42 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         const findings = (text.match(/find_[0-9a-f]{32}/g) ?? []).map((id) =>
           aside ? { id, outcome: 'set_aside', reason: 'It reads as intended.' } : { id, outcome: 'fixed' },
         )
-        return await call('finish_step', { summary: 'Fixed the heading.', findings })
+        // Showing its work, it hands a new run, not its screenshot again, and has now tried what it couldn't.
+        const shown = session.markers.has('[lead:evidence]')
+          ? {
+              evidence: [
+                { kind: 'test_run', caption: 'The heading test', command: 'bun test heading', exit_code: 0, output: '1 passed\n' },
+              ],
+              unverified: [],
+            }
+          : {}
+        return await call('finish_step', { summary: 'Fixed the heading.', findings, ...shown })
       }
       // Told to carry on, as a lead that took a step over is, it finishes as it was told to at first.
       // Told to carry on, or to try another way, as Althar tells one that stalled or went round in circles.
       const toldToGoOn = /^(Carry on with the task|Your last turn|You ran )/.test(text)
       // Asked for its pull request's description in the repository's template, it writes under the first heading, and ticks a box it shouldn't.
+      // Asked to show its work, it saves a screenshot in its worktree, uncommitted, and hands it with a test run and what it couldn't try.
+      const evidence = (): Record<string, unknown> => {
+        if (!session.markers.has('[lead:evidence]')) return {}
+        mkdirSync(join(session.cwd, 'evidence'), { recursive: true })
+        writeFileSync(join(session.cwd, 'evidence', 'retry.png'), Buffer.from(SCREENSHOT_PNG, 'base64'))
+        return {
+          evidence: [
+            { kind: 'screenshot', caption: 'The retry button after a failed checkout', path: 'evidence/retry.png' },
+            {
+              kind: 'test_run',
+              caption: 'The checkout tests',
+              command: 'bun test checkout',
+              exit_code: 0,
+              output: 'checkout.test.ts\n  ✓ retries once\n\n1 passed\n',
+            },
+          ],
+          unverified: ['Not tried against the real payment provider: no sandbox account'],
+        }
+      }
       const finish = async () => {
-        const answer = await call('finish_step', { summary: 'Did the task.' })
+        const answer = await call('finish_step', { summary: 'Did the task.', ...evidence() })
         const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
         if (template === undefined) return answer
         const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')

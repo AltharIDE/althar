@@ -43,12 +43,13 @@ export const addItem = (
   place: ItemPlace,
   kind: ItemKind,
   content: unknown,
-  links: { readonly toolCallId?: string; readonly userInputId?: string } = {},
+  /** What it answers, and its id where the caller made it first, to keep what belongs to it before it is added. */
+  links: { readonly toolCallId?: string; readonly userInputId?: string; readonly id?: string } = {},
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
-    const id = yield* newId(Ids.threadItem)
+    const id = links.id ?? (yield* newId(Ids.threadItem))
     yield* sql.withTransaction(
       Effect.gen(function* () {
         yield* sql`

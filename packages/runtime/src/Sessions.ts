@@ -47,9 +47,10 @@ import { touchCard } from './cards'
 import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
 import { git } from './git'
-import { reviewCopyOf } from './reviewCopy'
+import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
 import { Setups } from './Setups'
 import type { InputImage } from './sentImages'
+import { evidenceForReview } from './evidence'
 import { defaultEffortOf } from './preferences'
 import { addItem, betweenTurns, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import { commandOfCall, exitCodeIn, type LeftRunning, printedMore, servingAt, type ShownLeftRunning, shownOf, tailOf } from './leftRunning'
@@ -1652,6 +1653,13 @@ export class Sessions extends Context.Service<
             WHERE t.task_id = ${thread.taskId} AND t.kind = 'task' AND i.kind = 'step_result'
             ORDER BY i.sequence DESC LIMIT 1`
           const summary = lead === undefined ? '' : ((JSON.parse(lead.content) as { summary?: string }).summary ?? '')
+          // The lead's evidence, written beside the copies it reads: what it left uncommitted, or git keeps out, isn't in them.
+          const [taskThread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${thread.taskId} AND kind = 'task'`
+          const [first] = thread.repositories
+          const shown =
+            taskThread === undefined || first === undefined
+              ? ''
+              : yield* evidenceForReview(taskThread.id, evidenceFolderOf(first.worktree)).pipe(Effect.orElseSucceed(() => ''))
           return [
             "You are reviewing another agent's change, in Althar. You only read: you may read files, search, and run commands that only look, such as git diff. You change nothing; the task's lead settles what you find.",
             `The task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
@@ -1660,7 +1668,8 @@ export class Sessions extends Context.Service<
               ? `The change is in ${thread.repositories[0]?.worktree ?? thread.cwd}: a copy of the lead's work as it stood when this round began, which Althar throws away after; nothing you do there reaches the lead. See the change with \`git diff ${thread.repositories[0]?.baseCommit ?? 'HEAD~1'}\` there; new files are in it.`
               : `The change spans several repositories, each copied as the lead's work stood when this round began, side by side in ${thread.cwd}; Althar throws them away after, and nothing you do there reaches the lead. See each one's change with git diff there; new files are in it:\n${thread.repositories.map((repository) => `- ${repository.name}: ${repository.worktree}, \`git diff ${repository.baseCommit ?? 'HEAD~1'}\``).join('\n')}`,
             ...(summary === '' ? [] : [`The lead says:\n${summary}`]),
-            "Look for what would make the change wrong or unsafe to merge: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Then call Althar's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), where it is, and what is wrong. With no findings worth fixing, the verdict is pass.",
+            ...(shown === '' ? [] : [shown]),
+            "Look for what would make the change wrong or unsafe to merge: bugs, missed cases, broken behaviour, security, tests that don't test it. Not style the project doesn't ask for. Where the lead's evidence leaves out something important the change should be seen doing, say so as a minor finding; that alone doesn't fail a review. Then call Althar's report_review tool once: a verdict (pass, or changes_requested), a summary of a few lines, and your findings, each with its severity (blocking, major, minor or nit), where it is, and what is wrong. With no findings worth fixing, the verdict is pass.",
             ...(yield* threadSoFar(thread.threadId)),
           ].join('\n\n')
         })
@@ -1725,6 +1734,8 @@ export class Sessions extends Context.Service<
                 ]),
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
+            // What the lead shows of its work: evidence that fits the task, and what it couldn't show.
+            "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo or a version bump, a single note saying so is enough. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check.",
             // Althar reaches the code host for the task (ADR-011).
             "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. read_issue reads the issue the task came from, or any other.",
             ...(resolves?.resolves === 1
