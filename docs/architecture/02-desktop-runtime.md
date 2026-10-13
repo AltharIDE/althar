@@ -341,9 +341,10 @@ an agent, Git, or a test runner. Standard input/output (`stdio`) are byte
 streams through which the runtime may send requests and receive structured
 events. Agents speak ACP over `stdio`.
 
-Bundled ACP adapters written for Node run on Electron's own Node (the Electron
-binary started with `ELECTRON_RUN_AS_NODE`), so Althar doesn't depend on a
-Node installed on the machine.
+Bundled ACP adapters written for Node run on a Node the packaged app ships
+(ADR-033), so Althar doesn't depend on a Node installed on the machine, and
+its own binary never runs as Node: its `runAsNode` fuse is off. In
+development they run on Electron's binary as Node (`ELECTRON_RUN_AS_NODE`).
 
 Starting a process is easy. Owning its complete lifecycle is the hard part.
 

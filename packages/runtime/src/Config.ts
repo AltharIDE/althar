@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 import { available, type Fetch, type Product, type ProductInfo } from '@althar/connectors'
-import { agents, type AgentDefinition, type Transport, usingLocated } from '@althar/provider-adapters'
+import { adapterNode, agents, type AgentDefinition, type Transport, usingLocated } from '@althar/provider-adapters'
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import type { Machine } from './atOnce'
@@ -172,7 +172,7 @@ export class Agents extends Context.Service<
         .map((definition) => ({
           definition,
           transport: (cwd: string, env: Readonly<Record<string, string>> = {}) => {
-            const spec = definition.launch(process.execPath)
+            const spec = definition.launch(adapterNode())
             const own = definition.withoutOwnTools?.({ env: { ...process.env, ...env }, homeDir: homedir(), cwd }) ?? {}
             return { _tag: 'Process' as const, spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...env } }, cwd }
           },

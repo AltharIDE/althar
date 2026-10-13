@@ -61,7 +61,7 @@ export interface AgentDefinition {
   readonly name: string
   /** Bundled adapters ship with Althar at pinned versions; user-installed agents are found on the machine. */
   readonly source: 'bundled' | 'user_installed'
-  /** The command that starts it. `node` is the Node binary bundled adapters run on: Electron's own, in the app. */
+  /** The command that starts it. `node` is the Node binary bundled adapters run on: the one the app ships, or Electron's own in dev (`adapterNode`). */
   readonly launch: (node: string) => LaunchSpec
   /**
    * The modes Althar starts sessions in (ADR-007): one where the agent asks
@@ -224,10 +224,34 @@ const only =
 const require = createRequire(import.meta.url)
 const bundled = (packageName: string, entry: string) => join(dirname(require.resolve(`${packageName}/package.json`)), entry)
 
-/** The Codex CLI shipped with the adapter, used where the person's own CLI is not required. */
-const bundledCodex = () => {
-  const fromAdapter = createRequire(require.resolve('@agentclientprotocol/codex-acp/package.json'))
-  return join(dirname(fromAdapter.resolve('@openai/codex/package.json')), 'bin/codex.js')
+/** Codex's builds, by Node's `platform-arch`: the Rust target each is, as `@openai/codex`'s `bin/codex.js` names them. */
+const CODEX_TARGETS: Readonly<Record<string, string>> = {
+  'darwin-arm64': 'aarch64-apple-darwin',
+  'darwin-x64': 'x86_64-apple-darwin',
+  'linux-arm64': 'aarch64-unknown-linux-musl',
+  'linux-x64': 'x86_64-unknown-linux-musl',
+  'win32-arm64': 'aarch64-pc-windows-msvc',
+  'win32-x64': 'x86_64-pc-windows-msvc',
+}
+
+/**
+ * Codex's own program as the adapter's `@openai/codex` ships it, for this
+ * platform and processor, for its sign-in, status and version where the
+ * person has no Codex. Not `bin/codex.js`, which finds it for a terminal:
+ * that needs a `node` on the PATH, which an app opened from the Finder
+ * doesn't have. Null where there is no build.
+ */
+export const bundledCodex = (platform: string = process.platform, arch: string = process.arch): string | null => {
+  const target = CODEX_TARGETS[`${platform}-${arch}`]
+  if (target === undefined) return null
+  try {
+    const fromAdapter = createRequire(require.resolve('@agentclientprotocol/codex-acp/package.json'))
+    const fromCodex = createRequire(fromAdapter.resolve('@openai/codex/package.json'))
+    const vendor = join(dirname(fromCodex.resolve(`@openai/codex-${platform}-${arch}/package.json`)), 'vendor')
+    return join(vendor, target, 'bin', platform === 'win32' ? 'codex.exe' : 'codex')
+  } catch {
+    return null
+  }
 }
 
 /** How an agent's sign-in is paid for: a plan (Claude's, ChatGPT's), or per use, on a key. */
@@ -461,7 +485,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       name: 'codex',
       // In a Flatpak sessions use the host's Codex bridge too; reporting the
       // bundled CLI here would show an unrelated sign-in state.
-      ...(process.env.FLATPAK_ID === undefined ? { bundled: bundledCodex } : {}),
+      ...(process.env.FLATPAK_ID === undefined ? { bundled: () => bundledCodex() } : {}),
     },
   },
   opencode: {

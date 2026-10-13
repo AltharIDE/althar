@@ -1,11 +1,14 @@
-import { realpathSync } from 'node:fs'
+import { mkdtempSync, realpathSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { Deferred, Effect, Exit, Fiber, Scope, Stream } from 'effect'
 
 import { connect } from '../src/AgentConnection'
 import { AgentExited, AgentStartFailed } from '../src/errors'
-import { asNode, type CapturedFrame, childEnvironment, environmentDigest, spawnOwned } from '../src/process'
+import { adapterNode, asNode, type CapturedFrame, childEnvironment, environmentDigest, spawnOwned } from '../src/process'
+import { agents } from '../src/registry'
 import { fakeAgentMain, scenarios } from '../src/testing'
 import { text } from './contract'
 
@@ -169,6 +172,37 @@ describe('the process transport', () => {
     }),
   )
 
+  it.live('stops an adapter on a Node of its own, and all it started, though it ignores TERM', () =>
+    Effect.gen(function* () {
+      // A Node at a path of its own, as the app ships one: not the binary the runtime runs on.
+      const node = join(mkdtempSync(join(tmpdir(), 'althar-node-')), 'node')
+      symlinkSync(process.execPath, node)
+      const adapter = [
+        "process.on('SIGTERM', () => {})",
+        "const started = require('node:child_process').spawn('sleep', ['30'])",
+        'process.stderr.write(`${started.pid}\\n`)',
+        "process.stdout.write(String(process.env.ELECTRON_RUN_AS_NODE ?? 'none'))",
+        'setInterval(() => {}, 1000)',
+      ].join(';')
+      const scope = yield* Scope.make()
+      const owned = yield* Scope.provide(scope)(
+        spawnOwned({ command: node, args: ['-e', adapter], env: { ALTHAR_NODE: node } }, '/tmp', { grace: '200 millis' }),
+      )
+      const reader = owned.stdout.getReader()
+      const said = new TextDecoder().decode((yield* Effect.promise(() => reader.read())).value)
+      reader.releaseLock()
+      for (let waited = 0; owned.stderrTail() === '' && waited < 2_000; waited += 25) yield* Effect.sleep('25 millis')
+      const started = Number(owned.stderrTail().trim())
+      assert.strictEqual(said, 'none')
+      assert.isTrue(isAlive(started))
+      yield* Scope.close(scope, Exit.void)
+      assert.isFalse(isAlive(owned.pid))
+      assert.isTrue(yield* goneSoon(started))
+      assert.deepStrictEqual(yield* Deferred.await(owned.stopped), { signal: 'SIGKILL', survivors: false })
+      assert.deepStrictEqual(yield* Deferred.await(owned.exited), { code: null, signal: 'SIGKILL' })
+    }),
+  )
+
   it.live('has nothing to stop when the group has already gone', () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
@@ -241,6 +275,23 @@ describe('childEnvironment', () => {
         MODE: 'x',
       },
     )
+  })
+
+  it('runs the bundled adapters on the Node the app names, else on the binary it runs on', () => {
+    assert.strictEqual(
+      adapterNode({ ALTHAR_NODE: '/Applications/Althar.app/Contents/Resources/node/bin/node' }),
+      '/Applications/Althar.app/Contents/Resources/node/bin/node',
+    )
+    assert.strictEqual(adapterNode({}), process.execPath)
+    assert.strictEqual(adapterNode({ ALTHAR_NODE: '' }), process.execPath)
+  })
+
+  it('never tells the Node the app ships to run as Electron, even under Electron', () => {
+    const node = '/Applications/Althar.app/Contents/Resources/node/bin/node'
+    const spec = agents['claude-code'].launch(node)
+    assert.strictEqual(spec.command, node)
+    assert.isUndefined(childEnvironment(spec, { ELECTRON_RUN_AS_NODE: '1' }, true).ELECTRON_RUN_AS_NODE)
+    assert.deepStrictEqual(asNode(spec, true), {})
   })
 
   it("runs Electron's own binary as Node", () => {
