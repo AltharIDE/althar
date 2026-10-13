@@ -36,7 +36,12 @@
     resolve) don't open one: they have their own course, and the person
     pushes what the lead commits for them. Nor does anything while a
     conflict round is under way. A lead that calls `finish_step` after its
-    plan with no step open opens one and finishes it in the same call.
+    plan with no step open opens one and finishes it in the same call: that
+    round starts where the last run left the task (the nearer of what its
+    pull request was last sent and what its last review read, else its
+    branch when that run ended), so what the lead committed before it
+    reported, as a fix for checks Althar told it of, is the round's, and is
+    reviewed as the plan says.
   - **A round is a real round.** It ends as any of the lead's steps does,
     with `finish_step`, its summary and its evidence. With new work, it goes
     on to its review, if it has one, settled as ever. New work is new
@@ -71,7 +76,10 @@
     merged or closed and whose branch has commits after that pull request's
     head:
     - after a merge, Althar starts a new branch from the default branch as
-      the host has it now (fetched, signed in as a push is), named the
+      the host has it now (fetched, signed in as a push is, from the
+      repository the pull request opens on: for one from a fork into the
+      repository it came from, that one's, not the fork's, which doesn't
+      have what merged), named the
       task's branch with `-2` (`-3` and on: the first name free here and
       there), and cherry-picks the new commits onto it, merges left out
       since the default branch has what they brought, in the task's
@@ -92,13 +100,16 @@
     worktree back on its branch, and says which files, for the lead to bring
     the default branch in first. A push that doesn't go through leaves the
     worktree on the new branch, its commits still offered, and the next try
-    takes that branch. It is refused while the lead's round is under way,
-    while a pull request of the repository is open (the card pushes to
-    that), and with nothing new.
-  - **Merged with work after it isn't done.** A task whose pull requests
-    have all merged, but whose branch has commits after the last one's head
-    in any repository, stays open and ready, offering the new pull request,
-    rather than settling with work no pull request has.
+    takes that branch. Each repository goes by its own pull request: one
+    whose pull request is open takes pushes as before, while another opens
+    its next. It is refused while the lead's round is under way, and where
+    no repository has anything new.
+  - **Merged with work after it isn't done.** A task is done once each
+    repository's latest pull request has merged (one closed before its next
+    merged is history) and nothing after them changes anything. One whose
+    branch has commits after the last one's head in any repository stays
+    open and ready, offering the new pull request, rather than settling with
+    work no pull request has.
   - **The task keeps every pull request,** one external link each, and a
     change set per round. Its card and its header show the latest (the open
     one first, else the most recent) and the earlier ones under it;
