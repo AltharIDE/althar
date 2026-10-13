@@ -5,10 +5,10 @@ import { Cause, Clock, Context, Duration, Effect, Layer, Queue, Semaphore, Strea
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { type AtOnceDefault, atOnceFor, clamp } from './atOnce'
-import { touchCard } from './cards'
+import { touchTask } from './cards'
 import { RuntimeConfig } from './Config'
 import { Live } from './Live'
-import { treeCpus } from './processTree'
+import { treeMembers, workedBetween } from './processTree'
 import { timestamp } from './records'
 import { Sessions } from './Sessions'
 
@@ -156,7 +156,7 @@ export class Busy extends Context.Service<
         options.cpuOf ??
         ((agents: ReadonlyArray<{ readonly threadId: string; readonly pid: number | null }>) =>
           Effect.map(
-            treeCpus(agents.flatMap((agent) => (agent.pid === null ? [] : [agent.pid]))),
+            treeMembers(agents.flatMap((agent) => (agent.pid === null ? [] : [agent.pid]))),
             (used) => new Map(agents.map((agent) => [agent.threadId, agent.pid === null ? null : (used.get(agent.pid) ?? null)])),
           ))
       // Worked out once a launch: the machine doesn't change while Althar runs.
@@ -193,10 +193,13 @@ export class Busy extends Context.Service<
       let said = ''
       /*
        * What each thread's left running used of the CPU when last read, by thread: the agent's process (what it
-       * started is part of its tree), the CPU time then, when, when it last showed real use, and whether it counts as
-       * at work. Read now and then while any session has something running (`sample`).
+       * started is part of its tree), each process in the tree with its CPU time then, when, when it last showed real
+       * use, and whether it counts as at work. Read now and then while any session has something running (`sample`).
        */
-      const sampled = new Map<string, { pid: number | null; at: number; cpu: number | null; busyAt: number; working: boolean }>()
+      const sampled = new Map<
+        string,
+        { pid: number | null; at: number; tree: ReadonlyMap<number, number> | null; busyAt: number; working: boolean }
+      >()
 
       const wake = Queue.offer(wakes, undefined).pipe(Effect.asVoid)
 
@@ -222,17 +225,19 @@ export class Busy extends Context.Service<
         const now = yield* Clock.currentTimeMillis
         let flipped = false
         for (const { threadId, pid } of left) {
-          const cpu = read.get(threadId) ?? null
+          const tree = read.get(threadId) ?? null
           const before = sampled.get(threadId)
-          // The CPU time of a tree falls when a process in it ends: that is no use, nor a reason to stop counting it.
-          const spent =
-            before !== undefined && before.pid === pid && before.cpu !== null && cpu !== null ? Math.max(0, cpu - before.cpu) : null
           // A first reading, or one that can't be compared, says nothing: it counts.
-          const busy = spent === null || spent >= WORKING_SHARE * (now - (before?.at ?? now))
+          const busy =
+            before === undefined ||
+            before.pid !== pid ||
+            before.tree === null ||
+            tree === null ||
+            workedBetween(before.tree, tree, now - before.at, WORKING_SHARE)
           const busyAt = busy || before === undefined ? now : before.busyAt
           const working = busy || now - busyAt < quiet
           if (before !== undefined && before.working !== working) flipped = true
-          sampled.set(threadId, { pid, at: now, cpu, busyAt, working })
+          sampled.set(threadId, { pid, at: now, tree, busyAt, working })
         }
         if (flipped) yield* wake
       })
@@ -313,7 +318,7 @@ export class Busy extends Context.Service<
         Effect.gen(function* () {
           const queue = yield* waiting
           if (queue.length === 0) return false
-          const { at: busy } = yield* atWork
+          const { at: busy, holders } = yield* atWork
           const most = (yield* atOnce).count
           const left: Array<string> = []
           for (const waiter of queue) {
@@ -343,11 +348,14 @@ export class Busy extends Context.Service<
               scope,
             )
           }
-          // Who holds the places is on the cards too, so they are read again when that changes, not only how many.
-          const shown = `${[...busy].toSorted().join(',')} ${most}`
+          // Who holds the places, and whether by what they left running, is on the cards too: read again when that changes.
+          const shown = `${holders
+            .map((holder) => `${keyOf(holder.taskId, holder.review)}${holder.kept ? ' kept' : ''}`)
+            .toSorted()
+            .join(',')} ${most}`
           if (shown !== said) {
             said = shown
-            yield* Effect.forEach(new Set(left), (taskId) => Effect.ignore(provide(touchCard(taskId))), { discard: true })
+            yield* Effect.forEach(new Set(left), (taskId) => Effect.ignore(provide(touchTask(taskId))), { discard: true })
           }
           return left.length > 0
         }),
@@ -385,7 +393,7 @@ export class Busy extends Context.Service<
           if (waited === undefined || waited.sessionId !== sessionId) return
           turns.delete(threadId)
           if (state !== 'superseded') yield* sql`UPDATE threads SET waits_for_place = NULL WHERE id = ${threadId}`
-          yield* Effect.ignore(provide(touchCard(waited.taskId)))
+          yield* Effect.ignore(provide(touchTask(waited.taskId)))
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not let a waiting turn go', cause)))
 
       const events = yield* live.subscribe
@@ -397,6 +405,8 @@ export class Busy extends Context.Service<
               ? Effect.suspend(() => {
                   // Nothing left running: whatever it leaves running next starts afresh, counted until it has been quiet.
                   if (event.background.every((left) => left.ended !== null)) sampled.delete(event.threadId)
+                  // What a task keeps a place by is on the cards of those that wait: read them again.
+                  said = ''
                   return wake
                 })
               : event._tag === 'TurnEnded' || event._tag === 'AttentionNeeded' || event._tag === 'AttentionClosed'
@@ -486,7 +496,7 @@ export class Busy extends Context.Service<
             }),
           )
           if (!room) {
-            yield* Effect.ignore(provide(touchCard(agent.taskId)))
+            yield* Effect.ignore(provide(touchTask(agent.taskId)))
             yield* wake
             return false
           }

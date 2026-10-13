@@ -573,13 +573,22 @@ describe('Agents at once', () => {
   )
 })
 
-/** A stand-in for `ps`, for agents that are no process here: the CPU time of every agent rises by a second a reading while `burning`, else stands still. */
+/**
+ * A stand-in for `ps`, for agents that are no process here: the tree of every agent is one process whose CPU time rises
+ * by a second a reading while `burning`, else stands still; with `churning`, a short-lived worker besides, a new one each reading.
+ */
 const fakeCpu = () => {
-  const cpu = { burning: false, total: 0, unreadable: false }
+  const cpu = { burning: false, churning: false, total: 0, unreadable: false, workers: 0 }
   const of: NonNullable<BusyOptions['cpuOf']> = (agents) =>
     Effect.sync(() => {
       if (cpu.burning) cpu.total += 1_000
-      return new Map(agents.map((agent) => [agent.threadId, cpu.unreadable ? null : cpu.total]))
+      if (cpu.churning) cpu.workers += 1
+      return new Map(
+        agents.map((agent) => [
+          agent.threadId,
+          cpu.unreadable ? null : new Map([[1, cpu.total], ...(cpu.churning ? [[1_000 + cpu.workers, 0] as [number, number]] : [])]),
+        ]),
+      )
     })
   return { cpu, of }
 }
@@ -675,6 +684,50 @@ describe('Agents at once, and what they left running', () => {
         // Quiet for good, it stops counting.
         cpu.burning = false
         yield* busyAt(0)
+      }),
+    ),
+  )
+
+  it.live('keep counting a runner whose short-lived workers end between readings, though no CPU time is left in the tree', () =>
+    withCpu(1, (cpu) =>
+      Effect.gen(function* () {
+        cpu.churning = true
+        const { projectId } = yield* opened
+        yield* served(projectId, 'First')
+        // Far past the quiet that frees an idle server's place: each reading finds other workers than the last.
+        yield* Effect.sleep('1200 millis')
+        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
+        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
+        assert.strictEqual(second.outcome, 'waiting')
+        cpu.churning = false
+        yield* busyAt(0)
+      }),
+    ),
+  )
+
+  it.live("tell the waiting task's thread, and the cards, who holds the places as they change, so an open view reads them again", () =>
+    withCpu(1, (cpu) =>
+      Effect.gen(function* () {
+        cpu.burning = true
+        const { projectId } = yield* opened
+        const queries = yield* Queries
+        const first = yield* served(projectId, 'First')
+        const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
+        const third = yield* started(projectId, 'Third', 'Do it. [lead:finish]')
+        yield* waiting(second.taskId)
+        yield* waiting(third.taskId)
+        const holders = (taskId: string) =>
+          Effect.map(cardOf(projectId, taskId), (card) => card?.queued?.holders?.map((holder) => [holder.title, holder.kept]) ?? [])
+        assert.deepStrictEqual(yield* holders(third.taskId), [['First', true]])
+        // The server goes quiet: the second takes the place, and the third, still waiting, is told, on its own thread too.
+        const at = yield* queries.cursor
+        cpu.burning = false
+        yield* working(second.taskId)
+        yield* until(holders(third.taskId), (rows) => rows.length === 1 && rows[0]?.[0] === 'Second')
+        assert.deepStrictEqual(yield* holders(third.taskId), [['Second', false]])
+        const changes = yield* queries.changesSince(at, 100)
+        assert.isTrue(changes.some((change) => change.aggregateType === 'task' && change.threadId === third.threadId))
+        assert.isTrue(first.serverId !== '')
       }),
     ),
   )

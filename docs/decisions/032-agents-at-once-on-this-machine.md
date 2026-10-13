@@ -103,19 +103,22 @@
   prototype tasks held all four places. Counting what a lead left running was
   right for a test run and wrong for a server that waits for a browser.
 - **Decision.** What an agent left running takes a place only while its
-  process tree **uses real CPU**, read the way the CPU and memory meter reads
-  it (`ps`, the agent's process and everything it started,
-  `processTree.ts`). Every 5 seconds, while any session has something running,
-  Althar compares the tree's CPU time with the last reading; at least 5% of
-  one core over that time is work, and it counts at once. It stops counting
-  only after **30 seconds without** such use, so a test run that pauses for
-  a moment doesn't flip back and forth, and a server that starts working
-  again (a request, a rebuild) counts again at the next reading. A server just
-  started counts until it has been quiet for those 30 seconds. Where the
-  CPU can't be read (the agent is no process of its own, `ps` fails, as on
-  Windows), it counts, as before: when in doubt, protect the machine. A
-  task's own step or turn counts whenever it runs, as before, whatever its
-  server does.
+  process tree **does work**, read the way the CPU and memory meter reads it
+  (`ps`, the agent's process and everything it started, `processTree.ts`).
+  Every 5 seconds, while any session has something running, Althar reads each
+  process of the tree with its CPU time and compares it with the last
+  reading. It is work if a process started or ended since (a test runner's
+  short-lived workers are gone by the next reading, and the tree's total
+  falls when one ends, so totals can't be subtracted), or if the CPU time of
+  the processes present in both rose by at least 5% of one core over that
+  time. Work counts at once. It stops counting only after **30 seconds
+  without** any, so a test run that pauses for a moment doesn't flip back and
+  forth, and a server that starts working again (a request, a rebuild)
+  counts again at the next reading. A server just started counts until it
+  has been quiet for those 30 seconds. Where the CPU can't be read (the agent
+  is no process of its own, `ps` fails, as on Windows), it counts, as
+  before: when in doubt, protect the machine. A task's own step or turn
+  counts whenever it runs, as before, whatever its server does.
 - **Admitting what waits.** A reading that turns work into idle looks at the
   queue at once, so a waiting task starts as soon as the server it waited for
   goes quiet (up to 30 seconds after its last use, and one reading), without
@@ -123,10 +126,13 @@
   session does the same, as before.
 - **Who holds the places.** A task that waits for a place now carries who
   holds them: each task at work, and, for one kept only by what it left
-  running, that server. The waiting task's thread shows it as a pill over the
-  composer, "Keeping a place", the same list as Running, with the task it is
-  from and a Stop beside each. The words of the wait ("Waiting: 4 of 4
-  agents busy on this Mac") are unchanged.
+  running, that server. Where it waits, its plan card or its thread says "Held
+  by" those tasks, the kept ones with "(a server it left running)", and a
+  "Keeping a place" pill lists each server with the task it is from and a
+  Stop, the same list as Running. The words of the wait ("Waiting: 4 of 4
+  agents busy on this Mac") are unchanged. When who holds the places changes,
+  the waiting task's card and its own thread are told, so an open view reads
+  them again.
 - **Alternatives.**
   - *Classify instead:* a background process that listens on a port and is
     the session's only background work counts as a server, not as work. Needs
@@ -144,4 +150,5 @@
 - **Trade-off.** A server idle for 30 seconds still holds its place for those
   30 seconds, and one that serves a burst of requests holds it while they
   last. The 5% line is a guess: a server that always burns a little (a
-  watcher polling) counts, which errs toward waiting, not toward load.
+  watcher polling), or whose tree keeps starting a process, counts, which
+  errs toward waiting, not toward load.
