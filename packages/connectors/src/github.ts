@@ -81,6 +81,9 @@ const PullAnswer = Schema.Struct({
   additions: Schema.optional(Schema.Number),
   deletions: Schema.optional(Schema.Number),
   changed_files: Schema.optional(Schema.Number),
+  // Worked out in the background: null until GitHub has, and said only when one pull request is read.
+  mergeable: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  mergeable_state: Schema.optional(Schema.NullOr(Schema.String)),
   updated_at: Schema.String,
 })
 type PullAnswer = typeof PullAnswer.Type
@@ -178,6 +181,12 @@ const changeOf = (pull: PullAnswer): ChangeRequest => ({
   deletions: pull.deletions ?? null,
   changedFiles: pull.changed_files ?? null,
   updatedAt: pull.updated_at,
+  // Not mergeable, or `dirty`, is GitHub's way of saying the merge conflicts.
+  ...(pull.mergeable === false || pull.mergeable_state === 'dirty'
+    ? { conflicts: true }
+    : pull.mergeable === true
+      ? { conflicts: false }
+      : {}),
 })
 
 /** A check run's state from its status and conclusion. */

@@ -33,8 +33,10 @@ import type { ProjectSettingsModel } from './useProjectSettings'
  * change them in place; the others say where each thing stands and open
  * where it is changed: its repositories, its rules, and connecting the code
  * host and tracker it is on. Beside the tracker, a switch for whether a task's
- * issue moves to In Progress as the task starts. Removing it from Althar is
- * at the foot, and asks first. Nothing in it says what is running.
+ * issue moves to In Progress as the task starts; beside its rules, one has
+ * its leads resolve a conflict with the default branch unasked (ADR-030).
+ * Removing it from Althar is at the foot, and asks first. Nothing in it says
+ * what is running.
  */
 
 export const text = {
@@ -43,9 +45,12 @@ export const text = {
   identity: 'Name and colour',
   repositories: 'Repositories',
   rules: 'Rules',
+  conflicts: 'Resolve conflicts automatically',
+  conflictsOn: 'On: the lead fixes merge conflicts itself',
+  conflictsOff: 'Off: you ask the lead to fix them',
   moveIssues: 'Move issues to In Progress when their task starts',
-  on: 'On',
-  off: 'Off',
+  moveIssuesOn: 'On: Althar moves the issue as its task starts',
+  moveIssuesOff: 'Off: you move issues yourself',
   connectedAs: (login: string) => `Connected as ${login}`,
   notConnected: 'Not connected',
   connect: 'Connect',
@@ -189,7 +194,13 @@ export function ProjectSettings({
               {model.rules !== null && (
                 <ControlToggle
                   title={text.moveIssues}
-                  line={model.rules.moveIssues ? text.on : text.off}
+                  line={
+                    model.ruleFailed?.rule === 'moveIssues'
+                      ? model.ruleFailed.message
+                      : model.rules.moveIssues
+                        ? text.moveIssuesOn
+                        : text.moveIssuesOff
+                  }
                   on={model.rules.moveIssues}
                   onChange={model.setMoveIssues}
                   glyph={<Icon name="play" size={16} />}
@@ -197,9 +208,25 @@ export function ProjectSettings({
                   place={host !== null && tracker !== null ? RIGHT : ACROSS}
                 />
               )}
-              <ControlModule title={text.rules} onClick={leave(onRules)}>
+              <ControlModule title={text.rules} {...(model.rules === null ? {} : { place: LEFT })} onClick={leave(onRules)}>
                 {rules !== null && <ControlWords title={rules.policy} line={rules.asks} />}
               </ControlModule>
+              {model.rules !== null && (
+                <ControlToggle
+                  title={text.conflicts}
+                  line={
+                    model.ruleFailed?.rule === 'resolveConflicts'
+                      ? model.ruleFailed.message
+                      : model.rules.resolveConflicts
+                        ? text.conflictsOn
+                        : text.conflictsOff
+                  }
+                  on={model.rules.resolveConflicts}
+                  onChange={model.setResolveConflicts}
+                  glyph={<Icon name="branch" size={16} />}
+                  place={RIGHT}
+                />
+              )}
             </ControlGrid>
             <ControlFoot>
               <Button size="small" variant="danger" icon="close" onClick={leave(model.askRemove)}>

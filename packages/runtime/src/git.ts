@@ -224,6 +224,21 @@ export const remoteTip = (cwd: string, target: { readonly url: string; readonly 
     Effect.orElseSucceed(() => null),
   )
 
+/**
+ * Fetches a remote's branch by URL into a ref here, as a push is signed in:
+ * the commit it is at, or null where it can't be fetched.
+ */
+export const fetchInto = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string, ref: string) =>
+  run(
+    120_000,
+    cwd,
+    ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', target.url, `+refs/heads/${branch}:${ref}`],
+    target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
+  ).pipe(
+    Effect.andThen(commitOf(cwd, ref)),
+    Effect.orElseSucceed(() => null),
+  )
+
 /** The top of the repository a path is in. */
 export const topLevel = (path: string) => git(path, 'rev-parse', '--show-toplevel')
 

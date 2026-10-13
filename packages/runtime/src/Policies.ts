@@ -48,6 +48,12 @@ export const ProjectRules = Schema.Struct({
   /** How a task ends when its plan doesn't say: a draft pull request, one ready for review, or its branch alone. */
   end: Schema.optional(Schema.Literals(['draft', 'ready', 'none'])),
   /**
+   * Whether a task's lead resolves a conflict with its default branch on its
+   * own, found merging here or said by the pull request's host, rather than
+   * waiting for the person to ask it (docs/architecture/06). Off without it.
+   */
+  resolveConflicts: Schema.optional(Schema.Boolean),
+  /**
    * How a task's branch and its pull request's title are named, by a pattern
    * (`@althar/contracts`' names): the person's own, over what each
    * repository's docs say. Without one, the docs', else Althar's own.
@@ -133,6 +139,13 @@ export const usageLimitOf = (rules: ProjectRules): UsageLimit => rules.usageLimi
 
 /** Whether a revision's rules move a task's issue to In Progress as the task starts: they do unless the person turned it off. */
 export const movesIssues = (rules: ProjectRules): boolean => rules.moveIssues ?? true
+
+/** Whether a revision's rules have the lead resolve a conflict on its own: not unless the person turned it on. */
+export const resolvesConflicts = (rules: ProjectRules): boolean => rules.resolveConflicts === true
+
+/** Whether a task's lead resolves a conflict on its own: as the task says (its `resolve_conflicts`), else as its project's rules do. */
+export const resolvesConflictsFor = (rules: ProjectRules, task: number | boolean | null): boolean =>
+  task === null ? resolvesConflicts(rules) : task === true || task === 1
 
 /** The project's rule for an agent's accounts: rotation, off unless the person turned it on, and the accounts it may use. */
 export type AccountRule = NonNullable<ProjectRules['accounts']>

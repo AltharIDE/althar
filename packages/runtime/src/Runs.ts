@@ -2041,15 +2041,7 @@ export class Runs extends Context.Service<
             yield* begin(current, step.attemptId, sessionId, current.threadId, true)
             return
           }
-          const [last] = yield* sql<{ agentId: string; model: string | null; effort: string | null }>`
-            SELECT agent_id, model, effort FROM provider_sessions WHERE thread_id = ${input.threadId} ORDER BY started_at DESC LIMIT 1`
-          if (last === undefined) return
-          yield* sessions.start({
-            threadId: input.threadId,
-            agentId: last.agentId,
-            ...(last.model === null ? {} : { model: last.model }),
-            ...(last.effort === null ? {} : { effort: last.effort }),
-          })
+          yield* sessions.startLast(input.threadId)
         })
 
       const resume = (input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly lead?: Lead }) =>

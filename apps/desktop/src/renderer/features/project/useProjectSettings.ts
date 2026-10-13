@@ -9,14 +9,17 @@ import { useServices } from '../../data/services'
 
 /*
  * A project's settings' view model: its name and ink, changed in place, its
- * rules in a line, and removing it. A new name or ink shows at once, and
- * goes to the runtime one change after another; the tabs and the home hear
- * it through the change feed, and the projects are read again at once too,
- * so it shows everywhere before the feed is heard. One that didn't hold goes
- * back, and says why. Whether its tasks move their issues to In Progress is
- * switched in place, a rule like the others. Removing it from Althar is asked
- * in a dialog first.
+ * rules in a line, whether its leads resolve conflicts and its tasks move
+ * their issues to In Progress, and removing it. A new name or ink shows at
+ * once, and goes to the runtime one change after another; the tabs and the
+ * home hear it through the change feed, and the projects are read again at
+ * once too, so it shows everywhere before the feed is heard. One that didn't
+ * hold goes back, and says why. So do the switches, each a rule saved as the
+ * rules screen saves one. Removing it from Althar is asked in a dialog first.
  */
+
+/** A rule the settings switch in place. */
+export type RuleSwitch = 'resolveConflicts' | 'moveIssues'
 
 export interface ProjectSettingsModel {
   readonly project: ProjectSummary | null
@@ -30,8 +33,12 @@ export interface ProjectSettingsModel {
   /** Why the last new name or ink didn't hold. */
   readonly failed: string | null
   readonly rules: ProjectRulesView | null
-  /** Moves a task's issue to In Progress as the task starts, or stops doing so: shown at once, and read back where it didn't hold. */
+  /** Turns on or off the project's leads resolving conflicts on their own (ADR-030). */
+  readonly setResolveConflicts: (on: boolean) => void
+  /** Moves a task's issue to In Progress as the task starts, or stops doing so. */
   readonly setMoveIssues: (on: boolean) => void
+  /** Which switch didn't hold, and why. */
+  readonly ruleFailed: { readonly rule: RuleSwitch; readonly message: string } | null
   /** Asking whether to remove it from Althar. */
   readonly removing: boolean
   readonly askRemove: () => void
@@ -96,19 +103,26 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     [change, client, projectId],
   )
 
-  const setMoveIssues = useCallback(
-    (on: boolean) => {
+  // Shown switched at once; the rules as kept once saved, or as they were, with why, when it isn't.
+  const [ruleFailed, setRuleFailed] = useState<{ readonly rule: RuleSwitch; readonly message: string } | null>(null)
+  const setRule = useCallback(
+    (rule: RuleSwitch, on: boolean) => {
       const key = keys.rules(projectId)
-      cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, moveIssues: on }))
-      queue.current = queue.current.then(() =>
-        client.setProjectRules({ projectId, moveIssues: on }).then(
-          (kept) => cache.setQueryData(key, kept),
-          () => cache.invalidateQueries({ queryKey: key }),
-        ),
-      )
+      setRuleFailed(null)
+      cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, [rule]: on }))
+      queue.current = queue.current.then(async () => {
+        try {
+          cache.setQueryData(key, await client.setProjectRules({ projectId, [rule]: on }))
+        } catch (failure) {
+          setRuleFailed({ rule, message: messageOf(failure) })
+          await cache.invalidateQueries({ queryKey: key, exact: true })
+        }
+      })
     },
     [cache, client, projectId],
   )
+  const setResolveConflicts = useCallback((on: boolean) => setRule('resolveConflicts', on), [setRule])
+  const setMoveIssues = useCallback((on: boolean) => setRule('moveIssues', on), [setRule])
 
   const taken: Partial<Record<ProjectInk, string>> = {}
   for (const other of listed?.projects ?? []) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
@@ -150,7 +164,9 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     setInk,
     failed: failed?.message ?? null,
     rules,
+    setResolveConflicts,
     setMoveIssues,
+    ruleFailed,
     removing,
     askRemove,
     closeRemove,

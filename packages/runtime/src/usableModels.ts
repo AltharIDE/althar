@@ -15,12 +15,18 @@ import { SignIns } from './SignIns'
  * best way, on a plan before a key.
  */
 
-/** One way to a model: the agent that runs it, its id for it there, and whether a plan pays. */
+/** One way to a model: the agent that runs it, its id for it there, whether a plan pays, and how hard it can think there. */
 export interface Route {
   readonly agentId: string
   readonly agentName: string
   readonly model: string
   readonly plan: boolean
+  /** Its efforts there, in the agent's ids and names; empty where it has no such choice, or it isn't known. */
+  readonly efforts: ReadonlyArray<{ readonly id: string; readonly name: string }>
+  /** The effort it starts at by itself, the person's default aside; null where it isn't known. */
+  readonly effort: string | null
+  /** The person's default effort for it there; null where they set none. */
+  readonly defaultEffort: string | null
 }
 
 export interface UsableModel {
@@ -85,7 +91,15 @@ export const usableModels = (projectId?: string) =>
         const name = knownModelName(agent, model)
         const fact = facts.of(agent, model)
         const key = fact?.slug ?? name.toLowerCase()
-        const route: Route = { agentId: agent.id, agentName: agent.name, model: model.id, plan }
+        const route: Route = {
+          agentId: agent.id,
+          agentName: agent.name,
+          model: model.id,
+          plan,
+          efforts: model.efforts,
+          effort: model.effort,
+          defaultEffort: offered.defaults.find((chosen) => chosen.model === model.id)?.effort ?? null,
+        }
         const found = byKey.get(key)
         if (found === undefined) byKey.set(key, { name, maker: makerOf(fact, agent.id), fact, routes: [route] })
         else found.routes.push(route)
@@ -106,12 +120,27 @@ export const usableModels = (projectId?: string) =>
 
 const score = (value: number | null) => (value === null ? 'unknown' : String(value))
 
-/** The models as the coordinator reads them: by maker, each with its scores and how it is paid for. */
+/**
+ * A model's efforts the way it goes, as the coordinator reads them: the ids
+ * a step's effort takes, the one it starts at by itself, and the person's
+ * default where they set one it offers.
+ */
+const effortWords = (route: Route | undefined): string => {
+  if (route === undefined || route.efforts.length === 0) return 'no effort to set'
+  const preferred = route.efforts.some((level) => level.id === route.defaultEffort) ? route.defaultEffort : null
+  const starts = [
+    ...(route.effort === null ? [] : [`its own: ${route.effort}`]),
+    ...(preferred === null ? [] : [`the person's default: ${preferred}`]),
+  ]
+  return `effort ${route.efforts.map((level) => level.id).join(', ')}${starts.length === 0 ? '' : ` (${starts.join('; ')})`}`
+}
+
+/** The models as the coordinator reads them: by maker, each with its scores, how it is paid for, and its efforts. */
 export const describeModels = (usable: ReadonlyArray<UsableModel>): string => {
   if (usable.length === 0)
     return 'No model can be used now: no agent is signed in, every one is out of usage, or the person switched them all off.'
   const lines: string[] = [
-    "The models you can give work to now, by who makes them. Name one as it is written here, for propose_plan's lead and review. The scores are Artificial Analysis's indices, higher is better: intelligence, coding, agentic.",
+    "The models you can give work to now, by who makes them. Name one as it is written here, for propose_plan's lead and review and start_task's lead, and, where you set one, an effort it lists. Without an effort, a step starts at the person's default for its model, or else at the model's own. The scores are Artificial Analysis's indices, higher is better: intelligence, coding, agentic.",
   ]
   let maker: string | null | undefined
   for (const model of usable) {
@@ -131,7 +160,7 @@ export const describeModels = (usable: ReadonlyArray<UsableModel>): string => {
         : fact?.price == null
           ? 'per use'
           : `per use, $${fact.price.input.toFixed(2)} in and $${fact.price.output.toFixed(2)} out per million tokens`
-    lines.push(`- ${model.name}: ${scores}; ${paid}`)
+    lines.push(`- ${model.name}: ${scores}; ${paid}; ${effortWords(best)}`)
   }
   return lines.join('\n')
 }

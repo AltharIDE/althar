@@ -446,7 +446,23 @@ describe('a task of several repositories', () => {
         github.changes.map((one) => one.draft),
         [true, false],
       )
+      // The lead asks the person to push: with nothing new, each says so; unnamed, the one with something new; with both, it asks which.
+      const asks = (args: Record<string, unknown> = {}) => callTool(lead, 'push_to_pull_request', args)
+      const nothing = yield* asks()
+      assert.include(nothing, `api#${api?.number ?? 0} already has every commit on the branch`)
+      assert.include(nothing, `web#${web?.number ?? 0} already has every commit on the branch`)
       git(worktrees[0]?.path ?? '', 'commit', '-q', '--allow-empty', '-m', 'More')
+      assert.include(yield* asks(), `Asked the person to push 1 commit to api#${api?.number ?? 0}.`)
+      git(worktrees[1]?.path ?? '', 'commit', '-q', '--allow-empty', '-m', 'Web next')
+      assert.include(
+        yield* asks(),
+        `Several of this task's pull requests have new commits: api#${api?.number ?? 0}, web#${web?.number ?? 0}.`,
+      )
+      assert.include(yield* asks({ pull_request: `mobile#${web?.number ?? 0}` }), 'Say which with pull_request')
+      assert.include(
+        yield* asks({ pull_request: `web#${web?.number ?? 0}` }),
+        `Asked the person to push 1 commit to web#${web?.number ?? 0}.`,
+      )
       yield* changes.push(task.taskId, git(worktrees[0]?.path ?? '', 'rev-parse', 'HEAD'), api?.url ?? '')
       assert.include(git(bares.api ?? '', 'log', '--format=%s', task.branch), 'More')
       assert.notInclude(git(bares.web ?? '', 'log', '--format=%s', task.branch), 'More')

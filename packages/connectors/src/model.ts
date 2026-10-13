@@ -72,6 +72,12 @@ export const ChangeRequest = Schema.Struct({
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),
   updatedAt: Schema.String,
+  /**
+   * Whether the host says it conflicts with its target branch, so it can't
+   * merge until its branch is brought up to date. Absent where the host
+   * hasn't worked it out yet, or doesn't say.
+   */
+  conflicts: Schema.optional(Schema.Boolean),
 })
 export type ChangeRequest = typeof ChangeRequest.Type
 

@@ -1,0 +1,176 @@
+/*
+ * The nav's drop of glass: a small capsule of the lens's own glass under the
+ * page or GitHub being pointed at, or tabbed to. It glides from one to the
+ * next on a spring, settling with a breath past its mark, stretched a
+ * little along the way it moves and squashed a little across it; it
+ * gathers in where it first appears and, once nothing is held, leaves
+ * sooner than it arrived, where it is, without coasting on.
+ * What passes under it is magnified, by as much as it is covered.
+ *
+ * It is one piece of glass, never clipped. Aimed somewhere, it takes that
+ * width as its own once, and is carried there by a transform alone:
+ * stretched from the width it had, so its ends round out to its own as it
+ * settles. So while it moves the script writes only its transform and
+ * opacity, a frame at a time and only while something moves; the glass
+ * fades itself, as an ancestor fading would be a backdrop of its own and
+ * the glass would lose the page while it did.
+ *
+ * With reduced motion it appears where it is wanted, without gliding.
+ */
+
+/** The glide's spring, per unit mass: about a third of a second, at a damping ratio of 0.75, so it settles just past and back. */
+const STIFF = 300
+const DAMP = 26
+/** How fast it gathers in, and how fast it leaves, in ms. It leaves sooner than it arrives, so it is gone once the pointer is. */
+const IN = 90
+const OUT = 70
+/** How much bigger what is fully under it shows. */
+const MAGNIFY = 0.07
+/** At most how far it stretches along its way and squashes across, at its quickest. */
+const STRETCH = 0.12
+const SQUASH = 0.08
+/** Its narrowest: a circle as tall as it is, round GitHub's. Keep with .drop's height in Nav.module.css. */
+const LEAST = 36
+
+export type GlassDrop = {
+  /** What the pointer is on, or null once it has left the bar. */
+  point(item: Element | null): void
+  /** What has keyboard focus (shown as such), or null. */
+  focus(item: Element | null): void
+  stop(): void
+}
+
+type Item = { el: HTMLElement; centre: number; width: number }
+
+export function glassDrop(row: HTMLElement, drop: HTMLElement): GlassDrop {
+  let items: Item[] = []
+  let pointed: Element | null = null
+  let focused: Element | null = null
+  // Which of the two moved last: it leads, and the other is where the drop goes back to once it lets go.
+  let lead: 'pointer' | 'focus' = 'pointer'
+  // Where it is and is going: its centre and width in the row's box, how much it shows (0 to 1).
+  let x = 0
+  let w = 0
+  let vx = 0
+  let vw = 0
+  let shown = 0
+  let toX = 0
+  let toW = 0
+  let toShown = 0
+  let frame = 0
+  let last = 0
+  // The width it is drawn at, set as it is aimed: at rest it is unscaled.
+  let size = 0
+
+  const still = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  /** Where each item is, untransformed: offsets ignore the magnifying. */
+  const measure = () => {
+    items = [...row.querySelectorAll<HTMLElement>('[data-drop]')].map((el) => {
+      let left = 0
+      for (let at: HTMLElement | null = el; at && at !== row; at = at.offsetParent as HTMLElement | null) left += at.offsetLeft
+      return { el, centre: left + el.offsetWidth / 2, width: el.offsetWidth }
+    })
+  }
+
+  const draw = () => {
+    const speed = Math.min(Math.abs(vx) / 2400, 1)
+    const gather = still() ? 1 : 0.82 + 0.18 * shown
+    const along = gather * (1 + STRETCH * speed)
+    const across = gather * (1 - SQUASH * speed)
+    if (size !== toW) {
+      size = toW
+      drop.style.width = `${size}px`
+    }
+    drop.style.transform = `translate3d(${(x - size / 2).toFixed(2)}px, 0, 0) scale(${((w / size) * along).toFixed(4)}, ${across.toFixed(4)})`
+    drop.style.opacity = shown.toFixed(3)
+    // What is under it, by how much of the narrower of the two the other covers.
+    for (const item of items) {
+      const over = Math.min(x + w / 2, item.centre + item.width / 2) - Math.max(x - w / 2, item.centre - item.width / 2)
+      const k = over > 0 ? (over / Math.min(w, item.width)) * shown : 0
+      item.el.style.transform = k > 0.001 ? `scale(${(1 + MAGNIFY * k).toFixed(4)})` : ''
+    }
+  }
+
+  const tick = (now: number) => {
+    const dt = Math.min((now - last) / 1000, 1 / 30)
+    last = now
+    // The spring, in steps short enough to stay steady at any frame rate.
+    const steps = Math.ceil(dt / (1 / 240))
+    for (let n = 0; n < steps; n++) {
+      const h = dt / steps
+      vx += (STIFF * (toX - x) - DAMP * vx) * h
+      vw += (STIFF * (toW - w) - DAMP * vw) * h
+      x += vx * h
+      w += vw * h
+    }
+    shown += (toShown - shown) * (1 - Math.exp((-dt * 1000) / (toShown > shown ? IN : OUT)))
+    const settled =
+      Math.abs(toX - x) < 0.05 && Math.abs(vx) < 0.5 && Math.abs(toW - w) < 0.05 && Math.abs(vw) < 0.5 && Math.abs(toShown - shown) < 0.004
+    if (settled) {
+      x = toX
+      w = toW
+      vx = vw = 0
+      shown = toShown
+    }
+    draw()
+    frame = settled ? 0 : requestAnimationFrame(tick)
+  }
+
+  const run = () => {
+    if (frame) return
+    last = performance.now()
+    frame = requestAnimationFrame(tick)
+  }
+
+  /** Go to what the input that moved last holds, or else what the other does, or fade where it is. */
+  const aim = () => {
+    const el = lead === 'focus' ? (focused ?? pointed) : (pointed ?? focused)
+    const item = el && items.find((i) => i.el === el)
+    if (!item || !item.width) {
+      toShown = 0
+      // A drop still travelling as it fades reads as a slow exit. It leaves where it is.
+      vx = vw = 0
+      return run()
+    }
+    toX = item.centre
+    toW = Math.max(LEAST, item.width)
+    // From nothing, or with reduced motion, it appears in place.
+    if (shown < 0.05 || still()) {
+      x = toX
+      w = toW
+      vx = vw = 0
+    }
+    toShown = 1
+    run()
+  }
+
+  const remeasure = () => {
+    measure()
+    if (toShown) aim()
+  }
+  measure()
+  window.addEventListener('resize', remeasure)
+  // The pages' widths settle once the fonts have.
+  void document.fonts?.ready.then(remeasure)
+
+  return {
+    point(item) {
+      if (item === pointed) return
+      pointed = item
+      if (item) lead = 'pointer'
+      if (item && !items.some((i) => i.el === item)) measure()
+      aim()
+    },
+    focus(item) {
+      if (item === focused) return
+      focused = item
+      if (item) lead = 'focus'
+      aim()
+    },
+    stop() {
+      cancelAnimationFrame(frame)
+      window.removeEventListener('resize', remeasure)
+    },
+  }
+}
