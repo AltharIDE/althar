@@ -984,6 +984,11 @@ export const handlers = Api.toLayer(
       SetUsageLimit: ({ commandId, projectId, policy }) =>
         once(commandId, api(policies.setUsageLimit(projectId, policy, instance.personId))),
       OpenChange: ({ commandId, taskId }) => once(commandId, api(runs.publish(taskId))),
+      SkipReview: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.skip_review', { taskId }, commandId), (said) => runs.skipReview({ envelope: said, taskId }))),
+        ),
       Merge: ({ commandId, taskId, head, url }) => once(commandId, api(pullRequests.merge(taskId, head, url))),
       MergeHere: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.mergeHere(taskId, heads)))),
       Push: ({ commandId, taskId, head, url }) => once(commandId, api(Effect.asVoid(pullRequests.push(taskId, head, url)))),
