@@ -1418,6 +1418,8 @@ export const ThreadSnapshot = Schema.Struct({
   items: Schema.Array(ThreadItem),
   /** There are items before these. */
   earlier: Schema.Boolean,
+  /** The lead's step reports, on this page or not: the task's finished view, what it built and showed, is read from them. */
+  reports: Schema.Array(ThreadItem),
 })
 export type ThreadSnapshot = typeof ThreadSnapshot.Type
 

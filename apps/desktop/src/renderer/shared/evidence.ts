@@ -81,13 +81,17 @@ export const piecesOf = (itemId: string, evidence: ReadonlyArray<Evidence>): Evi
  * A task's finished view, as its pull request says it: what its lead last
  * said it built (a step that changed the work says it again), what each of
  * its lead's steps showed, in order, and what it last said it couldn't show.
+ * From the reports its thread was read with, whatever page they were on,
+ * and any that came since.
  */
 export const taskEvidence = (
   items: ReadonlyArray<ThreadItem>,
+  reports: ReadonlyArray<ThreadItem> = [],
 ): { readonly built: string | null; readonly pieces: EvidencePiece[]; readonly unverified: string[] } => {
-  const lead = items.flatMap((item) =>
-    item.kind === 'step_result' && (item.content.step === 'implement' || item.content.step === 'settle') ? [item] : [],
-  )
+  const byId = new Map([...reports, ...items].map((item) => [item.id, item]))
+  const lead = [...byId.values()]
+    .flatMap((item) => (item.kind === 'step_result' && (item.content.step === 'implement' || item.content.step === 'settle') ? [item] : []))
+    .sort((one, other) => one.sequence - other.sequence)
   return {
     built: lead.findLast((item) => item.content.built !== null)?.content.built ?? null,
     pieces: lead.flatMap((item) => piecesOf(item.id, item.content.evidence)),

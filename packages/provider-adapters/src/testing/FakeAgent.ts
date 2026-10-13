@@ -421,13 +421,16 @@ const playStall = async (
  * Told what people said on its pull
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
- * publishes it. Asked to plan a change with a link in it, the coordinator
+ * says again what the task built. Asked to plan a change with a link in it, the coordinator
  * drafts the task from that issue.
  */
 /** What the fake says its task built when it finishes, and again once settling a review changed it. */
 export const BUILT = 'Checkout retries once when the payment call fails, in `src/checkout.ts`. Try a checkout with the network off.'
 export const BUILT_SETTLED =
   'Checkout retries once when the payment call fails, in `src/checkout.ts`, and the README heading names it. Try a checkout with the network off.'
+/** What it says the task built once it fixed a failed check, after its plan was done. */
+export const BUILT_FIXED =
+  'Checkout retries once when the payment call fails, in `src/checkout.ts`, and its check passes again. Push the fix.'
 
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
 const commitIn = (cwd: string, file: string, message: string) => {
@@ -565,6 +568,7 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
       // Fixed and committed, for the person to push.
       if (session.markers.has('[lead:fix]') && text.startsWith('Checks failed')) {
         commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
+        await call('finish_step', { summary: 'Fixed the failing check, and committed it.', built: BUILT_FIXED })
         return 'Fixed the failing check, and committed it.'
       }
       // Works until it is stopped: for a lead that goes in the middle of its step.

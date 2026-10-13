@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
-import { BUILT, BUILT_SETTLED } from '@althar/provider-adapters/testing'
+import { BUILT, BUILT_FIXED, BUILT_SETTLED } from '@althar/provider-adapters/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
@@ -21,6 +21,7 @@ import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
+import { taskShown } from '../src/evidence'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import { Sessions } from '../src/Sessions'
@@ -210,11 +211,32 @@ describe('a task that ends in a pull request', () => {
       yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       const opened = github.changes[0]
       assert.strictEqual(opened?.source, 'feature/add-a-retry')
-      // The lead's description, in the template: its headings and checklist kept, the box it ticked unticked, Althar's own below.
+      // What the task built, then the lead's description, in the template: its headings and checklist kept, the box it ticked
+      // unticked, Althar's own below.
       assert.strictEqual(
         opened?.body,
-        '## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\n### Review\n\nPassed after one round of review.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>',
+        `${BUILT}\n\n## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\n### Review\n\nPassed after one round of review.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>`,
       )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('leads a description written in the template with what the task built as settling last said it', () => {
+    const { working, bare } = hosted()
+    mkdirSync(join(working, '.github'))
+    writeFileSync(join(working, '.github', 'pull_request_template.md'), '## What changed\n\n<!-- A line or two. -->\n')
+    git(working, '-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'add', '-A')
+    git(working, '-c', 'user.name=Test', '-c', 'user.email=test@althar.test', 'commit', '-q', '-m', 'Template')
+    git(working, 'push', '-q', bare, 'main')
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      // The description is written finishing; settling then changes the work, and says again what it built.
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:findings]')
+      yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
+      const body = github.changes[0]?.body ?? ''
+      assert.isTrue(body.startsWith(`${BUILT_SETTLED}\n\n## What changed\n\nDid the task, in the template.`))
+      assert.notInclude(body, BUILT)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -233,6 +255,13 @@ describe('a task that ends in a pull request', () => {
       // The lead fixes and commits it; nothing goes up until the person pushes it.
       const [fixed] = yield* until(cards(projectId), (all) => all[0]?.change?.unpushed === 1, Duration.seconds(20))
       assert.notInclude(git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry'), 'fixed.txt')
+      // Its plan done, it says again what the task built, and that is how the task now ends.
+      const [shown] = yield* until(
+        Effect.map(taskShown(fixed?.threadId ?? ''), (now) => [now]),
+        ([now]) => now?.built === BUILT_FIXED,
+        Duration.seconds(20),
+      )
+      assert.strictEqual(shown?.built, BUILT_FIXED)
       const changes = yield* Changes
       yield* changes.push(fixed?.taskId ?? '', fixed?.change?.localHead ?? '')
       assert.include(git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry'), 'fixed.txt')

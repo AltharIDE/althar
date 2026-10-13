@@ -12,6 +12,7 @@ import { RuntimeConfig, type StallOptions } from '../src/Config'
 import { Coordinator, CoordinatorUnavailable } from '../src/Coordinator'
 import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotFound } from '../src/errors'
+import { builtAsk } from '../src/evidence'
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
@@ -229,7 +230,7 @@ describe('the coordinator loop', () => {
       assert.match(yield* callTool(access, 'read_thread', { task: 'add-a-retry' }), /\[review, pass\] The change holds\./)
       assert.match(yield* callTool(access, 'propose_plan', { task: 'add-a-retry', lead: { agent: 'codex' } }), /has started already/)
       assert.match(yield* callTool(access, 'message_lead', { task: 'add-a-retry', message: 'Stop.', now: true }), /^Passed on/)
-      // With no step waiting, a lead's summary isn't kept.
+      // Its plan done, a lead that changes the work after says again what the task built: without it, Althar asks.
       const lead: ToolAccess = {
         role: 'lead',
         projectId,
@@ -237,10 +238,7 @@ describe('the coordinator loop', () => {
         sessionId: 'none',
         taskId: ready?.taskId ?? null,
       }
-      assert.strictEqual(
-        yield* callTool(lead, 'finish_step', { summary: 'Again.' }),
-        'No step is waiting on you, so Althar keeps no summary now.',
-      )
+      assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Again.' }), builtAsk(false))
       // What the person says to a task goes to its lead, not the coordinator.
       assert.instanceOf(yield* Effect.flip(say(ready?.threadId ?? '', 'Hello')), NotFound)
     }).pipe(Effect.provide(withQueries())),

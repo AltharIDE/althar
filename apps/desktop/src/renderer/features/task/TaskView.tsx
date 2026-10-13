@@ -369,7 +369,7 @@ export function TaskView({
     ),
   ]
   // What the task built, as its lead last said it, closes its thread once no step is under way, with what its steps showed gathered under it.
-  const finished = taskEvidence(snapshot.items)
+  const finished = taskEvidence(snapshot.items, snapshot.reports)
   const closing = finished.built !== null && !busy && snapshot.task.step === null && snapshot.task.phase !== 'waiting'
   // What each document was last changed by, so one open beside the thread follows its edits.
   const versionOf = documentVersions(

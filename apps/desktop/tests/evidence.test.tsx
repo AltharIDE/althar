@@ -185,4 +185,22 @@ describe('evidence, as the window draws it', () => {
     expect(await screen.findByRole('button', { name: 'What it printed: The kit’s tests' })).toBeTruthy()
     expect(screen.queryByRole('article', { name: 'What the task built' })).toBeNull()
   })
+
+  it('keeps what the task built when its report is on an earlier page than the one read', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
+        snapshot({
+          // A long review came after it: the page read starts there.
+          items: [items.step({ step: 'review', verdict: 'pass', summary: 'It holds.' })],
+          earlier: true,
+          reports: [items.step({ evidence: [RUN], unverified: ['Not in Safari'], built: 'A retry, on the checkout.' })],
+          task: { ...snapshot().task, phase: 'ready', changes: [change()] },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByRole('heading', { name: 'What it built', level: 2 })).toBeTruthy()
+    expect(screen.getByText('A retry, on the checkout.')).toBeTruthy()
+    expect(screen.getByText('Not in Safari')).toBeTruthy()
+  })
 })

@@ -421,9 +421,9 @@ export class Changes extends Context.Service<
           // What the task built, at the top; then what the lead showed across its steps, and what it last said it couldn't.
           const { built, evidence, unverified } = yield* taskShown(threadId)
           // An agent may sign its summary as it signs a commit; that stays here too.
-          const summary = built ?? lead?.summary ?? null
           return bodyOf({
-            lead: summary === null ? null : withoutAgentCredit(summary, agentNames),
+            built: built === null ? null : withoutAgentCredit(built, agentNames),
+            lead: lead === undefined ? null : withoutAgentCredit(lead.summary, agentNames),
             review: reviewed === undefined ? null : reviewed,
             findings: findings.map((finding) => {
               const location = JSON.parse(finding.location) as { file?: string | null; line?: number | null }

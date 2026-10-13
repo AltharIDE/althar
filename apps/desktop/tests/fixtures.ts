@@ -631,6 +631,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
   attention: [],
   items: [],
   earlier: false,
+  reports: [],
   ...overrides,
 })
 

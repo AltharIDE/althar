@@ -357,7 +357,7 @@ export function Outputs({
   // A pull request needs its host connected: without, there is nothing a press could open.
   const unpublished = ready && first === undefined && task.commits > 0 && snapshot.host?.connected === true
   // What it built and what the lead showed of it working, above what it changed: what the person reads before accepting it.
-  const shown = taskEvidence(snapshot.items)
+  const shown = taskEvidence(snapshot.items, snapshot.reports)
   return (
     <div className={s.outputs}>
       <ThreadMeasure className={s.outputsBody}>

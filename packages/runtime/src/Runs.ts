@@ -1520,10 +1520,13 @@ export class Runs extends Context.Service<
           const kept = { ...givenBefore.get(access.threadId), ...now.descriptions }
           const descriptions = Object.keys(kept).length === 0 ? {} : { descriptions: kept }
           const current = access.taskId === null ? undefined : yield* currentRun(access.taskId)
-          const [planned] =
-            access.taskId === null ? [] : yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${access.taskId} LIMIT 1`
-          if (current === undefined && planned === undefined) {
-            // A task started without a plan has no steps: the summary is still what the person reads, and what it made, its end.
+          const [last] =
+            access.taskId === null
+              ? []
+              : yield* sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${access.taskId} ORDER BY created_at DESC LIMIT 1`
+          // A task started without a plan has no steps; one whose plan is done may still change, for a failed check or what people
+          // said on its pull request. Either way the summary is what the person reads, and what it built, as it now stands, its end.
+          if (current === undefined && (last === undefined || last.state === 'succeeded')) {
             if (built === null) return yield* new ToolRefused({ message: builtAsk(false) })
             yield* addItem(
               { projectId: access.projectId as ProjectId, threadId: access.threadId },

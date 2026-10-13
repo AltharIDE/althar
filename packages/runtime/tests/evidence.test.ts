@@ -3,11 +3,12 @@ import { join } from 'node:path'
 
 import { SCREENSHOT_PNG } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { builtAsk, EVIDENCE_TEXT_KEPT, taskShown, textKept } from '../src/evidence'
 import { evidenceText } from '../src/pullRequestWords'
+import { Queries } from '../src/Queries'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, runtime, task } from './support'
 
@@ -121,7 +122,14 @@ describe('the evidence a lead hands', () => {
       const built = 'A prototype of the retry screen. Open http://localhost:5173 to try it.'
       assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Did it.', built: ` ${built}\n` }), 'Althar has your summary.')
       assert.strictEqual((yield* taskShown(threadId)).built, built)
-    }).pipe(Effect.provide(runtime())),
+      // Read with a page that doesn't reach it, its thread still carries it, for the task's finished view.
+      const snapshot = yield* (yield* Queries).thread(threadId, { limit: 0 })
+      assert.isEmpty(snapshot.items)
+      assert.deepStrictEqual(
+        snapshot.reports.flatMap((item) => (item.kind === 'step_result' ? [item.content.built] : [])),
+        [built],
+      )
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
   )
 
   it('keeps the end of a long output, from a line', () => {
