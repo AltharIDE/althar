@@ -192,7 +192,7 @@ CREATE TABLE tasks (
   created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   settled_at TEXT CHECK (settled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)), seen_at TEXT CHECK (seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;
