@@ -54,8 +54,9 @@ export const text = {
   earlier: (change: ChangeSummary, host: string) =>
     `Before this: ${change.short} ${change.prefix}${change.number}, ${change.state === 'open' ? 'open' : change.state} on ${host}.`,
   /** Commits after its last pull request merged or closed, in none yet. */
+  /** In a task of several repositories, by none: they may be in a repository that has had no pull request yet. */
   unshipped: (n: number, change: ChangeSummary | undefined) =>
-    `${n === 1 ? 'One commit' : `${n} commits`} after ${change === undefined ? 'its last pull request' : `${change.short} ${change.prefix}${change.number}`} ${n === 1 ? 'isn’t' : 'aren’t'} in a pull request yet.`,
+    `${n === 1 ? 'One commit' : `${n} commits`}${change === undefined ? '' : ` after ${change.short} ${change.prefix}${change.number}`} ${n === 1 ? 'isn’t' : 'aren’t'} in a pull request yet.`,
   push: (n: number) => (n === 1 ? 'Push 1 commit' : `Push ${n} commits`),
   pushTo: (n: number, repository: string) => `${n === 1 ? 'Push 1 commit' : `Push ${n} commits`} to ${repository}`,
   unpushed: (n: number, change: ChangeSummary) =>
@@ -421,10 +422,7 @@ export function Outputs({
         ))}
         {shipping && task.unshipped != null && (
           <p className={s.quiet}>
-            {text.unshipped(
-              task.unshipped.commits,
-              latest.findLast((one) => one.state !== 'open'),
-            )}
+            {text.unshipped(task.unshipped.commits, several ? undefined : latest.findLast((one) => one.state !== 'open'))}
           </p>
         )}
         {parted.map(({ change: one, kind, local: here, onPullRequest }) => (

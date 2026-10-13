@@ -204,8 +204,9 @@ interface PublishRow {
 
 /**
  * A repository of a task whose last pull request merged or closed, with
- * commits on its branch after that pull request's head: what its next pull
- * request would have (ADR-034).
+ * commits on its branch after that pull request's head, or one with commits
+ * that never had one: what its next pull request, or its first, would have
+ * (ADR-034).
  */
 export interface Unshipped {
   readonly workspaceId: string
@@ -213,11 +214,11 @@ export interface Unshipped {
   readonly branch: string
   readonly name: string
   readonly slug: string
-  /** Its last pull request, as last seen. */
-  readonly change: ChangeSummary
+  /** Its last pull request, as last seen; null where it has had none. */
+  readonly change: ChangeSummary | null
   /** When that pull request opened: its next is described from what came after. */
-  readonly openedAt: string
-  /** That pull request's head, as the branch has it; or, `moved`, where the branch made for its next one started. */
+  readonly openedAt: string | null
+  /** That pull request's head, as the branch has it; or, `moved` or with none, where its branch started. */
   readonly head: string
   /** The worktree is on a branch made for its next pull request already, which didn't open: it goes on that one. */
   readonly moved: boolean
@@ -788,7 +789,7 @@ export class Changes extends Context.Service<
         projectId: ProjectId,
         taskId: string,
         task: PublishRow,
-        next: Unshipped,
+        next: Unshipped & { readonly change: ChangeSummary },
         /** Where the branch goes: the fork, for a pull request from one. */
         pushTarget: { readonly url: string; readonly header: string | null },
         /** Where the pull request opens, whose default branch it starts from: the repository a fork came from, for one into it. */
@@ -888,12 +889,12 @@ export class Changes extends Context.Service<
                 : repository.defaultBranch
           // Its next pull request goes on a branch of its own, the merged or closed one left as it is: from the default branch of the
           // repository it opens on, which for one from a fork into the repository it came from isn't the fork's, behind what merged.
-          if (next !== undefined)
+          if (next?.change != null)
             task = yield* rebranch(
               input.projectId,
               input.taskId,
               task,
-              next,
+              { ...next, change: next.change },
               pushTarget,
               from === undefined ? pushTarget : yield* host.pushTarget(repository),
               target,
@@ -2029,37 +2030,51 @@ export class Changes extends Context.Service<
             path: string
             branch: string
             baseCommit: string | null
+            baseRef: string | null
             name: string
             slug: string
+            remotes: string
             sent: string | null
-            changeBranch: string
-            linkId: string
-            projectId: ProjectId
-            connectionId: string | null
-            product: Product
-            snapshot: string
-            cursor: string | null
-            listening: number
-            openedAt: string
+            changeBranch: string | null
+            linkId: string | null
+            product: Product | null
+            snapshot: string | null
+            listening: number | null
+            openedAt: string | null
           }>`
-            SELECT w.id AS workspace_id, w.path, w.branch, w.base_commit, b.display_name AS name, b.slug, c.head_commit AS sent,
-              c.branch AS change_branch, l.id AS link_id, l.project_id, l.connection_id, l.product, l.snapshot, l.cursor, l.listening, l.created_at AS opened_at
+            SELECT w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.display_name AS name, b.slug,
+              b.remote_fingerprints AS remotes, c.head_commit AS sent, c.branch AS change_branch, l.id AS link_id, l.product,
+              l.snapshot, l.listening, l.created_at AS opened_at
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-            JOIN repository_changes c ON c.id = (SELECT id FROM repository_changes WHERE workspace_id = w.id
+            LEFT JOIN repository_changes c ON c.id = (SELECT id FROM repository_changes WHERE workspace_id = w.id
               AND pull_request_url IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1)
-            JOIN external_links l ON l.task_id = w.task_id AND l.kind = 'change' AND l.url = c.pull_request_url
+            LEFT JOIN external_links l ON l.task_id = w.task_id AND l.kind = 'change' AND l.url = c.pull_request_url
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
             ORDER BY b.created_at, b.rowid`
           const found: Array<Unshipped> = []
           for (const repository of repositories) {
-            const seen = Option.getOrUndefined(yield* Effect.option(decodeSnapshot(repository.snapshot)))
-            if (seen === undefined || seen.state === 'open' || !existsSync(repository.path)) continue
-            // Its head as the host has it, else as Althar pushed it: the first the branch has. A worktree on a branch of its own
-            // since, made for its next pull request that didn't open, counts from where that branch started.
-            const moved = repository.branch !== repository.changeBranch
-            let head: string | undefined = moved && repository.baseCommit !== null ? repository.baseCommit : undefined
-            for (const candidate of moved ? [] : [seen.headSha, repository.sent])
-              if (candidate !== null && head === undefined && (yield* onHead(repository.path, candidate))) head = candidate
+            if (!existsSync(repository.path)) continue
+            const seen =
+              repository.snapshot === null ? undefined : Option.getOrUndefined(yield* Effect.option(decodeSnapshot(repository.snapshot)))
+            if (seen?.state === 'open') continue
+            let head: string | undefined
+            let moved = false
+            if (seen === undefined) {
+              // None yet: from where its branch started, where it is on a code host Althar knows; one on none merges here.
+              const remotes = Option.getOrElse(
+                Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))(repository.remotes),
+                () => [],
+              )
+              if ((yield* hostOfRemotes(remotes)) === null) continue
+              head = repository.baseCommit ?? repository.baseRef ?? undefined
+            } else {
+              // Its head as the host has it, else as Althar pushed it: the first the branch has. A worktree on a branch of its own
+              // since, made for its next pull request that didn't open, counts from where that branch started.
+              moved = repository.branch !== repository.changeBranch
+              head = moved && repository.baseCommit !== null ? repository.baseCommit : undefined
+              for (const candidate of moved ? [] : [seen.headSha, repository.sent])
+                if (candidate !== null && head === undefined && (yield* onHead(repository.path, candidate))) head = candidate
+            }
             if (head === undefined) continue
             const listed = yield* git(repository.path, 'rev-list', '--reverse', '--no-merges', `${head}..HEAD`).pipe(
               Effect.orElseSucceed(() => ''),
@@ -2083,7 +2098,10 @@ export class Changes extends Context.Service<
               name: repository.name,
               slug: repository.slug,
               openedAt: repository.openedAt,
-              change: { ...seen, linkId: repository.linkId, product: repository.product, listening: repository.listening === 1 },
+              change:
+                seen === undefined || repository.linkId === null || repository.product === null
+                  ? null
+                  : { ...seen, linkId: repository.linkId, product: repository.product, listening: repository.listening === 1 },
               head,
               commits,
               moved,
@@ -2145,7 +2163,10 @@ export class Changes extends Context.Service<
             if (head === '' || merged.code !== 0) unmerged.push(repository.name)
           }
           // Commits after a merged pull request are in none yet: a new one takes them.
-          const after = open.length > 0 ? [] : yield* unshippedOf(taskId)
+          const after =
+            open.length > 0
+              ? []
+              : (yield* unshippedOf(taskId)).flatMap((one) => (one.change === null ? [] : [{ ...one, change: one.change }]))
           if (open.length > 0 || unmerged.length > 0 || after.length > 0) {
             // Abandoned, it is nobody's to finish: nothing is said.
             if (task.state === 'abandoned') return

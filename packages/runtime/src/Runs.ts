@@ -680,8 +680,24 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           yield* sql.withTransaction(ends(run, state))
+          yield* rest(run.taskId)
           yield* touchCard(run.taskId)
         })
+
+      /** Where Althar keeps, by worktree, the commit it was on when the task's last run ended: what a round its lead's report opens starts from. */
+      const RESTED = 'refs/althar/rested/'
+
+      /**
+       * Keeps where each of the task's worktrees is as a run of it ends
+       * (ADR-034), in a ref of Althar's beside those of what it pushed: so a
+       * round the lead's report opens later knows what came after. Nothing,
+       * where git can't say.
+       */
+      const rest = (taskId: string) =>
+        Effect.gen(function* () {
+          for (const worktree of yield* worktreesOf(taskId))
+            yield* Effect.ignore(git(worktree.path, 'update-ref', `${RESTED}${worktree.id}`, 'HEAD'))
+        }).pipe(Effect.ignore)
 
       /** The run ends, inside the caller's transaction: unless its task's stop suspended it meanwhile, when it waits to be resumed. */
       const ends = (run: RunRow, state: 'succeeded' | 'failed' | 'cancelled') =>
@@ -834,14 +850,19 @@ export class Runs extends Context.Service<
           // card, or in a new one the person opens there once the last merged or closed.
           if (run.planId === null) {
             const after = yield* changes.unshipped(run.taskId).pipe(Effect.orElseSucceed(() => []))
-            const [first] = after
-            if (first !== undefined)
+            // Each repository with what it has: its last pull request merged or closed, or none yet.
+            const said = after.map((one) =>
+              one.change === null
+                ? `${one.name} has no pull request`
+                : `${one.change.words.short} ${one.change.words.prefix}${one.change.number}${after.length > 1 ? ` in ${one.name}` : ''} ${
+                    one.change.state === 'merged' ? 'is merged' : 'was closed'
+                  }`,
+            )
+            if (said.length > 0)
               yield* addItem({ projectId: run.projectId, threadId: run.threadId }, 'notice', {
                 source: 'runtime',
                 severity: 'info',
-                title: `${after.map((one) => `${one.change.words.short} ${one.change.words.prefix}${one.change.number}`).join(' and ')} ${
-                  after.length > 1 ? 'are' : first.change.state === 'merged' ? 'is merged' : 'was closed'
-                }${after.length > 1 ? ' merged or closed' : ''}, so what the follow-up committed isn't in a pull request yet.`,
+                title: `${said.join(', ')}, so what the follow-up committed isn't in a pull request yet.`,
                 description: 'Open a new pull request for it from the task.',
               })
             yield* finish(run, 'succeeded')
@@ -905,6 +926,7 @@ export class Runs extends Context.Service<
               yield* ends(run, 'succeeded')
             }),
           )
+          yield* rest(run.taskId)
           yield* touchCard(run.taskId)
         })
 
@@ -1317,17 +1339,17 @@ export class Runs extends Context.Service<
       /**
        * Where a task stood once its last run of work was over, for a round its
        * lead's report opens after the work is done (ADR-034): in each
-       * worktree, the nearer its head of what its pull request was last sent
-       * and what its last review read; with neither, its branch as it was
-       * when that run ended, a second before to be sure; else its head. What
-       * it hadn't committed counts as there already.
+       * worktree, the nearest its head of where it was as that run ended
+       * (kept by `rest`), what its pull request was last sent, and what its
+       * last review read. Where none of them is on its branch, as for a run
+       * that ended before Althar kept that, from where its branch started:
+       * everything counts as the round's, so nothing goes unreviewed. What it
+       * hadn't committed counts as there already.
        */
       const restedOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const now = yield* startOf(taskId)
-          const [ran] = yield* sql<{ endedAt: string | null }>`
-            SELECT ended_at FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`
           const heads: Record<string, string> = {}
           for (const worktree of yield* worktreesOf(taskId)) {
             const [known] = yield* sql<{ sent: string | null; reviewed: string | null }>`
@@ -1336,21 +1358,18 @@ export class Runs extends Context.Service<
                 (SELECT commit_sha FROM workspace_snapshots WHERE workspace_id = ${worktree.id}
                   ORDER BY taken_at DESC, rowid DESC LIMIT 1) AS reviewed`
             let nearest: { readonly commit: string; readonly after: number } | undefined
-            for (const candidate of [known?.sent ?? null, known?.reviewed == null ? null : `${known.reviewed}^`]) {
+            for (const candidate of [
+              `${RESTED}${worktree.id}`,
+              known?.sent ?? null,
+              known?.reviewed == null ? null : `${known.reviewed}^`,
+            ]) {
               if (candidate === null) continue
               const commit = yield* commitOf(worktree.path, candidate).pipe(Effect.orElseSucceed(() => ''))
               if (commit === '' || !(yield* isOnHead(worktree.path, commit))) continue
               const after = yield* commitsAhead(worktree.path, commit).pipe(Effect.orElseSucceed(() => Number.POSITIVE_INFINITY))
               if (nearest === undefined || after < nearest.after) nearest = { commit, after }
             }
-            const then =
-              nearest === undefined && ran?.endedAt != null
-                ? yield* commitOf(
-                    worktree.path,
-                    `refs/heads/${worktree.branch}@{${new Date(Date.parse(ran.endedAt) - 1000).toISOString().replace(/\.\d+Z$/, 'Z')}}`,
-                  ).pipe(Effect.orElseSucceed(() => ''))
-                : ''
-            heads[worktree.path] = nearest?.commit ?? (then === '' ? (now.heads[worktree.path] ?? '') : then)
+            heads[worktree.path] = nearest?.commit ?? worktree.base ?? ''
           }
           return { heads, uncommitted: now.uncommitted, digest: '' } satisfies RoundStart
         })
@@ -1573,6 +1592,7 @@ export class Runs extends Context.Service<
             }),
           )
           if (!closed) return false
+          yield* rest(run.taskId)
           // A pull request that merged while it ran settles the task now.
           yield* Effect.ignore(changes.settleIfMerged(run.taskId))
           yield* touchCard(run.taskId)
@@ -2242,7 +2262,7 @@ export class Runs extends Context.Service<
           if ((end === 'draft' || end === 'ready') && !quiet) {
             // A round's work after its task's pull request merged or closed goes in a new one, described from what came since.
             const after = round === undefined ? [] : yield* changes.unshipped(current.taskId).pipe(Effect.orElseSucceed(() => []))
-            const since = after.map((one) => one.openedAt).toSorted()[0] ?? null
+            const since = after.flatMap((one) => (one.openedAt === null ? [] : [one.openedAt])).toSorted()[0] ?? null
             const unwritten = yield* templatesUnwritten(access.threadId, worktrees, kept, since)
             if (unwritten.length > 0) {
               givenBefore.set(access.threadId, kept)
@@ -2267,6 +2287,7 @@ export class Runs extends Context.Service<
           )
           if (!taken) return yield* dropped
           if (quiet) {
+            yield* rest(current.taskId)
             // A pull request that merged while it ran settles the task now.
             yield* Effect.ignore(changes.settleIfMerged(current.taskId))
             yield* touchCard(current.taskId)
@@ -2780,6 +2801,7 @@ export class Runs extends Context.Service<
             if (round !== undefined) {
               yield* endAttempt('cancelled', { abandoned: true })
               yield* sql.withTransaction(backWhereItWas(current, round.round, 'abandoned'))
+              yield* rest(current.taskId)
               yield* Effect.ignore(changes.settleIfMerged(current.taskId))
               return yield* touchCard(current.taskId)
             }

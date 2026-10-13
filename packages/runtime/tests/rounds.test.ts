@@ -666,6 +666,164 @@ describe('a task’s next pull request, in its repositories', () => {
   )
 })
 
+describe('a task’s first pull request in a repository, and a reported round with nothing to go by', () => {
+  it.live(
+    'opens a repository’s first pull request after another’s merged, as a follow-up changes it for the first time',
+    () => {
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+      const bares: Record<string, string> = {}
+      for (const name of ['api', 'web']) {
+        const path = join(folder, name)
+        mkdirSync(path)
+        git(path, 'init', '-q', '-b', 'main')
+        writeFileSync(join(path, 'README.md'), `# ${name}\n`)
+        git(path, 'add', '.')
+        git(path, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '-m', 'Start')
+        git(path, 'remote', 'add', 'origin', `${HOST}/meridian/${name}.git`)
+        bares[name] = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+        execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bares[name] })
+        git(path, 'push', '-q', bares[name] ?? '', 'main')
+      }
+      const github = makeFakeService({ pushUrl: (path) => bares[path.at(-1) ?? ''] ?? '' })
+      github.addRepository(['meridian', 'api'])
+      github.addRepository(['meridian', 'web'])
+      const commitIn = (path: string, file: string, message: string) => {
+        appendFileSync(join(path, file), `${message}\n`)
+        git(path, 'add', '-A')
+        git(path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', message)
+      }
+      return Effect.gen(function* () {
+        const runs = yield* Runs
+        const sql = yield* SqlClient.SqlClient
+        const instance = yield* Instance
+        yield* connect()
+        const projects = yield* Projects
+        const plans = yield* Plans
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: folder })
+        const task = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId: project.projectId,
+          title: 'Share the retry',
+          description: '[lead:finish]',
+          draft: true,
+          repositories: ['api', 'web'],
+        })
+        const worktrees = yield* sql<{ path: string }>`
+        SELECT w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${task.taskId} ORDER BY b.created_at, b.rowid`
+        const [api = '', web = ''] = worktrees.map((worktree) => worktree.path)
+        // Its plan changes api alone: api's pull request opens, and web has nothing to propose.
+        commitIn(api, 'retry.txt', 'Retry')
+        const planId = yield* plans.propose({
+          projectId: project.projectId as Parameters<typeof plans.propose>[0]['projectId'],
+          taskId: task.taskId,
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          reason: null,
+          actorId: instance.personId,
+        })
+        yield* plans.start(planId, instance.personId)
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].change !== null, Duration.seconds(20))
+        assert.lengthOf(github.changes, 1)
+        squashMerge(bares.api ?? '', task.branch)
+        github.mergeByHand(1)
+        yield* (yield* Changes).refresh(task.taskId)
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(10))
+
+        // Its lead goes back to work on web, for the first time, and reports.
+        commitIn(web, 'retry.txt', 'Web first')
+        const [lead] = yield* sql<{
+          id: string
+        }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at DESC LIMIT 1`
+        const said = yield* callTool(
+          { role: 'lead', projectId: project.projectId, threadId: task.threadId, sessionId: lead?.id ?? '', taskId: task.taskId },
+          'finish_step',
+          { summary: 'Did web too.' },
+        )
+        assert.strictEqual(said, 'Althar has your summary. The task is ready for the person.')
+        const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
+        assert.deepStrictEqual(ready?.unshipped, { commits: 1, add: 1, del: 0 })
+        assert.isTrue(
+          (yield* notices(task.threadId)).some(
+            (notice) => notice.title === "web has no pull request, so what the follow-up committed isn't in a pull request yet.",
+          ),
+        )
+        // Web's first opens, from the task's branch, as a first one does; api's merged one stays as it is.
+        yield* runs.publish(task.taskId)
+        assert.lengthOf(github.changes, 2)
+        assert.include(github.changes[1]?.url, '/meridian/web/')
+        assert.strictEqual(github.changes[1]?.source, task.branch)
+        assert.strictEqual(git(bares.web ?? '', 'log', '-1', '--format=%s', task.branch), 'Web first')
+        assert.strictEqual(git(api, 'rev-parse', '--abbrev-ref', 'HEAD'), task.branch)
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
+    'starts a reported round of a task with no pull request or review where its last run left it, and from its start where that isn’t known',
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const plans = yield* Plans
+        const projects = yield* Projects
+        const instance = yield* Instance
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+        const created = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId: project.projectId,
+          title: 'Keep the retry here',
+          description: 'Do it. [lead:finish] [lead:edit]',
+          draft: true,
+        })
+        const planId = yield* plans.propose({
+          projectId: project.projectId as Parameters<typeof plans.propose>[0]['projectId'],
+          taskId: created.taskId,
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          reason: null,
+          actorId: instance.personId,
+        })
+        yield* plans.start(planId, instance.personId)
+        yield* until(runsOf(created.taskId), (rows) => rows[0]?.state === 'succeeded', Duration.seconds(20))
+        const [workspace] = yield* sql<{ id: string; path: string }>`SELECT id, path FROM workspaces WHERE task_id = ${created.taskId}`
+        const path = workspace?.path ?? ''
+        // Where its run left it is kept: its head as the run ended.
+        assert.strictEqual(git(path, 'rev-parse', `refs/althar/rested/${workspace?.id ?? ''}`), git(path, 'rev-parse', 'HEAD'))
+        const [lead] = yield* sql<{
+          id: string
+        }>`SELECT id FROM provider_sessions WHERE thread_id = ${created.threadId} ORDER BY started_at DESC LIMIT 1`
+        const report = (summary: string) =>
+          callTool(
+            { role: 'lead', projectId: project.projectId, threadId: created.threadId, sessionId: lead?.id ?? '', taskId: created.taskId },
+            'finish_step',
+            { summary },
+          )
+        const quiet = 'Althar has your summary. Nothing on the branch changed this round, so the task is back where it was.'
+        const ready = 'Althar has your summary. The task is ready for the person.'
+        // Nothing since: back where it was.
+        assert.strictEqual(yield* report('Looked again.'), quiet)
+        // A commit the moment after the run ended, within the same second, is the round's.
+        appendFileSync(join(path, 'later.txt'), 'later\n')
+        git(path, 'add', '-A')
+        git(path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', 'Later')
+        assert.strictEqual(yield* report('Did a little more.'), ready)
+        assert.strictEqual(git(path, 'rev-parse', `refs/althar/rested/${workspace?.id ?? ''}`), git(path, 'rev-parse', 'HEAD'))
+        // Where it isn't known where the last run left it, everything since its branch started is the round's: nothing goes unreviewed.
+        git(path, 'update-ref', '-d', `refs/althar/rested/${workspace?.id ?? ''}`)
+        assert.strictEqual(yield* report('Looked once more.'), ready)
+        const all = yield* runsOf(created.taskId)
+        assert.deepStrictEqual(
+          all.map((run) => [run.planId === null, run.endReason]),
+          [
+            [false, null],
+            [true, 'nothing_new'],
+            [true, null],
+            [true, null],
+          ],
+        )
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:'))))),
+    60_000,
+  )
+})
+
 describe('a round of work and a restart', () => {
   it.live(
     'carries on a round under way when Althar restarts, and its lead finishes it',
