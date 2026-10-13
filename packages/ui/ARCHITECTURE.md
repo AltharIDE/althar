@@ -15,7 +15,7 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | `thread` | What appears in a conversation: turns, tool calls, steps, permissions (a card, a stack with Allow all, their answers in small for a call on the home, and what a rule allowed), questions, Stuck, documents, Evidence (what the task built, what a lead showed of its change working, and what it couldn't), and Finished (the task's closing card, which holds them). |
 | `composer` | What writes into a conversation: Composer, DictationTray, ModelPick, ContextRing, Listening, Running. |
 | `coordinator` | What the coordinator shows about tasks: Issue, IssueDraft (an issue it drafted on a tracker, filed only from the card), TaskLaunch, TaskCard, TaskMark, TaskHeld. |
-| `board` | The project's work in lanes: Board, BoardColumn, and a card or row for each lane. |
+| `board` | The project's work in lanes: Board, BoardColumn, and a card or row for each lane: BoardCard (any task's card, with nothing to press) and its chips (PullChip, BranchChip, FileChips, Thumbs, CommandChip, Fact, Findings). |
 | `dock` | What opens beside the board: Dock and a peek for each kind of card. |
 | `home` | Work across every project, as the home shows it: NeedLine, ProjectList, WorkTicks, SinceRow, HomeRest, ProjectWord; and what needs you at the edge of the screen: Island, EdgeSheet. |
 | `outputs` | What a task made: ChangeSet, ArtifactCard, ChangeView, and NoOutputs (where its lead has looked, before it has made anything). |
@@ -158,7 +158,8 @@ A pattern that appears in two components becomes one part, so the two cannot dri
 | Panel, FormRow | A sheet of settings, and its label-beside-control rows (FormRow also names the control inside it) | Welcome; Select, Choices, Segmented and CheckList take their names from FormRow |
 | KeyValues | A small definition list | External, GraphProposal |
 | StepRow | A step's row, its track and its thread link | Step, Review |
-| StepTrack | A task's steps as a row of bars | TaskCard, WorkCard, TaskHeader |
+| StepTrack | A task's steps as a row of bars | TaskCard, WorkCard, BoardCard, TaskHeader |
+| Chips (PullChip, BranchChip, FileChips, Thumbs, CommandChip, Fact, Findings) | What a board card holds under its title: a card in the card, and one fact | BoardCard, AcceptCard |
 | Heading | A heading at the level the consumer gives | everything with a title |
 | Markdown | Markdown drawn as our own elements, never as HTML; its tables are the kit's Table | Document, DocPanel, FileArtifact |
 | ImageView | A picture at its src or its smaller copy, decoded lazily in a box that keeps its shape, saying when it couldn't be shown | Shots, Lightbox |
