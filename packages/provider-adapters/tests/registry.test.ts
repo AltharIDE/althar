@@ -65,6 +65,22 @@ describe('the agent registry', () => {
     assert.isFalse(meta.claudeCode.options.settings.sandbox.autoAllowBashIfSandboxed)
   })
 
+  it('makes an offline Claude Code reader deny its web tools, and still ask for every command', () => {
+    type Meta = { claudeCode: { options: { settings: { permissions: { deny?: Array<string>; ask: Array<string> } } } } }
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    const permissionsOf = (role: 'lead' | 'reader', options?: { offline?: boolean }) =>
+      (metaOf(role, options) as Meta).claudeCode.options.settings.permissions
+    const offline = permissionsOf('reader', { offline: true })
+    assert.includeMembers(offline.deny ?? [], ['Edit', 'Write', 'WebFetch', 'WebSearch'])
+    assert.deepStrictEqual(offline.ask, ['Bash'])
+    // A reader with the network keeps asking for its fetches, which Althar's reader rules allow.
+    assert.notInclude(permissionsOf('reader').deny ?? [], 'WebFetch')
+    assert.include(permissionsOf('reader', { offline: false }).ask, 'WebFetch')
+    // A lead is never offline this way: the option is a reader's.
+    assert.include(permissionsOf('lead', { offline: true }).ask, 'WebFetch')
+  })
+
   it('in a Flatpak, a reader’s commands run without the sandbox and every one asks, as no sandbox can start there', () => {
     const allows = () => {
       const meta = agents['claude-code'].sessionMeta?.('reader') as {
