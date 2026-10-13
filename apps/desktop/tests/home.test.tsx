@@ -734,6 +734,24 @@ describe('settings', () => {
     await waitFor(() => expect(count.getAttribute('aria-valuenow')).toBe('4'))
   })
 
+  it('posts the team’s reviews without asking only once the person turns it on, and says when that can’t be kept', async () => {
+    const { client } = fakeClient()
+    withServices(<Settings />, client)
+    const panel = await openModule(/^Keep awake/)
+    const posts = await within(panel).findByRole('switch', { name: 'Post reviews of my team’s pull requests without asking' })
+    expect(posts.getAttribute('aria-checked')).toBe('false')
+    expect(within(panel).getByText(/A review of a pull request from outside the team always waits for you to post it\./)).toBeTruthy()
+    await userEvent.click(posts)
+    expect(client.setPostTeamReviews).toHaveBeenLastCalledWith(true)
+    await waitFor(() => expect(posts.getAttribute('aria-checked')).toBe('true'))
+    vi.mocked(client.setPostTeamReviews).mockRejectedValue(new Error('disk full'))
+    const reads = vi.mocked(client.getSettings).mock.calls.length
+    await userEvent.click(posts)
+    expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(vi.mocked(client.getSettings).mock.calls.length).toBeGreaterThan(reads))
+    await waitFor(() => expect(posts.getAttribute('aria-checked')).toBe('false'))
+  })
+
   it('has Althar as co-author of what it sends until the person turns it off, and then says once, large, why it would stay', async () => {
     const { client } = fakeClient({ listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection] })) })
     withServices(<Settings />, client)

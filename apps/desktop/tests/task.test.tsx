@@ -160,6 +160,99 @@ describe('a task', () => {
     expect(screen.getAllByText('gpt-5.2-codex').length).toBeGreaterThan(0)
   })
 
+  it('reviews someone else’s pull request: opens with it, says what its lead can reach, and posts its draft only as the person says', async () => {
+    const base = snapshot()
+    const review = {
+      product: 'github' as const,
+      repository: 'meridian/api',
+      number: 1212,
+      url: 'https://github.com/meridian/api/pull/1212',
+      title: 'Honour Retry-After on refund webhooks',
+      author: 'ninemate',
+      outside: true,
+      additions: 58,
+      deletions: 20,
+      findings: 2,
+      blocking: 1,
+      verdict: null,
+      posted: null,
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [items.says('It needs a test.'), items.review()],
+          task: { ...base.task, title: 'Review #1212: Honour Retry-After on refund webhooks', request: 'Review this one', review },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    // Its thread opens with what the person asked, and the pull request under it.
+    await screen.findByText('Review this one')
+    expect(screen.getAllByText('Honour Retry-After on refund webhooks').length).toBeGreaterThan(1)
+    // Under its header, what its lead can reach: from outside, no network.
+    const reach = screen.getByLabelText('What this review’s lead can reach')
+    expect(
+      within(reach)
+        .getAllByRole('button')
+        .map((one) => one.textContent),
+    ).toEqual(['Reads ninemate’s branch', 'runs nothing of it', 'no network', 'posts nothing until you do'])
+    await userEvent.click(within(reach).getByRole('button', { name: 'no network' }))
+    expect(await screen.findByText(/The pull request is from outside the team, so the agent has no network/)).toBeTruthy()
+    await userEvent.keyboard('{Escape}')
+
+    // Its draft: from outside, the lead would approve, and no verdict is chosen for the person.
+    const card = screen.getByRole('article', { name: /Review draft · GitHub · meridian\/api #1212/ })
+    expect(within(card).getByText('ninemate, from a fork · drafted by Claude Code')).toBeTruthy()
+    for (const radio of within(card).getAllByRole('radio')) expect(radio.getAttribute('aria-checked')).toBe('false')
+    await userEvent.click(within(card).getByRole('button', { name: 'Post review' }))
+    expect(client.postReviewDraft).not.toHaveBeenCalled()
+    await userEvent.click(within(card).getByRole('radio', { name: 'Request changes' }))
+    expect(client.changeReviewDraft).toHaveBeenCalledWith('rdr_1', { verdict: 'changes' })
+    await userEvent.click(within(card).getByRole('switch', { name: 'Keep the comment on src/retry.ts:57' }))
+    expect(client.changeReviewDraft).toHaveBeenCalledWith('rdr_1', { comments: [{ id: 'c2', kept: false }] })
+    await userEvent.click(within(card).getByRole('button', { name: 'Edit' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Summary' }), ' Soon.')
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }))
+    expect(client.changeReviewDraft).toHaveBeenLastCalledWith('rdr_1', {
+      summary: 'The fix is **right**, but it needs a test. Soon.',
+      comments: [
+        { id: 'c1', body: 'Nothing covers the cap.' },
+        { id: 'c2', body: 'Nit: seconds.' },
+      ],
+    })
+    await userEvent.click(screen.getByRole('button', { name: 'Discard' }))
+    expect(client.discardReviewDraft).toHaveBeenCalledWith('rdr_1')
+  })
+
+  it('posts a review draft whose verdict stands chosen, and folds a posted one to its link', async () => {
+    const base = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          items: [
+            items.review({ outside: false, fork: false, suggested: 'comment', verdict: 'comment', drafter: null, account: null }),
+            items.review({
+              draftId: 'rdr_2',
+              state: 'posted',
+              verdict: 'changes',
+              review: { url: 'https://github.com/meridian/api/pull/1212#pullrequestreview-9', at: '2026-09-29T11:00:00.000Z' },
+            }),
+          ],
+          task: { ...base.task, request: null },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Post review' }))
+    expect(client.postReviewDraft).toHaveBeenCalledWith('rdr_1')
+    expect(screen.getByText('The lead suggests Comment')).toBeTruthy()
+    expect(screen.getByRole('link', { name: /Open on GitHub/ }).getAttribute('href')).toBe(
+      'https://github.com/meridian/api/pull/1212#pullrequestreview-9',
+    )
+    // Not a review task: no reach under its header.
+    expect(screen.queryByLabelText('What this review’s lead can reach')).toBeNull()
+  })
+
   it('starts a stopped task on its last lead and model, and not on an agent signed out since', async () => {
     const base = snapshot()
     const stopped = thread({

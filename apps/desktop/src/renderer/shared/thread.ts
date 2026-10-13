@@ -62,6 +62,7 @@ export type RunContent = Extract<ThreadItem, { kind: 'run' }>['content']
 export type IssueDraftContent = Extract<ThreadItem, { kind: 'issue_draft' }>['content']
 export type SetupContent = Extract<ThreadItem, { kind: 'setup' }>['content']
 export type PushRequestContent = Extract<ThreadItem, { kind: 'push_request' }>['content']
+export type ReviewDraftContent = Extract<ThreadItem, { kind: 'review_draft' }>['content']
 
 export type Block =
   | {
@@ -110,6 +111,8 @@ export type Block =
   | { readonly kind: 'setup'; readonly id: string; readonly setup: SetupContent }
   /** The lead asking the person to push its new commits to the task's pull request: when it asked, or when it settled. */
   | { readonly kind: 'push'; readonly id: string; readonly at: string; readonly request: PushRequestContent }
+  /** A review the lead drafted of someone else's pull request, posted only when the person says. */
+  | { readonly kind: 'review'; readonly id: string; readonly review: ReviewDraftContent }
 
 /** ACP's tool kinds, as the kit's. */
 /** The notice earlier versions left in a thread when Althar restarted under its lead. */
@@ -425,6 +428,9 @@ export const blocksOf = (
         continue
       case 'push_request':
         blocks.push({ kind: 'push', id: item.id, at: ago(item.content.settledAt ?? item.createdAt), request: item.content })
+        continue
+      case 'review_draft':
+        blocks.push({ kind: 'review', id: item.id, review: item.content })
         continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
