@@ -79,6 +79,7 @@ export const text = {
   loadingEarlier: 'Showing…',
   dismiss: 'Dismiss',
   boardFailed: 'Althar couldn’t read the board.',
+  olderFailed: 'Althar couldn’t load older tasks.',
   boardReading: 'Reading the board',
   width: 'Width of the conversation',
 }
@@ -456,7 +457,20 @@ export function ProjectView({
         {boarding && (
           <div className={s.board}>
             {lanes !== null ? (
-              <BoardView lanes={lanes} agents={model.agents} now={now} onOpen={onTask} />
+              <>
+                {board.olderError !== null && (
+                  <p className={s.failure} role="alert">
+                    {text.olderFailed} {board.olderError}
+                  </p>
+                )}
+                <BoardView
+                  lanes={lanes}
+                  agents={model.agents}
+                  now={now}
+                  onOpen={onTask}
+                  {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
+                />
+              </>
             ) : board.error === null ? (
               <PartPending label={text.boardReading} />
             ) : (

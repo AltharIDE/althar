@@ -1644,6 +1644,8 @@ export const BoardSnapshot = Schema.Struct({
   cursor: Cursor,
   tasks: Schema.Array(BoardTask),
   calls: Schema.Array(BoardCall),
+  /** How many tasks the project has settled (done or abandoned), in all: `tasks` holds only the most recent of them. */
+  settledTotal: Schema.Number,
 })
 export type BoardSnapshot = typeof BoardSnapshot.Type
 
@@ -1882,6 +1884,12 @@ export const Api = RpcGroup.make(
   call('GetFileDiff', { taskId: Schema.String, path: Schema.String }, FileDiff),
   /** A project's board: its tasks, by card, and the calls that wait on the person. */
   call('GetBoard', { projectId: Schema.String }, BoardSnapshot),
+  /** The next page of a project's settled tasks, as cards, older than the one settled at `before` (`taskId` breaking a tie), most recent first. */
+  call(
+    'GetOlderSettled',
+    { projectId: Schema.String, before: Schema.String, taskId: Schema.String },
+    Schema.Struct({ tasks: Schema.Array(BoardTask) }),
+  ),
   /** The home, across every project; what the loop did, from `since` where the window says, else from when the person last left the home. */
   call('GetHome', { since: Schema.optional(Schema.String) }, HomeSnapshot),
   /** The person left the home: what the loop does from now on is new to them. */

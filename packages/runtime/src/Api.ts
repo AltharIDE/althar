@@ -544,6 +544,8 @@ export const handlers = Api.toLayer(
       ReadDocument: ({ threadId, path }) => api(queries.document(threadId, path)),
       GetFileDiff: ({ taskId, path }) => api(queries.fileDiff(taskId, path)),
       GetBoard: ({ projectId }) => api(queries.board(projectId)),
+      GetOlderSettled: ({ projectId, before, taskId }) =>
+        api(Effect.map(queries.olderSettled(projectId, before, taskId), (tasks) => ({ tasks }))),
       GetHome: ({ since }) => api(queries.home(since)),
       LeftHome: () =>
         api(

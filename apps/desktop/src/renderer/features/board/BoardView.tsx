@@ -5,6 +5,7 @@ import {
   BoardColumn,
   BoardLane,
   BoardList,
+  Button,
   CallCard,
   NextRow,
   Outcome,
@@ -51,6 +52,7 @@ export const text = {
   merged: (name: string) => `${name} merged`,
   closed: (name: string) => `${name} closed`,
   abandoned: 'Abandoned',
+  showOlder: 'Show older',
 }
 
 /** What the home's dock holds: a task, by its id, or a call. */
@@ -80,6 +82,7 @@ export function BoardView({
   agents,
   now,
   onOpen,
+  onShowOlder,
 }: {
   lanes: Lanes
   agents: ReadonlyArray<AgentStatus>
@@ -87,6 +90,8 @@ export function BoardView({
   now: string
   /** Opens a task, by its thread. */
   onOpen: (threadId: string) => void
+  /** Loads the next page of settled work; absent where every settled task is already shown. */
+  onShowOlder?: () => void
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   const named = useModelNames()
@@ -182,7 +187,7 @@ export function BoardView({
         })}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Settled} count={lanes.settled.length}>
+      <BoardColumn lane={BoardLane.Settled} count={lanes.settledTotal}>
         <BoardList>
           {lanes.settled.map((work) => {
             const change = work.change
@@ -206,6 +211,11 @@ export function BoardView({
             )
           })}
         </BoardList>
+        {onShowOlder !== undefined && (
+          <Button variant="quiet" size="small" onClick={onShowOlder}>
+            {text.showOlder}
+          </Button>
+        )}
       </BoardColumn>
     </Board>
   )

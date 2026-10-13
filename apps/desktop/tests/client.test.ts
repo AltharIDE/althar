@@ -209,6 +209,7 @@ describe('the client', () => {
           Status: () => Effect.die('unused'),
           GetFileDiff: () => Effect.die('unused'),
           GetBoard: () => Effect.die('unused'),
+          GetOlderSettled: () => Effect.die('unused'),
           GetHome: () => Effect.die('unused'),
           LeftHome: () => Effect.die('unused'),
           Merge: () => Effect.die('unused'),
