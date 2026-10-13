@@ -1,4 +1,5 @@
 import interior from './plate/interior.webp'
+import view from './plate/view.webp'
 
 /*
  * The carriage: a photograph from inside a modern train, a man and a child
@@ -18,6 +19,8 @@ export interface Pane {
 
 export const PLATE = {
   src: interior,
+  /** The middle window's view as the train sets off, as the landscape's first frame draws it: the glass shows it until the landscape is in, and without scripts. */
+  view,
   width: 3344,
   height: 1882,
   /** The middle window, then the next ones either side. */

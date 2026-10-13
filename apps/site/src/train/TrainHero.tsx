@@ -1,5 +1,6 @@
 import { drawGrain } from '@althar/ui/opening'
 import { type CSSProperties, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { preload } from 'react-dom'
 
 import { useHydrated } from '../lib/browser'
 import { addDisplay, DISPLAY } from '../home/display'
@@ -81,8 +82,8 @@ const picture = (src: string) =>
     img.src = src
   })
 
-/** How long the train waits for its landscape before setting off without it. */
-const WAIT = 2500
+/** How long the train waits for its landscape before setting off without it, its first frame standing in. */
+const WAIT = 1800
 
 /** The plate's measure, for the stylesheet: its size, the point it keeps in view, and the middle window. */
 const STAGE = {
@@ -113,6 +114,9 @@ export function TrainHero({ nav, look = 'depth' }: { nav?: ReactNode; look?: Loo
   const grain = useRef<HTMLDivElement>(null)
   const [drawn, setDrawn] = useState(false)
   const hydrated = useHydrated()
+  // The view and the landscape's photographs, asked for with the page rather than once its script has run.
+  preload(PLATE.view, { as: 'image', fetchPriority: 'high' })
+  for (const src of Object.values(PICTURES)) preload(src, { as: 'image' })
 
   useLayoutEffect(() => {
     const tile = document.createElement('canvas')
@@ -408,7 +412,7 @@ export function TrainHero({ nav, look = 'depth' }: { nav?: ReactNode; look?: Loo
           <div ref={grain} className={s.grain} aria-hidden="true" />
           <div className={s.vignette} aria-hidden="true" />
           {/* Until the landscape is drawn, and without scripts, a plain sky in the window. */}
-          <div className={s.glass} aria-hidden="true" />
+          <div className={s.glass} style={{ backgroundImage: `url(${PLATE.view})` }} aria-hidden="true" />
           <div className={s.words}>
             <Words />
           </div>

@@ -61,8 +61,9 @@
 .photo { display: block; width: 100%; height: 100%; }
 /* The carriage dimming as the light outside is taken: masked by the photograph, so only the carriage darkens. */
 .dim { position: absolute; inset: 0; background: #000; opacity: 0; mask-size: 100% 100%; -webkit-mask-size: 100% 100%; }
-/* Up out of the dark as the page opens. */
+/* Up out of the dark as the train sets off; dark until then, so the scene comes up once, whole. */
 .curtain { position: absolute; inset: 0; z-index: 1; background: #000; opacity: var(--dark, 0); pointer-events: none; }
+@media (scripting: enabled) { .hero:not([data-begun]) .curtain { opacity: 1; } }
 
 /* Film's grain over the whole, stepping as film does, and the corners falling dark as a lens has them. */
 .grain, .vignette { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
@@ -82,7 +83,7 @@
     linear-gradient(transparent 72%, rgba(8, 4, 2, 0.7));
 }
 
-/* The middle window's glass: a plain sky stands in it until the landscape is drawn, and without scripts. */
+/* The middle window's glass: the view as the train sets off (its picture set by the script, PLATE.view) stands in it until the landscape is drawn, and without scripts. */
 .glass {
   position: absolute;
   z-index: 0;
@@ -91,9 +92,12 @@
   width: calc(var(--ww) * var(--u));
   height: calc(var(--wh) * var(--u));
   border-radius: calc(var(--wr) * var(--u));
-  background: linear-gradient(#2246c9, #3d6ae0 30%, #77a0ef 55%, #bcd2f6 60%, #6f8f45 62%, #3c5a2a);
+  background: #4f86dc center / cover no-repeat;
+  /* As the landscape's canvas is shown. */
+  filter: brightness(1.04);
 }
-.hero[data-drawn] .glass { display: none; }
+/* Giving way to the landscape: at once as the train sets off in the dark, softly if it comes after. */
+.hero[data-drawn] .glass { opacity: 0; visibility: hidden; transition: opacity 0.5s ease-out, visibility 0s 0.5s; }
 
 /* The words, set by the look (Looks.module.css). They wait for the train to set off, as the launch has them; crawlers read them in the HTML all the same. */
 .words { display: contents; }

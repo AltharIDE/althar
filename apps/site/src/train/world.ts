@@ -121,7 +121,10 @@ function stripOf(view: View, picture: HTMLImageElement, look: (typeof LAYOUT)[ke
   const ctx = padded.getContext('2d')
   if (!ctx) throw new Error('no 2d context')
   ctx.filter = look.grade
-  for (const x of [PAD - native, PAD, PAD + native]) ctx.drawImage(picture, x, 0)
+  // The photograph, and either side of it as much of its other end as the padding shows: drawn whole, the grade would be worked over all three copies.
+  ctx.drawImage(picture, PAD, 0)
+  ctx.drawImage(picture, native - PAD, 0, PAD, height, 0, 0, PAD, height)
+  ctx.drawImage(picture, 0, 0, PAD, height, PAD + native, 0, PAD, height)
   const period = native * scale
   const reach = SPEED.fast * metreUnit(view) * look.share * EXPOSURE.fast
   const most = clamp(Math.ceil(Math.log2(Math.max(1, reach / scale / 1.5))), 0, 8)
