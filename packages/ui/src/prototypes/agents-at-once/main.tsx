@@ -3,6 +3,7 @@ import { type CSSProperties, type KeyboardEvent, type PointerEvent, useRef, useS
 import { createRoot } from 'react-dom/client'
 
 import { Icon } from '../../foundations/Icon/Icon'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { KeepAwake, SettingList, SettingRow } from '../../setup/Preferences/Preferences'
 import '../../styles/global.css'
 import './prototype.css'
@@ -54,9 +55,9 @@ function AgentsAtOnce({ start = MACHINE.count }: { start?: number }) {
           {own && (
             <>
               {' '}
-              <button type="button" className="back" onClick={() => set(MACHINE.count)}>
+              <LinkButton className="back" onClick={() => set(MACHINE.count)}>
                 Use the default
-              </button>
+              </LinkButton>
             </>
           )}
         </>

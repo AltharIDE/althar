@@ -43,16 +43,9 @@
   font-variant-numeric: tabular-nums;
   color: color-mix(in srgb, var(--warm) calc(var(--heat, 0) * 100%), var(--t-1));
 }
+/* back to the default, in the note's own size */
 .back {
-  border: 0;
-  padding: 0;
-  background: none;
-  color: var(--signal);
-  font: inherit;
-  cursor: pointer;
-}
-.back:hover {
-  text-decoration: underline;
+  font-size: inherit;
 }
 
 /* ---- the slider, under the row's words ---- */
