@@ -232,7 +232,49 @@ describe('the board', () => {
     getBoard.mockImplementation(async () => board({ tasks: [settledTask(35), ...latest.slice(1)], calls: [], settledTotal: 36 }))
     emit(changed('task', 's35'))
     expect(await within(column).findByText('36')).toBeTruthy()
+    // Every card stays, the one that aged out of the snapshot (5) among them.
+    expect(within(column).getAllByRole('listitem')).toHaveLength(36)
     expect(within(column).getByText('Settled 0')).toBeTruthy()
+    expect(within(column).getByText('Settled 5')).toBeTruthy()
+    expect(within(column).queryByRole('button', { name: 'Show older' })).toBeNull()
+  })
+
+  it('asks for a page of older settled tasks once, however often it is pointed at, and says when it fails', async () => {
+    const settledAt = (n: number) => new Date(Date.UTC(2026, 0, 1, 0, n)).toISOString()
+    const settledTask = (n: number) =>
+      task({
+        taskId: `s${n}`,
+        threadId: `ths${n}`,
+        title: `Settled ${n}`,
+        slug: `settled-${n}`,
+        phase: 'settled',
+        state: 'done',
+        settledAt: settledAt(n),
+      })
+    const latest = Array.from({ length: 30 }, (_, i) => settledTask(i + 35))
+    const first = Array.from({ length: 30 }, (_, i) => settledTask(34 - i))
+    let release: (tasks: BoardTask[]) => void = () => {}
+    const getOlderSettled = vi
+      .fn<() => Promise<BoardTask[]>>()
+      .mockReturnValueOnce(new Promise((resolve) => (release = resolve)))
+      .mockRejectedValueOnce(new ApiError({ reason: 'SqlError', message: 'Broken.' }))
+      .mockResolvedValue([])
+    const { client } = fakeClient({ getBoard: vi.fn(async () => board({ tasks: latest, calls: [], settledTotal: 65 })), getOlderSettled })
+    withServices(<Project />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: 'Board' }))
+    const work = await screen.findByRole('region', { name: 'The project’s work' })
+    const column = within(work).getByRole('heading', { name: 'Settled' }).closest('section') as HTMLElement
+    const more = within(column).getByRole('button', { name: 'Show older' })
+    await userEvent.click(more)
+    await userEvent.click(more)
+    expect(getOlderSettled).toHaveBeenCalledTimes(1)
+    release(first)
+    await waitFor(() => expect(within(column).getAllByRole('listitem')).toHaveLength(60))
+    // The next page fails: it says so, and the board stays.
+    await userEvent.click(within(column).getByRole('button', { name: 'Show older' }))
+    expect(await screen.findByText(/couldn’t load older tasks\. Broken\./)).toBeTruthy()
+    expect(within(column).getAllByRole('listitem')).toHaveLength(60)
+    expect(within(column).getByRole('button', { name: 'Show older' })).toBeTruthy()
   })
 
   it('opens the first thing that needs you in its task, from the front page, and shows the rest when pointed at', async () => {
