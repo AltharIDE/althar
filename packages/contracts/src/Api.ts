@@ -637,6 +637,20 @@ export const ChangeSummary = Schema.Struct({
   localHead: Schema.NullOr(Schema.String),
   /** Commits on the task's branch here that aren't on it yet: the person pushes them once they've looked. */
   unpushed: Schema.Number,
+  /**
+   * Where the task's branch here no longer simply adds to it, so a plain
+   * push would be refused; null while it does. `rewritten`: commits Althar
+   * pushed were rewritten here, `local` new ones in place of `onPullRequest`
+   * of its own. `moved`: it has commits pushed from elsewhere that the branch
+   * doesn't, `onPullRequest` of them where they are here to count.
+   */
+  diverged: Schema.NullOr(
+    Schema.Struct({
+      kind: Schema.Literals(['rewritten', 'moved']),
+      local: Schema.Number,
+      onPullRequest: Schema.NullOr(Schema.Number),
+    }),
+  ),
 })
 export type ChangeSummary = typeof ChangeSummary.Type
 
@@ -2146,6 +2160,23 @@ export const Api = RpcGroup.make(
   ),
   /** Pushes the task's branch to its open pull request, up to the commit the person saw. */
   command('Push', { taskId: Schema.String, head: Schema.String, url: Schema.optional(Schema.String) }, Schema.Void),
+  /**
+   * Replaces the commits on the task's pull request with its branch here, up
+   * to the commit the person saw, once the branch was rewritten after it was
+   * pushed: a force push they confirmed, only while the pull request is still
+   * at `replaces`, the head they saw it at.
+   */
+  command(
+    'ReplacePullRequest',
+    { taskId: Schema.String, head: Schema.String, replaces: Schema.String, url: Schema.optional(Schema.String) },
+    Schema.Void,
+  ),
+  /**
+   * What to tell the lead so its branch takes the pull request's commits in
+   * by merging, and a plain push works again: the pull request's head is
+   * fetched to the task's worktree first.
+   */
+  command('MergeNote', { taskId: Schema.String, url: Schema.optional(Schema.String) }, Schema.Struct({ note: Schema.String })),
   /** Asks the task's pull request for news now. */
   command('RefreshTask', { taskId: Schema.String }, Schema.Void),
   /** Stops listening to the task's pull request at this address: nothing said there after arrives, and the lead hears none of it. */

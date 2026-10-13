@@ -601,6 +601,7 @@ export const change = (overrides: Partial<ChangeSummary> = {}): ChangeSummary =>
   listening: true,
   localHead: null,
   unpushed: 0,
+  diverged: null,
   ...overrides,
 })
 
@@ -764,6 +765,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     leftHome: vi.fn(async () => {}),
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
+    replacePullRequest: vi.fn(async () => {}),
+    mergeNote: vi.fn(async () => 'Merge them.'),
     mergeHere: vi.fn(async () => {}),
     pushHere: vi.fn(async () => {}),
     pushBranch: vi.fn(async () => {}),

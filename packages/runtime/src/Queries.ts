@@ -45,7 +45,7 @@ import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
 import { Instance } from './Instance'
 import { Launches } from './Launches'
-import { commitsAhead, commitsOf, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
+import { commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
 import { commandIn, shortCommand } from './rules'
 import { Sessions } from './Sessions'
 import { actionsOf, standingOf } from './Tasks'
@@ -281,6 +281,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
     listening,
     localHead: null,
     unpushed: 0,
+    diverged: null,
   }
 }
 
@@ -745,8 +746,12 @@ export class Queries extends Context.Service<
       const filesKept = keeper<ReadonlyArray<ChangedFile>>(owners)
       /** Whether a worktree's head is in its default branch here: by both commits. */
       const mergedKept = keeper<boolean>(owners)
-      /** How many commits a worktree's head has that its pull request doesn't: by both commits. */
-      const unpushedKept = keeper<number>(owners)
+      /** How a worktree's head stands against its pull request's (`againstPullRequest`): by the commits it follows from. */
+      const unpushedKept = keeper<{
+        readonly localHead: string
+        readonly unpushed: number
+        readonly diverged: ChangeSummary['diverged']
+      }>(owners)
 
       /** Lets go of what is kept of the worktrees of tasks `gone` says the screens no longer show. */
       const forget = (gone: (owner: Owner) => boolean) => {
@@ -970,27 +975,57 @@ export class Queries extends Context.Service<
           }
         })
 
+      /** How many commits `from` has that none of `not` has; failing, so it isn't kept, where git can't tell. */
+      const countOnly = (cwd: string, from: string, not: ReadonlyArray<string>) =>
+        Effect.map(git(cwd, 'rev-list', '--count', from, '--not', ...not), Number)
+
       /**
-       * A worktree's head, and how many commits on it what was pushed doesn't
-       * have: what is still the person's to push. What was pushed is the first
-       * of `pushed` the worktree knows, such as the pull request's head, else
-       * the commit Althar last pushed. None, where it can't be told. The head
-       * and which of them it knows are one look; the count is kept by the two
-       * commits.
+       * A worktree's head against its pull request: how many commits on it the
+       * pull request doesn't have, what is still the person's to push; or,
+       * where the branch no longer adds to it, how they parted. The pull
+       * request's head is what it was pushed from, else the commit Althar last
+       * pushed (`sent`). Where its head isn't under the branch's, either Althar
+       * pushed it and the branch was rewritten since (counted without the
+       * default branch's commits, which a rebase brings in), or it came from
+       * elsewhere, counted where it is here. A plain push of either would be
+       * refused, so neither has anything to push. One look at the commits;
+       * what follows from them is kept by them.
        */
-      const unpushedOf = (owner: Owner, pushed: ReadonlyArray<string | null>) =>
+      const againstPullRequest = (owner: Owner, pullRequestHead: string | null, sent: string | null, base: string | null) =>
         Effect.gen(function* () {
-          const [localHead = null, ...known] = yield* commitsOf(owner.path, [
+          // One not known, as an empty revision, is null.
+          const [localHead = null, there = null, ours = null, tip = null] = yield* commitsOf(owner.path, [
             'HEAD',
-            ...pushed.filter((commit): commit is string => commit !== null),
+            ...[pullRequestHead, sent, base].map((commit) => commit ?? ''),
           ])
-          const from = known.find((commit): commit is string => commit !== null)
-          if (localHead === null || from === undefined) return { localHead, unpushed: 0 }
+          const none = { localHead, unpushed: 0, diverged: null }
+          if (localHead === null) return none
+          const from = there ?? ours
+          // Its head a commit unknown here, and not what Althar pushed: someone else pushed to it.
+          if (pullRequestHead !== null && /^[0-9a-f]{40,64}$/.test(pullRequestHead) && there === null && pullRequestHead !== sent)
+            return { localHead, unpushed: 0, diverged: { kind: 'moved' as const, local: 0, onPullRequest: null } }
+          if (from === null) return none
           // Counted up to the head looked at, not HEAD again: the lead may commit in between.
-          const unpushed = yield* unpushedKept
-            .of(owner, `${from} ${localHead}`, commitsAhead(owner.path, from, localHead))
-            .pipe(Effect.orElseSucceed(() => 0))
-          return { localHead, unpushed }
+          return yield* unpushedKept
+            .of(
+              owner,
+              `${from} ${ours} ${tip} ${localHead}`,
+              Effect.gen(function* () {
+                if (yield* inHistory(owner.path, from, localHead))
+                  return { localHead, unpushed: yield* commitsAhead(owner.path, from, localHead), diverged: null }
+                const others = [tip].filter((commit): commit is string => commit !== null)
+                return {
+                  localHead,
+                  unpushed: 0,
+                  diverged: {
+                    kind: from === ours ? ('rewritten' as const) : ('moved' as const),
+                    local: yield* countOnly(owner.path, localHead, [from, ...others]),
+                    onPullRequest: yield* countOnly(owner.path, from, [localHead, ...others]),
+                  },
+                }
+              }),
+            )
+            .pipe(Effect.orElseSucceed(() => none))
         })
 
       /** One file a task changed, as a diff from its base to its worktree on this device; in several repositories, named under its repository's. */
@@ -1079,16 +1114,22 @@ export class Queries extends Context.Service<
                     ? Effect.succeed(change)
                     : Effect.gen(function* () {
                         // Its repository's worktree, as the record of the push says; the task's first, where it doesn't.
-                        const [here] = yield* sql<{ path: string; taskId: string; projectId: string; headCommit: string | null }>`
+                        const [here] = yield* sql<{
+                          path: string
+                          taskId: string
+                          projectId: string
+                          headCommit: string | null
+                          base: string | null
+                        }>`
                       SELECT w.path, w.task_id, w.project_id, (SELECT c.head_commit FROM repository_changes c WHERE c.pull_request_url = ${change.url}
-                          ORDER BY c.updated_at DESC LIMIT 1) AS head_commit
+                          ORDER BY c.updated_at DESC LIMIT 1) AS head_commit, coalesce(b.default_base_ref, w.base_ref) AS base
                       FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
                       WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
                       ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${change.url} LIMIT 1) DESC,
                         b.created_at, b.rowid
                       LIMIT 1`
                         if (here === undefined || !existsSync(here.path)) return change
-                        return { ...change, ...(yield* unpushedOf(here, [change.head, here.headCommit])) }
+                        return { ...change, ...(yield* againstPullRequest(here, change.head, here.headCommit, here.base)) }
                       }),
                 ),
               ),

@@ -449,6 +449,7 @@ describe('a conflict its pull request’s host reports', () => {
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, and Althar pushed the merge to PR #1.')
       const [note] = yield* asked(threadId)
       assert.include(note, 'merge origin/main into it, which Althar has fetched')
+      assert.include(note, "Merge, don't rebase: a branch that was pushed can't be rewritten.")
       assert.include(note, "Althar pushes that merge alone to PR #1. Don't push it yourself.")
       // Its brief says what Althar pushes for it, and that it never pushes itself.
       assert.include(yield* briefOf(threadId), PUSHED_FOR_IT)
@@ -559,8 +560,8 @@ describe('a conflict its pull request’s host reports', () => {
       writeFileSync(join(bare, 'hooks', 'pre-receive'), '#!/bin/sh\necho "refused" >&2\nexit 1\n', { mode: 0o755 })
       yield* titled(threadId, 'The lead resolved the conflict with main, in change.txt, but Althar couldn’t push the merge.')
       const said = (yield* notices(threadId)).find((notice) => notice.title?.endsWith('but Althar couldn’t push the merge.') === true)
-      // Why, as the task's Push card says it: git's own words.
-      assert.match(said?.description ?? '', /^git push didn't work: .+ Push it from PR #1’s card\.$/)
+      // Why, as the task's Push card says it: what the host said, in a sentence, not git's hint.
+      assert.match(said?.description ?? '', /^PR #1 refused the push: pre-receive hook declined\. Push it from PR #1’s card\.$/)
       assert.strictEqual((yield* rounds(taskId))[0]?.state, 'resolved')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -1089,7 +1090,7 @@ describe('a round’s words, and what git says of its branch', () => {
     assert.strictEqual(whereLine([one, two]), 'web’s develop, in README.md; api’s main, in a.ts, b.ts')
     const note = noteFor([one, two], { change: null }, null)
     assert.include(note, 'in web, develop conflicts in README.md; in api, main conflicts in a.ts, b.ts.')
-    assert.include(note, "Then say it's ready to merge again.")
+    assert.include(note, "Merge, don't rebase: a branch that was pushed can't be rewritten. Then say it's ready to merge again.")
     assert.strictEqual(changeOf({ change: null }), 'the pull request')
     const fix = fixNoteFor({ change: null }, { failing: ['test'], logs: [] })
     assert.match(fix, /^Checks failed on the merge Althar pushed to the pull request: test\.\n\nFix what broke/)

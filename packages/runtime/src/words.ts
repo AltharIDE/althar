@@ -193,7 +193,11 @@ export const words = (
         const remote = text(error, 'remote')
         const why = text(error, 'why')
         if (why === 'behind')
-          return `${remote} has commits that aren’t here yet, so it didn’t take the push. Pull them in, then push again.`
+          return `${remote} has commits that aren’t here yet, so it didn’t take the push. Bring them in, then push again.`
+        if (why === 'moved')
+          return `${remote} has commits pushed since you looked, so nothing was replaced. Look again before replacing them.`
+        if (why === 'never')
+          return `The project’s rules never allow force pushes, so ${remote}’s commits stay. Ask the lead to merge instead.`
         if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
         return `git couldn’t sign in to push to ${remote}. Push once from a terminal so your sign-in is kept, then push again here.`
       }
@@ -246,6 +250,8 @@ export const words = (
   })()
   // A merge that conflicts says in which files, for the window to have the lead settle them, or say it is.
   if (reason === 'CantMerge') return { reason, message, why: text(error, 'why'), detail: text(error, 'detail') }
+  // A push refused says why, for the window to offer what puts it right: bringing the remote's commits in.
+  if (reason === 'PushRefused') return { reason, message, why: text(error, 'why') }
   // A service's refusal says which, for the window to say it where it happened: a token it didn't take, as against one it took and limits.
   if (reason === 'ConnectorFailed') return { reason, message, why: text(error, 'reason') }
   return { reason, message }
@@ -281,7 +287,7 @@ const cantMerge = {
   settled: () => 'The task is settled, so its branch stays as it is.',
   changed: () => 'The task’s branch changed since you looked. Look again, then merge.',
   conflicts: (files: string) =>
-    `It conflicts with the default branch, in ${files}. Tell the lead to bring its branch up to date, then merge again.`,
+    `It conflicts with the default branch, in ${files}. Tell the lead to merge the default branch into its branch (merge, don’t rebase), then merge again.`,
   resolving: (files: string) =>
     `It conflicts with the default branch, in ${files}. The lead is resolving it, as the project’s rules say; merge again once it has.`,
   busy: (where: string) =>

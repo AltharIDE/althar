@@ -46,7 +46,7 @@ import { Questions } from './Questions'
 import { touchCard } from './cards'
 import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
-import { git } from './git'
+import { git, PUSHED } from './git'
 import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
 import { Setups } from './Setups'
 import type { InputImage } from './sentImages'
@@ -1712,6 +1712,40 @@ export class Sessions extends Context.Service<
               return { changed: named(changed), status: named(status) }
             }),
           )
+          // Whether each branch is published, as Althar knows it, not as an unfetched remote says: its pull request's head, else what
+          // Althar pushed of it or a remote's copy of it here. None of these says it was never pushed, so nothing here allows rewriting it.
+          const published = yield* Effect.forEach(thread.repositories, (repository) =>
+            Effect.gen(function* () {
+              // Where the host last saw its head, else what Althar pushed.
+              const [change] = yield* sql<{ url: string; at: string | null }>`
+                SELECT c.pull_request_url AS url, coalesce(
+                  (SELECT json_extract(l.snapshot, '$.headSha') FROM external_links l
+                    WHERE l.task_id = ${thread.taskId} AND l.kind = 'change' AND l.url = c.pull_request_url),
+                  c.head_commit) AS at
+                FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id
+                WHERE w.task_id = ${thread.taskId} AND w.path = ${repository.worktree} AND c.pull_request_url IS NOT NULL
+                ORDER BY c.updated_at DESC LIMIT 1`
+              const named = several ? `${repository.name}'s branch ${repository.branch}` : `the branch ${repository.branch}`
+              const Named = named.charAt(0).toUpperCase() + named.slice(1)
+              if (change !== undefined)
+                return `${Named} is published: its pull request, ${change.url}, has it${change.at === null ? '' : ` at ${change.at.slice(0, 12)}`}.`
+              return yield* git(repository.worktree, 'for-each-ref', '--format=%(refname) %(objectname)', 'refs/remotes', PUSHED).pipe(
+                Effect.map((listed) => {
+                  const refs = listed.split('\n').map((line) => line.split(' '))
+                  const pushed = refs.find(([ref]) => ref === `${PUSHED}${repository.branch}`)
+                  if (pushed !== undefined) return `${Named} is published: Althar pushed it, at ${String(pushed[1]).slice(0, 12)}.`
+                  const copy = refs.find(
+                    ([ref = '']) => /^refs\/remotes\/[^/]+\//.test(ref) && ref.replace(/^refs\/remotes\/[^/]+\//, '') === repository.branch,
+                  )
+                  return copy === undefined
+                    ? `${Named} isn't on any remote Althar knows of, but it may still have been pushed some other way.`
+                    : `${Named} is published: ${String(copy[0]).replace(/^refs\/remotes\//, '')} has it at ${String(copy[1]).slice(0, 12)}.`
+                }),
+                // Git couldn't say: unknown is taken as published, so nothing here allows rewriting it.
+                Effect.orElseSucceed(() => `Althar can't tell whether ${named} is published: take it that it is.`),
+              )
+            }),
+          )
           const changed = states.flatMap((state) => (state.changed === '' ? [] : [state.changed])).join('\n')
           const status = states.flatMap((state) => (state.status === '' ? [] : [state.status])).join('\n')
           const where = (repository: TaskRepository) =>
@@ -1738,6 +1772,8 @@ export class Sessions extends Context.Service<
             "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo or a version bump, a single note saying so is enough. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check.",
             // Althar reaches the code host for the task (ADR-011).
             "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. read_issue reads the issue the task came from, or any other.",
+            // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
+            `${published.join(' ')} Bring the default branch in by merging it, never by rebasing, and never amend or squash commits that were or may have been pushed: a pull request would no longer take your commits. Where Althar says a branch is published, go by that, not by git status or a remote you can't fetch.`,
             ...(resolves?.resolves === 1
               ? [
                   'This project has you resolve a conflict with the default branch on your own: Althar tells you when it finds one, and what to merge. On a pull request, Althar pushes that merge itself once you commit it, and then a fix you commit on top of it, as one commit, when Althar tells you its checks failed. Nothing else you commit is pushed for you, and you still never push.',

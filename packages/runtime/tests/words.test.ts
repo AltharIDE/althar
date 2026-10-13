@@ -251,6 +251,7 @@ describe('what screens read of a pull request and what arrived', () => {
       listening: true,
       localHead: null,
       unpushed: 0,
+      diverged: null,
     })
     const bare = changeOf({ number: 1, state: 'merged', checks: { outcome: 'odd', failing: 'x' } }, 'gitlab', false)
     assert.deepInclude(bare, { noun: 'pull request', short: 'PR', prefix: '#', repository: '', additions: null, draft: false })
