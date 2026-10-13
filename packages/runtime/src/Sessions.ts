@@ -528,6 +528,8 @@ export class Sessions extends Context.Service<
                   startedAt: yield* timestamp,
                   ended: null,
                 })
+                // Left running, its call is no longer one the agent has open.
+                if (event.toolCallId !== undefined) running.callsOpen.delete(event.toolCallId)
                 yield* toldBackground(running)
                 yield* Effect.forkIn(watchServing(running, event.id), running.scope)
                 return
@@ -583,9 +585,9 @@ export class Sessions extends Context.Service<
               else running.callsOpen.delete(event.toolCallId)
               break
             case 'ToolCallUpdate':
+              if (event.status === 'completed' || event.status === 'failed') running.callsOpen.delete(event.toolCallId)
               // What a command it left running prints isn't the agent at work.
               if ([...running.background.values()].some((left) => left.toolCallId === event.toolCallId)) return
-              if (event.status === 'completed' || event.status === 'failed') running.callsOpen.delete(event.toolCallId)
               break
             default:
               return

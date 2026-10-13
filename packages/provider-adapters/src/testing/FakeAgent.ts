@@ -433,7 +433,7 @@ const playStall = async (
  * a fix the tests found too, and `[lead:resolve-tests-hang]` has tests that
  * never end. `[lead:resolve-tests-codex]` has Codex say the tests are running
  * just after its turn, `[lead:resolve-tests-slow]` is slow to be woken by
- * them (`[lead:resolve-tests-output]` too, after they print once more), and `[lead:resolve-tests-url]` has tests that print a local address. Asked to plan a
+ * them (`[lead:resolve-tests-again]` leaves more running once woken, `[lead:resolve-tests-output]` too, after they print once more), and `[lead:resolve-tests-url]` has tests that print a local address. Asked to plan a
  * change with a link in it, the coordinator drafts the task from that issue.
  */
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
@@ -504,6 +504,7 @@ const leaveTests = async (
     readonly wakesAfter?: number
     readonly prints?: string
     readonly printsAfterEnd?: boolean
+    readonly again?: boolean
   },
 ) => {
   const notify = (update: Record<string, unknown>) =>
@@ -549,6 +550,11 @@ const leaveTests = async (
           await notify({ sessionUpdate: 'tool_call_update', toolCallId, _meta: { terminal_output_delta: { data: 'all passed\n' } } })
         if (plan.commits === undefined) return
         if (plan.wakesAfter !== undefined) await pause(plan.wakesAfter)
+        // Woken, it leaves more tests running, outside any turn Althar sent.
+        if (plan.again === true) {
+          await leaveTests(sessionId, session, client, { lasts: 100 })
+          await pause(300)
+        }
         const call = `${toolCallId}-woken`
         await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'The tests finished. ' } })
         await notify({
@@ -581,6 +587,7 @@ const playRole = async (
     readonly wakesAfter?: number
     readonly prints?: string
     readonly printsAfterEnd?: boolean
+    readonly again?: boolean
   }) => Promise<void> = () => Promise.resolve(),
 ): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
@@ -721,7 +728,8 @@ const playRole = async (
         session.markers.has('[lead:resolve-tests-codex]') ||
         session.markers.has('[lead:resolve-tests-slow]') ||
         session.markers.has('[lead:resolve-tests-url]') ||
-        session.markers.has('[lead:resolve-tests-output]')
+        session.markers.has('[lead:resolve-tests-output]') ||
+        session.markers.has('[lead:resolve-tests-again]')
       if (merging !== undefined && woken) {
         settleIn(session.cwd, merging)
         const fixes = session.markers.has('[lead:resolve-tests-fix]')
@@ -730,6 +738,7 @@ const playRole = async (
           lasts: 400,
           ...(session.markers.has('[lead:resolve-tests-codex]') ? { reportsAfter: 300 } : {}),
           ...(session.markers.has('[lead:resolve-tests-slow]') ? { lasts: 1500, wakesAfter: 1200 } : {}),
+          ...(session.markers.has('[lead:resolve-tests-again]') ? { again: true } : {}),
           ...(session.markers.has('[lead:resolve-tests-output]') ? { lasts: 1500, wakesAfter: 1200, printsAfterEnd: true } : {}),
           ...(session.markers.has('[lead:resolve-tests-url]')
             ? { lasts: 3000, prints: 'serving the browser tests at http://localhost:4173/\n' }

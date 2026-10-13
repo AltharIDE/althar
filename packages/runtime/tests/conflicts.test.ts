@@ -1062,6 +1062,20 @@ describe('a conflict its pull request’s host reports', () => {
     }).pipe(Effect.provide(runtimeWith({ github }, { wake: Duration.seconds(10) })))
   })
 
+  it.live('settles a lead that, once woken, left more tests running outside its turn, when they and its work are done', () => {
+    const { working, bare } = hosted()
+    const github = hostOf(bare, () => PASSED)
+    return Effect.gen(function* () {
+      const { taskId, threadId } = yield* opened(working, '[lead:resolve-tests-again]')
+      moveHostMainOn(working, bare)
+      yield* titled(threadId, 'The checks passed on what Althar pushed to PR #1.')
+      const said = yield* given(threadId)
+      assert.isFalse(said.some((body) => body.includes('Try once more') || body.includes('not committed: commit')))
+      const [round] = yield* rounds(taskId)
+      assert.deepStrictEqual([round?.state, round?.attempt], ['resolved', 1])
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('waits for tests that print a local address as they run, then asks the lead nothing', () => {
     const { working, bare } = hosted()
     const github = hostOf(bare, () => PASSED)
