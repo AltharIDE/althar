@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, type FormEvent, type ReactNode, type RefObject } from 'react'
+import { useId, useLayoutEffect, useRef, type FormEvent, type UIEvent, type WheelEvent, type ReactNode, type RefObject } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
@@ -248,6 +248,15 @@ export function Composer({
   /* While words arrive or are written down, the field is the dictation's: typing would land where they are about to. */
   const dictating = elapsed !== null || dictation?.busy === true
   const overlay = useRef<HTMLDivElement>(null)
+  /* Whether the arriving words are followed to the end: until the person scrolls up to read, then again once they are back at the end. */
+  const following = useRef(true)
+  const arriving = useRef<HTMLSpanElement>(null)
+  /* where the overlay rests to show the newest words: their last line at the bottom, which is the end of the text when they come at the end */
+  const newest = (el: HTMLElement) => {
+    const words = arriving.current
+    const max = el.scrollHeight - el.clientHeight
+    return words ? Math.max(0, Math.min(max, words.offsetTop + words.offsetHeight - el.clientHeight)) : max
+  }
   const at = Math.max(0, Math.min(value.length, dictation?.at ?? value.length))
   const before = value.slice(0, at)
   const after = value.slice(at)
@@ -263,6 +272,33 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`
     /* the words arriving draw over the field in its grid cell: measure again when they come and go, not only when the text changes */
   }, [value, interim, ref])
+
+  useLayoutEffect(() => {
+    const el = overlay.current
+    if (!interim) {
+      following.current = true
+      return
+    }
+    if (el && following.current) el.scrollTop = newest(el)
+  }, [value, interim])
+
+  /* The overlay is what shows while words arrive, and the field under it holds less than it does, so it is the overlay that scrolls: by wheel over either, and by hand to the end. */
+  const readEarlier = (e: WheelEvent<HTMLDivElement>) => {
+    const el = overlay.current
+    if (el) el.scrollTop += e.deltaMode === 1 ? e.deltaY * 20 : e.deltaY
+  }
+  const followIfAtEnd = (e: UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget
+    following.current = Math.abs(newest(el) - el.scrollTop) <= 4
+  }
+  /* what was read of it carries over to the field when the words are written down into it */
+  const lastScroll = useRef(0)
+  useLayoutEffect(() => {
+    if (interim) return
+    const el = ref.current
+    if (el && lastScroll.current > 0) el.scrollTop = lastScroll.current
+    lastScroll.current = 0
+  }, [interim, ref])
 
   const submit = (e?: FormEvent) => {
     e?.preventDefault()
@@ -362,13 +398,21 @@ export function Composer({
             ))}
           </ul>
         )}
-        <div className={s.field}>
+        <div className={s.field} onWheel={interim ? readEarlier : undefined}>
           {/* the words still arriving, faint where they will land; while they show, this draws what is written too, and the field's own text goes clear */}
           {interim && (
-            <div ref={overlay} className={s.interim} aria-hidden="true">
+            <div
+              ref={overlay}
+              className={s.interim}
+              aria-hidden="true"
+              onScroll={(e) => {
+                lastScroll.current = e.currentTarget.scrollTop
+                followIfAtEnd(e)
+              }}
+            >
               <span className={s.written}>{before}</span>
               {before && !/\s$/.test(before) ? ' ' : ''}
-              {interim}
+              <span ref={arriving}>{interim}</span>
               {after && !/^\s/.test(after) ? ' ' : ''}
               <span className={s.written}>{after}</span>
             </div>
@@ -379,9 +423,6 @@ export function Composer({
             value={value}
             className={cx(interim && s.under)}
             readOnly={dictating}
-            onScroll={(e) => {
-              if (overlay.current) overlay.current.scrollTop = e.currentTarget.scrollTop
-            }}
             placeholder={shownPlaceholder}
             aria-label={placeholder}
             aria-describedby={note ? hintId : undefined}

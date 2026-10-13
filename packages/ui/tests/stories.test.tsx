@@ -26,6 +26,7 @@ const BROWSER_ONLY = new Set<string>([
   'thread/WorkedFor/WorkedFor.stories.tsx#Opening',
   'primitives/CheckList/CheckList.stories.tsx#Default',
   'composer/Composer/Composer.stories.tsx#EnterEndsDictationAtItsSize',
+  'composer/Composer/Composer.stories.tsx#LongDictation',
 ])
 
 for (const [path, file] of Object.entries(files)) {
