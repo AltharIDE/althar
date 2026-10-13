@@ -242,6 +242,7 @@ describe('the client', () => {
           SetModelBlocked: () => Effect.die('unused'),
           GetSettings: () => Effect.die('unused'),
           SetCoAuthor: () => Effect.die('unused'),
+          SetAgentsAtOnce: () => Effect.die('unused'),
           StartAccountSignIn: () => Effect.die('unused'),
           GetAccountSignIn: () => Effect.die('unused'),
           PasteAccountSignInCode: () => Effect.die('unused'),

@@ -16,7 +16,8 @@ import s from './ProjectList.module.css'
  * Every project, as the home's side list: a row each, the ones that need
  * you first, then the ones with work in progress, then the quiet ones. A
  * row is the project's mark, large enough to see as its picture, its name,
- * and a quiet line under it: what is off (held for a reset, stopped), or
+ * and a quiet line under it: what is off (held for a reset, waiting for a
+ * free agent, stopped), or
  * else how much is in progress, or else when it last had a task. At its
  * end, how many calls wait there, in violet; otherwise a still grey tick
  * for each task in progress. The row opens the project, where its tasks
@@ -35,6 +36,8 @@ export interface ProjectListText {
   /** Read after a project's name. */
   yours: (n: number) => string
   held: (n: number) => string
+  /** Tasks waiting for a free agent, and why: every one the machine runs at once is busy. */
+  queued: (n: number) => string
   stopped: (n: number) => string
   waiting: (n: number) => string
   /** Under a project's name, with nothing off: how many tasks are in progress in it. */
@@ -48,6 +51,7 @@ export const projectListText: ProjectListText = {
   newProjectKbd: '⌘N',
   yours: (n) => (n === 1 ? '1 needs you' : `${n} need you`),
   held: (n) => `${n} held for a reset`,
+  queued: (n) => `${n} waiting for a free agent`,
   stopped: (n) => `${n} stopped`,
   waiting: (n) => `${n} waiting`,
   inProgress: (n) => (n === 1 ? '1 task in progress' : `${n} tasks in progress`),
@@ -88,6 +92,7 @@ const offOf = (tasks: readonly ProjectListTask[], t: ProjectListText) => {
   const count = (status: TaskStatus) => tasks.filter((task) => task.status === status).length
   return [
     count(TaskStatus.Paused) > 0 && t.held(count(TaskStatus.Paused)),
+    count(TaskStatus.Queued) > 0 && t.queued(count(TaskStatus.Queued)),
     count(TaskStatus.Stopped) > 0 && t.stopped(count(TaskStatus.Stopped)),
     count(TaskStatus.Yours) > 0 && t.waiting(count(TaskStatus.Yours)),
   ]

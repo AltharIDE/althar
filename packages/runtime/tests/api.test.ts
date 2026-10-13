@@ -40,7 +40,7 @@ import { Secrets } from '../src/Secrets'
 import { ConnectorFailed, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
 
-import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository } from './support'
+import { callTool, fakeAgents, fakeConnectors, HOST, hosted, repository, ROOMY } from './support'
 
 const commandId = () => `cmd_${randomBytes(16).toString('hex')}`
 
@@ -57,6 +57,8 @@ const connected = (
     readonly noTerminal?: boolean
     /** The editors a task's files open in, and what opening one does. */
     readonly editors?: RuntimeOptions['editors']
+    /** The machine how many agents are at work at once comes from: a large one unless a test says. */
+    readonly machine?: { readonly cores: number; readonly memory: number }
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -78,6 +80,7 @@ const connected = (
           : { openTerminal: (line: string) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(true)) }),
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
+        busy: { machine: options.machine ?? ROOMY },
       }),
     )
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
@@ -732,11 +735,34 @@ describe('settings, through the API', () => {
       Effect.gen(function* () {
         const { client } = yield* connected()
         const line = 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>'
-        assert.deepStrictEqual(yield* client.GetSettings({}), { coAuthor: { on: true, line } })
+        assert.deepStrictEqual((yield* client.GetSettings({})).coAuthor, { on: true, line })
         yield* client.SetCoAuthor({ commandId: commandId(), on: false })
-        assert.deepStrictEqual(yield* client.GetSettings({}), { coAuthor: { on: false, line } })
+        assert.deepStrictEqual((yield* client.GetSettings({})).coAuthor, { on: false, line })
         yield* client.SetCoAuthor({ commandId: commandId(), on: true })
         assert.isTrue((yield* client.GetSettings({})).coAuthor.on)
+      }),
+    ),
+  )
+
+  it.live('says how many agents this Mac runs at once and why, takes the person’s number at once, and goes back to the default', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, store } = yield* connected({ machine: { cores: 10, memory: 16 * 1024 ** 3 } })
+        const machine = { count: 4, cores: 10, memory: 16 }
+        assert.deepStrictEqual((yield* client.GetSettings({})).agentsAtOnce, { count: 4, own: null, machine })
+        // The default isn't kept: only what the person sets.
+        const kept = store(
+          Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ value: string }>`SELECT value FROM settings WHERE key = 'agents_at_once'`),
+        )
+        assert.deepStrictEqual(yield* kept, [])
+        yield* client.SetAgentsAtOnce({ commandId: commandId(), count: 2 })
+        assert.deepStrictEqual((yield* client.GetSettings({})).agentsAtOnce, { count: 2, own: 2, machine })
+        assert.deepStrictEqual(yield* kept, [{ value: '2' }])
+        yield* client.SetAgentsAtOnce({ commandId: commandId(), count: 9 })
+        assert.deepStrictEqual((yield* client.GetSettings({})).agentsAtOnce, { count: 9, own: 9, machine })
+        yield* client.SetAgentsAtOnce({ commandId: commandId(), count: null })
+        assert.deepStrictEqual((yield* client.GetSettings({})).agentsAtOnce, { count: 4, own: null, machine })
+        assert.deepStrictEqual(yield* kept, [])
       }),
     ),
   )

@@ -47,6 +47,7 @@ import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
 import { Queries } from './Queries'
+import { Busy } from './Busy'
 import { timestamp } from './records'
 import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
@@ -150,6 +151,7 @@ export const handlers = Api.toLayer(
     const connections = yield* Connections
     const issues = yield* Issues
     const pullRequests = yield* Changes
+    const busy = yield* Busy
     const envelope = (type: string, payload: unknown, commandId: string) =>
       Effect.provideContext(Runtime.envelope(type, payload, commandId), context)
     const agentName = (agentId: string) => agents.list.find((entry) => entry.definition.id === agentId)?.definition.name ?? agentId
@@ -597,10 +599,22 @@ export const handlers = Api.toLayer(
       SetModelBlocked: ({ commandId, agentId, model, blocked }) =>
         once(commandId, api(models.setModelBlocked({ agentId, model, blocked }))),
       GetSettings: () =>
-        api(Effect.map(coAuthorOn, (on) => ({ coAuthor: { on, line: coAuthorLine } }))).pipe(
-          Effect.provideService(SqlClient.SqlClient, sql),
-        ),
+        api(
+          Effect.gen(function* () {
+            const on = yield* coAuthorOn
+            const atOnce = yield* busy.atOnce
+            return {
+              coAuthor: { on, line: coAuthorLine },
+              agentsAtOnce: {
+                count: atOnce.count,
+                own: atOnce.own,
+                machine: { count: atOnce.machine.count, cores: atOnce.machine.cores, memory: atOnce.machine.memory },
+              },
+            }
+          }),
+        ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
+      SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
       Interrupt: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
@@ -710,7 +724,7 @@ export const handlers = Api.toLayer(
             }),
           ),
         ),
-      StartPlan: ({ commandId, planId }) => once(commandId, api(plans.start(planId, instance.personId))),
+      StartPlan: ({ commandId, planId }) => once(commandId, api(Effect.asVoid(plans.start(planId, instance.personId)))),
       HoldPlan: ({ commandId, planId }) => once(commandId, api(plans.hold(planId, instance.personId))),
       ChangePlan: ({ commandId, planId, steps, end }) => once(commandId, api(plans.change(planId, steps, instance.personId, end))),
       ChangeIssueDraft: ({ commandId, draftId, title, body, labels }) =>
@@ -735,26 +749,29 @@ export const handlers = Api.toLayer(
           commandId,
           api(
             Effect.gen(function* () {
-              const answer = Effect.gen(function* () {
-                const answered = yield* questions.answer({
-                  envelope: yield* envelope('attention.answer_question', { attentionId, answers }, commandId),
-                  attentionId,
-                  answers,
-                })
-                if (answered.told) return
-                // The agent that asked has gone: the answer is told to the one on its thread next, started for it.
-                const tell = {
-                  envelope: yield* Effect.provideContext(
-                    Runtime.envelope('thread.send', { threadId: answered.threadId, answered: attentionId }),
-                    context,
-                  ),
-                  threadId: answered.threadId,
-                  body: answered.body,
-                }
-                const [thread] = yield* sql<{ kind: string }>`SELECT kind FROM threads WHERE id = ${answered.threadId}`
-                if (thread?.kind === 'coordinator') yield* coordinator.say({ ...tell, disposition: 'after_current', quiet: true })
-                else yield* runs.answered(tell)
-              })
+              const said = yield* envelope('attention.answer_question', { attentionId, answers }, commandId)
+              const [on] = yield* sql<{ kind: string | null }>`
+                SELECT t.kind FROM attention_requests q LEFT JOIN threads t ON t.id = json_extract(q.payload, '$.threadId')
+                WHERE q.id = ${attentionId}`
+              // A task's lead or reviewer carries on with the answer once it has a place among the agents at work here (Runs).
+              const answer =
+                on?.kind === 'coordinator'
+                  ? Effect.gen(function* () {
+                      const answered = yield* questions.answer({ envelope: said, attentionId, answers })
+                      if (answered.told) return
+                      // The coordinator that asked has gone: the answer is told to the one on its thread next.
+                      yield* coordinator.say({
+                        envelope: yield* Effect.provideContext(
+                          Runtime.envelope('thread.send', { threadId: answered.threadId, answered: attentionId }),
+                          context,
+                        ),
+                        threadId: answered.threadId,
+                        body: answered.body,
+                        disposition: 'after_current',
+                        quiet: true,
+                      })
+                    })
+                  : runs.answer({ envelope: said, attentionId, answers })
               // A task's question is answered in the task's turn: stopping it comes first, and the question is withdrawn, or
               // after, and the agent the answer started stops.
               const [asked] = yield* sql<{ taskId: string | null }>`SELECT task_id FROM attention_requests WHERE id = ${attentionId}`

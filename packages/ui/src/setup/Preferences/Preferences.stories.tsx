@@ -7,6 +7,7 @@ import { EdgeSpot } from '../../foundations/vocabulary'
 import { States } from '../../storybook/States'
 import { EdgeMini } from '../EdgeMini/EdgeMini'
 import {
+  AgentsAtOnce,
   EdgeHere,
   EdgePlaces,
   EdgeScene,
@@ -30,7 +31,11 @@ const SOUNDS = ['Basso', 'Blow', 'Glass', 'Ping', 'Pop', 'Purr', 'Tink']
 
 const ALL_ON: NotifyChoices = { calls: true, ready: true, stopped: true, badge: true }
 
+/* A 16 GB Mac with 10 cores, which runs four at once by default. */
+const MACHINE = { count: 4, memory: 16, cores: 10 }
+
 /* What the stories' play functions look for, as a consumer would hear it. */
+const onAtOnce = fn()
 const onAwake = fn()
 const onNotify = fn()
 const onPlay = fn()
@@ -75,6 +80,22 @@ const menuMark = (
   </>
 )
 
+/* How many agents at once, as a consumer keeps it: the person's number, or none for the default. */
+function AtOnce() {
+  const [own, setOwn] = useState<number | null>(null)
+  return (
+    <AgentsAtOnce
+      count={own ?? MACHINE.count}
+      own={own !== null}
+      machine={MACHINE}
+      onChange={(count) => {
+        setOwn(count)
+        onAtOnce(count)
+      }}
+    />
+  )
+}
+
 /* The sections as a consumer keeps them: each change shows at once and goes out. */
 function General() {
   const [awake, setAwake] = useState(true)
@@ -91,6 +112,7 @@ function General() {
         onBattery={battery}
         onBatteryChange={setBattery}
       />
+      <AtOnce />
       <OpenFilesIn editors={EDITORS} value={editor} onChange={setEditor} />
     </SettingList>
   )
@@ -166,6 +188,30 @@ export const GeneralSettings: Story = {
     await expect(within(editors).getByRole('radio', { name: 'Cursor' })).toBeChecked()
     await userEvent.click(within(editors).getByRole('radio', { name: 'Zed' }))
     await expect(within(editors).getByRole('radio', { name: 'Zed' })).toBeChecked()
+  },
+}
+
+/** How many agents work at once, and why: the default from this Mac's memory and cores, a number of the person's own, and back to the default. */
+export const AgentsAtOnceSetting: Story = {
+  render: () => (
+    <SettingList>
+      <AtOnce />
+    </SettingList>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const count = c.getByRole('combobox', { name: 'Agents at once' })
+    await expect(count).toHaveTextContent('4')
+    await expect(c.getByText('4: this Mac has 16 GB and 10 cores. More tasks than that wait their turn.')).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Use the default' })).toBeNull()
+    await userEvent.click(count)
+    await userEvent.click(await within(document.body).findByRole('option', { name: '6' }))
+    await expect(onAtOnce).toHaveBeenCalledWith(6)
+    await expect(count).toHaveTextContent('6')
+    await expect(c.getByText(/Your own number\. The default is 4: this Mac has 16 GB and 10 cores\./)).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Use the default' }))
+    await expect(onAtOnce).toHaveBeenCalledWith(null)
+    await expect(count).toHaveTextContent('4')
   },
 }
 
@@ -256,6 +302,15 @@ export const AllStates: Story = {
           node: (
             <SettingList>
               <KeepAwake on={false} onChange={fn()} onBattery={false} onBatteryChange={fn()} />
+            </SettingList>
+          ),
+        },
+        {
+          state: 'agents at once, the default and the person’s own',
+          node: (
+            <SettingList>
+              <AgentsAtOnce count={4} own={false} machine={MACHINE} onChange={fn()} />
+              <AgentsAtOnce count={2} own machine={{ count: 1, memory: 8, cores: 8 }} onChange={fn()} />
             </SettingList>
           ),
         },

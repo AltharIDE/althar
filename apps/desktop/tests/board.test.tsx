@@ -430,6 +430,13 @@ describe('every state the board shows', () => {
         step: 'implement',
         waits: { agentId: 'codex', until: '2026-10-01T13:40:00.000Z' },
       }),
+      task({
+        taskId: 'q',
+        title: 'Waiting for a free agent',
+        phase: 'running',
+        step: 'implement',
+        queued: { busy: 4, atOnce: 4 },
+      }),
       task({ taskId: 'f', title: 'No branch yet', phase: 'ready', branch: null }),
       task({
         taskId: 'g',
@@ -460,6 +467,8 @@ describe('every state the board shows', () => {
     expect(screen.getByText('Claude Code stopped before the step was done.')).toBeTruthy()
     // A step held for a usage limit says whom it waits for, and when they're back.
     expect(screen.getByText(`Waits for Codex, back at ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
+    // One waiting for a free agent says what for.
+    expect(screen.getByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
     expect(screen.getByText("Althar couldn't open the pull request.")).toBeTruthy()
     expect(screen.getByText(/isn't connected to this repository's host/)).toBeTruthy()
     expect(screen.getByText('PR #12 closed')).toBeTruthy()

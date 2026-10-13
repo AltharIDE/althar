@@ -145,10 +145,32 @@ export const AgentModels = Schema.Struct({
 })
 export type AgentModels = typeof AgentModels.Type
 
+/** The most agents at work at once the person can set, as Althar is built for (docs/architecture/07). */
+export const MOST_AT_ONCE = 16
+
+/** How many agents may be at work at once on this machine: one to MOST_AT_ONCE. */
+export const AtOnceCount = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MOST_AT_ONCE }))
+
+/**
+ * How many tasks' agents may be at work at once on this machine (ADR-032):
+ * the person's number, else the default Althar worked out at this launch
+ * from the machine's cores and memory, which it says so Settings can say why.
+ */
+export const AgentsAtOnce = Schema.Struct({
+  /** As many as are at work at once now: the person's number, else the default. */
+  count: AtOnceCount,
+  /** The person's own number; null where they left the default. */
+  own: Schema.NullOr(AtOnceCount),
+  /** The default, and what it came from: the machine's cores, and its memory in whole GB. */
+  machine: Schema.Struct({ count: AtOnceCount, cores: Schema.Int, memory: Schema.Int }),
+})
+export type AgentsAtOnce = typeof AgentsAtOnce.Type
+
 /** The person's settings for the app as a whole. */
 export const AppSettings = Schema.Struct({
   /** Althar as co-author of what it sends to a code host, on unless turned off; `line` is the trailer each commit gets. */
   coAuthor: Schema.Struct({ on: Schema.Boolean, line: Schema.String }),
+  agentsAtOnce: AgentsAtOnce,
 })
 export type AppSettings = typeof AppSettings.Type
 
@@ -976,6 +998,15 @@ export const PlanStep = Schema.Struct({
 })
 export type PlanStep = typeof PlanStep.Type
 
+/**
+ * Work waiting for a place among the agents this machine runs at once
+ * (ADR-032), as it says why: how many tasks' agents are busy, and how many
+ * the machine runs at once. It starts on its own, oldest first, when one is
+ * free.
+ */
+export const Queued = Schema.Struct({ busy: Schema.Int, atOnce: Schema.Int })
+export type Queued = typeof Queued.Type
+
 /** Where a task stands, as the coordinator's thread shows it. */
 export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting', 'ready', 'stopped', 'settled'])
 export type TaskPhase = typeof TaskPhase.Type
@@ -1030,6 +1061,10 @@ export const TaskCard = Schema.Struct({
   startedAt: Schema.NullOr(Schema.String),
   /** The step is held until an agent's usage limit resets: which agent, and when it is back. */
   waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
+  /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
+  queued: Schema.NullOr(Queued),
+  /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
+  planWaits: Schema.optional(Schema.Boolean),
 })
 export type TaskCard = typeof TaskCard.Type
 
@@ -1454,6 +1489,8 @@ export const ThreadSnapshot = Schema.Struct({
     phase: Schema.NullOr(TaskPhase),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
     waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
+    /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
+    queued: Schema.NullOr(Queued),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
     /** Who leads it, running or not: the last agent on its thread, on its model and account, else the one its plan names. */
@@ -1922,6 +1959,12 @@ export const Api = RpcGroup.make(
   call('GetSettings', {}, AppSettings),
   /** Turns Althar's co-authoring of commits and pull requests on or off; the agents' own credit lines go either way. */
   command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
+  /**
+   * How many agents may be at work at once on this machine, from now on:
+   * the person's number, or, null, the default again. What waits starts if
+   * there is room now.
+   */
+  command('SetAgentsAtOnce', { count: Schema.NullOr(AtOnceCount) }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
   /** Stops a task: every agent on it stops, and the step it was on waits until the person resumes it. */

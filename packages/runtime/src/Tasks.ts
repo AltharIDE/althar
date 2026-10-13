@@ -86,8 +86,13 @@ export const standingOf = (taskId: string) =>
       SELECT k.project_id, k.state,
         (SELECT id FROM task_plans WHERE task_id = k.id AND state = 'proposed' ORDER BY proposed_at DESC LIMIT 1) AS plan_id,
         (SELECT state FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1) AS run_state,
+        -- An agent on its way: starting, its lead about to be asked about a conflict once it has a place, or a turn of
+        -- its lead or reviewer waiting for one (Busy.ts).
         (SELECT count(*) FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
-          WHERE h.task_id = k.id AND s.state = 'starting') AS starting
+          WHERE h.task_id = k.id AND s.state = 'starting')
+        + (SELECT count(*) FROM conflict_resolutions c WHERE c.task_id = k.id AND c.state = 'resolving' AND c.waiting IS NOT NULL)
+        + (SELECT count(*) FROM threads h WHERE h.task_id = k.id AND h.waits_for_place IS NOT NULL)
+          AS starting
       FROM tasks k WHERE k.id = ${taskId}`
     if (row === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
     const threads = (yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${taskId} ORDER BY created_at`).map(
@@ -244,6 +249,8 @@ export class Tasks extends Context.Service<
           // Suspended first, so no step takes its agents stopping as one going.
           yield* sql.withTransaction(suspend(input.taskId, input.envelope, 'stopped'))
           yield* stopAgents(input.taskId)
+          // A turn of its agents that waited for a place waits no more: what it would have delivered stays in its thread.
+          yield* sql`UPDATE threads SET waits_for_place = NULL WHERE task_id = ${input.taskId} AND waits_for_place IS NOT NULL`
           yield* touchCard(input.taskId)
         })
 
