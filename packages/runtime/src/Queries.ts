@@ -986,15 +986,18 @@ export class Queries extends Context.Service<
        * pull request doesn't have, what is still the person's to push; or,
        * where the branch no longer adds to it, how they parted. The pull
        * request's head is what it was pushed from, else the commit Althar last
-       * pushed (`sent`). Where its head isn't under the branch's, either Althar
-       * pushed it and the branch was rewritten since (counted without the
-       * default branch's commits, which a rebase brings in), or it came from
+       * pushed (`sent`). Where its head isn't under the branch's, but what
+       * crediting made it from is, the branch is still on its commits as the
+       * lead made them, and counts from there. Otherwise either Althar pushed
+       * it and the branch was rewritten since (counted without the default
+       * branch's commits, which a rebase brings in), or it came from
        * elsewhere, counted where it is here. A plain push of either would be
        * refused, so neither has anything to push. One look at the commits;
        * what follows from them is kept by them.
        */
       const againstPullRequest = (owner: Owner, pullRequestHead: string | null, sent: string | null, base: string | null) =>
         Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
           // One not known, as an empty revision, is null.
           const [localHead = null, there = null, ours = null, tip = null] = yield* commitsOf(owner.path, [
             'HEAD',
@@ -1007,14 +1010,19 @@ export class Queries extends Context.Service<
           if (pullRequestHead !== null && /^[0-9a-f]{40,64}$/.test(pullRequestHead) && there === null && pullRequestHead !== sent)
             return { localHead, unpushed: 0, diverged: { kind: 'moved' as const, local: 0, onPullRequest: null } }
           if (from === null) return none
+          // What crediting made the head from (credit.ts): a push sends the branch's commits made again, and the branch stays on
+          // them as the lead made them where it couldn't be moved onto what went, such as mid-merge. A push credits them again.
+          const madeFrom = yield* sql<{ original: string }>`
+            SELECT original FROM credited_commits WHERE credited = ${from} AND original != credited`.pipe(Effect.orElseSucceed(() => []))
           // Counted up to the head looked at, not HEAD again: the lead may commit in between.
           return yield* unpushedKept
             .of(
               owner,
               `${from} ${ours} ${tip} ${localHead}`,
               Effect.gen(function* () {
-                if (yield* inHistory(owner.path, from, localHead))
-                  return { localHead, unpushed: yield* commitsAhead(owner.path, from, localHead), diverged: null }
+                for (const counted of [from, ...madeFrom.map((row) => row.original)])
+                  if (yield* inHistory(owner.path, counted, localHead))
+                    return { localHead, unpushed: yield* commitsAhead(owner.path, counted, localHead), diverged: null }
                 const others = [tip].filter((commit): commit is string => commit !== null)
                 return {
                   localHead,

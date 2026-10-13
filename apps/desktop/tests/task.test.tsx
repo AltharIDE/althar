@@ -578,6 +578,36 @@ describe('a task', () => {
     await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ body: 'Name the retry' })))
   })
 
+  it('counts what is left to push as soon as a push ends, its button busy until the card is read again', async () => {
+    const base = thread()
+    const url = 'https://github.com/meridian/api/pull/12'
+    const ready = (unpushed: number): ThreadSnapshot => ({
+      ...base,
+      task: { ...base.task, phase: 'ready' as const, changes: [change({ draft: false, localHead: 'def456', unpushed })], commits: 10 },
+    })
+    const reread: { done: (snapshot: ThreadSnapshot) => void } = { done: () => undefined }
+    const getThread = vi.fn(async () => ready(10))
+    const { client } = fakeClient({
+      getThread,
+      // Pushed: the card's next read has none left, once it lands.
+      push: vi.fn(async () => {
+        getThread.mockImplementation(() => new Promise<ThreadSnapshot>((resolve) => (reread.done = resolve)))
+      }),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('10 commits aren’t on the pull request yet.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Push 10 commits' }))
+    await waitFor(() => expect(client.push).toHaveBeenCalledWith('t1', 'def456', url))
+    // Until the card is read again, Push stays under way: the ten aren't offered again as if nothing went.
+    await waitFor(() => expect(getThread.mock.calls.length).toBeGreaterThan(1))
+    expect(screen.getByRole('button', { name: 'Push 10 commits' }).getAttribute('aria-busy')).toBe('true')
+    act(() => reread.done(ready(0)))
+    // Read again, nothing is left: no second press.
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Push \d+ commits?$/ })).toBeNull())
+    expect(screen.queryByText('10 commits aren’t on the pull request yet.')).toBeNull()
+    expect(client.push).toHaveBeenCalledTimes(1)
+  })
+
   it('talks to its lead: sends, queues while it works, sends now, and interrupts', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     const view = withServices(<Task />, client)

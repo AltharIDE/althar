@@ -283,7 +283,11 @@ export const useTask = (threadId: string): TaskModel => {
     }
   }, [client, threadId, snapshot, setSnapshot, fail])
 
-  /** Runs an action, says what went wrong if it did, and reads the thread's head again. */
+  /**
+   * Runs an action, says what went wrong if it did, and reads the thread's
+   * head again. It stays under way until that read lands, so what it changed
+   * shows as it ends: a Push never shows its count from before it went.
+   */
   const act = useCallback(
     async (action: () => Promise<unknown>, which: Doing | null = null) => {
       setError(null)
@@ -294,9 +298,9 @@ export const useTask = (threadId: string): TaskModel => {
       } catch (failure) {
         fail(failure)
       } finally {
+        await readHead()
         setPending(false)
         setActing(null)
-        await readHead()
       }
     },
     [readHead, fail],
