@@ -148,10 +148,12 @@ export const listWords = (facts: PullRequestFacts): string => {
  */
 export const finishedBy = (facts: PullRequestFacts): 'merged' | null => {
   if (facts.unmerged > 0 || (facts.unshipped ?? 0) > 0) return null
-  const states = [...facts.changes.map(({ change }) => change.state), ...facts.merged.map(() => 'merged' as const)]
+  // Each repository by its latest pull request: one closed before its next merged is history (ADR-034).
+  const latest = inOrder(facts.changes).flatMap(({ seen, earlier }) => (earlier ? [] : [seen.change]))
+  const states = [...latest.map((change) => change.state), ...facts.merged.map(() => 'merged' as const)]
   if (states.length === 0 || states.includes('open')) return null
   // A closed one may have been reopened, and nothing watches it any more: not finished.
-  if (facts.changes.some(({ change }) => change.state === 'closed')) return null
+  if (latest.some((change) => change.state === 'closed')) return null
   return 'merged'
 }
 

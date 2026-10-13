@@ -1191,7 +1191,7 @@ export class Queries extends Context.Service<
             unmerged: said.here.length,
             // Commits after its last pull request merged or closed, in none yet (ADR-034).
             unshipped:
-              links.changes.length === 0 || links.changes.some((change) => change.state === 'open')
+              links.changes.length === 0
                 ? 0
                 : (yield* Effect.flatMap(Changes, (changes) => changes.unshipped(taskId)).pipe(Effect.orElseSucceed(() => []))).reduce(
                     (sum, one) => sum + one.commits.length,
@@ -1219,14 +1219,12 @@ export class Queries extends Context.Service<
           const sessions = yield* Sessions
           // Commits after its last pull request merged or closed, in none yet: something for the person to ship (ADR-034). Read
           // from git before the store, so a round of work that opens meanwhile shows as it is, not a settled task with its commit.
-          const [shipping] = yield* sql<{ state: string; changes: number; openChanges: number }>`
-            SELECT k.state,
-              (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change') AS changes,
-              (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change'
-                AND json_extract(l.snapshot, '$.state') = 'open') AS open_changes
+          // By repository: one whose pull request is still open takes pushes instead.
+          const [shipping] = yield* sql<{ state: string; changes: number }>`
+            SELECT k.state, (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change') AS changes
             FROM tasks k WHERE k.id = ${taskId}`
           const after =
-            shipping !== undefined && shipping.changes > 0 && shipping.openChanges === 0 && shipping.state !== 'abandoned'
+            shipping !== undefined && shipping.changes > 0 && shipping.state !== 'abandoned'
               ? yield* (yield* Changes).unshipped(taskId).pipe(Effect.orElseSucceed(() => []))
               : []
           const [task] = yield* sql<{

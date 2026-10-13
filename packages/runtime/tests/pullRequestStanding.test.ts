@@ -258,6 +258,10 @@ describe('how a task’s pull request is told to the coordinator', () => {
       /1 commit on the task's branch is after its last pull request, which merged or closed, and in none yet: the person opens a new pull request for it from the task\./,
     )
     assert.notMatch(sectionWords(after), /The task is finished/)
+    // One closed, then its next merged: finished, the closed one history.
+    const closedThenMerged = facts([change({ number: 142, state: 'closed', listening: false }), change({ number: 150, state: 'merged' })])
+    assert.strictEqual(finishedBy(closedThenMerged), 'merged')
+    assert.match(sectionWords(closedThenMerged), /The task is finished \(merged\)/)
   })
 
   it('says a stale open pull request may be out of date', () => {

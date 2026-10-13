@@ -228,6 +228,25 @@ export interface Unshipped {
   readonly del: number
 }
 
+/**
+ * A task's pull requests as they stand now: in each repository the latest,
+ * the open one else the newest; earlier ones, closed or merged, are history
+ * (ADR-034).
+ */
+export const latestOf = <A extends { readonly state: string; readonly repository: ReadonlyArray<string> }>(
+  changes: ReadonlyArray<A>,
+): ReadonlyArray<A> => {
+  const byRepository = new Map<string, Array<A>>()
+  for (const change of changes) {
+    const where = change.repository.join('/').toLowerCase()
+    byRepository.set(where, [...(byRepository.get(where) ?? []), change])
+  }
+  return [...byRepository.values()].flatMap((all) => {
+    const latest = all.find((change) => change.state === 'open') ?? all.at(-1)
+    return latest === undefined ? [] : [latest]
+  })
+}
+
 /** How long a pull request with nothing new counts as quiet, and how much less often a quiet one is asked. */
 const QUIET_AFTER = Duration.minutes(10)
 const QUIET_SLOWER = 10
@@ -770,7 +789,10 @@ export class Changes extends Context.Service<
         taskId: string,
         task: PublishRow,
         next: Unshipped,
+        /** Where the branch goes: the fork, for a pull request from one. */
         pushTarget: { readonly url: string; readonly header: string | null },
+        /** Where the pull request opens, whose default branch it starts from: the repository a fork came from, for one into it. */
+        baseTarget: { readonly url: string; readonly header: string | null },
         target: string,
       ) =>
         Effect.gen(function* () {
@@ -785,7 +807,7 @@ export class Changes extends Context.Service<
           let base = task.baseCommit
           if (next.change.state === 'merged') {
             // The default branch as its host has it now, with what merged: as this Mac last saw it, it may not have that yet.
-            const tip = yield* fetchInto(task.path, pushTarget, target, `refs/althar/base/${target}`)
+            const tip = yield* fetchInto(task.path, baseTarget, target, `refs/althar/base/${target}`)
             if (tip === null)
               return yield* new GitFailed({ args: ['fetch', target], cwd: task.path, stderr: `Couldn't fetch ${target} from the host.` })
             base = tip
@@ -864,8 +886,18 @@ export class Changes extends Context.Service<
               : task.baseRef?.startsWith('upstream/') === true
                 ? task.baseRef.slice('upstream/'.length)
                 : repository.defaultBranch
-          // Its next pull request goes on a branch of its own, the merged or closed one left as it is.
-          if (next !== undefined) task = yield* rebranch(input.projectId, input.taskId, task, next, pushTarget, target)
+          // Its next pull request goes on a branch of its own, the merged or closed one left as it is: from the default branch of the
+          // repository it opens on, which for one from a fork into the repository it came from isn't the fork's, behind what merged.
+          if (next !== undefined)
+            task = yield* rebranch(
+              input.projectId,
+              input.taskId,
+              task,
+              next,
+              pushTarget,
+              from === undefined ? pushTarget : yield* host.pushTarget(repository),
+              target,
+            )
           // Althar pushes what the lead committed, never what it left lying in the worktree; a screenshot it handed as evidence isn't left.
           const pictures = yield* evidencePaths(input.taskId)
           const left = (yield* uncommittedFiles(task.path)).filter((file) => !pictures(task.path, file))
@@ -2094,11 +2126,14 @@ export class Changes extends Context.Service<
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
             ORDER BY b.created_at, b.rowid`
-          // Among several, each pull request is said with its repository.
-          const links = yield* linksOf(taskId)
-          const open = (yield* Effect.forEach(links, (link) => Effect.option(decodeSnapshot(link.snapshot)))).flatMap((seen) =>
-            Option.isSome(seen) && seen.value.state !== 'merged'
-              ? [repositories.length > 1 ? `${nameOf(seen.value)} in ${seen.value.repository.at(-1) ?? ''}` : nameOf(seen.value)]
+          // Each repository by its latest pull request, the open one else its newest: one closed before its next merged is history
+          // (ADR-034). Among several, each is said with its repository.
+          const seen = (yield* Effect.forEach(yield* linksOf(taskId), (link) => Effect.option(decodeSnapshot(link.snapshot)))).flatMap(
+            (one) => (Option.isSome(one) ? [one.value] : []),
+          )
+          const open = latestOf(seen).flatMap((latest) =>
+            latest.state !== 'merged'
+              ? [repositories.length > 1 ? `${nameOf(latest)} in ${latest.repository.at(-1) ?? ''}` : nameOf(latest)]
               : [],
           )
           // A repository with no pull request is merged where its branch's head is in its default branch here.

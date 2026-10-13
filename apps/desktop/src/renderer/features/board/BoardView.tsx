@@ -157,8 +157,9 @@ export function BoardView({
           <CallCard key={waiting.id} {...callCardOf(waiting, name)} onOpen={() => onOpen(waiting.threadId)} />
         ))}
         {lanes.ready.map((work) => {
-          // Commits after its last pull request merged or closed: its branch, as for work with none, until a new one opens.
-          const change = work.unshipped == null ? work.change : null
+          // Commits after its last pull request merged or closed: its branch, as for work with none, until a new one opens; with
+          // another of its repositories' pull requests open, that one, to accept.
+          const change = work.unshipped == null || work.change?.state === 'open' ? work.change : null
           const brand = change === null ? undefined : productBrand(change.product)
           return (
             <AcceptCard
@@ -191,7 +192,7 @@ export function BoardView({
               text={{
                 task: unnamed,
                 ...(change === null ? {} : { number: (n: number) => `${change.prefix}${n}` }),
-                ...(work.unshipped == null ? {} : { kind: text.unshipped }),
+                ...(change === null && work.unshipped != null ? { kind: text.unshipped } : {}),
               }}
             />
           )

@@ -176,6 +176,12 @@ export function DockView({
           text={{ number: (n: number) => `${change.prefix}${n}` }}
         />
         <div className={s.actions}>
+          {/* Another of its repositories, whose last pull request merged with commits after it, opens a new one. */}
+          {task.unshipped != null && (
+            <ActionButton icon="pr" disabled={model.opening === task.taskId} onClick={() => void model.openChange(task.taskId)}>
+              {text.openNewChange}
+            </ActionButton>
+          )}
           {/* A repository of the task that ended on its branch merges here, beside the pull request of the rest. */}
           {task.here.length > 0 && (
             <ActionButton icon="branch" disabled={model.merging === task.taskId} onClick={() => void model.mergeHere(task)}>

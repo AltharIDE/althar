@@ -29,7 +29,7 @@ import { Limits, outWords, whenWords } from './Limits'
 import { Live, type LiveEvent } from './Live'
 import { Policies, usageLimitOf } from './Policies'
 import { conventionsAt } from './conventions'
-import { commitOf, commitsAhead, treeOf, uncommittedFiles } from './git'
+import { commitOf, commitsAhead, git, treeOf, uncommittedFiles } from './git'
 import { filesLine, templateAsk } from './pullRequestWords'
 import { evidenceFolderOf, reviewCopyOf, snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
@@ -753,9 +753,10 @@ export class Runs extends Context.Service<
 
       /**
        * One action on the task's pull request: two quick clicks open one, and
-       * the second hears it has one. A task whose last pull request merged or
-       * closed opens its next, for the commits after it (ADR-034); a merged
-       * task with such commits is open again for it.
+       * the second hears it has one. In each repository whose last pull
+       * request merged or closed with commits after it, the task opens its
+       * next (ADR-034), whatever another repository's pull request is doing;
+       * a merged task with such commits is open again for it.
        */
       const publish = (taskId: string) =>
         changes.exclusive(
@@ -767,8 +768,8 @@ export class Runs extends Context.Service<
             // An abandoned task's branch stays as it is; so does a merged one's, but for commits after its pull requests.
             if (task.state === 'abandoned') return yield* new NoChangeToOpen({ taskId, why: 'settled' })
             const opened = yield* changes.ofTask(taskId)
-            const open = opened.some((change) => change.state === 'open')
-            const after = opened.length > 0 && !open ? yield* changes.unshipped(taskId) : []
+            // By repository: one whose pull request is open takes pushes, one whose last merged or closed with commits after it a new one.
+            const after = opened.length > 0 ? yield* changes.unshipped(taskId) : []
             if (task.state === 'done' && after.length === 0) return yield* new NoChangeToOpen({ taskId, why: 'settled' })
             const [last] = yield* sql<{ runId: string; projectId: ProjectId; threadId: string; state: string }>`
             SELECT r.id AS run_id, r.project_id, t.id AS thread_id, r.state FROM runs r
@@ -777,16 +778,10 @@ export class Runs extends Context.Service<
             if (last === undefined || !['succeeded', 'failed', 'cancelled'].includes(last.state))
               return yield* new NoChangeToOpen({ taskId, why: 'working' })
             if (last.state !== 'succeeded') return yield* new NoChangeToOpen({ taskId, why: 'stopped' })
-            if (open) return yield* new NoChangeToOpen({ taskId, why: 'opened' })
-            if (opened.length > 0 && after.length === 0) return yield* new NoChangeToOpen({ taskId, why: 'nothing' })
-            const published = yield* changes.publish({
-              projectId: last.projectId,
-              taskId,
-              runId: last.runId,
-              end: 'draft',
-              ...(opened.length > 0 ? { again: true } : {}),
-            })
-            // Its new work going out, a merged task is open again, until that merges too.
+            if (opened.length > 0 && after.length === 0)
+              return yield* new NoChangeToOpen({ taskId, why: opened.some((change) => change.state === 'open') ? 'opened' : 'nothing' })
+            // Its new work going out, a merged task is open again, until that merges too: before it goes, so a try that opens
+            // some of its pull requests and not others leaves it open, for the next.
             if (task.state === 'done')
               yield* sql.withTransaction(
                 Effect.gen(function* () {
@@ -807,6 +802,13 @@ export class Runs extends Context.Service<
                   })
                 }),
               )
+            const published = yield* changes.publish({
+              projectId: last.projectId,
+              taskId,
+              runId: last.runId,
+              end: 'draft',
+              ...(opened.length > 0 ? { again: true } : {}),
+            })
             yield* result(
               { projectId: last.projectId, threadId: last.threadId },
               {
@@ -1285,8 +1287,8 @@ export class Runs extends Context.Service<
       const worktreesOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          return yield* sql<{ id: string; path: string; name: string; slug: string; base: string | null }>`
-            SELECT w.id, w.path, b.display_name AS name, b.slug, coalesce(w.base_commit, w.base_ref) AS base
+          return yield* sql<{ id: string; path: string; branch: string; name: string; slug: string; base: string | null }>`
+            SELECT w.id, w.path, w.branch, b.display_name AS name, b.slug, coalesce(w.base_commit, w.base_ref) AS base
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
         })
@@ -1311,6 +1313,51 @@ export class Runs extends Context.Service<
           }
           return { heads, uncommitted, digest: yield* digestAll(taskId) } satisfies RoundStart
         })
+
+      /**
+       * Where a task stood once its last run of work was over, for a round its
+       * lead's report opens after the work is done (ADR-034): in each
+       * worktree, the nearer its head of what its pull request was last sent
+       * and what its last review read; with neither, its branch as it was
+       * when that run ended, a second before to be sure; else its head. What
+       * it hadn't committed counts as there already.
+       */
+      const restedOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const now = yield* startOf(taskId)
+          const [ran] = yield* sql<{ endedAt: string | null }>`
+            SELECT ended_at FROM runs WHERE task_id = ${taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`
+          const heads: Record<string, string> = {}
+          for (const worktree of yield* worktreesOf(taskId)) {
+            const [known] = yield* sql<{ sent: string | null; reviewed: string | null }>`
+              SELECT (SELECT head_commit FROM repository_changes WHERE workspace_id = ${worktree.id} AND head_commit IS NOT NULL
+                  ORDER BY updated_at DESC, rowid DESC LIMIT 1) AS sent,
+                (SELECT commit_sha FROM workspace_snapshots WHERE workspace_id = ${worktree.id}
+                  ORDER BY taken_at DESC, rowid DESC LIMIT 1) AS reviewed`
+            let nearest: { readonly commit: string; readonly after: number } | undefined
+            for (const candidate of [known?.sent ?? null, known?.reviewed == null ? null : `${known.reviewed}^`]) {
+              if (candidate === null) continue
+              const commit = yield* commitOf(worktree.path, candidate).pipe(Effect.orElseSucceed(() => ''))
+              if (commit === '' || !(yield* isOnHead(worktree.path, commit))) continue
+              const after = yield* commitsAhead(worktree.path, commit).pipe(Effect.orElseSucceed(() => Number.POSITIVE_INFINITY))
+              if (nearest === undefined || after < nearest.after) nearest = { commit, after }
+            }
+            const then =
+              nearest === undefined && ran?.endedAt != null
+                ? yield* commitOf(
+                    worktree.path,
+                    `refs/heads/${worktree.branch}@{${new Date(Date.parse(ran.endedAt) - 1000).toISOString().replace(/\.\d+Z$/, 'Z')}}`,
+                  ).pipe(Effect.orElseSucceed(() => ''))
+                : ''
+            heads[worktree.path] = nearest?.commit ?? (then === '' ? (now.heads[worktree.path] ?? '') : then)
+          }
+          return { heads, uncommitted: now.uncommitted, digest: '' } satisfies RoundStart
+        })
+
+      /** Whether a commit is the worktree's head or behind it. */
+      const isOnHead = (path: string, commit: string) =>
+        Effect.match(git(path, 'merge-base', '--is-ancestor', commit, 'HEAD'), { onFailure: () => false, onSuccess: () => true })
 
       /**
        * Whether a round made new work since it started: new commits in any of
@@ -1346,9 +1393,11 @@ export class Runs extends Context.Service<
        * opens again for it. None while a run runs or is stopped, the task is
        * a draft or abandoned, its project removed, or a conflict round is
        * under way, which is its own course. The round's run and its attempt,
-       * or undefined where none opened.
+       * or undefined where none opened. `rested`, for a round the lead's
+       * report opens, it starts where the last run left the task, so what the
+       * lead did before it reported counts as the round's.
        */
-      const openRound = (taskId: string, sessionId: string) =>
+      const openRound = (taskId: string, sessionId: string, rested = false) =>
         oneRound(
           taskId,
           Effect.gen(function* () {
@@ -1385,7 +1434,7 @@ export class Runs extends Context.Service<
               SELECT s.id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
               WHERE s.id = ${sessionId} AND t.task_id = ${taskId} AND t.kind = 'task'`
             if (lead === undefined) return undefined
-            const start = yield* startOf(taskId)
+            const start = rested ? yield* restedOf(taskId) : yield* startOf(taskId)
             const policyId = yield* policyOf(task.projectId)
             const runId = yield* newId(Ids.run)
             const opened = yield* sql.withTransaction(
@@ -2158,7 +2207,7 @@ export class Runs extends Context.Service<
             return 'Althar has your summary.'
           }
           // After its plan, the lead's report opens a round of work of its own, which it finishes (ADR-034).
-          const current = underWay ?? (access.taskId === null ? undefined : (yield* openRound(access.taskId, access.sessionId))?.run)
+          const current = underWay ?? (access.taskId === null ? undefined : (yield* openRound(access.taskId, access.sessionId, true))?.run)
           const attempt = current === undefined ? undefined : yield* running(current, ['implement', 'settle'])
           if (current === undefined || attempt === undefined)
             return yield* new ToolRefused({ message: 'No step is waiting on you, so Althar keeps no summary now.' })

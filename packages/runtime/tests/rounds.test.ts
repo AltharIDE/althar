@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -415,6 +415,12 @@ describe('a task that goes back to work', () => {
         yield* runs.publish(taskId)
         assert.strictEqual(github.changes[2]?.source, 'althar/add-a-retry-3')
         assert.strictEqual(git(bare, 'rev-list', '--count', 'main..althar/add-a-retry-3'), '2')
+        // Merged, it is done: the pull request closed before it is history, not one still open.
+        squashMerge(bare, 'althar/add-a-retry-3')
+        github.mergeByHand(3)
+        yield* (yield* Changes).refresh(taskId)
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(10))
+        assert.strictEqual((yield* taskRow(taskId))?.state, 'done')
       }).pipe(Effect.provide(runtimeWith(github)))
     },
     60_000,
@@ -442,6 +448,218 @@ describe('a task that goes back to work', () => {
         assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry')
         assert.strictEqual(git(task.path, 'status', '--porcelain'), '')
         assert.lengthOf(github.changes, 1)
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+})
+
+describe('a task’s next pull request, in its repositories', () => {
+  it.live(
+    'opens one where a repository’s last merged with commits after it, while another’s stays open; and opens the rest once a try failed half way',
+    () => {
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+      const bares: Record<string, string> = {}
+      for (const name of ['api', 'web']) {
+        const path = join(folder, name)
+        mkdirSync(path)
+        git(path, 'init', '-q', '-b', 'main')
+        writeFileSync(join(path, 'README.md'), `# ${name}\n`)
+        git(path, 'add', '.')
+        git(path, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '-m', 'Start')
+        git(path, 'remote', 'add', 'origin', `${HOST}/meridian/${name}.git`)
+        bares[name] = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+        execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bares[name] })
+        git(path, 'push', '-q', bares[name] ?? '', 'main')
+      }
+      const github = makeFakeService({ pushUrl: (path) => bares[path.at(-1) ?? ''] ?? '' })
+      github.addRepository(['meridian', 'api'])
+      github.addRepository(['meridian', 'web'])
+      const commitIn = (path: string, file: string, message: string) => {
+        appendFileSync(join(path, file), `${message}\n`)
+        git(path, 'add', '-A')
+        git(path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', message)
+      }
+      return Effect.gen(function* () {
+        const runs = yield* Runs
+        const sql = yield* SqlClient.SqlClient
+        const instance = yield* Instance
+        yield* connect()
+        const projects = yield* Projects
+        const plans = yield* Plans
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: folder })
+        const task = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId: project.projectId,
+          title: 'Share the retry',
+          description: '[lead:finish]',
+          draft: true,
+          repositories: ['api', 'web'],
+        })
+        const worktrees = yield* sql<{ path: string }>`
+        SELECT w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${task.taskId} ORDER BY b.created_at, b.rowid`
+        const [api = '', web = ''] = worktrees.map((worktree) => worktree.path)
+        commitIn(api, 'retry.txt', 'Retry')
+        commitIn(web, 'retry.txt', 'Retry')
+        const planId = yield* plans.propose({
+          projectId: project.projectId as Parameters<typeof plans.propose>[0]['projectId'],
+          taskId: task.taskId,
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          reason: null,
+          actorId: instance.personId,
+        })
+        yield* plans.start(planId, instance.personId)
+        yield* until(
+          Effect.sync(() => github.changes),
+          (changes) => changes.length === 2,
+          Duration.seconds(20),
+        )
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
+
+        // api's merges, and its lead commits more; web's stays open. api's commit opens a pull request of its own, web's isn't touched.
+        squashMerge(bares.api ?? '', task.branch)
+        github.mergeByHand(1)
+        yield* (yield* Changes).refresh(task.taskId)
+        yield* until(cards(project.projectId), (all) => all[0]?.change?.number === 2)
+        commitIn(api, 'retry.txt', 'More for api')
+        const [mixed] = yield* until(cards(project.projectId), (all) => all[0]?.unshipped != null)
+        assert.deepStrictEqual([mixed?.phase, mixed?.change?.number, mixed?.unshipped?.commits], ['ready', 2, 1])
+        yield* runs.publish(task.taskId)
+        assert.lengthOf(github.changes, 3)
+        assert.strictEqual(github.changes[2]?.source, `${task.branch}-2`)
+        assert.strictEqual(git(bares.api ?? '', 'log', '-1', '--format=%s', `${task.branch}-2`), 'More for api')
+        assert.strictEqual(git(web, 'rev-parse', '--abbrev-ref', 'HEAD'), task.branch)
+
+        // Both merge, and each gets more; web's host refuses the push: api's opens, and trying again opens web's alone.
+        squashMerge(bares.api ?? '', `${task.branch}-2`)
+        squashMerge(bares.web ?? '', task.branch)
+        github.mergeByHand(2)
+        github.mergeByHand(3)
+        yield* (yield* Changes).refresh(task.taskId)
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(10))
+        commitIn(api, 'retry.txt', 'Again for api')
+        commitIn(web, 'retry.txt', 'More for web')
+        yield* until(cards(project.projectId), (all) => all[0]?.unshipped?.commits === 2)
+        const refuse = join(bares.web ?? '', 'hooks', 'pre-receive')
+        writeFileSync(refuse, '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+        yield* Effect.flip(runs.publish(task.taskId))
+        assert.lengthOf(github.changes, 4)
+        assert.strictEqual(github.changes[3]?.source, `${task.branch}-3`)
+        rmSync(refuse)
+        yield* runs.publish(task.taskId)
+        assert.lengthOf(github.changes, 5)
+        assert.strictEqual(github.changes[4]?.source, `${task.branch}-2`)
+        assert.strictEqual(git(bares.web ?? '', 'log', '-1', '--format=%s', `${task.branch}-2`), 'More for web')
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    90_000,
+  )
+
+  it.live(
+    'starts a fork’s next pull request from the main of the repository it opens on, not the fork’s, behind what merged',
+    () => {
+      const { working, bare: fork } = hosted(['you', 'api'])
+      git(working, 'remote', 'add', 'upstream', `${HOST}/meridian/api.git`)
+      const upstream = mkdtempSync(join(tmpdir(), 'althar-upstream-'))
+      execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: upstream })
+      git(working, 'push', '-q', upstream, 'main')
+      git(working, 'config', 'user.name', 'Fake')
+      git(working, 'config', 'user.email', 'fake@althar.test')
+      const github = makeFakeService({ pushUrl: (path) => (path.join('/') === 'meridian/api' ? upstream : fork) })
+      github.addRepository(['you', 'api'])
+      github.addRepository(['meridian', 'api'])
+      return Effect.gen(function* () {
+        const runs = yield* Runs
+        yield* connect()
+        const projects = yield* Projects
+        const coordinator = yield* Coordinator
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+        const [repository] = yield* projects.repositories(project.projectId)
+        yield* projects.setRepository({ projectId: project.projectId, repositoryId: repository?.id ?? '', changeTarget: 'upstream' })
+        const threadId = yield* coordinator.thread(project.projectId)
+        const body = 'Add a retry. [coordinator:plan] [coordinator:plan-no-review] [lead:finish] [lead:edit]'
+        yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+        const [ready] = yield* until(
+          cards(project.projectId),
+          (all) => all[0]?.phase === 'ready' && all[0].change !== null,
+          Duration.seconds(30),
+        )
+        assert.strictEqual(github.forkOf(1), 'you/api')
+        // Upstream merges it, squashed, from the fork's branch; the fork's own main stays where it was.
+        const clone = mkdtempSync(join(tmpdir(), 'althar-merge-'))
+        execFileSync('git', ['clone', '-q', upstream, clone])
+        git(clone, 'fetch', '-q', fork, 'althar/add-a-retry')
+        git(clone, '-c', 'user.name=Host', '-c', 'user.email=host@althar.test', 'merge', '-q', '--squash', 'FETCH_HEAD')
+        git(clone, '-c', 'user.name=Host', '-c', 'user.email=host@althar.test', 'commit', '-q', '-m', 'Squashed')
+        git(clone, 'push', '-q', 'origin', 'main')
+        github.mergeByHand(1)
+        yield* (yield* Changes).refresh(ready?.taskId ?? '')
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(10))
+        yield* say(ready?.threadId ?? '', 'Once more. [lead:finish]')
+        yield* until(runsOf(ready?.taskId ?? ''), (rows) => rows[1]?.state === 'succeeded', Duration.seconds(30))
+        // It edits the line the merged pull request added: from upstream's main it applies, from the fork's stale main it wouldn't.
+        yield* runs.publish(ready?.taskId ?? '')
+        assert.strictEqual(github.changes[1]?.source, 'althar/add-a-retry-2')
+        assert.strictEqual(github.forkOf(2), 'you/api')
+        assert.strictEqual(git(fork, 'rev-parse', 'althar/add-a-retry-2^'), git(upstream, 'rev-parse', 'main'))
+        assert.strictEqual(git(fork, 'rev-parse', 'main'), git(working, 'rev-parse', 'main'))
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
+    'takes what its lead committed after the plan, before it reported, as the round’s: reviewed as the plan says',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        yield* connect()
+        const projects = yield* Projects
+        const coordinator = yield* Coordinator
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+        const threadId = yield* coordinator.thread(project.projectId)
+        const body = 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:pass]'
+        yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
+        const [ready] = yield* until(
+          cards(project.projectId),
+          (all) => all[0]?.phase === 'ready' && all[0].change !== null,
+          Duration.seconds(30),
+        )
+        const taskId = ready?.taskId ?? ''
+        // Told its checks failed, as Althar tells it with no round, the lead fixes them and commits; then it reports.
+        const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${taskId}`
+        appendFileSync(join(workspace?.path ?? '', 'fixed.txt'), 'fixed\n')
+        git(workspace?.path ?? '', 'add', '-A')
+        git(
+          workspace?.path ?? '',
+          '-c',
+          'user.name=Fake',
+          '-c',
+          'user.email=fake@althar.test',
+          'commit',
+          '-q',
+          '-m',
+          'Fix the failing check',
+        )
+        const [lead] = yield* sql<{
+          id: string
+        }>`SELECT id FROM provider_sessions WHERE thread_id = ${ready?.threadId ?? ''} ORDER BY started_at DESC LIMIT 1`
+        const said = yield* callTool(
+          { role: 'lead', projectId: project.projectId, threadId: ready?.threadId ?? '', sessionId: lead?.id ?? '', taskId },
+          'finish_step',
+          { summary: 'Fixed the failing check.' },
+        )
+        assert.strictEqual(said, 'Althar has your summary. A review starts now; wait for its findings.')
+        const [, round] = yield* until(runsOf(taskId), (rows) => rows[1]?.state === 'succeeded', Duration.seconds(30))
+        assert.deepStrictEqual([round?.planId, round?.endReason], [null, null])
+        assert.deepStrictEqual(
+          (yield* results(ready?.threadId ?? '')).map((result) => result.step),
+          ['implement', 'review', 'publish', 'implement', 'review'],
+        )
+        const [after] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready')
+        assert.strictEqual(after?.change?.unpushed, 1)
+        assert.strictEqual(git(bare, 'rev-list', '--count', 'main..althar/add-a-retry'), '1')
       }).pipe(Effect.provide(runtimeWith(github)))
     },
     60_000,
