@@ -55,6 +55,27 @@ describe('AgentsAtOnce pointer', () => {
   })
 })
 
+describe('AgentsAtOnce kept at the default’s own number', () => {
+  it('offers the way back to the default, and sends null for it', () => {
+    const onChange = vi.fn()
+    render(<AgentsAtOnce count={4} own machine={MACHINE} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Use the default' }))
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(null)
+  })
+
+  it('says nothing of it when the default is what is in use', () => {
+    render(<AgentsAtOnce count={4} own={false} machine={MACHINE} onChange={vi.fn()} />)
+    expect(screen.queryByRole('button', { name: 'Use the default' })).toBeNull()
+  })
+
+  it('sends null for a release on the same number', () => {
+    const { slider, onChange } = track({ own: true })
+    fireEvent.pointerDown(slider, { clientX: 33 })
+    fireEvent.pointerUp(slider)
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(null)
+  })
+})
+
 describe('AgentsAtOnce scale', () => {
   it.each([
     [1, 16],

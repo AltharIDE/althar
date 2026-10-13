@@ -586,6 +586,7 @@ export function SettingsView({
               {atOnce !== null && (
                 <AgentsAtOnce
                   count={atOnce.atOnce.count}
+                  own={atOnce.atOnce.own !== null}
                   machine={atOnce.atOnce.machine}
                   most={MOST_AT_ONCE}
                   onChange={atOnce.set}

@@ -214,8 +214,13 @@ export const AgentsAtOnceSetting: Story = {
     await expect(onAtOnce).toHaveBeenLastCalledWith(null)
     await expect(count).toHaveAttribute('aria-valuenow', '4')
     // Back on the default by the keys: the default again, not a number of the person's own.
-    await userEvent.keyboard('{ArrowLeft}{ArrowRight}')
+    count.focus()
+    await userEvent.keyboard('{ArrowLeft}')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(3)
+    await expect(count).toHaveAttribute('aria-valuenow', '3')
+    await userEvent.keyboard('{ArrowRight}')
     await expect(onAtOnce).toHaveBeenLastCalledWith(null)
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
   },
 }
 
@@ -310,13 +315,14 @@ export const AllStates: Story = {
           ),
         },
         {
-          state: 'agents at once: the default, fewer, well past it, and a small Mac past its one',
+          state: 'agents at once: the default, fewer, well past it, a small Mac past its one, and a big Mac under its sixteen',
           node: (
             <SettingList>
               <AgentsAtOnce count={4} machine={MACHINE} onChange={fn()} />
               <AgentsAtOnce count={2} machine={MACHINE} onChange={fn()} />
               <AgentsAtOnce count={11} machine={MACHINE} onChange={fn()} />
               <AgentsAtOnce count={2} machine={{ count: 1, memory: 8, cores: 8 }} onChange={fn()} />
+              <AgentsAtOnce count={12} machine={{ count: 16, memory: 128, cores: 16 }} onChange={fn()} />
             </SettingList>
           ),
         },

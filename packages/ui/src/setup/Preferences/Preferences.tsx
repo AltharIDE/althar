@@ -173,6 +173,8 @@ export const agentsAtOnceText: AgentsAtOnceText = {
 export interface AgentsAtOnceProps {
   /** How many tasks' agents work at once now: the person's number, else the default. */
   count: number
+  /** Whether the person's own number is kept, as it may be the default's number too. Without it, a number other than the default is. */
+  own?: boolean
   /** The default, and the machine it comes from. */
   machine: AtOnceMachine
   /** The most the person can choose. */
@@ -190,14 +192,14 @@ export interface AgentsAtOnceProps {
  * further it goes. A drag goes out once it is let go. It says nothing of
  * what runs now: Settings stays calm.
  */
-export function AgentsAtOnce({ count, machine, most = 16, onChange, text }: AgentsAtOnceProps) {
+export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, text }: AgentsAtOnceProps) {
   const t = { ...agentsAtOnceText, ...text }
   // While the thumb is held, the number it is on; it goes out once let go.
   const [held, setHeld] = useState<number | null>(null)
   const [clicks, setClicks] = useState(0)
   const track = useRef<HTMLDivElement>(null)
   const n = held ?? count
-  const own = n !== machine.count
+  const own = held === null ? (kept ?? n !== machine.count) : n !== machine.count
   const heat = Math.max(0, Math.min(1, (n - machine.count) / Math.max(1, most - machine.count)))
   const at = (v: number) => `${((v - 1) / Math.max(1, most - 1)) * 100}%`
   const clamp = (v: number) => Math.max(1, Math.min(most, v))
@@ -205,7 +207,7 @@ export function AgentsAtOnce({ count, machine, most = 16, onChange, text }: Agen
     if (next === machine.count && n !== machine.count) setClicks((c) => c + 1)
   }
   const send = (next: number) => {
-    if (next !== count) onChange(next === machine.count ? null : next)
+    if (next !== count || (next === machine.count && kept === true)) onChange(next === machine.count ? null : next)
   }
   const from = (x: number) => {
     const box = track.current?.getBoundingClientRect()
