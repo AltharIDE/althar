@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import type { AgentStatus, PlanStep, TaskEnd as End } from '@althar/contracts'
+import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End } from '@althar/contracts'
 import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@althar/ui'
 
 import { queuedWords, waitsWords } from '../../shared/agents'
@@ -148,6 +148,12 @@ function PlanCard({
   )
 }
 
+/** Its pull requests in a few words: the latest, and those of its earlier rounds of work before it (ADR-034). */
+const pullRequestsOf = (latest: ChangeSummary, earlier: ReadonlyArray<ChangeSummary>) => {
+  const name = (change: ChangeSummary) => `${change.short} ${change.prefix}${change.number}`
+  return earlier.length === 0 ? name(latest) : `${name(latest)}, after ${earlier.map(name).join(' and ')}`
+}
+
 /** A task's card, with, while it waits for a free agent, who holds the places. */
 export function Card({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
   const holders = card.queued?.holders
@@ -168,7 +174,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   // Started, its first step waiting for a free agent, the plan can still be changed: it says what it waits for where the clock was.
   if (card.planWaits === true && card.queued !== null && card.plan !== null)
     return <PlanCard key={card.plan.id} card={card} plan={card.plan} actions={actions} queued={queuedWords(card.queued)} />
-  const steps = stepNames(card.plan?.steps ?? [])
+  const steps = stepNames(card.plan?.steps ?? [], card.followUp === true)
   const at = stepIndex(steps, card.step)
   // Ready, but its lead couldn't resolve a conflict: it needs the person, and says why.
   const handedBack = card.phase === 'ready' ? (card.handedBack ?? null) : null
@@ -203,7 +209,7 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
       {...(effort === null ? {} : { effort })}
       {...(card.branch === null ? {} : { branch: card.branch })}
       {...(from === undefined ? {} : { from })}
-      {...(card.change === null ? {} : { pr: `${card.change.short} ${card.change.prefix}${card.change.number}` })}
+      {...(card.change === null ? {} : { pr: pullRequestsOf(card.change, card.earlier ?? []) })}
       onOpen={() => actions.onOpen(card.threadId)}
       text={{ status: text.status, task: text.task }}
     />

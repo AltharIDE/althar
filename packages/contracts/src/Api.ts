@@ -171,6 +171,8 @@ export const AppSettings = Schema.Struct({
   /** Althar as co-author of what it sends to a code host, on unless turned off; `line` is the trailer each commit gets. */
   coAuthor: Schema.Struct({ on: Schema.Boolean, line: Schema.String }),
   agentsAtOnce: AgentsAtOnce,
+  /** A review of the team's pull request posts itself once drafted, without asking; off unless the person turns it on. Outside ones always wait. */
+  postTeamReviews: Schema.Boolean,
 })
 export type AppSettings = typeof AppSettings.Type
 
@@ -1044,9 +1046,75 @@ export type Holder = typeof Holder.Type
 export const Queued = Schema.Struct({ busy: Schema.Int, atOnce: Schema.Int, holders: Schema.optional(Schema.Array(Holder)) })
 export type Queued = typeof Queued.Type
 
+/**
+ * Commits on a task's branch after its last pull request merged or closed,
+ * in none yet: what Open a new pull request opens one with (ADR-034).
+ */
+export const Unshipped = Schema.Struct({
+  commits: Schema.Int,
+  /** Lines they add and remove, all together. */
+  add: Schema.Int,
+  del: Schema.Int,
+})
+export type Unshipped = typeof Unshipped.Type
+
 /** Where a task stands, as the coordinator's thread shows it. */
 export const TaskPhase = Schema.Literals(['planned', 'held', 'running', 'waiting', 'ready', 'stopped', 'settled'])
 export type TaskPhase = typeof TaskPhase.Type
+
+/**
+ * What a task makes, read from what it has and never stored (DEV-96): a
+ * change has a pull request of its own, commits or changes on its branch, or
+ * a plan that ends in one; a review reads someone else's pull request and
+ * has no branch of its own; any other task is plain: a question, a
+ * prototype, a release from this Mac. A task only moves toward change.
+ */
+export const TaskKind = Schema.Literals(['change', 'review', 'plain'])
+export type TaskKind = typeof TaskKind.Type
+
+/**
+ * What a plain task handed back, for its card while it waits for the person:
+ * the pictures its lead showed when it last reported, and the files it wrote
+ * or pointed at in what it last said, with the lines each added where git
+ * can say.
+ */
+export const Handed = Schema.Struct({
+  pictures: Schema.Array(Picture),
+  files: Schema.Array(Schema.Struct({ path: Schema.String, add: Schema.NullOr(Schema.Number) })),
+})
+export type Handed = typeof Handed.Type
+
+/** What a review says of a pull request as a whole: approve it, ask for changes, or only comment. */
+export const ReviewVerdict = Schema.Literals(['approve', 'changes', 'comment'])
+export type ReviewVerdict = typeof ReviewVerdict.Type
+
+/**
+ * Someone else's pull request a task reviews, as its card and its view show
+ * it: what it is, whether it comes from outside, how big it is, what the
+ * lead's latest draft found (its comments, the blocking among them, and its
+ * verdict), and the review once posted.
+ */
+export const ReviewBrief = Schema.Struct({
+  /** Its code host. */
+  product: Product,
+  /** owner/name. */
+  repository: Schema.String,
+  number: Schema.Int,
+  url: Schema.String,
+  title: Schema.String,
+  author: Schema.String,
+  outside: Schema.Boolean,
+  additions: Schema.NullOr(Schema.Int),
+  deletions: Schema.NullOr(Schema.Int),
+  /** Comments in the latest draft, and those of them that block it; none before the lead drafts. */
+  findings: Schema.Int,
+  blocking: Schema.Int,
+  /** The latest draft's verdict, as chosen; null before one is drafted, or while none is chosen. */
+  verdict: Schema.NullOr(ReviewVerdict),
+  /** The review, once posted: its link and when. */
+  posted: Schema.NullOr(Schema.Struct({ url: Schema.String, at: Schema.String })),
+})
+export type ReviewBrief = typeof ReviewBrief.Type
 
 /**
  * What the person can do to a task as a whole, where it stands now, as its
@@ -1068,6 +1136,12 @@ export const TaskCard = Schema.Struct({
   title: Schema.String,
   slug: Schema.String,
   phase: TaskPhase,
+  /** What it makes, read from what it has now: its card's word, and what the card shows. */
+  kind: TaskKind,
+  /** A plain task's pictures and files, while it has some; null or absent otherwise. */
+  handed: Schema.optional(Schema.NullOr(Handed)),
+  /** The pull request a review task reads, and how its review stands; null or absent for any other task. */
+  reviewing: Schema.optional(Schema.NullOr(ReviewBrief)),
   plan: Schema.NullOr(
     Schema.Struct({
       id: Schema.String,
@@ -1082,10 +1156,16 @@ export const TaskCard = Schema.Struct({
   ),
   /** The issue it came from. */
   issue: Schema.NullOr(Schema.Struct({ product: Product, key: Schema.String, title: Schema.String, url: Schema.String })),
-  /** Its pull request, once opened. */
+  /** Its pull request, once opened: the open one, else its latest. */
   change: Schema.NullOr(ChangeSummary),
+  /** Its other pull requests, newest first: those of earlier rounds of its work, merged or closed (ADR-034). */
+  earlier: Schema.optional(Schema.Array(ChangeSummary)),
+  /** Commits after its last pull request merged or closed, in none yet; null or absent where there are none. */
+  unshipped: Schema.optional(Schema.NullOr(Unshipped)),
   /** The step it is on, by key, while it runs. */
   step: Schema.NullOr(Schema.String),
+  /** It runs a round of work after its plan, as the person asked its lead for more (ADR-034). */
+  followUp: Schema.optional(Schema.Boolean),
   /** The latest summary the lead reported. */
   summary: Schema.NullOr(Schema.String),
   /** The agent that leads it, or last did: the plan's lead until one starts. */
@@ -1225,6 +1305,74 @@ export const IssueDraftItem = Schema.Struct({
   content: IssueDraftCard,
 })
 
+/** How much a comment in a review matters, as its lead says: blocking it, a major or minor point, or a nit. */
+export const ReviewSeverity = Schema.Literals(['blocking', 'major', 'minor', 'nit'])
+export type ReviewSeverity = typeof ReviewSeverity.Type
+
+/** Where a review the lead drafted stands: waiting on you, being posted, posted, not posted and why, perhaps posted (its answer was lost), or discarded. */
+export const ReviewDraftState = Schema.Literals(['pending', 'posting', 'posted', 'failed', 'uncertain', 'discarded'])
+export type ReviewDraftState = typeof ReviewDraftState.Type
+
+/** A comment in a review draft, on a line of the pull request as it now reads: kept, or dropped by the person. */
+export const ReviewComment = Schema.Struct({
+  id: Schema.String,
+  path: Schema.String,
+  line: Schema.Int,
+  /** Markdown. */
+  body: Schema.String,
+  severity: ReviewSeverity,
+  kept: Schema.Boolean,
+})
+export type ReviewComment = typeof ReviewComment.Type
+
+/**
+ * A review the lead of a review task drafted of someone else's pull request,
+ * in the task's thread (docs/architecture/06, "Reviewing someone else's pull
+ * request"): the pull request, the lead's verdict and the one chosen, the
+ * summary, its comments on lines, and where it stands. Nothing reaches the
+ * code host until the person posts it here, or their setting posts their
+ * team's; they can change it first, or discard it. Althar posts it and keeps
+ * it current.
+ */
+export const ReviewDraftCard = Schema.Struct({
+  draftId: Schema.String,
+  product: Product,
+  /** The pull request's repository, as its host names it: owner/name. */
+  repository: Schema.String,
+  number: Schema.Int,
+  url: Schema.String,
+  title: Schema.String,
+  /** Who opened it, by their login. */
+  author: Schema.String,
+  /** It comes from outside the repository's people: from a fork, or by an author the host doesn't name one of them. */
+  outside: Schema.Boolean,
+  /** It comes from a fork: why it counts as outside, where it does. */
+  fork: Schema.Boolean,
+  /** The agent that drafted it, by name; null where Althar couldn't tell. */
+  drafter: Schema.NullOr(Schema.String),
+  /** Who it posts as on the host: the connection's account. */
+  account: Schema.NullOr(Schema.String),
+  /** The lead's verdict: only a suggestion. */
+  suggested: ReviewVerdict,
+  /** The verdict it posts with: the lead's to begin with, but none for an outside pull request the lead would approve. */
+  verdict: Schema.NullOr(ReviewVerdict),
+  /** Markdown. */
+  summary: Schema.String,
+  comments: Schema.Array(ReviewComment),
+  state: ReviewDraftState,
+  /** Why it wasn't posted, while it stands failed, or why it may have been, while uncertain: in the host's words, or Althar's. */
+  error: Schema.NullOr(Schema.String),
+  /** The review, once posted: its link and when. */
+  review: Schema.NullOr(Schema.Struct({ url: Schema.String, at: Schema.String })),
+})
+export type ReviewDraftCard = typeof ReviewDraftCard.Type
+
+export const ReviewDraftItem = Schema.Struct({
+  ...itemFields,
+  kind: Schema.Literal('review_draft'),
+  content: ReviewDraftCard,
+})
+
 /**
  * Althar setting up a task's worktree before its lead starts (ADR-023), in
  * the task's thread: the repository, what runs, and how it ended. Althar
@@ -1271,6 +1419,7 @@ export const ThreadItem = Schema.Union([
   IssueDraftItem,
   SetupItem,
   PushRequestItem,
+  ReviewDraftItem,
 ])
 export type ThreadItem = typeof ThreadItem.Type
 
@@ -1532,8 +1681,14 @@ export const ThreadSnapshot = Schema.Struct({
     settledAt: Schema.NullOr(Schema.String),
     /** The issue it came from. */
     issue: Schema.NullOr(IssueSummary),
-    /** Its pull requests, as last seen. */
+    /** Its pull requests, as last seen, oldest first. */
     changes: Schema.Array(ChangeSummary),
+    /** Commits after its last pull request merged or closed, in none yet: what Open a new pull request opens one with. */
+    unshipped: Schema.optional(Schema.NullOr(Unshipped)),
+    /** The review of its run under way can still be skipped, as the person may (ADR-034). */
+    skipReview: Schema.optional(Schema.Boolean),
+    /** It runs a round of work after its plan. */
+    followUp: Schema.optional(Schema.Boolean),
     /** What it changed since it started, committed or not, file by file, and in how many commits; empty without a worktree here. */
     files: Schema.Array(ChangedFile),
     commits: Schema.Number,
@@ -1555,6 +1710,8 @@ export const ThreadSnapshot = Schema.Struct({
      * its project's rules do, which `project` is.
      */
     resolveConflicts: Schema.Struct({ task: Schema.NullOr(Schema.Boolean), project: Schema.Boolean }),
+    /** Someone else's pull request it reviews, where it is a review: its thread opens with it, and its view says what the lead can reach. */
+    review: Schema.optional(Schema.NullOr(ReviewBrief)),
   }),
   session: Schema.NullOr(SessionSummary),
   attention: Schema.Array(AttentionRequest),
@@ -1573,7 +1730,7 @@ export const BoardTask = Schema.Struct({
   state: Schema.String,
   createdAt: Schema.String,
   settledAt: Schema.NullOr(Schema.String),
-  /** What a ready task changed, when it has no pull request to say so: its files, and lines added and removed. */
+  /** What a ready task, or a change at work, changed when it has no pull request to say so: its files, and lines added and removed. */
   changed: Schema.NullOr(Schema.Struct({ files: Schema.Number, add: Schema.Number, del: Schema.Number })),
   /** A ready task's repositories with no pull request, not merged yet, which merge here. */
   here: Schema.Array(TaskRepositoryHere),
@@ -1757,6 +1914,41 @@ export type OutputText = typeof OutputText.Type
 export const DocumentText = Schema.Struct({ path: Schema.String, body: Schema.String, bytes: Schema.Number, lines: Schema.Number })
 export type DocumentText = typeof DocumentText.Type
 
+/** A stretch of what a found task holds, in order: the words that matched what was asked for are `hit`. */
+export const FoundPart = Schema.Struct({ text: Schema.String, hit: Schema.Boolean })
+export type FoundPart = typeof FoundPart.Type
+
+/**
+ * A task found by what it was about (ADR-035): enough to show it in a list
+ * and open it. Where it stands is read as its card's phase is, from the
+ * store and the agents at work, never from git.
+ */
+export const FoundTask = Schema.Struct({
+  taskId: Schema.String,
+  /** Its own thread, which opens it. */
+  threadId: Schema.String,
+  projectId: Schema.String,
+  title: Schema.String,
+  slug: Schema.String,
+  phase: TaskPhase,
+  /** As the store keeps it: draft, open, done or abandoned. */
+  state: Schema.String,
+  /** Its latest pull request, as its host writes it (#143, !12); null where it has none. */
+  pullRequest: Schema.NullOr(Schema.String),
+  /** When what it is found by last changed. */
+  changedAt: Schema.String,
+  /** What matched besides its title, a few words either side, ellipses where it was cut; null where only its title did, or nothing was asked for. */
+  matched: Schema.NullOr(Schema.Array(FoundPart)),
+})
+export type FoundTask = typeof FoundTask.Type
+
+/** The most a search finds at once. */
+export const FOUND_MOST = 50
+
+/** What a search found, best first. */
+export const FoundTasks = Schema.Struct({ tasks: Schema.Array(FoundTask) })
+export type FoundTasks = typeof FoundTasks.Type
+
 /** A part of the whole, 0 to 1. */
 const Part = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
 /** A number of bytes. */
@@ -1879,6 +2071,23 @@ export const Api = RpcGroup.make(
     Schema.Void,
   ),
   call('ListTasks', { projectId: Schema.String }, TaskList),
+  /**
+   * Finds tasks by what they were about: their titles, what the person asked,
+   * what their leads reported and built, their pull requests' numbers and
+   * issues' keys, their branches, and the files their leads changed. In one
+   * project, or every one still in the window; each word typed finds the
+   * words it begins, and every word must be found. Best first, recent first
+   * among equals; with nothing typed, the most recently changed.
+   */
+  call(
+    'SearchTasks',
+    {
+      projectId: Schema.optional(Schema.String),
+      text: Schema.String.check(Schema.isMaxLength(500)),
+      limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: FOUND_MOST }))),
+    },
+    FoundTasks,
+  ),
   command(
     'CreateTask',
     {
@@ -1917,6 +2126,11 @@ export const Api = RpcGroup.make(
   call('GetHome', { since: Schema.optional(Schema.String) }, HomeSnapshot),
   /** The person left the home: what the loop does from now on is new to them. */
   command('LeftHome', {}, Schema.Void),
+  /**
+   * The person opened a task's screen. A plain task that finished, with
+   * nothing to accept and nothing waiting on them, is done once seen.
+   */
+  command('SeeTask', { taskId: Schema.String }, Schema.Void),
   call('GetThreadItem', { threadId: Schema.String, itemId: Schema.String }, ThreadItem),
   /** What a command in a thread printed, as kept once it ended. */
   call('ReadOutput', { threadId: Schema.String, itemId: Schema.String }, OutputText),
@@ -1965,6 +2179,27 @@ export const Api = RpcGroup.make(
   command('FileIssueDraft', { draftId: Schema.String }, Schema.Void),
   /** Discards an issue the coordinator drafted: nothing is filed. */
   command('DiscardIssueDraft', { draftId: Schema.String }, Schema.Void),
+  /**
+   * Changes a review the lead drafted, before it is posted: the verdict it
+   * posts with, its summary, and which of its comments are kept, or what
+   * each says. What isn't given stays as it is.
+   */
+  command(
+    'ChangeReviewDraft',
+    {
+      draftId: Schema.String,
+      verdict: Schema.optional(ReviewVerdict),
+      summary: Schema.optional(Schema.String),
+      comments: Schema.optional(
+        Schema.Array(Schema.Struct({ id: Schema.String, kept: Schema.optional(Schema.Boolean), body: Schema.optional(Schema.String) })),
+      ),
+    },
+    Schema.Void,
+  ),
+  /** Posts a review the lead drafted, with its verdict and the comments kept; or one that wasn't posted, again. Its card says how it went. */
+  command('PostReviewDraft', { draftId: Schema.String }, Schema.Void),
+  /** Discards a review the lead drafted: nothing is posted. */
+  command('DiscardReviewDraft', { draftId: Schema.String }, Schema.Void),
   command(
     'StartSession',
     { threadId: Schema.String, agentId: Schema.String, model: Schema.optional(Schema.String), effort: Schema.optional(Schema.String) },
@@ -1996,6 +2231,8 @@ export const Api = RpcGroup.make(
   call('GetSettings', {}, AppSettings),
   /** Turns Althar's co-authoring of commits and pull requests on or off; the agents' own credit lines go either way. */
   command('SetCoAuthor', { on: Schema.Boolean }, Schema.Void),
+  /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
+  command('SetPostTeamReviews', { on: Schema.Boolean }, Schema.Void),
   /**
    * How many agents may be at work at once on this machine, from now on:
    * the person's number, or, null, the default again. What waits starts if
@@ -2199,8 +2436,14 @@ export const Api = RpcGroup.make(
   ),
   /** What the project does when an agent reaches its usage limit. */
   command('SetUsageLimit', { projectId: Schema.String, policy: UsageLimit }, Schema.Void),
-  /** Opens the pull request of a task whose work ended on its branch: a draft, as the person said. */
+  /**
+   * Opens the pull request of a task whose work ended on its branch: a
+   * draft, as the person said. A task whose last pull request merged or
+   * closed opens its next, for the commits after it, on a new branch (ADR-034).
+   */
   command('OpenChange', { taskId: Schema.String }, Schema.Void),
+  /** Skips the review of the task's run under way: a review under way stops, and work whose lead is done is ready (ADR-034). */
+  command('SkipReview', { taskId: Schema.String }, Schema.Void),
   /**
    * Merges the task's pull request at the head the person saw, because they
    * said to; a draft is marked ready first. A pull request that moved on

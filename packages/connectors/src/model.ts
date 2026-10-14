@@ -1,7 +1,7 @@
 import type { Effect } from 'effect'
 import { Schema } from 'effect'
 
-import type { ConnectorFailed } from './errors'
+import { ConnectorFailed } from './errors'
 
 /*
  * The two models (docs/architecture/06, "Code hosts and trackers"): what
@@ -127,6 +127,49 @@ export const Comment = Schema.Struct({
 })
 export type Comment = typeof Comment.Type
 
+/**
+ * A change to review: someone else's pull request, as Althar reads it before
+ * it reviews one it didn't open. Beside what any change says: whether its
+ * author is one of the repository's people, the fork its branch is on, and
+ * where its target branch is.
+ */
+export const ChangeToReview = Schema.Struct({
+  ...ChangeRequest.fields,
+  /** Its author is one of the repository's people, as the host says: GitHub's owner, a member of its organisation, or a collaborator. */
+  member: Schema.Boolean,
+  /** The repository its branch is on, where that isn't the one it goes into: a fork's path, or none where the fork is gone. Null for a branch of the repository's own. */
+  fork: Schema.NullOr(Schema.Array(Schema.String)),
+  /** The commit its target branch is on, as the host says; null where it doesn't. */
+  baseSha: Schema.NullOr(Schema.String),
+})
+export type ChangeToReview = typeof ChangeToReview.Type
+
+/**
+ * Whether a change comes from outside the repository's people: from a fork,
+ * or by an author the host doesn't name one of them. What it brings is then
+ * read with less trust: its words may try to steer whoever reads them.
+ */
+export const fromOutside = (change: Pick<ChangeToReview, 'member' | 'fork'>): boolean => !change.member || change.fork !== null
+
+/** What a review says of a change as a whole: approve it, ask for changes, or only comment. */
+export const ReviewEvent = Schema.Literals(['approve', 'request_changes', 'comment'])
+export type ReviewEvent = typeof ReviewEvent.Type
+
+/** A review to post: what it says of the change, its summary, the commit it was of, and its comments on the change's lines. */
+export interface NewReview {
+  readonly event: ReviewEvent
+  /** Markdown. */
+  readonly body: string
+  /** The commit the review is of, as its reviewer read it; null for the change's head as the host has it now. */
+  readonly commit: string | null
+  /** Comments on lines of the change as it now reads (its new side), by path and line. */
+  readonly comments: ReadonlyArray<{ readonly path: string; readonly line: number; readonly body: string }>
+}
+
+/** A review the host took: its id, and its link where the host gives one. */
+export const PostedReview = Schema.Struct({ id: Schema.String, url: Schema.NullOr(Schema.String) })
+export type PostedReview = typeof PostedReview.Type
+
 /** What happened on a change since a cursor: comments and reviews, oldest first, and the cursor to ask from next. */
 export interface Activity {
   readonly comments: ReadonlyArray<Comment>
@@ -149,6 +192,12 @@ export interface HostCapabilities {
   readonly checkLogs: boolean
   /** Comments on lines sit in threads a reply can join. */
   readonly threads: boolean
+  /**
+   * A change Althar didn't open can be read for review, with whether its
+   * author is one of the repository's people and the fork it comes from, and
+   * a review posted on it with comments on its lines. Only GitHub's, for now.
+   */
+  readonly reviews: boolean
 }
 
 /** How git pushes to a repository: its URL, and the header that signs the push in. */
@@ -204,7 +253,25 @@ export interface CodeHost {
     reply: { readonly body: string; readonly threadId: string | null },
   ): Effect.Effect<Comment, ConnectorFailed>
   pushTarget(repository: Repository): Effect.Effect<PushTarget, ConnectorFailed>
+  /**
+   * A change to review, whoever opened it: what it is, whether its author is
+   * one of the repository's people, and the fork it comes from. Where the
+   * host has `capabilities.reviews`; refused elsewhere, as `rejected`.
+   */
+  changeToReview(repository: Repository, number: number): Effect.Effect<ChangeToReview, ConnectorFailed>
+  /**
+   * Posts a review of a change, because the person said to, or their own
+   * setting does for their team's changes: never on an agent's word alone.
+   * Where the host has `capabilities.reviews`; refused elsewhere, as
+   * `rejected`. A comment on a line the change doesn't touch is refused by
+   * the host, with its words.
+   */
+  postReview(repository: Repository, number: number, review: NewReview): Effect.Effect<PostedReview, ConnectorFailed>
 }
+
+/** A host's refusal of a review, where it has no `capabilities.reviews`: said in its words for a change. */
+export const noReviews = (product: Product, words: ChangeWords): ConnectorFailed =>
+  new ConnectorFailed({ product, reason: 'rejected', message: `Althar can’t review a ${words.noun} on this host yet.` })
 
 // ---- Trackers -------------------------------------------------------------
 

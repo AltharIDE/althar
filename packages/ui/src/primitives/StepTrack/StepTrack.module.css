@@ -49,25 +49,27 @@
   background-color: var(--n-5);
   box-shadow: none;
 }
+/* the step it is on: a still bar of cobalt, with a faint sheen gliding over it slowly, so it reads as at work without a
+   segment running across it */
 .now i {
-  background-color: var(--live-dim);
+  background-color: color-mix(in srgb, var(--live) 78%, var(--n-1));
   box-shadow: none;
 }
 .now i::after {
   content: '';
   position: absolute;
   inset: 0;
-  width: 40%;
-  border-radius: 99px;
-  background: var(--live);
-  animation: run 1.4s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.5), transparent);
+  animation: sheen 3.2s cubic-bezier(0.45, 0, 0.35, 1) infinite;
 }
-@keyframes run {
+@keyframes sheen {
   from {
-    transform: translateX(-100%);
+    transform: translateX(-110%);
   }
+  70%,
   to {
-    transform: translateX(250%);
+    transform: translateX(240%);
   }
 }
 .now .name {
@@ -120,5 +122,9 @@
   }
   .track i {
     transition: none;
+  }
+  /* still, the bar alone says where it is: no sheen left standing on it */
+  .now i::after {
+    content: none;
   }
 }

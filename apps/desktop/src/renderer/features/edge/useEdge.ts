@@ -10,7 +10,7 @@ import { type Client, messageOf } from '../../data/client'
 import { type Feed, HOME, HOME_SHOWN } from '../../data/feed'
 import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { callKindOf, readyKindOf } from '../../shared/calls'
+import { callKindOf, isFinished, readyKindOf } from '../../shared/calls'
 import { refOf } from '../home/HomeView'
 import type { AnsweredCall } from '../home/needs'
 
@@ -67,7 +67,7 @@ export interface EdgeModel {
 /** What waits on the person, by id: the calls, and the tasks ready to accept. */
 const needIds = (home: HomeSnapshot) => [
   ...home.calls.map((call) => call.id),
-  ...home.tasks.filter((task) => task.phase === 'ready').map((task) => task.taskId),
+  ...home.tasks.filter((task) => task.phase === 'ready' && !isFinished(task)).map((task) => task.taskId),
 ]
 
 /** A need, as the island says it: whose, by its project's mark, and what kind. */

@@ -1440,7 +1440,7 @@ describe('a push the lead asks the person for', () => {
       commit(task.path, 'After')
       assert.strictEqual(
         yield* callTool(task.lead, 'push_to_pull_request', {}),
-        "PR #1 is merged, so there's nothing to push to. Tell the person what you committed.",
+        "PR #1 is merged, so there's nothing to push to. What you committed after it goes in a new pull request, which the person opens from the task: if you haven't, call finish_step with your summary, and tell them it's ready.",
       )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })

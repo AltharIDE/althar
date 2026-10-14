@@ -4,6 +4,7 @@ import { Cause, Option } from 'effect'
 import type { AccountRefused } from './Accounts'
 import type { CantMerge, DocumentRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
 import { MESSAGE_IMAGES } from './pictures'
+import type { ReviewDraftIncomplete } from './Reviews'
 
 /*
  * What went wrong, in words a person reads in the window. The runtime's
@@ -206,7 +207,7 @@ export const words = (
         return cantMerge[text(error, 'why') as CantMerge['why']]?.(detail) ?? `Althar couldn't merge it. ${detail}`
       }
       case 'NoChangeToOpen':
-        return noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working
+        return (noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working)(text(error, 'detail'))
       case 'LaunchRefused':
         return text(error, 'message')
       case 'TaskRefused':
@@ -227,6 +228,10 @@ export const words = (
         return draftClosed[text(error, 'state')] ?? 'That issue draft can’t change now.'
       case 'DraftUntitled':
         return 'An issue needs a title.'
+      case 'ReviewDraftClosed':
+        return reviewClosed[text(error, 'state')] ?? 'That review draft can’t change now.'
+      case 'ReviewDraftIncomplete':
+        return reviewIncomplete[text(error, 'missing') as ReviewDraftIncomplete['missing']]
       case 'OutwardUncertain':
         return "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again."
       case 'ConnectorFailed':
@@ -297,13 +302,18 @@ const cantMerge = {
   missing: (branch: string) => `This Mac has no ${branch} branch to merge into.`,
 } as const satisfies Record<CantMerge['why'], (detail: string) => string>
 
-/** Why a task has no pull request to open, by reason. */
+/** Why a task has no pull request to open, by reason, with the files it concerns where it says them. */
 const noChangeToOpen = {
-  working: "The task's work isn't done yet. Its pull request opens when it is.",
-  stopped: 'The task’s work stopped before it was done, so it has no pull request to open.',
-  settled: 'The task is settled, so its branch stays as it is.',
-  opened: 'The task already has its pull request.',
-} as const satisfies Record<NoChangeToOpen['why'], string>
+  working: () => "The task's work isn't done yet. Its pull request opens when it is.",
+  stopped: () => 'The task’s work stopped before it was done, so it has no pull request to open.',
+  settled: () => 'The task is settled, so its branch stays as it is.',
+  opened: () => 'The task already has its pull request.',
+  nothing: () => 'Every commit on the task’s branch is in a pull request already, so there’s nothing new to open one for.',
+  uncommitted: (files: string) =>
+    `The lead left changes it didn’t commit${files === '' ? '' : `, in ${files}`}. Ask it to commit them or clear them away, then open the pull request again.`,
+  conflicts: (files: string) =>
+    `The new commits don’t apply on the default branch as it is now: they conflict${files === '' ? '' : ` in ${files}`}. Ask the lead to merge the default branch into its branch (merge, don’t rebase), then open the pull request again.`,
+} as const satisfies Record<NoChangeToOpen['why'], (detail: string) => string>
 
 /** Why a task can't be abandoned, reopened or renamed, by reason. */
 const taskRefused = {
@@ -321,11 +331,27 @@ const draftClosed: Readonly<Record<string, string>> = {
   filing: 'That issue is being filed now.',
 }
 
+/** Why a review draft can't change, by where it stands. */
+const reviewClosed: Readonly<Record<string, string>> = {
+  posted: 'That review is posted already. Change it on GitHub.',
+  discarded: 'That review draft was discarded.',
+  posting: 'That review is being posted now.',
+}
+
+/** What a review draft lacks to be kept or posted. */
+const reviewIncomplete = {
+  verdict: 'Choose a verdict before you post the review.',
+  summary: 'A review needs a summary.',
+  comment: 'Write the comment, or drop it.',
+} as const satisfies Record<ReviewDraftIncomplete['missing'], string>
+
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
   'LaunchRefused',
   'DraftClosed',
   'DraftUntitled',
+  'ReviewDraftClosed',
+  'ReviewDraftIncomplete',
   'ChangedSinceSeen',
   'CantMerge',
   'NoChangeToOpen',

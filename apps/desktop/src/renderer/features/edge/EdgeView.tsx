@@ -7,6 +7,7 @@ import { refOf, text as homeText } from '../home/HomeView'
 import { needLineOf, needsOf, workOf } from '../home/needs'
 import s from './Edge.module.css'
 import type { EdgeModel } from './useEdge'
+import { isFinished } from '../../shared/calls'
 import { useModelNames } from '../../shared/modelNames'
 
 /*
@@ -50,7 +51,8 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
   const refs = new Map((home?.projects ?? []).map((project) => [project.id, refOf(project)]))
   const tasks = home?.tasks ?? []
   const calls = (home?.calls ?? []).filter((call) => !model.answered.some((one) => one.call.id === call.id))
-  const ready = tasks.filter((task) => task.phase === 'ready')
+  // Ready to accept: a plain task that finished waits on its board instead.
+  const ready = tasks.filter((task) => task.phase === 'ready' && !isFinished(task))
   // What has a call above isn't counted again in the work.
   const called = new Set((home?.calls ?? []).map((call) => call.threadId))
   const working = tasks.filter((task) => task.phase !== 'ready' && !called.has(task.threadId) && refs.has(task.projectId))

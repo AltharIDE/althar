@@ -31,7 +31,21 @@ export const WithPullRequest: Story = {
   args: { activity: TaskActivity.Still, change: { name: 'Pull request #1206', host: 'GitHub' } },
 }
 /** Before its worktree was made, it has none to leave. */
-export const NoWorktree: Story = { args: { activity: TaskActivity.Planned, worktree: null, branch: null } }
+export const NoWorktree: Story = {
+  args: { activity: TaskActivity.Planned, worktree: null, branch: null },
+  play: async () => {
+    await expect(within(document.body).getByRole('dialog')).toHaveTextContent('You can reopen it later.')
+  },
+}
+/** A plain task, whose lead changed nothing in the repository: its worktree stays, and it has no branch to. */
+export const Plain: Story = {
+  args: { activity: TaskActivity.Still, branch: null },
+  play: async () => {
+    const dialog = within(document.body).getByRole('dialog')
+    await expect(dialog).not.toHaveTextContent('branch')
+    await expect(dialog).toHaveTextContent('You can reopen it later, on the same worktree.')
+  },
+}
 /** A long path and branch wrap inside the dialog. */
 export const LongNames: Story = {
   args: {

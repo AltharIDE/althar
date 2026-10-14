@@ -95,6 +95,8 @@ export const ThreadItemKind = Schema.Literals([
   'setup',
   /** The lead asking the person to push its new commits to the task's pull request. Althar posts it and keeps it current. */
   'push_request',
+  /** A review the lead drafted of someone else's pull request, in the task's thread: the person posts it, changes it or discards it there. */
+  'review_draft',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -216,8 +218,8 @@ export type ConnectionCli = typeof ConnectionCli.Type
 export const ConnectionState = Schema.Literals(['ready', 'reauth_required', 'removed'])
 export type ConnectionState = typeof ConnectionState.Type
 
-/** What a task's external link points at: the issue it came from, or a change it opened. */
-export const ExternalKind = Schema.Literals(['issue', 'change'])
+/** What a task's external link points at: the issue it came from, a change it opened, or someone else's change it reviews. */
+export const ExternalKind = Schema.Literals(['issue', 'change', 'review'])
 export type ExternalKind = typeof ExternalKind.Type
 
 /**
@@ -228,6 +230,19 @@ export type ExternalKind = typeof ExternalKind.Type
  */
 export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
 export type IssueDraftState = typeof IssueDraftState.Type
+
+/**
+ * Where a review the lead drafted of someone else's pull request stands:
+ * waiting on the person, being posted, posted, not posted for a reason the
+ * host gave, perhaps posted (its answer was lost, so the pull request is
+ * looked at before posting it again), or discarded.
+ */
+export const ReviewDraftState = Schema.Literals(['pending', 'posting', 'posted', 'failed', 'uncertain', 'discarded'])
+export type ReviewDraftState = typeof ReviewDraftState.Type
+
+/** What a review says of a pull request as a whole: approve it, ask for changes, or only comment. */
+export const ReviewVerdict = Schema.Literals(['approve', 'changes', 'comment'])
+export type ReviewVerdict = typeof ReviewVerdict.Type
 
 /**
  * Where a lead resolving a conflict on its own stands (docs/architecture/06):
@@ -287,5 +302,6 @@ export const AggregateType = Schema.Literals([
   'issue_draft',
   'conflict_resolution',
   'project_note',
+  'review_draft',
 ])
 export type AggregateType = typeof AggregateType.Type
