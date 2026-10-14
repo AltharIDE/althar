@@ -941,7 +941,13 @@ describe('an abandoned task’s pull request', () => {
       const changes = yield* Changes
       const { projectId, taskId, threadId, url } = yield* opened(github, working)
       yield* abandon(taskId)
+      // The board's settled row reads it open, as GitHub has it; closed, it reads it closed, without waiting for anything else.
+      const onBoard = Effect.flatMap(Queries, (queries) =>
+        Effect.map(queries.board(projectId), (board) => board.tasks.find((task) => task.taskId === taskId)),
+      )
+      assert.strictEqual((yield* onBoard)?.change?.state, 'open')
       const closed = yield* changes.close(taskId, url, { deleteBranch: true })
+      assert.strictEqual((yield* onBoard)?.change?.state, 'closed')
       assert.strictEqual(closed.change.state, 'closed')
       assert.isNull(closed.branch)
       assert.strictEqual(github.changes[0]?.state, 'closed')
