@@ -7,6 +7,7 @@ import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@a
 import { BoardView, trackOf } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
 import { pictureUrl } from '../src/main/pictureAddress'
+import { queuedWords } from '../src/renderer/shared/agents'
 import { clock, running } from '../src/renderer/shared/time'
 import { inYoursOf, lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
 import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
@@ -152,6 +153,48 @@ describe('the board’s lanes', () => {
     expect(lanes.ready.map((work) => work.taskId)).toEqual(['t4', 't5'])
     expect(lanes.settled.map((work) => work.taskId)).toEqual(['t6', 't7'])
     expect(yoursOf(lanes)).toBe(3)
+  })
+
+  describe('a task waiting for a free agent', () => {
+    const NOW = '2026-10-01T10:00:00.000Z'
+    const queued = { busy: 4, atOnce: 4 }
+    const waiting = (taskId: string, place: number, overrides: Partial<BoardTask> = {}) =>
+      task({ taskId, threadId: `th-${taskId}`, title: `Waiting ${taskId}`, phase: 'running', queued, planWaits: true, place, ...overrides })
+    const planned = task({
+      taskId: 'p',
+      title: 'Add a retry',
+      phase: 'planned',
+      plan: { ...card().plan!, startsAt: '2026-10-01T10:00:20.000Z' },
+    })
+    const held = task({ taskId: 'h', title: 'Hold off', phase: 'held', plan: { ...card().plan!, startsAt: null } })
+
+    it('goes up next when no step has had an agent, in the order they will start, above planned and held plans', () => {
+      const lanes = lanesOf(board({ tasks: [held, planned, waiting('b', 2), waiting('a', 1), waiting('c', 3)], calls: [] }))
+      expect(lanes.next.map((work) => work.taskId)).toEqual(['a', 'b', 'c', 'p', 'h'])
+      expect(lanes.free).toBe(3)
+      expect(lanes.running).toEqual([])
+    })
+
+    it('stays running when it is mid-work and a later turn waits for a place', () => {
+      const midWork = task({ taskId: 'm', phase: 'running', step: 'implement', queued })
+      const lanes = lanesOf(board({ tasks: [midWork, waiting('a', 1)], calls: [] }))
+      expect(lanes.next.map((work) => work.taskId)).toEqual(['a'])
+      expect(lanes.running.map((work) => work.taskId)).toEqual(['m'])
+    })
+
+    it('moves to running by itself once an agent frees and it starts', () => {
+      const lanes = lanesOf(board({ tasks: [waiting('a', 1, { planWaits: undefined, queued: null, step: 'implement' })], calls: [] }))
+      expect(lanes.next).toEqual([])
+      expect(lanes.running.map((work) => work.taskId)).toEqual(['a'])
+    })
+
+    it('draws a divider over those that start when an agent is free, and keeps today’s wording', () => {
+      const lanes = lanesOf(board({ tasks: [held, planned, waiting('a', 1)], calls: [] }))
+      withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+      expect(screen.getByText('Starts when an agent is free')).toBeTruthy()
+      expect(screen.getByText(queuedWords(queued))).toBeTruthy()
+      expect(screen.getByText('Planned')).toBeTruthy()
+    })
   })
 
   it('keeps a call its own card where no task on the board waits on it, and a waiting task whose call isn’t read yet', () => {

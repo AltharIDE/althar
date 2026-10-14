@@ -5,6 +5,7 @@ import {
   boardCardText,
   type BoardCardProps,
   BoardColumn,
+  BoardDivider,
   BoardLane,
   BoardList,
   BranchChip,
@@ -28,7 +29,7 @@ import {
 import type { ReactNode } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
-import { busyWords, waitsWords } from '../../shared/agents'
+import { busyWords, queuedWords, waitsWords } from '../../shared/agents'
 import { callKindOf, kindWords, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
@@ -52,6 +53,9 @@ export const text = {
   label: 'The project’s work',
   startsIn: (seconds: number) => (seconds <= 0 ? 'Starting' : `Starts in ${seconds}s`),
   held: 'Held. Starts when you say',
+  /** The quiet divider over the tasks started whose first step waits for a free agent, and, under them, the plans. */
+  startsWhenFree: 'Starts when an agent is free',
+  planned: 'Planned',
   step: { implement: 'Implement', review: 'Review' } satisfies Record<PlanStep['key'], string>,
   /** A round of work after its plan, in place of Implement, as the person asked its lead for more. */
   followUp: 'Follow-up',
@@ -385,30 +389,40 @@ export function BoardView({
     ...lanes.calls.map((call) => ({ at: call.createdAt, waiting: null, call })),
   ].toSorted((a, b) => a.at.localeCompare(b.at))
 
+  const nextRow = (work: BoardTask, index: number) => {
+    const startsAt = work.plan?.startsAt ?? null
+    const kind = kindWordOf(work)
+    const free = index < lanes.free && work.queued !== null
+    return (
+      <NextRow
+        key={work.taskId}
+        place={index + 1}
+        task={work.slug}
+        {...(kind === undefined ? {} : { kind })}
+        title={work.title}
+        wait={free || startsAt !== null ? Wait.Workers : Wait.You}
+        reason={
+          free && work.queued !== null
+            ? queuedWords(work.queued)
+            : startsAt === null
+              ? text.held
+              : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
+        }
+        onOpen={() => onOpen(work.threadId)}
+        text={{ task: unnamed }}
+      />
+    )
+  }
+
   return (
     <Board label={text.label}>
       <BoardColumn lane={BoardLane.Next} count={lanes.next.length}>
-        <BoardList>
-          {lanes.next.map((work, index) => {
-            const startsAt = work.plan?.startsAt ?? null
-            const kind = kindWordOf(work)
-            return (
-              <NextRow
-                key={work.taskId}
-                place={index + 1}
-                task={work.slug}
-                {...(kind === undefined ? {} : { kind })}
-                title={work.title}
-                wait={startsAt === null ? Wait.You : Wait.Workers}
-                reason={
-                  startsAt === null ? text.held : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
-                }
-                onOpen={() => onOpen(work.threadId)}
-                text={{ task: unnamed }}
-              />
-            )
-          })}
-        </BoardList>
+        {lanes.free > 0 && <BoardDivider>{text.startsWhenFree}</BoardDivider>}
+        {lanes.free > 0 && <BoardList>{lanes.next.slice(0, lanes.free).map((work, index) => nextRow(work, index))}</BoardList>}
+        {lanes.free > 0 && lanes.free < lanes.next.length && <BoardDivider>{text.planned}</BoardDivider>}
+        {lanes.free < lanes.next.length && (
+          <BoardList>{lanes.next.slice(lanes.free).map((work, index) => nextRow(work, lanes.free + index))}</BoardList>
+        )}
       </BoardColumn>
 
       <BoardColumn lane={BoardLane.Running} count={lanes.running.length}>

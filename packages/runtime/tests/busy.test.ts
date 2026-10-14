@@ -299,9 +299,16 @@ describe('Agents at once', () => {
       const third = yield* started(projectId, 'Third', 'Work on it. [lead:wait]')
       yield* waiting(second.taskId)
       yield* waiting(third.taskId)
+      // Their cards say in what order they will start, the oldest first, for the board to list them so.
+      assert.strictEqual((yield* cardOf(projectId, second.taskId))?.place, 1)
+      assert.strictEqual((yield* cardOf(projectId, third.taskId))?.place, 2)
+      assert.isUndefined((yield* cardOf(projectId, first.taskId))?.place)
       const tasks = yield* Tasks
       yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
       yield* working(second.taskId)
+      // The second started, so the third is first in line, and no card of a task at work has a place.
+      assert.isUndefined((yield* cardOf(projectId, second.taskId))?.place)
+      assert.strictEqual((yield* cardOf(projectId, third.taskId))?.place, 1)
       // One place: the third waits on behind the second.
       assert.deepStrictEqual((yield* attempts(third.taskId)).at(-1), { step: 'implement', state: 'held', holdReason: 'machine_busy' })
       assert.deepStrictEqual(countsOf((yield* cardOf(projectId, third.taskId))?.queued), { busy: 1, atOnce: 1 })

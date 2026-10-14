@@ -17,6 +17,7 @@ import { PermissionCall } from '../task/PermissionCall'
 import { StuckCall } from '../task/StuckCall'
 import { text as boardText, type DockTarget, trackOf } from './BoardView'
 import s from './Board.module.css'
+import { startsWhenFree } from './lanes'
 import type { BoardModel } from './useBoard'
 
 /*
@@ -50,7 +51,7 @@ const stepsOf = (task: BoardTask): ReadonlyArray<PeekStep> => {
   const { steps, at } = trackOf(task)
   const finished = task.phase === 'ready' || task.phase === 'settled'
   // A plan that hasn't started has all its steps to come.
-  const waiting = task.phase === 'planned' || task.phase === 'held'
+  const waiting = task.phase === 'planned' || task.phase === 'held' || startsWhenFree(task)
   return steps.map((label, index) => ({
     label,
     state: waiting ? TrackStep.Next : finished || index < at ? TrackStep.Done : index === at ? TrackStep.Now : TrackStep.Next,
@@ -203,7 +204,7 @@ export function DockView({
         ? boardText.startsIn(Math.ceil((new Date(task.plan.startsAt).getTime() - new Date(now).getTime()) / 1000))
         : null
   return (
-    <Dock label={label} name={text.phase[task.phase]} sub={sub} onClose={onClose}>
+    <Dock label={label} name={startsWhenFree(task) ? text.phase.planned : text.phase[task.phase]} sub={sub} onClose={onClose}>
       <WorkPeek
         title={task.title}
         {...(waiting !== null
