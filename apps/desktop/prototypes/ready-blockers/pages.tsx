@@ -106,7 +106,7 @@ function Compare() {
         ))}
       </ol>
       <Shot label="X1" title="Every state, across every direction" wide>
-        <div className="grid" style={{ gridTemplateColumns: `150px repeat(${DIRECTIONS.length}, 252px)` }}>
+        <div className="grid" style={{ gridTemplateColumns: `116px repeat(${DIRECTIONS.length}, 246px)` }}>
           <div />
           {DIRECTIONS.map((one) => (
             <a key={one.key} className="col" href={pageOf(one.key)}>

@@ -256,7 +256,7 @@ const e: Direction = {
 const detailOf = (standing: Standing): string | null => {
   const [first, ...rest] = stopping(standing)
   const checks = standing.checks
-  const files = (paths: ReadonlyArray<string>) => `with main, in ${paths.map(fileName).join(', ')}`
+  const files = (paths: ReadonlyArray<string>) => `main, in ${paths.map(fileName).join(', ')}`
   switch (first?.kind) {
     case undefined:
       return clearOf(standing).phrase
@@ -268,9 +268,9 @@ const detailOf = (standing: Standing): string | null => {
     case 'running':
       return `${first.passed} of ${first.total} passed`
     case 'conflict':
-      return files(first.files)
+      return `With ${files(first.files)}`
     case 'resolving':
-      return `The lead is on it, ${files(first.files)}`
+      return `The lead is on it, with ${files(first.files)}`
     case 'changes':
       return `By ${first.by}`
     case 'draft':

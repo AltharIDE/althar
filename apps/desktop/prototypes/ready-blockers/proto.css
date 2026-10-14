@@ -16,9 +16,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 36px;
-  max-width: 1720px;
+  max-width: 1760px;
   margin: 0 auto;
-  padding: 24px 40px 80px;
+  padding: 24px 28px 80px;
   font-family: var(--font);
   color: var(--t-1);
 }

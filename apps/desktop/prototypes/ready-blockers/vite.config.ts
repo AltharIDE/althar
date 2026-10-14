@@ -11,7 +11,9 @@ import { defineConfig } from 'vite-plus'
  * home's line wrapped, so a page's direction can change what a ready card
  * says. Throwaway: delete the folder when done.
  *
- *   bunx vp dev --config prototypes/ready-blockers/vite.config.ts   (from apps/desktop)
+ *   ./node_modules/.bin/vp dev --config prototypes/ready-blockers/vite.config.ts   (from apps/desktop)
+ *
+ * The server doesn't always see files change: after an edit, start it again.
  */
 const here = import.meta.dirname
 
