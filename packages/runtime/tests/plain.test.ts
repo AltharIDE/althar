@@ -487,6 +487,70 @@ describe('a plain task of several repositories', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('gives the rest their branch once one has its own, trying again where git couldn’t, and says so in its thread', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const projects = yield* Projects
+      const coordinator = yield* Coordinator
+      const folder = folderOf('api', 'web')
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: folder })
+      const threadId = yield* coordinator.thread(project.projectId)
+      // The coordinator has spoken: what follows is its news.
+      yield* coordinator.say({
+        envelope: yield* Runtime.envelope('thread.send', {}),
+        threadId,
+        body: 'Hello.',
+        disposition: 'after_current',
+      })
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId}`,
+        (rows) => rows.length > 0 && rows.every((row) => row.state !== 'pending' && row.state !== 'delivered'),
+      )
+      const news = Effect.map(
+        Effect.flatMap(modelNamer, (namer) => coordinatorNews(threadId, project.projectId, namer)),
+        (said) => said ?? '',
+      )
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Share the header',
+        repositories: ['api', 'web'],
+        plain: true,
+      })
+      const [api, web] = yield* sql<{ id: string; path: string; branch: string }>`
+        SELECT w.id, w.path, w.branch FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+        WHERE w.task_id = ${created.taskId} ORDER BY b.created_at, b.rowid`
+      if (api === undefined || web === undefined) return assert.fail('no worktrees')
+      const said = Effect.map(notices(created.threadId), (all) => all.map((notice) => notice.title))
+      // Git won't take web's name; its lead writes in api only. The task is a change, and its thread says web has no branch yet.
+      yield* sql`UPDATE workspaces SET branch = 'althar/no..dots' WHERE id = ${web.id}`
+      writeFileSync(join(api.path, 'header.md'), 'A header.\n')
+      assert.deepStrictEqual(yield* branchOnFirstWrite(created.taskId), [api.branch])
+      assert.include(
+        yield* said,
+        `This task changes files now, on its branch ${api.branch}. Althar couldn’t make its branch in web yet, and tries again as its lead’s turn ends.`,
+      )
+      // Tried again at the next check, though nothing is written in web; still refused, it isn't said twice.
+      const before = (yield* said).length
+      assert.deepStrictEqual(yield* branchOnFirstWrite(created.taskId), [])
+      assert.lengthOf(yield* said, before)
+      assert.isNull(gitIn(web.path, 'symbolic-ref', '-q', 'HEAD'))
+      // Once git takes a name, web gets its branch, and the thread says so.
+      yield* sql`UPDATE workspaces SET branch = ${`${web.branch}-web`} WHERE id = ${web.id}`
+      assert.deepStrictEqual(yield* branchOnFirstWrite(created.taskId), [])
+      assert.strictEqual(gitIn(web.path, 'symbolic-ref', '--short', 'HEAD'), `${web.branch}-web`)
+      assert.include(yield* said, `This task is on its branch ${web.branch}-web in web too now.`)
+      const [left] = yield* sql<{ n: number }>`
+        SELECT count(*) AS n FROM workspaces WHERE task_id = ${created.taskId} AND branched_at IS NULL`
+      assert.strictEqual(left?.n, 0)
+      // The coordinator hears that it became a change, on the branch it became one on.
+      assert.include(
+        yield* news,
+        `- ${created.slug} (Share the header): its lead started changing the repository, so it is a change now, on its branch ${api.branch}. If`,
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('says each repository has no branch yet, and stays so where git can’t make one', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
