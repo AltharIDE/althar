@@ -7,11 +7,18 @@ export type Os = 'mac' | 'windows' | 'linux'
 
 export const OS_NAME: Record<Os, string> = { mac: 'macOS', windows: 'Windows', linux: 'Linux' }
 
+/** The system `?platform=` in the address asks for, to try each by hand; null where none is. */
+export const askedOs = (): Os | null => {
+  if (typeof window === 'undefined') return null
+  const asked = new URLSearchParams(window.location.search).get('platform')
+  return asked === 'mac' || asked === 'windows' || asked === 'linux' ? asked : null
+}
+
 /** The system this page is read on, when it is a desktop one; a phone or tablet says nothing. `?platform=` overrides it. */
 export const detectOs = (): Os | null => {
   if (typeof navigator === 'undefined') return null
-  const asked = new URLSearchParams(window.location.search).get('platform')
-  if (asked === 'mac' || asked === 'windows' || asked === 'linux') return asked
+  const asked = askedOs()
+  if (asked) return asked
   const ua = navigator.userAgent
   if (/Android|iPhone|iPad|iPod/i.test(ua)) return null
   if (/Windows/i.test(ua)) return 'windows'

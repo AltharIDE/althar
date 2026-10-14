@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { LATEST_RELEASE, LINKS } from '../content/facts'
-import { detectOs, type Os, OS_NAME } from '../shared/OsMark'
+import { askedOs, detectOs, type Os, OS_NAME } from '../shared/OsMark'
 
 /*
  * The download for the system the page is read on: the latest published
@@ -70,6 +70,16 @@ interface Found {
   href: string
 }
 
+/** The reader's installer, once the release and the chip are known; null where the link is the releases page. */
+async function find(): Promise<Found | null> {
+  const os = detectOs()
+  if (!os) return null
+  // Asked for by hand, the address stands for the whole system, chip included: the build's, not the one under the browser.
+  const [assets, arch] = await Promise.all([assetsOnce(), askedOs() ? null : archOnce()])
+  const asset = pickAsset(os, arch, assets)
+  return asset && { os, href: asset.browser_download_url }
+}
+
 /**
  * The download link: the latest release's installer for the reader's
  * system (`os`), or the releases page with `os` null. `pending` is true
@@ -80,15 +90,8 @@ export function useDownload() {
   const [found, setFound] = useState<Found | null>()
   useEffect(() => {
     let live = true
-    const os = detectOs()
-    if (!os) {
-      setFound(null)
-      return
-    }
-    void Promise.all([assetsOnce(), archOnce()]).then(([assets, arch]) => {
-      if (!live) return
-      const asset = pickAsset(os, arch, assets)
-      setFound(asset && { os, href: asset.browser_download_url })
+    void find().then((it) => {
+      if (live) setFound(it)
     })
     return () => {
       live = false
