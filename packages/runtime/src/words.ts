@@ -297,6 +297,8 @@ const cantMerge = {
     `It conflicts with the default branch, in ${files}. The lead is resolving it, as the project’s rules say; merge again once it has.`,
   busy: (where: string) =>
     `The default branch is checked out in ${where} with changes not committed. Commit or put them away, then merge again.`,
+  unreadable: (detail: string) =>
+    `Althar couldn't check the default branch's checkout or its submodules, so nothing was merged. The task's branches stay as they are. Resolve the status failure before trying again.\n${detail}`,
   untracked: (files: string) => `The merge would overwrite files git doesn’t track: ${files}. Move them away, then merge again.`,
   moved: (branch: string) => `${branch} moved while Althar was merging, so nothing was merged. Merge again.`,
   missing: (branch: string) => `This Mac has no ${branch} branch to merge into.`,
