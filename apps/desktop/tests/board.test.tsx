@@ -640,7 +640,7 @@ describe('every state the board shows', () => {
     // A step held for a usage limit says whom it waits for, and when they're back.
     expect(screen.getByText(`Waits for Codex, back at ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
     // One waiting for a free agent says so, and what for.
-    expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
+    expect(screen.getByText('4 of 4 tasks at work on this Mac')).toBeTruthy()
     expect(screen.getByText('Waiting')).toBeTruthy()
     expect(screen.getByText("Althar couldn't open the pull request.")).toBeTruthy()
     expect(screen.getByText(/isn't connected to this repository's host/)).toBeTruthy()
@@ -684,6 +684,34 @@ describe('every state the board shows', () => {
     expect(screen.getByText('Merge conflict')).toBeTruthy()
     expect(screen.getByText(why)).toBeTruthy()
     expect(screen.getAllByText('Ready to accept')).toHaveLength(1)
+  })
+
+  it('keeps a task whose lead finished where its work put it while a follow-up for it waits for a place, saying so', () => {
+    const waits = { busy: 6, atOnce: 6 }
+    const lanes = lanesOf(
+      board({
+        tasks: [
+          task({ taskId: 'w1', threadId: 'thw1', title: 'Ready, more asked', phase: 'ready', followUpWaits: waits }),
+          task({
+            taskId: 'w2',
+            threadId: 'thw2',
+            title: 'Done, more asked',
+            phase: 'settled',
+            state: 'done',
+            settledAt: '2026-10-01T09:30:00.000Z',
+            followUpWaits: waits,
+          }),
+        ],
+        calls: [],
+      }),
+    )
+    // In Needs you and Done, not Running.
+    expect(lanes.ready.map((work) => work.taskId)).toEqual(['w1'])
+    expect(lanes.settled.map((work) => work.taskId)).toEqual(['w2'])
+    expect(lanes.running).toEqual([])
+    withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+    expect(screen.getAllByText('Follow-up waiting: 6 of 6 tasks at work on this Mac')).toHaveLength(2)
+    expect(screen.queryByText('Waiting')).toBeNull()
   })
 
   it('says how long work has run', () => {

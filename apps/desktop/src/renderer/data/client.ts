@@ -142,7 +142,7 @@ export interface Client {
   readonly getSettings: () => Promise<AppSettings>
   /** Althar as co-author of the commits and pull requests it sends, or not. */
   readonly setCoAuthor: (on: boolean) => Promise<void>
-  /** How many agents work at once on this machine: the person's number, or null for the default again. */
+  /** How many tasks work at once on this machine: the person's number, or null for the default again. */
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>

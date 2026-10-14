@@ -32,7 +32,7 @@ import {
   TitleBar,
 } from '@althar/ui'
 
-import { queuedWords, waitsWords } from '../../shared/agents'
+import { followUpWords, queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { Holders } from '../../shared/Holders'
@@ -140,7 +140,8 @@ export const text = {
 /**
  * Where a task stands, for its header: the step it is on, by what it does
  * there; a step held for a usage limit says whom it waits for, and until when;
- * one waiting for a free agent, that every agent this computer runs at once is busy;
+ * one waiting for a free place, that every task this computer runs at once is at work;
+ * one whose follow-up waits for a place, that, where its work put it;
  * ready, it waits on the person to accept it.
  */
 export const statusOf = (
@@ -155,6 +156,13 @@ export const statusOf = (
   const doing =
     step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
+  // A follow-up waiting for a place leaves the task where its work put it, and says so (ADR-037).
+  const followUp = snapshot.task.followUpWaits
+  if (followUp !== undefined && snapshot.task.handedBack == null)
+    return {
+      status: phase === 'settled' ? TaskStatus.Done : phase === 'stopped' ? TaskStatus.Stopped : TaskStatus.Yours,
+      state: followUpWords(followUp),
+    }
   // Ready, but its lead couldn't resolve a conflict with its default branch: it needs the person before it can be accepted.
   if (phase === 'ready' && snapshot.task.handedBack != null) return { status: TaskStatus.Yours, state: text.needsYou }
   // A review drafted is the person's to post (DEV-96).
@@ -540,7 +548,7 @@ export function TaskView({
         </p>
       )}
       {session === null && model.agentsKnown && model.agents.length === 0 && <p className={s.handover}>{text.needsAgent}</p>}
-      <Holders holders={snapshot.task.queued?.holders} onStop={(holder, id) => void model.stopHolding(holder, id)} />
+      <Holders holders={snapshot.task.queued?.holders} />
       {waiting !== null && (
         <p className={s.handover}>
           {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}

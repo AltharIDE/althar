@@ -349,7 +349,7 @@ describe('the Talk room', () => {
     const waitingCard = card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4 }, planWaits: true })
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
     withServices(<Project />, client)
-    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
+    expect(await screen.findByText('Waiting: 4 of 4 tasks at work on this Mac')).toBeTruthy()
     // Nothing to start or hold: it starts on its own once an agent is free.
     expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Hold' })).toBeNull()
@@ -364,6 +364,14 @@ describe('the Talk room', () => {
         null,
       ),
     )
+  })
+
+  it('keeps a finished task’s card ready while a follow-up for its lead waits for a place, and says so', async () => {
+    const readyCard = card({ phase: 'ready', step: null, queued: null, followUpWaits: { busy: 6, atOnce: 6 } })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(readyCard)] })) })
+    withServices(<Project />, client)
+    expect(await screen.findByText('Follow-up waiting: 6 of 6 tasks at work on this Mac')).toBeTruthy()
+    expect(screen.queryByText(/^Waiting: /)).toBeNull()
   })
 
   it('shows the effort the coordinator picked for a step as one the person chose, keeps it, and lets the person change it', async () => {

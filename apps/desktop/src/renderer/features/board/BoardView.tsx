@@ -28,7 +28,7 @@ import {
 import type { ReactNode } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
-import { busyWords, waitsWords } from '../../shared/agents'
+import { busyWords, followUpWords, waitsWords } from '../../shared/agents'
 import { callKindOf, kindWords, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
@@ -286,7 +286,13 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
  * what it handed back, or else its branch, where its lead wrote in the repository: on this Mac, as no pull request is coming.
  */
 export const readyCardOf = (work: BoardTask): Card => {
-  const base = { status: TaskStatus.Yours, kind: kindOf(work), title: work.title }
+  const base = {
+    status: TaskStatus.Yours,
+    kind: kindOf(work),
+    title: work.title,
+    // A follow-up for its lead waits for a place: it stays here, and says so (ADR-037).
+    ...(work.followUpWaits === undefined ? {} : { why: followUpWords(work.followUpWaits) }),
+  }
   switch (work.kind) {
     case 'plain': {
       const pictures = (work.handed?.pictures ?? []).flatMap((picture, index) =>
@@ -448,11 +454,13 @@ export function BoardView({
                 task={work.slug}
                 {...(kind === undefined ? {} : { kind })}
                 title={work.title}
-                {...(named === null
-                  ? work.branch === null
-                    ? {}
-                    : { meta: work.branch }
-                  : { meta: change?.state === 'merged' ? text.merged(named) : text.closed(named) })}
+                {...(work.followUpWaits !== undefined
+                  ? { meta: followUpWords(work.followUpWaits) }
+                  : named === null
+                    ? work.branch === null
+                      ? {}
+                      : { meta: work.branch }
+                    : { meta: change?.state === 'merged' ? text.merged(named) : text.closed(named) })}
                 at={work.settledAt === null ? '' : ago(work.settledAt, new Date(now))}
                 onOpen={() => onOpen(work.threadId)}
                 text={{ task: unnamed }}

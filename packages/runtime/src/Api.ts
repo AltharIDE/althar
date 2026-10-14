@@ -804,7 +804,7 @@ export const handlers = Api.toLayer(
               const [on] = yield* sql<{ kind: string | null }>`
                 SELECT t.kind FROM attention_requests q LEFT JOIN threads t ON t.id = json_extract(q.payload, '$.threadId')
                 WHERE q.id = ${attentionId}`
-              // A task's lead or reviewer carries on with the answer once it has a place among the agents at work here (Runs).
+              // A task's lead or reviewer carries on with the answer once it has a place among the tasks at work here (Runs).
               const answer =
                 on?.kind === 'coordinator'
                   ? Effect.gen(function* () {

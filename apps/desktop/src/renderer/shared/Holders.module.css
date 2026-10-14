@@ -1,11 +1,4 @@
-/* Under where a task says it waits: who holds the places, and the servers to stop. */
-.holders {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
+/* Under where a task says it waits: the tasks that hold the places. */
 .held {
   margin: 0;
   color: var(--t-2);

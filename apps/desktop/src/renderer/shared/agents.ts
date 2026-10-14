@@ -20,15 +20,18 @@ export const brandOf = (agentId: string): Brand | undefined => BRANDS[agentId]
 export const waitsWords = (agent: string, at: string) => `Waits for ${agent}, back at ${at}`
 
 /**
- * What work waiting for a free agent waits for (ADR-032): every agent this
- * computer runs at once is busy. More busy than that, after the person
- * lowered the number, says both.
+ * What work waiting for a free place waits for (ADR-032, ADR-037): every task
+ * this computer runs at once is at work. More at work than that, after the
+ * person lowered the number, says both.
  */
 export const queuedWords = (queued: Queued, where: string = device.this) => `Waiting: ${busyWords(queued, where)}`
 
-/** How busy this computer's agents are, as work that waits for one says it. */
+/** How many tasks this computer has at work, as work that waits for a place says it. */
 export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this) =>
-  busy > atOnce ? `${busy} agents busy on ${where}, which runs ${atOnce} at once` : `${busy} of ${atOnce} agents busy on ${where}`
+  busy > atOnce ? `${busy} tasks at work on ${where}, which runs ${atOnce} at once` : `${busy} of ${atOnce} tasks at work on ${where}`
+
+/** A follow-up for a lead that finished, waiting for a place (ADR-037): its task stays where its work put it, and says so. */
+export const followUpWords = (queued: Queued, where: string = device.this) => `Follow-up waiting: ${busyWords(queued, where)}`
 
 /**
  * The same, short, for a project's tasks on the home, which is this
@@ -36,7 +39,7 @@ export const busyWords = ({ busy, atOnce }: Queued, where: string = device.this)
  * project's name.
  */
 export const queuedOfWords = (n: number, { busy, atOnce }: Queued) =>
-  `${n === 1 ? 'Waiting' : `${n} waiting`}: ${busy > atOnce ? `${busy} agents busy, ${atOnce} at once` : `${busy} of ${atOnce} agents busy`}`
+  `${n === 1 ? 'Waiting' : `${n} waiting`}: ${busy > atOnce ? `${busy} tasks at work, ${atOnce} at once` : `${busy} of ${atOnce} tasks at work`}`
 
 /** What an agent signs in to in the browser, as the window names it: the plan, and the site that asks. */
 const SIGN_IN: Readonly<Record<string, { readonly plan: string; readonly host: string }>> = {

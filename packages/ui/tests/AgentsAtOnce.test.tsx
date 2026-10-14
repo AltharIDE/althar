@@ -9,7 +9,7 @@ const MACHINE = { count: 4, memory: 16, cores: 10 }
 function track(props: Partial<Parameters<typeof AgentsAtOnce>[0]> = {}) {
   const onChange = vi.fn()
   render(<AgentsAtOnce count={4} machine={MACHINE} onChange={onChange} {...props} />)
-  const slider = screen.getByRole('slider', { name: 'Agents at once' })
+  const slider = screen.getByRole('slider', { name: 'Tasks at once' })
   vi.spyOn(slider, 'getBoundingClientRect').mockReturnValue({ left: 0, width: 150 } as DOMRect)
   return { slider, onChange }
 }

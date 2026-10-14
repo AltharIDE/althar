@@ -1,6 +1,7 @@
 # ADR-032: A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn
 
-- **Status:** Accepted
+- **Status:** Accepted; what counts, and its follow-up below, superseded by
+  [ADR-037](037-a-task-keeps-its-place-until-its-work-comes-back.md)
 - **Date:** 2026-10-13
 - **Owner:** Repository maintainers
 - **Context:** Althar set no limit on tasks at once, and had no queue

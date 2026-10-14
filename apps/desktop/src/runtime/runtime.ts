@@ -197,7 +197,7 @@ const program = Effect.gen(function* () {
           // Nothing opens in Terminal while the tests drive the app.
           openTerminal: () => Effect.succeed(false),
           openUrl: () => Effect.succeed(false),
-          // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
+          // How many tasks work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
           busy: { machine: machineIn(process.env.ALTHAR_MACHINE) },
         }
       : undefined

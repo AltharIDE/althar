@@ -1263,26 +1263,19 @@ export class Queries extends Context.Service<
             : { id: row.id, sequence: row.sequence, agentId: null, createdAt: row.createdAt, kind: 'task', content },
         )
 
-      /** Why work waits for a place: how many are busy, and who holds them. What a holder left running is listed where it alone keeps the place, to stop it from here. */
+      /** Why work waits for a place: how many tasks are at work, and which hold the places. */
       const queuedNow = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
-        const sessions = yield* Sessions
         const { busy, atOnce, holders } = yield* (yield* Busy).now
         return {
           busy,
           atOnce,
           holders: yield* Effect.forEach(holders, (holder) =>
-            Effect.gen(function* () {
-              const [task] = yield* sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${holder.taskId}`
-              const live = holder.kept && holder.threadId !== null ? yield* sessions.running(holder.threadId) : Option.none()
-              return {
-                taskId: holder.taskId,
-                title: task?.title ?? '',
-                threadId: holder.threadId,
-                kept: holder.kept,
-                running: Option.isSome(live) ? live.value.background.filter((left) => left.ended === null) : [],
-              }
-            }),
+            Effect.map(sql<{ title: string }>`SELECT title FROM tasks WHERE id = ${holder.taskId}`, ([task]) => ({
+              taskId: holder.taskId,
+              title: task?.title ?? '',
+              threadId: holder.threadId,
+            })),
           ),
         }
       })
@@ -1380,7 +1373,7 @@ export class Queries extends Context.Service<
               r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1) AS step,
-              -- A step held until an agent's usage limit resets, or until a place among the agents at work here frees.
+              -- A step held until an agent's usage limit resets, or until a place among the tasks at work here frees.
               (SELECT a.output FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                 WHERE e.run_id = r.id AND a.state = 'held' ORDER BY a.admitted_at DESC LIMIT 1) AS held,
               (SELECT a.hold_reason FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
@@ -1425,8 +1418,11 @@ export class Queries extends Context.Service<
             task.starting > 0 ||
             Option.exists(lead, (session) => session.turnRunning) ||
             Option.exists(reviewer, (session) => session.turnRunning)
-          // Waiting for a place among the agents at work on this machine: under way, and it starts on its own.
-          const queued = task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || task.turnWaits > 0
+          // A follow-up for a lead that finished, waiting for a place, moves nothing: the task stays where its work put it (ADR-037).
+          const followUpWaits = task.turnWaits > 0 && task.runState !== null && task.runState !== 'running'
+          // Waiting for a place among the tasks at work on this machine: under way, and it starts on its own.
+          const queued =
+            task.heldFor === 'machine_busy' || task.roundWaits > 0 || task.answersWait > 0 || (task.turnWaits > 0 && !followUpWaits)
           const unshipped =
             after.length === 0
               ? null
@@ -1528,6 +1524,7 @@ export class Queries extends Context.Service<
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow : null,
             ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
+            ...(followUpWaits && task.state !== 'abandoned' ? { followUpWaits: yield* queuedNow } : {}),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
@@ -1892,6 +1889,7 @@ export class Queries extends Context.Service<
               handedBack: card?.handedBack ?? null,
               waits: card?.waits ?? null,
               queued: card?.queued ?? null,
+              ...(card?.followUpWaits === undefined ? {} : { followUpWaits: card.followUpWaits }),
               steps: card?.plan?.steps ?? [],
               lead: last ?? (planned === undefined ? null : { agentId: planned.agentId, model: planned.model, account: null }),
               step: card?.step ?? null,

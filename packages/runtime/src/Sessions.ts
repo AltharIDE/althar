@@ -224,7 +224,7 @@ interface Running {
   readonly wake: Queue.Queue<void>
   /** Held while a turn is delivered, so stopping waits for the turn to be recorded. */
   readonly delivering: Semaphore.Semaphore
-  /** Told once the next turn is under way: the place it was given among the agents at work here is then its session's. */
+  /** Told once the next turn is under way: the place it was given among the tasks at work here is then its session's. */
   begun?: Effect.Effect<void> | undefined
   readonly stopRequest: Deferred.Deferred<StopRequest>
   readonly ended: Deferred.Deferred<void>
@@ -470,9 +470,8 @@ export class Sessions extends Context.Service<
     outputSoFar(threadId: string, itemId: string): Effect.Effect<Option.Option<OutputSoFar>>
     /**
      * Every session on a task's threads, its lead's or a step's, with whether
-     * it is in a turn and whether something it left running still runs: what
-     * counts toward the agents at work on this machine (Busy.ts). Never the
-     * coordinator's.
+     * it is in a turn: what keeps its task at work on this machine (Busy.ts).
+     * Never the coordinator's.
      */
     readonly onTasks: Effect.Effect<
       ReadonlyArray<{
@@ -481,14 +480,12 @@ export class Sessions extends Context.Service<
         /** A task's reviewer, not its lead. */
         readonly reviewer: boolean
         readonly turnRunning: boolean
-        readonly background: boolean
-        /** The agent's process, where it runs as one: what its left running is a part of, and is read for CPU (Busy.ts). */
-        readonly pid: number | null
       }>
     >
     /**
      * What a lead's or a reviewer's turns wait for before they are delivered:
-     * a place among the agents at work on this machine (Busy.ts). `work`
+     * a place among the tasks at work on this machine, where their task has
+     * none (Busy.ts). `work`
      * delivers what the thread has queued; the gate runs it now, or once
      * there is a place.
      */
@@ -1204,7 +1201,7 @@ export class Sessions extends Context.Service<
                   }
                 }),
               )
-            // A lead's or a reviewer's turns, one at a time, each waiting for a place among the agents at work here: what
+            // A lead's or a reviewer's turns, one at a time, each waiting for a place where its task has none: what
             // is still queued after one wakes it again, and asks again.
             if (running.stopping || !(running.brief !== undefined || (yield* hasQueued(thread.threadId)))) return
             yield* gate(
@@ -2395,8 +2392,6 @@ export class Sessions extends Context.Service<
                     taskId: running.thread.taskId,
                     reviewer: running.thread.role === 'reviewer',
                     turnRunning: running.turnRunning,
-                    background: [...running.background.values()].some((left) => left.ended === null),
-                    pid: running.connection.process?.pid ?? null,
                   },
                 ],
           ),

@@ -6,7 +6,7 @@ import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, W
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { queuedWords, waitsWords } from '../../shared/agents'
+import { followUpWords, queuedWords, waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
 import { callKindOf, whereOf } from '../../shared/calls'
 import { checkOf } from '../../shared/checks'
@@ -210,11 +210,13 @@ export function DockView({
           ? { note: waiting }
           : task.queued !== null
             ? { note: queuedWords(task.queued) }
-            : task.waits !== null
-              ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until)) }
-              : task.summary === null
-                ? {}
-                : { note: task.summary.split('\n')[0] ?? '' })}
+            : task.followUpWaits !== undefined
+              ? { note: followUpWords(task.followUpWaits) }
+              : task.waits !== null
+                ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until)) }
+                : task.summary === null
+                  ? {}
+                  : { note: task.summary.split('\n')[0] ?? '' })}
         status={
           task.phase === 'waiting'
             ? TaskStatus.Yours

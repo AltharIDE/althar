@@ -138,7 +138,7 @@ export function KeepAwake({ on, onChange, onBattery, onBatteryChange, text }: Ke
   )
 }
 
-/* ---- agents at once ------------------------------------------------------------- */
+/* ---- tasks at once -------------------------------------------------------------- */
 
 /** The machine the default comes from: how many it runs at once by default, its memory in GB and its cores. */
 export interface AtOnceMachine {
@@ -158,7 +158,7 @@ export interface AgentsAtOnceText {
 }
 
 export const agentsAtOnceText: AgentsAtOnceText = {
-  title: 'Agents at once',
+  title: 'Tasks at once',
   note: (n, { count, memory, cores }) => {
     if (n === count) return `${n}: this Mac has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`
     if (n === 1) return '1: one at a time. The calmest this Mac can be.'
@@ -171,7 +171,7 @@ export const agentsAtOnceText: AgentsAtOnceText = {
 }
 
 export interface AgentsAtOnceProps {
-  /** How many tasks' agents work at once now: the person's number, else the default. */
+  /** How many tasks work at once now: the person's number, else the default. */
   count: number
   /** Whether the person's own number is kept, as it may be the default's number too. Without it, a number other than the default is. */
   own?: boolean
@@ -185,7 +185,7 @@ export interface AgentsAtOnceProps {
 }
 
 /**
- * How many tasks' agents work at once on this machine, and why: a stepped
+ * How many tasks work at once on this machine, and why: a stepped
  * track from one to the most, the default from its memory and cores marked
  * on it. The thumb clicks into the default as it passes; past it the track,
  * the number and the row's glyph warm, and the glyph breathes faster, the

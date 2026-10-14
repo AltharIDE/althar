@@ -286,10 +286,26 @@ below): what it commits goes to the task's open pull request when the person
 pushes it, or, once the last merged or closed, into a **new pull request**
 the person opens from the task, on a new branch from the default branch as
 the host has it, its new commits cherry-picked onto it, never forced. A
-quick task's round offers none. Between turns a round takes no place among the agents at work
-([ADR-032](../decisions/032-agents-at-once-on-this-machine.md)). Whenever an
-agent on a task is in a turn, starting, or waiting for a place, its card says
-Running, whatever the task was.
+quick task's round offers none. Between its lead's turns a round takes no
+place among the tasks at work
+([ADR-037](../decisions/037-a-task-keeps-its-place-until-its-work-comes-back.md)).
+Whenever an agent on a task is in a turn or starting, its card says Running,
+whatever the task was; a follow-up only waiting for a place leaves it where
+its work put it, saying so.
+
+### Places among the tasks at work
+
+A machine runs as many tasks at once as the person's number, or the default
+its cores and memory give
+([ADR-032](../decisions/032-agents-at-once-on-this-machine.md)). A task takes
+one place when its run's first step starts and keeps it until the run ends,
+through its steps, its lead's turns between them, and while it waits on the
+person; a step held for a usage limit gives it up
+([ADR-037](../decisions/037-a-task-keeps-its-place-until-its-work-comes-back.md)).
+The place is read from the run and the live sessions, never kept apart. What
+waits for one starts in order: what was at work when Althar stopped, what
+the person did, the work of a task already under way, then the rest, each
+oldest first.
 
 ### A quick task's first write, and making it a change
 

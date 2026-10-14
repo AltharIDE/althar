@@ -150,8 +150,6 @@ export interface TaskModel {
   readonly discardReview: (draftId: string) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
-  /** Stops a command another task's lead left running, which keeps a place this task waits for. */
-  readonly stopHolding: (threadId: string, id: string) => Promise<void>
   /** Clears one that ended by itself from the list. */
   readonly clearBackground: (id: string) => Promise<void>
   /** Runs what it built, with no agent, in its worktree. */
@@ -562,7 +560,6 @@ export const useTask = (threadId: string): TaskModel => {
     postReview: (draftId) => act(() => client.postReviewDraft(draftId)),
     discardReview: (draftId) => act(() => client.discardReviewDraft(draftId)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
-    stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),
     runProject: () => act(async () => (snapshot === null ? undefined : client.runProject(snapshot.project.id, snapshot.task.id, threadId))),
     stopLaunch: (id) => act(() => client.stopLaunch(id)),

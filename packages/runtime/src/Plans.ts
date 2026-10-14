@@ -45,7 +45,7 @@ export class Plans extends Context.Service<
     }): Effect.Effect<string, unknown>
     /**
      * Starts a proposed plan now: its first step is under way (`running`), or
-     * waits for a place among the agents at work on this machine (`waiting`);
+     * waits for a place among the tasks at work on this machine (`waiting`);
      * null where it no longer stood to start.
      */
     start(planId: string, actorId: ActorId): Effect.Effect<'running' | 'waiting' | null, unknown>
@@ -54,7 +54,7 @@ export class Plans extends Context.Service<
     /**
      * Changes a proposed plan's steps (who does them, or which are skipped),
      * and what happens when the work is done; or a started one's, while its
-     * first step waits for a place among the agents at work here (ADR-032).
+     * first step waits for a place among the tasks at work here (ADR-032).
      */
     change(planId: string, steps: ReadonlyArray<PlanStep>, actorId: ActorId, end?: TaskEnd | null): Effect.Effect<void, unknown>
   }

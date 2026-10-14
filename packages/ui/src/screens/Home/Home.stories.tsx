@@ -291,7 +291,7 @@ export const WaitingForAFreeAgent: Story = {
     looked: 'an hour ago',
     projects: PROJECTS_QUIET,
     text: {
-      projects: { queued: (n) => `${n === 1 ? 'Waiting' : `${n} waiting`}: 4 of 4 agents busy` },
+      projects: { queued: (n) => `${n === 1 ? 'Waiting' : `${n} waiting`}: 4 of 4 tasks at work` },
     },
   },
   render: (args) => (
@@ -301,7 +301,7 @@ export const WaitingForAFreeAgent: Story = {
   ),
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
-    await expect(canvas.getByText('2 waiting: 4 of 4 agents busy')).toBeInTheDocument()
+    await expect(canvas.getByText('2 waiting: 4 of 4 tasks at work')).toBeInTheDocument()
     // Waiting isn't moving: the four at work are.
     await expect(canvas.getByText('4 tasks moving in 3 projects.')).toBeInTheDocument()
   },

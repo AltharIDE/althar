@@ -2089,19 +2089,27 @@ describe('a task', () => {
       status: TaskStatus.Paused,
       state: `Waits for Codex, back at ${clock(until)}`,
     })
-    // One waiting for a free agent says how many are busy, of how many this Mac runs at once; past that, both.
+    // One waiting for a free place says how many tasks are at work, of how many this Mac runs at once; past that, both.
     expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 4, atOnce: 4 } } })).toEqual({
       status: TaskStatus.Queued,
-      state: 'Waiting: 4 of 4 agents busy on this Mac',
+      state: 'Waiting: 4 of 4 tasks at work on this Mac',
     })
     expect(statusOf({ ...base, task: { ...base.task, queued: { busy: 6, atOnce: 2 } } }).state).toBe(
-      'Waiting: 6 agents busy on this Mac, which runs 2 at once',
+      'Waiting: 6 tasks at work on this Mac, which runs 2 at once',
     )
     expect(statusOf(running())).toEqual({ status: TaskStatus.Running, state: 'Working' })
     expect(statusOf({ ...base, session: null })).toEqual({ status: TaskStatus.Stopped, state: 'Stopped' })
     // Ready, accepting it is the person's; settled, it is done.
     expect(statusOf({ ...base, task: { ...base.task, phase: 'ready' } })).toEqual({ status: TaskStatus.Yours, state: 'Ready for you' })
     expect(statusOf({ ...base, task: { ...base.task, phase: 'settled' } })).toEqual({ status: TaskStatus.Done, state: 'Done' })
+    // A follow-up waiting for a place leaves it where its work put it, and says so.
+    const followUpWaits = { busy: 6, atOnce: 6 }
+    expect(statusOf({ ...base, task: { ...base.task, phase: 'ready', followUpWaits } })).toEqual({
+      status: TaskStatus.Yours,
+      state: 'Follow-up waiting: 6 of 6 tasks at work on this Mac',
+    })
+    expect(statusOf({ ...base, task: { ...base.task, phase: 'settled', followUpWaits } }).status).toBe(TaskStatus.Done)
+    expect(statusOf({ ...base, task: { ...base.task, phase: 'stopped', followUpWaits } }).status).toBe(TaskStatus.Stopped)
     // Abandoned, it says so.
     expect(statusOf({ ...base, task: { ...base.task, phase: 'settled', state: 'abandoned' } })).toEqual({
       status: TaskStatus.Done,

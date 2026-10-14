@@ -51,29 +51,6 @@ export const treeCpuOf = (listing: string, pid: number): number | null => {
 }
 
 /**
- * Whether a process tree did work between two readings `ms` apart, as far as
- * `ps` shows it. The total of a tree falls when a process in it ends, taking
- * its time with it, so it can't be told by subtracting totals: work is a
- * process that started or ended since, or CPU time rising, process by
- * process, by at least `share` of a core over the time. What `ps` can't show
- * is a worker that started, worked and ended between the two readings: its
- * time is gone with it, and its parent's own time doesn't include it. That
- * work is caught only by a reading that finds the worker alive, so the readings
- * are often (Busy.ts) and a tree counts until none has shown work for a
- * while.
- */
-export const workedBetween = (before: ReadonlyMap<number, number>, after: ReadonlyMap<number, number>, ms: number, share: number) => {
-  if (before.size !== after.size) return true
-  let spent = 0
-  for (const [pid, cpu] of after) {
-    const was = before.get(pid)
-    if (was === undefined) return true
-    spent += Math.max(0, cpu - was)
-  }
-  return spent >= share * ms
-}
-
-/**
  * The CPU time each of `pids` and everything it started have used, in
  * milliseconds, or null once it's gone or `ps` can't say: from one listing,
  * however many there are.
@@ -83,17 +60,5 @@ export const treeCpus = (pids: ReadonlyArray<number>): Effect.Effect<ReadonlyMap
     if (pids.length === 0) return resume(Effect.succeed(new Map()))
     execFile('ps', ['-A', '-o', 'pid=,ppid=,time='], { timeout: 10_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
       resume(Effect.succeed(new Map(pids.map((pid) => [pid, error === null ? treeCpuOf(stdout, pid) : null]))))
-    })
-  })
-
-/**
- * The CPU time of each process in the tree of each of `pids`, by process, or
- * null once it's gone or `ps` can't say: from one listing, however many there are.
- */
-export const treeMembers = (pids: ReadonlyArray<number>): Effect.Effect<ReadonlyMap<number, ReadonlyMap<number, number> | null>> =>
-  Effect.callback<ReadonlyMap<number, ReadonlyMap<number, number> | null>>((resume) => {
-    if (pids.length === 0) return resume(Effect.succeed(new Map()))
-    execFile('ps', ['-A', '-o', 'pid=,ppid=,time='], { timeout: 10_000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
-      resume(Effect.succeed(new Map(pids.map((pid) => [pid, error === null ? treeMembersOf(stdout, pid) : null]))))
     })
   })

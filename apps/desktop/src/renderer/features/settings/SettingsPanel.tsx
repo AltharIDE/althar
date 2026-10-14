@@ -79,7 +79,7 @@ import { type PostTeamReviewsModel, usePostTeamReviews } from './usePostTeamRevi
  * Settings, as a panel from the home's bar, over the home: the kit's Control
  * Center, each part as large as it matters. Round switches across the top,
  * for keeping the Mac awake while work runs and for notifications, each
- * opening out to the rest of its settings: on battery too, how many agents
+ * opening out to the rest of its settings: on battery too, how many tasks
  * work at once on this Mac and why, and the editor files open in; and which
  * notifications, the Dock's count and a sound.
  * Under them the agents, large, each with a word on where it stands; the
@@ -276,7 +276,7 @@ export function SettingsView({
   edge: EdgePlaceModel
   /** Null until the settings are read. */
   coAuthor: CoAuthorModel | null
-  /** How many agents work at once on this Mac, and why; null until the settings are read. */
+  /** How many tasks work at once on this Mac, and why; null until the settings are read. */
   atOnce: AgentsAtOnceModel | null
   /** Whether a review of the team's pull request posts itself once drafted; null until the settings are read. */
   postTeamReviews?: PostTeamReviewsModel | null

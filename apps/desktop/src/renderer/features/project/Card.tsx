@@ -3,7 +3,7 @@ import { useState } from 'react'
 import type { AgentStatus, ChangeSummary, PlanStep, TaskEnd as End } from '@althar/contracts'
 import { type IssueRefProps, type LaunchStep, TaskCard, TaskEnd, TaskLaunch, TaskStatus } from '@althar/ui'
 
-import { queuedWords, waitsWords } from '../../shared/agents'
+import { followUpWords, queuedWords, waitsWords } from '../../shared/agents'
 import { type NameModel, useEffortNames, useModelNames } from '../../shared/modelNames'
 import { Holders } from '../../shared/Holders'
 import { ModelChoice } from '../../shared/ModelChoice'
@@ -56,8 +56,6 @@ export interface CardActions {
   readonly onHold: (planId: string) => void
   readonly onChange: (planId: string, steps: ReadonlyArray<PlanStep>, end?: End | null) => void
   readonly onOpen: (threadId: string) => void
-  /** Stops a command a task's lead left running, from the task that waits for the place it keeps. */
-  readonly onStopBackground: (threadId: string, id: string) => void
 }
 
 type Plan = NonNullable<TaskCardContent['plan']>
@@ -154,14 +152,14 @@ const pullRequestsOf = (latest: ChangeSummary, earlier: ReadonlyArray<ChangeSumm
   return earlier.length === 0 ? name(latest) : `${name(latest)}, after ${earlier.map(name).join(' and ')}`
 }
 
-/** A task's card, with, while it waits for a free agent, who holds the places. */
+/** A task's card, with, while it waits for a free place, who holds the places. */
 export function Card({ card, actions }: { card: TaskCardContent; actions: CardActions }) {
   const holders = card.queued?.holders
   if (holders === undefined || holders.length === 0) return <Shown card={card} actions={actions} />
   return (
     <div className={s.stack}>
       <Shown card={card} actions={actions} />
-      <Holders holders={holders} onStop={actions.onStopBackground} />
+      <Holders holders={holders} />
     </div>
   )
 }
@@ -184,15 +182,17 @@ function Shown({ card, actions }: { card: TaskCardContent; actions: CardActions 
   const now =
     handedBack !== null
       ? handedBack
-      : status === TaskStatus.Done
-        ? card.summary?.split('\n')[0]
-        : card.queued !== null
-          ? queuedWords(card.queued)
-          : card.waits !== null
-            ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until))
-            : card.step === null
-              ? undefined
-              : text.now[card.step]
+      : card.followUpWaits !== undefined
+        ? followUpWords(card.followUpWaits)
+        : status === TaskStatus.Done
+          ? card.summary?.split('\n')[0]
+          : card.queued !== null
+            ? queuedWords(card.queued)
+            : card.waits !== null
+              ? waitsWords(actions.agentName(card.waits.agentId), clock(card.waits.until))
+              : card.step === null
+                ? undefined
+                : text.now[card.step]
   const from = fromOf(card)
   // How hard its lead thinks, whoever chose it: what its session is on, or the plan's until it has started.
   const effort = effortOf(card.lead, card.leadModel, card.leadEffort)

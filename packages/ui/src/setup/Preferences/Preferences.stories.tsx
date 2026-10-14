@@ -80,7 +80,7 @@ const menuMark = (
   </>
 )
 
-/* How many agents at once, as a consumer keeps it: the person's number, or none for the default. */
+/* How many tasks at once, as a consumer keeps it: the person's number, or none for the default. */
 function AtOnce() {
   const [own, setOwn] = useState<number | null>(null)
   return (
@@ -190,7 +190,7 @@ export const GeneralSettings: Story = {
   },
 }
 
-/** How many agents work at once, and why: the default from this Mac's memory and cores, a number of the person's own, and back to the default. */
+/** How many tasks work at once, and why: the default from this Mac's memory and cores, a number of the person's own, and back to the default. */
 export const AgentsAtOnceSetting: Story = {
   render: () => (
     <SettingList>
@@ -199,7 +199,7 @@ export const AgentsAtOnceSetting: Story = {
   ),
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
-    const count = c.getByRole('slider', { name: 'Agents at once' })
+    const count = c.getByRole('slider', { name: 'Tasks at once' })
     await expect(count).toHaveAttribute('aria-valuenow', '4')
     await expect(c.getByText('4: this Mac has 16 GB and 10 cores. More tasks than that wait their turn.')).toBeInTheDocument()
     await expect(c.queryByRole('button', { name: 'Use the default' })).toBeNull()
@@ -315,7 +315,7 @@ export const AllStates: Story = {
           ),
         },
         {
-          state: 'agents at once: the default, fewer, well past it, a small Mac past its one, and a big Mac under its sixteen',
+          state: 'tasks at once: the default, fewer, well past it, a small Mac past its one, and a big Mac under its sixteen',
           node: (
             <SettingList>
               <AgentsAtOnce count={4} machine={MACHINE} onChange={fn()} />

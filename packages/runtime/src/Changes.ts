@@ -345,7 +345,7 @@ interface RoundRow {
   readonly pushedHead: string | null
   readonly askedSequence: number | null
   readonly updatedAt: string
-  /** The ask it waits to put to the lead until a place among the agents at work on this machine frees; null once asked. */
+  /** The ask it waits to put to the lead until a place among the tasks at work on this machine frees; null once asked. */
   readonly waiting: string | null
 }
 
@@ -2429,7 +2429,7 @@ export class Changes extends Context.Service<
 
       /**
        * A conflict the lead is to resolve: recorded, said in the thread, and
-       * asked of it, once the lead has a place among the agents at work on
+       * asked of it, once the lead has a place among the tasks at work on
        * this machine; until then the round keeps its ask, and waits.
        */
       const beginRound = (
@@ -2500,6 +2500,8 @@ export class Changes extends Context.Service<
           Effect.map(decodeWaiting(round.waiting ?? ''), (waited) => ({
             taskId: round.taskId,
             since: waited.since,
+            // Its task's work goes on: before tasks that haven't started (ADR-037).
+            ahead: 'started' as const,
             start: provide(locked(round.taskId)(askWaiting(round.id))),
           })),
         )
@@ -2878,7 +2880,7 @@ export class Changes extends Context.Service<
             const log = yield* host.checkLog(repository, check).pipe(Effect.orElseSucceed(() => null))
             if (log !== null) logs.push(logOf(check.name, log))
           }
-          // The lead takes a place among the agents at work on this machine to fix them, or the round keeps its ask and waits for one.
+          // The lead takes a place among the tasks at work on this machine to fix them, or the round keeps its ask and waits for one.
           const body = fixNoteFor(place, { failing: sum.failing, logs })
           const why = { failing: sum.failing }
           const room = yield* busy.enter(round.taskId, (room) =>

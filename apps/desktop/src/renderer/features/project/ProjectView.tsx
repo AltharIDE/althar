@@ -220,7 +220,6 @@ export function ProjectView({
     onHold: (planId) => void model.holdPlan(planId),
     onChange: (planId, steps, end) => void model.changePlan(planId, steps, end),
     onOpen: onTask,
-    onStopBackground: (threadId, id) => void model.stopBackground(threadId, id),
   }
   const draftActions: DraftActions = {
     onFile: (draftId) => void model.fileIssueDraft(draftId),

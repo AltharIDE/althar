@@ -68,7 +68,7 @@
   font-size: inherit;
 }
 
-/* ---- agents at once: a stepped track that warms past the default ---- */
+/* ---- tasks at once: a stepped track that warms past the default ---- */
 /* the number, large, where the row's control goes */
 .value {
   display: inline-block;

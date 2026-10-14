@@ -559,7 +559,7 @@ export class Coordinator extends Context.Service<
           const started = yield* plans.start(planId, instance.coordinatorId)
           if (started === 'waiting') {
             const { busy: atWork, atOnce } = yield* busy.now
-            return `Started ${created.slug}, but it waits for a free agent: ${atWork} of the ${atOnce} this computer runs at once are busy. Its lead starts on it by itself when one is free, with no review, and nothing goes outside the project when it is done. The person sees it as a card, waiting; say in a sentence what it does, and that it waits its turn.`
+            return `Started ${created.slug}, but it waits for a free place: ${atWork} of the ${atOnce} tasks this computer runs at once are at work. Its lead starts on it by itself when one is free, with no review, and nothing goes outside the project when it is done. The person sees it as a card, waiting; say in a sentence what it does, and that it waits its turn.`
           }
           return `Started ${created.slug}: its lead is on it now, with no review, and nothing goes outside the project when it is done. The person sees it as a card; say in a sentence what it does.`
         })

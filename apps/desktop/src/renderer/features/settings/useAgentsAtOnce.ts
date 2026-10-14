@@ -7,7 +7,7 @@ import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 
 /*
- * How many agents work at once on this machine, as Settings shows and
+ * How many tasks work at once on this machine, as Settings shows and
  * changes it (ADR-032): the person's number, or the default the runtime
  * worked out from this machine's memory and cores, with why. A change shows
  * at once and takes effect in the runtime without a restart; if it can't be

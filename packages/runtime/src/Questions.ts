@@ -65,7 +65,7 @@ export interface QuestionPayload {
 
 /** What answering came to: told to the agent waiting on it, or to be told to the one on the thread next. */
 export type Answered =
-  /** Told; or, `kept`, to be told once there is a place among the agents at work here: nothing more to do now either way. */
+  /** Told; or, `kept`, to be told once there is a place among the tasks at work here: nothing more to do now either way. */
   | { readonly told: true; readonly kept?: true }
   | {
       readonly told: false

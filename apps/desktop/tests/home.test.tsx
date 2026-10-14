@@ -407,7 +407,7 @@ describe('the home', () => {
     })
     withServices(<Home />, client)
     const projects = await screen.findByRole('complementary', { name: 'Projects' })
-    expect(within(projects).getByText('2 waiting: 4 of 4 agents busy')).toBeTruthy()
+    expect(within(projects).getByText('2 waiting: 4 of 4 tasks at work')).toBeTruthy()
     // Only the one at work moves.
     expect(screen.getByText('1 task moving in 1 project.')).toBeTruthy()
   })
@@ -749,7 +749,7 @@ describe('settings', () => {
     const { client } = fakeClient()
     withServices(<Settings />, client)
     const panel = await openModule(/^Keep awake/)
-    const count = await within(panel).findByRole('slider', { name: 'Agents at once' })
+    const count = await within(panel).findByRole('slider', { name: 'Tasks at once' })
     expect(count.getAttribute('aria-valuenow')).toBe('4')
     expect(within(panel).getByText('4: this Mac has 16 GB and 10 cores. More tasks than that wait their turn.')).toBeTruthy()
     // Settings stays calm: nothing in it says how many are busy now.
@@ -770,7 +770,7 @@ describe('settings', () => {
     vi.mocked(client.setAgentsAtOnce).mockRejectedValue(new Error('disk full'))
     withServices(<Settings />, client)
     const panel = await openModule(/^Keep awake/)
-    const count = await within(panel).findByRole('slider', { name: 'Agents at once' })
+    const count = await within(panel).findByRole('slider', { name: 'Tasks at once' })
     const reads = vi.mocked(client.getSettings).mock.calls.length
     count.focus()
     await userEvent.keyboard('{ArrowLeft}{ArrowLeft}')

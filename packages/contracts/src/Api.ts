@@ -1022,26 +1022,21 @@ export const BackgroundCommand = Schema.Struct({
 })
 export type BackgroundCommand = typeof BackgroundCommand.Type
 
-/**
- * A task's agent holding a place among the agents this machine runs at once
- * (ADR-032): at work in its step or a turn, or, `kept`, only by what it left
- * running that is at work, which `running` lists, to stop from here.
- */
+/** A task holding a place among the tasks this machine runs at once (ADR-037), from its first step until its work comes back. */
 export const Holder = Schema.Struct({
   taskId: Schema.String,
   title: Schema.String,
-  /** The thread its agent is on, where what it left running is stopped; null where it has no session yet. */
+  /** The thread it is on; null where no agent of it has started yet. */
   threadId: Schema.NullOr(Schema.String),
-  kept: Schema.Boolean,
-  running: Schema.Array(BackgroundCommand),
 })
 export type Holder = typeof Holder.Type
 
 /**
- * Work waiting for a place among the agents this machine runs at once
- * (ADR-032), as it says why: how many tasks' agents are busy, which hold the
- * places, and how many the machine runs at once. It starts on its own, oldest
- * first, when one is free.
+ * Work waiting for a place among the tasks this machine runs at once
+ * (ADR-032, ADR-037), as it says why: how many tasks are at work, which hold
+ * the places, and how many the machine runs at once. It starts on its own
+ * when one is free: what the person did first, then the work of tasks under
+ * way, then the rest, each oldest first.
  */
 export const Queued = Schema.Struct({ busy: Schema.Int, atOnce: Schema.Int, holders: Schema.optional(Schema.Array(Holder)) })
 export type Queued = typeof Queued.Type
@@ -1184,10 +1179,15 @@ export const TaskCard = Schema.Struct({
    * so it's the person's: why, in a sentence. Without it, nothing is.
    */
   handedBack: Schema.optional(Schema.NullOr(Schema.String)),
-  /** It waits for a place among the agents this machine runs at once (ADR-032): how many are busy, and how many it runs at once. */
+  /** It waits for a place among the tasks this machine runs at once (ADR-032): how many are at work, and how many it runs at once. */
   queued: Schema.NullOr(Queued),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
   planWaits: Schema.optional(Schema.Boolean),
+  /**
+   * Its lead finished, and a follow-up for it waits for a place (ADR-037): the
+   * task stays where its work put it, in Needs you or Done, and says so.
+   */
+  followUpWaits: Schema.optional(Queued),
 })
 export type TaskCard = typeof TaskCard.Type
 
@@ -1665,8 +1665,10 @@ export const ThreadSnapshot = Schema.Struct({
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
     waits: Schema.NullOr(Schema.Struct({ agentId: Schema.String, until: Schema.String })),
-    /** It waits for a place among the agents this machine runs at once: how many are busy, and how many it runs at once. */
+    /** It waits for a place among the tasks this machine runs at once: how many are at work, and how many it runs at once. */
     queued: Schema.NullOr(Queued),
+    /** Its lead finished, and a follow-up for it waits for a place (ADR-037). */
+    followUpWaits: Schema.optional(Queued),
     /** Its plan's steps, as its header's track shows them; empty without a plan. */
     steps: Schema.Array(PlanStep),
     /** Who leads it, running or not: the last agent on its thread, on its model and account, else the one its plan names. */

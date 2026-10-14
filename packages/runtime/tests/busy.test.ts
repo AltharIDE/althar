@@ -5,10 +5,10 @@ import { join } from 'node:path'
 import type { ActorId, ProjectId } from '@althar/domain'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Effect, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { Busy } from '../src/Busy'
+import { Busy, inOrder } from '../src/Busy'
 import type { BusyOptions } from '../src/Config'
 import { touchTask } from '../src/cards'
 import { Coordinator } from '../src/Coordinator'
@@ -23,11 +23,13 @@ import type { ToolAccess } from '../src/ToolServer'
 import { callTool, repository, runtime, until } from './support'
 
 /*
- * How many tasks are at work at once on this machine (Busy.ts, ADR-032).
- * With every place taken, the next task's first step doesn't start: it
- * waits, held in the store, and its card says why; it starts on its own,
- * oldest first, when a place frees, after a restart too. The person can stop
- * it while it waits, and a number they set takes effect at once.
+ * How many tasks are at work at once on this machine (Busy.ts, ADR-032,
+ * ADR-037). A task keeps its place from its first step until its work comes
+ * back, through its steps and while it waits on the person. With every place
+ * taken, the next task's first step doesn't start: it waits, held in the
+ * store, and its card says why; it starts on its own when a place frees,
+ * after a restart too, what the person did first. The person can stop it
+ * while it waits, and a number they set takes effect at once.
  */
 
 const GB = 1024 ** 3
@@ -227,10 +229,10 @@ const waitsOn = (threadId: string) =>
     return row?.since ?? null
   })
 
-/** Waits until the task's card says it waits for a free agent. */
-const queuedOn = (projectId: string, taskId: string) =>
+/** Waits until the task's card says a follow-up for its lead waits for a place. */
+const followUpOn = (projectId: string, taskId: string) =>
   until(
-    Effect.map(cardOf(projectId, taskId), (card) => (card?.queued == null ? [] : [card.queued])),
+    Effect.map(cardOf(projectId, taskId), (card) => (card?.followUpWaits === undefined ? [] : [card.followUpWaits])),
     (rows) => rows.length === 1,
   )
 
@@ -241,7 +243,7 @@ const working = (taskId: string) => until(attempts(taskId), (rows) => rows.at(-1
 const waiting = (taskId: string) =>
   until(attempts(taskId), (rows) => rows.at(-1)?.state === 'held' && rows.at(-1)?.holdReason === 'machine_busy')
 
-describe('Agents at once', () => {
+describe('Tasks at once', () => {
   it.live('start what fits, and the next plan waits, saying why, until a place frees; then it starts on its own', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
@@ -261,12 +263,12 @@ describe('Agents at once', () => {
       assert.strictEqual(card?.phase, 'running')
       assert.strictEqual(card?.step, 'implement')
       assert.deepStrictEqual(countsOf(card?.queued), { busy: 2, atOnce: 2 })
-      // It names the tasks that hold the places, none of them only by something it left running.
+      // It names the tasks that hold the places.
       assert.deepStrictEqual(
-        card?.queued?.holders?.map((holder) => [holder.title, holder.kept]),
+        card?.queued?.holders?.map((holder) => [holder.title, holder.threadId]),
         [
-          ['First', false],
-          ['Second', false],
+          ['First', first.threadId],
+          ['Second', second.threadId],
         ],
       )
       assert.isNull(card?.waits)
@@ -319,7 +321,10 @@ describe('Agents at once', () => {
         description: 'Jump twice and say whether it lands. [lead:finish]',
         lead: { agent: 'codex' },
       })
-      assert.match(said, /^Started try-the-double-jump, but it waits for a free agent: 1 of the 1 this computer runs at once are busy\./)
+      assert.match(
+        said,
+        /^Started try-the-double-jump, but it waits for a free place: 1 of the 1 tasks this computer runs at once are at work\./,
+      )
       const sql = yield* SqlClient.SqlClient
       const [quick] = yield* sql<{ id: string }>`SELECT id FROM tasks WHERE slug = 'try-the-double-jump'`
       const taskId = quick?.id ?? ''
@@ -399,109 +404,102 @@ describe('Agents at once', () => {
     }).pipe(Effect.provide(machine(1))),
   )
 
-  it.live('do not count a lead waiting on the person’s answer to a question', () =>
-    Effect.gen(function* () {
-      const { projectId } = yield* opened
-      const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
-      yield* working(first.taskId)
-      const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-      yield* waiting(second.taskId)
-      // Its step still under way between turns, the first's lead holds its place: the second waits on.
-      yield* (yield* Sessions).interrupt(first.threadId)
-      yield* until(turnsOn(first.threadId), (rows) => rows.every((row) => row.state !== 'delivered'))
-      yield* waiting(second.taskId)
-      // Then its lead asks the person something: it isn't using the machine while it waits on them, so the second starts.
-      yield* say(first.threadId, scenarios.question, 'after_current')
-      yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
-      const sql = yield* SqlClient.SqlClient
-      const asked = yield* sql<{ id: string }>`SELECT id FROM attention_requests WHERE kind = 'question' AND state = 'open'`
-      assert.lengthOf(asked, 1)
-    }).pipe(Effect.provide(machine(1))),
-  )
-
-  it.live('keep the person’s answer until its lead has a place again, and tell it then', () =>
+  it.live('keep a task’s place while its lead waits on the person’s answer, and tell the answer at once', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
       const tasks = yield* Tasks
       const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
       yield* working(first.taskId)
       const question = yield* asking(first.threadId)
-      // Its lead waits on the person: the second takes the place.
-      const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
-      yield* working(second.taskId)
-      // Answered now, the first's lead would be a second agent at work: the answer is kept, and its task says it waits.
+      // Its lead waits on the person: the task keeps its place, and the second waits for one.
+      const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
+      assert.strictEqual(second.outcome, 'waiting')
+      yield* waiting(second.taskId)
+      assert.deepStrictEqual(
+        (yield* cardOf(projectId, second.taskId))?.queued?.holders?.map((holder) => holder.title),
+        ['First'],
+      )
+      // Answered, its lead is told at once, in the place its task kept; nothing of the answer waits.
       yield* answerIt(question)
-      assert.deepStrictEqual(yield* questionOf(question), { state: 'answered', kept: true })
-      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
-      yield* Effect.sleep('300 millis')
-      assert.isFalse((yield* replies(first.threadId)).some((text) => text.startsWith('answer=')))
-      // Once the second stops, the first's lead is told, and carries on.
-      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
       assert.include(
         yield* until(replies(first.threadId), (said) => said.some((text) => text.startsWith('answer='))),
         'answer={"database":"sqlite"}',
       )
       assert.deepStrictEqual(yield* questionOf(question), { state: 'answered', kept: false })
       assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
+      yield* waiting(second.taskId)
+      // Once the first stops, the second starts, and finishes.
+      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
+      yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
     }).pipe(Effect.provide(machine(1))),
   )
 
-  it.live('hold what the person says to an idle lead until it has a place, and deliver it then', () =>
+  it.live('start a review in its task’s place, whatever its lead left running, while the next task waits on', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
-      const sessions = yield* Sessions
+      const tasks = yield* Tasks
+      const task = yield* reviewed(projectId, 'Served', 'Serve it, then finish. [lead:serve] [lead:finish] [review:wait]')
+      assert.strictEqual(task.outcome, 'running')
+      const next = yield* started(projectId, 'Next', 'Do it. [lead:finish]')
+      assert.strictEqual(next.outcome, 'waiting')
+      // The lead's step is done and its server still runs: the review goes on in the task's place, and the next task can't
+      // slip in between the two.
+      yield* until(
+        attempts(task.taskId),
+        (rows) => rows.map((row) => [row.step, row.state, row.holdReason]).join() === 'implement,succeeded,,review,running,',
+      )
+      assert.isNull((yield* cardOf(projectId, task.taskId))?.queued)
+      yield* waiting(next.taskId)
+      assert.deepStrictEqual(yield* sessionsOn(next.threadId), [])
+      // Stopped, the task gives its place up: the next starts, and finishes.
+      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: task.taskId })
+      yield* until(attempts(next.taskId), (rows) => rows[0]?.state === 'succeeded')
+    }).pipe(Effect.provide(machine(1))),
+  )
+
+  it.live('hold a follow-up for a lead that finished until there is a place, leaving its task in Needs you, saying so', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
       const tasks = yield* Tasks
       const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
       yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
-      yield* until(
-        Effect.map(sessions.running(first.threadId), (live) => (Option.isSome(live) && !live.value.turnRunning ? [true] : [])),
-        (rows) => rows.length === 1,
-      )
+      yield* idle(first.threadId)
       const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
       yield* working(second.taskId)
       const turns = (yield* turnsOn(first.threadId)).length
-      // Its lead is idle: a word from the person would make it a second agent at work, so it waits, and its task says so.
+      // Its lead is idle and its task has no place: a word for it waits, and its task stays ready, saying so.
       yield* say(first.threadId, 'Look again.', 'after_current')
-      yield* until(
-        Effect.map(cardOf(projectId, first.taskId), (card) => (card?.queued == null ? [] : [card.queued])),
-        (rows) => rows.length === 1,
+      const [waits] = yield* followUpOn(projectId, first.taskId)
+      assert.deepStrictEqual(countsOf(waits), { busy: 1, atOnce: 1 })
+      assert.deepStrictEqual(
+        waits?.holders?.map((holder) => holder.title),
+        ['Second'],
       )
-      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
+      const card = yield* cardOf(projectId, first.taskId)
+      assert.strictEqual(card?.phase, 'ready')
+      assert.isNull(card?.queued)
+      const home = yield* onHome(first.taskId)
+      assert.strictEqual(home?.phase, 'ready')
+      assert.deepStrictEqual(countsOf(home?.followUpWaits), { busy: 1, atOnce: 1 })
+      const thread = yield* Effect.orDie((yield* Queries).thread(first.threadId))
+      assert.deepStrictEqual(countsOf(thread.task.followUpWaits), { busy: 1, atOnce: 1 })
+      assert.isNull(thread.task.queued)
       yield* Effect.sleep('300 millis')
       assert.lengthOf(yield* turnsOn(first.threadId), turns)
-      // Once the second stops, it is delivered.
+      // Once the second stops, it is delivered, and the task says so no more.
       yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
       yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1)
-    }).pipe(Effect.provide(machine(1))),
-  )
-
-  it.live('hold a review until what its lead left running stops: the two would be two agents at work', () =>
-    Effect.gen(function* () {
-      const { projectId } = yield* opened
-      const sessions = yield* Sessions
-      const task = yield* reviewed(projectId, 'Served', 'Serve it, then finish. [lead:serve] [lead:finish] [review:pass]')
-      assert.strictEqual(task.outcome, 'running')
-      // The lead's step is done, and the server it left running still runs: the review waits for a place, and says so.
-      const running = yield* until(
-        Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
-        (left) => left.length === 1,
-      )
       yield* until(
-        attempts(task.taskId),
-        (rows) => rows.map((row) => [row.step, row.state, row.holdReason]).join() === 'implement,succeeded,,review,held,machine_busy',
+        Effect.map(cardOf(projectId, first.taskId), (card) => (card?.followUpWaits === undefined ? [true] : [])),
+        (rows) => rows.length === 1,
       )
-      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, task.taskId))?.queued), { busy: 1, atOnce: 1 })
-      // The server stops: the reviewer takes the place, and the review passes.
-      yield* sessions.stopBackground(task.threadId, running[0]?.id ?? '')
-      yield* until(attempts(task.taskId), (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.state === 'succeeded')
     }).pipe(Effect.provide(machine(1))),
   )
 
-  it.live('ask for a place for each turn: one the person adds while a turn runs waits behind a task that waited longer', () =>
+  it.live('go on with what the person said while its lead worked, in the same place, ahead of a task that waited longer', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
       const sessions = yield* Sessions
-      const tasks = yield* Tasks
       const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
       yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
       yield* idle(first.threadId)
@@ -517,13 +515,11 @@ describe('Agents at once', () => {
       const turns = (yield* turnsOn(first.threadId)).length
       yield* say(first.threadId, 'Look again.', 'after_current')
       yield* sessions.interrupt(first.threadId)
-      // The second waited longer: it takes the place, and the first's next turn waits.
-      yield* working(second.taskId)
-      yield* Effect.sleep('300 millis')
-      assert.lengthOf(yield* turnsOn(first.threadId), turns)
-      assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
-      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
+      // What the person said while it worked follows on in its place, though the second waited longer: the first's lead is
+      // told, and the second waits on.
       yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1)
+      yield* waiting(second.taskId)
+      assert.deepStrictEqual(yield* sessionsOn(second.threadId), [])
     }).pipe(Effect.provide(machine(1))),
   )
 
@@ -539,11 +535,11 @@ describe('Agents at once', () => {
       yield* working(second.taskId)
       const turns = (yield* turnsOn(first.threadId)).length
       yield* say(first.threadId, 'Look again.', 'after_current')
-      yield* queuedOn(projectId, first.taskId)
+      yield* followUpOn(projectId, first.taskId)
       // The person stops the first's lead: nothing of it waits, and its card no longer says so.
       yield* sessions.stop(first.threadId)
       yield* until(
-        Effect.map(cardOf(projectId, first.taskId), (card) => (card?.queued == null ? [true] : [])),
+        Effect.map(cardOf(projectId, first.taskId), (card) => (card?.followUpWaits === undefined ? [true] : [])),
         (rows) => rows.length === 1,
       )
       // A place frees: the stopped lead isn't started for it.
@@ -554,328 +550,104 @@ describe('Agents at once', () => {
     }).pipe(Effect.provide(machine(1))),
   )
 
-  it.live('count a lead whose step is done while what it left running still runs, and free its place when that stops', () =>
+  it.live('take no place for what a task left running once its work came back', () =>
     Effect.gen(function* () {
       const { projectId } = yield* opened
       const sessions = yield* Sessions
       const first = yield* started(projectId, 'First', 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
-      // Its step is done and the task ready, but the server it left running still runs: it holds its place.
-      yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
-      const running = yield* until(
+      // Its step is done and the task ready, while the server it left running still runs: it holds no place.
+      yield* until(
+        Effect.map(cardOf(projectId, first.taskId), (card) => (card === undefined ? [] : [card])),
+        (cards) => cards[0]?.phase === 'ready',
+      )
+      yield* until(
         Effect.map(sessions.running(first.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
         (left) => left.length === 1,
       )
+      yield* until(
+        Effect.map((yield* Busy).now, (now) => [now.busy]),
+        (rows) => rows[0] === 0,
+      )
       const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-      assert.strictEqual(second.outcome, 'waiting')
-      yield* waiting(second.taskId)
-      yield* sessions.stopBackground(first.threadId, running[0]?.id ?? '')
+      assert.strictEqual(second.outcome, 'running')
       yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
+    }).pipe(Effect.provide(machine(1))),
+  )
+
+  it.live("tell the waiting task's thread, and the cards, who holds the places as they change, so an open view reads them again", () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const queries = yield* Queries
+      const tasks = yield* Tasks
+      const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
+      yield* working(first.taskId)
+      const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
+      const third = yield* started(projectId, 'Third', 'Do it. [lead:finish]')
+      yield* waiting(second.taskId)
+      yield* waiting(third.taskId)
+      const holders = (taskId: string) =>
+        Effect.map(cardOf(projectId, taskId), (card) => card?.queued?.holders?.map((holder) => holder.title) ?? [])
+      assert.deepStrictEqual(yield* holders(third.taskId), ['First'])
+      // The first stops: the second takes the place, and the third, still waiting, is told, on its own thread too.
+      const at = yield* queries.cursor
+      yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
+      yield* working(second.taskId)
+      yield* until(holders(third.taskId), (rows) => rows.length === 1 && rows[0] === 'Second')
+      const changes = yield* queries.changesSince(at, 100)
+      assert.isTrue(changes.some((change) => change.aggregateType === 'task' && change.threadId === third.threadId))
+      // Telling the clients about a task that isn't there changes nothing.
+      yield* touchTask('missing')
     }).pipe(Effect.provide(machine(1))),
   )
 })
 
-/**
- * A stand-in for `ps`, for agents that are no process here: the tree of every agent is one process whose CPU time rises
- * by a second a reading while `burning`, else stands still; with `churning`, a short-lived worker besides, a new one each reading.
- */
-const fakeCpu = () => {
-  const cpu = { burning: false, churning: false, total: 0, unreadable: false, workers: 0, burstEvery: 0, reads: 0 }
-  const of: NonNullable<BusyOptions['cpuOf']> = (agents) =>
-    Effect.sync(() => {
-      if (cpu.burning) cpu.total += 1_000
-      if (cpu.churning) cpu.workers += 1
-      cpu.reads += 1
-      // A burst of work that a reading finds only now and then: a worker alive at every n-th reading, gone at the rest.
-      const burst = cpu.burstEvery > 0 && cpu.reads % cpu.burstEvery === 0
-      return new Map(
-        agents.map((agent) => [
-          agent.threadId,
-          cpu.unreadable ? null : new Map([[1, cpu.total], ...(cpu.churning || burst ? [[1_000 + cpu.reads, 0] as [number, number]] : [])]),
-        ]),
-      )
-    })
-  return { cpu, of }
-}
-
-/** A machine that runs `n` at once, whose agents' CPU the test sets: read every 50 ms, and quiet for a second before it counts as idle. */
-const withCpu = <A, E, R>(n: number, body: (cpu: ReturnType<typeof fakeCpu>['cpu']) => Effect.Effect<A, E, R>) => {
-  const fake = fakeCpu()
-  return body(fake.cpu).pipe(
-    Effect.provide(machine(n, ':memory:', { cpuOf: fake.of, sample: Duration.millis(50), quiet: Duration.millis(1_000) })),
-  )
-}
-
-/** The lead of a task that served and finished: its step is done, and what it left running is the only thing that may hold its place. */
-const served = (projectId: ProjectId, title: string) =>
-  Effect.gen(function* () {
-    const sessions = yield* Sessions
-    const task = yield* started(projectId, title, 'Serve it, then finish. [lead:serve] [lead:finish]', 'claude-code')
-    yield* until(attempts(task.taskId), (rows) => rows[0]?.state === 'succeeded')
-    const running = yield* until(
-      Effect.map(sessions.running(task.threadId), (live) => (Option.isSome(live) ? live.value.background : [])),
-      (left) => left.length === 1,
+describe('What waits, in order', () => {
+  it('starts what was at work first, then what the person did, the work of a task under way, then the rest, oldest first', () => {
+    const start = Effect.void
+    const waiters = [
+      { taskId: 'first-plan', since: '2026-10-14T20:00:00.000Z', start },
+      { taskId: 'restarted', since: '2026-10-14T23:00:00.000Z', ahead: 'working' as const, start },
+      { taskId: 'back-from-a-limit', since: '2026-10-14T21:00:00.000Z', ahead: 'started' as const, start },
+      { taskId: 'resumed', since: '2026-10-14T22:00:00.000Z', ahead: 'person' as const, start },
+      { taskId: 'round-turn', threadId: 'round', since: '2026-10-14T21:30:00.000Z', start },
+      { taskId: 'persons-turn', threadId: 'told', since: '2026-10-14T22:30:00.000Z', start },
+      { taskId: 'passed-on', threadId: 'idle', since: '2026-10-14T20:30:00.000Z', start },
+    ]
+    assert.deepStrictEqual(
+      inOrder(waiters, new Set(['told']), new Set(['round-turn'])).map((waiter) => waiter.taskId),
+      ['restarted', 'resumed', 'persons-turn', 'back-from-a-limit', 'round-turn', 'first-plan', 'passed-on'],
     )
-    return { ...task, serverId: running[0]?.id ?? '' }
   })
-
-/** Waits until this many agents are counted at work. */
-const busyAt = (n: number) =>
-  Effect.flatMap(Busy, (busy) =>
-    until(
-      Effect.map(busy.now, (now) => [now.busy]),
-      (rows) => rows[0] === n,
-    ),
-  )
-
-describe('Agents at once, and what they left running', () => {
-  it.live('take no place for a server left running that sits idle', () =>
-    withCpu(1, () =>
-      Effect.gen(function* () {
-        const { projectId } = yield* opened
-        const sessions = yield* Sessions
-        const first = yield* served(projectId, 'First')
-        // Nothing uses CPU: the server is still there, and takes no place.
-        yield* busyAt(0)
-        const left = yield* sessions.running(first.threadId)
-        assert.strictEqual(Option.isSome(left) ? left.value.background.length : 0, 1)
-        // The next task starts at once, and finishes, though the cap is one.
-        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-        assert.strictEqual(second.outcome, 'running')
-        yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
-      }),
-    ),
-  )
-
-  it.live('count a test run left running, and say it keeps the place, with what to stop', () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        cpu.burning = true
-        const { projectId } = yield* opened
-        const sessions = yield* Sessions
-        const first = yield* served(projectId, 'First')
-        // Well past the time an idle server stops counting, it still holds its place.
-        yield* Effect.sleep('2200 millis')
-        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-        assert.strictEqual(second.outcome, 'waiting')
-        yield* waiting(second.taskId)
-        // The waiting task says who keeps the place: the first, by what it left running, and what to stop.
-        const holders = (yield* cardOf(projectId, second.taskId))?.queued?.holders ?? []
-        assert.deepStrictEqual(
-          holders.map((holder) => [holder.taskId, holder.title, holder.threadId, holder.kept, holder.running.map((left) => left.id)]),
-          [[first.taskId, 'First', first.threadId, true, [first.serverId]]],
-        )
-        yield* sessions.stopBackground(first.threadId, first.serverId)
-        yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
-      }),
-    ),
-  )
-
-  it.live('keep counting a test run that idles for a moment', () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        cpu.burning = true
-        const { projectId } = yield* opened
-        yield* served(projectId, 'First')
-        yield* Effect.sleep('300 millis')
-        // A pause shorter than the quiet it takes to stop counting.
-        cpu.burning = false
-        yield* Effect.sleep('150 millis')
-        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-        cpu.burning = true
-        yield* Effect.sleep('1500 millis')
-        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-        // Quiet for good, it stops counting.
-        cpu.burning = false
-        yield* busyAt(0)
-      }),
-    ),
-  )
-
-  it.live('keep counting a runner whose short-lived workers end between readings, though no CPU time is left in the tree', () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        cpu.churning = true
-        const { projectId } = yield* opened
-        yield* served(projectId, 'First')
-        // Far past the quiet that frees an idle server's place: each reading finds other workers than the last.
-        yield* Effect.sleep('2500 millis')
-        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-        assert.strictEqual(second.outcome, 'waiting')
-        cpu.churning = false
-        yield* busyAt(0)
-      }),
-    ),
-  )
-
-  it.live("tell the waiting task's thread, and the cards, who holds the places as they change, so an open view reads them again", () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        cpu.burning = true
-        const { projectId } = yield* opened
-        const queries = yield* Queries
-        const first = yield* served(projectId, 'First')
-        const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
-        const third = yield* started(projectId, 'Third', 'Do it. [lead:finish]')
-        yield* waiting(second.taskId)
-        yield* waiting(third.taskId)
-        const holders = (taskId: string) =>
-          Effect.map(cardOf(projectId, taskId), (card) => card?.queued?.holders?.map((holder) => [holder.title, holder.kept]) ?? [])
-        assert.deepStrictEqual(yield* holders(third.taskId), [['First', true]])
-        // The server goes quiet: the second takes the place, and the third, still waiting, is told, on its own thread too.
-        const at = yield* queries.cursor
-        cpu.burning = false
-        yield* working(second.taskId)
-        yield* until(holders(third.taskId), (rows) => rows.length === 1 && rows[0]?.[0] === 'Second')
-        assert.deepStrictEqual(yield* holders(third.taskId), [['Second', false]])
-        const changes = yield* queries.changesSince(at, 100)
-        assert.isTrue(changes.some((change) => change.aggregateType === 'task' && change.threadId === third.threadId))
-        assert.isTrue(first.serverId !== '')
-      }),
-    ),
-  )
-
-  it.live(
-    'keep counting a runner whose bursts are seen only now and then, while they come more often than the quiet, and free it once they stop',
-    () =>
-      withCpu(1, (cpu) =>
-        Effect.gen(function* () {
-          // A worker alive at every 5th reading (250 ms), gone between: the tree is the same idle parent at the rest, for far
-          // longer than the second it takes an idle server to stop counting.
-          cpu.burstEvery = 5
-          const { projectId } = yield* opened
-          yield* served(projectId, 'First')
-          yield* Effect.sleep('2500 millis')
-          assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-          // The bursts stop: nothing shows work for the quiet, and the place frees.
-          cpu.burstEvery = 0
-          yield* busyAt(0)
-        }),
-      ),
-  )
-
-  it.live('count a server again once it starts working', () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        const { projectId } = yield* opened
-        yield* served(projectId, 'First')
-        yield* busyAt(0)
-        // A request makes it work: it holds its place again, and the next task waits.
-        cpu.burning = true
-        yield* busyAt(1)
-        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-        assert.strictEqual(second.outcome, 'waiting')
-      }),
-    ),
-  )
-
-  it.live('start a waiting task as soon as the server it waits for goes idle, with nothing else happening', () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        cpu.burning = true
-        const { projectId } = yield* opened
-        yield* served(projectId, 'First')
-        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-        yield* waiting(second.taskId)
-        // The server goes quiet: no turn ends, no one answers, nothing is stopped.
-        cpu.burning = false
-        yield* until(attempts(second.taskId), (rows) => rows[0]?.state === 'succeeded')
-        // Nothing is left holding a place once it is done and the idle server counts no more.
-        yield* busyAt(0)
-      }),
-    ),
-  )
-
-  it.live('read what the machine says of an agent that is no process, and count it, as it cannot say', () =>
-    Effect.gen(function* () {
-      const { projectId } = yield* opened
-      yield* served(projectId, 'First')
-      yield* Effect.sleep('600 millis')
-      assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-      // Telling the clients about a task that isn't there changes nothing.
-      yield* touchTask('missing')
-    }).pipe(Effect.provide(machine(1, ':memory:', { sample: Duration.millis(50), quiet: Duration.millis(100) }))),
-  )
-
-  it.live('let a session that ended go from what is read, with what it left running', () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        cpu.burning = true
-        const { projectId } = yield* opened
-        const sessions = yield* Sessions
-        const first = yield* served(projectId, 'First')
-        yield* Effect.sleep('300 millis')
-        yield* sessions.stop(first.threadId)
-        yield* busyAt(0)
-        yield* Effect.sleep('300 millis')
-        assert.strictEqual((yield* (yield* Busy).now).busy, 0)
-      }),
-    ),
-  )
-
-  it.live('count what it cannot read the CPU of', () =>
-    withCpu(1, (cpu) =>
-      Effect.gen(function* () {
-        cpu.unreadable = true
-        const { projectId } = yield* opened
-        yield* served(projectId, 'First')
-        yield* Effect.sleep('2200 millis')
-        assert.strictEqual((yield* (yield* Busy).now).busy, 1)
-        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
-        assert.strictEqual(second.outcome, 'waiting')
-      }),
-    ),
-  )
 })
 
-describe('Agents at once, across a restart', () => {
-  it.live('carry on a stuck step as the person answered, once there is a place, though Althar restarted meanwhile', () =>
+describe('Tasks at once, across a restart', () => {
+  it.live('carry on a stuck step as the person answered, in the place its task kept, while what came after waits', () =>
     Effect.gen(function* () {
-      const file = store()
-      const before = yield* Effect.gen(function* () {
-        const runs = yield* Runs
-        const sql = yield* SqlClient.SqlClient
-        const { projectId } = yield* opened
-        // Its lead can't start: the step needs the person, and takes no place meanwhile.
-        const stuck = yield* started(projectId, 'Stuck', 'Do it. [lead:finish]', 'missing')
-        const [call] = yield* until(
-          sql<{ id: string }>`SELECT id FROM attention_requests WHERE task_id = ${stuck.taskId} AND kind = 'stuck' AND state = 'open'`,
-          (rows) => rows.length === 1,
-        )
-        const other = yield* started(projectId, 'Other', 'Work on it. [lead:wait]')
-        yield* working(other.taskId)
-        // Handed to Codex while the other works: it waits for a place, with the answer.
-        yield* runs.answerStuck({
-          envelope: yield* Runtime.envelope('attention.answer', {}),
-          attentionId: call?.id ?? '',
-          answer: { kind: 'retry', agentId: 'codex' },
-        })
-        yield* waiting(stuck.taskId)
-        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, stuck.taskId))?.queued), { busy: 1, atOnce: 1 })
-        // Only the lead that couldn't start: nothing is on it yet.
-        assert.deepStrictEqual(
-          (yield* sessionsOn(stuck.threadId)).map((session) => session.agentId),
-          ['missing'],
-        )
-        return { projectId, stuck, other }
-      }).pipe(Effect.provide(machine(1, file)))
-
-      yield* Effect.gen(function* () {
-        const { projectId, stuck, other } = before
-        yield* until(sessionsOn(other.threadId), (rows) => rows.length === 2)
-        yield* waiting(stuck.taskId)
-        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, stuck.taskId))?.queued), { busy: 1, atOnce: 1 })
-        // The other is stopped: the step carries on on Codex, as the person said, and finishes.
-        const tasks = yield* Tasks
-        yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: other.taskId })
-        yield* until(attempts(stuck.taskId), (rows) => rows.at(-1)?.state === 'succeeded')
-        assert.deepStrictEqual(
-          (yield* sessionsOn(stuck.threadId)).map((session) => session.agentId),
-          ['missing', 'codex'],
-        )
-      }).pipe(Effect.provide(machine(1, file)))
-    }),
+      const runs = yield* Runs
+      const sql = yield* SqlClient.SqlClient
+      const { projectId } = yield* opened
+      // Its lead can't start: the step needs the person, and its task keeps its place meanwhile.
+      const stuck = yield* started(projectId, 'Stuck', 'Do it. [lead:finish]', 'missing')
+      const [call] = yield* until(
+        sql<{ id: string }>`SELECT id FROM attention_requests WHERE task_id = ${stuck.taskId} AND kind = 'stuck' AND state = 'open'`,
+        (rows) => rows.length === 1,
+      )
+      const other = yield* started(projectId, 'Other', 'Do it. [lead:finish]')
+      assert.strictEqual(other.outcome, 'waiting')
+      // Handed to Codex: it carries on at once, as the person said, and finishes; then the other starts.
+      yield* runs.answerStuck({
+        envelope: yield* Runtime.envelope('attention.answer', {}),
+        attentionId: call?.id ?? '',
+        answer: { kind: 'retry', agentId: 'codex' },
+      })
+      yield* until(attempts(stuck.taskId), (rows) => rows.at(-1)?.state === 'succeeded')
+      assert.deepStrictEqual(
+        (yield* sessionsOn(stuck.threadId)).map((session) => session.agentId),
+        ['missing', 'codex'],
+      )
+      yield* until(attempts(other.taskId), (rows) => rows[0]?.state === 'succeeded')
+      assert.isNull((yield* cardOf(projectId, stuck.taskId))?.queued)
+    }).pipe(Effect.provide(machine(1))),
   )
 
   it.live('start an idle lead again for what the person said to it, once there is a place, though Althar restarted meanwhile', () =>
@@ -889,7 +661,7 @@ describe('Agents at once, across a restart', () => {
         const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
         yield* working(second.taskId)
         yield* say(first.threadId, 'Look again.', 'after_current')
-        yield* queuedOn(projectId, first.taskId)
+        yield* followUpOn(projectId, first.taskId)
         return { projectId, first, second, turns: (yield* turnsOn(first.threadId)).length }
       }).pipe(Effect.provide(machine(1, file)))
 
@@ -897,11 +669,11 @@ describe('Agents at once, across a restart', () => {
         const { projectId, first, second, turns } = before
         yield* until(sessionsOn(second.threadId), (rows) => rows.length === 2)
         // Still waiting, and saying so; once the second is stopped, the lead starts again and is told.
-        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
+        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.followUpWaits), { busy: 1, atOnce: 1 })
         const tasks = yield* Tasks
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
         yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1)
-        assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
+        assert.isUndefined((yield* cardOf(projectId, first.taskId))?.followUpWaits)
       }).pipe(Effect.provide(machine(1, file)))
     }),
   )
@@ -919,13 +691,13 @@ describe('Agents at once, across a restart', () => {
         yield* working(second.taskId)
         const turns = (yield* turnsOn(first.threadId)).length
         yield* say(first.threadId, 'Look again.', 'after_current')
-        yield* queuedOn(projectId, first.taskId)
+        yield* followUpOn(projectId, first.taskId)
         assert.isNotNull(yield* waitsOn(first.threadId))
         // The second stops: what waited is delivered, and nothing of it waits any more, on the card or the thread.
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
         yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1 && rows.every((row) => row.state !== 'delivered'))
         assert.isNull(yield* waitsOn(first.threadId))
-        assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
+        assert.isUndefined((yield* cardOf(projectId, first.taskId))?.followUpWaits)
         return { projectId, first, turns: turns + 1, sessions: (yield* sessionsOn(first.threadId)).length }
       }).pipe(Effect.provide(machine(1, file)))
 
@@ -934,7 +706,7 @@ describe('Agents at once, across a restart', () => {
         yield* Effect.sleep('1 second')
         assert.lengthOf(yield* turnsOn(first.threadId), turns)
         assert.lengthOf(yield* sessionsOn(first.threadId), sessions)
-        assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
+        assert.isUndefined((yield* cardOf(projectId, first.taskId))?.followUpWaits)
       }).pipe(Effect.provide(machine(1, file)))
     }),
   )
@@ -950,7 +722,7 @@ describe('Agents at once, across a restart', () => {
         const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
         yield* working(second.taskId)
         yield* say(first.threadId, 'Look again.', 'after_current')
-        yield* queuedOn(projectId, first.taskId)
+        yield* followUpOn(projectId, first.taskId)
         return { projectId, first, second, turns: (yield* turnsOn(first.threadId)).length }
       }).pipe(Effect.provide(machine(1, file)))
 
@@ -962,7 +734,7 @@ describe('Agents at once, across a restart', () => {
         assert.include(yield* tasksActions(first.threadId), 'stop')
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
         assert.isNull(yield* waitsOn(first.threadId))
-        assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
+        assert.isUndefined((yield* cardOf(projectId, first.taskId))?.followUpWaits)
         const sessions = (yield* sessionsOn(first.threadId)).length
         // A place frees: the first isn't started for it.
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
@@ -990,14 +762,14 @@ describe('Agents at once, across a restart', () => {
           agentId: 'claude-code',
           message: { envelope: yield* Runtime.envelope('thread.send', {}), body: 'Look again.' },
         })
-        yield* queuedOn(projectId, first.taskId)
+        yield* followUpOn(projectId, first.taskId)
         return { projectId, first, second }
       }).pipe(Effect.provide(machine(1, file)))
 
       yield* Effect.gen(function* () {
         const { projectId, first, second } = before
         yield* until(sessionsOn(second.threadId), (rows) => rows.length === 2)
-        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
+        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.followUpWaits), { busy: 1, atOnce: 1 })
         const tasks = yield* Tasks
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
         // Claude Code starts again, as the person last had it, and takes what waited.
@@ -1083,7 +855,7 @@ describe('Agents at once, across a restart', () => {
     }),
   )
 
-  it.live('keep an answer that waits for a place, and tell it once there is one', () =>
+  it.live('keep the place of a task whose lead waits on the person across a restart, and tell its answer at once', () =>
     Effect.gen(function* () {
       const file = store()
       const before = yield* Effect.gen(function* () {
@@ -1092,28 +864,28 @@ describe('Agents at once, across a restart', () => {
         yield* working(first.taskId)
         const question = yield* asking(first.threadId)
         const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
-        yield* working(second.taskId)
-        yield* answerIt(question)
-        assert.deepStrictEqual(yield* questionOf(question), { state: 'answered', kept: true })
+        yield* waiting(second.taskId)
         return { projectId, first, second, question }
       }).pipe(Effect.provide(machine(1, file)))
 
       yield* Effect.gen(function* () {
         const { projectId, first, second, question } = before
-        // The second carries on in its place; the first's answer still waits, its step on it, not carried on by the restart.
-        yield* until(sessionsOn(second.threadId), (rows) => rows.length === 2)
-        yield* working(second.taskId)
-        assert.deepStrictEqual(yield* questionOf(question), { state: 'answered', kept: true })
-        assert.strictEqual((yield* attempts(first.taskId))[0]?.state, 'waiting_attention')
-        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, first.taskId))?.queued), { busy: 1, atOnce: 1 })
-        // Once the second stops, the answer is told to a lead started for it.
-        const tasks = yield* Tasks
-        yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: second.taskId })
+        // Its step still waits on the person after the restart, in its task's place: the second waits on.
+        yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'waiting_attention')
+        yield* waiting(second.taskId)
+        assert.deepStrictEqual(countsOf((yield* cardOf(projectId, second.taskId))?.queued), { busy: 1, atOnce: 1 })
+        // Answered, it is told at once to a lead started for it, and nothing of the answer waits.
+        yield* answerIt(question)
         assert.include(
           yield* until(replies(first.threadId), (said) => said.some((text) => text.startsWith('told='))),
           'told=Which database? sqlite',
         )
         assert.deepStrictEqual(yield* questionOf(question), { state: 'answered', kept: false })
+        yield* waiting(second.taskId)
+        // Once the first stops, the second starts by itself.
+        const tasks = yield* Tasks
+        yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
+        yield* working(second.taskId)
       }).pipe(Effect.provide(machine(1, file)))
     }),
   )
