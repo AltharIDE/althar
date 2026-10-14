@@ -32,8 +32,11 @@ const heard = Effect.gen(function* () {
   return { events, stop: Fiber.interrupt(fiber) }
 })
 
-/** A task planned for its lead alone, started at once: one that reports, or, without `[lead:finish]`, one that never does. */
-const started = (title: string) =>
+/**
+ * A task planned for its lead alone, started at once: one that reports, or, without `[lead:finish]`, one that never does.
+ * `plain`, as the coordinator's start_task makes one: with no branch until its lead changes the repository.
+ */
+const started = (title: string, plain = false) =>
   Effect.gen(function* () {
     const projects = yield* Projects
     const plans = yield* Plans
@@ -44,6 +47,7 @@ const started = (title: string) =>
       projectId: project.projectId,
       title,
       draft: true,
+      ...(plain ? { plain } : {}),
     })
     const planId = yield* plans.propose({
       projectId: project.projectId as ProjectId,
@@ -111,8 +115,8 @@ describe('nudges', () => {
     Effect.gen(function* () {
       const { events, stop } = yield* heard
       const sql = yield* SqlClient.SqlClient
-      // A question, with nothing on its branch and no pull request at its end.
-      const plain = yield* started('Which partners still call v1? [lead:finish]')
+      // A question, with no branch and no pull request at its end.
+      const plain = yield* started('Which partners still call v1? [lead:finish]', true)
       yield* until(
         sql<{ state: string }>`SELECT state FROM runs WHERE task_id = ${plain.taskId}`,
         (rows) => rows[0]?.state === 'succeeded',
