@@ -11,13 +11,13 @@ import { useProto } from '../state'
 type Message = ReactElement<{ children: [ReactElement<YouProps>, ReactElement<{ children: ReadonlyArray<ReactElement> }>] }>
 
 export function ThreadBlocks(props: ComponentProps<typeof Drawn>) {
-  const { direction, short } = useProto()
+  const { direction, keys } = useProto()
   // Called, not rendered, so its elements can be read: it is the same function the app renders, hooks and all.
   const drawn = Drawn(props) as ReadonlyArray<ReactElement>
   return drawn.map((element, at) => {
     const block = props.blocks[at]
     if (direction === 'T' || block?.kind !== 'you' || block.links.length === 0) return element
     const [you, row] = (element as Message).props.children
-    return <Linked key={block.id} direction={direction} short={short} block={block} you={you} cards={row.props.children} />
+    return <Linked key={block.id} direction={direction} keys={keys} block={block} you={you} cards={row.props.children} />
   })
 }

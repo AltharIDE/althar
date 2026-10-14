@@ -1,14 +1,15 @@
-// Scrappy: the real desktop app (its router, tabs, coordinator and task screens) on the tests' fake client, with a message holding links.
+// Scrappy: the real desktop app (its router, tabs, coordinator and task screens) on the tests' fake client, with a message holding links, and a switcher that swaps the direction in place.
 import '@fontsource-variable/inter'
 import '@fontsource-variable/jetbrains-mono'
 import '@althar/ui/styles.css'
 import '../../src/renderer/app.css'
 
 import type { BoardTask, ProjectSummary } from '@althar/contracts'
-import { RouterProvider } from '@tanstack/react-router'
+import { RouterProvider, useRouterState } from '@tanstack/react-router'
+import { useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 
-import { LinkButton, Segmented } from '@althar/ui'
+import { Segmented, Switch } from '@althar/ui'
 
 import { follow } from '../../src/renderer/data/feed'
 import { makeQueryClient } from '../../src/renderer/data/reads'
@@ -17,7 +18,7 @@ import { makeRouter } from '../../src/renderer/router'
 import { card, coordinatorSnapshot, fakeClient, fakeHost, home, project, repositories, snapshot } from '../../tests/fixtures'
 import { coordinatorItems, TASK, taskItems } from './data'
 import css from './parts.module.css'
-import { type Direction, proto, type Scenario, useProto } from './state'
+import { type Direction, DIRECTIONS, proto, type Scenario, useProto } from './state'
 
 /* ——— What the fake runtime holds: althar, a few of its tasks, the coordinator's thread and one task's. ——— */
 
@@ -116,61 +117,91 @@ proto.subscribe(() => {
   void cache.invalidateQueries({ queryKey: ['thread'] })
 })
 
-/* ——— The strip under the window: which message, which thread, and the way back to every direction. ——— */
+/* ——— The switcher under the window: the direction, swapped in place; the message; the thread. ——— */
 
 const SCENARIOS: ReadonlyArray<{ value: Scenario; label: string }> = [
-  { value: 'short', label: 'Short, one link' },
-  { value: 'long', label: 'Long, one link' },
+  { value: 'short', label: 'Short' },
+  { value: 'long', label: 'Long' },
   { value: 'two', label: 'Two links' },
-  { value: 'agent', label: 'The agent’s link' },
+  { value: 'agent', label: 'Agent’s link' },
 ]
 
-const COORDINATOR = '#/projects/p1?room=both'
-const THREAD = '#/threads/th1'
+type Screen = 'coordinator' | 'task'
+const SCREENS: ReadonlyArray<{ value: Screen; label: string }> = [
+  { value: 'coordinator', label: 'Coordinator' },
+  { value: 'task', label: 'Task' },
+]
+const PLACES: Record<Screen, string> = { coordinator: '#/projects/p1?room=both', task: '#/threads/th1' }
 
-function Strip({ name }: { name: string }) {
+const OPTIONS = DIRECTIONS.map((one, at) => ({ value: one.value, label: one.short, tooltip: { label: one.name, kbd: String(at + 1) } }))
+
+const router = makeRouter({ client, cache })
+
+/** Whether a key is meant for a field or a control of its own: pressed in a text box or a choice of options, or with a modifier (TaskView's `typing`). */
+const typing = (event: KeyboardEvent) => {
+  const target = event.target
+  return (
+    event.metaKey ||
+    event.ctrlKey ||
+    event.altKey ||
+    (target instanceof HTMLElement &&
+      (target.isContentEditable ||
+        target.closest('input, textarea, select, [role="textbox"], [role="radiogroup"], [role="menu"]') !== null))
+  )
+}
+
+// 1 to 9 pick a direction, ← and → step through them: never while typing.
+window.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented || typing(event)) return
+  const picked = /^[1-9]$/.test(event.key) ? DIRECTIONS[Number(event.key) - 1] : undefined
+  if (picked !== undefined) proto.set({ direction: picked.value })
+  else if (event.key === 'ArrowLeft') proto.step(-1)
+  else if (event.key === 'ArrowRight') proto.step(1)
+  else return
+  event.preventDefault()
+})
+
+function Switcher() {
   const p = useProto()
+  const screen: Screen = useRouterState({ router, select: (at) => (at.location.pathname.startsWith('/threads/') ? 'task' : 'coordinator') })
+  const name = DIRECTIONS.find((one) => one.value === p.direction)?.name ?? ''
+  useEffect(() => {
+    document.title = `${p.direction === 'T' ? 'Today' : p.direction} · ${name}`
+  }, [p.direction, name])
   if (p.bare) return null
   return (
-    <div className={css.strip}>
-      <span className={css.name}>
-        {p.direction === 'T' ? 'Today' : p.direction} · {name}
-      </span>
+    <div className={css.switcher}>
+      <Segmented<Direction> label="Direction" value={p.direction} onChange={(direction) => proto.set({ direction })} options={OPTIONS} />
+      <span className={css.keys}>1–6 · ← →</span>
+      <span className={css.grow} />
+      {(p.direction === 'B' || p.direction === 'C') && (
+        <span className={css.toggle}>
+          <Switch checked={p.keys} onChange={(keys) => proto.set({ keys })} labelledBy="keys-label" />
+          <span id="keys-label">Show the address as its key</span>
+        </span>
+      )}
       <Segmented<Scenario>
         label="The person’s message"
         value={p.scenario}
         onChange={(scenario) => proto.set({ scenario })}
         options={SCENARIOS}
       />
-      <LinkButton onClick={() => window.location.assign(COORDINATOR)}>Coordinator</LinkButton>
-      <LinkButton onClick={() => window.location.assign(THREAD)}>Task</LinkButton>
-      <span className={css.grow} />
-      <LinkButton onClick={() => window.location.assign('./index.html')}>All directions</LinkButton>
+      <Segmented<Screen> label="Thread" value={screen} onChange={(next) => window.location.assign(PLACES[next])} options={SCREENS} />
     </div>
   )
 }
 
-export const boot = (direction: Direction, name: string) => {
-  const params = new URLSearchParams(window.location.search)
-  proto.set({
-    direction,
-    scenario: (params.get('s') as Scenario | null) ?? 'short',
-    short: params.has('short'),
-    bare: params.has('bare'),
-  })
-  // Every page opens on althar's tab, whatever another page kept.
-  window.localStorage.removeItem('althar.tabs')
-  if (window.location.hash === '' || window.location.hash === '#/') window.location.hash = COORDINATOR
-  const router = makeRouter({ client, cache })
-  const element = document.getElementById('root')
-  if (element === null) throw new Error('The page has no #root')
-  document.title = `${direction === 'T' ? 'Today' : direction} · ${name}`
-  createRoot(element).render(
-    <ServicesProvider value={services}>
-      <div className={params.has('bare') ? css.bare : css.frame}>
-        <RouterProvider router={router} />
-      </div>
-      <Strip name={name} />
-    </ServicesProvider>,
-  )
-}
+// The page opens on althar's tab, whatever an earlier visit kept, on the coordinator unless the URL says the task.
+window.localStorage.removeItem('althar.tabs')
+if (window.location.hash === '' || window.location.hash === '#/') window.location.hash = PLACES.coordinator
+const element = document.getElementById('root')
+if (element === null) throw new Error('The page has no #root')
+proto.set({})
+createRoot(element).render(
+  <ServicesProvider value={services}>
+    <div className={proto.get().bare ? css.bare : css.frame}>
+      <RouterProvider router={router} />
+    </div>
+    <Switcher />
+  </ServicesProvider>,
+)

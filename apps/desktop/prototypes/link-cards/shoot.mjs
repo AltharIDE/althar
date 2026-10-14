@@ -20,7 +20,8 @@ for (const shot of shots.filter((one) => only.length === 0 || only.includes(one.
   page.on('pageerror', (error) => errors.push(String(error)))
   page.on('console', (message) => message.type() === 'error' && errors.push(message.text()))
   const [path, hash] = shot.page.split('#')
-  const url = `http://localhost:5377/${path}${path.includes('?') ? '&' : '?'}bare${hash === undefined ? '' : `#${hash}`}`
+  // The switcher shows only where the shot is of it; every other shot is the app alone.
+  const url = `http://localhost:5377/${path}${shot.bar ? '' : `${path.includes('?') ? '&' : '?'}bare`}${hash === undefined ? '' : `#${hash}`}`
   await page.goto(url)
   await page.waitForTimeout(1600)
   for (const target of shot.hover ?? []) {

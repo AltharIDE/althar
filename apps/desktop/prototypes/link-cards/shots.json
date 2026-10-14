@@ -1,265 +1,221 @@
 [
   {
+    "id": "S1",
+    "page": "index.html?d=C&s=two&keys",
+    "bar": true,
+    "caption": "The page: the app with the switcher under it (Today, A to E; 1–6 and ← → swap the direction in place), here C with the addresses as keys, in the coordinator’s thread, two links."
+  },
+
+  {
     "id": "T1",
-    "page": "today.html?s=short",
+    "page": "index.html?d=T&s=short",
     "caption": "Today · Coordinator, short message: the raw Linear address fills the bubble, and the DEV-68 card sits 30px under “just now”, across the whole conversation, as an item of its own."
   },
   {
     "id": "T2",
-    "page": "today.html?s=long",
+    "page": "index.html?d=T&s=long",
     "caption": "Today · Coordinator, long message: the address is buried mid-paragraph; the card again comes after the stamp, at full width."
   },
   {
     "id": "T3",
-    "page": "today.html?s=two",
+    "page": "index.html?d=T&s=two",
     "caption": "Today · Coordinator, two links: both raw addresses in the words, then two full-width cards under the stamp."
   },
   {
     "id": "T4",
-    "page": "today.html?s=agent",
+    "page": "index.html?d=T&s=agent",
     "caption": "Today · Coordinator, the agent’s link: the coordinator’s “PR #131” is a plain link in its prose; the person’s card floats between the two messages."
   },
   {
     "id": "T5",
-    "page": "today.html?s=short#/threads/th1",
+    "page": "index.html?d=T&s=short#/threads/th1",
     "caption": "Today · Task, short message: in a task’s wider thread the card spans 700px, wider than the bubble it came from."
   },
   {
     "id": "T6",
-    "page": "today.html?s=long#/threads/th1",
+    "page": "index.html?d=T&s=long#/threads/th1",
     "caption": "Today · Task, long message: the address mid-paragraph, the card after the stamp."
   },
-  {
-    "id": "T7",
-    "page": "today.html?s=two#/threads/th1",
-    "caption": "Today · Task, two links: two full-width cards under the stamp."
-  },
+  { "id": "T7", "page": "index.html?d=T&s=two#/threads/th1", "caption": "Today · Task, two links: two full-width cards under the stamp." },
   {
     "id": "T8",
-    "page": "today.html?s=agent#/threads/th1",
+    "page": "index.html?d=T&s=agent#/threads/th1",
     "caption": "Today · Task, the agent’s link: the lead’s bare address is a plain link in its prose."
   },
+
   {
     "id": "A1",
-    "page": "a.html?s=short",
+    "page": "index.html?d=A&s=short",
     "caption": "A · Coordinator, short: the address becomes the kit’s inline mark and key, “DEV-68”, and the app’s own card sits inside the bubble under the words; the bubble widens to hold it."
   },
   {
     "id": "A2",
-    "page": "a.html?s=long",
+    "page": "index.html?d=A&s=long",
     "caption": "A · Coordinator, long: the key reads in place mid-paragraph; the card sits at the bubble’s foot, inside it."
   },
   {
     "id": "A3",
-    "page": "a.html?s=two",
+    "page": "index.html?d=A&s=two",
     "caption": "A · Coordinator, two links: “DEV-68” and “#131” in the words, both cards stacked inside the bubble."
   },
   {
     "id": "A4",
-    "page": "a.html?s=agent",
+    "page": "index.html?d=A&s=agent",
     "caption": "A · Coordinator, the agent’s link: the person’s card is inside their grey bubble; the coordinator’s link stays a plain link in its prose."
   },
   {
     "id": "A5",
-    "page": "a.html?s=short#/threads/th1",
+    "page": "index.html?d=A&s=short#/threads/th1",
     "caption": "A · Task, short: one bubble holding the words and the card, at the bubble’s widest."
   },
-  {
-    "id": "A6",
-    "page": "a.html?s=long#/threads/th1",
-    "caption": "A · Task, long: the card closes the bubble."
-  },
-  {
-    "id": "A7",
-    "page": "a.html?s=two#/threads/th1",
-    "caption": "A · Task, two links: both cards inside the bubble."
-  },
+  { "id": "A6", "page": "index.html?d=A&s=long#/threads/th1", "caption": "A · Task, long: the card closes the bubble." },
+  { "id": "A7", "page": "index.html?d=A&s=two#/threads/th1", "caption": "A · Task, two links: both cards inside the bubble." },
   {
     "id": "A8",
-    "page": "a.html?s=agent#/threads/th1",
+    "page": "index.html?d=A&s=agent#/threads/th1",
     "caption": "A · Task, the agent’s link: the person’s card in their bubble, the lead’s link plain."
   },
+
   {
     "id": "B1",
-    "page": "b.html?s=short",
+    "page": "index.html?d=B&s=short",
     "caption": "B · Coordinator, short: the card above the bubble, right-aligned at the bubble’s widest, as what was sent with it; the address stays in the words as typed."
   },
   {
     "id": "B2",
-    "page": "b.html?s=long",
+    "page": "index.html?d=B&s=long",
     "caption": "B · Coordinator, long: the card is read before the paragraph that explains it, and the raw address still runs through the words."
   },
-  {
-    "id": "B3",
-    "page": "b.html?s=two",
-    "caption": "B · Coordinator, two links: two cards stacked above the bubble."
-  },
+  { "id": "B3", "page": "index.html?d=B&s=two", "caption": "B · Coordinator, two links: two cards stacked above the bubble." },
   {
     "id": "B4",
-    "page": "b.html?s=agent",
+    "page": "index.html?d=B&s=agent",
     "caption": "B · Coordinator, the agent’s link: the card leads the person’s message; the coordinator’s link plain in its prose."
   },
-  {
-    "id": "B5",
-    "page": "b.html?s=short#/threads/th1",
-    "caption": "B · Task, short: card, then bubble, then “just now”."
-  },
-  {
-    "id": "B6",
-    "page": "b.html?s=long#/threads/th1",
-    "caption": "B · Task, long: the card above a tall bubble."
-  },
-  {
-    "id": "B7",
-    "page": "b.html?s=two#/threads/th1",
-    "caption": "B · Task, two links: two cards above the bubble."
-  },
+  { "id": "B5", "page": "index.html?d=B&s=short#/threads/th1", "caption": "B · Task, short: card, then bubble, then “just now”." },
+  { "id": "B6", "page": "index.html?d=B&s=long#/threads/th1", "caption": "B · Task, long: the card above a tall bubble." },
+  { "id": "B7", "page": "index.html?d=B&s=two#/threads/th1", "caption": "B · Task, two links: two cards above the bubble." },
   {
     "id": "B8",
-    "page": "b.html?s=agent#/threads/th1",
+    "page": "index.html?d=B&s=agent#/threads/th1",
     "caption": "B · Task, the agent’s link: the person’s card above their bubble, the lead’s link plain."
   },
+
   {
     "id": "C1",
-    "page": "c.html?s=short",
+    "page": "index.html?d=C&s=short",
     "caption": "C · Coordinator, short: the card right under the bubble, in the kit’s own unfurl slot on You, at the bubble’s widest, with “just now” after it: words, card, time, one message. The address stays as typed."
   },
   {
     "id": "C2",
-    "page": "c.html?s=long",
+    "page": "index.html?d=C&s=long",
     "caption": "C · Coordinator, long: the card follows the paragraph it belongs to, 6px under it, before the stamp."
   },
   {
     "id": "C3",
-    "page": "c.html?s=two",
+    "page": "index.html?d=C&s=two",
     "caption": "C · Coordinator, two links: two cards stacked under the bubble, then the stamp."
   },
   {
     "id": "C4",
-    "page": "c.html?s=agent",
+    "page": "index.html?d=C&s=agent",
     "caption": "C · Coordinator, the agent’s link: the person’s card closes their message on the right; the coordinator’s link plain on the left."
   },
   {
     "id": "C5",
-    "page": "c.html?s=short#/threads/th1",
+    "page": "index.html?d=C&s=short#/threads/th1",
     "caption": "C · Task, short: in the wide thread the card keeps to the bubble’s column."
   },
   {
     "id": "C6",
-    "page": "c.html?s=long#/threads/th1",
+    "page": "index.html?d=C&s=long#/threads/th1",
     "caption": "C · Task, long: the card under the paragraph, before the stamp."
   },
-  {
-    "id": "C7",
-    "page": "c.html?s=two#/threads/th1",
-    "caption": "C · Task, two links: two cards under the bubble."
-  },
+  { "id": "C7", "page": "index.html?d=C&s=two#/threads/th1", "caption": "C · Task, two links: two cards under the bubble." },
   {
     "id": "C8",
-    "page": "c.html?s=agent#/threads/th1",
+    "page": "index.html?d=C&s=agent#/threads/th1",
     "caption": "C · Task, the agent’s link: the person’s card under their bubble, the lead’s bare address plain."
   },
   {
     "id": "C9",
-    "page": "c.html?s=two&short",
-    "caption": "C, with A’s keys · Coordinator, two links: the addresses read as “DEV-68” and “#131” in the words, the cards under the bubble."
+    "page": "index.html?d=C&s=two&keys",
+    "caption": "C, with “Show the address as its key” on · Coordinator, two links: the addresses read as “DEV-68” and “#131” in the words, the cards under the bubble."
   },
   {
     "id": "C10",
-    "page": "c.html?s=two&short#/threads/th1",
-    "caption": "C, with A’s keys · Task, two links: the same in the wide thread."
+    "page": "index.html?d=C&s=two&keys#/threads/th1",
+    "caption": "C, with “Show the address as its key” on · Task, two links: the same in the wide thread."
   },
+
   {
     "id": "D1",
-    "page": "d.html?s=short",
+    "page": "index.html?d=D&s=short",
     "caption": "D · Coordinator, short: the address becomes a chip in the words (Linear’s mark, DEV-68 and the title, cut to fit); no card until asked."
   },
-  {
-    "id": "D2",
-    "page": "d.html?s=long",
-    "caption": "D · Coordinator, long: the chip mid-paragraph; the bubble stays words only."
-  },
+  { "id": "D2", "page": "index.html?d=D&s=long", "caption": "D · Coordinator, long: the chip mid-paragraph; the bubble stays words only." },
   {
     "id": "D3",
-    "page": "d.html?s=two",
+    "page": "index.html?d=D&s=two",
     "caption": "D · Coordinator, two links: two chips; in the narrow column the second wraps onto a line of its own and breaks the sentence."
   },
   {
     "id": "D4",
-    "page": "d.html?s=agent",
+    "page": "index.html?d=D&s=agent",
     "caption": "D · Coordinator, the agent’s link: the person’s chip against the coordinator’s plain link."
   },
-  {
-    "id": "D5",
-    "page": "d.html?s=short#/threads/th1",
-    "caption": "D · Task, short: one chip at the end of the words."
-  },
-  {
-    "id": "D6",
-    "page": "d.html?s=long#/threads/th1",
-    "caption": "D · Task, long: the chip in the first line of the paragraph."
-  },
-  {
-    "id": "D7",
-    "page": "d.html?s=two#/threads/th1",
-    "caption": "D · Task, two links: both chips in one sentence."
-  },
+  { "id": "D5", "page": "index.html?d=D&s=short#/threads/th1", "caption": "D · Task, short: one chip at the end of the words." },
+  { "id": "D6", "page": "index.html?d=D&s=long#/threads/th1", "caption": "D · Task, long: the chip in the first line of the paragraph." },
+  { "id": "D7", "page": "index.html?d=D&s=two#/threads/th1", "caption": "D · Task, two links: both chips in one sentence." },
   {
     "id": "D8",
-    "page": "d.html?s=agent#/threads/th1",
+    "page": "index.html?d=D&s=agent#/threads/th1",
     "caption": "D · Task, the agent’s link: the person’s chip, the lead’s plain link."
   },
   {
     "id": "D9",
-    "page": "d.html?s=short",
+    "page": "index.html?d=D&s=short",
     "hover": ["article button:has-text('DEV-68')"],
     "caption": "D · Coordinator, pointing at the DEV-68 chip: the app’s own card opens above it, and goes when the pointer leaves."
   },
   {
     "id": "D10",
-    "page": "d.html?s=two#/threads/th1",
+    "page": "index.html?d=D&s=two#/threads/th1",
     "click": ["article button:has-text('#131')"],
     "away": true,
     "caption": "D · Task, the #131 chip pressed: its card stays open once the pointer leaves, until a press outside or Escape; pressing the card opens GitHub."
   },
+
   {
     "id": "E1",
-    "page": "e.html?s=short",
+    "page": "index.html?d=E&s=short",
     "caption": "E · Coordinator, short: the address becomes the key in the words; under the bubble, before “just now”, one quiet line: Linear’s mark, DEV-68, the title, Todo, and an arrow (it opens Linear)."
   },
   {
     "id": "E2",
-    "page": "e.html?s=long",
+    "page": "index.html?d=E&s=long",
     "caption": "E · Coordinator, long: the key in the paragraph, the line at the bubble’s foot."
   },
   {
     "id": "E3",
-    "page": "e.html?s=two",
+    "page": "index.html?d=E&s=two",
     "caption": "E · Coordinator, two links: one line per link, right-aligned like the bubble, each with where it stands (Todo, Merged)."
   },
   {
     "id": "E4",
-    "page": "e.html?s=agent",
+    "page": "index.html?d=E&s=agent",
     "caption": "E · Coordinator, the agent’s link: the person’s line under their bubble, the coordinator’s plain link."
   },
-  {
-    "id": "E5",
-    "page": "e.html?s=short#/threads/th1",
-    "caption": "E · Task, short: one line under the bubble."
-  },
-  {
-    "id": "E6",
-    "page": "e.html?s=long#/threads/th1",
-    "caption": "E · Task, long: the line closes the message."
-  },
+  { "id": "E5", "page": "index.html?d=E&s=short#/threads/th1", "caption": "E · Task, short: one line under the bubble." },
+  { "id": "E6", "page": "index.html?d=E&s=long#/threads/th1", "caption": "E · Task, long: the line closes the message." },
   {
     "id": "E7",
-    "page": "e.html?s=two#/threads/th1",
+    "page": "index.html?d=E&s=two#/threads/th1",
     "caption": "E · Task, two links: two lines, the title cut to fit the bubble’s width."
   },
   {
     "id": "E8",
-    "page": "e.html?s=agent#/threads/th1",
+    "page": "index.html?d=E&s=agent#/threads/th1",
     "caption": "E · Task, the agent’s link: the person’s line, the lead’s plain link."
   }
 ]

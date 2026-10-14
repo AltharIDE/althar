@@ -40,13 +40,14 @@ const stateOf = (link: Unfurl) => (link.kind === 'issue' ? link.status.name : te
 
 export function Linked({
   direction,
-  short,
+  keys,
   block,
   you,
   cards,
 }: {
   direction: Exclude<Direction, 'T'>
-  short: boolean
+  /** B and C: the address in the words reads as its key, as A does. */
+  keys: boolean
   block: YouBlock
   /** The app's You for this message, as ThreadBlocks made it. */
   you: ReactElement<YouProps>
@@ -70,12 +71,12 @@ export function Linked({
       return (
         <div data-rhythm="you" className={css.above}>
           <div className={css.cards}>{cards}</div>
-          {short ? cloneElement(you, {}, shortened) : you}
+          {keys ? cloneElement(you, {}, shortened) : you}
         </div>
       )
     // C: the cards under the bubble, in the kit's own unfurl slot: the same message, before its time.
     case 'C':
-      return cloneElement(you, { unfurl: <span className={css.stack}>{cards}</span> }, ...(short ? [shortened] : []))
+      return cloneElement(you, { unfurl: <span className={css.stack}>{cards}</span> }, ...(keys ? [shortened] : []))
     // D: each address becomes a chip in the words; pointing at it shows its card, pressing it keeps the card open.
     case 'D':
       return cloneElement(
