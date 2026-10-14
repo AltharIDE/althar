@@ -36,6 +36,8 @@ export const DraftReady: Story = { args: { onStop: undefined, onMarkReady: fn(),
 export const Abandoned: Story = { args: { onStop: undefined, onAbandon: undefined, onReopen: fn(), defaultOpen: true } }
 /** Merged, it is done for good: only its folder opens. */
 export const Merged: Story = { args: { onStop: undefined, onAbandon: undefined, defaultOpen: true } }
+/** Merged with commits after its pull request in none yet, it is before you: leave them out, and it settles without them. */
+export const MergedWithCommitsAfter: Story = { args: { onStop: undefined, onAbandon: undefined, onLeaveOut: fn(), defaultOpen: true } }
 /** With no editor found, nothing but abandoning. */
 export const OnlyAbandon: Story = { args: { onOpen: undefined, onStop: undefined, defaultOpen: true } }
 /** Long words, as a translation might have them, wrap inside the menu. */

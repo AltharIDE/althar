@@ -1164,6 +1164,22 @@ describe('a task', () => {
     expect((await taskMenu({ phase: 'settled', state: 'done', actions: [] }, null)).offered).toEqual(['Open in Zed'])
   })
 
+  it('offers leaving out the commits after a merged task’s pull request, which keep it in Needs you', async () => {
+    const after = await taskMenu(
+      {
+        phase: 'ready',
+        state: 'done',
+        actions: ['leaveOut'],
+        changes: [change({ state: 'merged' })],
+        unshipped: { commits: 1, add: 300, del: 304 },
+      },
+      null,
+    )
+    expect(after.offered).toEqual(['Open in Zed', 'Leave these commits out'])
+    await userEvent.click(screen.getByRole('menuitem', { name: /Leave these commits out/ }))
+    await waitFor(() => expect(after.client.leaveOutCommits).toHaveBeenCalledWith('t1'))
+  })
+
   it('renames a task in its header: pressing the title edits it where it is, Enter keeps it and Escape puts it back', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     withServices(<Task />, client)

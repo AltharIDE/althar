@@ -1906,7 +1906,8 @@ export class Queries extends Context.Service<
               commits: said.commits,
               here: said.here,
               merged: said.merged,
-              actions: [...actionsOf(standing)],
+              // With commits after its last pull request in none yet, it can leave them out: a merged task too, which they keep before the person.
+              actions: [...actionsOf({ ...standing, unshipped: card?.unshipped != null })],
               planId: standing.planId,
               runCommand: yield* launches.commandFor(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => null)),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),

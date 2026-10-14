@@ -6,6 +6,7 @@ import { Context, type Crypto, Effect, Layer, Option, Schema, Semaphore } from '
 import { SqlClient } from 'effect/sql'
 
 import { touchCard } from './cards'
+import { Changes } from './Changes'
 import { TITLE_LENGTH } from './Coordinator'
 import { NotFound, TaskRefused } from './errors'
 import { makeScratch } from './firstWrite'
@@ -39,11 +40,15 @@ import { Setups } from './Setups'
  * with none still, where it started; a review's copy at the head its lead
  * read, set up with nothing): a run that was cut short resumes like a
  * stopped one, a run that passed is ready again, and a plan that never
- * started waits, held. A merged task is done for good.
+ * started waits, held. A merged task is done for good, but for commits
+ * after its pull requests that are in none yet (ADR-034): the person opens a
+ * new pull request for them, from the task, or leaves them out, and it
+ * settles without them. Their branch and worktree stay, as abandoning keeps
+ * them, and only what is committed after counts again.
  */
 
 /** What the person can do to a task as a whole, in its menu's order. */
-export type TaskAction = 'start' | 'stop' | 'resume' | 'abandon' | 'reopen'
+export type TaskAction = 'start' | 'stop' | 'resume' | 'leaveOut' | 'abandon' | 'reopen'
 
 /** Where a task stands, as far as its course goes. */
 export interface Standing {
@@ -58,18 +63,31 @@ export interface Standing {
   readonly threads: ReadonlyArray<string>
   /** An agent is on one of them, or starting. */
   readonly working: boolean
+  /** One of them is mid-turn, or starting: not only there, between turns. */
+  readonly busy: boolean
+  /**
+   * Commits after its last pull request merged or closed, in none yet
+   * (ADR-034): read from git, by the caller that has them.
+   */
+  readonly unshipped?: boolean
 }
 
 /**
- * What applies where a task stands. Merged, nothing. Abandoned, reopening.
- * Otherwise abandoning, always; starting its plan while it waits to start;
- * stopping while its run runs or an agent is on it; resuming while its run
- * is suspended.
+ * What applies where a task stands. Abandoned, reopening. Merged, nothing,
+ * but leaving out commits after its pull requests that are in none yet,
+ * which put it before the person again; open with them too, once nothing is
+ * at work on it. Otherwise abandoning, always; starting its plan while it
+ * waits to start; stopping while its run runs or an agent is on it; resuming
+ * while its run is suspended.
  */
-export const actionsOf = (standing: Pick<Standing, 'state' | 'planId' | 'runState' | 'working'>): ReadonlyArray<TaskAction> => {
+export const actionsOf = (
+  standing: Pick<Standing, 'state' | 'planId' | 'runState' | 'working' | 'busy' | 'unshipped'>,
+): ReadonlyArray<TaskAction> => {
+  // Not while a round of work, or an agent's turn, may still add to them.
+  const leaves = standing.unshipped === true && standing.runState !== 'running' && !standing.busy
   switch (standing.state) {
     case 'done':
-      return []
+      return leaves ? ['leaveOut'] : []
     case 'abandoned':
       return ['reopen']
     case 'draft':
@@ -78,6 +96,7 @@ export const actionsOf = (standing: Pick<Standing, 'state' | 'planId' | 'runStat
       if (standing.planId !== null) actions.push('start')
       if (standing.runState === 'running' || standing.working) actions.push('stop')
       if (standing.runState === 'suspended') actions.push('resume')
+      if (leaves) actions.push('leaveOut')
       actions.push('abandon')
       return actions
     }
@@ -115,6 +134,7 @@ export const standingOf = (taskId: string) =>
       runState: row.runState === null ? null : yield* Effect.orDie(Schema.decodeUnknownEffect(RunState)(row.runState)),
       threads,
       working: row.starting > 0 || live.some(Option.isSome),
+      busy: row.starting > 0 || live.some((session) => Option.exists(session, (one) => one.turnRunning)),
     } satisfies Standing
   })
 
@@ -122,7 +142,7 @@ export const standingOf = (taskId: string) =>
 const stoppedOutput = (output: string | null) =>
   JSON.stringify({ ...(JSON.parse(output ?? '{}') as Readonly<Record<string, unknown>>), stopped: true })
 
-type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Sessions | Runs | Plans | Setups
+type Store = SqlClient.SqlClient | Instance | Ledger | Crypto.Crypto | Sessions | Runs | Plans | Setups | Changes
 
 export class Tasks extends Context.Service<
   Tasks,
@@ -131,6 +151,13 @@ export class Tasks extends Context.Service<
     stop(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /** Carries a stopped task on from the step it was on: with its last lead, or the one given. */
     resume(input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly lead?: Lead }): Effect.Effect<void, unknown>
+    /**
+     * Leaves out the commits after the task's last pull requests that are in
+     * none yet: it settles without them, done where every pull request of it
+     * merged, and they stay on its branch, in its worktree. Nothing, where
+     * it has none or its lead may still add to them.
+     */
+    leaveOut(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /** Settles the task without its change; its worktree and branch stay. Refused for a merged task. */
     abandon(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /** Opens an abandoned task again, on its worktree and branch. Refused for a merged task. */
@@ -160,6 +187,7 @@ export class Tasks extends Context.Service<
       const runs = yield* Runs
       const plans = yield* Plans
       const setups = yield* Setups
+      const changes = yield* Changes
       const provide = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
       /*
        * A task's course changes one at a time, through stopping its agents
@@ -277,6 +305,13 @@ export class Tasks extends Context.Service<
         Effect.gen(function* () {
           if (!actionsOf(yield* standingOf(input.taskId)).includes('resume')) return
           yield* runs.resume(input)
+        })
+
+      // Whether there is anything to leave out is git's to say: Changes reads it again where it marks them, so a press is one.
+      const leaveOut = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+        Effect.gen(function* () {
+          if (!actionsOf({ ...(yield* standingOf(input.taskId)), unshipped: true }).includes('leaveOut')) return
+          yield* changes.leaveOut(input)
         })
 
       const abandon = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
@@ -526,6 +561,7 @@ export class Tasks extends Context.Service<
         rename: (input) => provide(rename(input)),
         stop: (input) => oneAtATime(input.taskId, stop(input)),
         resume: (input) => oneAtATime(input.taskId, resume(input)),
+        leaveOut: (input) => oneAtATime(input.taskId, leaveOut(input)),
         abandon: (input) => oneAtATime(input.taskId, abandon(input)),
         reopen: (input) => oneAtATime(input.taskId, reopen(input)),
         inTurn,

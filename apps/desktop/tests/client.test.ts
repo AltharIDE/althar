@@ -265,6 +265,7 @@ describe('the client', () => {
           StopTask: () => Effect.die('unused'),
           SetTaskResolveConflicts: () => Effect.die('unused'),
           ResumeTask: () => Effect.die('unused'),
+          LeaveOutCommits: () => Effect.die('unused'),
           AbandonTask: () => Effect.die('unused'),
           RenameTask: () => Effect.die('unused'),
           ReopenTask: () => Effect.die('unused'),

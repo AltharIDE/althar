@@ -127,6 +127,29 @@
     Settled.** One that was done before rounds existed, with work its lead
     committed afterwards, as DEV-58's was, shows as Ready, offering the new
     pull request.
+  - **Whatever puts a task before the person, the task offers a way out of.**
+    Commits after its pull requests are what put a merged task in Needs you,
+    so its menu offers to **Leave these commits out**, beside the new pull
+    request (`actionsOf` says so, as for everything a task's menu offers). A
+    task stays `done`, or an open one whose pull requests all merged settles
+    as `done` as a merge does; its settled time is kept where it had one.
+    The commits stay on its branch, in its worktree, as abandoning keeps
+    them: Althar keeps where each worktree was, in a ref of its own
+    (`refs/althar/left-out/<worktree>`), and only what is committed after it
+    counts again. It isn't offered while a round of work or an agent's turn
+    may still add to them. Abandoning isn't the answer for a merged task:
+    its change is in.
+  - **Commits the default branch has count for nothing.** Commits after a
+    pull request that the default branch has already, as this Mac has it
+    (as Althar last fetched it for a next pull request, as the worktree
+    started from it, and its own branch), aren't in none: those a merge of
+    the default branch brought into the task's branch, and those whose
+    change it has under another hash, cherry-picked into another pull
+    request that merged (by patch, as `git cherry` tells). DEV-58's count
+    of three was its one slider commit and two of main's its lead merged
+    in. A commit squashed into another pull request with changes of its
+    own has another patch, so it still counts, and the person leaves it
+    out.
   - **A round counts as any turn does** toward the agents at work on this
     machine (ADR-032): its lead takes a place while it is in a turn, in the
     place its turn asked for, and none between turns, when it waits on the
@@ -138,7 +161,8 @@
     end would have been, so one that made nothing new goes back where it
     was.
 
-  The states and transitions, tested in `packages/runtime/tests/rounds.test.ts`, with an
+  The states and transitions, tested in `packages/runtime/tests/rounds.test.ts` (leaving commits out, and those the
+  default branch has, under "a merged task with commits after its pull request"), with an
   interrupted round in `changes.test.ts` and a restart after a completed turn in
   `busy.test.ts`; `apps/desktop/e2e/rounds.spec.ts` walks the first and the last in the window, and a task of
   two repositories: one's pull request open beside the other's next, and a try whose push one host refused:
@@ -160,6 +184,7 @@
       asking --> after: given up, from done, with commits in no pull request
       round --> after: finished with new commits, review passed
       after --> ready: Open a new pull request (a new branch, cherry-picked, pushed plainly)
+      after --> settled: Leave these commits out, every pull request merged (its settled time kept, where it had one)
       ready --> settled: every pull request merged, nothing after them
       ready --> after: a pull request merged with commits after it
   ```
@@ -183,7 +208,9 @@
   | Passed, pull request open | Push | as before | Ready |
   | Every pull request merged, nothing after | (the host says so) | `done` | Settled |
   | A pull request merged, commits after it | (the host says so) | stays `open` | Ready, offering a new pull request |
-  | `done`, commits after its last pull request | (read for its card) | as it is | Ready, offering a new pull request |
+  | `done`, commits after its last pull request | (read for its card) | as it is | Ready, offering a new pull request, and to leave them out |
+  | `done` or `open`, commits after its last pull request, no turn under way | Leave these commits out | `done` where every pull request merged, its settled time kept; the commits stay on its branch | Settled |
+  | Any, commits after its last pull request the default branch has (merged in, or cherry-picked) | (read for its card) | as it is | as if there were none |
 - **Alternatives considered:**
   - **A new task for follow-up work.** What the person asked not to be the
     answer: a task is the conversation, and a new one starts without its

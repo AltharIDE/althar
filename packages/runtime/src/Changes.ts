@@ -14,7 +14,7 @@ import {
 } from '@althar/connectors'
 import { PushRequestItem } from '@althar/contracts'
 import { type ActorId, type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
-import type { Ledger } from '@althar/persistence-sqlite'
+import { bumpRevision, type Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
@@ -400,6 +400,12 @@ export class Changes extends Context.Service<
      * with none stays as it is.
      */
     settleIfMerged(taskId: string): Effect.Effect<void, unknown>
+    /**
+     * Leaves out the commits after the task's last pull requests that are in
+     * none yet, as the person says (ADR-034): they stay on its branch, and it
+     * settles without them, done where every pull request merged.
+     */
+    leaveOut(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /**
      * Pushes the task's branch to its open pull request, up to the commit the
      * person saw: theirs to do, after looking at what the lead committed. One
@@ -2072,14 +2078,63 @@ export class Changes extends Context.Service<
           return happened
         })
 
+      /** Where Althar keeps, by worktree, the commit the person left out what came before (ADR-034): only what comes after counts. */
+      const LEFT_OUT = 'refs/althar/left-out/'
+
+      /**
+       * Of commits on a worktree's branch after `head`, those its default
+       * branch doesn't have: neither the commits themselves, as a merge of the
+       * default branch into the task's brings them, nor their change, as one
+       * cherry-picked into another pull request that merged has it under
+       * another hash (by patch, as `git cherry` tells). The default branch as
+       * this Mac has it: as Althar last fetched it for a next pull request, as
+       * the worktree started from it, and its own branch. All of them, where
+       * git can't say.
+       */
+      const notOnDefault = (
+        repository: { readonly path: string; readonly baseRef: string | null; readonly defaultBase: string | null },
+        head: string,
+        commits: ReadonlyArray<string>,
+      ) =>
+        Effect.gen(function* () {
+          const target = (repository.baseRef ?? '').replace(/^origin\//, '') || repository.defaultBase
+          const named = [
+            target === null || target === '' ? null : `refs/althar/base/${target}`,
+            repository.baseRef,
+            repository.defaultBase === null ? null : `refs/heads/${repository.defaultBase}`,
+          ]
+          const tips: Array<string> = []
+          for (const ref of named) {
+            if (ref === null || ref === '') continue
+            const tip = (yield* gitOutcome(repository.path, 'rev-parse', '--verify', '-q', `${ref}^{commit}`)).stdout
+            if (tip !== '' && !tips.includes(tip)) tips.push(tip)
+          }
+          const [first, ...rest] = tips
+          if (first === undefined) return commits
+          const listed = yield* gitOutcome(
+            repository.path,
+            'rev-list',
+            '--no-merges',
+            '--right-only',
+            '--cherry-pick',
+            `${first}...HEAD`,
+            `^${head}`,
+            ...rest.map((tip) => `^${tip}`),
+          )
+          if (listed.code !== 0) return commits
+          const kept = new Set(listed.stdout.split('\n').filter((line) => line !== ''))
+          return commits.filter((commit) => kept.has(commit))
+        })
+
       /**
        * Each of the task's repositories here whose last pull request merged
        * or closed, with commits on its branch after that pull request's head:
        * what a new pull request would have (ADR-034). Merges are left out of
-       * them, since what a merge brought in is the default branch's, and
-       * commits that change nothing together have nothing to ship. One whose
-       * worktree doesn't have its pull request's head can't tell, and has
-       * none.
+       * them, since what a merge brought in is the default branch's, and so
+       * are commits the default branch has already, by their change too;
+       * commits that change nothing together have nothing to ship, and those
+       * the person left out are history. One whose worktree doesn't have its
+       * pull request's head can't tell, and has none.
        */
       const unshippedOf = (taskId: string) =>
         Effect.gen(function* () {
@@ -2093,6 +2148,7 @@ export class Changes extends Context.Service<
             name: string
             slug: string
             remotes: string
+            defaultBase: string | null
             sent: string | null
             changeBranch: string | null
             linkId: string | null
@@ -2102,7 +2158,7 @@ export class Changes extends Context.Service<
             openedAt: string | null
           }>`
             SELECT w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.display_name AS name, b.slug,
-              b.remote_fingerprints AS remotes, c.head_commit AS sent, c.branch AS change_branch, l.id AS link_id, l.product,
+              b.remote_fingerprints AS remotes, b.default_base_ref AS default_base, c.head_commit AS sent, c.branch AS change_branch, l.id AS link_id, l.product,
               l.snapshot, l.listening, l.created_at AS opened_at
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             LEFT JOIN repository_changes c ON c.id = (SELECT id FROM repository_changes WHERE workspace_id = w.id
@@ -2135,14 +2191,38 @@ export class Changes extends Context.Service<
                 if (candidate !== null && head === undefined && (yield* onHead(repository.path, candidate))) head = candidate
             }
             if (head === undefined) continue
+            // What the person left out after it stays out: the count starts where they did, while the branch still has it.
+            const left = (yield* gitOutcome(
+              repository.path,
+              'rev-parse',
+              '--verify',
+              '-q',
+              `${LEFT_OUT}${repository.workspaceId}^{commit}`,
+            )).stdout
+            if (
+              left !== '' &&
+              left !== head &&
+              (yield* onHead(repository.path, left)) &&
+              (yield* gitOutcome(repository.path, 'merge-base', '--is-ancestor', head, left)).code === 0
+            )
+              head = left
             const listed = yield* git(repository.path, 'rev-list', '--reverse', '--no-merges', `${head}..HEAD`).pipe(
               Effect.orElseSucceed(() => ''),
             )
-            const commits = listed.split('\n').filter((line) => line !== '')
+            const all = listed.split('\n').filter((line) => line !== '')
+            if (all.length === 0) continue
+            const commits = yield* notOnDefault(repository, head, all)
+            // Some of them in the default branch already, the diff from that head has its changes too: theirs are counted alone.
+            const whole = commits.length === all.length
             // Commits that change nothing, all together, have nothing to ship.
-            if (commits.length === 0 || (yield* gitOutcome(repository.path, 'diff', '--quiet', head, 'HEAD')).code === 0) continue
+            if (commits.length === 0 || (whole && (yield* gitOutcome(repository.path, 'diff', '--quiet', head, 'HEAD')).code === 0))
+              continue
             // How big they are together, as a diff from that head says: a binary file counts no lines.
-            const counted = yield* git(repository.path, 'diff', '--numstat', head, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
+            const counted = yield* (
+              whole
+                ? git(repository.path, 'diff', '--numstat', head, 'HEAD')
+                : git(repository.path, 'show', '--numstat', '--format=', ...commits)
+            ).pipe(Effect.orElseSucceed(() => ''))
             const lines = counted
               .split('\n')
               .map((line) => line.split('\t'))
@@ -2260,6 +2340,61 @@ export class Changes extends Context.Service<
             }),
           )
           yield* touchCard(taskId)
+        })
+
+      /**
+       * The person leaves out the commits after the task's last pull requests
+       * that are in none yet (ADR-034): where each worktree is now is kept,
+       * so they are history and only what is committed after counts again.
+       * They stay on its branch, in its worktree, as abandoning keeps them.
+       * Then it settles as a merge does: done where every pull request of it
+       * merged, its settled time kept where it was done already.
+       */
+      const leaveOut = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const after = yield* unshippedOf(input.taskId)
+          if (after.length === 0) return
+          const [task] = yield* sql<{ projectId: ProjectId; threadId: string; state: string; revision: number }>`
+            SELECT k.project_id, t.id AS thread_id, k.state, k.revision FROM tasks k
+            JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${input.taskId}`
+          if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
+          const left: Array<{ readonly repository: string; readonly branch: string; readonly at: string; readonly commits: number }> = []
+          for (const one of after) {
+            const at = yield* commitOf(one.path, 'HEAD')
+            yield* git(one.path, 'update-ref', `${LEFT_OUT}${one.workspaceId}`, at)
+            left.push({ repository: one.name, branch: one.branch, at, commits: one.commits.length })
+          }
+          yield* sql.withTransaction(
+            Effect.gen(function* () {
+              const revision = yield* bumpRevision('tasks', input.taskId, task.revision)
+              yield* fact({
+                projectId: task.projectId,
+                aggregateType: 'task',
+                aggregateId: input.taskId,
+                revision,
+                type: 'task.left_out',
+                payload: { left },
+                actorId: input.envelope.actorId,
+                commandId: input.envelope.commandId,
+              })
+            }),
+          )
+          const several = after.length > 1
+          const commits = after.reduce((sum, one) => sum + one.commits.length, 0)
+          yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title: `Left out ${after
+              .map(
+                (one) =>
+                  `${commitsWord(one.commits.length)} after ${one.change === null ? 'where its branch started' : nameOf(one.change)}${several ? ` in ${one.name}` : ''}`,
+              )
+              .join(', ')}.`,
+            description: `${commits === 1 ? 'It stays' : 'They stay'} on ${after.map((one) => one.branch).join(' and ')}, in the task's worktree. What's committed after counts again.`,
+          })
+          if (task.state === 'open') yield* settleIfDone(input.taskId, { actorId: input.envelope.actorId })
+          yield* touchCard(input.taskId)
         })
 
       /* ---- A lead resolving a conflict on its own, where the project says to (conflicts.ts) ---- */
@@ -3437,6 +3572,7 @@ export class Changes extends Context.Service<
               }),
             ),
           ),
+        leaveOut: (input) => provide(locked(input.taskId)(leaveOut(input))),
         push: (taskId, head, url) => provide(locked(taskId)(push(taskId, head, url))),
         replace: (taskId, head, replaces, url) => provide(locked(taskId)(replace(taskId, head, replaces, url))),
         mergeNote: (taskId, url) => provide(locked(taskId)(mergeNote(taskId, url))),

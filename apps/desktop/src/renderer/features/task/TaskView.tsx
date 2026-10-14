@@ -505,6 +505,7 @@ export function TaskView({
         {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
         {...(can('stop') ? { onStop: () => void model.stop() } : {})}
         {...(can('resume') ? { onResume: () => void model.resume() } : {})}
+        {...(can('leaveOut') ? { onLeaveOut: () => void model.leaveOut() } : {})}
         {...(can('abandon')
           ? {
               onAbandon: () => {

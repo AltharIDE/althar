@@ -7,8 +7,8 @@ import s from './TaskMenu.module.css'
 /*
  * What you can do with a task as a whole, from its bar: rename it, open its folder in
  * an editor, start its plan now, mark its draft pull request ready, skip
- * the review of the work under way, stop it, resume it, abandon it, reopen
- * it. Each item is there when its callback is,
+ * the review of the work under way, stop it, resume it, leave out the
+ * commits after its last pull request, abandon it, reopen it. Each item is there when its callback is,
  * and the consumer gives only those that apply where the task stands, so
  * the menu never offers what the task can't do. With nothing to offer, there
  * is no button. Stopping a task is not interrupting its lead: the composer's
@@ -46,6 +46,8 @@ export interface TaskMenuText {
   stopAbout: string
   resume: string
   resumeAbout: string
+  leaveOut: string
+  leaveOutAbout: string
   abandon: string
   abandonAbout: string
   reopen: string
@@ -81,6 +83,8 @@ export const taskMenuText: TaskMenuText = {
   stopAbout: 'Every agent on it stops. The branch and what it found stay, and you can resume it.',
   resume: 'Resume',
   resumeAbout: 'The lead carries on from the step it was on, in a fresh session.',
+  leaveOut: 'Leave these commits out',
+  leaveOutAbout: 'It settles without the commits after its last pull request. They stay on its branch and in its worktree.',
   abandon: 'Abandon',
   abandonAbout: 'It ends here, and its change isn’t merged. Its worktree and branch stay.',
   reopen: 'Reopen',
@@ -112,6 +116,11 @@ export interface TaskMenuProps {
   onSkipReview?: () => void
   onStop?: () => void
   onResume?: () => void
+  /**
+   * Leaves out the commits after its last pull request that are in none yet:
+   * it settles without them, where they are all that keep it open.
+   */
+  onLeaveOut?: () => void
   /** Abandons it; the consumer asks first, since it settles the task. */
   onAbandon?: () => void
   onReopen?: () => void
@@ -136,6 +145,7 @@ export function TaskMenu({
   onSkipReview,
   onStop,
   onResume,
+  onLeaveOut,
   onAbandon,
   onReopen,
   conflicts,
@@ -183,7 +193,7 @@ export function TaskMenu({
       </MenuItem>
     ),
   ].filter(Boolean)
-  if (!opens && course.length === 0 && !onAbandon && !conflicts) return null
+  if (!opens && course.length === 0 && !onLeaveOut && !onAbandon && !conflicts) return null
   // Said beside the button only where the task goes otherwise than its project.
   const differs = conflicts !== undefined && conflicts.choice !== 'project' && (conflicts.choice === 'on') !== conflicts.project
   const menu = (
@@ -241,12 +251,19 @@ export function TaskMenu({
           </MenuRadioGroup>
         </>
       )}
-      {onAbandon && (
+      {(onLeaveOut || onAbandon) && (
         <>
           {(opens || course.length > 0 || conflicts) && <MenuSeparator />}
-          <MenuItem icon="close" tone="danger" description={t.abandonAbout} onSelect={onAbandon}>
-            {t.abandon}
-          </MenuItem>
+          {onLeaveOut && (
+            <MenuItem icon="check" description={t.leaveOutAbout} onSelect={onLeaveOut}>
+              {t.leaveOut}
+            </MenuItem>
+          )}
+          {onAbandon && (
+            <MenuItem icon="close" tone="danger" description={t.abandonAbout} onSelect={onAbandon}>
+              {t.abandon}
+            </MenuItem>
+          )}
         </>
       )}
     </Menu>

@@ -29,7 +29,7 @@ import { useServices, useWatch } from '../../data/services'
  * streaming, and what the person can do: talk to the lead, interrupt it,
  * answer its calls, change its model and effort or hand the task to another
  * agent with one, and steer its course: start its plan now, stop it, resume
- * it, abandon it, reopen it. It reads the thread's newest page once, then only what changes: an item
+ * it, leave out commits after its last pull request, abandon it, reopen it. It reads the thread's newest page once, then only what changes: an item
  * that changed is read alone, and anything else about the thread (the agent
  * working, the calls waiting) reads the thread's head again, without its
  * items. Earlier items are read a page at a time, when asked for.
@@ -91,6 +91,8 @@ export interface TaskModel {
   readonly resume: () => Promise<void>
   /** Whether its lead resolves conflicts on its own, otherwise than its project says; null goes back to the project. */
   readonly setResolveConflicts: (on: boolean | null) => Promise<void>
+  /** Leaves out the commits after its last pull request that are in none yet: it settles without them, and they stay on its branch. */
+  readonly leaveOut: () => Promise<void>
   /** Settles it without its change; its worktree and branch stay. Whether it was abandoned. */
   readonly abandon: () => Promise<boolean>
   /** Opens it again, once abandoned, on its worktree and branch. */
@@ -463,6 +465,7 @@ export const useTask = (threadId: string): TaskModel => {
       })
       return abandoned
     },
+    leaveOut: () => onTask((taskId) => client.leaveOutCommits(taskId)),
     reopen: () => onTask((taskId) => client.reopenTask(taskId)),
     rename: (title) => onTask((taskId) => client.renameTask(taskId, title)),
     startPlan: (planId) => act(() => client.startPlan(planId)),
