@@ -101,6 +101,8 @@ export type SessionEvent =
       readonly kind: ToolKind
       readonly status: ToolCallStatus
       readonly rawInput?: unknown
+      /** What came back, where the call arrives already ended. */
+      readonly rawOutput?: unknown
       /** The files it touches, when it says. */
       readonly locations?: ReadonlyArray<ToolLocation>
       readonly content?: ReadonlyArray<ToolContent>
@@ -316,6 +318,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
         kind: asToolKind(update.kind),
         status: update.status ?? 'pending',
         ...defined('rawInput', update.rawInput),
+        ...defined('rawOutput', update.rawOutput),
         ...defined('locations', locationsOf(update.locations)),
         ...defined('content', toolContentOf(update.content)),
         ...defined('terminal', terminalOf(update._meta)),
