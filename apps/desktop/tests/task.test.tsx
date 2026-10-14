@@ -73,13 +73,14 @@ describe('a task', () => {
     expect(client.seeTask).toHaveBeenCalledTimes(1)
   })
 
-  it('is seen again as its lead’s turn ends in front of the person', async () => {
-    let now = running()
+  it('is seen again as it becomes ready in front of the person, however quickly it finished', async () => {
+    let now = thread()
     const { client, emit } = fakeClient({ getThread: vi.fn(async () => now) })
     withServices(<Task />, client)
     expect(await screen.findByText('Carrying on.')).toBeTruthy()
     await waitFor(() => expect(client.seeTask).toHaveBeenCalledTimes(1))
-    now = thread()
+    // Started and finished between two reads: never seen running here, it is ready now.
+    now = thread({ task: { ...thread().task, phase: 'ready' } })
     act(() => emit(changed('task', snapshot().task.id)))
     await waitFor(() => expect(client.seeTask).toHaveBeenCalledTimes(2))
   })

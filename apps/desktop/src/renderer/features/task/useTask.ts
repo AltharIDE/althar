@@ -201,14 +201,11 @@ export const useTask = (threadId: string): TaskModel => {
     if (taskId !== null) client.seeTask(taskId).catch(() => undefined)
   }, [client, taskId])
 
-  // And as its lead's turn ends in front of the person: one that finished it there has been seen finishing.
-  const turnRunning = snapshot?.session?.turnRunning ?? false
-  const wasRunning = useRef(turnRunning)
+  // And as it becomes ready in front of the person, however quickly it got there: one that finished there has been seen finishing.
+  const phase = snapshot?.task.phase ?? null
   useEffect(() => {
-    const ended = wasRunning.current && !turnRunning
-    wasRunning.current = turnRunning
-    if (ended && taskId !== null && document.visibilityState === 'visible') client.seeTask(taskId).catch(() => undefined)
-  }, [client, taskId, turnRunning])
+    if (phase === 'ready' && taskId !== null && document.visibilityState === 'visible') client.seeTask(taskId).catch(() => undefined)
+  }, [client, taskId, phase])
 
   useEffect(() => () => clearTimeout(timer.current), [])
 
