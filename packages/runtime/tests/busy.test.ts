@@ -16,6 +16,7 @@ import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Runs } from '../src/Runs'
 import { Queries } from '../src/Queries'
+import { Questions } from '../src/Questions'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
@@ -886,6 +887,58 @@ describe('Tasks at once, across a restart', () => {
         const tasks = yield* Tasks
         yield* tasks.stop({ envelope: yield* Runtime.envelope('task.stop', {}), taskId: first.taskId })
         yield* working(second.taskId)
+      }).pipe(Effect.provide(machine(1, file)))
+    }),
+  )
+
+  it.live('tell an answer kept for a place before tasks kept theirs while waiting on the person, once its task has one', () =>
+    Effect.gen(function* () {
+      const { projectId } = yield* opened
+      const first = yield* started(projectId, 'First', 'Work on it. [lead:wait]')
+      yield* working(first.taskId)
+      const question = yield* asking(first.threadId)
+      // Kept as Althar kept an answer when its agent had no place: its task holds one now, so it is told.
+      yield* (yield* Questions).answer({
+        envelope: yield* Runtime.envelope('attention.answer_question', { attentionId: question }),
+        attentionId: question,
+        answers: { database: { values: ['sqlite'] } },
+        keep: true,
+      })
+      yield* (yield* Busy).wake
+      assert.include(
+        yield* until(replies(first.threadId), (said) => said.some((text) => text.startsWith('answer='))),
+        'answer={"database":"sqlite"}',
+      )
+      assert.deepStrictEqual(yield* questionOf(question), { state: 'answered', kept: false })
+      assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
+    }).pipe(Effect.provide(machine(1))),
+  )
+
+  it.live('start a review held for a place before tasks kept theirs ahead of a task that has not started, though Althar restarted', () =>
+    Effect.gen(function* () {
+      const file = store()
+      const before = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const { projectId } = yield* opened
+        const first = yield* reviewed(projectId, 'Reviewed', 'Do it. [lead:finish] [review:wait]')
+        yield* until(attempts(first.taskId), (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.state === 'running')
+        const second = yield* started(projectId, 'Second', 'Do it. [lead:finish]')
+        yield* waiting(second.taskId)
+        // As a review was held when its lead's place went to another task: after the second began to wait.
+        yield* sql`
+          UPDATE node_attempts SET state = 'held', hold_reason = 'machine_busy', provider_session_id = NULL,
+            output = ${JSON.stringify({ place: { how: 'next' }, since: new Date(Date.now() + 60_000).toISOString() })}
+          WHERE id = (SELECT a.id FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
+            JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${first.taskId} AND n.node_key = 'review')`
+        return { projectId, first, second }
+      }).pipe(Effect.provide(machine(1, file)))
+
+      yield* Effect.gen(function* () {
+        const { first, second } = before
+        // Its task was under way: the review goes first, though the second waited longer, and the second waits on.
+        yield* until(attempts(first.taskId), (rows) => rows.at(-1)?.step === 'review' && rows.at(-1)?.state === 'running')
+        yield* waiting(second.taskId)
+        assert.deepStrictEqual(yield* sessionsOn(second.threadId), [])
       }).pipe(Effect.provide(machine(1, file)))
     }),
   )
