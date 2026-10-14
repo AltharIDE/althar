@@ -609,7 +609,10 @@ export class Reviews extends Context.Service<
 
       /**
        * Changes a draft if it stands as `when` needs, checked and changed in
-       * one transaction with its card, so two presses can't both post it.
+       * one transaction with its card, so two presses can't both post it;
+       * and with whatever else `also` changes, such as the task a posted
+       * review settles. Changed, the task's card on the board is told to
+       * read again, as its findings and verdict are read from the draft.
        */
       const transition = (
         draftId: string,
@@ -618,10 +621,11 @@ export class Reviews extends Context.Service<
         type: string,
         actorId: ActorId,
         payload?: (row: Row) => unknown,
+        also?: (row: Row) => Effect.Effect<void, unknown, Store>,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          return yield* sql.withTransaction(
+          const result = yield* sql.withTransaction(
             Effect.gen(function* () {
               const row = yield* load(draftId)
               if (!when(row)) return { changed: false as const, row }
@@ -638,9 +642,31 @@ export class Reviews extends Context.Service<
                 actorId,
               })
               yield* showCard(draftId)
+              if (also !== undefined) yield* also(after)
               return { changed: true as const, row: after }
             }),
           )
+          if (result.changed) yield* touchCard(result.row.taskId)
+          return result
+        })
+
+      /** Settles a review task once its review is posted, in the transaction that records it posted; one not open stays as it is. */
+      const settle = (row: Row, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${row.taskId}`
+          if (task?.state !== 'open') return
+          const at = yield* timestamp
+          const revision = yield* change('tasks', row.taskId, { state: 'done', settledAt: at })
+          yield* fact({
+            projectId: row.projectId,
+            aggregateType: 'task',
+            aggregateId: row.taskId,
+            revision,
+            type: 'task.done',
+            payload: { reviewed: row.reviewUrl },
+            actorId,
+          })
         })
 
       /** Whether a draft can still change, or be posted: waiting on the person, not posted the last time, or perhaps posted. */
@@ -811,8 +837,8 @@ export class Reviews extends Context.Service<
                 )
               }),
             )
+            yield* touchCard(taskId)
           }
-          yield* touchCard(taskId)
           const name = `${review.words.noun} ${review.words.prefix}${review.number}`
           const counted = comments.length === 1 ? '1 comment' : `${comments.length} comments`
           // The person's own setting posts their team's reviews at once; an outside one always waits for them.
@@ -897,7 +923,6 @@ export class Reviews extends Context.Service<
       const post: Reviews['Service']['post'] = (draftId, actorId) =>
         provide(
           Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient
             const before = yield* load(draftId)
             if (open(before) && before.verdict === null) return yield* new ReviewDraftIncomplete({ draftId, missing: 'verdict' })
             const marked = yield* transition(
@@ -938,28 +963,10 @@ export class Reviews extends Context.Service<
               made._tag === 'Success' ? 'review_draft.posted' : uncertain(made.failure) ? 'review_draft.uncertain' : 'review_draft.failed',
               actorId,
               (now) => (now.state === 'posted' ? { url: now.reviewUrl, verdict, comments: kept.length } : { error: now.error }),
+              // Posted, the review task is done, in the same transaction: a crash between them can't leave a posted review open.
+              (now) => (now.state === 'posted' ? settle(now, actorId) : Effect.void),
             )
             if (made._tag === 'Failure') yield* Effect.logWarning('A review could not be posted', made.failure)
-            // Posted, the review task is done.
-            if (made._tag === 'Success')
-              yield* sql.withTransaction(
-                Effect.gen(function* () {
-                  const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${row.taskId}`
-                  if (task?.state !== 'open') return
-                  const at = yield* timestamp
-                  const revision = yield* change('tasks', row.taskId, { state: 'done', settledAt: at })
-                  yield* fact({
-                    projectId: row.projectId,
-                    aggregateType: 'task',
-                    aggregateId: row.taskId,
-                    revision,
-                    type: 'task.done',
-                    payload: { reviewed: ended.row.reviewUrl },
-                    actorId,
-                  })
-                }),
-              )
-            yield* touchCard(row.taskId)
             return yield* cardFor(ended.row)
           }),
         )
@@ -975,7 +982,6 @@ export class Reviews extends Context.Service<
               actorId,
             )
             if (!result.changed) return yield* closed(result.row)
-            yield* touchCard(result.row.taskId)
           }),
         )
 
@@ -997,6 +1003,24 @@ export class Reviews extends Context.Service<
               (row) => ({ error: row.error }),
             )
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not settle the review drafts left being posted', cause))),
+      )
+      // A review posted whose task an older Althar closed before settling it: settled now, unless it was settled or reopened since.
+      yield* provide(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const left = yield* sql<{ draftId: string }>`
+            SELECT d.id AS draft_id FROM tasks k
+            JOIN review_drafts d ON d.id = (SELECT id FROM review_drafts WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1)
+            JOIN record_events p ON p.aggregate_type = 'review_draft' AND p.aggregate_id = d.id AND p.type = 'review_draft.posted'
+            WHERE k.state = 'open' AND d.state = 'posted'
+              AND NOT EXISTS (SELECT 1 FROM record_events e WHERE e.aggregate_type = 'task' AND e.aggregate_id = k.id
+                AND e.type IN ('task.done', 'task.reopened') AND e.sequence > p.sequence)`
+          for (const one of left) {
+            const row = yield* load(one.draftId)
+            yield* sql.withTransaction(settle(row, instance.systemId))
+            yield* touchCard(row.taskId)
+          }
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not settle the reviews left posted on an open task', cause))),
       )
 
       // A review's lead reads the pull request and drafts its review, and nothing else: every lead tool that isn't one a review

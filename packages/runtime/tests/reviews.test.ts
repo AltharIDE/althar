@@ -29,6 +29,7 @@ import {
 import * as Runtime from '../src/Runtime'
 import { findTasks } from '../src/Search'
 import { Sessions } from '../src/Sessions'
+import { fact } from '../src/records'
 import { transcript } from '../src/threads'
 import { words } from '../src/words'
 import type { ToolAccess } from '../src/ToolServer'
@@ -809,6 +810,137 @@ describe('reviewing someone else’s pull request', () => {
       assert.include(yield* review({ ...coordinator, sessionId: 'coordinator-session-3' }), 'already reviews')
       assert.lengthOf(yield* sql`SELECT id FROM tasks`, 2)
     }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('tells the board when its draft changes, and counts a draft that waits as ready, unless a call waits first', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      const sql = yield* SqlClient.SqlClient
+      const queries = yield* Queries
+      const reviews = yield* Reviews
+      const instance = yield* Instance
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const { task } = yield* reviewTask(projectId)
+      const taskId = task?.id ?? ''
+      const threadId = task?.threadId ?? ''
+      yield* until(said(threadId), (all) => all.length > 0)
+      // The card's item on the board: its revision moves on each time the board is told to read it again.
+      const revision = Effect.map(
+        sql<{ revision: number }>`
+          SELECT i.revision FROM thread_items i JOIN threads t ON t.id = i.thread_id
+          WHERE t.kind = 'coordinator' AND i.kind = 'task' AND json_extract(i.content, '$.taskId') = ${taskId}`,
+        ([row]) => row?.revision ?? 0,
+      )
+      const ready = Effect.map(Effect.orDie(queries.projects), (list) => list.projects.find((one) => one.id === projectId)?.ready)
+      const onBoard = Effect.map(Effect.orDie(queries.board(projectId)), (board) => board.tasks.find((one) => one.taskId === taskId))
+      assert.strictEqual(yield* ready, 0)
+
+      yield* callTool(lead(projectId, threadId, taskId), 'draft_review', {
+        verdict: 'changes',
+        summary: 'Two things.',
+        comments: [
+          { path: 'send.ts', line: 1, body: 'Untested.', severity: 'blocking' },
+          { path: 'README.md', line: 1, body: 'Odd heading.', severity: 'minor' },
+        ],
+      })
+      const [card] = yield* cardsIn(threadId)
+      const draftId = card?.draftId ?? ''
+      // Drafted, with no run, it is the person's to post: ready on the board and in the project's count.
+      assert.strictEqual(yield* ready, 1)
+      let seen = yield* revision
+      const moved = Effect.gen(function* () {
+        const now = yield* revision
+        assert.isAbove(now, seen)
+        seen = now
+      })
+
+      yield* reviews.change(draftId, { comments: [{ id: card?.comments[1]?.id ?? '', kept: false }] }, instance.personId)
+      yield* moved
+      assert.deepInclude((yield* onBoard)?.reviewing, { findings: 1, blocking: 1, verdict: 'changes' })
+      yield* reviews.change(draftId, { verdict: 'comment' }, instance.personId)
+      yield* moved
+      assert.deepInclude((yield* onBoard)?.reviewing, { verdict: 'comment' })
+      github.failNext('postReview', 'rejected')
+      assert.strictEqual((yield* reviews.post(draftId, instance.personId)).state, 'failed')
+      yield* moved
+      // Failed, it still waits for the person.
+      assert.strictEqual(yield* ready, 1)
+
+      // A call on the task waits on them first: it counts once, as that.
+      const at2 = new Date().toISOString()
+      yield* sql`INSERT INTO attention_requests ${sql.insert({
+        id: `attn_${'a'.repeat(32)}`,
+        projectId,
+        taskId,
+        kind: 'question',
+        payload: '{}',
+        state: 'open',
+        createdAt: at2,
+      })}`
+      assert.strictEqual(yield* ready, 0)
+      yield* sql`UPDATE attention_requests SET state = 'answered', answered_at = ${at2}`
+      assert.strictEqual(yield* ready, 1)
+
+      yield* reviews.discard(draftId, instance.personId)
+      yield* moved
+      assert.strictEqual(yield* ready, 0)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('settles, as Althar starts, a task whose review an older Althar posted but closed before settling', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const left = pullRequest(at, github)
+    const reopened = pullRequest(at, github, { title: 'Retry the checkout' })
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-reviews-')), 'althar.sqlite')
+    return Effect.gen(function* () {
+      const tasks = yield* Effect.gen(function* () {
+        const { projectId, coordinator } = yield* project(at.working)
+        const sql = yield* SqlClient.SqlClient
+        const instance = yield* Instance
+        const posted = (number: number) =>
+          Effect.gen(function* () {
+            yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(number), lead: { agent: 'claude-code' } })
+            const { task } = yield* reviewTask(projectId)
+            yield* callTool(lead(projectId, task?.threadId ?? '', task?.id ?? ''), 'draft_review', { verdict: 'comment', summary: 'Fine.' })
+            const [card] = yield* cardsIn(task?.threadId ?? '')
+            const card2 = yield* (yield* Reviews).post(card?.draftId ?? '', instance.personId)
+            assert.strictEqual(card2.state, 'posted')
+            // Posted and settled in one go.
+            assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'done')
+            return task?.id ?? ''
+          })
+        const first = yield* posted(left.pull.number)
+        const second = yield* posted(reopened.pull.number)
+        // As an older Althar left it: posted, then closed before the task settled.
+        yield* sql`UPDATE tasks SET state = 'open', settled_at = NULL WHERE id = ${first}`
+        yield* sql`DELETE FROM record_events WHERE aggregate_type = 'task' AND aggregate_id = ${first} AND type = 'task.done'`
+        // And one settled, then opened again since: it stays open.
+        yield* sql`UPDATE tasks SET state = 'open', settled_at = NULL WHERE id = ${second}`
+        yield* fact({
+          projectId,
+          aggregateType: 'task',
+          aggregateId: second,
+          revision: 9,
+          type: 'task.reopened',
+          actorId: instance.personId,
+        })
+        return { first, second }
+      }).pipe(Effect.provide(withQueries(github, database)))
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const states = yield* sql<{ id: string; state: string }>`SELECT id, state FROM tasks ORDER BY created_at`
+        assert.deepStrictEqual(states, [
+          { id: tasks.first, state: 'done' },
+          { id: tasks.second, state: 'open' },
+        ])
+      }).pipe(Effect.provide(withQueries(github, database)))
+    })
   })
 
   it.live('refuses a host that takes no reviews', () => {
