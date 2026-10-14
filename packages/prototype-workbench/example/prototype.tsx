@@ -40,7 +40,7 @@ const checksPassed = (
 function Lane({ children }: { children: ReactNode }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'center', height: '100%' }}>
-      <div style={{ display: 'flex', width: 360 }}>
+      <div style={{ display: 'grid', width: 360 }}>
         <BoardColumn lane={BoardLane.Yours} count={2}>
           {children}
           <BoardCard

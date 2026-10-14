@@ -7,7 +7,7 @@ import react from '@vitejs/plugin-react'
 import { createServer, type ViteDevServer } from 'vite'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { PROTOTYPE, bare, forPage, pageOf, prototypeIn, workbench } from '../src/plugin'
+import { PROTOTYPE, PROTOTYPE_FILE, bare, forPage, pageOf, prototypeIn, reactAliases, workbench } from '../src/plugin'
 
 const home = resolve(import.meta.dirname, '..')
 
@@ -54,6 +54,21 @@ describe('the parts of the plugin', () => {
     expect(forPage('/tasks/7', '*/*')).toBe(false)
     expect(forPage('/kit.tsx', 'text/html')).toBe(false)
     expect(forPage('/@vite/client', 'text/html')).toBe(false)
+  })
+
+  it('knows a prototype’s own file, wherever it is, and nothing else', () => {
+    for (const path of ['/w/.althar/scratch/card/prototype.tsx', '/w/example/prototype.ts', '/w/x/prototype.jsx'])
+      expect(PROTOTYPE_FILE.test(path)).toBe(true)
+    for (const path of ['/w/x/prototypes.tsx', '/w/x/prototype.tsx.map', '/w/x/my-prototype.tsx'])
+      expect(PROTOTYPE_FILE.test(path)).toBe(false)
+  })
+
+  it('gives every page the workbench’s one React, its parts by their paths in it', () => {
+    const [react, dom] = reactAliases()
+    expect('react/jsx-dev-runtime'.replace(react?.find ?? '', react?.replacement ?? '')).toMatch(/\/react\/jsx-dev-runtime$/)
+    expect('react-dom/client'.replace(dom?.find ?? '', dom?.replacement ?? '')).toMatch(/\/react-dom\/client$/)
+    expect(react?.find.test('react-dom')).toBe(false)
+    expect(react?.find.test('react-redux')).toBe(false)
   })
 
   it('writes a page that loads its script on the kit’s root', () => {

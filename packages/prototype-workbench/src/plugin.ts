@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync, realpathSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -21,6 +22,17 @@ const entry = join(home, 'src', 'entry.ts')
 /** Where the workbench's packages are found from. */
 const anchor = join(home, 'src', 'index.ts')
 
+/** A package of the workbench's own, by its folder. */
+const own = (name: string) => dirname(realpathSync(createRequire(anchor).resolve(`${name}/package.json`)))
+
+/**
+ * React, always the workbench's: one React for the page, the kit and the
+ * prototype, wherever its folder is. As an alias, since Vite bundles React
+ * ahead by its name, from the folder, without asking the plugins.
+ */
+export const reactAliases = () =>
+  ['react', 'react-dom'].map((name) => ({ find: new RegExp(`^${name}(/.*)?$`), replacement: `${own(name)}$1` }))
+
 /** What a prototype imports the workbench as. */
 const NAME = '@althar/prototype-workbench'
 
@@ -30,6 +42,14 @@ const MISSING = '\0prototype-workbench/missing'
 
 /** A prototype's file in its folder, as it may be written. */
 const FILES = ['prototype.tsx', 'prototype.ts', 'prototype.jsx', 'prototype.js']
+
+/**
+ * A prototype's own file, which React's fast refresh leaves to the page: its
+ * default export is the prototype, not a component, so fast refresh would
+ * reload the page, losing what was done in it. The page draws it again in
+ * place instead (entry.ts).
+ */
+export const PROTOTYPE_FILE = /\/prototype\.[jt]sx?$/
 
 /** The prototype in a folder, or null where it has none yet. */
 export const prototypeIn = (folder: string) => FILES.map((name) => join(folder, name)).find((path) => existsSync(path)) ?? null
@@ -79,6 +99,7 @@ export function workbench(): Plugin {
         // Each prototype's own, in the workbench's: none is written in the prototype's folder.
         cacheDir: join(home, 'node_modules', '.vite', 'prototypes', named),
         optimizeDeps: { entries: [entry, ...(file === null ? [] : [file])] },
+        resolve: { alias: reactAliases() },
         // The repository, for the kit, the app's screens and the packages, and the folder, wherever it is.
         server: { fs: { allow: [resolve(home, '../..'), root] } },
       }

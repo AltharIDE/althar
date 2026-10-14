@@ -1,7 +1,7 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite-plus'
 
-import { workbench } from './src/plugin'
+import { PROTOTYPE_FILE, workbench } from './src/plugin'
 
 /*
  * One config for serving a prototype and for the tests. `vp dev <folder>`
@@ -10,7 +10,7 @@ import { workbench } from './src/plugin'
  * port from 5400, and prints its address.
  */
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), ...(process.env.VITEST === undefined ? [workbench()] : [])],
+  plugins: [react({ exclude: [/\/node_modules\//, PROTOTYPE_FILE] }), ...(process.env.VITEST === undefined ? [workbench()] : [])],
   css: {
     modules: {
       // As the kit's own: its components read their classes in camel case.
