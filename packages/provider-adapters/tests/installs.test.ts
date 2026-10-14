@@ -144,6 +144,23 @@ describe('finding an agent’s command', () => {
     expect(pointed.signIn.login).toBe('/app/claude auth login')
   })
 
+  it('names a copy inside the app’s sandbox through the app, so the person’s own terminal can run the sign-in', () => {
+    // The bundled copy lives under /app, which exists only inside a Flatpak: a host terminal reaches it through the app.
+    const bundled = usingLocated(agents['claude-code'], () => ({ command: '/app/claude', whose: 'bundled' }), 'dev.althar.app')
+    expect(bundled.signIn.login).toBe('flatpak run --command=/app/claude dev.althar.app auth login')
+    // The person's own copy, and one Althar downloaded under the profile, are paths their terminal already reaches.
+    const theirs = usingLocated(agents['claude-code'], () => ({ command: '/usr/bin/claude', whose: 'theirs' }), 'dev.althar.app')
+    expect(theirs.signIn.login).toBe('/usr/bin/claude auth login')
+    const downloaded = usingLocated(
+      agents['claude-code'],
+      () => ({ command: '/home/me/.var/app/dev.althar.app/data/althar/agents/claude-code/current/claude', whose: 'althar' }),
+      'dev.althar.app',
+    )
+    expect(downloaded.signIn.login).toBe(
+      '/home/me/.var/app/dev.althar.app/data/althar/agents/claude-code/current/claude auth login',
+    )
+  })
+
   it('finds the Claude Code the Agent SDK ships for this computer, and none for one it has no build for', () => {
     expect(bundledClaude()).toMatch(/claude-agent-sdk-[a-z0-9-]+\/claude(\.exe)?$/)
     expect(bundledClaude('plan9', 'mips')).toBeNull()
