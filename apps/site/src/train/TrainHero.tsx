@@ -188,6 +188,8 @@ export function TrainHero({ nav, look = 'depth' }: { nav?: ReactNode; look?: Loo
     }
 
     const draw = (t: number) => {
+      // Up out of the dark as it sets off, landscape or not.
+      el.style.setProperty('--dark', (1 - smooth(AT.open, AT.opened, t)).toFixed(3))
       if (!world) {
         style.frame(el, t, null)
         direct(t, 0)
@@ -219,13 +221,10 @@ export function TrainHero({ nav, look = 'depth' }: { nav?: ReactNode; look?: Loo
       ctx.restore()
       drawNear(t, win)
       box.style.transform = `translate3d(${ride.x.toFixed(2)}px, ${ride.y.toFixed(2)}px, 0) scale(1.012)`
-      // The carriage darkens a little as poles and trees take the light, and comes up out of the dark at the start.
-      const dark = 1 - smooth(AT.open, AT.opened, t)
-      // The other train takes the sun as it goes by.
+      // The carriage darkens a little as poles and trees take the light, and as the other train takes the sun going by.
       const passer = style.passer ? (passAt(win, t)?.cover ?? 0) : 0
       const shade = passer * 0.32
       if (dim.current) dim.current.style.opacity = String(clamp((1 - lightAt(world, metres)) * 1.4 + shade))
-      el.style.setProperty('--dark', dark.toFixed(3))
       // "fast.", on the train's own time.
       style.frame(el, t, { win, painted: word !== null })
       direct(t, passer)
