@@ -7,12 +7,13 @@ import type { ReviewDraftCard } from '@althar/contracts'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer } from 'effect'
+import { Duration, Effect, Layer, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
+import { Nudges } from '../src/Nudges'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import {
@@ -283,6 +284,11 @@ describe('reviewing someone else’s pull request', () => {
         const access = lead(projectId, threadId, task?.id ?? '')
         const reviews = yield* Reviews
         const instance = yield* Instance
+        const nudges = yield* Nudges
+        const told: Array<string> = []
+        yield* Effect.forkChild(
+          Stream.runForEach(nudges.events, (event) => Effect.sync(() => void (event._tag === 'Nudge' && told.push(event.body)))),
+        )
 
         // Comments only where the change shows: a file it hasn't, or a line it doesn't touch, is refused before anything is kept.
         const astray = yield* callTool(access, 'draft_review', {
@@ -356,6 +362,11 @@ describe('reviewing someone else’s pull request', () => {
           Duration.seconds(20),
         )
         assert.deepInclude(onBoard, { kind: 'review' })
+        // The person is told it waits for them, outside the window too.
+        yield* until(
+          Effect.sync(() => told),
+          (said) => said.includes('Review drafted: #1 by ninemate'),
+        )
         // Found by the pull request it reviews.
         assert.deepStrictEqual(
           (yield* findTasks({ projectId, text: 'PR #1' }, new Set())).map((found) => found.taskId),
@@ -433,7 +444,7 @@ describe('reviewing someone else’s pull request', () => {
         assert.strictEqual((yield* reviews.post(second?.draftId ?? '', instance.personId)).state, 'posted')
         assert.lengthOf(github.reviewsPosted, 2)
         assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'done')
-      }).pipe(Effect.provide(withQueries(github)))
+      }).pipe(Effect.provide(Nudges.layer.pipe(Layer.provideMerge(withQueries(github)))))
     },
   )
 

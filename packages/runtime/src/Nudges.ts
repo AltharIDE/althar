@@ -86,6 +86,9 @@ export const readyWords = (summary: string): string => {
   return said === '' ? 'Ready to look at' : `Ready: ${said}`
 }
 
+/** A review drafted, in the words a nudge says it: whose pull request waits for the person to post its review. */
+export const draftedWords = (number: number, author: string): string => `Review drafted: #${number} by ${author}`
+
 export class Nudges extends Context.Service<
   Nudges,
   {
@@ -168,6 +171,31 @@ export class Nudges extends Context.Service<
             title: task.title,
             body: readyWords(text(parse(task.latest), 'summary')),
             threadId: task.threadId,
+          })
+        }
+        // A review drafted, waiting for the person to post it (DEV-96): a review has no run, so it is read from its draft.
+        const drafted = yield* sql<{ taskId: string; threadId: string; title: string; number: number; author: string }>`
+          SELECT k.id AS task_id, t.id AS thread_id, k.title, d.number, d.author
+          FROM review_drafts d
+          JOIN tasks k ON k.id = d.task_id
+          JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+          JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
+          WHERE d.state = 'pending' AND k.state = 'open'
+            AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
+          ORDER BY d.created_at, d.rowid`
+        for (const review of drafted) {
+          const turning = yield* Effect.map(
+            sessions.running(review.threadId),
+            Option.exists((session) => session.turnRunning),
+          )
+          if (turning) continue
+          found.set(`ready:${review.taskId}`, {
+            _tag: 'Nudge',
+            kind: 'ready',
+            key: `ready:${review.taskId}`,
+            title: review.title,
+            body: draftedWords(review.number, review.author),
+            threadId: review.threadId,
           })
         }
         return found
