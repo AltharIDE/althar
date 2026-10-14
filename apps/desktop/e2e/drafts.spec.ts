@@ -19,6 +19,8 @@ import { launch, openFirstProject } from './support'
 const SLOW = 3_000
 
 test('keeps the draft through the home and back, and dictation finishes while the person is away', async () => {
+  // Three slow writings down, and a wait on the home: more than a quick spec's time on a busy machine.
+  test.setTimeout(120_000)
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const meridian = repository(home, 'meridian')
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_SPEECH: '1', ALTHAR_FAKE_SPEECH_SLOW: String(SLOW) })
