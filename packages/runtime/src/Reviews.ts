@@ -5,7 +5,7 @@ import { ConnectorFailed, fromOutside, parseRemote, type PostedReview, type Prod
 import type { ReviewBrief, ReviewDraftCard } from '@althar/contracts'
 import { type ActorId, type CommandEnvelope, Ids, newId, type ProjectId, type ReviewDraftState, type ReviewVerdict } from '@althar/domain'
 import { Commands, type Ledger } from '@althar/persistence-sqlite'
-import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
+import { Context, type Crypto, Effect, Layer, Option, Schema, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { postCard, touchCard } from './cards'
@@ -611,13 +611,11 @@ export class Reviews extends Context.Service<
         })
 
       /**
-       * Changes a draft if it stands as `when` needs, checked and changed in
-       * one transaction with its card, so two presses can't both post it;
-       * and with whatever else `also` changes, such as the task a posted
-       * review settles. Changed, the task's card on the board is told to
-       * read again, as its findings and verdict are read from the draft.
+       * Changes a draft if it stands as `when` needs, with its card, inside
+       * the caller's transaction; and with whatever else `also` changes, such
+       * as the task a posted review settles.
        */
-      const transition = (
+      const transitionIn = (
         draftId: string,
         when: (row: Row) => boolean,
         set: (row: Row, at: string) => Readonly<Record<string, unknown>>,
@@ -627,28 +625,35 @@ export class Reviews extends Context.Service<
         also?: (row: Row) => Effect.Effect<void, unknown, Store>,
       ) =>
         Effect.gen(function* () {
+          const row = yield* load(draftId)
+          if (!when(row)) return { changed: false as const, row }
+          const at = yield* timestamp
+          const revision = yield* change('review_drafts', draftId, { ...set(row, at), updatedAt: at })
+          const after = yield* load(draftId)
+          yield* fact({
+            projectId: row.projectId,
+            aggregateType: 'review_draft',
+            aggregateId: draftId,
+            revision,
+            type,
+            ...(payload === undefined ? {} : { payload: payload(after) }),
+            actorId,
+          })
+          yield* showCard(draftId)
+          if (also !== undefined) yield* also(after)
+          return { changed: true as const, row: after }
+        })
+
+      /**
+       * Changes a draft if it stands as `when` needs, checked and changed in
+       * one transaction with its card, so two presses can't both post it
+       * (`transitionIn`). Changed, the task's card on the board is told to
+       * read again, as its findings and verdict are read from the draft.
+       */
+      const transition = (...args: Parameters<typeof transitionIn>) =>
+        Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const result = yield* sql.withTransaction(
-            Effect.gen(function* () {
-              const row = yield* load(draftId)
-              if (!when(row)) return { changed: false as const, row }
-              const at = yield* timestamp
-              const revision = yield* change('review_drafts', draftId, { ...set(row, at), updatedAt: at })
-              const after = yield* load(draftId)
-              yield* fact({
-                projectId: row.projectId,
-                aggregateType: 'review_draft',
-                aggregateId: draftId,
-                revision,
-                type,
-                ...(payload === undefined ? {} : { payload: payload(after) }),
-                actorId,
-              })
-              yield* showCard(draftId)
-              if (also !== undefined) yield* also(after)
-              return { changed: true as const, row: after }
-            }),
-          )
+          const result = yield* sql.withTransaction(transitionIn(...args))
           if (result.changed) yield* touchCard(result.row.taskId)
           return result
         })
@@ -674,6 +679,18 @@ export class Reviews extends Context.Service<
 
       /** Whether a draft can still change, or be posted: waiting on the person, not posted the last time, or perhaps posted. */
       const open = (row: Row) => row.state === 'pending' || row.state === 'failed' || row.state === 'uncertain'
+      /** Whether the lead drafting again replaces a draft: one that waits, or wasn't posted; never one perhaps posted, whose warning stays. */
+      const redraftable = (row: Pick<Row, 'state'>) => row.state === 'pending' || row.state === 'failed'
+
+      /* One draft at a time on a task: two draft_review calls at once make one draft, never two that both post. */
+      const drafting = new Map<string, Semaphore.Semaphore>()
+      const oneDraftAt = (taskId: string) => {
+        const known = drafting.get(taskId)
+        if (known !== undefined) return known.withPermits(1)
+        const made = Semaphore.makeUnsafe(1)
+        drafting.set(taskId, made)
+        return made.withPermits(1)
+      }
       const closed = (row: Row) => new ReviewDraftClosed({ draftId: row.id, state: row.state })
 
       /**
@@ -732,6 +749,9 @@ export class Reviews extends Context.Service<
 
       const draft = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
+          // When the call came in: a draft posted since was posted while it was drafted, by another call at once with it or
+          // by the person, and isn't drafted over with a review of its own.
+          const began = yield* timestamp
           const sql = yield* SqlClient.SqlClient
           const taskId = access.taskId
           const review = taskId === null ? null : yield* reviewOf(taskId)
@@ -769,16 +789,6 @@ export class Reviews extends Context.Service<
           const verdict = startingVerdict(asked.verdict, review.outside)
           const drafter = yield* drafterOf(access.threadId)
           const account = yield* accountOf(review)
-          // The lead drafting again changes the draft that waits, rather than adding another; one being posted, or perhaps posted, waits on the person.
-          const [latest] = yield* sql<{ id: string; state: ReviewDraftState }>`
-            SELECT id, state FROM review_drafts WHERE task_id = ${taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`
-          if (latest?.state === 'posting' || latest?.state === 'uncertain')
-            return yield* new ToolRefused({
-              message:
-                latest.state === 'posting'
-                  ? 'Your last draft is being posted now. Wait for it, then draft again if the person asks.'
-                  : 'Your last draft may be on GitHub already: its answer was lost. Ask the person to look there before you draft again.',
-            })
           const content = {
             suggested: asked.verdict,
             verdict,
@@ -788,69 +798,90 @@ export class Reviews extends Context.Service<
             drafter,
             account,
           }
-          let draftId: string
-          if (latest !== undefined && (latest.state === 'pending' || latest.state === 'failed')) {
-            draftId = latest.id
-            yield* transition(
-              draftId,
-              open,
-              () => ({ ...content, state: 'pending', error: null }),
-              'review_draft.redrafted',
-              instance.systemId,
-              () => ({ verdict: asked.verdict, comments: comments.length }),
-            )
-          } else {
-            draftId = yield* newId(Ids.reviewDraft)
-            const id = draftId
-            yield* sql.withTransaction(
-              Effect.gen(function* () {
-                const at = yield* timestamp
-                yield* sql`INSERT INTO review_drafts ${sql.insert({
-                  id,
-                  projectId: access.projectId,
-                  taskId,
-                  threadId: access.threadId,
-                  connectionId: review.connectionId,
-                  product: review.product,
-                  repository: review.repository.join('/'),
-                  number: review.number,
-                  url: review.url,
-                  title: review.title,
-                  author: review.author,
-                  outside: review.outside ? 1 : 0,
-                  ...content,
-                  state: 'pending',
-                  draftedByActorId: instance.systemId,
-                  createdAt: at,
-                  updatedAt: at,
-                })}`
-                yield* fact({
-                  projectId: access.projectId as ProjectId,
-                  aggregateType: 'review_draft',
-                  aggregateId: id,
-                  revision: 1,
-                  type: 'review_draft.drafted',
-                  payload: { url: review.url, verdict: asked.verdict, comments: comments.length, outside: review.outside },
-                  actorId: instance.systemId,
-                })
-                yield* addItem(
-                  { projectId: access.projectId as ProjectId, threadId: access.threadId },
-                  'review_draft',
-                  cardOf(yield* load(id), review.fork !== null),
-                )
-              }),
-            )
-            yield* touchCard(taskId)
-          }
           const name = `${review.words.noun} ${review.words.prefix}${review.number}`
           const counted = comments.length === 1 ? '1 comment' : `${comments.length} comments`
-          // The person's own setting posts their team's reviews at once; an outside one always waits for them.
-          if (!review.outside && (yield* postTeamReviews)) {
-            const posted = yield* post(draftId, instance.systemId)
-            return posted.state === 'posted'
+          // One at a time on the task: the latest draft read and replaced, or one added, in one transaction; and one the
+          // person's setting posts is posted before the next call reads it.
+          const drafted = yield* oneDraftAt(taskId)(
+            Effect.gen(function* () {
+              const kept = yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  // The lead drafting again changes the draft that waits, rather than adding another; one being posted, or perhaps
+                  // posted, waits on the person.
+                  const [latest] = yield* sql<{ id: string; state: ReviewDraftState; updatedAt: string }>`
+                    SELECT id, state, updated_at FROM review_drafts WHERE task_id = ${taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1`
+                  if (latest?.state === 'posting' || latest?.state === 'uncertain')
+                    return {
+                      refused:
+                        latest.state === 'posting'
+                          ? 'Your last draft is being posted now. Wait for it, then draft again if the person asks.'
+                          : 'Your last draft may be on GitHub already: its answer was lost. Ask the person to look there before you draft again.',
+                    }
+                  if (latest?.state === 'posted' && latest.updatedAt >= began)
+                    return {
+                      refused: `Your review of ${name} was posted while you drafted this, from another draft_review call or by the person. Draft again only if the person asks for more.`,
+                    }
+                  if (latest !== undefined && redraftable(latest)) {
+                    yield* transitionIn(
+                      latest.id,
+                      redraftable,
+                      () => ({ ...content, state: 'pending', error: null }),
+                      'review_draft.redrafted',
+                      instance.systemId,
+                      () => ({ verdict: asked.verdict, comments: comments.length }),
+                    )
+                    return { draftId: latest.id }
+                  }
+                  const id = yield* newId(Ids.reviewDraft)
+                  const at = yield* timestamp
+                  yield* sql`INSERT INTO review_drafts ${sql.insert({
+                    id,
+                    projectId: access.projectId,
+                    taskId,
+                    threadId: access.threadId,
+                    connectionId: review.connectionId,
+                    product: review.product,
+                    repository: review.repository.join('/'),
+                    number: review.number,
+                    url: review.url,
+                    title: review.title,
+                    author: review.author,
+                    outside: review.outside ? 1 : 0,
+                    ...content,
+                    state: 'pending',
+                    draftedByActorId: instance.systemId,
+                    createdAt: at,
+                    updatedAt: at,
+                  })}`
+                  yield* fact({
+                    projectId: access.projectId as ProjectId,
+                    aggregateType: 'review_draft',
+                    aggregateId: id,
+                    revision: 1,
+                    type: 'review_draft.drafted',
+                    payload: { url: review.url, verdict: asked.verdict, comments: comments.length, outside: review.outside },
+                    actorId: instance.systemId,
+                  })
+                  yield* addItem(
+                    { projectId: access.projectId as ProjectId, threadId: access.threadId },
+                    'review_draft',
+                    cardOf(yield* load(id), review.fork !== null),
+                  )
+                  return { draftId: id }
+                }),
+              )
+              if ('refused' in kept) return kept
+              yield* touchCard(taskId)
+              // The person's own setting posts their team's reviews at once; an outside one always waits for them.
+              if (!review.outside && (yield* postTeamReviews)) return { ...kept, posted: yield* post(kept.draftId, instance.systemId) }
+              return kept
+            }),
+          )
+          if ('refused' in drafted) return yield* new ToolRefused({ message: drafted.refused })
+          if ('posted' in drafted)
+            return drafted.posted.state === 'posted'
               ? `Posted your review of ${name} (${VERDICT_WORDS[asked.verdict]}, ${counted}): the person posts their team's reviews without asking. Say in a sentence or two what you found.`
               : `Drafted your review of ${name}. The person's setting posts their team's reviews at once, but it didn't post; they see why on its card.`
-          }
           return `Drafted your review of ${name} (you suggest ${VERDICT_WORDS[asked.verdict]}, ${counted}). Nothing is posted until the person posts it from its card, where they choose the verdict and keep or drop each comment; they see it there, so don't repeat it. Say in a sentence or two what you found.${verdict === null ? ' It comes from outside the project, so Approve is theirs to choose.' : ''}`
         })
 

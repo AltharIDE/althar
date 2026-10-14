@@ -591,7 +591,9 @@ asks; its thread opens with what they said and the pull request under it.
   card in the thread. A comment on a file the pull request hasn't, or a line
   its diff doesn't show, is refused before anything is kept, since GitHub
   would refuse the whole review for it. Drafting again replaces the draft
-  that waits. The person keeps or drops each comment, rewords them, and
+  that waits, or one that wasn't posted, never one perhaps posted; a task
+  drafts one at a time, so two calls at once make one draft, and a call
+  made while its review was posted drafts nothing over it. The person keeps or drops each comment, rewords them, and
   chooses the verdict: the lead's is a suggestion, and on a pull request from
   outside, Approve is never chosen for them. Nothing reaches GitHub until they
   press Post, which posts the review with their verdict and the comments

@@ -36,7 +36,20 @@ import { fact } from '../src/records'
 import { transcript } from '../src/threads'
 import { words } from '../src/words'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, items, launches, listTools, repository, runtime, sessionMetas, until } from './support'
+import {
+  callTool,
+  callToolAtOnce,
+  fakeConnectors,
+  HOST,
+  hosted,
+  items,
+  launches,
+  listTools,
+  repository,
+  runtime,
+  sessionMetas,
+  until,
+} from './support'
 
 /*
  * Reviews of someone else's pull request (docs/architecture/06, "Reviewing
@@ -515,6 +528,102 @@ describe('reviewing someone else’s pull request', () => {
       assert.lengthOf(github.reviewsPosted, 0)
       assert.strictEqual((yield* reviews.post(draftId, instance.personId)).state, 'posted')
       assert.lengthOf(github.reviewsPosted, 1)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('keeps one draft when the lead drafts twice at once, and posts one review where the person’s setting posts it', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    const second = pullRequest(at, github, { title: 'Retry the checkout' })
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      const sql = yield* SqlClient.SqlClient
+      const twice = (access: ToolAccess) =>
+        callToolAtOnce(
+          access,
+          'draft_review',
+          ['First look.', 'Second look.'].map((summary) => ({
+            verdict: 'comment',
+            summary,
+            comments: [{ path: 'send.ts', line: 1, body: summary, severity: 'nit' }],
+          })),
+        )
+      const draftsOf = (taskId: string) =>
+        sql<{ state: string; summary: string }>`SELECT state, summary FROM review_drafts WHERE task_id = ${taskId}`
+      // Drafted twice at once, it is one draft, the one drafted last, and one card.
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const first = yield* reviewTask(projectId)
+      const said = yield* twice(lead(projectId, first.task?.threadId ?? '', first.task?.id ?? ''))
+      assert.isTrue(
+        said.every((one) => one.startsWith('Drafted your review')),
+        said.join('\n'),
+      )
+      const [kept, ...more] = yield* draftsOf(first.task?.id ?? '')
+      assert.deepStrictEqual(more, [])
+      assert.strictEqual(kept?.state, 'pending')
+      assert.lengthOf(yield* cardsIn(first.task?.threadId ?? ''), 1)
+      // Where the person's setting posts their team's reviews, one review reaches GitHub.
+      yield* setPostTeamReviews(true)
+      yield* callTool(coordinator, 'review_pull_request', {
+        pull_request: linkTo(second.pull.number),
+        lead: { agent: 'claude-code' },
+      })
+      const other = yield* reviewTask(projectId)
+      const posted = yield* twice(lead(projectId, other.task?.threadId ?? '', other.task?.id ?? ''))
+      assert.deepStrictEqual(
+        (yield* draftsOf(other.task?.id ?? '')).map((one) => one.state),
+        ['posted'],
+      )
+      assert.deepStrictEqual(
+        github.reviewsPosted.map((one) => one.number),
+        [second.pull.number],
+      )
+      // One call posted it; the other drafted over it before, or was told it was posted while it drafted.
+      assert.isTrue(
+        posted.some((one) => one.startsWith('Posted your review')),
+        posted.join('\n'),
+      )
+      for (const one of posted) assert.match(one, /^Posted your review|was posted while you drafted this/)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('drafts over one that wasn’t posted, and never over one perhaps posted, however many calls come at once', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const { task } = yield* reviewTask(projectId)
+      const threadId = task?.threadId ?? ''
+      const access = lead(projectId, threadId, task?.id ?? '')
+      const reviews = yield* Reviews
+      const instance = yield* Instance
+      yield* callTool(access, 'draft_review', { verdict: 'comment', summary: 'A thought.' })
+      const draftId = (yield* cardsIn(threadId))[0]?.draftId ?? ''
+      github.failNext('postReview', 'rejected')
+      assert.strictEqual((yield* reviews.post(draftId, instance.personId)).state, 'failed')
+      // Not posted, it is drafted over: the same card, waiting again.
+      yield* callTool(access, 'draft_review', { verdict: 'changes', summary: 'Another thought.' })
+      const [again, ...more] = yield* cardsIn(threadId)
+      assert.deepStrictEqual(more, [])
+      assert.deepInclude(again, { draftId, state: 'pending', error: null, summary: 'Another thought.' })
+      // Perhaps posted, no call drafts over it, however many come at once: its warning stays for the person.
+      github.failNext('postReview', 'unreachable')
+      assert.strictEqual((yield* reviews.post(draftId, instance.personId)).state, 'uncertain')
+      const said = yield* callToolAtOnce(access, 'draft_review', [
+        { verdict: 'approve', summary: 'Fine after all.' },
+        { verdict: 'approve', summary: 'Fine, really.' },
+      ])
+      for (const one of said) assert.include(one, 'may be on GitHub already')
+      const [kept, ...others] = yield* cardsIn(threadId)
+      assert.deepStrictEqual(others, [])
+      assert.deepInclude(kept, { draftId, state: 'uncertain', summary: 'Another thought.' })
+      assert.match(kept?.error ?? '', /^Its answer was lost/)
+      assert.lengthOf(github.reviewsPosted, 0)
     }).pipe(Effect.provide(withQueries(github)))
   })
 
