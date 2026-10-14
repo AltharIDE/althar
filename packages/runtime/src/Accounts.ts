@@ -405,9 +405,7 @@ export class Accounts extends Context.Service<
               // The home a session gets (`env`), not the folder: the usual
               // Claude account in a Flatpak signs in where its sessions read.
               const home = env(account)[definition.home.variable]
-              return home === undefined
-                ? definition.signIn.login
-                : `${definition.home.variable}=${quoted(home)} ${definition.signIn.login}`
+              return home === undefined ? definition.signIn.login : `${definition.home.variable}=${quoted(home)} ${definition.signIn.login}`
             }),
           ),
       })
