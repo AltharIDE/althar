@@ -394,6 +394,48 @@ describe('GitLab as a code host', () => {
     }),
   )
 
+  it.effect('closes a merge request unmerged, deletes its branch once closed, and says GitLab’s 401 is an account that may not', () =>
+    Effect.gen(function* () {
+      let state = 'opened'
+      const { host, sent } = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, () => ({ json: request({ state, source_project_id: 34675721 }) })],
+        [
+          'PUT',
+          `${PROJECT}/merge_requests/12`,
+          () => {
+            state = 'closed'
+            return { json: request({ state }) }
+          },
+        ],
+        ['DELETE', `${PROJECT}/repository/branches/althar%2Fmer-231`, { status: 204 }],
+      ])
+      const closed = yield* host.closeChange(repository, change)
+      assert.strictEqual(closed.state, 'closed')
+      assert.deepStrictEqual(sent.find((one) => one.method === 'PUT')?.body, { state_event: 'close' })
+      yield* host.deleteBranch(repository, closed)
+      assert.isTrue(sent.some((one) => one.method === 'DELETE'))
+      // Closed already, it is left as it is; a branch already gone is nothing to do.
+      const gone = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, { json: request({ state: 'closed' }) }],
+        ['DELETE', `${PROJECT}/repository/branches/althar%2Fmer-231`, { status: 404, json: { message: '404 Branch Not Found' } }],
+      ])
+      assert.strictEqual((yield* gone.host.closeChange(repository, change)).state, 'closed')
+      yield* gone.host.deleteBranch(repository, change)
+      assert.isFalse(gone.sent.some((one) => one.method === 'PUT'))
+      // Open, its branch stays; and an account that may not close it is refused, as forbidden, while its token works.
+      const open = gitlab([
+        ['GET', `${PROJECT}/merge_requests/12`, { json: request() }],
+        ['PUT', `${PROJECT}/merge_requests/12`, { status: 401, json: { message: '401 Unauthorized' } }],
+        ['GET', `${API}/user`, { json: user(5, 'you') }],
+      ])
+      assert.deepInclude(yield* Effect.flip(open.host.deleteBranch(repository, change)), {
+        reason: 'rejected',
+        message: 'MR !12 is still open, so its branch stays.',
+      })
+      assert.deepInclude(yield* Effect.flip(open.host.closeChange(repository, change)), { reason: 'forbidden', status: 401 })
+    }),
+  )
+
   it.effect('merges only the head it saw, squashed where the project prefers it', () =>
     Effect.gen(function* () {
       const { host, sent } = gitlab([['PUT', `${PROJECT}/merge_requests/12/merge`, { json: request({ state: 'merged', draft: false }) }]])

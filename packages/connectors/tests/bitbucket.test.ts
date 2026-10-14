@@ -409,6 +409,33 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
+  it.effect('declines a pull request to close it, and deletes its branch once declined', () =>
+    Effect.gen(function* () {
+      let state = 'OPEN'
+      const { host, sent } = cloud([
+        ['GET', PR, () => ({ json: pull({ state }) })],
+        [
+          'POST',
+          `${PR}/decline`,
+          () => {
+            state = 'DECLINED'
+            return { json: pull({ state }) }
+          },
+        ],
+        ['DELETE', `${ACE}/refs/branches/ONECLOUD-13657/add-on-settings`, { status: 204 }],
+      ])
+      const seen = yield* host.change(ace, 552)
+      assert.deepInclude(yield* Effect.flip(host.deleteBranch(ace, seen)), { reason: 'rejected' })
+      const closed = yield* host.closeChange(ace, seen)
+      assert.strictEqual(closed.state, 'closed')
+      yield* host.deleteBranch(ace, closed)
+      assert.deepStrictEqual(
+        sent.filter((one) => one.method !== 'GET').map((one) => `${one.method} ${one.url}`),
+        [`POST ${PR}/decline`, `DELETE ${ACE}/refs/branches/ONECLOUD-13657/add-on-settings`],
+      )
+    }),
+  )
+
   it.effect('merges the head it saw, in the first way the target branch allows', () =>
     Effect.gen(function* () {
       let merged = false
@@ -1248,6 +1275,33 @@ describe('Bitbucket Data Center as a code host', () => {
       },
     },
   })
+
+  it.effect('declines a pull request at the version it read, and deletes its branch with the branch utilities', () =>
+    Effect.gen(function* () {
+      let state = 'OPEN'
+      const { host, sent } = center([
+        ['GET', PULL, () => ({ json: pr({ state }) })],
+        [
+          'POST',
+          `${PULL}/decline?version=3`,
+          () => {
+            state = 'DECLINED'
+            return { json: pr({ state, version: 4 }) }
+          },
+        ],
+        ['DELETE', `${SERVER}/rest/branch-utils/latest/projects/PRJ/repos/my-repo/branches`, { status: 204 }],
+      ])
+      const seen = yield* host.change(prj, 101)
+      const closed = yield* host.closeChange(prj, seen)
+      assert.strictEqual(closed.state, 'closed')
+      yield* host.deleteBranch(prj, closed)
+      assert.deepStrictEqual(sent.find((one) => one.method === 'DELETE')?.body, { name: 'refs/heads/feature-ABC-123', dryRun: false })
+      // Declined already, it is left as it is.
+      assert.strictEqual(sent.filter((one) => one.method === 'POST').length, 1)
+      yield* host.closeChange(prj, closed)
+      assert.strictEqual(sent.filter((one) => one.method === 'POST').length, 1)
+    }),
+  )
 
   it.effect('merges the head it saw, at the version it read, in the first way the repository allows', () =>
     Effect.gen(function* () {

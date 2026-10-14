@@ -20,7 +20,7 @@ import type {
   Tracker,
   Verdict,
 } from '../model'
-import { leftAsItIs, noReviews, unstarted } from '../model'
+import { leftAsItIs, noReviews, stillOpen, unstarted } from '../model'
 
 /*
  * A code host and tracker that lives in memory, for tests and the desktop's
@@ -119,6 +119,8 @@ export interface FakeControls {
   }): ChangeRequest
   /** Every review posted, in order, with the change it is on. */
   readonly reviewsPosted: ReadonlyArray<{ readonly number: number; readonly id: string; readonly review: NewReview }>
+  /** Every branch `deleteBranch` deleted, by the number of the change it was the branch of, in order. */
+  readonly branchesDeleted: ReadonlyArray<number>
   /** Method names, in the order they were called. */
   readonly calls: ReadonlyArray<string>
 }
@@ -161,6 +163,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const created: Array<Issue> = []
   const failures = new Map<string, { readonly reason: ConnectorFailed['reason']; readonly retryAt?: string; readonly status?: number }>()
   const calls: Array<string> = []
+  const deleted: Array<number> = []
   let ids = 0
   const nextId = () => String((ids += 1))
 
@@ -287,6 +290,18 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', status: 409, message: 'Head branch was modified' }))
         update(change.number, { state: 'merged' })
         return Effect.succeed(changeNumbered(change.number))
+      }),
+    closeChange: (_repository, change) =>
+      Effect.andThen(called('closeChange'), () => {
+        // As GitHub: one merged or closed already stays as it is.
+        if (changeNumbered(change.number).state === 'open') update(change.number, { state: 'closed' })
+        return Effect.succeed(changeNumbered(change.number))
+      }),
+    deleteBranch: (_repository, change) =>
+      Effect.andThen(called('deleteBranch'), () => {
+        if (changeNumbered(change.number).state === 'open') return Effect.fail(stillOpen(product, service.words, change.number))
+        if (!deleted.includes(change.number)) deleted.push(change.number)
+        return Effect.void
       }),
     checks: (_repository, sha) =>
       Effect.andThen(called('checks'), () => {
@@ -580,6 +595,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     },
     get reviewsPosted() {
       return [...posted]
+    },
+    get branchesDeleted() {
+      return [...deleted]
     },
     calls,
   }

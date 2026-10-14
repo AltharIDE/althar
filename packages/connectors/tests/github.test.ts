@@ -111,6 +111,57 @@ describe('GitHub as a code host', () => {
     }),
   )
 
+  it.effect('closes a pull request unmerged, leaves one already closed as it is, and says why it can’t', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull() }],
+        ['PATCH', `${REPO}/pulls/12`, { json: pull({ state: 'closed' }) }],
+      ])
+      const closed = yield* host.closeChange(repository, yield* host.change(repository, 12))
+      assert.strictEqual(closed.state, 'closed')
+      assert.deepStrictEqual(sent.find((request) => request.method === 'PATCH')?.body, { state: 'closed' })
+      // Merged meanwhile, it isn't touched: it says it is merged.
+      const already = github([['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', merged_at: '2026-10-02T00:00:00Z' }) }]])
+      assert.strictEqual((yield* already.host.closeChange(repository, closed)).state, 'merged')
+      assert.isFalse(already.sent.some((request) => request.method === 'PATCH'))
+      // An account that can't push here is refused, in GitHub's words.
+      const refusing = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull() }],
+        ['PATCH', `${REPO}/pulls/12`, { status: 403, json: { message: 'Resource not accessible by integration' } }],
+      ])
+      const refused = yield* Effect.flip(refusing.host.closeChange(repository, closed))
+      assert.deepInclude(refused, { reason: 'forbidden', status: 403, message: 'Resource not accessible by integration' })
+    }),
+  )
+
+  it.effect('deletes a closed pull request’s branch where its head is, a fork’s too, and never an open one’s', () =>
+    Effect.gen(function* () {
+      const head = { ref: 'althar/mer-231', sha: 'abc', repo: { full_name: 'meridian/api' } }
+      const { host, sent } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', head }) }],
+        ['DELETE', `${REPO}/git/refs/heads/althar/mer-231`, { status: 204 }],
+      ])
+      const change = yield* host.change(repository, 12)
+      yield* host.deleteBranch(repository, change)
+      assert.deepStrictEqual(
+        sent.map((request) => `${request.method} ${request.url}`),
+        [`GET ${REPO}/pulls/12`, `GET ${REPO}/pulls/12`, `DELETE ${REPO}/git/refs/heads/althar/mer-231`],
+      )
+      // From a fork, the fork's branch goes; one already gone is nothing to do.
+      const fork = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', head: { ...head, repo: { full_name: 'you/api' } } }) }],
+        ['DELETE', `${API}/repos/you/api/git/refs/heads/althar/mer-231`, { status: 422, json: { message: 'Reference does not exist' } }],
+      ])
+      yield* fork.host.deleteBranch(repository, change)
+      assert.isTrue(fork.sent.some((request) => request.method === 'DELETE' && request.url.startsWith(`${API}/repos/you/api/`)))
+      // Still open, its branch stays: deleting it would close the pull request behind the person's back.
+      const open = github([['GET', `${REPO}/pulls/12`, { json: pull({ head }) }]])
+      const refused = yield* Effect.flip(open.host.deleteBranch(repository, change))
+      assert.deepInclude(refused, { reason: 'rejected', message: 'PR #12 is still open, so its branch stays.' })
+      assert.isFalse(open.sent.some((request) => request.method === 'DELETE'))
+    }),
+  )
+
   it.effect('finds the open pull request from a branch', () =>
     Effect.gen(function* () {
       const { host, sent } = github([
