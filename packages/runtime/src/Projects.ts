@@ -208,7 +208,7 @@ export const slugify = (name: string, fallback: string) => {
 }
 
 /** The first of `slug`, `slug-2`, `slug-3`… that isn't taken. */
-const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
+export const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
   if (!taken.includes(slug)) return slug
   for (let n = 2; ; n += 1) if (!taken.includes(`${slug}-${n}`)) return `${slug}-${n}`
 }

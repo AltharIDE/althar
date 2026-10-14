@@ -19,6 +19,7 @@ import {
   Running,
   TaskFace,
   TaskHeader,
+  ReachLine,
   type TaskConflicts,
   TaskMenu,
   TaskStatus,
@@ -58,6 +59,8 @@ import { RunOf } from '../../shared/RunOf'
 import { PushRequestOf } from '../../shared/PushRequestOf'
 import { behindText, listeningOf, useHeard } from './behind'
 import { PermissionCalls } from './PermissionCall'
+import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
+import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { StuckCall } from './StuckCall'
 import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
@@ -86,6 +89,8 @@ type Face = 'talk' | 'out'
 
 export const text = {
   thread: 'Thread',
+  /** The sentence under a review's header: what its lead can reach. */
+  reach: 'What this review’s lead can reach',
   noLead: 'No lead yet',
   lead: 'Lead',
   placeholderBusy: 'Add to the queue, or interrupt the lead',
@@ -253,6 +258,8 @@ export function TaskView({
   // Images to send with what the person says, and which agents take them.
   const images = useImages()
   const models = useModels()
+  // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
+  const postsTeamReviews = usePostTeamReviews()?.on === true
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while a lead is on the task: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
@@ -378,7 +385,8 @@ export function TaskView({
             text: snapshot.task.request,
             at: snapshot.task.startedAt === null ? '' : ago(snapshot.task.startedAt),
             delivery: Delivery.Delivered,
-            links: [],
+            // A review's thread opens with the pull request it reviews, under what the person asked.
+            links: snapshot.task.review == null ? [] : [reviewedUnfurl(snapshot.task.review)],
             pictures: [],
           },
         ]),
@@ -628,6 +636,10 @@ export function TaskView({
           onBack={onBack}
         />
       </TitleBar>
+      {/* What a review's lead can reach, in a sentence under the header. */}
+      {snapshot.task.review != null && (
+        <ReachLine className={s.reach} phrases={reachOf(snapshot.task.review, postsTeamReviews)} aria-label={text.reach} />
+      )}
       {shown === 'out' && !hasOutputs(snapshot) ? (
         <NoOutputsView snapshot={snapshot} lead={lead.name} />
       ) : shown === 'out' ? (
@@ -730,6 +742,17 @@ export function TaskView({
                 {...(asking == null ? {} : { focusQuestion: asking })}
                 run={(run) => (
                   <RunOf run={run} now={now} onStop={(id) => void model.stopLaunch(id)} onRunAgain={() => void model.runProject()} />
+                )}
+                // A review the lead drafted is posted from its card, only when the person says.
+                review={(draft) => (
+                  <ReviewCard
+                    draft={draft}
+                    actions={{
+                      onChange: model.changeReview,
+                      onPost: (draftId) => void model.postReview(draftId),
+                      onDiscard: (draftId) => void model.discardReview(draftId),
+                    }}
+                  />
                 )}
                 // A push the lead asked for is pushed as the outputs push: up to the head it shows.
                 push={(request, at) => (

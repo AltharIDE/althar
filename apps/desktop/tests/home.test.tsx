@@ -343,6 +343,41 @@ describe('the home', () => {
     expect(screen.queryByText('Which partners call v1?')).toBeNull()
   })
 
+  it('lists a drafted review by its pull request, whose it is and what it found, to review', async () => {
+    const one = busy()
+    const drafted = task({
+      taskId: 't21',
+      threadId: 'th21',
+      title: 'Review #1199',
+      slug: 'review-1199',
+      phase: 'ready',
+      kind: 'review',
+      branch: null,
+      reviewing: {
+        product: 'github',
+        repository: 'meridian/api',
+        number: 1199,
+        url: 'https://github.com/meridian/api/pull/1199',
+        title: 'Retry webhooks',
+        author: 'ninemate',
+        outside: true,
+        additions: 12,
+        deletions: 3,
+        findings: 3,
+        blocking: 1,
+        verdict: 'changes',
+        posted: null,
+      },
+    })
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...one, tasks: [...one.tasks, drafted] })) })
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
+    const line = within(needs).getByRole('article', { name: 'Review #1199' })
+    expect(within(line).getByText('Review drafted')).toBeTruthy()
+    expect(within(line).getByText('api #1199 · by ninemate · 3 findings')).toBeTruthy()
+    expect(within(line).getByRole('button', { name: 'Review' })).toBeTruthy()
+  })
+
   it('lists a task with a call on its line alone, not again in its project, until the call is answered', async () => {
     const one = busy()
     const { client } = fakeClient({
@@ -742,6 +777,24 @@ describe('settings', () => {
     expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
     await waitFor(() => expect(vi.mocked(client.getSettings).mock.calls.length).toBeGreaterThan(reads))
     await waitFor(() => expect(count.getAttribute('aria-valuenow')).toBe('4'))
+  })
+
+  it('posts the team’s reviews without asking only once the person turns it on, and says when that can’t be kept', async () => {
+    const { client } = fakeClient()
+    withServices(<Settings />, client)
+    const panel = await openModule(/^Keep awake/)
+    const posts = await within(panel).findByRole('switch', { name: 'Post reviews of my team’s pull requests without asking' })
+    expect(posts.getAttribute('aria-checked')).toBe('false')
+    expect(within(panel).getByText(/A review of a pull request from outside the team always waits for you to post it\./)).toBeTruthy()
+    await userEvent.click(posts)
+    expect(client.setPostTeamReviews).toHaveBeenLastCalledWith(true)
+    await waitFor(() => expect(posts.getAttribute('aria-checked')).toBe('true'))
+    vi.mocked(client.setPostTeamReviews).mockRejectedValue(new Error('disk full'))
+    const reads = vi.mocked(client.getSettings).mock.calls.length
+    await userEvent.click(posts)
+    expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(vi.mocked(client.getSettings).mock.calls.length).toBeGreaterThan(reads))
+    await waitFor(() => expect(posts.getAttribute('aria-checked')).toBe('false'))
   })
 
   it('has Althar as co-author of what it sends until the person turns it off, and then says once, large, why it would stay', async () => {

@@ -86,6 +86,7 @@ import { indexTask } from './Search'
 import { Policies, resolvesConflictsFor, ruleSetOf } from './Policies'
 import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
+import { readReviewed, reviewOf } from './reviewing'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
 import { summarize, words } from './words'
 
@@ -725,7 +726,7 @@ export class Changes extends Context.Service<
             SELECT k.title, b.display_name AS name, b.slug, t.id AS thread_id, w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.id AS binding_id,
               b.remote_fingerprints AS remotes, b.default_base_ref AS default_base, b.change_target
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-            JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId}
+            JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId} AND w.access = 'write'
             JOIN repository_bindings b ON b.id = w.binding_id
             WHERE k.id = ${input.taskId} ORDER BY b.created_at, b.rowid`
           if (tasks.length === 0) return yield* new NotFound({ kind: 'task', id: input.taskId })
@@ -1165,7 +1166,7 @@ export class Changes extends Context.Service<
             SELECT w.path, w.branch, coalesce(b.default_base_ref, w.base_ref) AS base,
               (SELECT t.id FROM threads t WHERE t.task_id = w.task_id AND t.kind = 'task') AS thread_id
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
             ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${url} LIMIT 1) DESC,
               b.created_at, b.rowid
             LIMIT 1`
@@ -1550,7 +1551,7 @@ export class Changes extends Context.Service<
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
             ORDER BY b.created_at, b.rowid`,
         )
 
@@ -1688,7 +1689,7 @@ export class Changes extends Context.Service<
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
               AND NOT EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL)
             ORDER BY b.created_at, b.rowid`
           const pushed: Array<{ branch: string; remote: string }> = []
@@ -1732,7 +1733,7 @@ export class Changes extends Context.Service<
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
               AND NOT EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL)`
           const pushed: Array<{ branch: string; remote: string }> = []
           for (const repository of repositories) {
@@ -2098,7 +2099,7 @@ export class Changes extends Context.Service<
             LEFT JOIN repository_changes c ON c.id = (SELECT id FROM repository_changes WHERE workspace_id = w.id
               AND pull_request_url IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1)
             LEFT JOIN external_links l ON l.task_id = w.task_id AND l.kind = 'change' AND l.url = c.pull_request_url
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.state = 'ready'
             ORDER BY b.created_at, b.rowid`
           const found: Array<Unshipped> = []
           for (const repository of repositories) {
@@ -2291,7 +2292,7 @@ export class Changes extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<{ slug: string; path: string }>`
             SELECT b.slug, w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}`
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'`
           return new Map(rows.map((row) => [row.slug, row.path]))
         })
 
@@ -2753,7 +2754,7 @@ export class Changes extends Context.Service<
           const [workspace] = yield* sql<{ path: string; slug: string; name: string; threadId: string }>`
             SELECT w.path, b.slug, b.display_name AS name, t.id AS thread_id FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
-            WHERE w.task_id = ${link.taskId} AND w.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${link.taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
             ORDER BY w.id = (SELECT c.workspace_id FROM repository_changes c WHERE c.pull_request_url = ${seen.url} LIMIT 1) DESC,
               b.created_at, b.rowid
             LIMIT 1`
@@ -3124,7 +3125,7 @@ export class Changes extends Context.Service<
             SELECT k.id AS task_id, k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             WHERE k.state = 'open'
               AND ${'taskId' in where ? sql`k.id = ${where.taskId}` : sql`k.project_id = ${where.projectId}`}
-              AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.device_id = ${instance.deviceId})
+              AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.device_id = ${instance.deviceId} AND w.access = 'write')
             ORDER BY k.created_at, k.rowid`
           for (const task of open)
             yield* conflictsNow(task).pipe(
@@ -3250,17 +3251,24 @@ export class Changes extends Context.Service<
         name,
         description,
         input,
-        call: (value: unknown, access: ToolAccess) =>
-          access.taskId === null
+        call: (value: unknown, access: ToolAccess) => {
+          const taskId = access.taskId
+          return taskId === null
             ? Effect.fail(new ToolRefused({ message: 'This tool is for a task’s lead.' }))
-            : provide(call(access.taskId, value, access)).pipe(
+            : provide(call(taskId, value, access)).pipe(
                 Effect.catch((error) => {
                   if (error instanceof ToolRefused) return Effect.fail(error)
                   if (error instanceof NotFound && error.kind === 'pull request')
-                    return Effect.fail(
-                      new ToolRefused({
-                        message: 'This task has no pull request yet. Althar opens one when the plan’s steps are done.',
-                      }),
+                    // A review's lead reads someone else's pull request, and Althar posts nothing for it there but the person's review.
+                    return Effect.flatMap(provide(Effect.orElseSucceed(reviewOf(taskId), () => null)), (review) =>
+                      Effect.fail(
+                        new ToolRefused({
+                          message:
+                            review === null
+                              ? 'This task has no pull request yet. Althar opens one when the plan’s steps are done.'
+                              : 'This task reviews someone else’s pull request: nothing goes on it from here but your review, which the person posts. Put what you would say in draft_review.',
+                        }),
+                      ),
                     )
                   if (error instanceof NotConnected || (error instanceof NotFound && error.kind === 'connection'))
                     return Effect.fail(
@@ -3275,15 +3283,21 @@ export class Changes extends Context.Service<
                     Effect.fail(new ToolRefused({ message: 'Althar could not do that. Try again, or tell the person.' })),
                   )
                 }),
-              ),
+              )
+        },
       })
 
       yield* toolServer.serve('lead', [
         leadTool(
           'read_pull_request',
-          "The task's pull request as it stands, or each of them in a task of several repositories: its state, its checks (with the end of a failed check's log), and what people said on it, with each line comment's thread id.",
+          "The task's pull request as it stands, or each of them in a task of several repositories: its state, its checks (with the end of a failed check's log), and what people said on it, with each line comment's thread id. In a review, the pull request it reviews: its description too, and what everyone said on it.",
           { type: 'object', properties: {} },
-          (taskId) => read(taskId),
+          (taskId) =>
+            Effect.gen(function* () {
+              // A review reads the pull request it reviews, someone else's, as its host has it now.
+              const review = (yield* urlsOf(taskId)).length === 0 ? yield* reviewOf(taskId) : null
+              return review === null ? yield* read(taskId) : yield* readReviewed(review)
+            }),
         ),
         leadTool(
           'reply_on_pull_request',

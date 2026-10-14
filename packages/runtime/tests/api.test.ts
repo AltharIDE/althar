@@ -744,6 +744,34 @@ describe('settings, through the API', () => {
     ),
   )
 
+  it.live('posts the team’s reviews without asking only once the person turns it on, and takes review drafts’ commands', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        assert.isFalse((yield* client.GetSettings({})).postTeamReviews)
+        yield* client.SetPostTeamReviews({ commandId: commandId(), on: true })
+        assert.isTrue((yield* client.GetSettings({})).postTeamReviews)
+        yield* client.SetPostTeamReviews({ commandId: commandId(), on: false })
+        assert.isFalse((yield* client.GetSettings({})).postTeamReviews)
+        // A draft that isn't there is said so, whichever the command.
+        const draftId = `rdr_${'0'.repeat(32)}`
+        for (const refused of [
+          client.ChangeReviewDraft({
+            commandId: commandId(),
+            draftId,
+            verdict: 'comment',
+            summary: 'x',
+            comments: [{ id: 'c1', kept: false }],
+          }),
+          client.ChangeReviewDraft({ commandId: commandId(), draftId }),
+          client.PostReviewDraft({ commandId: commandId(), draftId }),
+          client.DiscardReviewDraft({ commandId: commandId(), draftId }),
+        ])
+          assert.strictEqual((yield* Effect.flip(refused)).reason, 'NotFound')
+      }),
+    ),
+  )
+
   it.live('says how many agents this Mac runs at once and why, takes the person’s number at once, and goes back to the default', () =>
     Effect.scoped(
       Effect.gen(function* () {

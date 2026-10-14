@@ -64,6 +64,7 @@ import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
 import { git, PUSHED } from './git'
 import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
+import { reviewBrief as reviewingBrief, type Reviewed, reviewOf } from './reviewing'
 import { Setups } from './Setups'
 import type { InputImage } from './sentImages'
 import { evidenceForReview } from './evidence'
@@ -140,6 +141,12 @@ interface TaskThread {
   readonly defaultBranch: string
   readonly repositories: ReadonlyArray<TaskRepository>
   readonly cwd: string
+  /**
+   * Someone else's pull request the task reviews, where it is a review: its
+   * lead then reads a read-only copy of it, under the rules of a role that
+   * only reads, and, for one from outside the project, offline.
+   */
+  readonly review: Reviewed | null
 }
 
 /**
@@ -727,6 +734,7 @@ export class Sessions extends Context.Service<
             defaultBranch: first.defaultBranch,
             repositories,
             cwd: startIn(repositories),
+            review: yield* reviewOf(task.taskId),
           } satisfies ThreadContext as ThreadContext
         })
 
@@ -1329,6 +1337,9 @@ export class Sessions extends Context.Service<
               launchedAt: yield* timestamp,
             })}`
           }
+          // A review's lead only reads, as the coordinator and a reviewer do; offline, for a pull request from outside the project.
+          const reads = thread.role !== 'task' || thread.review !== null
+          const offline = thread.role === 'task' && thread.review?.outside === true
           const requestContext: RequestContext = {
             projectId: thread.projectId,
             threadId: thread.threadId,
@@ -1336,7 +1347,7 @@ export class Sessions extends Context.Service<
             sessionId,
             meanings: definition.permissions,
             rules:
-              thread.role === 'task'
+              thread.role === 'task' && !reads
                 ? {
                     role: 'task',
                     context: {
@@ -1351,7 +1362,7 @@ export class Sessions extends Context.Service<
                       taskBranch: thread.branch,
                     },
                   }
-                : { role: 'reader' },
+                : { role: 'reader', ...(offline ? { offline } : {}) },
           }
           // Althar's tools for the session's role: the coordinator's plan tasks; a lead's and a reviewer's report their step.
           const tools = yield* toolServer.grant({
@@ -1381,13 +1392,14 @@ export class Sessions extends Context.Service<
               })
               const agent = yield* connection.newSession({
                 cwd: cwdOf(thread),
-                // The coordinator and a reviewer only read: in the agent's read-only mode where that still lets it call Althar's tools.
-                mode: thread.role === 'task' ? definition.modes.ask : definition.modes.reader,
+                // The coordinator, a reviewer and a review's lead only read: in the agent's read-only mode where that still lets it call
+                // Althar's tools, offline where the agent lets Althar take its network away (the registry says what each is held to).
+                mode: reads ? definition.modes.reader : definition.modes.ask,
                 modeOptionId: definition.options.mode,
                 mcpServers: [tools.server],
                 ...(definition.sessionMeta === undefined
                   ? {}
-                  : { meta: definition.sessionMeta(thread.role === 'task' ? 'lead' : 'reader') }),
+                  : { meta: definition.sessionMeta(reads ? 'reader' : 'lead', offline ? { offline } : undefined) }),
               })
               if (model !== undefined) yield* agent.setOption(definition.options.model, model)
               // An effort the model doesn't offer is no reason not to start.
@@ -1842,7 +1854,21 @@ export class Sessions extends Context.Service<
         thread: ThreadContext,
         why: { readonly kind: 'start' } | { readonly kind: 'takeover'; readonly from: string | undefined },
       ): Effect.Effect<string, SqlError.SqlError, Store> =>
-        thread.role === 'coordinator' ? coordinatorBrief(thread) : thread.role === 'reviewer' ? reviewBrief(thread) : taskBrief(thread, why)
+        thread.role === 'coordinator'
+          ? coordinatorBrief(thread)
+          : thread.role === 'reviewer'
+            ? reviewBrief(thread)
+            : thread.review !== null
+              ? reviewTaskBrief(thread, thread.review)
+              : taskBrief(thread, why)
+
+      /** A review task's lead's brief: someone else's pull request, where its copy is, what it may do, and how it drafts. */
+      const reviewTaskBrief = (thread: TaskThread, review: Reviewed) =>
+        Effect.gen(function* () {
+          return [...reviewingBrief({ cwd: thread.cwd, review }), ...askedFor(thread), ...(yield* threadSoFar(thread.threadId))].join(
+            '\n\n',
+          )
+        })
 
       /** A reviewer's brief: the task, how to see the change, what it may do, and how to report. */
       const reviewBrief = (thread: ReviewThread) =>
@@ -2019,6 +2045,7 @@ export class Sessions extends Context.Service<
             "- find_tasks, when the person asks about a task by what it did rather than its name (the retry fix, PR 143, the task that changed the login page): it finds the project's tasks by words from their titles, what was asked, what their leads reported and built, pull request numbers, branches and files.",
             "- read_issue and find_issues, for the issues on the person's connected trackers and in the project's repository. When the person points at an issue, read it, and draft the task from it with its link or key as draft_task's issue.",
             "- draft_issue, when the person wants something tracked rather than done now, such as a bug you found or follow-up work, as an issue on one of their connected trackers. It files nothing: the person sees it as a card, and files it, changes it or discards it there. Once they file it, you hear its key and link, and a task drafted from it later takes that as draft_task's issue.",
+            "- review_pull_request, when the person asks you to review a pull request, or pastes a pull request's link and asks: by its link, or its number in the project's repository, with the model that reviews it (a strong one, as list_models writes it). It starts a review task whose lead reads a read-only copy of the pull request's code, runs nothing of it, and drafts a review the person posts from its card; nothing reaches the code host until they do. Don't review it yourself.",
             "- message_lead, to pass something to a task's lead.",
             "- keep_note, list_notes and drop_note, for the project's notes: decisions the person makes in conversation that the code doesn't show, such as \"issue drafts need an approval card, on every tracker\" or \"dependency setup runs outside the sandbox; don't widen the lead's sandbox\". When the person decides something like that, keep it in a sentence, without asking; drop a note they take back. Every session of yours starts with the notes, and the person sees them in the project's settings.",
           ].join('\n'),

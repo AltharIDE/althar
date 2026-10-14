@@ -267,15 +267,22 @@ describe('the window’s reads', () => {
   it('starts over from the new page when an earlier one holds something that may have moved since', () => {
     const at = (item: ThreadSnapshot['items'][number], sequence: number) => ({ ...item, id: `i${sequence}`, sequence })
     const with_ = (first: ThreadSnapshot['items'][number]) => snapshot({ items: [at(first, 1), at(items.says('#2'), 2)], earlier: true })
-    // A tool call still running, a message still queued, an issue draft not yet filed: the earlier page goes, to be read again.
+    // A tool call still running, a message still queued, an issue or review draft not yet filed or posted: the earlier page goes, to be read again.
     for (const unsettled of [
       items.tool({ status: 'in_progress' }),
       items.you('Wait', { state: 'queued', interrupting: false }),
       items.draft({ state: 'failed', error: 'No.' }),
+      items.review(),
     ])
       expect(sequences(continued(with_(unsettled), page([2, 3], true)))).toEqual([2, 3])
-    // Done and delivered, filed or discarded: kept.
-    for (const done of [items.tool({ status: 'completed' }), items.you('Hi'), items.draft({ state: 'discarded' })])
+    // Done and delivered, filed, posted or discarded: kept.
+    for (const done of [
+      items.tool({ status: 'completed' }),
+      items.you('Hi'),
+      items.draft({ state: 'discarded' }),
+      items.review({ state: 'posted', verdict: 'comment', review: { url: 'https://github.com/x', at: '2026-09-29T11:00:00.000Z' } }),
+      items.review({ state: 'discarded' }),
+    ])
       expect(sequences(continued(with_(done), page([2, 3], false)))).toEqual([1, 2, 3])
     // What the new page holds is its own, settled or not.
     expect(

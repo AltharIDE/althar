@@ -136,9 +136,12 @@ export interface AgentDefinition {
   /**
    * What goes in `_meta` on `session/new`, to keep the agent asking whatever
    * its settings say (ADR-007): for a lead, or for a role that only reads
-   * (the coordinator, a reviewer), whose writes are refused outright.
+   * (the coordinator, a reviewer, the lead of a review), whose writes are
+   * refused outright. `offline`, for a reader of a pull request from outside
+   * the project, takes away what the agent reaches the web with where its
+   * settings can: each agent's entry says what that holds it to.
    */
-  readonly sessionMeta?: (role?: 'lead' | 'reader') => Readonly<Record<string, unknown>>
+  readonly sessionMeta?: (role?: 'lead' | 'reader', options?: SessionOptions) => Readonly<Record<string, unknown>>
   /**
    * Verified session settings that remove the agent's built-in tools, disable
    * user hooks and exclude its own MCP servers. Without this capability the
@@ -154,6 +157,11 @@ export interface AgentDefinition {
   readonly withoutOwnTools?: (at: StartingAt) => Readonly<Record<string, string>>
   /** What it does differently, for the support matrix. */
   readonly knownGaps: ReadonlyArray<string>
+}
+
+/** How a session is started beyond its role: `offline`, it has no network where the agent lets Althar take it away. */
+export interface SessionOptions {
+  readonly offline?: boolean
 }
 
 export interface AgentCli {
@@ -352,13 +360,15 @@ const claudeAsks = {
  * manifest's permission remains broad and is not a boundary against a
  * compromised app or agent.
  */
-const claudeReads = (flatpak: boolean) => ({
+const claudeReads = (flatpak: boolean, offline: boolean) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
       settings: {
-        permissions: { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'], ask: ['Bash', 'WebFetch'] },
+        permissions: offline
+          ? { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'WebSearch'], ask: ['Bash'] }
+          : { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'], ask: ['Bash', 'WebFetch'] },
         sandbox: { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: flatpak, failIfUnavailable: false },
       },
     },
@@ -411,7 +421,18 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     /* Its sign-in, status and version run `claude`: the person's own, else the copy its sessions run on, which ships with Althar. */
     cli: { name: 'claude', bundled: () => bundledClaude() },
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
-    sessionMeta: (role = 'lead') => (role === 'reader' ? claudeReads(process.env.FLATPAK_ID !== undefined) : claudeAsks),
+    /*
+     * Offline, a reader has WebFetch and WebSearch denied, so Claude Code
+     * reaches no page itself; every shell command still asks, and meets
+     * Althar's reader rules, which list no command that reaches the network
+     * and refuse every fetch for that session. Its sandbox, where it starts,
+     * lets a command reach only the domains its settings allow (none here)
+     * and asks for any other, which Althar refuses too: so Claude Code's
+     * documentation describes it, not yet checked against a real session. In
+     * a Flatpak, where the sandbox can't start, the rules are what holds it.
+     */
+    sessionMeta: (role = 'lead', options = {}) =>
+      role === 'reader' ? claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true) : claudeAsks,
     permissionJudge: { sessionMeta: claudeJudges },
     knownGaps: [
       'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Althar always sets the mode.',
@@ -442,6 +463,13 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
      * Not `agent`, codex-acp's default: that mode sends every request to go
      * beyond the sandbox to an automatic reviewer, so none reach Althar.
      * In `workspace-write` the person, through Althar, is the reviewer.
+     */
+    /*
+     * Its read-only sandbox has no network (`networkAccess: false` in
+     * codex-acp 2.1.1): what would reach it asks, and an offline reader's
+     * ask meets Althar's rules, which refuse it. Its own web search, where
+     * the person's Codex config turns it on, is OpenAI's, not the sandbox's,
+     * and isn't switched off here yet.
      */
     modes: { ask: 'workspace-write', readOnly: 'read-only', reader: 'read-only' },
     options: { mode: 'mode', model: 'model', effort: 'reasoning_effort' },
@@ -498,6 +526,11 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       env: { OPENCODE_CONFIG_CONTENT: openCodeConfig },
       inheritEnv: ['OPENCODE_CONFIG_DIR'],
     }),
+    /*
+     * It has no sandbox: a reader, offline or not, is held by Althar's
+     * rules alone. Its web fetches ask (`webfetch: 'ask'`), so an offline
+     * reader's are refused there.
+     */
     modes: { ask: 'build', readOnly: 'plan', reader: 'build' },
     /*
      * Its efforts are a model's variants, so each model has its own, and

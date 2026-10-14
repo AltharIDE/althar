@@ -30,6 +30,7 @@ import { statements as pushRequests } from './0025_push_requests'
 import { statements as projectNotes } from './0026_project_notes'
 import { statements as agentsAtOnce } from './0027_agents_at_once'
 import { statements as taskSeen } from './0028_task_seen'
+import { statements as reviewDrafts } from './0029_review_drafts'
 import { statements as taskSearch } from './0030_task_search'
 
 export interface Migration {
@@ -78,6 +79,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0026_project_notes', statements: projectNotes },
   { key: '0027_agents_at_once', statements: agentsAtOnce },
   { key: '0028_task_seen', statements: taskSeen },
+  { key: '0029_review_drafts', statements: reviewDrafts },
   { key: '0030_task_search', statements: taskSearch },
 ]
 

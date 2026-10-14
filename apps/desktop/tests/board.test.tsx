@@ -193,6 +193,34 @@ describe('the board’s lanes', () => {
     expect(firstNeedOf(lanes)).toBe('th4')
   })
 
+  it('lists a drafted review as one to post, by its pull request and whose it is', () => {
+    const reviewing = {
+      product: 'github' as const,
+      repository: 'meridian/api',
+      number: 1199,
+      url: 'https://github.com/meridian/api/pull/1199',
+      title: 'Retry webhooks',
+      author: 'ninemate',
+      outside: true,
+      additions: 12,
+      deletions: 3,
+      findings: 3,
+      blocking: 1,
+      verdict: 'changes' as const,
+      posted: null,
+    }
+    const lanes = lanesOf(
+      board({
+        tasks: [task({ taskId: 'r1', threadId: 'thr1', title: 'Review #1199', phase: 'ready', kind: 'review', reviewing, branch: null })],
+        calls: [],
+      }),
+    )
+    expect(needsOf(lanes, () => '', vi.fn()).map((need) => [need.kind, need.title, need.meta])).toEqual([
+      ['Review drafted', 'Review #1199', 'PR #1199 by ninemate'],
+    ])
+    expect(yoursOf(lanes)).toBe(1)
+  })
+
   it('lists what needs the person, the task on screen among them but opening nothing, and opens the first of the others', () => {
     const lanes = lanesOf(board())
     const onTask = vi.fn()
@@ -747,6 +775,7 @@ describe('every state the board shows', () => {
 describe('each kind’s card', () => {
   const NOW = '2026-10-01T10:00:00.000Z'
   const reviewing = {
+    product: 'github' as const,
     repository: 'meridian/api',
     number: 1199,
     url: 'https://github.com/meridian/api/pull/1199',

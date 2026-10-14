@@ -47,7 +47,13 @@ export const needsOf = (
     .filter((work) => !isFinished(work))
     .map((work) => {
       const change = work.change
-      const meta = change === null ? (work.branch ?? undefined) : `${change.short} ${change.prefix}${change.number}`
+      // A review drafted: their pull request; else its own, or its branch.
+      const meta =
+        work.reviewing != null
+          ? `PR #${work.reviewing.number} by ${work.reviewing.author}`
+          : change === null
+            ? (work.branch ?? undefined)
+            : `${change.short} ${change.prefix}${change.number}`
       return {
         id: work.taskId,
         kind: readyKindOf(work),

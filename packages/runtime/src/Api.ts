@@ -52,6 +52,7 @@ import { timestamp } from './records'
 import * as Runtime from './Runtime'
 import { Coordinator } from './Coordinator'
 import { IssueDrafts } from './IssueDrafts'
+import { postTeamReviews, Reviews, setPostTeamReviews } from './Reviews'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
 import { findTasks } from './Search'
@@ -139,6 +140,7 @@ export const handlers = Api.toLayer(
     const policies = yield* Policies
     const plans = yield* Plans
     const issueDrafts = yield* IssueDrafts
+    const reviews = yield* Reviews
     const runs = yield* Runs
     const tasks = yield* Tasks
     const coordinator = yield* Coordinator
@@ -625,6 +627,7 @@ export const handlers = Api.toLayer(
             const atOnce = yield* busy.atOnce
             return {
               coAuthor: { on, line: coAuthorLine },
+              postTeamReviews: yield* postTeamReviews,
               agentsAtOnce: {
                 count: atOnce.count,
                 own: atOnce.own,
@@ -635,6 +638,8 @@ export const handlers = Api.toLayer(
         ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
       SetCoAuthor: ({ commandId, on }) => once(commandId, api(setCoAuthor(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       SetAgentsAtOnce: ({ commandId, count }) => once(commandId, api(busy.set(count))),
+      SetPostTeamReviews: ({ commandId, on }) =>
+        once(commandId, api(setPostTeamReviews(on)).pipe(Effect.provideService(SqlClient.SqlClient, sql))),
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
       Interrupt: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
@@ -760,6 +765,23 @@ export const handlers = Api.toLayer(
         once(commandId, api(issueDrafts.change(draftId, { title, body, labels }, instance.personId))),
       FileIssueDraft: ({ commandId, draftId }) => once(commandId, api(Effect.asVoid(issueDrafts.file(draftId, instance.personId)))),
       DiscardIssueDraft: ({ commandId, draftId }) => once(commandId, api(issueDrafts.discard(draftId, instance.personId))),
+      ChangeReviewDraft: ({ commandId, draftId, verdict, summary, comments }) =>
+        once(
+          commandId,
+          api(
+            reviews.change(
+              draftId,
+              {
+                ...(verdict === undefined ? {} : { verdict }),
+                ...(summary === undefined ? {} : { summary }),
+                ...(comments === undefined ? {} : { comments }),
+              },
+              instance.personId,
+            ),
+          ),
+        ),
+      PostReviewDraft: ({ commandId, draftId }) => once(commandId, api(Effect.asVoid(reviews.post(draftId, instance.personId)))),
+      DiscardReviewDraft: ({ commandId, draftId }) => once(commandId, api(reviews.discard(draftId, instance.personId))),
       AnswerStuck: ({ commandId, attentionId, answer }) =>
         once(
           commandId,

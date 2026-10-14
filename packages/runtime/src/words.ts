@@ -4,6 +4,7 @@ import { Cause, Option } from 'effect'
 import type { AccountRefused } from './Accounts'
 import type { CantMerge, DocumentRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
 import { MESSAGE_IMAGES } from './pictures'
+import type { ReviewDraftIncomplete } from './Reviews'
 
 /*
  * What went wrong, in words a person reads in the window. The runtime's
@@ -227,6 +228,10 @@ export const words = (
         return draftClosed[text(error, 'state')] ?? 'That issue draft can’t change now.'
       case 'DraftUntitled':
         return 'An issue needs a title.'
+      case 'ReviewDraftClosed':
+        return reviewClosed[text(error, 'state')] ?? 'That review draft can’t change now.'
+      case 'ReviewDraftIncomplete':
+        return reviewIncomplete[text(error, 'missing') as ReviewDraftIncomplete['missing']]
       case 'OutwardUncertain':
         return "Althar can't tell whether that went through: its answer was lost. Look on the host before trying again."
       case 'ConnectorFailed':
@@ -326,11 +331,27 @@ const draftClosed: Readonly<Record<string, string>> = {
   filing: 'That issue is being filed now.',
 }
 
+/** Why a review draft can't change, by where it stands. */
+const reviewClosed: Readonly<Record<string, string>> = {
+  posted: 'That review is posted already. Change it on GitHub.',
+  discarded: 'That review draft was discarded.',
+  posting: 'That review is being posted now.',
+}
+
+/** What a review draft lacks to be kept or posted. */
+const reviewIncomplete = {
+  verdict: 'Choose a verdict before you post the review.',
+  summary: 'A review needs a summary.',
+  comment: 'Write the comment, or drop it.',
+} as const satisfies Record<ReviewDraftIncomplete['missing'], string>
+
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
   'LaunchRefused',
   'DraftClosed',
   'DraftUntitled',
+  'ReviewDraftClosed',
+  'ReviewDraftIncomplete',
   'ChangedSinceSeen',
   'CantMerge',
   'NoChangeToOpen',

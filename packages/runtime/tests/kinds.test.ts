@@ -89,6 +89,7 @@ describe("a task's kind", () => {
     assert.strictEqual(kindOf({ ...none, changes: 1 }), 'change')
     assert.strictEqual(kindOf({ ...none, made: true }), 'change')
     const reviewing = {
+      product: 'github' as const,
       repository: 'meridian/api',
       number: 12,
       url: 'https://github.com/meridian/api/pull/12',

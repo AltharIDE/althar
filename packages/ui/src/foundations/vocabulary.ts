@@ -329,6 +329,30 @@ export enum IssueDraftState {
   Discarded = 'discarded',
 }
 
+/** Where a review a lead drafted of someone else's pull request stands. */
+export enum ReviewDraftState {
+  Pending = 'pending',
+  Posting = 'posting',
+  Posted = 'posted',
+  Failed = 'failed',
+  /** Perhaps posted: the host's answer was lost, so the pull request is looked at before posting it again. */
+  Uncertain = 'uncertain',
+  Discarded = 'discarded',
+}
+
+/** What a review says of a pull request as a whole. */
+export enum ReviewVerdict {
+  Comment = 'comment',
+  Approve = 'approve',
+  Changes = 'changes',
+}
+
+/** Why a pull request counts as from outside the team: its branch is on a fork, or its author isn't one of the repository's people. */
+export enum Outside {
+  Fork = 'fork',
+  Author = 'author',
+}
+
 /** An entry of the agent's plan. */
 export enum PlanState {
   Done = 'done',

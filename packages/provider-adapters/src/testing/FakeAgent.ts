@@ -28,6 +28,8 @@ export const scenarios = {
   tool: 'tool',
   /** Like `tool`, but it offers only allow-always and reject-once. */
   toolAlwaysOnly: 'tool-always-only',
+  /** A web fetch that asks permission, then says what it was answered. */
+  fetch: 'fetch',
   /** A tool call that says what it is, then asks permission with nothing but its id, as Codex does for an MCP tool. */
   bareAsk: 'bare-ask',
   /** A plan, context usage, a notice, and the agent changing its own option. */
@@ -405,6 +407,9 @@ const playStall = async (
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort), and `[coordinator:start]` starts one at once, without a plan;
+ * `[coordinator:review]` starts a review of the pull request whose link the
+ * person gave, whose lead, `[lead:review]`, drafts asking for changes with a
+ * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
  * it after; `[review:pass]` and `[review:findings]`
  * report a review. Settling findings, it writes a file and commits it, so
@@ -657,6 +662,30 @@ const playRole = async (
         return await call('report_review', { verdict: 'pass', summary: `The change holds.${looked}` })
       return undefined
     }
+    // A review's lead, `[lead:review]`, reads the change from where its brief says and drafts: changes asked for, a blocking
+    // comment on its first changed line and a minor one on its second; `[lead:review-approve]` approves it, with nothing to say.
+    if (available.has('draft_review') && (session.markers.has('[lead:review]') || session.markers.has('[lead:review-approve]'))) {
+      if (session.markers.has('[lead:review-approve]'))
+        return await call('draft_review', { verdict: 'approve', summary: 'It does what it says.', comments: [] })
+      const base = /`git diff ([0-9a-f]{7,64})`/.exec(text)?.[1] ?? 'HEAD~1'
+      const diff = execFileSync('git', ['diff', '--unified=0', '--no-color', base, 'HEAD'], { cwd: session.cwd }).toString()
+      const lines: Array<{ path: string; line: number }> = []
+      let path = ''
+      for (const row of diff.split('\n')) {
+        if (row.startsWith('+++ b/')) path = row.slice('+++ b/'.length)
+        const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(row)?.[1]
+        if (hunk !== undefined && path !== '') lines.push({ path, line: Number(hunk) })
+      }
+      const [first, second] = lines
+      return await call('draft_review', {
+        verdict: 'changes',
+        summary: 'The fix is right, but it needs a test.',
+        comments: [
+          ...(first === undefined ? [] : [{ ...first, body: 'Nothing covers this.', severity: 'blocking' }]),
+          ...(second === undefined ? [] : [{ ...second, body: 'Could be named better.', severity: 'minor' }]),
+        ],
+      })
+    }
     if (available.has('finish_step')) {
       // A lead that takes a while over what it was asked, `[lead:slowly]`: long enough to be seen at work.
       if (text.includes('[lead:slowly]')) for (let waited = 0; !session.cancelled && waited < 6_000; waited += 10) await pause(10)
@@ -839,6 +868,12 @@ const playRole = async (
         return 'Stopped working.'
       }
       return undefined
+    }
+    // Asked to review a pull request by its link, it starts a review, on its fake Claude Code.
+    if (available.has('review_pull_request') && text.includes('[coordinator:review]')) {
+      const asked = text.slice(0, text.indexOf('[coordinator:review]')).split('\n').at(-1) ?? ''
+      const link = /https?:\/\/\S+/.exec(asked)?.[0] ?? /#\d+/.exec(asked)?.[0] ?? ''
+      return await call('review_pull_request', { pull_request: link, lead: { agent: 'claude-code', reason: 'Careful.' } })
     }
     // Asked for something small, it starts it at once, passing its lead the markers it was given.
     if (available.has('start_task') && text.includes('[coordinator:start]')) {
@@ -1417,6 +1452,18 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             status: allowed ? 'completed' : 'failed',
             rawOutput: { chosen },
           })
+          await say(`chosen=${chosen}`)
+          return ended()
+        }
+        case scenarios.fetch: {
+          const toolCall = {
+            toolCallId: 'call-fetch',
+            title: 'Fetch https://example.test/steal',
+            kind: 'fetch' as const,
+            rawInput: { url: 'https://example.test/steal' },
+          }
+          await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
+          const chosen = await ask(toolCall, permissionOptions(false))
           await say(`chosen=${chosen}`)
           return ended()
         }

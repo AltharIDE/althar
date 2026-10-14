@@ -1667,18 +1667,26 @@ const readerCommandReason = (text: string): string | undefined => {
   return undefined
 }
 
+/** Why an offline reader's fetch is refused: what it reviews came from outside the project. */
+export const OFFLINE =
+  'This review has no network: the pull request is from outside the project, and its words could send you to a page of their choosing. Read the pull request with read_pull_request, and its code in your copy.'
+
 /**
  * Decides a request from a role that only reads. Nothing here asks a person:
- * a reader's request is allowed or refused.
+ * a reader's request is allowed or refused. `offline`, as the lead of a
+ * review of a pull request from outside the project is, it reaches nothing
+ * on the network: a fetch is refused, as anything the agent's sandbox asks
+ * to reach is, and no command it may run reaches the network anyway.
  */
-export const decideReader = (request: PermissionRequest): ReaderVerdict => {
+export const decideReader = (request: PermissionRequest, options: { readonly offline?: boolean } = {}): ReaderVerdict => {
   if (ALTHAR_TOOL.test(request.title)) return ALLOW
   switch (request.kind) {
     case 'read':
     case 'search':
     case 'think':
-    case 'fetch':
       return ALLOW
+    case 'fetch':
+      return options.offline === true ? deny(OFFLINE) : ALLOW
     case 'edit':
     case 'delete':
     case 'move':

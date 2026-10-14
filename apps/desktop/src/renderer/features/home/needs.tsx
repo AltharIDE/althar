@@ -45,6 +45,9 @@ export const needText = {
     passed: 'checks passed',
     none: 'no checks',
   },
+  /** A review drafted, in a line: whose pull request, and what the draft found. */
+  by: (author: string) => `by ${author}`,
+  findings: (n: number) => (n === 0 ? 'no findings' : n === 1 ? '1 finding' : `${n} findings`),
 }
 
 /** Something that waits on the person, said once for every place that lists it. */
@@ -100,6 +103,14 @@ const withAnswered = (calls: ReadonlyArray<HomeCall>, answered: ReadonlyArray<An
 
 /** What a ready task's line says to accept it by: its change, where and how its checks went and how big, or what is on its branch. */
 export const briefOf = (task: HomeTask): string => {
+  // A review drafted: their pull request, whose, and what the draft found.
+  const reviewing = task.reviewing
+  if (reviewing != null)
+    return [
+      `${reviewing.repository.slice(reviewing.repository.lastIndexOf('/') + 1)} #${reviewing.number}`,
+      needText.by(reviewing.author),
+      needText.findings(reviewing.findings),
+    ].join(' · ')
   const change = task.change
   if (change === null)
     return task.changed === null ? needText.onBranch : needText.branchSize(task.changed.files, task.changed.add, task.changed.del)
@@ -258,7 +269,11 @@ export function needLineOf(
       actions={
         permission === undefined ? (
           <Button size="small" {...(need.kind === kindWords.question ? { variant: 'signal' as const } : {})} onClick={open}>
-            {need.kind === kindWords.ready ? needText.review : need.kind === kindWords.question ? needText.answer : needText.look}
+            {need.kind === kindWords.ready || need.kind === kindWords.drafted
+              ? needText.review
+              : need.kind === kindWords.question
+                ? needText.answer
+                : needText.look}
           </Button>
         ) : answers !== undefined ? (
           answers(permission, need.project)
