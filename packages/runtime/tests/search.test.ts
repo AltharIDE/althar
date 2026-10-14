@@ -357,6 +357,9 @@ describe('where a found task stands', () => {
     assert.strictEqual(phaseOf({ ...task, runState: 'succeeded' }, none), 'ready')
     assert.strictEqual(phaseOf({ ...task, runState: 'suspended' }, none), 'stopped')
     assert.strictEqual(phaseOf({ ...task, runState: 'running', held: 1 }, none), 'running')
+    // A review has no run: drafted, it is the person's to post; posted, it is done.
+    assert.strictEqual(phaseOf({ ...task, drafted: 1 }, none), 'ready')
+    assert.strictEqual(phaseOf({ ...task, drafted: 1, state: 'done' }, none), 'settled')
     assert.strictEqual(phaseOf({ ...task, runState: 'running' }, none), 'stopped')
   })
 
