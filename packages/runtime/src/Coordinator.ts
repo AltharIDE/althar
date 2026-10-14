@@ -8,15 +8,19 @@ import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from './Busy'
+import { touchCard } from './cards'
 import { Changes } from './Changes'
+import { modelNamer } from './coordinatorNews'
 import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { Agents } from './Config'
 import { NotFound, TaskRefused } from './errors'
 import { taskShown } from './evidence'
+import { branchedWords, branchOnFirstWrite } from './firstWrite'
 import { Instance } from './Instance'
 import { DraftUntitled, IssueDrafts, IssueTargetNeeded } from './IssueDrafts'
 import { Issues } from './Issues'
+import { quickIn } from './kinds'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
@@ -29,7 +33,8 @@ import { findTasks, foundWords } from './Search'
 import { notesSection, projectOverview } from './handover'
 import { dropNote, keepNote, NOTE_LENGTH, NoteRefused, NOTES_KEPT, notesOf, sayNotes } from './notes'
 import { envelope } from './envelope'
-import { type PlanStep } from './Runs'
+import { fact } from './records'
+import { type PlanStep, Runs } from './Runs'
 import { type Disposition, Sessions } from './Sessions'
 import { blockedModelsOf } from './preferences'
 import type { InputImage } from './sentImages'
@@ -87,6 +92,7 @@ type Store =
   | Accounts
   | Reviews
   | Tasks
+  | Runs
 
 const Drafted = Schema.Struct({
   title: Schema.String,
@@ -131,6 +137,12 @@ const ToReview = Schema.Struct({
 const Named = Schema.Struct({ task: Schema.String })
 /* A task, by its slug or id, and the title it is given now. */
 const Retitled = Schema.Struct({ task_id: Schema.String, title: Schema.String })
+/* A quick task made a change, as its lead names it: what it does now, the model that reviews it or none, and its pull request. */
+const MadeChange = Schema.Struct({
+  title: Schema.String,
+  review: Schema.NullOr(StepPick),
+  output: Schema.Literals(['draft', 'ready']),
+})
 const Sought = Schema.Struct({ text: Schema.String })
 /* A thread to read: a task's, or, with none, the coordinator's own; and, to read further back, where the part read before began. */
 const Reading = Schema.Struct({ task: Schema.optional(Schema.String), before: Schema.optional(Schema.Int) })
@@ -605,10 +617,9 @@ export class Coordinator extends Context.Service<
         })
 
       /**
-       * Gives a task another title, as the person can: for one whose work
-       * became a change (a plain task whose lead changed the repository), when
-       * its title no longer says what it does. Its slug and branch stay, and
-       * what the person asked stays in its thread.
+       * Gives a task another title, as the person can: when its title no
+       * longer says what it does. Its slug and branch stay, and what the person
+       * asked stays in its thread.
        */
       const renameTask = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
@@ -637,6 +648,126 @@ export class Coordinator extends Context.Service<
           return title.trim() === task.title
             ? `${task.slug} is called that already.`
             : `Renamed ${task.slug} to “${title.trim()}”. Its slug and branch stay as they were; the person sees the new title on its card.`
+        })
+
+      /* ---- A quick task's lead making it a change (DEV-96, the person's decision of 14 October) ---- */
+
+      /** What names a reviewer's model, as a lead making its task a change is told where it named one Althar can't use. */
+      const REVIEWER = "make_it_a_change's review"
+
+      /**
+       * Why a task's lead may not make it a change, or null where it may: it
+       * is a quick task still, one the coordinator started at once, whose plan
+       * stays on this Mac, with no pull request. A planned task, a review, one
+       * with a pull request and one made a change already each say so.
+       */
+      const notQuick = (taskId: string | null) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ quick: number; reviews: number; changes: number; made: number }>`
+            SELECT ${sql.unsafe(quickIn('k'))} AS quick,
+              EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review') AS reviews,
+              EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change') AS changes,
+              EXISTS (SELECT 1 FROM record_events e WHERE e.aggregate_type = 'task' AND e.aggregate_id = k.id
+                AND e.type = 'task.made_change') AS made
+            FROM tasks k WHERE k.id = ${taskId ?? ''}`
+          if (task === undefined) return 'Only the lead of one of the project’s tasks makes its task a change.'
+          if (task.quick === 1) return null
+          if (task.reviews === 1) return 'This task reviews someone else’s pull request: it has no work of its own to make a change of.'
+          if (task.made === 1)
+            return 'This task is a change already: it was made one as the person asked. Commit your work and call finish_step when it’s ready; its review and its pull request follow.'
+          if (task.changes === 1) return 'This task has a pull request already, so it is a change: there is nothing to make.'
+          return 'This task was planned as a change from its start: its plan already says who reviews it and how it ends. Carry on, and call finish_step when it’s done.'
+        })
+
+      /**
+       * A quick task's lead makes it a change, as the person asked: renamed for
+       * what it does now, reviewed by the model named (or by none, where the
+       * person said so), and ending in a draft pull request or one ready for
+       * review. Its branch is made now where its worktree has none. Its plan,
+       * the run of it and the run under way take the review and the ending, so
+       * the lead's next finish_step goes through the review, and the run
+       * publishes as any change does; where its last run had ended and no round
+       * is under way, a round opens with that ending. Said in its thread, its
+       * card read again, and the coordinator hears it in its news.
+       */
+      const makeChange = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const runs = yield* Runs
+          const refused = yield* notQuick(access.taskId)
+          if (refused !== null || access.taskId === null) return yield* new ToolRefused({ message: refused ?? '' })
+          const taskId = access.taskId
+          const asked = yield* read(MadeChange, input)
+          const title = asked.title.trim()
+          if (title === '') return yield* new ToolRefused({ message: 'Give it a title: what the change does, in a few words.' })
+          if (title.length > TITLE_LENGTH)
+            return yield* new ToolRefused({
+              message: `That title is ${title.length} characters. Keep it to ${TITLE_LENGTH}: what the change does, in a few words.`,
+            })
+          const review: PlanStep | null =
+            asked.review === null ? null : { key: 'review', ...(yield* stepOf(access.projectId, asked.review, REVIEWER)), skipped: false }
+          // A pull request where its repositories are on a host Althar knows; else it ends on its branch, as a planned task there does.
+          const hosts = yield* changes.hostsFor(access.projectId, taskId)
+          const end = hosts.some((host) => host !== null) ? asked.output : null
+          const [task] = yield* sql<{ title: string; projectId: ProjectId; threadId: string }>`
+            SELECT k.title, k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+            WHERE k.id = ${taskId}`
+          if (task === undefined)
+            return yield* new ToolRefused({ message: 'Only the lead of one of the project’s tasks makes it a change.' })
+          // Its branch first, where its worktree has none, so all its lead did is on one before its plan ends in a pull request.
+          yield* changes.exclusive(taskId, branchOnFirstWrite(taskId, [], true))
+          const named = yield* modelNamer
+          const who = review === null ? 'with no review' : `reviewed by ${named(review)}`
+          const ends =
+            end === null
+              ? 'it ends on its branch, as its repository isn’t on a code host Althar knows'
+              : `it opens ${end === 'ready' ? 'a pull request ready for review' : 'a draft pull request'} when it’s done`
+          const underWay = yield* sql.withTransaction(
+            Effect.gen(function* () {
+              // Read again where it is written: made a change meanwhile, it isn't made twice.
+              const now = yield* notQuick(taskId)
+              if (now !== null) return yield* new ToolRefused({ message: now })
+              yield* (yield* Tasks).rename({
+                envelope: yield* envelope('task.rename', { taskId, title }, undefined, instance.systemId),
+                taskId,
+                title,
+              })
+              const under = yield* runs.makeChange(taskId, review, end, instance.systemId)
+              const branches = yield* sql<{ branch: string }>`
+                SELECT w.branch FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+                WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.branched_at IS NOT NULL
+                ORDER BY b.created_at, b.rowid`
+              yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
+                source: 'runtime',
+                severity: 'info',
+                title: `This task is a change now: ${who}, ${ends}.`,
+                ...(branches.length === 0 ? {} : { description: `Its work is ${branchedWords(branches.map((one) => one.branch))}.` }),
+              })
+              // What the coordinator hears at its next turn: what it is called now and was, who reviews it, and how it ends.
+              const [revised] = yield* sql<{ revision: number }>`SELECT revision FROM tasks WHERE id = ${taskId}`
+              yield* fact({
+                projectId: task.projectId,
+                aggregateType: 'task',
+                aggregateId: taskId,
+                revision: revised?.revision ?? 1,
+                type: 'task.made_change',
+                payload: { title, was: task.title, review, end },
+                actorId: instance.systemId,
+              })
+              return under
+            }),
+          )
+          // Its last run had ended, and nothing reopened it: a round of its own, on this lead's session, with the new ending.
+          const opened = underWay || (yield* runs.madeRound(taskId, access.sessionId))
+          yield* touchCard(taskId)
+          const next =
+            end === null
+              ? `${review === null ? 'It' : `${named(review)} reviews it next, and it`} ends on its branch: its repository isn't on a code host Althar knows.`
+              : `${review === null ? 'Then' : `${named(review)} reviews it next, then`} Althar opens ${end === 'ready' ? 'its pull request, ready for review' : 'its pull request as a draft'}. Don't push or open it yourself.`
+          return opened
+            ? `The task is a change now, called “${title}”. Commit your work, and call finish_step when it's ready, with what it built and your evidence. ${next}`
+            : `The task is a change now, called “${title}”, but Althar couldn't open a round of work for it: tell the person, who can write to you to carry on.`
         })
 
       /** The models the coordinator can give work to in the project, as it reads them. */
@@ -672,7 +803,7 @@ export class Coordinator extends Context.Service<
        * a model as list_models writes it, taken the best way there is; or an
        * agent, on its own id for a model or on its own default.
        */
-      const stepOf = (projectId: string, pick: typeof StepPick.Type) =>
+      const stepOf = (projectId: string, pick: typeof StepPick.Type, use?: string) =>
         Effect.gen(function* () {
           // On the way it goes, at an effort that model takes there; named as the plan names it.
           const on = (route: Route, named: string) =>
@@ -686,10 +817,13 @@ export class Coordinator extends Context.Service<
             if (route !== null) return yield* on(route, pick.model)
             if (pick.agent === undefined)
               return yield* new ToolRefused({
-                message: `No model called ${pick.model} can be used now. ${describeModels(yield* usableModels(projectId))}`,
+                message: `No model called ${pick.model} can be used now. ${describeModels(yield* usableModels(projectId), use)}`,
               })
           }
-          if (pick.agent === undefined) return yield* new ToolRefused({ message: 'Name the model, as list_models writes it.' })
+          if (pick.agent === undefined)
+            return yield* new ToolRefused({
+              message: use === undefined ? 'Name the model, as list_models writes it.' : `Name the model, for ${use}.`,
+            })
           const agentId = yield* agentOf(pick.agent)
           // Named the old way, by agent, a model the person switched off is still off: the same model another way, by the name people know it by, or none.
           if (pick.model !== undefined && (yield* blockedModelsOf(agentId)).includes(pick.model)) {
@@ -703,7 +837,7 @@ export class Coordinator extends Context.Service<
                 : routeTo(yield* usableModels(projectId), knownModelName({ id: agentId, name: agentName }, offered))
             if (elsewhere !== null) return yield* on(elsewhere, pick.model)
             return yield* new ToolRefused({
-              message: `The person switched ${pick.model} off. ${describeModels(yield* usableModels(projectId))}`,
+              message: `The person switched ${pick.model} off. ${describeModels(yield* usableModels(projectId), use)}`,
             })
           }
           // Its efforts as the agent offers that model; on its own default, they aren't known, so none is taken.
@@ -999,7 +1133,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'start_task',
-          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it, and an effort it lists where it matters; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. It starts with no branch; if its lead changes the repository, Althar puts that on a branch of its own and the task is a change from then. A change worth reviewing, or that should end in a pull request, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
+          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it, and an effort it lists where it matters; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. It starts with no branch; if its lead changes the repository, Althar puts that on a branch of its own, which stays on this Mac. Should the person want what it made as a real change, reviewed and in a pull request, they ask its lead, which makes it one; pass that on with message_lead. A change worth reviewing, or that should end in a pull request from the start, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
           {
             type: 'object',
             properties: {
@@ -1039,7 +1173,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'rename_task',
-          `Gives a task another title, at most ${TITLE_LENGTH} characters, as the person can. For a task whose work became a change, such as a plain task whose lead started changing the repository, when its title no longer says what it does: say what it does now, in a few words. What the person asked stays in its thread, and its slug and branch stay as they are.`,
+          `Gives a task another title, at most ${TITLE_LENGTH} characters, as the person can, when its title no longer says what it does: say what it does now, in a few words. What the person asked stays in its thread, and its slug and branch stay as they are.`,
           {
             type: 'object',
             properties: {
@@ -1074,6 +1208,40 @@ export class Coordinator extends Context.Service<
           drop,
         ),
       ])
+
+      // A quick task's lead makes it a change when the person asks: the one lead tool that plans, as the coordinator's do. Offered
+      // only on a quick task not made one yet; refused, with why, on any other.
+      yield* toolServer.serve('lead', [
+        tool(
+          'make_it_a_change',
+          `Makes this quick task a real change, with a review and a pull request: call it only when the person asks to turn what you made into a real thing (to keep it, review it, or open a pull request), never on your own. Give the task a title for what the change does now (at most ${TITLE_LENGTH} characters); the model that reviews it, which only reads (pick a strong one, from another maker than yours where there is one), or null only where the person said it needs no review; and whether its pull request opens as a draft or ready for review (a draft, unless the person said ready). Its work goes on a branch of its own if it has none; then commit what belongs in the change, and call finish_step: the review comes next, then the pull request.`,
+          {
+            type: 'object',
+            properties: {
+              title: { type: 'string', maxLength: TITLE_LENGTH, description: 'What the change does, in a few words.' },
+              review: {
+                type: ['object', 'null'],
+                description: 'The model that reviews it, or null for no review, only where the person said so.',
+                properties: {
+                  model: { type: 'string', description: 'Its name as people know it, such as its maker writes it.' },
+                  effort,
+                },
+                required: ['model'],
+              },
+              output: { type: 'string', enum: ['draft', 'ready'], description: 'Its pull request: a draft, or ready for review.' },
+            },
+            required: ['title', 'review', 'output'],
+          },
+          makeChange,
+        ),
+      ])
+      yield* toolServer.guard('lead', (tool, access) =>
+        tool.name !== 'make_it_a_change'
+          ? Effect.succeed(null)
+          : provide(notQuick(access.taskId)).pipe(
+              Effect.orElseSucceed(() => 'Althar couldn’t tell whether this task may be made a change. Try again, or tell the person.'),
+            ),
+      )
 
       return Coordinator.of({
         thread: (projectId) => provide(thread(projectId)),

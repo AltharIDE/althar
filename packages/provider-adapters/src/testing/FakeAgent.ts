@@ -411,7 +411,10 @@ const playStall = async (
  * person gave, whose lead, `[lead:review]`, drafts asking for changes with a
  * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
- * it after; `[review:pass]` and `[review:findings]`
+ * it after; asked to, `[lead:make-change]` makes its quick task a change
+ * first, reviewed by Codex and ending in a draft pull request, or with no
+ * review (`[lead:make-change-alone]`), and without `[lead:finish]` ends its
+ * turn there; `[review:pass]` and `[review:findings]`
  * report a review. Settling findings, it writes a file and commits it, so
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
@@ -707,6 +710,15 @@ const playRole = async (
         writeFileSync(join(session.cwd, '.althar', 'scratch', 'sketch.html'), '<p>A sketch.</p>\n')
       }
       if ((writes || commits || sketches) && !text.includes('[lead:finish]')) return 'Did it, without reporting.'
+      // Asked in these words to make its quick task a real change, it does, and carries on as its other markers say.
+      if (text.includes('[lead:make-change') && available.has('make_it_a_change')) {
+        const made = await call('make_it_a_change', {
+          title: 'Make the sketch real',
+          review: text.includes('[lead:make-change-alone]') ? null : { agent: 'codex' },
+          output: 'draft',
+        })
+        if (!text.includes('[lead:finish]')) return made
+      }
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')

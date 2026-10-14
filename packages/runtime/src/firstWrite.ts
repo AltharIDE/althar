@@ -14,7 +14,7 @@ import { indexTask } from './Search'
 import { addItem } from './threads'
 
 /*
- * A plain task's worktree (DEV-96, ADR-035). What the coordinator starts
+ * A quick task's worktree (DEV-96, ADR-035). What the coordinator starts
  * with `start_task`, a question, a quick look, a prototype or a release run
  * from this Mac, starts in a worktree with no branch: detached at the commit
  * it starts from, set up as any task's is, its branch's name planned as any
@@ -22,9 +22,11 @@ import { addItem } from './threads'
  * in its scratch folder, which git ignores. Where its lead first changes the
  * repository itself, with new commits or changes not committed that aren't
  * evidence it handed, Althar makes the task's branch right there, with that
- * work on it: as the lead's turn ends, or as it calls finish_step. The lead
- * keeps its session and its folder; the task is a change from then, and its
- * thread and the coordinator are told.
+ * work on it, so nothing is lost on a detached head: as the lead's turn ends,
+ * or as it calls finish_step. That keeps the work safe, and nothing more: the
+ * branch stays on this Mac, and the task is still plain. Only the person
+ * makes it a change, by asking its lead (make_it_a_change), which makes its
+ * branch then where it has none. The lead keeps its session and its folder.
  */
 
 /** Where a worktree keeps what its lead throws away: prototypes, notes, screenshots. */
@@ -78,13 +80,13 @@ const wroteIn = (worktree: Unbranched, evidence: (worktree: string, file: string
     return (yield* uncommittedFiles(worktree.path)).some((file) => !evidence(worktree.path, file))
   }).pipe(Effect.orElseSucceed(() => false))
 
-/** What a plain task's thread says as it becomes a change: the branch it is on now, or each, where its repositories' differ. */
+/** Where a task's work is, by its branch, or each, where its repositories' differ: "on its branch althar/x". */
 export const branchedWords = (names: ReadonlyArray<string>) => {
   const distinct = [...new Set(names)]
   return distinct.length === 1 ? `on its branch ${distinct[0] ?? ''}` : `on its branches ${distinct.join(', ')}`
 }
 
-/** Whether one of the task's worktrees it writes in has its branch here: the task is a change. */
+/** Whether one of the task's worktrees it writes in has its branch here: its work is on a branch already. */
 const changing = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -106,58 +108,71 @@ const repositoriesOf = (ids: ReadonlyArray<string>) =>
   })
 
 /**
- * Makes a plain task's branch where its lead first changed the repository:
+ * Makes a quick task's branch where its lead first changed the repository:
  * in each of its worktrees with none yet, the first free of its planned name,
  * `-2`, `-3`…, switched to where the worktree is, so commits made on the
  * detached head and changes not committed are on it. Recorded, said in its
- * thread, found by it, and its card read again. Nothing where it has a
- * branch already or wrote nothing; `handed` are pictures its lead hands as
- * evidence now, which aren't work. Once one of its worktrees has its branch,
- * the task is a change, and the rest get theirs whatever they hold: one git
- * couldn't switch is tried again at each later check, its thread told the
- * first time, and again once it has its branch. The branches made as the
- * task becomes a change; none as one it was already gets another. The
- * caller holds the task's lock, so this never runs beside publishing it.
+ * thread, found by it, and its card read again; the task stays as it was,
+ * plain, and the branch on this Mac. Nothing where it has a branch already or
+ * wrote nothing; `handed` are pictures its lead hands as evidence now, which
+ * aren't work. Once one of its worktrees has its branch, the rest get theirs
+ * whatever they hold: one git couldn't switch is tried again at each later
+ * check, its thread told the first time, and again once it has its branch.
+ * `made`, as the task is made a change (make_it_a_change): each gets its
+ * branch whatever it holds, and its thread is told by the caller, with the
+ * rest of what changed. The branches made as the task first gets one, or as
+ * it is made a change; none as one it had already gets another. The caller
+ * holds the task's lock, so this never runs beside publishing it.
  */
-export const branchOnFirstWrite = (taskId: string, handed: ReadonlyArray<{ readonly worktree: string; readonly file: string }> = []) =>
+export const branchOnFirstWrite = (
+  taskId: string,
+  handed: ReadonlyArray<{ readonly worktree: string; readonly file: string }> = [],
+  made = false,
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const instance = yield* Instance
     const open = (yield* unbranchedOf(taskId)).filter((worktree) => worktree.state === 'ready' && existsSync(worktree.path))
     if (open.length === 0) return []
     const already = yield* changing(taskId)
-    if (!already) {
+    if (!already && !made) {
       const before = yield* evidencePaths(taskId)
       const evidence = (worktree: string, file: string) =>
         before(worktree, file) || handed.some((picture) => picture.worktree === worktree && picture.file === file)
       const wrote = yield* Effect.forEach(open, (worktree) => wroteIn(worktree, evidence))
       if (!wrote.includes(true)) return []
     }
-    // Each one now, so the task is all a change; one git can't switch stays as it is, to be tried again at the next check.
-    const made: Array<Unbranched & { readonly name: string }> = []
+    // Each one now, so all of the task's work is safe; one git can't switch stays as it is, to be tried again at the next check.
+    const branched: Array<Unbranched & { readonly name: string }> = []
     const missed: Array<Unbranched> = []
     for (const worktree of open) {
       let name = worktree.branch
       for (let n = 2; yield* branchExists(worktree.path, name); n += 1) name = `${worktree.branch}-${n}`
       const switched = yield* Effect.exit(git(worktree.path, 'switch', '--quiet', '--create', name))
-      if (switched._tag === 'Success') made.push({ ...worktree, name })
+      if (switched._tag === 'Success') branched.push({ ...worktree, name })
       else {
         missed.push(worktree)
-        yield* Effect.logWarning('Could not make a plain task’s branch', switched.cause)
+        yield* Effect.logWarning('Could not make a quick task’s branch', switched.cause)
       }
     }
-    const [first] = made
+    const [first] = branched
     if (first === undefined) return []
-    const names = branchedWords(made.map((worktree) => worktree.name))
-    const title = already
-      ? `This task is ${names} in ${yield* repositoriesOf(made.map((worktree) => worktree.id))} too now.`
-      : missed.length === 0
-        ? `This task changes files now, ${names}.`
-        : `This task changes files now, ${names}. Althar couldn’t make its branch in ${yield* repositoriesOf(missed.map((worktree) => worktree.id))} yet, and tries again as its lead’s turn ends.`
+    const distinct = [...new Set(branched.map((worktree) => worktree.name))]
+    const own =
+      distinct.length === 1
+        ? `on a branch of its own now, ${distinct[0] ?? ''}, which stays on this Mac`
+        : `on branches of its own now, ${distinct.join(', ')}, which stay on this Mac`
+    const title = made
+      ? null
+      : already
+        ? `This task’s work is ${branchedWords(distinct)} in ${yield* repositoriesOf(branched.map((worktree) => worktree.id))} too now.`
+        : missed.length === 0
+          ? `This task’s work is ${own}.`
+          : `This task’s work is ${own}. Althar couldn’t make its branch in ${yield* repositoriesOf(missed.map((worktree) => worktree.id))} yet, and tries again as its lead’s turn ends.`
     yield* sql.withTransaction(
       Effect.gen(function* () {
         const at = yield* timestamp
-        for (const worktree of made) {
+        for (const worktree of branched) {
           const revision = yield* change('workspaces', worktree.id, { branchedAt: at, branch: worktree.name })
           yield* fact({
             projectId: worktree.projectId,
@@ -165,15 +180,16 @@ export const branchOnFirstWrite = (taskId: string, handed: ReadonlyArray<{ reado
             aggregateId: worktree.id,
             revision,
             type: 'workspace.branched',
-            // `later`: the task was a change already, which the coordinator was told.
-            payload: { from: null, to: worktree.name, ...(already ? { later: true } : {}) },
+            // `later`: the task's work was on a branch already; `made`: as the task was made a change.
+            payload: { from: null, to: worktree.name, ...(already ? { later: true } : {}), ...(made ? { made: true } : {}) },
             actorId: instance.systemId,
           })
         }
-        yield* addItem({ projectId: first.projectId, threadId: first.threadId }, 'notice', { source: 'runtime', severity: 'info', title })
+        if (title !== null)
+          yield* addItem({ projectId: first.projectId, threadId: first.threadId }, 'notice', { source: 'runtime', severity: 'info', title })
         yield* indexTask(taskId)
       }),
     )
     yield* touchCard(taskId)
-    return already ? [] : made.map((worktree) => worktree.name)
+    return already && !made ? [] : branched.map((worktree) => worktree.name)
   })
