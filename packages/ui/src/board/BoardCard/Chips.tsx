@@ -84,7 +84,9 @@ export function BranchChip({ name, add, del, className, ...rest }: BranchChipPro
   return (
     <div className={cx(s.chip, className)} {...rest}>
       <Icon name="branch" size={12} />
-      <span className={s.name}>{name}</span>
+      <span className={cx(s.name, s.branch)} title={name}>
+        <bdi>{name}</bdi>
+      </span>
       {(add !== undefined || del !== undefined) && <Delta {...sized(add, del)} className={s.delta} />}
     </div>
   )

@@ -118,6 +118,15 @@ describe('Finder', () => {
     }
   })
 
+  it('opens on Enter what the words typed find, once found, not what was there before', () => {
+    const onOpen = vi.fn()
+    const { rerender } = render(<Finder results={RECENT} searching query="retr" onOpen={onOpen} onClose={vi.fn()} />)
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter' })
+    expect(onOpen).not.toHaveBeenCalled()
+    rerender(<Finder results={RETRY} query="retr" onOpen={onOpen} onClose={vi.fn()} />)
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith(RETRY[0]?.id)
+  })
+
   it('counts what it found in words of the consumer’s', () => {
     const { said } = open({ defaultQuery: 'retr', results: RETRY, text: { count: (n) => `${n} gefunden` } })
     expect(said()).toBe(`${RETRY.length} gefunden`)

@@ -29,6 +29,11 @@
   white-space: nowrap;
   font-weight: 550;
 }
+/* a branch gives way from its start: every one of a task's starts alike, and its end says which it is */
+.branch {
+  direction: rtl;
+  text-align: left;
+}
 .number {
   flex: none;
   font: 500 11.5px/1 var(--mono);

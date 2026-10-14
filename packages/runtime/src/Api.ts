@@ -520,7 +520,7 @@ export const handlers = Api.toLayer(
       SearchTasks: ({ projectId, text, limit }) =>
         api(
           Effect.gen(function* () {
-            const working = new Set((yield* sessions.onTasks).map((session) => session.taskId))
+            const working = new Set((yield* sessions.onTasks).flatMap((session) => (session.turnRunning ? [session.taskId] : [])))
             const input = { text, ...(projectId === undefined ? {} : { projectId }), ...(limit === undefined ? {} : { limit }) }
             return { tasks: yield* findTasks(input, working) }
           }),

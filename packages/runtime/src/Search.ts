@@ -219,6 +219,8 @@ interface Found {
   readonly planState: string | null
   readonly startsAt: string | null
   readonly waiting: number
+  /** Drafts of its review that wait for the person. */
+  readonly drafted: number
   readonly runState: string | null
   readonly held: number
   readonly pullRequest: string | null
@@ -235,13 +237,15 @@ interface Found {
  * read for a search.
  */
 export const phaseOf = (
-  task: Pick<Found, 'taskId' | 'state' | 'planState' | 'startsAt' | 'waiting' | 'runState' | 'held'>,
+  task: Pick<Found, 'taskId' | 'state' | 'planState' | 'startsAt' | 'waiting' | 'runState' | 'held'> & Partial<Pick<Found, 'drafted'>>,
   working: ReadonlySet<string>,
 ): TaskPhase => {
   if (task.state === 'abandoned') return 'settled'
   if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
   if (task.waiting > 0) return 'waiting'
   if (working.has(task.taskId)) return 'running'
+  // A review has no run: drafted, it is the person's to post, as its card says.
+  if ((task.drafted ?? 0) > 0 && task.state === 'open') return 'ready'
   if (task.state === 'done') return 'settled'
   if (task.runState === 'succeeded') return 'ready'
   if (task.runState !== null && task.runState !== 'running') return 'stopped'
@@ -290,6 +294,7 @@ export const findTasks = Effect.fn('Search.findTasks')(function* (input: SearchI
     r.id AS row_id, t.id AS thread_id, k.id AS task_id, k.project_id, k.title, k.slug, k.state, ${recency} AS changed_at,
     p.state AS plan_state, p.starts_at,
     (SELECT count(*) FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open') AS waiting,
+    (SELECT count(*) FROM review_drafts v WHERE v.task_id = k.id AND v.state IN ('pending', 'failed', 'uncertain')) AS drafted,
     n.state AS run_state,
     (SELECT count(*) FROM node_attempts a JOIN nodes d ON d.id = a.node_id JOIN workflow_executions e ON e.id = d.execution_id
       WHERE e.run_id = n.id AND a.state = 'held') AS held,

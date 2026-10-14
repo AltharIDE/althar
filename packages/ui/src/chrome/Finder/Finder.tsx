@@ -1,5 +1,5 @@
 import { Dialog } from 'radix-ui'
-import { type KeyboardEvent, useId, useRef, useState } from 'react'
+import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
 import type { ProjectInk } from '../../foundations/ProjectMark/drawing'
@@ -135,6 +135,14 @@ export function Finder({ results, searching = false, query, defaultQuery = '', o
   const at = Math.min(active, Math.max(rows.length - 1, 0))
   const optionId = (index: number) => `${ids}-${index}`
   const answered = results !== null && !searching
+  // Enter on words not searched yet opens the first of what they find, once it comes, not the first of what was there before.
+  const [opening, setOpening] = useState(false)
+  useEffect(() => {
+    if (!opening || searching) return
+    setOpening(false)
+    const first = results?.[0]
+    if (first !== undefined) onOpen(first.id)
+  }, [opening, searching, results, onOpen])
 
   const move = (to: number) => {
     setActive(to)
@@ -147,7 +155,8 @@ export function Finder({ results, searching = false, query, defaultQuery = '', o
     else if (event.key === 'ArrowUp') move(Math.max(at - 1, 0))
     else if (event.key === 'Enter') {
       const chosen = rows[at]
-      if (chosen !== undefined) onOpen(chosen.id)
+      if (searching) setOpening(true)
+      else if (chosen !== undefined) onOpen(chosen.id)
     } else return
     event.preventDefault()
   }

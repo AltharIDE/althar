@@ -310,7 +310,7 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const { text } = yield* read(Sought, input)
           if (text.trim() === '') return yield* new ToolRefused({ message: 'Say what to look for. list_tasks lists the newest tasks.' })
-          const working = new Set((yield* sessions.onTasks).map((session) => session.taskId))
+          const working = new Set((yield* sessions.onTasks).flatMap((session) => (session.turnRunning ? [session.taskId] : [])))
           return foundWords(text, yield* findTasks({ projectId: access.projectId, text, limit: 20 }, working))
         })
 
