@@ -92,6 +92,8 @@ test('sends usage data while its switch is on, named events only, and nothing on
 
     // Off in Settings: nothing more leaves, whatever happens.
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
+    // Home listens for ⌘, once it is on screen.
+    await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeAttached()
     await page.keyboard.press('Meta+,')
     const settings = page.getByRole('dialog', { name: 'Settings' })
     await settings.getByRole('button', { name: 'Usage data' }).click()
