@@ -281,7 +281,10 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
   }
 }
 
-/** A ready task's card: a change to accept, with its pull request and checks; a review drafted; or a plain task that finished, with what it handed back. */
+/**
+ * A ready task's card: a change to accept, with its pull request and checks; a review drafted; or a plain task that finished, with
+ * what it handed back, or else its branch, where its lead wrote in the repository: on this Mac, as no pull request is coming.
+ */
 export const readyCardOf = (work: BoardTask): Card => {
   const base = { status: TaskStatus.Yours, kind: kindOf(work), title: work.title }
   switch (work.kind) {
@@ -299,7 +302,13 @@ export const readyCardOf = (work: BoardTask): Card => {
           ? { object: <Thumbs pictures={pictures.slice(0, HANDED_SHOWN)} /> }
           : files.length > 0
             ? { object: <FileChips files={files.slice(0, HANDED_SHOWN)} /> }
-            : {}),
+            : work.branch !== null
+              ? {
+                  object: (
+                    <BranchChip name={work.branch} {...(work.changed === null ? {} : { add: work.changed.add, del: work.changed.del })} />
+                  ),
+                }
+              : {}),
       }
     }
     case 'review':
@@ -440,7 +449,7 @@ export function BoardView({
                 {...(kind === undefined ? {} : { kind })}
                 title={work.title}
                 {...(named === null
-                  ? work.branch === null || work.kind === 'plain'
+                  ? work.branch === null
                     ? {}
                     : { meta: work.branch }
                   : { meta: change?.state === 'merged' ? text.merged(named) : text.closed(named) })}

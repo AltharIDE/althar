@@ -20,13 +20,13 @@ import type { ToolAccess } from '../src/ToolServer'
 import { callTool, repository, runtime, until } from './support'
 
 /*
- * A task's kind is read from what it has, never stored (DEV-96): a change
- * has a branch (every planned task from its start), a pull request, commits
- * or changes on its branch, or a plan that ends in one; anything else is
- * plain, as a task the coordinator starts with start_task is until its lead
- * changes the repository. A plain task that finished waits on its board as
- * Finished, and nothing else counts it; seeing it settles it as done, and
- * writing to its lead opens it again.
+ * A task's kind is read from what it has, never stored (DEV-96): a plain
+ * task is a quick task, one the coordinator starts with start_task, whose
+ * plan stays on this Mac and ends in nothing, with no pull request, whatever
+ * its lead wrote; a review reads someone else's pull request; everything else
+ * is a change, every planned task among them. A plain task that finished
+ * waits on its board as Finished, and nothing else counts it; seeing it
+ * settles it as done, and writing to its lead opens it again.
  */
 
 const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
@@ -98,15 +98,18 @@ const row = (taskId: string) =>
 const picture = (digest: string, name: string) => ({ sha256: digest, mediaType: 'image/png', bytes: 120, width: 8, height: 6, name })
 
 describe("a task's kind", () => {
-  it('is a change once it has a branch, or has or will have a pull request or work of its own; a review with nothing of its own; else plain', () => {
-    const none = { reviewing: null, end: null, changes: 0, made: false, branched: false }
-    assert.strictEqual(kindOf(none), 'plain')
-    // A planned task has its branch from its start, whatever its end: one that merges here has none.
-    assert.strictEqual(kindOf({ ...none, branched: true }), 'change')
-    for (const end of ['draft', 'ready', 'none']) assert.strictEqual(kindOf({ ...none, end }), 'change', end)
-    assert.strictEqual(kindOf({ ...none, end: 'merge' }), 'plain')
-    assert.strictEqual(kindOf({ ...none, changes: 1 }), 'change')
-    assert.strictEqual(kindOf({ ...none, made: true }), 'change')
+  it('is plain for a quick task with no pull request, whatever it made; a review with nothing of its own; else a change', () => {
+    const quick = { reviewing: null, end: null, changes: 0, made: false, quick: true }
+    assert.strictEqual(kindOf(quick), 'plain')
+    // What its lead wrote or committed doesn't make it a change: only the person does, through its lead.
+    assert.strictEqual(kindOf({ ...quick, made: true }), 'plain')
+    // Made a change, its plan ends in a pull request or a pushed branch; and a pull request of its own makes it one.
+    for (const end of ['draft', 'ready', 'none']) assert.strictEqual(kindOf({ ...quick, end }), 'change', end)
+    assert.strictEqual(kindOf({ ...quick, changes: 1 }), 'change')
+    // Any other task is a change: every planned one, whatever its end, as one that merges here has none.
+    const planned = { ...quick, quick: false }
+    assert.strictEqual(kindOf(planned), 'change')
+    assert.strictEqual(kindOf({ ...planned, end: 'merge' }), 'change')
     const reviewing = {
       product: 'github' as const,
       repository: 'meridian/api',
@@ -122,12 +125,12 @@ describe("a task's kind", () => {
       verdict: null,
       posted: null,
     }
-    assert.strictEqual(kindOf({ ...none, reviewing }), 'review')
-    assert.strictEqual(kindOf({ ...none, reviewing, end: 'draft' }), 'review')
-    // A branch alone isn't a review's own work.
-    assert.strictEqual(kindOf({ ...none, reviewing, branched: true }), 'review')
+    assert.strictEqual(kindOf({ ...planned, reviewing }), 'review')
+    assert.strictEqual(kindOf({ ...planned, reviewing, end: 'draft' }), 'review')
+    assert.strictEqual(kindOf({ ...quick, reviewing }), 'review')
     // A review the person takes over, with work of its own, is a change.
-    assert.strictEqual(kindOf({ ...none, reviewing, made: true }), 'change')
+    assert.strictEqual(kindOf({ ...planned, reviewing, made: true }), 'change')
+    assert.strictEqual(kindOf({ ...planned, reviewing, changes: 1 }), 'change')
     assert.isFalse(endsInChange(null))
   })
 
@@ -153,11 +156,13 @@ describe("a task's kind", () => {
     assert.isNull(handedOf({ evidence: [] }, [{ files: [] }]))
   })
 
-  it.live('is read from what the task has: plain with no branch, a change with one, with commits, or a plan that ends in one', () =>
+  it.live('is read from what the task has: plain for a quick task, a change for a planned one, whatever it made or how it ends', () =>
     Effect.gen(function* () {
       const queries = yield* Queries
       const project = yield* open
       const question = yield* plain(project.projectId, 'Which partners still call v1?', '[lead:finish]')
+      // A quick task whose lead committed: its work is on a branch of its own, and it is plain still.
+      const sketch = yield* plain(project.projectId, 'Sketch the settings', '[lead:commit] [lead:finish]')
       const change = yield* planned(project.projectId, 'Retry the checkout', '[lead:finish] [lead:edit]')
       // Planned, in a project with no host, so it merges here when accepted: its plan has no end, and it makes nothing.
       const kept = yield* planned(project.projectId, 'Keep the old checkout', '[lead:finish]')
@@ -165,6 +170,9 @@ describe("a task's kind", () => {
 
       const plainCard = yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
       assert.deepInclude(plainCard, { kind: 'plain', handed: null, reviewing: null })
+      const sketched = yield* cardOnce(sketch.taskId, (card) => card.phase === 'ready')
+      assert.strictEqual(sketched.kind, 'plain')
+      assert.isNotNull(sketched.branch)
       assert.strictEqual((yield* cardOnce(change.taskId, (card) => card.phase === 'ready')).kind, 'change')
       // On its branch from its start, it is a change though it made nothing, and ready to accept.
       assert.strictEqual((yield* cardOnce(kept.taskId, (card) => card.phase === 'ready')).kind, 'change')
@@ -177,6 +185,7 @@ describe("a task's kind", () => {
         board.tasks.filter((task) => task.phase === 'ready').map((task) => [task.title, task.kind]),
         [
           ['Which partners still call v1?', 'plain'],
+          ['Sketch the settings', 'plain'],
           ['Retry the checkout', 'change'],
           ['Keep the old checkout', 'change'],
         ],
@@ -188,7 +197,7 @@ describe("a task's kind", () => {
       )
       const summary = (yield* queries.projects).projects.find((one) => one.id === project.projectId)
       assert.strictEqual(summary?.ready, 2)
-      assert.deepStrictEqual([...(yield* queries.finished)], [question.taskId])
+      assert.sameMembers([...(yield* queries.finished)], [question.taskId, sketch.taskId])
     }).pipe(Effect.provide(withQueries())),
   )
 

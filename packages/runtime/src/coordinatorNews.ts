@@ -14,9 +14,9 @@ import { PlanParameters, type PlanStep, type TaskEnd } from './Runs'
  * or declined it, or its time came and it started. And of the issues it
  * drafted: the person changed one, filed it or discarded it, or filing it
  * failed. And of the issues tasks came from: Althar moved one to In
- * Progress as its task started, or couldn't. And of plain tasks whose lead
- * started changing the repository, which are changes now, on a branch, and
- * may want a title that says so. The coordinator proposed each plan and drafted each issue and moved
+ * Progress as its task started, or couldn't. And of quick tasks the person
+ * had their leads make changes, with a review and a pull request to end in.
+ * The coordinator proposed each plan and drafted each issue and moved
  * on; the cards are the person's, and nothing else tells it. Read before
  * what the person says next, it speaks of each as it now is, not as it
  * proposed or drafted it.
@@ -99,8 +99,8 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       ORDER BY sequence`
     const drafts = yield* draftNews(projectId, last.sequence)
     const started = yield* startedNews(projectId, last.sequence)
-    const branched = yield* branchedNews(projectId, last.sequence)
-    if (events.length === 0 && drafts.length === 0 && started.length === 0 && branched.length === 0) return null
+    const made = yield* madeNews(projectId, last.sequence, modelOf)
+    if (events.length === 0 && drafts.length === 0 && started.length === 0 && made.length === 0) return null
 
     /** Who does a plan's steps; each step's effort too where it isn't what the other plan gives it, as its ending is said only where it changed. */
     const team = (parameters: PlanParameters, other: PlanParameters) =>
@@ -150,7 +150,7 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
       else if (plan.state === 'proposed' && plan.startsAt === null) said.push('The person is holding it: it waits until they start it.')
       if (said.length > 0) lines.push(`- ${plan.slug} (${plan.title}): ${said.join(' ')}`)
     }
-    if (lines.length === 0 && drafts.length === 0 && started.length === 0 && branched.length === 0) return null
+    if (lines.length === 0 && drafts.length === 0 && started.length === 0 && made.length === 0) return null
     const close =
       lines.length === 0 && drafts.length === 0
         ? started.length === 0
@@ -161,7 +161,7 @@ export const coordinatorNews = (threadId: string, projectId: string, modelOf: Mo
           : lines.length === 0
             ? 'Speak of these issues as they are now, not as you drafted them.'
             : 'Speak of these plans and issues as they are now, not as you proposed or drafted them.'
-    return `Since you last spoke, in Althar:\n${[...lines, ...started, ...branched, ...drafts, ...(close === null ? [] : [close])].join('\n')}`
+    return `Since you last spoke, in Althar:\n${[...lines, ...started, ...made, ...drafts, ...(close === null ? [] : [close])].join('\n')}`
   })
 
 /** The issue draft events the coordinator hears of: the person changed one, filed it, or discarded it; or filing it failed, or may have. */
@@ -258,25 +258,21 @@ const startedNews = (projectId: string, since: number) =>
   })
 
 /**
- * The plain tasks whose lead started changing the repository since a place in
- * the ledger (DEV-96): each is a change now, on the branch Althar made for it,
- * and its title, written for a question or something to try, may no longer
- * say what it does. A line for each task, with its title now; none for a
- * branch made later in another of its repositories, once it was a change.
+ * The quick tasks made changes since a place in the ledger, as the person
+ * asked their leads (make_it_a_change): a line for each, with what it is
+ * called now and was called, who reviews it, and how it ends.
  */
-const branchedNews = (projectId: string, since: number) =>
+const madeNews = (projectId: string, since: number, modelOf: ModelNamer) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
-    const events = yield* sql<{ taskId: string; slug: string; title: string; branch: string }>`
-      SELECT w.task_id, k.slug, k.title, json_extract(e.payload, '$.to') AS branch FROM record_events e
-      JOIN workspaces w ON w.id = e.aggregate_id JOIN tasks k ON k.id = w.task_id
-      WHERE e.project_id = ${projectId} AND e.aggregate_type = 'workspace' AND e.sequence > ${since}
-        AND e.type = 'workspace.branched' AND json_extract(e.payload, '$.from') IS NULL AND json_extract(e.payload, '$.later') IS NULL
+    const events = yield* sql<{ payload: string; slug: string; title: string }>`
+      SELECT e.payload, k.slug, k.title FROM record_events e JOIN tasks k ON k.id = e.aggregate_id
+      WHERE e.project_id = ${projectId} AND e.aggregate_type = 'task' AND e.sequence > ${since} AND e.type = 'task.made_change'
       ORDER BY e.sequence`
-    return [...new Set(events.map((event) => event.taskId))].map((taskId) => {
-      const mine = events.filter((event) => event.taskId === taskId)
-      const [first] = mine
-      const branches = [...new Set(mine.map((event) => event.branch))]
-      return `- ${first?.slug ?? ''} (${first?.title ?? ''}): its lead started changing the repository, so it is a change now, on ${branches.length === 1 ? `its branch ${branches[0] ?? ''}` : `its branches ${branches.join(', ')}`}. If its title no longer says what it does, rename it with rename_task, keeping what the person asked in its thread.`
+    return events.map((event) => {
+      const made = JSON.parse(event.payload) as { was?: string; review?: PlanStep | null; end?: TaskEnd | null }
+      const was = made.was === undefined || made.was === event.title ? '' : ` (it was “${made.was}”)`
+      const who = made.review == null ? 'no review' : `${modelOf(made.review)} reviews it`
+      return `- ${event.slug} (${event.title})${was}: the person asked its lead to make this quick task a change, and it is one now: ${who}, and ${endWords(made.end)}.`
     })
   })

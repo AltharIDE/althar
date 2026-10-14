@@ -135,12 +135,19 @@ const effortWords = (route: Route | undefined): string => {
   return `effort ${route.efforts.map((level) => level.id).join(', ')}${starts.length === 0 ? '' : ` (${starts.join('; ')})`}`
 }
 
-/** The models as the coordinator reads them: by maker, each with its scores, how it is paid for, and its efforts. */
-export const describeModels = (usable: ReadonlyArray<UsableModel>): string => {
+/**
+ * The models as the coordinator reads them: by maker, each with its scores,
+ * how it is paid for, and its efforts. `use` says what names one, for a
+ * task's lead making its task a change.
+ */
+export const describeModels = (
+  usable: ReadonlyArray<UsableModel>,
+  use = "propose_plan's lead and review and start_task's lead",
+): string => {
   if (usable.length === 0)
     return 'No model can be used now: no agent is signed in, every one is out of usage, or the person switched them all off.'
   const lines: string[] = [
-    "The models you can give work to now, by who makes them. Name one as it is written here, for propose_plan's lead and review and start_task's lead, and, where you set one, an effort it lists. Without an effort, a step starts at the person's default for its model, or else at the model's own. The scores are Artificial Analysis's indices, higher is better: intelligence, coding, agentic.",
+    `The models you can give work to now, by who makes them. Name one as it is written here, for ${use}, and, where you set one, an effort it lists. Without an effort, a step starts at the person's default for its model, or else at the model's own. The scores are Artificial Analysis's indices, higher is better: intelligence, coding, agentic.`,
   ]
   let maker: string | null | undefined
   for (const model of usable) {

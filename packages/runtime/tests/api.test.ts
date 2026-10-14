@@ -1361,12 +1361,13 @@ describe('the coordinator, through the API', () => {
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
-        // A plain task is one the coordinator starts with no plan; one the person starts is on a branch, a change, though it makes nothing.
+        // A plain task is one the coordinator starts with no plan, and stays one though its lead commits, on a branch of its own; one
+        // the person starts is a change, though it makes nothing.
         const coordinator = yield* client.GetCoordinator({ projectId: project.id })
         yield* client.Send({
           commandId: commandId(),
           threadId: coordinator.threadId,
-          body: 'Which partners still call v1? [coordinator:start] [lead:finish]',
+          body: 'Which partners still call v1? [coordinator:start] [lead:commit] [lead:finish]',
           disposition: 'after_current',
         })
         const change = yield* client.StartTask({
@@ -1388,6 +1389,7 @@ describe('the coordinator, through the API', () => {
           ],
         )
         const question = both.tasks.find((one) => one.kind === 'plain')
+        assert.isNotNull(question?.branch)
         yield* client.SeeTask({ commandId: commandId(), taskId: question?.taskId ?? '' })
         yield* client.SeeTask({ commandId: commandId(), taskId: change.id })
         const board = yield* client.GetBoard({ projectId: project.id })

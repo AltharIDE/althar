@@ -34,7 +34,8 @@ const heard = Effect.gen(function* () {
 
 /**
  * A task planned for its lead alone, started at once: one that reports, or, without `[lead:finish]`, one that never does.
- * `plain`, as the coordinator's start_task makes one: with no branch until its lead changes the repository.
+ * `plain`, as the coordinator's start_task makes one: a quick task, its plan staying on this Mac, with no branch until its lead
+ * changes the repository.
  */
 const started = (title: string, plain = false) =>
   Effect.gen(function* () {
@@ -56,6 +57,7 @@ const started = (title: string, plain = false) =>
       reason: null,
       actorId: instance.personId,
       end: null,
+      ...(plain ? { here: true } : {}),
     })
     yield* plans.start(planId, instance.personId)
     return task

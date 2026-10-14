@@ -14,28 +14,36 @@
   call. People asked for temporary chats, a prototype kind, a document kind;
   prototyped, each turned out to be a task with less in it. DEV-96.
 - **Decision:** one primitive, the task; its kind is read from what it has.
-  - **Three kinds, never stored.** A **change** is a task with a branch of
-    its own, a pull request or commits; a plan that ends in a pull request
-    (its ending is `draft`, `ready` or `none`) says so before anything else
-    does. Every planned task has its branch from its start, so it is a
-    change whatever its ending: one that merges here when it is accepted has
-    no pull request to end in. A docs pull request is a change. A **review**
-    reviews someone else's pull request and has no work of its own. A
-    **plain** task is everything else: a task with no branch yet. The
-    runtime reads the kind for each card from the task's plan, workspaces,
-    pull requests and review; nothing writes it, so nothing can disagree
-    with it.
-  - **A task only moves toward change.** A plain task that writes becomes a
-    change; a review the person takes over becomes a change that builds on
-    it. It is one task, thread and card throughout: nothing restarts, and
-    the coordinator retitles it where its title no longer fits.
+  - **Three kinds, never stored.** Whether a task ends in a pull request is
+    the person's intent, never a side effect of the files its lead writes
+    (decided 14 October). A **plain** task is a quick task: one the
+    coordinator starts at once with `start_task`, whose plan says it stays
+    on this Mac (`here`) and ends in nothing, with no pull request of its
+    own. It stays plain whatever its lead writes or commits, branch or not,
+    until the person asks its lead to make it a change. A **review** reviews
+    someone else's pull request and has no work of its own. A **change** is
+    everything else: every planned task, whatever its ending (one that
+    merges here when it is accepted has no pull request to end in), a quick
+    task made a change, and any task with a pull request. A docs pull
+    request is a change. The runtime reads the kind for each card from the
+    task's plan, pull requests and review; nothing writes it, so nothing can
+    disagree with it. A quick task started before its plan said `here` is
+    read as a change, as it was once it had a branch.
+  - **A task only moves toward change, when the person says so.** As they
+    try something with a quick task's lead and like it, they ask it to make
+    it a real thing; the lead calls `make_it_a_change`, which renames the
+    task for what it does now, adds a review by the model it names, and
+    gives it an ending: a draft pull request, or one ready for review. A
+    review the person takes over becomes a change that builds on it. It is
+    one task, thread and card throughout: nothing restarts.
   - **A card has nothing to press.** The whole card is one button that
     opens the task, where a permission is answered, a question answered,
     and the lead told what's next. The card says where the task stands in a
     word, in the lane's colour, then its kind (Change, Review; nothing for a
     plain task), its title, and at most one card in the card and one fact:
     a change's branch or pull request, its checks or a conflict; a review's
-    pull request and its findings; a plain task's pictures or files.
+    pull request and its findings; a plain task's pictures or files, or else
+    its branch, where its lead wrote in the repository.
   - **A task with an open call shows once,** in Needs you: its card says the
     call's kind and why. A call with no task, the coordinator's question,
     is still a card of its own.
@@ -55,20 +63,32 @@
     and picks the verdict (never Approve for them on an outside pull
     request), then posts. A setting of their own posts reviews of their
     team's pull requests without asking; outside ones always wait.
-  - **A plain task starts with no branch.** What the coordinator starts
-    with `start_task` (no plan: a question, a quick look, a prototype, a
-    release run from this Mac) works in a worktree of its own, detached at
-    the commit its default branch is at, set up as any task's is
+  - **A plain task is a quick task until the person asks its lead to make
+    it a change.** What the coordinator starts with `start_task` (no plan to
+    look over: a question, a quick look, a prototype, a release run from
+    this Mac) works in a worktree of its own, detached at the commit its
+    default branch is at, set up as any task's is
     ([ADR-023](023-althar-runs-the-project.md)), with a scratch folder git
-    ignores for what its lead throws away. Where its lead first changes the
-    repository, with new commits or changes not committed that aren't
-    evidence it handed, Althar makes the task's branch right there, as the
-    lead's turn ends or as it calls `finish_step`, with that work on it: the
-    same folder, the same lead and session. It says so in the task's thread
-    ("This task changes files now, on its branch …"), and tells the
-    coordinator, which retitles the task (`rename_task`) where its title no
-    longer says what it does. From then it is a change, published as the
-    project's changes are. With no branch there is nothing to ship, and a
+    ignores for what its lead throws away. Nothing of it leaves this Mac.
+    Writing in the repository is fine: where its lead first changes it,
+    with new commits or changes not committed that aren't evidence it
+    handed, Althar makes the task's branch right there, as the lead's turn
+    ends or as it calls `finish_step`, with that work on it, so nothing is
+    lost on a detached head: the same folder, the same lead and session.
+    That keeps the work safe, and nothing more. The branch stays on this
+    Mac, the task stays plain (Finished, then Done once seen), and its
+    thread says so ("This task's work is on a branch of its own now, …,
+    which stays on this Mac"). When the person asks to turn it into a real
+    change, its lead calls `make_it_a_change`: the task is renamed, its plan
+    takes the review and the ending and no longer stays here, and so does
+    the run under way, or a round of work opens with them where its last
+    run had ended ([ADR-034](034-a-task-goes-back-to-work-and-ships-again.md));
+    its branch is made then where it has none. The thread says so ("This
+    task is a change now: reviewed by …, it opens a draft pull request when
+    it's done"), and the coordinator hears it in its news. The lead's next
+    `finish_step` goes through the review, and then the run publishes as any
+    change does, that round too, with all the work since the task started
+    counted as the round's. With no branch there is nothing to ship, and a
     lead that changed nothing finishes with its summary alone.
   - **Tasks can be found.** ⌘K in a project and on the home searches titles,
     what the person asked, the lead's summaries and what it built, pull
@@ -80,8 +100,14 @@
     parts, and each needed its own way to become a task when it grew, which
     is the common case. A document is a change whose files are prose.
   - **A stored kind, chosen by the coordinator.** It would go stale the
-    moment a plain task wrote a file or a review was taken over, and the
-    card would say one thing while the task did another.
+    moment a quick task was made a change or a review was taken over, and
+    the card would say one thing while the task did another.
+  - **A quick task that writes becomes a change by itself** (as built first,
+    13 October). A prototype whose lead wrote in the repository got its
+    branch, became a change and opened a draft pull request once its host
+    was connected (PR #162): the person never asked for one. Writing is how
+    a prototype is made; turning it into a change is the person's decision,
+    and the lead, which they are talking to, is who carries it out.
   - **More kinds: Release, Watch, Prototype.** A release has no output
     Althar can see, so its card could say no more than a plain task's.
     Watching a pull request until its checks pass is a state of a change
@@ -106,15 +132,15 @@
   - **No install for a plain task.** Its lead's quick look often runs the
     project's tests or tools, which fail without one in a sandbox that
     refuses the package manager's folders outside the worktree.
-- **Trade-off:** The kind can change under the person's eyes, from plain to
-  change, which is what happened to the work; the card and the thread say
-  so, and the coordinator's retitle says why. A plain task still costs a
-  worktree and its install, as any task does. Its branch is made at the end
-  of the turn that wrote, not as the file is written, so mid-turn the task
-  still reads plain, and work a lead leaves outside its scratch folder, a
-  screenshot it hasn't handed yet, makes it a change. A review in reader
-  mode can't run the pull request's tests; its lead reads the checks the
-  host ran instead.
+- **Trade-off:** The kind changes from plain to change only when the person
+  asks for it, through the lead; the card, the thread and the new title say
+  so. A quick task's branch can hold commits that never leave this Mac, and
+  nothing reminds the person they are there but its card and its row. A
+  plain task still costs a worktree and its install, as any task does. Its
+  branch is made at the end of the turn that wrote, not as the file is
+  written, and work a lead leaves outside its scratch folder, a screenshot
+  it hasn't handed yet, gets it one. A review in reader mode can't run the
+  pull request's tests; its lead reads the checks the host ran instead.
 - **Related:** the triage checkpoint (PR #116's exploration) will show on a
   running card's top line, which takes any word; DEV-91 (merging once
   checks pass) will be a change's state, not a kind.

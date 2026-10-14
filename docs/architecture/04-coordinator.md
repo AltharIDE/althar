@@ -28,10 +28,11 @@ See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
   something out, checking how something behaves. One lead it picks, no
   review, nothing outside the project when it is done, and no countdown
   (`start_task`). It is a plain task, in a worktree with no branch until its
-  lead changes the repository; then it is a change on its branch, which the
-  coordinator hears of at its next turn and retitles where its title no
-  longer says what it does (`rename_task`,
-  [ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md));
+  lead changes the repository, when its work goes on a branch of its own
+  that stays on this Mac. It stays plain until the person asks its lead to
+  make it a real change (`make_it_a_change`), which the coordinator hears of
+  at its next turn
+  ([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md));
 - runs the project for the person, with no agent, when they ask, and keeps how
   it runs when Althar can't tell (ADR-023);
 - follows the work, and passes messages to a task's lead;
@@ -110,9 +111,10 @@ provisional.
 | `draft_issue` | Drafts an issue on a connected tracker, as a card the person files, changes or discards; nothing is filed on its word ([06](06-integrations-and-skills.md#drafting-issues)) | Command |
 | `list_models` | The models it can use now, by maker, with their scores and each one's efforts: the ids a step takes, the one it starts at by itself, and the person's default where they set one | Query |
 | `propose_plan` | Steps, a model per step and, where it matters, an effort that model offers, optional steps. An effort it doesn't offer is refused with the ones it does; left out, the step starts at the person's default for the model, or else the model's own | Command |
-| `start_task` | Drafts a mini task and starts it at once: one lead, at an effort as `propose_plan` takes one, no review, nothing outside the project when it is done; a plain task, with no branch until its lead changes the repository | Command |
+| `start_task` | Drafts a mini task and starts it at once: one lead, at an effort as `propose_plan` takes one, no review, nothing outside the project when it is done; a plain task (a quick task), with no branch until its lead changes the repository, and then one that stays on this Mac | Command |
 | `review_pull_request` | Starts a review of someone else's pull request, by its link or its number in the project's repository, with the lead it picks: a task on a read-only copy of the pull request's head, whose lead drafts a review the person posts ([06](06-integrations-and-skills.md#reviewing-someone-elses-pull-request)). Asked again, the task still reviewing it; once that one is done, a new review | Command |
-| `rename_task` | Gives a task another title, as the person can, for one whose work became a change; its slug and branch stay, and what the person asked stays in its thread | Command |
+| `rename_task` | Gives a task another title, as the person can, where its title no longer says what it does; its slug and branch stay, and what the person asked stays in its thread | Command |
+| `make_it_a_change` | A lead's, not the coordinator's: offered only on a quick task not made a change yet, and refused, with why, on any other. Called when the person asks to turn what the lead made into a real thing: a title for what it does now, a reviewer named as `propose_plan` names one (none only where the person said so), and a pull request, a draft or ready for review. Makes its branch where it has none; renames the task and gives its plan, and the run under way, the review and the ending, or opens a round with them where its last run had ended; its thread and the coordinator's news say so. The lead's next `finish_step` goes through the review, then the pull request opens ([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)) | Command |
 | `run_project` | Runs the project with no agent: the default branch in a copy of its own, or a task's worktree (ADR-023) | Command |
 | `set_run_command` | Keeps how the project runs, for Althar to run it; leads have it too (ADR-023) | Command |
 | `order_tasks` | Orders a batch | Command |

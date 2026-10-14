@@ -69,6 +69,7 @@ import { Setups } from './Setups'
 import type { InputImage } from './sentImages'
 import { evidenceForReview } from './evidence'
 import { scratchOf } from './firstWrite'
+import { quickIn } from './kinds'
 import { defaultEffortOf } from './preferences'
 import { addItem, betweenTurns, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import {
@@ -2008,9 +2009,18 @@ export class Sessions extends Context.Service<
           const status = states.flatMap((state) => (state.status === '' ? [] : [state.status])).join('\n')
           const where = (repository: TaskRepository) =>
             `${repository.worktree}, ${repository.branched === 0 ? 'with no branch yet, at' : `on the branch ${repository.branch}, which started from`} ${repository.baseRef}${repository.baseCommit === null ? '' : ` at ${repository.baseCommit.slice(0, 12)}`}${repository.within === null ? '' : `. The project is its folder ${repository.within}: start there, and change the rest of the repository where the task needs it`}`
-          // A plain task's worktrees have no branch until its lead changes the repository (DEV-96).
+          // A quick task is for trying something out, and nothing of it leaves this Mac until the person has it made a change; its
+          // worktrees have no branch until its lead changes the repository (DEV-96).
+          const [quick] = yield* sql<{
+            quick: number
+          }>`SELECT ${sql.unsafe(quickIn('k'))} AS quick FROM tasks k WHERE k.id = ${thread.taskId}`
           const unbranched = thread.repositories.filter((repository) => repository.branched === 0)
           const [plainFirst] = unbranched
+          const [first] = thread.repositories
+          const scratch =
+            thread.repositories.length === 1 && first !== undefined
+              ? `its scratch folder, ${scratchOf(first.worktree)}`
+              : `each worktree's scratch folder, .althar/scratch`
           return [
             why.kind === 'start'
               ? several
@@ -2027,10 +2037,18 @@ export class Sessions extends Context.Service<
               : [
                   `The project's other repositories, to read but not change (they are the person's own checkouts, on whatever branch they left them): ${others.map((other) => `${withRole(other.name, other.role)}, at ${other.path}`).join('; ')}.`,
                 ]),
-            ...(plainFirst === undefined
+            ...(quick?.quick !== 1
               ? []
               : [
-                  `This task has no branch yet: it is a question, a look around or something to try, and it leaves the repository as it found it. Put what you'd throw away, such as prototypes, notes and screenshots, in ${unbranched.length === 1 ? `its scratch folder, ${scratchOf(plainFirst.worktree)}` : `each worktree's scratch folder, .althar/scratch`}, which git ignores: the task stays as it is. Anything you change in the repository itself, committed or not, makes the task a change on a branch of its own, ${plainFirst.branch}: Althar makes it when your turn ends, or when you call finish_step, with your work on it, and you carry on there in the same folder. From then the task is published as the project's changes are, and you commit on its branch as on any task. Where you changed nothing in the repository, finish_step needs only your summary.`,
+                  [
+                    'This task is for trying something out: a question, a look around, a prototype. Nothing of it leaves this Mac: nothing is pushed, and no pull request opens.',
+                    `Put what you'd throw away, such as prototypes, notes and screenshots, in ${scratch}, which git ignores.`,
+                    plainFirst === undefined
+                      ? `Writing in the repository is fine: its work is on a branch of its own, ${first?.branch ?? ''}, which stays on this Mac. Commit there as on any task.`
+                      : `Writing in the repository is fine, committed or not: it has no branch yet, and Althar puts what you change there on a branch of its own, ${plainFirst.branch}, when your turn ends or when you call finish_step, and you carry on there in the same folder. That branch stays on this Mac; commit there as on any task.`,
+                    'If the person asks to make it a real change, to keep it, have it reviewed or open a pull request, call make_it_a_change: it gets a title for what it does, a reviewer and a pull request to end in.',
+                    'Where you changed nothing in the repository, finish_step needs only your summary.',
+                  ].join(' '),
                 ]),
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
@@ -2041,7 +2059,7 @@ export class Sessions extends Context.Service<
             // What the task built, which ends it: the person reads it before the proof, and it is said again when the work changes.
             "When you finish the task, say in finish_step's `built` what it has built, as it stands now, the way you would wrap up a session for the person: what it does for them now, the main changes and where they are, anything left open or decided along the way (\"the images aren't in the pull request because…\"), and what they should do next (try it at its local address, push, check it on a real device). A few lines or a short list, in plain words, about where it ended rather than how it got there: a review finding you fixed belongs only if it changed what was built. For a prototype or anything to look at, say how to see it. Settling a review that changes the work, say it again, so it never describes an earlier version; and once the plan's steps are done, when you change the work after (a failed check, what people said on the pull request), call finish_step again with `built` as it now stands.",
             // Althar reaches the code host for the task (ADR-011).
-            "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. read_issue reads the issue the task came from, or any other.",
+            `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. read_issue reads the issue the task came from, or any other.`,
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
             [
               ...published.filter((said) => said !== ''),

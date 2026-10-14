@@ -40,6 +40,8 @@ export class Plans extends Context.Service<
       readonly end?: TaskEnd | null
       /** Held from the start: it waits until someone starts it, with no countdown. */
       readonly held?: boolean
+      /** Nothing of it leaves this Mac when it is done, whatever the project's host (`PlanParameters.here`). */
+      readonly here?: boolean
     }): Effect.Effect<string, unknown>
     /**
      * Starts a proposed plan now: its first step is under way (`running`), or
@@ -140,7 +142,12 @@ export class Plans extends Context.Service<
                   projectId: input.projectId,
                   taskId: input.taskId,
                   workflowVersionId,
-                  parameters: JSON.stringify({ steps: input.steps, reason: input.reason, end: input.end ?? null }),
+                  parameters: JSON.stringify({
+                    steps: input.steps,
+                    reason: input.reason,
+                    end: input.end ?? null,
+                    ...(input.here === true ? { here: true } : {}),
+                  }),
                   proposedByActorId: input.actorId,
                   state: 'proposed',
                   proposedAt: at,
@@ -219,8 +226,13 @@ export class Plans extends Context.Service<
             Effect.gen(function* () {
               const sql = yield* SqlClient.SqlClient
               const changed = (plan: PlanRow) => {
-                const before = JSON.parse(plan.parameters) as { reason?: string | null; end?: TaskEnd | null }
-                return JSON.stringify({ steps, reason: before.reason ?? null, end: end === undefined ? (before.end ?? null) : end })
+                const before = JSON.parse(plan.parameters) as { reason?: string | null; end?: TaskEnd | null; here?: boolean }
+                return JSON.stringify({
+                  steps,
+                  reason: before.reason ?? null,
+                  end: end === undefined ? (before.end ?? null) : end,
+                  ...(before.here === true ? { here: true } : {}),
+                })
               }
               const plan = yield* load(planId)
               if (plan.state === 'proposed') {

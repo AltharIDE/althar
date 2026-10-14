@@ -44,7 +44,7 @@ import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { builtIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
 import { filesOf, outputOf, picturesOf } from './handed'
-import { endsInChange, handedOf, kindOf } from './kinds'
+import { handedOf, kindOf, quickIn } from './kinds'
 import { documentText, outputText } from './reading'
 import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
@@ -1298,10 +1298,11 @@ export class Queries extends Context.Service<
 
       /**
        * The plain tasks that finished and wait to be seen (DEV-96), by id:
-       * their latest run passed, they have no branch (so nothing in git of
-       * their own), no pull request, and no plan ending in one. One stays in
-       * its project's Needs you, but asks nothing of the person, so nothing
-       * counts it: not the tabs, the home, the edge or the Dock.
+       * their latest run passed, and they are quick tasks still (their plan
+       * stays on this Mac and ends in nothing, and they have no pull request),
+       * whatever they committed. One stays in its project's Needs you, but
+       * asks nothing of the person, so nothing counts it: not the tabs, the
+       * home, the edge or the Dock.
        */
       const finishedPlain = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -1309,11 +1310,7 @@ export class Queries extends Context.Service<
           SELECT k.id FROM tasks k
           JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
           JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
-          WHERE k.state = 'open' AND r.state = 'succeeded'
-            AND NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.branched_at IS NOT NULL)
-            AND NOT EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change')
-            AND coalesce((SELECT json_extract(parameters, '$.end') FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted')
-              ORDER BY proposed_at DESC LIMIT 1), '') NOT IN ('draft', 'ready', 'none')`
+          WHERE k.state = 'open' AND r.state = 'succeeded' AND ${sql.unsafe(quickIn('k'))}`
         return new Set(rows.map((row) => row.id))
       })
 
@@ -1377,10 +1374,8 @@ export class Queries extends Context.Service<
             answersWait: number
             turnWaits: number
             runPlan: string | null
-            branched: number
           }>`
             SELECT t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, ${sql.unsafe(SHOWN_BRANCH)},
-              EXISTS (SELECT 1 FROM workspaces f WHERE f.task_id = k.id AND f.branched_at IS NOT NULL) AS branched,
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
               r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
@@ -1484,14 +1479,15 @@ export class Queries extends Context.Service<
           const leadEffort = task.leadEffort ?? (onPlan ? (implement?.effort ?? null) : null)
           const { issue, changes } = links ?? (yield* linksOf(taskId))
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
-          // What it makes: a branch, a pull request or its plan says so; else git does, by what is on its branch (a review's, which
-          // a branch alone doesn't make a change); for a task that settled, once, as nothing changes it until it opens again.
-          const branched = task.branched === 1
-          const decided = changes.length > 0 || (reviewing === null && (branched || endsInChange(end)))
-          // By its branch too: a round that wrote and was given up settles it again at the same time, a change now.
-          const settledAs = task.state === 'done' || task.state === 'abandoned' ? `${taskId}:${task.settledAt}:${task.branched}` : null
+          // What it makes: its plan and its pull requests say so, whatever it wrote (a quick task stays plain until it is made a
+          // change); for a review, git does too, by what is on its branch; for a task that settled, once, as nothing changes it
+          // until it opens again.
+          const quick = field(parameters, 'here') === true
+          const reads = reviewing !== null && changes.length === 0
+          // By its plan too: a quick task made a change in a round that was given up settles again at the same time, a change now.
+          const settledAs = task.state === 'done' || task.state === 'abandoned' ? `${taskId}:${task.settledAt}:${quick}` : null
           const kept = settledAs === null ? undefined : settledKinds.get(settledAs)
-          const kind = kept ?? kindOf({ reviewing, end, changes: changes.length, branched, made: decided ? false : yield* madeOf(taskId) })
+          const kind = kept ?? kindOf({ reviewing, end, changes: changes.length, quick, made: reads ? yield* madeOf(taskId) : false })
           if (settledAs !== null) settledKinds.set(settledAs, kind)
           return {
             taskId,
