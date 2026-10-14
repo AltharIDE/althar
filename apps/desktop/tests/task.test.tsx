@@ -10,6 +10,7 @@ import { lookedOf, noOutputsOf, readsOf } from '../src/renderer/features/task/No
 import { conflictsOf } from '../src/renderer/features/task/Outputs'
 import { elapsedOf, sinceOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
+import { numberOf, reachOf, reviewedUnfurl } from '../src/renderer/features/task/ReviewCard'
 import { agents, change, changed, fakeClient, items, models, snapshot, status, streamed, usual } from './fixtures'
 import type { ChangedFile } from '@althar/contracts'
 import { clock } from '../src/renderer/shared/time'
@@ -222,6 +223,33 @@ describe('a task', () => {
     })
     await userEvent.click(screen.getByRole('button', { name: 'Discard' }))
     expect(client.discardReviewDraft).toHaveBeenCalledWith('rdr_1')
+  })
+
+  it('says a team’s review reads with the network, and posts once drafted where the person’s setting says so', () => {
+    const team = {
+      product: 'github' as const,
+      repository: 'meridian/api',
+      number: 7,
+      url: 'https://github.com/meridian/api/pull/7',
+      title: 'Tidy',
+      author: 'ana',
+      outside: false,
+      additions: null,
+      deletions: null,
+      findings: 0,
+      blocking: 0,
+      verdict: null,
+      posted: null,
+    }
+    expect(reachOf(team, false).map((one) => one.words)).toEqual(['Reads ana’s branch', 'runs nothing of it', 'posts nothing until you do'])
+    expect(reachOf(team, true).at(-1)).toMatchObject({
+      words: 'posts once drafted',
+      means: expect.stringMatching(/Turn it off in Settings\.$/),
+    })
+    // From outside, the setting changes nothing: it waits for the person.
+    expect(reachOf({ ...team, outside: true }, true).map((one) => one.words)).toContain('posts nothing until you do')
+    expect(numberOf('gitlab', 4)).toBe('!4')
+    expect(reviewedUnfurl(team)).toMatchObject({ kind: 'change', key: 'PR #7', state: 'open', repository: 'meridian/api' })
   })
 
   it('posts a review draft whose verdict stands chosen, and folds a posted one to its link', async () => {
