@@ -165,7 +165,8 @@ export const statusOf = (
   if (phase === 'settled') return { status: TaskStatus.Done, state: snapshot.task.state === 'abandoned' ? text.abandoned : text.done }
   // On a step another agent takes, a review, while its lead waits.
   if (phase === 'running' && doing !== undefined) return { status: TaskStatus.Running, state: doing }
-  if (snapshot.session === null) return { status: TaskStatus.Stopped, state: text.stopped }
+  // A recorded session the runtime no longer holds is no lead at work either.
+  if (snapshot.session === null || !snapshot.session.held) return { status: TaskStatus.Stopped, state: text.stopped }
   return { status: TaskStatus.Running, state: text.idle }
 }
 
@@ -362,7 +363,7 @@ export function TaskView({
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Running or not, the task has its lead: the one on it now, else the last, else the one its plan names.
   const lead =
-    session !== null
+    session !== null && session.held
       ? named(session.agentId, session.model, session.account)
       : snapshot.task.lead === null
         ? noLead
@@ -426,17 +427,17 @@ export function TaskView({
       : resume === undefined
         ? null
         : { agentId: resume.id, model: null, effort: null })
-  const waiting = session === null || handover?.agentId === session.agentId ? null : handover
-  const choice = session === null ? chosen : (waiting ?? runningOn(session))
+  const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
+  const choice = session === null || !session.held ? chosen : (waiting ?? runningOn(session))
 
   // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.
-  const receiving = waiting?.agentId ?? session?.agentId ?? chosen?.agentId ?? null
+  const receiving = waiting?.agentId ?? (session?.held ? session.agentId : (chosen?.agentId ?? null))
   const receiver = { name: agentName(receiving), takes: takesImages(models, receiving) }
   // With no lead working, what the person says starts the one picked, as its first turn; with another agent picked, that one takes over with it.
   const send = (body: string, now: boolean, outgoing?: Outgoing) => {
     setDraft('')
     if (outgoing !== undefined) images.clear()
-    if (session === null) return model.send(body, chosen ?? undefined, outgoing)
+    if (session === null || !session.held) return model.send(body, chosen ?? undefined, outgoing)
     if (waiting !== null) {
       setHandover(null)
       return model.handOver(waiting, body, outgoing)
@@ -461,7 +462,7 @@ export function TaskView({
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {
-    if (session === null) return setPick(next)
+    if (session === null || !session.held) return setPick(next)
     if (next.agentId !== session.agentId) return setHandover(next)
     setHandover(null)
     void model.choose(next)
@@ -539,7 +540,9 @@ export function TaskView({
           {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
         </p>
       )}
-      {session === null && model.agentsKnown && model.agents.length === 0 && <p className={s.handover}>{text.needsAgent}</p>}
+      {(session === null || !session.held) && model.agentsKnown && model.agents.length === 0 && (
+        <p className={s.handover}>{text.needsAgent}</p>
+      )}
       <Holders holders={snapshot.task.queued?.holders} onStop={(holder, id) => void model.stopHolding(holder, id)} />
       {waiting !== null && (
         <p className={s.handover}>
@@ -593,7 +596,7 @@ export function TaskView({
               value={choice}
               onChange={choose}
               // Another agent's model hands the task over, once the person says something.
-              {...(session === null ? {} : { handover: { note: text.handsOver, ask: null } })}
+              {...(session === null || !session.held ? {} : { handover: { note: text.handsOver, ask: null } })}
             />
           )
         }

@@ -421,6 +421,7 @@ describe('the board', () => {
       .mockResolvedValue(undefined)
     const send = vi.fn(async () => {})
     const startSession = vi.fn(async () => 's1')
+    const recorded = snapshot().session
     const { client } = fakeClient({
       merge,
       send,
@@ -428,7 +429,7 @@ describe('the board', () => {
       getBoard: vi.fn(async () => board()),
       getThread: vi.fn(async () =>
         snapshot({
-          session: null,
+          session: recorded === null ? null : { ...recorded, held: false },
           task: {
             ...snapshot().task,
             id: 't4',

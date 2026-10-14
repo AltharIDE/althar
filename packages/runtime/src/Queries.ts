@@ -758,6 +758,9 @@ export class Queries extends Context.Service<
             effort: session.effort,
             models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
             turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
+            // Whether the runtime holds a session on this thread, which is what takes a note and what makes a start refuse: during a switch the
+            // newest row is the new, still-starting session while the old one is held, and the thread is held either way.
+            held: Option.isSome(running),
             context: Option.isSome(running) && running.value.sessionId === session.id ? running.value.context : null,
             background: Option.isSome(running) && running.value.sessionId === session.id ? running.value.background : [],
           }

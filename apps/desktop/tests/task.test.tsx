@@ -1893,9 +1893,21 @@ describe('a task', () => {
     expect(await screen.findByRole('button', { name: /^Continue with/ }, { timeout: 4000 })).toBeTruthy()
   })
 
-  it('starts the lead picked when the person says something to a task none is working on, with that as its first turn', async () => {
+  it('starts the lead picked when a task’s recorded session is no longer held, with that as its first turn', async () => {
+    const recorded = thread().session
+    const unheld = recorded === null ? null : { ...recorded, agentId: 'codex', agentName: 'Codex', held: false }
     const { client } = fakeClient({
-      getThread: vi.fn(async () => thread({ session: null, task: { ...thread().task, phase: 'stopped', actions: ['abandon'] } })),
+      getThread: vi.fn(async () =>
+        thread({
+          session: unheld,
+          task: {
+            ...thread().task,
+            phase: 'stopped',
+            actions: ['abandon'],
+            lead: { agentId: 'claude-code', model: 'opus', account: null },
+          },
+        }),
+      ),
     })
     withServices(<Task />, client)
     expect(await screen.findByText('Stopped')).toBeTruthy()
@@ -1906,11 +1918,17 @@ describe('a task', () => {
     expect(screen.queryByRole('menuitem', { name: /Stop the task/ })).toBeNull()
     await userEvent.click(await screen.findByRole('menuitem', { name: /Open in Zed/ }))
     expect(client.openInEditor).toHaveBeenCalledWith({ taskId: 't1', editor: 'zed' })
-    await userEvent.click(await screen.findByRole('button', { name: 'Lead: gpt-5.2-codex Medium' }))
-    await userEvent.click(await screen.findByRole('radio', { name: /Claude Code default/ }))
-    await userEvent.type(screen.getByRole('textbox', { name: 'Tell Claude Code something' }), 'Carry on with the retry.{Enter}')
-    await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'default' }))
-    expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Carry on with the retry.', disposition: 'after_current' })
+    const box = screen.getByRole('textbox')
+    fireEvent.paste(box, { clipboardData: { files: [new File([PNG], '', { type: 'image/png' })], types: ['Files'] } })
+    expect(await screen.findByRole('img', { name: 'Pasted image' })).toBeTruthy()
+    await userEvent.type(box, 'Carry on with the retry.{Enter}')
+    await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'opus' }))
+    expect(client.send).toHaveBeenCalledWith({
+      threadId: 'th1',
+      body: 'Carry on with the retry.',
+      disposition: 'after_current',
+      images: [{ data: Buffer.from(PNG).toString('base64'), name: 'Pasted image' }],
+    })
     // Queued before the lead starts, so it reads it in its first turn.
     expect(vi.mocked(client.send).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.startSession).mock.invocationCallOrder[0] ?? 0)
   })

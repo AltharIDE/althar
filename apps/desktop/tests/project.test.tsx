@@ -48,6 +48,7 @@ const session = {
   effort: null,
   models: [],
   turnRunning: false,
+  held: true,
   context: null,
   background: [],
 }
@@ -448,6 +449,16 @@ describe('the Talk room', () => {
       expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'codex', model: 'gpt-5.2-codex', effort: 'low' }),
     )
     expect(client.send).toHaveBeenLastCalledWith({ threadId: 'thc', body: 'And a test', disposition: 'after_current' })
+  })
+
+  it('starts a coordinator whose recorded session is no longer held before it queues a message', async () => {
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ session: { ...session, held: false } })) })
+    withServices(<Project />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    await userEvent.type(box, 'Start again{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Start again', disposition: 'after_current' }))
+    expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code' })
+    expect(vi.mocked(client.startSession).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.send).mock.invocationCallOrder[0] ?? 0)
   })
 
   it('keeps the effort picked on another of the agent’s models only where that model offers it', async () => {
