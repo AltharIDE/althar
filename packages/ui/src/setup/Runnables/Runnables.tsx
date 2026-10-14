@@ -66,7 +66,7 @@ export const addRunnableText: AddRunnableText = {
   nameNote: 'Optional. Without one, the command names it.',
   namePlaceholder: 'Storybook',
   repository: 'Repository',
-  find: (n) => `Find among ${n} scripts`,
+  find: (n) => (n === 1 ? 'Find the script' : `Find among ${n} scripts`),
   scripts: 'Scripts in package.json',
   reading: 'Reading the repository’s scripts…',
   noScripts: 'The repository has no package.json scripts that aren’t kept already.',
