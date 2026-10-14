@@ -656,29 +656,42 @@ export class Coordinator extends Context.Service<
       const REVIEWER = "make_it_a_change's review"
 
       /**
-       * Why a task's lead may not make it a change, or null where it may: it
-       * is a quick task still, one the coordinator started at once, whose plan
-       * stays on this Mac, with no pull request. A planned task, a review, one
-       * with a pull request and one made a change already each say so.
+       * A task its lead may make a change: a quick task still, one the
+       * coordinator started at once, whose plan stays on this Mac, with no
+       * pull request; its title, project and thread. Else why not, in words:
+       * a planned task, a review, one with a pull request and one made a
+       * change already each say so.
        */
-      const notQuick = (taskId: string | null) =>
+      const quickOf = (taskId: string | null) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [task] = yield* sql<{ quick: number; reviews: number; changes: number; made: number }>`
-            SELECT ${sql.unsafe(quickIn('k'))} AS quick,
+          const [task] = yield* sql<{
+            id: string
+            title: string
+            projectId: ProjectId
+            threadId: string
+            quick: number
+            reviews: number
+            changes: number
+            made: number
+          }>`
+            SELECT k.id, k.title, k.project_id, t.id AS thread_id, ${sql.unsafe(quickIn('k'))} AS quick,
               EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'review') AS reviews,
               EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change') AS changes,
               EXISTS (SELECT 1 FROM record_events e WHERE e.aggregate_type = 'task' AND e.aggregate_id = k.id
                 AND e.type = 'task.made_change') AS made
-            FROM tasks k WHERE k.id = ${taskId ?? ''}`
+            FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${taskId ?? ''}`
           if (task === undefined) return 'Only the lead of one of the project’s tasks makes its task a change.'
-          if (task.quick === 1) return null
+          if (task.quick === 1) return task
           if (task.reviews === 1) return 'This task reviews someone else’s pull request: it has no work of its own to make a change of.'
           if (task.made === 1)
             return 'This task is a change already: it was made one as the person asked. Commit your work and call finish_step when it’s ready; its review and its pull request follow.'
           if (task.changes === 1) return 'This task has a pull request already, so it is a change: there is nothing to make.'
           return 'This task was planned as a change from its start: its plan already says who reviews it and how it ends. Carry on, and call finish_step when it’s done.'
         })
+
+      /** Why a task's lead may not make it a change, or null where it may. */
+      const notQuick = (taskId: string | null) => Effect.map(quickOf(taskId), (found) => (typeof found === 'string' ? found : null))
 
       /**
        * A quick task's lead makes it a change, as the person asked: renamed for
@@ -695,9 +708,9 @@ export class Coordinator extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const runs = yield* Runs
-          const refused = yield* notQuick(access.taskId)
-          if (refused !== null || access.taskId === null) return yield* new ToolRefused({ message: refused ?? '' })
-          const taskId = access.taskId
+          const task = yield* quickOf(access.taskId)
+          if (typeof task === 'string') return yield* new ToolRefused({ message: task })
+          const taskId = task.id
           const asked = yield* read(MadeChange, input)
           const title = asked.title.trim()
           if (title === '') return yield* new ToolRefused({ message: 'Give it a title: what the change does, in a few words.' })
@@ -710,11 +723,6 @@ export class Coordinator extends Context.Service<
           // A pull request where its repositories are on a host Althar knows; else it ends on its branch, as a planned task there does.
           const hosts = yield* changes.hostsFor(access.projectId, taskId)
           const end = hosts.some((host) => host !== null) ? asked.output : null
-          const [task] = yield* sql<{ title: string; projectId: ProjectId; threadId: string }>`
-            SELECT k.title, k.project_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
-            WHERE k.id = ${taskId}`
-          if (task === undefined)
-            return yield* new ToolRefused({ message: 'Only the lead of one of the project’s tasks makes it a change.' })
           // Its branch first, where its worktree has none, so all its lead did is on one before its plan ends in a pull request.
           yield* changes.exclusive(taskId, branchOnFirstWrite(taskId, [], true))
           const named = yield* modelNamer

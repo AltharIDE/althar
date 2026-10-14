@@ -790,6 +790,44 @@ describe('making a quick task a change', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('while its first run is under way, gives that run the review and the ending: reviewed, it ends on its branch with no host', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const place = yield* opened
+      // Its lead commits, and is asked at once, in the words its task was given.
+      const task = yield* started(place, 'Sketch the settings', 'Sketch it. [lead:commit] [lead:make-change] [lead:finish] [review:pass]')
+      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change', 40)
+      assert.strictEqual(card.title, 'Make the sketch real')
+      assert.deepStrictEqual(yield* stepsReported(task.threadId), ['implement', 'review'])
+      // One run, its plan's, with the review and no more of staying here; its graph patched with the review.
+      const runs = yield* sql<{
+        planId: string | null
+        parameters: string
+      }>`SELECT plan_id, parameters FROM runs WHERE task_id = ${task.id}`
+      assert.lengthOf(runs, 1)
+      assert.isNotNull(runs[0]?.planId)
+      const parameters = JSON.parse(runs[0]?.parameters ?? '{}') as { steps: ReadonlyArray<{ key: string }> }
+      assert.deepStrictEqual(
+        parameters.steps.map((step) => step.key),
+        ['implement', 'review'],
+      )
+      assert.notProperty(parameters, 'here')
+      assert.notProperty(parameters, 'publishes')
+      const [patched] = yield* sql<{ graph: string }>`
+        SELECT g.graph FROM execution_graph_revisions g JOIN workflow_executions e ON e.id = g.execution_id
+        JOIN runs r ON r.id = e.run_id WHERE r.task_id = ${task.id} AND g.cause = 'patch'`
+      assert.include(patched?.graph, '"review"')
+      // With no host Althar knows, it ends on its branch, and says so.
+      const said = (yield* notices(task.threadId)).map((notice) => notice.title)
+      assert.include(
+        said,
+        "This task is a change now: reviewed by Fake codex's default model, it ends on its branch, as its repository isn’t on a code host Althar knows.",
+      )
+      assert.include(said, 'The task ends on its branch.')
+      assert.strictEqual(gitIn((yield* worktreeOf(task.id)).path, 'log', '-1', '--format=%s'), 'Change it')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('is refused on a planned task, on a review, and for a model Althar can’t use or a title too long', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -864,6 +902,31 @@ describe('making a quick task a change', () => {
       )
       // None of it changed the task: it is still plain.
       assert.strictEqual((yield* cardOnce(quick.id, () => true)).kind, 'plain')
+      // With a pull request of its own, it is a change already.
+      yield* sql`INSERT INTO external_links ${sql.insert({
+        id: `xlink_${'b'.repeat(32)}`,
+        projectId: place.projectId,
+        taskId: quick.id,
+        product: 'github',
+        kind: 'change',
+        externalId: '13',
+        ref: 'meridian/api#13',
+        key: '#13',
+        url: 'https://github.test/meridian/api/pull/13',
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      assert.strictEqual(
+        yield* callTool(quickLead, 'make_it_a_change', asked),
+        'This task has a pull request already, so it is a change: there is nothing to make.',
+      )
+      // And only a task's lead makes its task one.
+      const none: ToolAccess = { role: 'lead', ...place, sessionId: 'none', taskId: null }
+      assert.notInclude(yield* listTools(none), 'make_it_a_change')
+      assert.strictEqual(
+        yield* callTool(none, 'make_it_a_change', asked),
+        'Only the lead of one of the project’s tasks makes its task a change.',
+      )
     }).pipe(Effect.provide(withQueries())),
   )
 })
