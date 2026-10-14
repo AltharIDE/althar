@@ -193,7 +193,9 @@ export class Agents extends Context.Service<
     Agents,
     Effect.gen(function* () {
       const installs = yield* Installs
-      return Agents.fromRegistry((definition) => usingLocated(definition, () => installs.locate(definition)))
+      // In a Flatpak a bundled copy lives inside the app's sandbox: the sign-in
+      // line the person runs names the app that carries it (`usingLocated`).
+      return Agents.fromRegistry((definition) => usingLocated(definition, () => installs.locate(definition), process.env.FLATPAK_ID))
     }),
   )
 
