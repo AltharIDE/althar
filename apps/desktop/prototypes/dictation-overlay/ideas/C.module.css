@@ -1,0 +1,50 @@
+/* Throwaway: C, the small composer in the corner, above the screen's own. */
+
+.float {
+  position: absolute;
+  right: 20px;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 400px;
+  padding: 8px;
+  border-radius: 14px;
+  background: var(--frost-sheet);
+  -webkit-backdrop-filter: var(--frost-blur);
+  backdrop-filter: var(--frost-blur);
+  box-shadow:
+    var(--lift-dialog),
+    0 0 0 1px var(--line-2);
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px 0 6px;
+}
+.where {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--t-3);
+}
+.grow {
+  flex: 1;
+}
+
+.composer {
+  box-shadow: none;
+}
+
+.pick {
+  font-weight: 500;
+}
+
+.after {
+  padding: 6px 8px;
+}

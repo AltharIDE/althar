@@ -1,0 +1,118 @@
+/* Throwaway: A, the floating pill and its card. */
+
+.float {
+  position: absolute;
+  z-index: var(--z-popover);
+  transform: translateX(-50%);
+}
+
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  max-width: 640px;
+  padding: 0 6px 0 12px;
+  border-radius: 999px;
+  background: var(--frost-raised);
+  -webkit-backdrop-filter: var(--frost-blur);
+  backdrop-filter: var(--frost-blur);
+  box-shadow:
+    var(--lift-pop),
+    0 0 0 1px var(--line-2);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.pill:active {
+  cursor: grabbing;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-1);
+}
+.wave {
+  color: var(--live);
+}
+
+.to {
+  flex: none;
+  max-width: 220px;
+  padding-left: 10px;
+  box-shadow: inset 1px 0 var(--line-2);
+}
+
+.tail {
+  min-width: 0;
+  max-width: 280px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--t-3);
+  cursor: pointer;
+}
+
+.open {
+  flex: none;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 440px;
+  padding: 12px 12px 10px 14px;
+  border-radius: var(--r-lg);
+  background: var(--paper);
+  box-shadow:
+    var(--lift-dialog),
+    0 0 0 1px var(--line-2);
+  cursor: grab;
+  touch-action: none;
+}
+
+.head,
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.grow {
+  flex: 1;
+}
+.status {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--t-3);
+}
+
+.words {
+  max-height: 168px;
+  cursor: auto;
+}
+
+/* where it is held to move it */
+.grip {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  display: flex;
+  gap: 3px;
+  transform: translateX(-50%);
+}
+.grip i {
+  width: 3px;
+  height: 3px;
+  border-radius: 99px;
+  background: var(--t-4);
+}
