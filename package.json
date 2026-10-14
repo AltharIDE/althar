@@ -11,6 +11,8 @@
   "scripts": {
     "dev": "bun --filter @althar/pitch dev",
     "site": "bun --filter @althar/site dev",
+    "prototype": "vp dev --config packages/prototype-workbench/vite.config.ts",
+    "prototype:shoot": "node packages/prototype-workbench/scripts/shoot.ts",
     "build": "bun --filter '*' build",
     "check": "bun --filter '*' check",
     "test": "bun --filter '*' test",

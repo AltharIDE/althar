@@ -1,0 +1,225 @@
+/* The page: the direction fills it, the bar sits under it and takes its own
+   room, so nothing of the direction is ever behind the bar. */
+.page {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--n-2);
+}
+.stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.alone {
+  height: 100%;
+}
+
+/* Side by side: a column each, at the same state, each scrolling on its own. */
+.side {
+  display: grid;
+  height: 100%;
+}
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--line-2);
+}
+.pane:first-child {
+  border-left: none;
+}
+.caption {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 7px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--n-1);
+  font-size: 12px;
+  color: var(--t-2);
+}
+.paneBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* The bar. */
+.bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 16px;
+  height: 46px;
+  padding: 0 10px 0 14px;
+  border-top: 1px solid var(--line-2);
+  background: var(--n-1);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.title {
+  flex: 0 1 auto;
+  min-width: 60px;
+  max-width: 240px;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--t-1);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The directions, as the kit's Segmented draws a choice: one on, raised. */
+.directions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--n-2);
+}
+.direction {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  height: 26px;
+  padding: 5px 10px 0;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--t-3);
+  white-space: nowrap;
+  transition:
+    background var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+.direction:hover {
+  color: var(--t-1);
+}
+.direction:active {
+  background: var(--n-4);
+}
+.direction[data-state='on'] {
+  background: var(--paper);
+  color: var(--t-1);
+  box-shadow: var(--lift);
+}
+.direction[data-state='on'] .name {
+  font-weight: 550;
+}
+.letter {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.caption .letter {
+  font-size: 11.5px;
+}
+.name {
+  min-width: 0;
+}
+.rule {
+  flex: none;
+  width: 1px;
+  margin: 5px 3px;
+  background: var(--line-3);
+}
+
+.states {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+.label {
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+
+.end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+.sideBySide {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--t-2);
+  white-space: nowrap;
+}
+
+.keys {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 12px;
+  align-items: baseline;
+  margin: 0;
+  font-size: 12px;
+}
+.keys dt {
+  white-space: nowrap;
+  color: var(--t-3);
+}
+.keys dd {
+  margin: 0;
+  color: var(--t-2);
+}
+
+/* With the bar hidden, a way back shows only where the pointer goes looking for it. */
+.peek {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  padding: 8px 10px;
+  opacity: 0;
+  transition: opacity var(--base) var(--ease);
+}
+.peek:hover,
+.peek:focus-within {
+  opacity: 1;
+}
+
+.problems {
+  max-width: 560px;
+  margin: 12vh auto 0;
+  padding: 20px 24px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+}
+.problems h1 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.problems ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--t-2);
+}
+
+.failed {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 560px;
+  margin: 40px auto;
+  padding: 14px 16px;
+  border-radius: var(--r-lg);
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+.failed code {
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}

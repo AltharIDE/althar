@@ -1,0 +1,46 @@
+{
+  "name": "@althar/prototype-workbench",
+  "version": "0.0.0",
+  "private": true,
+  "description": "One live page for a prototype: its directions, A, B, C…, switched in place from a bar at the bottom, with its states, side by side, and a screenshot helper.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "example": "vp dev example",
+    "shoot": "node scripts/shoot.ts",
+    "check": "vp check",
+    "fix": "vp check --fix",
+    "test": "vp test run",
+    "test:coverage": "vp test run --coverage",
+    "verify": "bun run check && bun run test:coverage"
+  },
+  "dependencies": {
+    "@althar/ui": "workspace:*",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "radix-ui": "^1.6.7",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitest/coverage-v8": "5.0.1",
+    "jsdom": "^30.1.1",
+    "playwright": "1.63.0",
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
+    "vite-plus": "1.0.0-rc.0",
+    "vitest": "5.0.1"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
+  }
+}
