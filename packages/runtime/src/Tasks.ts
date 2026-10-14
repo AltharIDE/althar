@@ -11,6 +11,7 @@ import { NotFound, TaskRefused } from './errors'
 import { makeScratch } from './firstWrite'
 import { branchExists, restoreDetachedWorktree, restoreWorktree } from './git'
 import { Instance } from './Instance'
+import { quickIn } from './kinds'
 import { Plans } from './Plans'
 import { copyReviewed, reviewOf } from './reviewing'
 import { touchQuestion } from './Questions'
@@ -437,6 +438,8 @@ export class Tasks extends Context.Service<
               end: plan.end ?? null,
               actorId: input.envelope.actorId,
               held: true,
+              // A quick task's stays on this Mac, as it was started.
+              ...(plan.here === true ? { here: true } : {}),
             })
           }
           if (restored) yield* setups.begin(input.taskId)
@@ -497,8 +500,8 @@ export class Tasks extends Context.Service<
                   (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open')
                   + (SELECT count(*) FROM task_plans p WHERE p.task_id = k.id AND p.state = 'proposed')
                   + (SELECT count(*) FROM external_links l WHERE l.task_id = k.id AND l.kind IN ('change', 'review'))
-                  -- Branched since the person's screen read it as plain: a change now, not one to settle on sight.
-                  + (SELECT count(*) FROM workspaces w WHERE w.task_id = k.id AND w.access = 'write' AND w.branched_at IS NOT NULL) AS open
+                  -- Made a change since the person's screen read it as plain, or never a quick task: not one to settle on sight.
+                  + (CASE WHEN ${sql.unsafe(quickIn('k'))} THEN 0 ELSE 1 END) AS open
                 FROM tasks k WHERE k.id = ${input.taskId}`
               if (task === undefined || task.state !== 'open' || task.run !== 'succeeded' || task.open > 0) return false
               const state = yield* transition(taskLifecycle, 'open', 'done')
