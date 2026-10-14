@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -31,6 +31,7 @@ import {
 import * as Runtime from '../src/Runtime'
 import { findTasks } from '../src/Search'
 import { Sessions } from '../src/Sessions'
+import { Tasks } from '../src/Tasks'
 import { fact } from '../src/records'
 import { transcript } from '../src/threads'
 import { words } from '../src/words'
@@ -1009,6 +1010,34 @@ describe('reviewing someone else’s pull request', () => {
       ),
       Effect.provide(withQueries(github)),
     )
+  })
+
+  it.live('reopened after its copy went, makes it again at the head its lead read, never where the change starts', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull, head } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const { task, workspace } = yield* reviewTask(projectId)
+      const copy = workspace?.path ?? ''
+      const tasks = yield* Tasks
+      yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task?.id ?? '' })
+      rmSync(copy, { recursive: true, force: true })
+      yield* tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: task?.id ?? '' })
+      assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'open')
+      // The pull request's code, as the lead read it, in a copy of its own again; where its change starts, kept for comparing.
+      assert.notStrictEqual(workspace?.baseCommit, head)
+      assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), head)
+      assert.strictEqual(git(copy, 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD')
+      assert.strictEqual(git(copy, 'rev-parse', 'refs/althar/review/base'), workspace?.baseCommit)
+      assert.strictEqual(readFileSync(join(copy, 'send.ts'), 'utf8'), 'export const sendBack = () => 1\n')
+      assert.isTrue(statSync(join(copy, '.git')).isDirectory())
+      // Nothing a plain task's worktree is given: no scratch folder, no setup.
+      assert.isFalse(existsSync(join(copy, '.althar')))
+      assert.strictEqual(git(copy, 'status', '--porcelain'), '')
+    }).pipe(Effect.provide(withQueries(github)))
   })
 
   it.live('a copy a restart interrupted is ready once git had made it, read from where its change starts', () => {

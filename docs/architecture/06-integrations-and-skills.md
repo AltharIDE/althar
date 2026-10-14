@@ -524,10 +524,11 @@ asks; its thread opens with what they said and the pull request under it.
   system's: a filter, diff or merge driver defined there (`python -m
   nbstripout`, a textconv) would otherwise run on the pull request's files
   as the copy is checked out, or as `git status` or `git diff` reads it, in
-  the copy, where it finds the pull request's own modules first. The lead
-  never fetches. Nothing Althar sets up a task with touches the copy: no
-  install, no run of the project, no merge here, no conflict round, nothing
-  published.
+  the copy, where it finds the pull request's own modules first. A review
+  reopened after its copy's folder went has it made again at the head its
+  lead read. The lead never fetches. Nothing Althar sets up a task with
+  touches the copy: no install, no run of the project, no merge here, no
+  conflict round, nothing published.
 - **It runs nothing of it.** The lead's session is in reader mode, under the
   reader rules, as the coordinator's and a reviewer's are (04, "Read-only by
   construction"): it reads, searches and runs commands that only look. Since
