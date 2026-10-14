@@ -108,6 +108,13 @@ export const PlanParameters = Schema.Struct({
   steps: Schema.Array(PlanStep),
   reason: Schema.NullOr(Schema.String),
   end: Schema.optional(Schema.NullOr(TaskEnd)),
+  /**
+   * Nothing of it leaves this Mac when it is done, whatever the project's
+   * host: a task the coordinator starts at once (`start_task`), which it told
+   * the person so. Without it, a plan with no end opens its pull request once
+   * its host is connected.
+   */
+  here: Schema.optional(Schema.Boolean),
 })
 export type PlanParameters = typeof PlanParameters.Type
 
@@ -474,6 +481,7 @@ export class Runs extends Context.Service<
           implement: parameters.steps.find((step) => step.key === 'implement'),
           review: parameters.steps.find((step) => step.key === 'review' && !step.skipped),
           end: parameters.end ?? null,
+          here: parameters.here === true,
         }))
 
       /**
@@ -882,7 +890,8 @@ export class Runs extends Context.Service<
           }
           // A plan made while the repository's host wasn't connected opens its pull request if it is by now.
           // The plan's ending, else the project's, as when a plan is made: one made while the host wasn't connected opens its pull request if it is by now.
-          const end = (yield* stepsOf(run)).end ?? (yield* changes.endFor(run.projectId, run.taskId))
+          const ending = yield* stepsOf(run)
+          const end = ending.end ?? (ending.here ? null : yield* changes.endFor(run.projectId, run.taskId))
           if (end === null) {
             yield* onBranch(run)
             return yield* finish(run, 'succeeded')
@@ -2313,7 +2322,8 @@ export class Runs extends Context.Service<
           if (built === null && !quiet && !plain && (step === 'implement' || workAfter !== workBefore))
             return yield* new ToolRefused({ message: builtAsk(step === 'settle') })
           // A task that ends on its host pushes commits only: what isn't committed is the lead's to commit or clear away first.
-          const end = (yield* stepsOf(current)).end ?? (yield* changes.endFor(current.projectId, current.taskId))
+          const ending = yield* stepsOf(current)
+          const end = ending.end ?? (ending.here ? null : yield* changes.endFor(current.projectId, current.taskId))
           if (end !== null) {
             // In a task of several repositories, each file by the repository it's in. A picture handed as evidence, now or at an
             // earlier step, needn't be committed.

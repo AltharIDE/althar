@@ -541,6 +541,8 @@ export class Coordinator extends Context.Service<
             actorId: instance.coordinatorId,
             end: null,
             held: true,
+            // It said nothing goes outside the project when it is done: nor does it once its lead writes and it has a branch.
+            here: true,
           })
           const started = yield* plans.start(planId, instance.coordinatorId)
           if (started === 'waiting') {

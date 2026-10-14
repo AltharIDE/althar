@@ -3,16 +3,19 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Changes } from '../src/Changes'
+import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
 import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { CantMerge, NoChangeToOpen } from '../src/errors'
 import { branchOnFirstWrite, scratchOf } from '../src/firstWrite'
+import { Instance } from '../src/Instance'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
@@ -21,7 +24,7 @@ import { findTasks } from '../src/Search'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, notices, repository, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, notices, repository, runtime, until } from './support'
 
 /*
  * A plain task (DEV-96, ADR-035): what the coordinator starts with
@@ -307,6 +310,33 @@ describe('a plain task', () => {
         yield* sessions.stop(task.threadId)
       }).pipe(Effect.provide(withQueries())),
   )
+
+  it.live('keeps what it committed on this Mac where the project is on a host: no push and no pull request, as it was started', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId, webUrl: HOST })
+      const projects = yield* Projects
+      const coordinator = yield* Coordinator
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const place = { projectId: project.projectId, threadId: yield* coordinator.thread(project.projectId) }
+      const task = yield* started(place, 'Sketch the settings', 'Sketch it. [lead:commit] [lead:finish]')
+      // Its lead commits: it has its branch, a change, ready on it.
+      const card = yield* cardOnce(task.id, (one) => one.phase === 'ready')
+      assert.deepStrictEqual([card.kind, card.change], ['change', null])
+      const worktree = yield* worktreeOf(task.id)
+      assert.isNotNull(worktree.branchedAt)
+      // Nothing went to the host: no push, no pull request.
+      assert.lengthOf(github.changes, 0)
+      assert.isNull(gitIn(bare, 'rev-parse', '--verify', '--quiet', `refs/heads/${worktree.branch}`))
+      const sql = yield* SqlClient.SqlClient
+      const [plan] = yield* sql<{ parameters: string }>`SELECT parameters FROM task_plans WHERE task_id = ${task.id}`
+      assert.include(plan?.parameters, '"here":true')
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(undefined, {}, { connectors: fakeConnectors({ github }) })))))
+  })
 
   it.live('is put back with no branch where its worktree went, unless it had one by then', () =>
     Effect.gen(function* () {
