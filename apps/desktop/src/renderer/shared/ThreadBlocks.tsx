@@ -42,6 +42,7 @@ import type {
   ArrivalContent,
   Block,
   IssueDraftContent,
+  ReviewDraftContent,
   Part,
   PushRequestContent,
   QuestionContent,
@@ -432,6 +433,7 @@ export function ThreadBlocks({
   run,
   draft,
   push,
+  review,
   queued,
   gathered = false,
   onPassOn,
@@ -464,6 +466,8 @@ export function ThreadBlocks({
   draft?: (draft: IssueDraftContent) => ReactNode
   /** Draws a push the lead asked for, in a task's thread, with when it was asked or settled. */
   push?: (request: PushRequestContent, at: string) => ReactNode
+  /** Draws a review the lead drafted of someone else's pull request, in a review task's thread. */
+  review?: (review: ReviewDraftContent) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
   /** What the lead's steps showed is in the task's closing card, after these, so its steps don't show it again. */
@@ -533,6 +537,8 @@ export function ThreadBlocks({
         return <SetupView key={block.id} setup={block.setup} />
       case 'push':
         return <Fragment key={block.id}>{push?.(block.request, block.at)}</Fragment>
+      case 'review':
+        return <Fragment key={block.id}>{review?.(block.review)}</Fragment>
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')

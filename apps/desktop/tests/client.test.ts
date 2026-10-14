@@ -79,6 +79,9 @@ describe('the client', () => {
 
     const task = await client.createTask({ projectId: project.id, title: 'Say hello' })
     expect((await client.listTasks(project.id)).tasks.map((each) => each.title)).toEqual(['Say hello'])
+    // Found by a word begun, in its project and across every one.
+    expect((await client.searchTasks({ projectId: project.id, text: 'hel' })).tasks.map((each) => each.title)).toEqual(['Say hello'])
+    expect((await client.searchTasks({ text: 'goodbye' })).tasks).toEqual([])
     await client.startSession({ threadId: task.threadId, agentId: 'claude-code' })
     await eventually(
       () => client.getThread(task.threadId),
@@ -212,6 +215,7 @@ describe('the client', () => {
           GetOlderSettled: () => Effect.die('unused'),
           GetHome: () => Effect.die('unused'),
           LeftHome: () => Effect.die('unused'),
+          SeeTask: () => Effect.die('unused'),
           Merge: () => Effect.die('unused'),
           ReadFolder: () => Effect.die('unused'),
           Push: () => Effect.die('unused'),
@@ -227,6 +231,7 @@ describe('the client', () => {
           ListProjects: () => Effect.die('unused'),
           OpenProject: () => Effect.die('unused'),
           ListTasks: () => Effect.die('unused'),
+          SearchTasks: () => Effect.die('unused'),
           CreateTask: () => Effect.die('unused'),
           GetThread: () => Effect.die('unused'),
           GetThreadItem: () => Effect.die('unused'),
@@ -245,6 +250,7 @@ describe('the client', () => {
           SetModelBlocked: () => Effect.die('unused'),
           GetSettings: () => Effect.die('unused'),
           SetCoAuthor: () => Effect.die('unused'),
+          SetPostTeamReviews: () => Effect.die('unused'),
           SetAgentsAtOnce: () => Effect.die('unused'),
           StartAccountSignIn: () => Effect.die('unused'),
           GetAccountSignIn: () => Effect.die('unused'),
@@ -274,6 +280,9 @@ describe('the client', () => {
           ChangeIssueDraft: () => Effect.die('unused'),
           FileIssueDraft: () => Effect.die('unused'),
           DiscardIssueDraft: () => Effect.die('unused'),
+          ChangeReviewDraft: () => Effect.die('unused'),
+          PostReviewDraft: () => Effect.die('unused'),
+          DiscardReviewDraft: () => Effect.die('unused'),
           AnswerStuck: () => Effect.die('unused'),
           ListConnections: () => Effect.die('unused'),
           StartSignIn: () => Effect.die('unused'),

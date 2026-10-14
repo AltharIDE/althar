@@ -22,7 +22,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
-import { leftAsItIs } from './model'
+import { leftAsItIs, noReviews } from './model'
 import { answered, failedOf, probe, type Reached, reachLine, readAs, refusalOf, seenOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
@@ -417,7 +417,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
   return {
     product,
     words: { noun: 'merge request', short: 'MR', prefix: '!' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, links: false, starts: false },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: false, links: false, starts: false },
     account,
     repository: (path) =>
       Effect.map(http.json(ProjectAnswer, 'GET', project(path)), (answer) => ({
@@ -596,6 +596,9 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         // Althar's own reply: whether it counts as a member's doesn't matter, it is known by its receipt.
         (note) => commentOf(repository, number, note, reply.threadId, true),
       ),
+    // Reviews of a change Althar didn't open are GitHub's alone, for now.
+    changeToReview: () => Effect.fail(noReviews(product, { noun: 'merge request', short: 'MR', prefix: '!' })),
+    postReview: () => Effect.fail(noReviews(product, { noun: 'merge request', short: 'MR', prefix: '!' })),
     pushTarget: (repository) =>
       Effect.map(options.credential, (credential) => ({
         url: `${web}/${repository.path.join('/')}.git`,

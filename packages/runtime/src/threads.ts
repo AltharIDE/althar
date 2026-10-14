@@ -19,6 +19,7 @@ import {
 } from './handed'
 import { change, timestamp } from './records'
 import { essentials } from './rules'
+import { indexThread } from './Search'
 
 /*
  * The thread's items: what the person reads (docs/architecture/01). An
@@ -59,6 +60,8 @@ export const addItem = (
             ${kind}, ${links.userInputId ?? null}, ${place.deliveryId ?? null}, ${place.sessionId ?? null}, ${links.toolCallId ?? null},
             ${JSON.stringify(content)}, ${yield* timestamp})`
         yield* ledger.notify({ projectId: place.projectId, aggregateType: 'thread_item', aggregateId: id, aggregateRevision: 1 })
+        // What the person asks of a task, and what its lead reports, are what it is found by.
+        if (kind === 'user_message' || kind === 'step_result') yield* indexThread(place.threadId)
       }),
     )
     return id
@@ -443,6 +446,7 @@ export const transcript = (
       agentId: string | null
       task: string | null
       draft: string | null
+      review: string | null
       asked: string | null
       askedState: string | null
     }>`
@@ -450,6 +454,8 @@ export const transcript = (
         (SELECT k.slug || ': ' || k.title FROM tasks k WHERE k.id = json_extract(i.content, '$.taskId')) AS task,
         (SELECT d.title || ' (' || d.state || CASE WHEN d.issue_key IS NULL THEN '' ELSE ', ' || d.issue_key || ' ' || d.issue_url END || ')'
           FROM issue_drafts d WHERE d.id = json_extract(i.content, '$.draftId')) AS draft,
+        (SELECT 'of #' || r.number || ', suggesting ' || r.suggested || ' (' || r.state || CASE WHEN r.review_url IS NULL THEN '' ELSE ', ' || r.review_url END || ')'
+          FROM review_drafts r WHERE i.kind = 'review_draft' AND r.id = json_extract(i.content, '$.draftId')) AS review,
         a.payload AS asked, a.state AS asked_state
       FROM thread_items i
       LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
@@ -479,6 +485,9 @@ export const transcript = (
           return item.task === null ? [] : [`[task] ${item.task}`]
         case 'issue_draft':
           return item.draft === null ? [] : [`[issue draft] ${item.draft}`]
+        // The lead's review draft, and where it stands: an agent that takes the thread over doesn't draft again what was posted.
+        case 'review_draft':
+          return item.review === null ? [] : [`[review draft] ${item.review}`]
         case 'question': {
           // What was asked of the person, and what they answered: an agent that takes the thread over knows both.
           const fields = Array.isArray(content['fields']) ? (content['fields'] as ReadonlyArray<QuestionField>) : []

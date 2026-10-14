@@ -744,6 +744,34 @@ describe('settings, through the API', () => {
     ),
   )
 
+  it.live('posts the team’s reviews without asking only once the person turns it on, and takes review drafts’ commands', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        assert.isFalse((yield* client.GetSettings({})).postTeamReviews)
+        yield* client.SetPostTeamReviews({ commandId: commandId(), on: true })
+        assert.isTrue((yield* client.GetSettings({})).postTeamReviews)
+        yield* client.SetPostTeamReviews({ commandId: commandId(), on: false })
+        assert.isFalse((yield* client.GetSettings({})).postTeamReviews)
+        // A draft that isn't there is said so, whichever the command.
+        const draftId = `rdr_${'0'.repeat(32)}`
+        for (const refused of [
+          client.ChangeReviewDraft({
+            commandId: commandId(),
+            draftId,
+            verdict: 'comment',
+            summary: 'x',
+            comments: [{ id: 'c1', kept: false }],
+          }),
+          client.ChangeReviewDraft({ commandId: commandId(), draftId }),
+          client.PostReviewDraft({ commandId: commandId(), draftId }),
+          client.DiscardReviewDraft({ commandId: commandId(), draftId }),
+        ])
+          assert.strictEqual((yield* Effect.flip(refused)).reason, 'NotFound')
+      }),
+    ),
+  )
+
   it.live('says how many agents this Mac runs at once and why, takes the person’s number at once, and goes back to the default', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -1324,6 +1352,54 @@ describe('the coordinator, through the API', () => {
           'pass',
           'claude-code',
         ])
+      }),
+    ),
+  )
+
+  it.live('settles a plain task that finished once the person opens it, and leaves a change ready', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        // A plain task is one the coordinator starts with no plan; one the person starts is on a branch, a change, though it makes nothing.
+        const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: coordinator.threadId,
+          body: 'Which partners still call v1? [coordinator:start] [lead:finish]',
+          disposition: 'after_current',
+        })
+        const change = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Retry',
+          description: '[lead:finish]',
+          steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        })
+        const both = yield* eventually(
+          client.GetBoard({ projectId: project.id }),
+          (board) => board.tasks.length === 2 && board.tasks.every((one) => one.phase === 'ready'),
+        )
+        assert.sameDeepMembers(
+          both.tasks.map((one) => [one.title, one.kind]),
+          [
+            ['Which partners still call v1', 'plain'],
+            ['Retry', 'change'],
+          ],
+        )
+        const question = both.tasks.find((one) => one.kind === 'plain')
+        yield* client.SeeTask({ commandId: commandId(), taskId: question?.taskId ?? '' })
+        yield* client.SeeTask({ commandId: commandId(), taskId: change.id })
+        const board = yield* client.GetBoard({ projectId: project.id })
+        assert.sameDeepMembers(
+          board.tasks.map((one) => [one.title, one.phase]),
+          [
+            ['Which partners still call v1', 'settled'],
+            ['Retry', 'ready'],
+          ],
+        )
+        const unknown = yield* Effect.flip(client.SeeTask({ commandId: commandId(), taskId: 'task_nothing' }))
+        assert.strictEqual(unknown.reason, 'NotFound')
       }),
     ),
   )

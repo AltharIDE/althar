@@ -73,6 +73,7 @@ import { type AppIconModel, useAppIcon } from './useAppIcon'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { type CoAuthorModel, useCoAuthor } from './useCoAuthor'
 import { type AgentsAtOnceModel, useAgentsAtOnce } from './useAgentsAtOnce'
+import { type PostTeamReviewsModel, usePostTeamReviews } from './usePostTeamReviews'
 
 /*
  * Settings, as a panel from the home's bar, over the home: the kit's Control
@@ -142,6 +143,8 @@ export const text = {
     return `${n}: well past what ${device.this}’s ${memory} GB suggests. Expect it to run hot.`
   },
   atOnceMark: ({ count }: { count: number }) => `${count} · ${device.this}`,
+  postTeamTitle: 'Post reviews of my team’s pull requests without asking',
+  postTeamNote: 'As soon as a review’s lead drafts one. A review of a pull request from outside the team always waits for you to post it.',
   loadTitle: `Show how hard ${device.this} works`,
   loadNote: 'CPU and memory in the bar, and how much of each Althar’s work uses.',
   badge: `Count them on ${device.count ?? 'the icon'}`,
@@ -239,6 +242,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
       edge={useEdgePlace(props.open)}
       coAuthor={useCoAuthor()}
       atOnce={useAgentsAtOnce()}
+      postTeamReviews={usePostTeamReviews()}
       preferences={usePreferences()}
       editors={useEditorList()}
       pictures={useEditorPictures()}
@@ -256,6 +260,7 @@ export function SettingsView({
   edge,
   coAuthor,
   atOnce,
+  postTeamReviews = null,
   preferences: kept,
   editors,
   pictures,
@@ -273,6 +278,8 @@ export function SettingsView({
   coAuthor: CoAuthorModel | null
   /** How many agents work at once on this Mac, and why; null until the settings are read. */
   atOnce: AgentsAtOnceModel | null
+  /** Whether a review of the team's pull request posts itself once drafted; null until the settings are read. */
+  postTeamReviews?: PostTeamReviewsModel | null
   preferences: PreferencesModel
   editors: ReadonlyArray<{ readonly id: string; readonly name: string }>
   /** Each editor's icon by its id, as they come. */
@@ -593,6 +600,15 @@ export function SettingsView({
                   text={{ note: text.atOnceNote, mark: text.atOnceMark }}
                 />
               )}
+              {postTeamReviews !== null && (
+                <SettingSwitch
+                  title={text.postTeamTitle}
+                  note={text.postTeamNote}
+                  glyph={<Icon name="pr" size={15} />}
+                  checked={postTeamReviews.on}
+                  onChange={postTeamReviews.set}
+                />
+              )}
               <SettingSwitch
                 title={text.loadTitle}
                 note={text.loadNote}
@@ -613,7 +629,7 @@ export function SettingsView({
               )}
             </SettingList>
             {failed}
-            {atOnce?.failed === true && (
+            {(atOnce?.failed === true || postTeamReviews?.failed === true) && (
               <p role="alert" className={s.failed}>
                 {text.preferenceFailed}
               </p>

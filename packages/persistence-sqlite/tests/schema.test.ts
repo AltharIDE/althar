@@ -10,7 +10,7 @@ import { SqlClient } from 'effect/sql'
 import { canonicalJson, sha256Hex } from '../src/canonicalJson'
 import * as Database from '../src/Database'
 import { ForeignKeyViolations } from '../src/Database'
-import { migrations } from '../src/migrations'
+import { idOf, migrations } from '../src/migrations'
 import { checksums } from '../src/migrations/checksums'
 import { seed } from './fixtures'
 import { InMemory, WebCrypto } from './support'
@@ -49,8 +49,10 @@ describe('schema', () => {
   it.effect('creates every table as STRICT', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      // Ordinary tables: a full-text index is a virtual table, with shadow tables of SQLite's own making.
       const tables = yield* sql<{ name: string; sql: string }>`
-        SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'schema_migrations'`
+        SELECT m.name, m.sql FROM sqlite_schema m JOIN pragma_table_list l ON l.schema = 'main' AND l.name = m.name
+        WHERE l.type = 'table' AND m.name NOT LIKE 'sqlite_%' AND m.name <> 'schema_migrations'`
       assert.isAbove(tables.length, 80)
       for (const table of tables) assert.isTrue(table.sql.endsWith(') STRICT'), `${table.name} is not STRICT`)
     }).pipe(Effect.provide(InMemory)),
@@ -127,7 +129,7 @@ describe('schema', () => {
         })
         yield* Effect.provide(referenced, Layer.fresh(Database.layer({ filename })))
         const rebuildDevices = {
-          key: `${String(migrations.length + 1).padStart(4, '0')}_rebuild_devices`,
+          key: `${String(idOf(migrations.at(-1) ?? { key: '0', statements: [] }) + 1).padStart(4, '0')}_rebuild_devices`,
           statements: [
             'CREATE TABLE devices_new (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, created_at TEXT NOT NULL) STRICT',
             'INSERT INTO devices_new SELECT id, name, created_at FROM devices',
@@ -232,6 +234,40 @@ describe('schema', () => {
         })
         assert.isNull(setupOf(tasks[1]))
         assert.isNull(setupOf(tasks[2]))
+      }),
+    ),
+  )
+
+  it.effect('takes every worktree made before plain tasks as made on its branch, when it was made', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const before = migrations.findIndex((migration) => migration.key === '0031_branch_on_first_write')
+        const made = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { projectId, deviceId, actorId, createdAt } = yield* seed
+          const bindingId = yield* newId(Ids.repositoryBinding)
+          yield* sql`INSERT INTO repository_bindings ${sql.insert({ id: bindingId, projectId, slug: 'meridian', role: 'other', displayName: 'meridian', createdAt })}`
+          const taskId = yield* newId(Ids.task)
+          yield* sql`INSERT INTO tasks ${sql.insert({ id: taskId, projectId, title: 'Retry', slug: 'retry', state: 'open', createdByActorId: actorId, createdAt })}`
+          yield* sql`INSERT INTO workspaces ${sql.insert({
+            id: yield* newId(Ids.workspace),
+            projectId,
+            taskId,
+            bindingId,
+            deviceId,
+            access: 'write',
+            path: '/worktrees/meridian/retry/meridian',
+            baseRef: 'main',
+            branch: 'althar/retry',
+            state: 'ready',
+            createdAt,
+          })}`
+          return createdAt
+        }).pipe(Effect.provide(WebCrypto))
+        const createdAt = yield* Effect.provide(made, Layer.fresh(Database.layer({ filename, migrations: migrations.slice(0, before) })))
+        const read = Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ branchedAt: string | null }>`SELECT branched_at FROM workspaces`)
+        const after = yield* Effect.provide(read, Layer.fresh(Database.layer({ filename })))
+        assert.deepStrictEqual(after, [{ branchedAt: createdAt }])
       }),
     ),
   )

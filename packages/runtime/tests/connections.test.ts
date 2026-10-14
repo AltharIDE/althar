@@ -9,7 +9,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Fiber, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
-import { Agents, Connectors, withoutSignIns } from '../src/Config'
+import { Agents, Connectors, readingUntrusted, withoutSignIns } from '../src/Config'
 import { Connections, NotConnected, pageOf, SignInUnavailable } from '../src/Connections'
 import { CliUnanswered, NotFound } from '../src/errors'
 import { Instance } from '../src/Instance'
@@ -1089,6 +1089,44 @@ describe('the agents', () => {
       assert.strictEqual(env.CODEX_HOME, home)
     }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
   )
+
+  it.effect('start a review’s lead with nothing of the repository’s config loading, each as its registry entry says', () =>
+    Effect.gen(function* () {
+      const agents = yield* Agents
+      const cwd = mkdtempSync(join(tmpdir(), 'althar-cwd-'))
+      const envOf = (agentId: string, untrusted: boolean) => {
+        const transport = agents.list
+          .find((entry) => entry.definition.id === agentId)
+          ?.transport(cwd, { CODEX_HOME: mkdtempSync(join(tmpdir(), 'althar-codex-home-')) }, untrusted ? { untrusted } : undefined)
+        return transport?._tag === 'Process' ? (transport.spec.env ?? {}) : {}
+      }
+      for (const agentId of ['claude-code', 'codex', 'opencode']) {
+        // Git's credential helper stays reset beside it.
+        assert.deepInclude(envOf(agentId, true), { ...readingUntrusted, GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '' })
+        assert.strictEqual(envOf(agentId, false).GIT_CONFIG_COUNT, '1')
+      }
+      assert.deepStrictEqual(JSON.parse(envOf('codex', true).CODEX_CONFIG ?? '{}'), { web_search: 'disabled', 'features.hooks': false })
+      assert.isUndefined(envOf('codex', false).CODEX_CONFIG)
+      assert.strictEqual(envOf('opencode', true).OPENCODE_DISABLE_PROJECT_CONFIG, '1')
+      assert.isFalse(JSON.parse(envOf('opencode', true).OPENCODE_CONFIG_CONTENT ?? '{}').lsp)
+      assert.isUndefined(envOf('opencode', false).OPENCODE_DISABLE_PROJECT_CONFIG)
+    }).pipe(Effect.provide(Layer.sync(Agents, () => Agents.fromRegistry()))),
+  )
+
+  it('leave a review’s lead’s git out of a bare repository the pull request carries, unless it is named', () => {
+    // A repository a pull request could carry under any name, whose config names a program for git to run.
+    const folder = mkdtempSync(join(tmpdir(), 'althar-carried-'))
+    spawnSync('git', ['init', '-q', '--bare', 'fixtures.git'], { cwd: folder })
+    const git = (env: Readonly<Record<string, string>>) =>
+      spawnSync('git', ['-C', 'fixtures.git', 'rev-parse', '--git-dir'], {
+        cwd: folder,
+        env: { PATH: process.env.PATH ?? '', HOME: folder, GIT_CONFIG_NOSYSTEM: '1', ...withoutSignIns(folder), ...env },
+      })
+    assert.strictEqual(git({}).status, 0)
+    const refused = git(readingUntrusted)
+    assert.notStrictEqual(refused.status, 0)
+    assert.include(refused.stderr.toString(), 'safe.bareRepository')
+  })
 
   it('leave git with no credential helper to ask, whatever the person set', () => {
     // The person's git hands out a password to whoever asks. The system's config is left out, so the real keychain isn't asked.

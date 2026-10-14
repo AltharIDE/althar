@@ -18,6 +18,7 @@ import type {
   Review,
   Verdict,
 } from './model'
+import { noReviews } from './model'
 import {
   answered,
   failedOf,
@@ -394,7 +395,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: false, threads: true },
+    capabilities: { drafts: true, checkLogs: false, threads: true, reviews: false },
     account,
     repository: (path) =>
       Effect.gen(function* () {
@@ -577,6 +578,9 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
         // Althar's own reply: whether it counts as a member's doesn't matter, it is known by its receipt.
         (comment) => commentOf(repository, number, comment, { id: reply.threadId ?? String(comment.id), path: null, line: null }, true),
       ),
+    // Reviews of a change Althar didn't open are GitHub's alone, for now.
+    changeToReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
+    postReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
     pushTarget: (repository) =>
       Effect.map(options.credential, (credential) => ({
         url: `${web}/scm/${(repository.path[0] ?? '').toLowerCase()}/${repository.path[1] ?? ''}.git`,

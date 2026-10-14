@@ -116,6 +116,20 @@ describe('GitLab as a code host', () => {
     }),
   )
 
+  it.effect('refuses to review a merge request it didn’t open, in GitLab’s words, without asking GitLab', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([])
+      assert.isFalse(host.capabilities.reviews)
+      assert.deepInclude(yield* Effect.flip(host.changeToReview(repository, 12)), {
+        reason: 'rejected',
+        message: 'Althar can’t review a merge request on this host yet.',
+      })
+      const posted = yield* Effect.flip(host.postReview(repository, 12, { event: 'comment', body: 'b', commit: null, comments: [] }))
+      assert.strictEqual(posted.reason, 'rejected')
+      assert.lengthOf(sent, 0)
+    }),
+  )
+
   it.effect('reads a project in nested groups, whether the account may push, and how it merges', () =>
     Effect.gen(function* () {
       const { host, sent } = gitlab([

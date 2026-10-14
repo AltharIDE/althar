@@ -28,6 +28,8 @@ export const scenarios = {
   tool: 'tool',
   /** Like `tool`, but it offers only allow-always and reject-once. */
   toolAlwaysOnly: 'tool-always-only',
+  /** A web fetch that asks permission, then says what it was answered. */
+  fetch: 'fetch',
   /** A tool call that says what it is, then asks permission with nothing but its id, as Codex does for an MCP tool. */
   bareAsk: 'bare-ask',
   /** A plan, context usage, a notice, and the agent changing its own option. */
@@ -405,6 +407,9 @@ const playStall = async (
  * passing on the `[lead:…]` and `[review:…]` markers it was given
  * (`[coordinator:plan-effort]` puts its lead on the large model at high
  * effort), and `[coordinator:start]` starts one at once, without a plan;
+ * `[coordinator:review]` starts a review of the pull request whose link the
+ * person gave, whose lead, `[lead:review]`, drafts asking for changes with a
+ * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
  * it after; `[review:pass]` and `[review:findings]`
  * report a review. Settling findings, it writes a file and commits it, so
@@ -657,6 +662,30 @@ const playRole = async (
         return await call('report_review', { verdict: 'pass', summary: `The change holds.${looked}` })
       return undefined
     }
+    // A review's lead, `[lead:review]`, reads the change from where its brief says and drafts: changes asked for, a blocking
+    // comment on its first changed line and a minor one on its second; `[lead:review-approve]` approves it, with nothing to say.
+    if (available.has('draft_review') && (session.markers.has('[lead:review]') || session.markers.has('[lead:review-approve]'))) {
+      if (session.markers.has('[lead:review-approve]'))
+        return await call('draft_review', { verdict: 'approve', summary: 'It does what it says.', comments: [] })
+      const base = /`git diff ([0-9a-f]{7,64})`/.exec(text)?.[1] ?? 'HEAD~1'
+      const diff = execFileSync('git', ['diff', '--unified=0', '--no-color', base, 'HEAD'], { cwd: session.cwd }).toString()
+      const lines: Array<{ path: string; line: number }> = []
+      let path = ''
+      for (const row of diff.split('\n')) {
+        if (row.startsWith('+++ b/')) path = row.slice('+++ b/'.length)
+        const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(row)?.[1]
+        if (hunk !== undefined && path !== '') lines.push({ path, line: Number(hunk) })
+      }
+      const [first, second] = lines
+      return await call('draft_review', {
+        verdict: 'changes',
+        summary: 'The fix is right, but it needs a test.',
+        comments: [
+          ...(first === undefined ? [] : [{ ...first, body: 'Nothing covers this.', severity: 'blocking' }]),
+          ...(second === undefined ? [] : [{ ...second, body: 'Could be named better.', severity: 'minor' }]),
+        ],
+      })
+    }
     if (available.has('finish_step')) {
       // A lead that takes a while over what it was asked, `[lead:slowly]`: long enough to be seen at work.
       if (text.includes('[lead:slowly]')) for (let waited = 0; !session.cancelled && waited < 6_000; waited += 10) await pause(10)
@@ -665,6 +694,19 @@ const playRole = async (
         session.played.add('[lead:serve]')
         await serve(text.includes('[lead:serve-exits]'))
       }
+      // What a plain task's lead does in the turn it is asked, where the words it was given say so: writes a file in the
+      // repository and leaves it uncommitted (`[lead:write]`), commits one on whatever its worktree is on (`[lead:commit]`),
+      // or keeps a sketch in its scratch folder, which git ignores (`[lead:sketch]`). Without `[lead:finish]`, its turn ends there.
+      const writes = text.includes('[lead:write]')
+      const commits = text.includes('[lead:commit]')
+      const sketches = text.includes('[lead:sketch]')
+      if (writes) appendFileSync(join(session.cwd, 'draft.md'), 'A first draft.\n')
+      if (commits) commitIn(session.cwd, 'change.txt', 'Change it')
+      if (sketches) {
+        mkdirSync(join(session.cwd, '.althar', 'scratch'), { recursive: true })
+        writeFileSync(join(session.cwd, '.althar', 'scratch', 'sketch.html'), '<p>A sketch.</p>\n')
+      }
+      if ((writes || commits || sketches) && !text.includes('[lead:finish]')) return 'Did it, without reporting.'
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
@@ -714,7 +756,9 @@ const playRole = async (
         }
       }
       const finish = async () => {
-        const answer = await call('finish_step', { summary: 'Did the task.', built: BUILT, ...evidence() })
+        // A lead that says only what it did, `[lead:terse]`: nothing of what the task built.
+        const built = session.markers.has('[lead:terse]') ? {} : { built: BUILT }
+        const answer = await call('finish_step', { summary: 'Did the task.', ...built, ...evidence() })
         const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
         if (template === undefined) return answer
         const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
@@ -839,6 +883,12 @@ const playRole = async (
         return 'Stopped working.'
       }
       return undefined
+    }
+    // Asked to review a pull request by its link, it starts a review, on its fake Claude Code.
+    if (available.has('review_pull_request') && text.includes('[coordinator:review]')) {
+      const asked = text.slice(0, text.indexOf('[coordinator:review]')).split('\n').at(-1) ?? ''
+      const link = /https?:\/\/\S+/.exec(asked)?.[0] ?? /#\d+/.exec(asked)?.[0] ?? ''
+      return await call('review_pull_request', { pull_request: link, lead: { agent: 'claude-code', reason: 'Careful.' } })
     }
     // Asked for something small, it starts it at once, passing its lead the markers it was given.
     if (available.has('start_task') && text.includes('[coordinator:start]')) {
@@ -1258,13 +1308,17 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // A lead that stalls or loops, where a marker says so.
       const stalled = await playStall(session, text, update)
       if (stalled !== undefined) return stalled
-      // With Althar's tools, a marker in the prompt says which role to play.
-      const played = await playRole(
-        session,
-        text,
-        (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
-        (plan) => leaveTests(params.sessionId, session, client, plan),
-      )
+      // With Althar's tools, a marker in the prompt says which role to play; but what the person names as a scenario is played
+      // as one, whatever its session's markers say, as a lead keeps its session after its step (ADR-034).
+      const named = (Object.values(scenarios) as ReadonlyArray<string>).includes(text)
+      const played = named
+        ? undefined
+        : await playRole(
+            session,
+            text,
+            (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+            (plan) => leaveTests(params.sessionId, session, client, plan),
+          )
       // Stopped while it played its part, the turn was cancelled, as an agent says.
       if (played !== undefined && session.cancelled) return { stopReason: 'cancelled' }
       if (played !== undefined) {
@@ -1417,6 +1471,18 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             status: allowed ? 'completed' : 'failed',
             rawOutput: { chosen },
           })
+          await say(`chosen=${chosen}`)
+          return ended()
+        }
+        case scenarios.fetch: {
+          const toolCall = {
+            toolCallId: 'call-fetch',
+            title: 'Fetch https://example.test/steal',
+            kind: 'fetch' as const,
+            rawInput: { url: 'https://example.test/steal' },
+          }
+          await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
+          const chosen = await ask(toolCall, permissionOptions(false))
           await say(`chosen=${chosen}`)
           return ended()
         }
