@@ -27,6 +27,7 @@ import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
+import { Runs } from '../runs/Runs'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
@@ -359,8 +360,22 @@ export function ProjectView({
         trackers,
         open: (url) => window.open(url, '_blank'),
       })}
-      // The default branch runs with no agent, where its repository says how.
-      {...(coordinator?.runCommand == null ? {} : { run: { command: coordinator.runCommand, onRun: () => void model.runProject() } })}
+      // What the project runs, with no agent, on its default branch (ADR-036).
+      {...(coordinator === null
+        ? {}
+        : {
+            run: (
+              <Runs
+                projectId={projectId}
+                project={kept?.name ?? name}
+                taskId={null}
+                threadId={coordinator.threadId}
+                runnables={coordinator.runnables}
+                launches={coordinator.launches}
+                now={now}
+              />
+            ),
+          })}
       {...(settings === undefined
         ? {}
         : {
@@ -431,7 +446,7 @@ export function ProjectView({
                           run={run}
                           now={now}
                           onStop={(id) => void model.stopLaunch(id)}
-                          onRunAgain={(taskId) => void model.runProject(taskId)}
+                          onRunAgain={(taskId, runnableId) => void model.runProject(taskId, runnableId)}
                         />
                       )}
                       queued={text.queued}

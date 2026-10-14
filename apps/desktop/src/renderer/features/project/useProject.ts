@@ -63,7 +63,8 @@ export interface ProjectModel {
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
   /** Runs the project with no agent: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
-  readonly runProject: (taskId?: string | null) => Promise<void>
+  /** Runs one of the project's runnables, its default without one: in the task's worktree, or a copy of the default branch. */
+  readonly runProject: (taskId?: string | null, runnableId?: string | null) => Promise<void>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   /** Moves the running coordinator to another agent. */
@@ -314,7 +315,8 @@ export const useProject = (projectId: string): ProjectModel => {
       }
     },
     interrupt: () => act(async () => (threadId === null ? undefined : client.interrupt(threadId))),
-    runProject: (taskId = null) => act(() => client.runProject(projectId, taskId, threadId)),
+    runProject: (taskId = null, runnableId = null) =>
+      act(() => client.runProject(projectId, taskId, threadId, ...(runnableId === null ? [] : [runnableId]))),
     stopLaunch: (id) => act(() => client.stopLaunch(id)),
     clearLaunch: (id) => act(() => client.clearLaunch(id)),
     choose: (choice) =>

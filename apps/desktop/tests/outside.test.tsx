@@ -31,6 +31,7 @@ import {
   githubGuide,
   items,
   NOW,
+  runnables,
   snapshot,
 } from './fixtures'
 import { withServices } from './render'
@@ -678,24 +679,24 @@ function Task() {
 }
 
 describe('running what a task built, with no agent', () => {
-  it('runs it from the task’s menu, shows it over the composer beside what its lead left running, and stops each its own way', async () => {
+  it('runs it from the task’s bar, shows it over the composer beside what its lead left running, and stops each its own way', async () => {
     const thread = snapshot()
     const serving = { id: 'bg-1', command: 'bun dev', url: 'http://localhost:5173/', startedAt: '2026-10-10T09:00:00.000Z', ended: null }
     const { client, emit } = fakeClient({
       getThread: vi.fn(async () => ({
         ...thread,
-        task: { ...thread.task, runCommand: 'bun run dev' },
+        task: { ...thread.task, runnables },
         session: thread.session === null ? null : { ...thread.session, background: [serving] },
       })),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: /Run bun run dev/ }))
-    expect(client.runProject).toHaveBeenCalledWith('p1', 't1', 'th1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Run bun run dev' }))
+    expect(client.runProject).toHaveBeenCalledWith('p1', 't1', 'th1', 'rnbl_dev')
     // The run comes back on the watch: one for another task, or another project, says nothing here.
     const launch = {
       id: 'proc_1',
       taskId: 't1',
+      runnableId: 'rnbl_dev',
       where: 'Fix the login timeout',
       command: 'bun run dev',
       url: 'http://localhost:4173/',

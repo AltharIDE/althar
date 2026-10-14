@@ -1,0 +1,257 @@
+import { useControlled } from '../../lib/controlled'
+import { Button } from '../../primitives/Button/Button'
+import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import { Menu, MenuCheckboxItem, MenuGroup, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
+import { SplitButton } from '../../primitives/SplitButton/SplitButton'
+import s from './RunButton.module.css'
+
+/*
+ * What a project runs, from the top of its screen or a task's bar (ADR-036):
+ * one press runs its default, the first of the list, as the one Run button
+ * did; while that runs, the button says where it answers and opens it. The
+ * chevron lists everything it runs, those running first, checked, each with
+ * where it answers or how it last ended, and the rest with what it runs,
+ * where, and who said how; picking one starts or stops it, and the menu stays
+ * open, so several start at once. After them, adding something more to run,
+ * and the whole list to change. With nothing known to run, the button offers
+ * the ways to say what runs.
+ */
+
+/** Who said how something runs: worked out from its repository, or kept by the person, the coordinator or another agent. */
+export type RunFrom = 'repository' | 'person' | 'coordinator' | 'agent'
+
+/** The ways to add something to run. */
+export type AddWay = 'type' | 'scripts' | 'ask'
+
+/** Its run here, as it stands. */
+export interface RunTargetRun {
+  /** starting: before it says where it answers, or that it runs; ended: by itself, or stopped. */
+  state: 'starting' | 'running' | 'ended'
+  /** Where it answers: localhost:5290. */
+  url?: string
+  /** How long it has run, or when it ended: 12m, 3m ago. */
+  since?: string
+  /** How it ended by itself: its exit code, null where unknown. */
+  code?: number | null
+  /** It was stopped, not ended by itself. */
+  stopped?: boolean
+}
+
+/** One of what the project runs, as the button lists it. */
+export interface RunTarget {
+  id: string
+  /** What it is, in a word or two, where someone named it: Storybook. */
+  name?: string
+  /** What it runs: `bun --filter @althar/ui storybook`. */
+  command: string
+  /** Where it runs from here, in a word: main, this task. */
+  where: string
+  from: RunFrom
+  /** Its run here; none where it hasn't run, or the run was cleared. */
+  run?: RunTargetRun
+  /** It runs somewhere else now, seen from here: on main, at its address. */
+  elsewhere?: { where: string; url?: string }
+}
+
+export interface RunButtonText {
+  /** The main half, running the default. */
+  run: (label: string) => string
+  starting: (label: string) => string
+  /** The chevron's name. */
+  more: string
+  /** The menu's name. */
+  label: string
+  running: string
+  resting: string
+  /** The heading over everything, while nothing runs. */
+  all: string
+  default: string
+  startingHint: string
+  from: Record<RunFrom, string>
+  finished: (since: string) => string
+  failed: (code: number | null, since: string) => string
+  stopped: (since: string) => string
+  elsewhere: (where: string, url?: string) => string
+  add: string
+  edit: string
+  note: string
+  /** With nothing known to run. */
+  empty: string
+  emptyLabel: string
+  emptyNote: string
+  ask: string
+  askAbout: string
+  scripts: string
+  scriptsAbout: string
+  type: string
+}
+
+export const runButtonText: RunButtonText = {
+  run: (label) => `Run ${label}`,
+  starting: (label) => `Starting ${label}…`,
+  more: 'Everything to run',
+  label: 'What it runs',
+  running: 'Running',
+  resting: 'Not running',
+  all: 'Run',
+  default: 'Default',
+  startingHint: 'Starting…',
+  from: {
+    repository: 'Worked out from the repository',
+    person: 'Added by you',
+    coordinator: 'Added by the coordinator',
+    agent: 'Kept by an agent',
+  },
+  finished: (since) => `Finished ${since}`,
+  failed: (code, since) => `Failed ${since}${code === null ? '' : ` · exit ${code}`}`,
+  stopped: (since) => `Stopped ${since}`,
+  elsewhere: (where, url) => `Running ${where}${url === undefined ? '' : ` at ${url}`}`,
+  add: 'Add something to run…',
+  edit: 'Edit the list…',
+  note: 'Checked ones are running. Pick one to start or stop it.',
+  empty: 'Run',
+  emptyLabel: 'Something to run',
+  emptyNote: 'Althar runs it itself, with no agent, and shows where it answers.',
+  ask: 'Ask the coordinator to work it out',
+  askAbout: 'It reads the repository and keeps what is worth running.',
+  scripts: 'Pick from package.json…',
+  scriptsAbout: 'Any of the repository’s scripts.',
+  type: 'Type a command…',
+}
+
+export interface RunButtonProps {
+  /** What the project runs from here, in its order: the first is its default. */
+  targets: readonly RunTarget[]
+  /** Runs one here. */
+  onRun: (id: string) => void
+  /** Stops its run here. */
+  onStop: (id: string) => void
+  /** Opens where its run answers, in the person's browser. */
+  onOpen: (id: string) => void
+  /** Adds something to run, one of three ways. */
+  onAdd: (way: AddWay) => void
+  /** Opens the whole list, to order, edit and remove. */
+  onEdit: () => void
+  open?: boolean
+  defaultOpen?: boolean
+  onOpenChange?: (open: boolean) => void
+  text?: Partial<RunButtonText>
+}
+
+const labelOf = (target: RunTarget) => target.name ?? target.command
+
+const live = (target: RunTarget) => target.run !== undefined && target.run.state !== 'ended'
+
+/** How its last run ended, in a few words: Failed 8m ago · exit 1. */
+const endedOf = (run: RunTargetRun, t: RunButtonText) => {
+  const since = run.since ?? ''
+  if (run.stopped === true) return t.stopped(since)
+  return run.code === 0 ? t.finished(since) : t.failed(run.code ?? null, since)
+}
+
+export function RunButton({ targets, onRun, onStop, onOpen, onAdd, onEdit, open, defaultOpen, onOpenChange, text }: RunButtonProps) {
+  const t = { ...runButtonText, ...text }
+  const [opened, setOpened] = useControlled(open, defaultOpen ?? false, onOpenChange)
+  const ways = (
+    <>
+      <MenuItem icon="agents" description={t.askAbout} onSelect={() => onAdd('ask')}>
+        {t.ask}
+      </MenuItem>
+      <MenuItem icon="list" description={t.scriptsAbout} onSelect={() => onAdd('scripts')}>
+        {t.scripts}
+      </MenuItem>
+      <MenuItem icon="terminal" onSelect={() => onAdd('type')}>
+        {t.type}
+      </MenuItem>
+    </>
+  )
+
+  const [first] = targets
+  if (first === undefined)
+    return (
+      <Menu
+        label={t.emptyLabel}
+        align="end"
+        width={320}
+        open={opened}
+        onOpenChange={setOpened}
+        note={t.emptyNote}
+        trigger={
+          <Button size="small" variant="quiet" icon="terminal" trailingIcon="chevronD">
+            {t.empty}
+          </Button>
+        }
+      >
+        {ways}
+      </Menu>
+    )
+
+  const item = (target: RunTarget) => {
+    const run = target.run
+    const on = live(target)
+    const hint =
+      run?.state === 'starting' ? t.startingHint : on && run?.url !== undefined ? run.url : target === first && !on ? t.default : undefined
+    const about = [
+      target.name === undefined ? null : target.command,
+      target.where,
+      run?.state === 'ended' ? endedOf(run, t) : null,
+      on && run?.since !== undefined ? run.since : null,
+      target.elsewhere === undefined ? null : t.elsewhere(target.elsewhere.where, target.elsewhere.url),
+      run === undefined && target.elsewhere === undefined ? t.from[target.from] : null,
+    ]
+      .filter((part) => part !== null)
+      .join(' · ')
+    return (
+      <MenuCheckboxItem
+        key={target.id}
+        checked={on}
+        onCheckedChange={() => (on ? onStop(target.id) : onRun(target.id))}
+        keepOpen
+        {...(hint === undefined ? {} : { hint })}
+        description={about}
+      >
+        {labelOf(target)}
+      </MenuCheckboxItem>
+    )
+  }
+  const running = targets.filter(live)
+  const resting = targets.filter((target) => !live(target))
+
+  // The main half: runs the default; while it runs, says where it answers and opens it, or, with no address, opens the list.
+  const run = first.run
+  const main =
+    run?.state === 'starting'
+      ? { children: t.starting(labelOf(first)), busy: true }
+      : run?.state === 'running'
+        ? {
+            children: (
+              <span className={s.live}>
+                <LiveDot />
+                {run.url === undefined ? labelOf(first) : `${labelOf(first)} · ${run.url}`}
+              </span>
+            ),
+            onClick: () => (run.url === undefined ? setOpened(true) : onOpen(first.id)),
+          }
+        : { children: t.run(labelOf(first)), icon: 'terminal' as const, onClick: () => onRun(first.id) }
+
+  return (
+    <SplitButton
+      size="small"
+      moreLabel={t.more}
+      {...main}
+      menu={(trigger) => (
+        <Menu label={t.label} align="end" width={440} open={opened} onOpenChange={setOpened} trigger={trigger} note={t.note}>
+          {running.length > 0 && <MenuGroup label={t.running}>{running.map(item)}</MenuGroup>}
+          {resting.length > 0 && <MenuGroup label={running.length > 0 ? t.resting : t.all}>{resting.map(item)}</MenuGroup>}
+          <MenuSeparator />
+          <MenuItem icon="plus" onSelect={() => onAdd('type')}>
+            {t.add}
+          </MenuItem>
+          <MenuItem icon="list" onSelect={onEdit}>
+            {t.edit}
+          </MenuItem>
+        </Menu>
+      )}
+    />
+  )
+}
