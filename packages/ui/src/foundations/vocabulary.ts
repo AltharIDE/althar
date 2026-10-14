@@ -229,6 +229,17 @@ export enum TaskActivity {
   Still = 'still',
 }
 
+/**
+ * What a task makes, read from what it has (DEV-96): a change ends in a pull
+ * request of its own, or has commits; a review reads someone else's; any
+ * other task is plain, and has no word on its card.
+ */
+export enum TaskKind {
+  Change = 'change',
+  Review = 'review',
+  Plain = 'plain',
+}
+
 /** What a task does with its work when it is done. */
 export enum TaskEnd {
   DraftPr = 'draft',
@@ -318,6 +329,30 @@ export enum IssueDraftState {
   Discarded = 'discarded',
 }
 
+/** Where a review a lead drafted of someone else's pull request stands. */
+export enum ReviewDraftState {
+  Pending = 'pending',
+  Posting = 'posting',
+  Posted = 'posted',
+  Failed = 'failed',
+  /** Perhaps posted: the host's answer was lost, so the pull request is looked at before posting it again. */
+  Uncertain = 'uncertain',
+  Discarded = 'discarded',
+}
+
+/** What a review says of a pull request as a whole. */
+export enum ReviewVerdict {
+  Comment = 'comment',
+  Approve = 'approve',
+  Changes = 'changes',
+}
+
+/** Why a pull request counts as from outside the team: its branch is on a fork, or its author isn't one of the repository's people. */
+export enum Outside {
+  Fork = 'fork',
+  Author = 'author',
+}
+
 /** An entry of the agent's plan. */
 export enum PlanState {
   Done = 'done',
@@ -401,6 +436,22 @@ export enum Wait {
   Workers = 'workers',
   /** It is held on a call of yours. */
   You = 'you',
+}
+
+/** Where a task a search found stands, in a word. */
+export enum FoundState {
+  /** Its plan waits to start. */
+  Planned = 'planned',
+  Running = 'running',
+  /** A call in it waits on you. */
+  Yours = 'you',
+  /** Done, waiting for you to accept it. */
+  Ready = 'ready',
+  Stopped = 'stopped',
+  Merged = 'merged',
+  /** Settled without a merge to show for it. */
+  Done = 'done',
+  Abandoned = 'abandoned',
 }
 
 /** What a piece of settled work came to. */

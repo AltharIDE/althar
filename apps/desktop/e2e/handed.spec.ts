@@ -29,6 +29,8 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
     await page.getByRole('button', { name: /Open task/ }).click()
     await toConversation(page)
     await expect(page.getByText('Did the task.')).toBeVisible()
+    // Its turn over, what it built said, as a person would read it before writing.
+    await expect(page.getByText('What it built')).toBeVisible()
 
     // A command whose output streams until it is stopped: open in its tool call as it comes.
     await say(page, 'streams')
@@ -90,13 +92,15 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
     await expect(page.getByText('exit 1')).toBeVisible()
     await page.screenshot({ path: 'test-results/handed-output.png', fullPage: true })
 
-    // Copy, on what it said: the window may write to the clipboard, and only that.
+    // Copy, on what it said: the window may write to the clipboard, and only that. Its turn goes on with Althar's reminder to
+    // report what it changed, as a round's does (ADR-034); Copy takes the turn's last words, whichever they are.
     const turn = page.getByRole('article').filter({ hasText: 'Here is what I found.' }).last()
     await turn.hover()
     await turn.getByRole('button', { name: 'Copy' }).last().click()
     await expect(turn.getByRole('button', { name: 'Copied' })).toBeVisible()
     const copied = await electronApp.evaluate(({ clipboard }) => clipboard.readText())
-    expect(copied).toContain('Here is what I found.')
+    expect(copied.length).toBeGreaterThan(0)
+    await expect(turn.getByText(copied.slice(0, 40)).first()).toBeVisible()
   } finally {
     await electronApp.close()
   }

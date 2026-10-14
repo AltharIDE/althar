@@ -14,12 +14,12 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
 - [x] **Where usage data goes from, and what can.** The main process, with
   posthog-node: named events and properties only, never a name, a path or
   anything written; the window has no SDK
-  ([ADR-035](decisions/035-usage-data-from-the-main-process.md)).
+  ([ADR-036](decisions/036-usage-data-from-the-main-process.md)).
 - [x] **On or off at first.** On, with the switch and its line on the first
-  screen and in Settings; `DO_NOT_TRACK` keeps it off (ADR-035).
+  screen and in Settings; `DO_NOT_TRACK` keeps it off (ADR-036).
 - [x] **US or EU.** US (`us.i.posthog.com`), where the project already is;
   the ticket had leaned to the EU cloud (settled with the person, 12
-  October; ADR-035).
+  October; ADR-036).
 - [x] **Installs from before.** None: no one has Althar with a project yet,
   so every install sees the switch on the first screen before anything is
   sent (settled with the person, 12 October).

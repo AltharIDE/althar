@@ -12,6 +12,7 @@ import {
   type HomeEvent,
   type HomeSnapshot,
   IssueDraftCard,
+  ReviewDraftCard,
   type IssueSummary,
   LimitCall,
   PAGE,
@@ -19,6 +20,7 @@ import {
   type TaskPhase,
   type ProjectList,
   type StuckStep,
+  type TaskCard,
   type TaskList,
   type TaskSummary,
   type DocumentText,
@@ -42,6 +44,7 @@ import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
 import { builtIn, evidenceOf, evidencePaths, unverifiedIn } from './evidence'
 import { filesOf, outputOf, picturesOf } from './handed'
+import { endsInChange, handedOf, kindOf } from './kinds'
 import { documentText, outputText } from './reading'
 import type { Artifacts } from './Artifacts'
 import { type DocumentRefused, GitFailed, NotFound } from './errors'
@@ -49,6 +52,7 @@ import { Instance } from './Instance'
 import { Launches } from './Launches'
 import { commitsAhead, commitsOf, git, gitOutcome, indexStamp, namedRemotes, remoteOf } from './git'
 import { commandIn, shortCommand } from './rules'
+import { reviewBriefOf } from './Reviews'
 import { Sessions } from './Sessions'
 import { actionsOf, standingOf } from './Tasks'
 
@@ -64,6 +68,9 @@ import { actionsOf, standingOf } from './Tasks'
 
 /** Session states in which a session is working on its thread. */
 const LIVE = ['starting', 'active', 'waiting_approval', 'cancelling']
+
+/** A task's branch as its screens show it, from its first worktree `w`: none for a plain task's that has no branch yet (DEV-96). */
+const SHOWN_BRANCH = 'CASE WHEN w.branched_at IS NULL THEN NULL ELSE w.branch END AS branch'
 
 /** How many tasks, or cards, a screen reads at once: each may start git. */
 const AT_ONCE = 8
@@ -292,6 +299,7 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
 
 const decodeLinks = Schema.decodeUnknownOption(Schema.Array(Unfurl))
 const decodeDraft = Schema.decodeUnknownOption(IssueDraftCard)
+const decodeReviewDraft = Schema.decodeUnknownOption(ReviewDraftCard)
 const decodePushRequest = Schema.decodeUnknownOption(PushRequestItem.fields.content)
 const decodeChecks = Schema.decodeUnknownOption(ChecksSummary.fields.list)
 
@@ -491,6 +499,12 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         onNone: () => undefined,
         onSome: (card) => ({ ...base, kind: 'issue_draft' as const, content: card }),
       })
+    // A review draft's card, written whole with each change to the draft, as an issue draft's is.
+    case 'review_draft':
+      return Option.match(decodeReviewDraft(content), {
+        onNone: () => undefined,
+        onSome: (card): ThreadItem => ({ ...base, kind: 'review_draft', content: card }),
+      })
     case 'push_request':
       // Althar writes it whole, as the contract has it; one that doesn't read so is left out.
       return Option.match(decodePushRequest(content), {
@@ -555,6 +569,10 @@ export class Queries extends Context.Service<
     document(threadId: string, path: string): Effect.Effect<DocumentText, SqlError.SqlError | NotFound | DocumentRefused>
     /** One file a task changed, as a diff from its base to its worktree; only a file it changed. */
     fileDiff(taskId: string, path: string): Effect.Effect<FileDiff, unknown>
+    /** A task's card, as its board shows it: where it stands and what it makes. */
+    card(taskId: string): Effect.Effect<TaskCard, unknown>
+    /** The plain tasks that finished and wait to be seen, by id: nothing counts them as waiting on the person. */
+    readonly finished: Effect.Effect<ReadonlySet<string>, unknown>
     /** A project's board: its tasks, by card, and the calls that wait on the person. */
     board(projectId: string): Effect.Effect<BoardSnapshot, unknown>
     /** The next page of a project's settled tasks, as cards: the ones settled before `before` (`taskId` breaking a tie), most recent first. */
@@ -592,10 +610,12 @@ export class Queries extends Context.Service<
         const sql = yield* SqlClient.SqlClient
         const at = yield* cursor
         const rows = yield* sql<
-          Omit<ProjectList['projects'][number], 'rotateAccounts' | 'onlyAccounts' | 'repositories' | 'worktrees'> & {
+          Omit<ProjectList['projects'][number], 'rotateAccounts' | 'onlyAccounts' | 'repositories' | 'worktrees' | 'ready'> & {
             readonly rotateAccounts: number
             readonly onlyAccounts: string | null
             readonly repositories: string
+            readonly ready: string
+            readonly drafted: string
           }
         >`
           SELECT p.id, p.name, p.slug, p.ink,
@@ -616,22 +636,32 @@ export class Queries extends Context.Service<
               WHERE k.project_id = p.id AND k.state NOT IN ('done', 'abandoned') AND r.state = 'running'
                 AND EXISTS (SELECT 1 FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                   WHERE e.run_id = r.id AND a.state IN ('admitted', 'running', 'held'))) AS working,
-            (SELECT count(*) FROM tasks k JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
+            (SELECT json_group_array(k.id) FROM tasks k JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
               WHERE k.project_id = p.id AND k.state NOT IN ('done', 'abandoned') AND r.state = 'succeeded'
                 AND coalesce((SELECT state FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted')
                   ORDER BY proposed_at DESC LIMIT 1), '') <> 'proposed'
                 AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
                 AND NOT EXISTS (SELECT 1 FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                   WHERE e.run_id = r.id AND a.state = 'admitted')) AS ready,
+            -- A review has no run: drafted, it is the person's to post, as its card says, unless a call on it waits on them first.
+            (SELECT json_group_array(k.id) FROM tasks k WHERE k.project_id = p.id AND k.state = 'open'
+                AND EXISTS (SELECT 1 FROM review_drafts d WHERE d.task_id = k.id AND d.state IN ('pending', 'failed', 'uncertain'))
+                AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')) AS drafted,
             coalesce((SELECT json_extract(r.rules, '$.usageLimit') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 'move') AS usage_limit,
             coalesce((SELECT json_extract(r.rules, '$.accounts.rotate') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 0) AS rotate_accounts,
             (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts,
             (SELECT t.id FROM threads t WHERE t.project_id = p.id AND t.kind = 'coordinator' AND t.owner_actor_id = ${instance.personId}) AS coordinator_thread_id
           FROM projects p WHERE p.archived_at IS NULL ORDER BY p.created_at DESC, p.id DESC`
+        // A plain task that finished waits on its board, but asks nothing of the person: no count says it (DEV-96).
+        const finished = yield* finishedPlain
         return {
           cursor: at,
-          projects: rows.map((row) => ({
+          projects: rows.map(({ drafted, ...row }) => ({
             ...row,
+            // Each task once: one ready and drafted both, as a review taken over might be, counts once.
+            ready: [
+              ...new Set([...(JSON.parse(row.ready) as ReadonlyArray<string>), ...(JSON.parse(drafted) as ReadonlyArray<string>)]),
+            ].filter((id) => !finished.has(id)).length,
             rotateAccounts: row.rotateAccounts === 1,
             onlyAccounts:
               row.onlyAccounts === null ? null : (JSON.parse(row.onlyAccounts) as Readonly<Record<string, ReadonlyArray<string>>>),
@@ -646,7 +676,7 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql<TaskSummary>`
-            SELECT k.id, k.project_id, k.title, k.slug, t.id AS thread_id, k.state, w.branch,
+            SELECT k.id, k.project_id, k.title, k.slug, t.id AS thread_id, k.state, ${sql.unsafe(SHOWN_BRANCH)},
               (SELECT s.agent_id FROM provider_sessions s WHERE s.thread_id = t.id AND s.state IN (${sql.unsafe(live)})
                 ORDER BY s.started_at DESC LIMIT 1) AS agent_id,
               (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open') AS waiting,
@@ -786,17 +816,18 @@ export class Queries extends Context.Service<
             branch: string
             baseRef: string | null
             baseCommit: string | null
+            branched: number
             root: string | null
             opened: number
             taskId: string
             projectId: string
           }>`
             SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, w.branch, w.base_ref, w.base_commit,
-              l.path AS root, w.task_id, w.project_id,
+              w.branched_at IS NOT NULL AS branched, l.path AS root, w.task_id, w.project_id,
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' ORDER BY b.created_at, b.rowid`
         })
 
       const nothingChanged = { files: [], commits: 0 } as const satisfies {
@@ -909,7 +940,9 @@ export class Queries extends Context.Service<
        * their default branch here yet, each with its default branch and its
        * branch's head as it stands. In several repositories, each file is
        * named under its repository's, and the commits are all of theirs.
-       * Every worktree is read at the same time, and looked at once.
+       * Every worktree is read at the same time, and looked at once. A plain
+       * task's worktree with no branch yet has nothing of its own: what its
+       * lead writes there is a change once Althar makes its branch.
        */
       const gitOf = (taskId: string, wants: { readonly changed: boolean; readonly here: boolean; readonly fresh?: boolean }) =>
         Effect.gen(function* () {
@@ -926,7 +959,7 @@ export class Queries extends Context.Service<
           const shown = (worktree: string) => (file: ChangedFile) =>
             !(file.uncommitted && file.status === 'added' && pictures(worktree, file.path))
           const each = yield* Effect.forEach(
-            worktrees,
+            worktrees.filter((worktree) => worktree.branched === 1),
             (worktree) =>
               Effect.gen(function* () {
                 const owner = { path: worktree.path, taskId: worktree.taskId, projectId: worktree.projectId }
@@ -1254,6 +1287,54 @@ export class Queries extends Context.Service<
         }
       })
 
+      /* A settled task's kind, by the task and when it settled: it is read from git once, not each time its card is. */
+      const settledKinds = new Map<string, TaskCard['kind']>()
+
+      /** Whether a task has made something on its branch: commits, or changes not committed yet, its evidence aside. */
+      const madeOf = (taskId: string) =>
+        Effect.map(gitOf(taskId, { changed: true, here: false }), (said) => said.commits > 0 || said.files.length > 0).pipe(
+          Effect.orElseSucceed(() => false),
+        )
+
+      /**
+       * The plain tasks that finished and wait to be seen (DEV-96), by id:
+       * their latest run passed, they have no branch (so nothing in git of
+       * their own), no pull request, and no plan ending in one. One stays in
+       * its project's Needs you, but asks nothing of the person, so nothing
+       * counts it: not the tabs, the home, the edge or the Dock.
+       */
+      const finishedPlain = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const rows = yield* sql<{ id: string }>`
+          SELECT k.id FROM tasks k
+          JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
+          JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
+          WHERE k.state = 'open' AND r.state = 'succeeded'
+            AND NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.branched_at IS NOT NULL)
+            AND NOT EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change')
+            AND coalesce((SELECT json_extract(parameters, '$.end') FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted')
+              ORDER BY proposed_at DESC LIMIT 1), '') NOT IN ('draft', 'ready', 'none')`
+        return new Set(rows.map((row) => row.id))
+      })
+
+      /**
+       * What a plain task's lead handed back: the pictures in its latest
+       * report's evidence, and the files it named in what it said since its
+       * latest run began (since it began, without one).
+       */
+      const handedFor = (threadId: string, report: string | null, since: string | null) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const said = yield* sql<{ content: string }>`
+            SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'agent_message'
+              AND created_at >= ${since ?? ''} AND json_array_length(json_extract(content, '$.files')) > 0
+            ORDER BY sequence`
+          return handedOf(
+            parse(report),
+            said.map((message) => parse(message.content)),
+          )
+        })
+
       /** Where a task stands, read from it, its plan, its run and its sessions: what its card and its header show. Its links, where they are read already. */
       const cardFor = (taskId: string, links?: { readonly issue: IssueSummary | null; readonly changes: ReadonlyArray<ChangeSummary> }) =>
         Effect.gen(function* () {
@@ -1274,6 +1355,7 @@ export class Queries extends Context.Service<
             title: string
             slug: string
             state: string
+            settledAt: string | null
             branch: string | null
             planId: string | null
             planState: string | null
@@ -1295,8 +1377,10 @@ export class Queries extends Context.Service<
             answersWait: number
             turnWaits: number
             runPlan: string | null
+            branched: number
           }>`
-            SELECT t.id AS thread_id, k.title, k.slug, k.state, w.branch,
+            SELECT t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, ${sql.unsafe(SHOWN_BRANCH)},
+              EXISTS (SELECT 1 FROM workspaces f WHERE f.task_id = k.id AND f.branched_at IS NOT NULL) AS branched,
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
               r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
@@ -1356,6 +1440,13 @@ export class Queries extends Context.Service<
                   add: after.reduce((sum, one) => sum + one.add, 0),
                   del: after.reduce((sum, one) => sum + one.del, 0),
                 }
+          // Someone else's pull request it reviews (DEV-96); and whether a draft of its review waits for the person.
+          const reviewing = yield* reviewBriefOf(taskId)
+          const [draftWaits] =
+            reviewing === null
+              ? []
+              : yield* sql<{ id: string }>`
+                  SELECT id FROM review_drafts WHERE task_id = ${taskId} AND state IN ('pending', 'failed', 'uncertain') LIMIT 1`
           const phase = ((): TaskPhase => {
             if (task.state === 'abandoned') return 'settled'
             if (task.planState === 'proposed') return task.startsAt === null ? 'held' : 'planned'
@@ -1363,6 +1454,8 @@ export class Queries extends Context.Service<
             // again until its lead is done with the note, and a merged task whose lead works on it again is running.
             if (task.waiting > 0) return 'waiting'
             if (busy || queued || resolving !== undefined) return 'running'
+            // A review has no run: drafted, it is the person's to post, as a change is to accept.
+            if (draftWaits !== undefined && task.state === 'open') return 'ready'
             // Merged, it is settled, unless commits after its pull requests are in none yet.
             if (task.state === 'done') return unshipped === null ? 'settled' : 'ready'
             if (task.runState === 'succeeded') return 'ready'
@@ -1391,12 +1484,25 @@ export class Queries extends Context.Service<
           const leadEffort = task.leadEffort ?? (onPlan ? (implement?.effort ?? null) : null)
           const { issue, changes } = links ?? (yield* linksOf(taskId))
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
+          // What it makes: a branch, a pull request or its plan says so; else git does, by what is on its branch (a review's, which
+          // a branch alone doesn't make a change); for a task that settled, once, as nothing changes it until it opens again.
+          const branched = task.branched === 1
+          const decided = changes.length > 0 || (reviewing === null && (branched || endsInChange(end)))
+          // By its branch too: a round that wrote and was given up settles it again at the same time, a change now.
+          const settledAs = task.state === 'done' || task.state === 'abandoned' ? `${taskId}:${task.settledAt}:${task.branched}` : null
+          const kept = settledAs === null ? undefined : settledKinds.get(settledAs)
+          const kind = kept ?? kindOf({ reviewing, end, changes: changes.length, branched, made: decided ? false : yield* madeOf(taskId) })
+          if (settledAs !== null) settledKinds.set(settledAs, kind)
           return {
             taskId,
             threadId: task.threadId,
             title: task.title,
             slug: task.slug,
             phase,
+            kind,
+            // What a plain task handed back, small on its card while it waits for the person.
+            handed: kind === 'plain' ? yield* handedFor(task.threadId, latest?.content ?? null, task.runAt) : null,
+            reviewing,
             plan:
               task.planId === null
                 ? null
@@ -1461,8 +1567,14 @@ export class Queries extends Context.Service<
           if (settled !== undefined) return [settled]
           const card = yield* cardFor(row.id)
           if (card === undefined) return []
-          // Ready, what merges here is read from git; without a pull request, so is its size: its branch's.
-          const said = card.phase === 'ready' ? yield* gitOf(row.id, { changed: card.change === null, here: true }) : null
+          // Ready, what merges here is read from git; without a pull request, so is its size: its branch's. A change at work
+          // without one shows its branch's size so far.
+          const atWork = (card.phase === 'running' || card.phase === 'stopped') && card.kind === 'change' && card.change === null
+          // A plain task with no branch yet has nothing of its own in git to size.
+          const said =
+            (card.phase === 'ready' || atWork) && card.branch !== null
+              ? yield* gitOf(row.id, { changed: card.change === null, here: card.phase === 'ready' })
+              : null
           const changed =
             said !== null && card.change === null
               ? {
@@ -1603,7 +1715,12 @@ export class Queries extends Context.Service<
             rows,
             (row) =>
               Effect.map(onBoard(row), (read) =>
-                read.flatMap((task) => (ON_HOME.includes(task.phase) ? [{ ...task, projectId: row.projectId }] : [])),
+                read.flatMap((task) =>
+                  // A plain task that finished waits on its board, not here (DEV-96).
+                  ON_HOME.includes(task.phase) && !(task.kind === 'plain' && task.phase === 'ready')
+                    ? [{ ...task, projectId: row.projectId }]
+                    : [],
+                ),
               ),
             { concurrency: AT_ONCE },
           )
@@ -1711,7 +1828,7 @@ export class Queries extends Context.Service<
             projectResolves: number | null
           }>`
             SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.request, k.slug, k.state,
-              k.settled_at, w.branch, w.path AS worktree, w.base_ref, w.base_commit, k.resolve_conflicts,
+              k.settled_at, ${sql.unsafe(SHOWN_BRANCH)}, w.path AS worktree, w.base_ref, w.base_commit, k.resolve_conflicts,
               (SELECT json_extract(r.rules, '$.resolveConflicts') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS project_resolves
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
@@ -1801,6 +1918,7 @@ export class Queries extends Context.Service<
                 task: head.resolveConflicts === null ? null : head.resolveConflicts === 1,
                 project: head.projectResolves === 1,
               },
+              review: yield* reviewBriefOf(head.taskId),
             },
             session,
             attention: attention.map(callOf),
@@ -1878,6 +1996,7 @@ export class Queries extends Context.Service<
                 WHEN 'external_link' THEN (SELECT t.id FROM external_links x
                   JOIN threads t ON t.task_id = x.task_id AND t.kind = 'task' WHERE x.id = c.aggregate_id)
                 WHEN 'issue_draft' THEN (SELECT thread_id FROM issue_drafts WHERE id = c.aggregate_id)
+                WHEN 'review_draft' THEN (SELECT thread_id FROM review_drafts WHERE id = c.aggregate_id)
               END AS thread_id
             FROM change_log c WHERE c.cursor > ${after} ORDER BY c.cursor LIMIT ${limit}`
         })
@@ -1902,6 +2021,13 @@ export class Queries extends Context.Service<
           ),
         thread: (threadId, page) => run(thread(threadId, page)),
         fileDiff: (taskId, path) => run(diffOf(taskId, path)),
+        card: (taskId) =>
+          run(
+            Effect.flatMap(cardFor(taskId), (found) =>
+              found === undefined ? Effect.fail(new NotFound({ kind: 'task', id: taskId })) : Effect.succeed(found),
+            ),
+          ),
+        finished: run(finishedPlain),
         board: (projectId) => run(board(projectId)),
         olderSettled: (projectId, before, taskId) => run(olderSettled(projectId, before, taskId)),
         home: (since) => run(home(since)),

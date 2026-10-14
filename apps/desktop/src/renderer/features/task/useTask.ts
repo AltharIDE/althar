@@ -8,6 +8,7 @@ import {
   type AlwaysScope,
   type FieldAnswer,
   PAGE,
+  type ReviewVerdict,
   type ThreadItem,
   type ThreadSnapshot,
 } from '@althar/contracts'
@@ -135,6 +136,18 @@ export interface TaskModel {
   readonly mergeNote: (url: string) => Promise<string | null>
   /** Stops listening to the task's pull request at this address. */
   readonly stopListening: (url: string) => Promise<void>
+  /** Changes the review a review task's lead drafted: its verdict, summary, or which comments are kept and what they say. */
+  readonly changeReview: (
+    draftId: string,
+    edit: {
+      readonly verdict?: ReviewVerdict
+      readonly summary?: string
+      readonly comments?: ReadonlyArray<{ readonly id: string; readonly kept?: boolean; readonly body?: string }>
+    },
+  ) => Promise<void>
+  /** Posts that review, as it stands; or again, after it wasn't posted. */
+  readonly postReview: (draftId: string) => Promise<void>
+  readonly discardReview: (draftId: string) => Promise<void>
   /** Stops a command its lead left running. */
   readonly stopBackground: (id: string) => Promise<void>
   /** Stops a command another task's lead left running, which keeps a place this task waits for. */
@@ -182,6 +195,17 @@ export const useTask = (threadId: string): TaskModel => {
   useEffect(() => {
     if (taskId !== null && hasChange) client.refreshTask(taskId).catch(() => undefined)
   }, [client, taskId, hasChange])
+
+  // Its screen open, the task is seen, once: a plain task that finished is done then (DEV-96). Seeing it again does nothing more.
+  useEffect(() => {
+    if (taskId !== null) client.seeTask(taskId).catch(() => undefined)
+  }, [client, taskId])
+
+  // And as it becomes ready in front of the person, however quickly it got there: one that finished there has been seen finishing.
+  const phase = snapshot?.task.phase ?? null
+  useEffect(() => {
+    if (phase === 'ready' && taskId !== null && document.visibilityState === 'visible') client.seeTask(taskId).catch(() => undefined)
+  }, [client, taskId, phase])
 
   useEffect(() => () => clearTimeout(timer.current), [])
 
@@ -534,6 +558,9 @@ export const useTask = (threadId: string): TaskModel => {
       return note
     },
     stopListening: (url) => onTask((taskId) => client.stopListening(taskId, url)),
+    changeReview: (draftId, edit) => act(() => client.changeReviewDraft(draftId, edit)),
+    postReview: (draftId) => act(() => client.postReviewDraft(draftId)),
+    discardReview: (draftId) => act(() => client.discardReviewDraft(draftId)),
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),

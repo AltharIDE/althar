@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type { UsageEvent as Said, Took } from '@althar/runtime'
+import type { UsageEvent as Said, Settled, Took } from '@althar/runtime'
 import { PostHog, type PostHogOptions } from 'posthog-node'
 
 import { readPreferences, writePreference } from './preferences'
@@ -47,6 +47,9 @@ export const TOOK = ['under_10m', '10m_to_1h', '1h_to_1d', 'over_1d'] as const s
 /** Each event the runtime says, with a check for each of its properties: one the runtime adds must be named here before it can go. */
 type FromRuntime = { readonly [E in Said as E['name']]: { readonly [P in keyof E['properties']]: Holds } }
 
+/** How a task settled. */
+export const SETTLED = ['merged_here', 'pull_request', 'abandoned', 'reviewed', 'seen'] as const satisfies ReadonlyArray<Settled>
+
 /** What may be sent: each event Althar names, and the properties each may carry. */
 export const USAGE_EVENTS = {
   /** Althar opened. */
@@ -57,10 +60,10 @@ export const USAGE_EVENTS = {
   agent_signed_in: { agent: id, how: oneOf('found', 'signed_in') },
   /** A project was made, of this many repositories. */
   project_made: { repositories: count },
-  /** A task started: as planned, as a mini task the coordinator started at once, or by writing to a lead; its lead's agent and model family. */
-  task_started: { as: oneOf('planned', 'mini', 'direct'), agent: id, family: id },
-  /** A task settled: merged here, as a pull request, or abandoned; how long it took, and in how many steps. */
-  task_settled: { as: oneOf('merged_here', 'pull_request', 'abandoned'), took: oneOf(...TOOK), steps: count },
+  /** A task started: as planned, as a mini task the coordinator started at once, by writing to a lead, or as a review; its lead's agent and model family. */
+  task_started: { as: oneOf('planned', 'mini', 'direct', 'review'), agent: id, family: id },
+  /** A task settled: merged here, as a pull request, abandoned, its review posted, or done on sight; how long it took, and in how many steps. */
+  task_settled: { as: oneOf(...SETTLED), took: oneOf(...TOOK), steps: count },
   /** An ask was answered: a permission, a question or a stuck step, by the person or by the coordinator. */
   ask_answered: { ask: oneOf('permission', 'question', 'stuck'), by: oneOf('person', 'coordinator') },
   /** An agent's account reached its usage limit. */

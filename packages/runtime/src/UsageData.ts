@@ -26,6 +26,9 @@ const GATHER = Duration.millis(500)
 /** How long an account that reached its usage limit is taken as out where the agent gave no reset, so each time it is out is said once. */
 const OUT = Duration.hours(1)
 
+/** How a task settled. */
+export type Settled = 'merged_here' | 'pull_request' | 'abandoned' | 'reviewed' | 'seen'
+
 /** How long a task took, as a bucket. */
 export type Took = 'under_10m' | '10m_to_1h' | '1h_to_1d' | 'over_1d'
 
@@ -34,14 +37,15 @@ export type UsageEvent =
   /** The first project, made where there were none: the first screen's. */
   | { readonly name: 'first_screen_done'; readonly properties: { readonly repositories: number } }
   | { readonly name: 'agent_signed_in'; readonly properties: { readonly agent: string; readonly how: 'found' | 'signed_in' } }
-  /** Planned, as a mini task the coordinator started at once, or by writing to a lead with no plan. */
+  /** Planned, as a mini task the coordinator started at once, by writing to a lead with no plan, or as a review of a pull request. */
   | {
       readonly name: 'task_started'
-      readonly properties: { readonly as: 'planned' | 'mini' | 'direct'; readonly agent: string; readonly family: string }
+      readonly properties: { readonly as: 'planned' | 'mini' | 'direct' | 'review'; readonly agent: string; readonly family: string }
     }
+  /** Merged here, as its first pull request, abandoned, its review posted, or, a plain task, done once the person saw it. */
   | {
       readonly name: 'task_settled'
-      readonly properties: { readonly as: 'merged_here' | 'pull_request' | 'abandoned'; readonly took: Took; readonly steps: number }
+      readonly properties: { readonly as: Settled; readonly took: Took; readonly steps: number }
     }
   | {
       readonly name: 'ask_answered'
@@ -131,10 +135,11 @@ export class UsageData extends Context.Service<
 
       /**
        * A task's settling, how long since it was made and how many steps its
-       * runs took: once, the first way it settled, merged here, its first
-       * pull request or abandoned, until it is reopened.
+       * runs took: once, the first way it settled (merged here, its first
+       * pull request, abandoned, its review posted, done on sight), until it
+       * is reopened.
        */
-      const settled = (as: 'merged_here' | 'pull_request' | 'abandoned', taskId: string, heard: Heard) =>
+      const settled = (as: Settled, taskId: string, heard: Heard) =>
         Effect.map(
           sql<{ createdAt: string; steps: number }>`
             SELECT k.created_at, (SELECT count(*) FROM nodes n JOIN workflow_executions x ON x.id = n.execution_id
@@ -145,7 +150,8 @@ export class UsageData extends Context.Service<
                 AND e.sequence > coalesce((SELECT max(o.sequence) FROM record_events o WHERE o.aggregate_type = 'task'
                   AND o.aggregate_id = k.id AND o.type = 'task.reopened' AND o.sequence < ${heard.sequence}), 0)
                 AND ((e.aggregate_type = 'task' AND e.aggregate_id = k.id
-                    AND (e.type = 'task.abandoned' OR (e.type = 'task.done' AND json_type(e.payload, '$.here') = 'array')))
+                    AND (e.type = 'task.abandoned' OR (e.type = 'task.done' AND (json_type(e.payload, '$.here') = 'array'
+                      OR json_type(e.payload, '$.reviewed') = 'text' OR json_extract(e.payload, '$.seen') = 1))))
                   OR (e.type = 'external_link.change_opened' AND x.task_id = k.id)))`,
           (tasks) =>
             tasks.map(
@@ -202,30 +208,50 @@ export class UsageData extends Context.Service<
               )
             }
             case 'turn_delivery.delivered': {
-              // What the person wrote reached a lead on a task's own thread, before any run, for the first time: they started the
-              // task by writing to it. Picking an agent alone starts a session, and says nothing.
-              const sessions = yield* sql<{ agentId: string; model: string | null }>`
-                SELECT s.agent_id, d.model FROM turn_deliveries d
+              // What was written reached a lead on a task's own thread, before any run, for the first time: the person started the
+              // task by writing to it, or the lead of a review was told to start. Picking an agent alone starts a session, and says
+              // nothing.
+              const sessions = yield* sql<{ agentId: string; model: string | null; review: number; person: number }>`
+                SELECT s.agent_id, d.model,
+                  EXISTS (SELECT 1 FROM record_events c WHERE c.aggregate_type = 'task' AND c.aggregate_id = t.task_id
+                    AND c.type = 'task.created' AND json_extract(c.payload, '$.reviews') IS NOT NULL) AS review,
+                  EXISTS (SELECT 1 FROM turn_delivery_inputs i JOIN user_inputs u ON u.id = i.user_input_id
+                    WHERE i.delivery_id = d.id AND u.author_actor_id = ${instance.personId}) AS person
+                FROM turn_deliveries d
                 JOIN threads t ON t.id = d.thread_id AND t.kind = 'task'
                 JOIN provider_sessions s ON s.id = d.provider_session_id
                 WHERE d.id = ${heard.aggregateId} AND NOT EXISTS (SELECT 1 FROM runs WHERE task_id = t.task_id)
                   AND EXISTS (SELECT 1 FROM turn_delivery_inputs i JOIN user_inputs u ON u.id = i.user_input_id
-                    WHERE i.delivery_id = d.id AND u.author_actor_id = ${instance.personId})
+                    WHERE i.delivery_id = d.id AND u.author_actor_id IN (${instance.personId}, ${instance.coordinatorId}))
                   AND NOT EXISTS (SELECT 1 FROM record_events e JOIN turn_deliveries o ON o.id = e.aggregate_id
                     JOIN turn_delivery_inputs oi ON oi.delivery_id = o.id JOIN user_inputs ou ON ou.id = oi.user_input_id
-                    WHERE e.type = 'turn_delivery.delivered' AND o.thread_id = d.thread_id AND ou.author_actor_id = ${instance.personId}
-                      AND e.sequence < ${heard.sequence})`
-              return sessions.map(
-                (session) =>
-                  ({
-                    name: 'task_started',
-                    properties: { as: 'direct', agent: session.agentId, family: familyOf(session.model) },
-                  }) as const,
+                    WHERE e.type = 'turn_delivery.delivered' AND o.thread_id = d.thread_id
+                      AND ou.author_actor_id IN (${instance.personId}, ${instance.coordinatorId}) AND e.sequence < ${heard.sequence})`
+              return sessions.flatMap((session) =>
+                session.review === 1 || session.person === 1
+                  ? [
+                      {
+                        name: 'task_started',
+                        properties: {
+                          as: session.review === 1 ? 'review' : 'direct',
+                          agent: session.agentId,
+                          family: familyOf(session.model),
+                        },
+                      } as const,
+                    ]
+                  : [],
               )
             }
             case 'task.done':
-              // Merged here; one whose pull request merged on its host settled as that pull request when it opened.
-              return Array.isArray(payload.here) ? yield* settled('merged_here', heard.aggregateId, heard) : []
+              // Merged here, its review posted, or done on sight; one whose pull request merged on its host settled as that pull
+              // request when it opened, and one a round left as it was (`back`) had settled already.
+              return Array.isArray(payload.here)
+                ? yield* settled('merged_here', heard.aggregateId, heard)
+                : typeof payload.reviewed === 'string'
+                  ? yield* settled('reviewed', heard.aggregateId, heard)
+                  : payload.seen === true
+                    ? yield* settled('seen', heard.aggregateId, heard)
+                    : []
             case 'task.abandoned':
               return yield* settled('abandoned', heard.aggregateId, heard)
             case 'external_link.change_opened': {

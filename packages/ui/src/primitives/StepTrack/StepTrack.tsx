@@ -8,8 +8,8 @@ import s from './StepTrack.module.css'
  * A task's steps as a row of bars: done in ink, the one it is on in the
  * task's colour, the rest to come. A step that finishes fills with ink from
  * its start. Where the task stands colours the step it
- * is on: cobalt while it runs, violet when it waits on you, still when it is
- * paused or stopped. With labels the step names sit under the bars; without,
+ * is on: cobalt while it runs, a still bar with a faint sheen gliding over it
+ * slowly; violet when it waits on you; still when it is paused or stopped. With labels the step names sit under the bars; without,
  * they are read out but not shown.
  */
 

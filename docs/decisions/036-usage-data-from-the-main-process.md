@@ -1,4 +1,4 @@
-# ADR-035: Anonymous usage data goes from the main process, named events only
+# ADR-036: Anonymous usage data goes from the main process, named events only
 
 - **Status:** Accepted
 - **Date:** 2026-10-12
@@ -33,8 +33,9 @@
     way each fact was recorded, from where the record stood as the launch
     began; no workflow sends usage data itself. Sign-ins aren't recorded, so
     `SignIns` says when an agent is found signed in, once a launch, or signs
-    in again. The utility process hands each event to the main process, as
-    it does nudges.
+    in again. A task starts as planned, as a mini task, as a review, or when
+    the person's first words reach its lead. The utility process hands each
+    event to the main process, as it does nudges.
   - **A switch the person sees before anything is sent.** "Usage data" is
     an app preference (`usageData`), on by default, shown under the
     repositories on the first screen with one line on what it sends and
@@ -79,7 +80,8 @@
     shutdown, and keeping where it was read across a restart, cost more
     than an event now and then.
   - **A task settles once**, the first way it does (merged here, its first
-    pull request, or abandoned), until it is reopened; one abandoned after
+    pull request, abandoned, a review's review posted, or a plain task done
+    once the person saw it, ADR-035), until it is reopened; one abandoned after
     its pull request opened isn't said again. A finished task that goes back
     to work (ADR-034) is reopened: its round is no new start, and shipping
     it again settles it again.

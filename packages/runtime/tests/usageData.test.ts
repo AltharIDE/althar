@@ -171,6 +171,45 @@ describe('usage data', () => {
     }).pipe(Effect.provide(withUsage())),
   )
 
+  it.live('says a review started when its lead is told to start, by the coordinator', () =>
+    Effect.gen(function* () {
+      const { events, stop } = yield* heard
+      const project = yield* opened()
+      const projects = yield* Projects
+      const instance = yield* Instance
+      const task = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Review the retry',
+      })
+      // A review is made reviewing a pull request, and its lead is told to start by whoever started it.
+      yield* fact({
+        projectId: project.projectId as ProjectId,
+        aggregateType: 'task',
+        aggregateId: task.taskId,
+        revision: 1,
+        type: 'task.created',
+        payload: { reviews: 'https://github.test/meridian/pull/7' },
+        actorId: instance.coordinatorId,
+      })
+      const sessions = yield* Sessions
+      const body = 'Review the pull request, then draft your review with draft_review.'
+      yield* sessions.send({
+        envelope: yield* Runtime.envelope('thread.send', { threadId: task.threadId, body }, undefined, instance.coordinatorId),
+        threadId: task.threadId,
+        body,
+        disposition: 'after_current',
+      })
+      yield* sessions.start({ threadId: task.threadId, agentId: 'codex', model: 'large' })
+      yield* awaiting(events, (seen) => named(seen, 'task_started').length === 1)
+      yield* Effect.sleep(Duration.millis(800))
+      assert.deepStrictEqual(named(events, 'task_started'), [
+        { name: 'task_started', properties: { as: 'review', agent: 'codex', family: 'other' } },
+      ])
+      yield* stop
+    }).pipe(Effect.provide(withUsage())),
+  )
+
   it.live('says a task settled when it merged here, and when its first pull request opened, but not again for another', () =>
     Effect.gen(function* () {
       const { events, stop } = yield* heard
@@ -229,6 +268,13 @@ describe('usage data', () => {
       yield* tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: host.taskId })
       yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: host.taskId })
       yield* awaiting(events, (seen) => named(seen, 'task_settled').length >= 3)
+      // A review posted, and a plain task done once the person saw it; a round that left a task as it was says nothing.
+      const done = (taskId: string, payload: unknown) =>
+        fact({ projectId, aggregateType: 'task', aggregateId: taskId, revision: 3, type: 'task.done', payload, actorId: instance.personId })
+      yield* done((yield* make('Review the retry')).taskId, { reviewed: 'https://github.test/meridian/pull/7' })
+      yield* done((yield* make('Why is checkout slow?')).taskId, { seen: true })
+      yield* done(here.taskId, { round: 'run_x', back: true })
+      yield* awaiting(events, (seen) => named(seen, 'task_settled').length >= 5)
       yield* Effect.sleep(Duration.millis(800))
       assert.deepStrictEqual(
         named(events, 'task_settled').map((event) => event.properties),
@@ -236,6 +282,8 @@ describe('usage data', () => {
           { as: 'merged_here', took: 'under_10m', steps: 0 },
           { as: 'pull_request', took: 'under_10m', steps: 0 },
           { as: 'abandoned', took: 'under_10m', steps: 0 },
+          { as: 'reviewed', took: 'under_10m', steps: 0 },
+          { as: 'seen', took: 'under_10m', steps: 0 },
         ],
       )
       assert.notInclude(JSON.stringify(events), 'github.test')

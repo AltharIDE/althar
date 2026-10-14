@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -19,7 +19,9 @@ import { GitFailed } from './errors'
  * there the git directory and work tree are named outright, and the child is
  * given the app home as a known-existing cwd. Inheriting the app's cwd is not
  * safe: it may itself be a document-portal path whose grant has gone away.
- * Everywhere else the process starts in the folder, as it always has.
+ * Everywhere else the process starts in the folder, as it always has. In a
+ * copy made to read someone else's code (`addReadCopy`), they run without
+ * the person's config or the system's.
  */
 
 /** Where a picked folder is inside a Flatpak: the document portal's FUSE mount, where a cwd makes getcwd fail. */
@@ -35,6 +37,31 @@ export const gitIn = (cwd: string, args: ReadonlyArray<string>): { readonly args
   cwd === PORTAL || cwd.startsWith(`${PORTAL}/`)
     ? { args: ['--git-dir', join(cwd, '.git'), '--work-tree', cwd, ...args], cwd: homedir() }
     : { args, cwd }
+
+/** What marks a copy made to read someone else's code, in its git folder (`addReadCopy`). */
+const READ_COPY = 'althar-read-copy'
+
+/** Whether a folder is a copy Althar made to read someone else's code: its git folder says so. */
+export const isReadCopy = (cwd: string) => existsSync(join(cwd, '.git', READ_COPY))
+
+/**
+ * The environment git runs with in `cwd`: never prompting, in English, with
+ * `env` over it. In a copy made to read someone else's code, with no config
+ * but the copy's own: not the person's, not the system's, nor any the
+ * environment carries (`GIT_CONFIG_*`).
+ */
+const environmentIn = (cwd: string, env: Readonly<Record<string, string>>): NodeJS.ProcessEnv => ({
+  ...(isReadCopy(cwd)
+    ? {
+        ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_CONFIG'))),
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+      }
+    : process.env),
+  GIT_TERMINAL_PROMPT: '0',
+  LC_ALL: 'C',
+  ...env,
+})
 
 export const git = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> => gitWithin(60_000, cwd, ...args)
 
@@ -56,7 +83,7 @@ export const gitOutcome = (
         ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
         timeout: 60_000,
         maxBuffer: 16 * 1024 * 1024,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+        env: environmentIn(cwd, {}),
       },
       (error, stdout) =>
         resume(Effect.succeed({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 128, stdout: stdout.trim() })),
@@ -85,7 +112,7 @@ const run = (
         ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
         timeout,
         maxBuffer: 16 * 1024 * 1024,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...env },
+        env: environmentIn(cwd, env),
       },
       (error, stdout, stderr) =>
         resume(
@@ -238,6 +265,26 @@ export const fetchInto = (cwd: string, target: { readonly url: string; readonly 
     Effect.orElseSucceed(() => null),
   )
 
+/**
+ * Fetches refs from a remote by URL into refs here, as a push is signed in,
+ * each `from` into its `into`, forced: whether git could. Tags aren't
+ * fetched, and nothing is written to FETCH_HEAD.
+ */
+export const fetchRefs = (
+  cwd: string,
+  target: { readonly url: string; readonly header: string | null },
+  refs: ReadonlyArray<{ readonly from: string; readonly into: string }>,
+) =>
+  run(
+    120_000,
+    cwd,
+    ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', target.url, ...refs.map((ref) => `+${ref.from}:${ref.into}`)],
+    signedIn(target),
+  ).pipe(
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
+  )
+
 /** The top of the repository a path is in. */
 export const topLevel = (path: string) => git(path, 'rev-parse', '--show-toplevel')
 
@@ -371,9 +418,50 @@ export const namedRemotes = (cwd: string, which: 'fetch' | 'push' = 'fetch') =>
 export const addWorktree = (repository: string, path: string, branch: string, base: string) =>
   git(repository, 'worktree', 'add', '-b', branch, path, base)
 
+/** Adds a worktree with no branch, detached at a commit: a plain task's, until its lead first changes the repository. */
+export const addDetachedWorktree = (repository: string, path: string, commit: string) =>
+  git(repository, 'worktree', 'add', '--detach', path, commit)
+
 /** Puts back a worktree whose folder is gone, on the branch it had: git forgets the missing one first. */
 export const restoreWorktree = (repository: string, path: string, branch: string) =>
   Effect.andThen(git(repository, 'worktree', 'prune'), git(repository, 'worktree', 'add', path, branch))
+
+/** Puts back a worktree whose folder is gone that never had a branch, detached where it started. */
+export const restoreDetachedWorktree = (repository: string, path: string, commit: string) =>
+  Effect.andThen(git(repository, 'worktree', 'prune'), addDetachedWorktree(repository, path, commit))
+
+/**
+ * Makes a copy to read someone else's code in a new folder, `path`, checked
+ * out detached at `commit`, with `refs` of its own: a repository of its own
+ * that borrows the person's repository's objects (`objects/info/alternates`),
+ * never a worktree of it, so none of its config applies. It is marked a copy
+ * before git first runs in it, and git runs there without the person's
+ * config or the system's (`isReadCopy`): no filter, diff or merge driver is
+ * defined, so none that the code's `.gitattributes` chooses runs, as checking
+ * it out, reading its status or its diff would otherwise run it, in the copy,
+ * where a program it starts finds the code's own modules first. A copy git
+ * couldn't finish is removed.
+ */
+export const addReadCopy = (repository: string, path: string, commit: string, refs: Readonly<Record<string, string>> = {}) =>
+  Effect.gen(function* () {
+    if (existsSync(path)) return yield* new GitFailed({ args: ['init'], cwd: path, stderr: 'The copy’s folder is taken.' })
+    const objects = resolve(repository, yield* git(repository, 'rev-parse', '--git-path', 'objects'))
+    const write = (file: string, text: string) =>
+      Effect.try({
+        try: () => {
+          mkdirSync(dirname(file), { recursive: true })
+          writeFileSync(file, text)
+        },
+        catch: (error) => new GitFailed({ args: ['init'], cwd: path, stderr: String(error) }),
+      })
+    return yield* Effect.gen(function* () {
+      yield* write(join(path, '.git', READ_COPY), '')
+      yield* git(path, 'init', '--quiet', ...(commit.length === 64 ? ['--object-format=sha256'] : []))
+      yield* write(join(path, '.git', 'objects', 'info', 'alternates'), `${objects}\n`)
+      for (const [ref, at] of Object.entries(refs)) yield* git(path, 'update-ref', ref, at)
+      yield* git(path, 'checkout', '--quiet', '--detach', commit)
+    }).pipe(Effect.tapError(() => Effect.sync(() => rmSync(path, { recursive: true, force: true }))))
+  })
 
 /** The files the worktree hasn't committed, changed, new or deleted, ignored files aside; by path, sorted. */
 export const uncommittedFiles = (cwd: string) =>

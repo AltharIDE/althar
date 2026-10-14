@@ -11,7 +11,7 @@ import { repository } from '../tests/repository'
 import { launch, startTask } from './support'
 
 /*
- * Anonymous usage data (ADR-035), from the app as someone uses it: what the
+ * Anonymous usage data (ADR-036), from the app as someone uses it: what the
  * runtime says happened reaches PostHog from the main process, named events
  * only, while the switch is on; once it is off, nothing leaves. PostHog here
  * is a server on this computer (ALTHAR_FAKE_POSTHOG), which keeps every

@@ -19,6 +19,7 @@ import {
   type ConnectionList,
   type ConnectionSummary,
   type FoundServer,
+  type FoundTasks,
   type CoordinatorSnapshot,
   type DocumentText,
   type DomMessagePort,
@@ -35,6 +36,7 @@ import {
   type ProjectRepository,
   type ProjectSummary,
   type RepositoryRole,
+  type ReviewVerdict,
   type PlanStep,
   type Service,
   type SignInStart,
@@ -93,6 +95,8 @@ export interface Client {
     },
   ) => Promise<ProjectSummary>
   readonly listTasks: (projectId: string) => Promise<TaskList>
+  /** Tasks found by what they were about, best first: in one project, or every one; with no words, the ones changed last. */
+  readonly searchTasks: (input: { readonly projectId?: string; readonly text: string; readonly limit?: number }) => Promise<FoundTasks>
   readonly createTask: (input: {
     readonly projectId: string
     readonly title: string
@@ -120,6 +124,8 @@ export interface Client {
   readonly getHome: (since?: string) => Promise<HomeSnapshot>
   /** The person left the home: what the loop does from now on is new to them. */
   readonly leftHome: () => Promise<void>
+  /** The person opened a task's screen: a plain task that finished is done once seen. */
+  readonly seeTask: (taskId: string) => Promise<void>
   readonly startSession: (input: Start) => Promise<string>
   /** Hands the thread to another agent; with `body`, what the person said, and any images, its first turn after the brief. */
   readonly switchAgent: (input: Start & { readonly body?: string; readonly images?: ReadonlyArray<SentImage> }) => Promise<string>
@@ -138,6 +144,8 @@ export interface Client {
   readonly setCoAuthor: (on: boolean) => Promise<void>
   /** How many agents work at once on this machine: the person's number, or null for the default again. */
   readonly setAgentsAtOnce: (count: number | null) => Promise<void>
+  /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
+  readonly setPostTeamReviews: (on: boolean) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
   /** Stops a task: every agent on it, and the step it was on waits until it is resumed. */
   readonly stopTask: (taskId: string) => Promise<void>
@@ -202,6 +210,18 @@ export interface Client {
   /** Files an issue the coordinator drafted, or one that wasn't filed, again: its card says how it went. */
   readonly fileIssueDraft: (draftId: string) => Promise<void>
   readonly discardIssueDraft: (draftId: string) => Promise<void>
+  /** Changes a review the lead drafted, before it is posted: its verdict, its summary, which comments are kept and what they say. */
+  readonly changeReviewDraft: (
+    draftId: string,
+    edit: {
+      readonly verdict?: ReviewVerdict
+      readonly summary?: string
+      readonly comments?: ReadonlyArray<{ readonly id: string; readonly kept?: boolean; readonly body?: string }>
+    },
+  ) => Promise<void>
+  /** Posts a review the lead drafted, or one that wasn't posted, again: its card says how it went. */
+  readonly postReviewDraft: (draftId: string) => Promise<void>
+  readonly discardReviewDraft: (draftId: string) => Promise<void>
   /** The connections on this Mac, and the code hosts and trackers a person can connect. */
   readonly listConnections: () => Promise<ConnectionList>
   /** Starts a service's own sign-in. */
@@ -418,6 +438,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
         }),
       ),
     listTasks: (projectId) => settle(api.ListTasks({ projectId })),
+    searchTasks: (input) => settle(api.SearchTasks(input)),
     createTask: (input) => command((commandId) => api.CreateTask({ commandId, ...input })),
     getThread: (threadId, page = {}) => settle(api.GetThread({ threadId, ...page })),
     getThreadItem: (threadId, itemId) => settle(api.GetThreadItem({ threadId, itemId })),
@@ -428,6 +449,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     getOlderSettled: (projectId, before, taskId) => settle(api.GetOlderSettled({ projectId, before, taskId })).then((older) => older.tasks),
     getHome: (since) => settle(api.GetHome(since === undefined ? {} : { since })),
     leftHome: () => command((commandId) => api.LeftHome({ commandId })),
+    seeTask: (taskId) => command((commandId) => api.SeeTask({ commandId, taskId })),
     startSession: (input) => command((commandId) => api.StartSession({ commandId, ...input })),
     switchAgent: (input) => command((commandId) => api.SwitchAgent({ commandId, ...input })),
     setModel: (input) => command((commandId) => api.SetModel({ commandId, ...input })),
@@ -437,6 +459,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setModelBlocked: (input) => command((commandId) => api.SetModelBlocked({ commandId, ...input })),
     getSettings: () => settle(api.GetSettings({})),
     setCoAuthor: (on) => command((commandId) => api.SetCoAuthor({ commandId, on })),
+    setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
@@ -458,6 +481,9 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     changeIssueDraft: (draftId, edit) => command((commandId) => api.ChangeIssueDraft({ commandId, draftId, ...edit })),
     fileIssueDraft: (draftId) => command((commandId) => api.FileIssueDraft({ commandId, draftId })),
     discardIssueDraft: (draftId) => command((commandId) => api.DiscardIssueDraft({ commandId, draftId })),
+    changeReviewDraft: (draftId, edit) => command((commandId) => api.ChangeReviewDraft({ commandId, draftId, ...edit })),
+    postReviewDraft: (draftId) => command((commandId) => api.PostReviewDraft({ commandId, draftId })),
+    discardReviewDraft: (draftId) => command((commandId) => api.DiscardReviewDraft({ commandId, draftId })),
     listConnections: () => settle(api.ListConnections()),
     startSignIn: (product, webUrl, connectionId) =>
       command((commandId) =>
