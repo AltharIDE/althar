@@ -231,6 +231,20 @@ const typing = (event: KeyboardEvent) => {
   )
 }
 
+/**
+ * The face a task opens on. A call waiting on the person is answered in the
+ * conversation, whatever the task is. Otherwise a change that is ready, or
+ * merged here with its remote still to have it, opens on what it made: there
+ * is something there to accept. Any other task (a quick one, a prototype, a
+ * review) has nothing to accept in its outputs, so it opens on its
+ * conversation, where its lead's last word, its links and its questions are.
+ */
+export const openingFace = (snapshot: ThreadSnapshot): Face => {
+  const { task } = snapshot
+  if (snapshot.attention.length > 0 || (task.kind !== undefined && task.kind !== 'change')) return 'talk'
+  return (task.phase === 'ready' && hasOutputs(snapshot)) || task.merged.some((one) => one.ahead > 0) ? 'out' : 'talk'
+}
+
 const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', efforts: [] }
 
 /** The task's own say on its lead resolving conflicts, as its menu offers it: none goes by the project. */
@@ -275,18 +289,11 @@ export function TaskView({
   const [renaming, setRenaming] = useState(false)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
   const [face, setFace] = useState<Face | null>(null)
-  // Ready, or merged here with its remote still to have it, it opens on what it made: there is something there to do.
-  // An agent's question waiting comes first: it opens on the conversation, where it is answered.
+  // An agent's question waiting is kept to answer it here, whatever else the task is.
   const [asking, setAsking] = useState<string | null | undefined>(undefined)
   if (face === null && model.snapshot !== null) {
-    const question = model.snapshot.attention.find((call) => call.kind === 'question')
-    setAsking(question?.id ?? null)
-    setFace(
-      question === undefined &&
-        ((model.snapshot.task.phase === 'ready' && hasOutputs(model.snapshot)) || model.snapshot.task.merged.some((one) => one.ahead > 0))
-        ? 'out'
-        : 'talk',
-    )
+    setAsking(model.snapshot.attention.find((call) => call.kind === 'question')?.id ?? null)
+    setFace(openingFace(model.snapshot))
   }
   const named = useModelNames()
   const editors = useEditors(model.snapshot?.task.id ?? '')

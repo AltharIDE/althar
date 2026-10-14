@@ -1889,6 +1889,7 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               baseRef: head.baseRef,
               phase: card?.phase ?? null,
+              kind: card?.kind,
               handedBack: card?.handedBack ?? null,
               waits: card?.waits ?? null,
               queued: card?.queued ?? null,
