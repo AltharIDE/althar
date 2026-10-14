@@ -8,7 +8,7 @@ import { BoardView, trackOf } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
 import { pictureUrl } from '../src/main/pictureAddress'
 import { clock, running } from '../src/renderer/shared/time'
-import { inYoursOf, lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
+import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
 import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
 import { useBoard } from '../src/renderer/features/board/useBoard'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
@@ -176,7 +176,7 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
-  it('shows a plain task that finished in Needs you, but counts it nowhere and opens it from nothing else', () => {
+  it('keeps a plain task that finished out of Needs you, since it asks nothing, and waits for it above what settled', () => {
     const lanes = lanesOf(
       board({
         tasks: [
@@ -186,8 +186,8 @@ describe('the board’s lanes', () => {
         calls: [],
       }),
     )
-    expect(lanes.ready.map((work) => work.taskId)).toEqual(['p1', 't4'])
-    expect(inYoursOf(lanes)).toBe(2)
+    expect(lanes.ready.map((work) => work.taskId)).toEqual(['t4'])
+    expect(lanes.finished.map((work) => work.taskId)).toEqual(['p1'])
     expect(yoursOf(lanes)).toBe(1)
     expect(needsOf(lanes, () => '', vi.fn()).map((need) => need.title)).toEqual(['Rate-limit refunds'])
     expect(firstNeedOf(lanes)).toBe('th4')

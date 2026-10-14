@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import type { HomeCall, HomeTask } from '@althar/contracts'
 import { Button, type EdgeWork, NeedLine, type ProjectRef } from '@althar/ui'
 
-import { callKindOf, isFinished, kindWords, readyKindOf, whereOf } from '../../shared/calls'
+import { callKindOf, isUnshipped, kindWords, readyKindOf, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
 import { text as stuckText } from '../task/StuckCall'
@@ -37,6 +37,11 @@ export const needText = {
   answer: 'Answer',
   /** A change on its branch alone, by its size. */
   onBranch: 'On its branch',
+  /** Commits after its last pull request, in none yet, and how big they are. */
+  inNone: (commits: number, add: number, del: number) =>
+    `${commits === 1 ? '1 commit' : `${commits} commits`} in no pull request · +${add} −${del}`,
+  /** Commits on its branch that its open pull request doesn't have yet, for the person to push. */
+  toPush: (n: number) => (n === 1 ? '1 commit to push' : `${n} commits to push`),
   branchSize: (files: number, add: number, del: number) => `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
   /** A change ready to accept, in a line: where, its checks, how big. */
   checks: {
@@ -112,6 +117,9 @@ export const briefOf = (task: HomeTask): string => {
       needText.findings(reviewing.findings),
     ].join(' · ')
   const change = task.change
+  // Commits after its last pull request merged or closed: a new one is the person's to open.
+  const after = task.unshipped
+  if (after != null && isUnshipped(task)) return needText.inNone(after.commits, after.add, after.del)
   if (change === null)
     return task.changed === null ? needText.onBranch : needText.branchSize(task.changed.files, task.changed.add, task.changed.del)
   const checks = change.checks
@@ -129,6 +137,7 @@ export const briefOf = (task: HomeTask): string => {
     `${change.repository.slice(change.repository.lastIndexOf('/') + 1)} ${change.prefix}${change.number}`,
     said,
     change.additions === null || change.deletions === null ? null : `+${change.additions} −${change.deletions}`,
+    change.state === 'open' && change.localHead !== null && change.unpushed > 0 ? needText.toPush(change.unpushed) : null,
   ]
   return parts.filter((part) => part !== null).join(' · ')
 }
@@ -207,8 +216,8 @@ export const needsOf = ({
   }),
   ...ready.flatMap((task): ReadonlyArray<Need> => {
     const project = refs.get(task.projectId)
-    // A plain task that finished waits on its board, not here.
-    return project === undefined || isFinished(task)
+    // `ready` is the tasks that wait on the person (`readyOf`): a plain task that finished waits on its board, not here.
+    return project === undefined
       ? []
       : [
           {

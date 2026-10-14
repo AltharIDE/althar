@@ -55,8 +55,6 @@ export const text = {
   step: { implement: 'Implement', review: 'Review' } satisfies Record<PlanStep['key'], string>,
   /** A round of work after its plan, in place of Implement, as the person asked its lead for more. */
   followUp: 'Follow-up',
-  /** Ready with commits after its last pull request, in none yet: a new one is the person's to open. */
-  unshipped: 'Ready for a new pull request',
   conversation: 'Conversation',
   status: {
     [TaskStatus.Running]: 'Running',
@@ -342,7 +340,8 @@ export const readyCardOf = (work: BoardTask): Card => {
       return {
         ...base,
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet.
-        word: work.handedBack != null ? text.mergeConflict : change === null && work.unshipped != null ? text.unshipped : kindWords.ready,
+        word:
+          work.handedBack != null ? text.mergeConflict : change === null && work.unshipped != null ? kindWords.unshipped : kindWords.ready,
         ...(object === null ? {} : { object }),
         ...(work.handedBack != null
           ? {
@@ -434,7 +433,11 @@ export function BoardView({
         ))}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Settled} count={lanes.settledTotal}>
+      <BoardColumn lane={BoardLane.Settled} count={lanes.settledTotal + lanes.finished.length}>
+        {/* A plain task that finished asks nothing of the person, so it waits here, above what is done, until they open it. */}
+        {lanes.finished.map((work) => (
+          <BoardCard key={work.taskId} {...readyCardOf(work)} onOpen={() => onOpen(work.threadId)} />
+        ))}
         <BoardList>
           {lanes.settled.map((work) => {
             const change = work.change
