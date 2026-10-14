@@ -620,6 +620,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                 )
               }
             }),
+          { interruptible: true },
         )
         const sessionId = started.sessionId
         const current = yield* Ref.make(normalizeOptions(started.configOptions))
