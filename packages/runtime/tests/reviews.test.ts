@@ -1146,6 +1146,15 @@ describe('reviewing someone else’s pull request', () => {
       // Nothing a plain task's worktree is given: no scratch folder, no setup.
       assert.isFalse(existsSync(join(copy, '.althar')))
       assert.strictEqual(git(copy, 'status', '--porcelain'), '')
+      // With no head kept for it, it isn't put back at all.
+      yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task?.id ?? '' })
+      rmSync(copy, { recursive: true, force: true })
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE external_links SET snapshot = '{}' WHERE task_id = ${task?.id ?? ''}`
+      const refused = yield* Effect.flip(tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: task?.id ?? '' }))
+      assert.strictEqual(tagOf(refused), 'TaskRefused')
+      assert.isFalse(existsSync(copy))
+      assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'abandoned')
     }).pipe(Effect.provide(withQueries(github)))
   })
 

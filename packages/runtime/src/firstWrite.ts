@@ -98,7 +98,6 @@ const changing = (taskId: string) =>
 /** Worktrees' repositories by the names the person knows them by, the project's first first. */
 const repositoriesOf = (ids: ReadonlyArray<string>) =>
   Effect.gen(function* () {
-    if (ids.length === 0) return ''
     const sql = yield* SqlClient.SqlClient
     const names = yield* sql<{ name: string }>`
       SELECT b.display_name AS name FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id

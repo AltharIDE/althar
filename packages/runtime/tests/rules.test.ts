@@ -657,6 +657,7 @@ describe('a role that only reads', () => {
         "printf '%-10s|%5.2s|%%|%b|%q|%c\\n' a b c d e",
         "printf -- '-v %s' x",
         'printf -',
+        'printf',
         'test -f package.json && cat package.json',
         '[ -d src ]',
         'echo $HOME ${HOME}',
