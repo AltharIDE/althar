@@ -163,14 +163,26 @@ export const PLAIN_FILES: Card = {
   object: <FileChips files={[{ path: 'docs/releases/partners/release-notes-0.4.md', add: 64 }]} />,
 }
 
-/** Waiting for a free agent: still, and it starts on its own. */
+/** Waiting for a free agent before any work: nothing has run, so there is no track, branch or clock. It starts on its own. */
 export const CHANGE_QUEUED: Card = {
   status: TaskStatus.Queued,
   word: 'Waiting',
   kind: TaskKind.Change,
-  at: '2m',
+  at: '',
   title: 'Extract rate-limit policy into a shared module',
-  track: trackOf(['Implement', 'Review'], 0),
+  why: '4 of 4 tasks at work on this Mac',
+}
+
+/** Waiting for a free agent after real work: the step done and the branch with its diff stay; the step it waits for stands still and empty. */
+export const CHANGE_QUEUED_MIDWAY: Card = {
+  status: TaskStatus.Queued,
+  word: 'Waiting',
+  kind: TaskKind.Change,
+  at: '31m',
+  title: 'Extract rate-limit policy into a shared module',
+  why: '4 of 4 tasks at work on this Mac',
+  track: trackOf(['Implement', 'Review'], 1),
+  object: <BranchChip name="meridian/extract-rate-limit-policy" add={212} del={48} />,
 }
 
 export const CHANGE_STOPPED: Card = {
@@ -211,6 +223,7 @@ export const KIND_CARDS: ReadonlyArray<{ readonly id: string; readonly card: Car
   { id: 'plain, a picture being made', card: PLAIN_PICTURES_MAKING },
   { id: 'plain, its files', card: PLAIN_FILES },
   { id: 'waiting for an agent', card: CHANGE_QUEUED },
+  { id: 'waiting for an agent, midway', card: CHANGE_QUEUED_MIDWAY },
   { id: 'paused', card: CHANGE_PAUSED },
   { id: 'stopped', card: CHANGE_STOPPED },
 ]

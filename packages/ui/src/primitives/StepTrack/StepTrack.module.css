@@ -87,6 +87,18 @@
 .track[data-status='you'] .now .name {
   color: var(--signal);
 }
+/* waiting for a free agent: the step has not started, so its bar is empty and still */
+.track[data-status='queued'] .now i::after {
+  content: none;
+}
+.track[data-status='queued'] .now i {
+  background-color: transparent;
+  box-shadow: inset 0 0 0 1px var(--t-3);
+}
+.track[data-status='queued'] .now .name {
+  color: var(--t-2);
+  font-weight: inherit;
+}
 /* paused for a usage limit, or stopped by you: nothing moves */
 .track:is([data-status='paused'], [data-status='stopped']) .now i::after {
   content: none;

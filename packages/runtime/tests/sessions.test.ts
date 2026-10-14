@@ -4,11 +4,12 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect, Layer, Option } from 'effect'
+import { Effect, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { AlreadyDelivered, AttentionClosed, NoSession, NotFound, SessionFailed, SessionRunning } from '../src/errors'
 import { Instance } from '../src/Instance'
+import { Live } from '../src/Live'
 import { Permissions } from '../src/Permissions'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
@@ -157,6 +158,29 @@ describe('sessions', () => {
         `echo: ${promptFor([{ body: 'use the retry helper', disposition: 'interrupt_and_continue' }], undefined)}`,
       )
     }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('stops a turn that is stopped as soon as it is said to have started', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const live = yield* Live
+        const { task: created } = yield* task()
+        yield* begin(created.threadId, 'codex')
+        // Stopped the moment it is said to have started, as a spent budget of turns does: it is said once the agent can be stopped.
+        const events = yield* live.subscribe
+        yield* Effect.forkScoped(
+          Stream.runForEach(events, (event) =>
+            event._tag === 'TurnStarted' && event.threadId === created.threadId
+              ? Effect.asVoid(Effect.forkScoped(Effect.ignore(sessions.interrupt(created.threadId))))
+              : Effect.void,
+          ),
+        )
+        yield* say(created.threadId, scenarios.slow)
+        const [turn] = yield* ended(created.threadId, 1)
+        assert.deepStrictEqual([turn?.state, turn?.stopReason], ['interrupted', 'cancelled'])
+      }),
+    ).pipe(Effect.provide(runtime())),
   )
 
   it.live('takes back a message waiting its turn, so the agent never reads it, and keeps one the agent has', () =>
@@ -349,6 +373,23 @@ describe('sessions', () => {
       assert.include(reply, '[person] hello')
       assert.include(reply, '[claude-code] Hello')
       assert.include(reply, 'Carry on with the task from where it stands.')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('briefs the agent that takes over with what a failed command printed, not only that it failed', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task: created } = yield* task('Fix the lint')
+      yield* begin(created.threadId, 'claude-code')
+      yield* say(created.threadId, scenarios.handsBack)
+      yield* ended(created.threadId, 1)
+      yield* sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode' })
+      yield* settled(created.threadId, 3)
+      const reply = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'agent_message').at(-1)?.content.text as string
+      assert.include(reply, 'You are taking over a task from Fake claude-code')
+      assert.include(reply, '[tool] npm run lint (failed)\n[it printed] src/a.ts\n  3:1  error  Unexpected any\n✗ 1 problem\nexit code: 1')
+      // A command that succeeded is said as before, without what it printed.
+      assert.include(reply, '[tool] git status --short (completed)\n')
     }).pipe(Effect.provide(runtime())),
   )
 

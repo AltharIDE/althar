@@ -165,6 +165,14 @@ describe('normalize', () => {
     })
   })
 
+  it('keeps what came back of a tool call that arrives already ended', () => {
+    const rawOutput = { stderr: 'AssertionError: expected account B, received account A', exitCode: 1 }
+    assert.deepStrictEqual(
+      normalize({ sessionUpdate: 'tool_call', toolCallId: 't', title: 'Test', kind: 'execute', status: 'failed', rawOutput }),
+      { _tag: 'ToolCall', toolCallId: 't', title: 'Test', kind: 'execute', status: 'failed', rawOutput },
+    )
+  })
+
   it('keeps the files a tool call touches', () => {
     assert.deepStrictEqual(
       normalize({

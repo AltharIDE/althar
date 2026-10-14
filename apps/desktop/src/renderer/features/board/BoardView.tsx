@@ -182,6 +182,9 @@ const checksFact = (checks: ChangeSummary['checks'], ready: boolean): ReactNode 
   return <Fact>{text.checks.soFar(checks.passed, checks.total)}</Fact>
 }
 
+/** A branch with nothing changed (+0 −0) says nothing, so no card shows its chip; one whose size isn't known still does. */
+const empty = (size: { readonly add: number; readonly del: number } | null | undefined) => size != null && size.add === 0 && size.del === 0
+
 /** The step a change is on, in its word: its step's name on its track, or what it does once its steps are done. */
 const stepWordOf = (work: BoardTask): string => {
   if (work.step === 'publish' || afterSteps(work.step)) return stepText.now[work.step ?? ''] ?? ''
@@ -216,10 +219,12 @@ export const runningCardOf = (work: BoardTask, now: string, name: (id: string | 
         : work.phase === 'stopped'
           ? { status: TaskStatus.Stopped, word: text.status[TaskStatus.Stopped], why: text.stopped }
           : null
+  const beforeWork = work.queued !== null && work.planWaits === true
   const base = {
     kind: kindOf(work),
     title: work.title,
-    ...(work.startedAt === null ? {} : { at: running(work.startedAt, now) }),
+    // Waiting before its first step has had an agent, nothing has run: no clock.
+    ...(work.startedAt === null || beforeWork ? {} : { at: running(work.startedAt, now) }),
   }
   switch (work.kind) {
     case 'plain':
@@ -243,17 +248,19 @@ export const runningCardOf = (work: BoardTask, now: string, name: (id: string | 
         status,
         word: stepWordOf(work),
         ...still,
-        // A track of one step says nothing more than its word.
-        ...(steps.length > 1 ? { track: trackItems(steps, at) } : {}),
-        ...(change !== null && change.state === 'open'
-          ? { object: pullChip(change), foot: checksFact(change.checks, false) }
-          : work.branch !== null
-            ? {
-                object: (
-                  <BranchChip name={work.branch} {...(work.changed === null ? {} : { add: work.changed.add, del: work.changed.del })} />
-                ),
-              }
-            : {}),
+        // A track of one step says nothing more than its word; before any work it has no progress to show.
+        ...(steps.length > 1 && !beforeWork ? { track: trackItems(steps, at) } : {}),
+        ...(beforeWork
+          ? {}
+          : change !== null && change.state === 'open'
+            ? { object: pullChip(change), foot: checksFact(change.checks, false) }
+            : work.branch !== null && !empty(work.changed)
+              ? {
+                  object: (
+                    <BranchChip name={work.branch} {...(work.changed === null ? {} : { add: work.changed.add, del: work.changed.del })} />
+                  ),
+                }
+              : {}),
       }
     }
     default:
@@ -308,7 +315,7 @@ export const readyCardOf = (work: BoardTask): Card => {
           ? { object: <Thumbs pictures={pictures.slice(0, HANDED_SHOWN)} /> }
           : files.length > 0
             ? { object: <FileChips files={files.slice(0, HANDED_SHOWN)} /> }
-            : work.branch !== null
+            : work.branch !== null && !empty(work.changed)
               ? {
                   object: (
                     <BranchChip name={work.branch} {...(work.changed === null ? {} : { add: work.changed.add, del: work.changed.del })} />
@@ -328,10 +335,8 @@ export const readyCardOf = (work: BoardTask): Card => {
       // another of its repositories' pull requests open, that one, to accept, and the branch under it with what is in none.
       const change = work.unshipped == null || work.change?.state === 'open' ? work.change : null
       const after = work.unshipped == null || work.branch === null ? null : { name: work.branch, ...work.unshipped }
-      const branch =
-        work.branch === null
-          ? null
-          : { name: work.branch, add: work.unshipped?.add ?? work.changed?.add ?? 0, del: work.unshipped?.del ?? work.changed?.del ?? 0 }
+      const size = { add: work.unshipped?.add ?? work.changed?.add ?? 0, del: work.unshipped?.del ?? work.changed?.del ?? 0 }
+      const branch = work.branch === null || empty(size) ? null : { name: work.branch, ...size }
       const object =
         change === null ? (
           branch === null ? null : (
@@ -342,7 +347,7 @@ export const readyCardOf = (work: BoardTask): Card => {
         ) : (
           <div className={s.chips}>
             {pullChip(change)}
-            <BranchChip name={after.name} add={after.add} del={after.del} />
+            {!empty(after) && <BranchChip name={after.name} add={after.add} del={after.del} />}
           </div>
         )
       return {

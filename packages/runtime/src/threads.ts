@@ -17,8 +17,9 @@ import {
   printedIn,
   together,
 } from './handed'
+import { diagnosticIn, diagnosticOf } from './diagnostics'
 import { change, timestamp } from './records'
-import { essentials } from './rules'
+import { commandIn, essentials } from './rules'
 import { indexThread } from './Search'
 
 /*
@@ -258,17 +259,28 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         // OpenCode says a command's output as the tool's own words, whole each time, and whole in its raw output's metadata where it has it.
         // Its error report is the error, not its output: what it printed stays, and the error is kept beside it.
         const words = content.flatMap((entry) => (entry._tag === 'Text' ? [entry.text] : []))
-        const raw = event._tag === 'ToolCallUpdate' ? event.rawOutput : undefined
+        const raw = event.rawOutput
         const whole = printedIn(raw)
         const failed = event.status === 'failed'
         if (whole !== null) output.replace(whole)
         else if (!failed && words.length > 0) output.replace(words.join('\n'))
         if (failed) output.error = errorIn(raw) ?? (words.length > 0 ? words.join('\n') : null)
       }
-      const exit = event.terminal?.exit?.code ?? (event._tag === 'ToolCallUpdate' ? exitIn(event.rawOutput) : null)
+      const exit = event.terminal?.exit?.code ?? exitIn(event.rawOutput)
       if (exit !== null) output.exit = exit
       if (event.status !== 'completed' && event.status !== 'failed') return extras
-      return { ...extras, ...(yield* ended(toolCallId, output)) }
+      // What a failed command printed goes on its item with its status, in short, before the agent says anything of it.
+      const diagnostic =
+        event.status === 'failed'
+          ? diagnosticOf({
+              command: commandIn(stored.rawInput),
+              printed: output.text,
+              error: output.error,
+              exit: output.exit,
+              rawOutput: event.rawOutput,
+            })
+          : undefined
+      return { ...extras, ...(yield* ended(toolCallId, output)), ...(diagnostic === undefined ? {} : { diagnostic }) }
     })
 
   /** Ends what the turn left open: a command's output, kept as far as it came, as when the turn was stopped. */
@@ -298,7 +310,7 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
           yield* flush
           // The call's command and paths are kept, not what it writes or what came back (docs/architecture/07).
           const kept = event.rawInput === undefined ? undefined : essentials(event.rawInput)
-          const output = event._tag === 'ToolCallUpdate' && event.rawOutput !== undefined
+          const output = event.rawOutput !== undefined
           const content = defined({
             title: event.title,
             kind: event._tag === 'ToolCall' ? event.kind : undefined,
@@ -475,8 +487,11 @@ export const transcript = (
         }
         case 'agent_message':
           return [`[${agent}] ${text('text')}`]
-        case 'tool_call':
-          return [`[tool] ${text('title')} (${text('status')})`]
+        case 'tool_call': {
+          // What a failed command printed, in short: what the tool reported, not why it failed.
+          const printed = diagnosticIn(content['diagnostic'])
+          return [`[tool] ${text('title')} (${text('status')})${printed === null ? '' : `\n[it printed] ${printed.text}`}`]
+        }
         case 'notice':
           return [`[note] ${text('title')}${text('description') === '' ? '' : `: ${text('description')}`}`]
         case 'step_result':

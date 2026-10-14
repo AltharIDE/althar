@@ -278,6 +278,34 @@ describe('AgentConnection', () => {
       ),
     )
 
+    it.live('says a turn has started only once it can be interrupted', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+          // Stopped the moment it is said to have started, as a spent budget of turns does: the stop reaches it.
+          const events = yield* Stream.runCollect(session.prompt(scenarios.slow, [], Effect.ignore(session.interrupt)))
+          assert.strictEqual(stopReason(events), 'cancelled')
+          assert.strictEqual(text(yield* Stream.runCollect(session.prompt(scenarios.hello))), 'Hello')
+        }),
+      ),
+    )
+
+    it.live('does not say a turn has started when the agent is already in one', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+          const first = yield* Effect.forkChild(Stream.runCollect(session.prompt(scenarios.slow)))
+          yield* Effect.sleep('50 millis')
+          const started = yield* Ref.make(false)
+          const refused = yield* Effect.flip(Stream.runCollect(session.prompt(scenarios.hello, [], Ref.set(started, true))))
+          assert.instanceOf(refused, TurnInProgress)
+          assert.isFalse(yield* Ref.get(started))
+          yield* session.interrupt
+          yield* Fiber.join(first)
+        }),
+      ),
+    )
+
     it.live('reads a turn to its end when its stream is stopped early, so the next turn gets only its own events', () =>
       withConnection(fake, (connection) =>
         Effect.gen(function* () {
