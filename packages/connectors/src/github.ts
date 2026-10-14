@@ -7,6 +7,7 @@ import { makeHttp, paged } from './http'
 import type {
   Account,
   Activity,
+  ChangeQuery,
   ChangeRequest,
   ChangeToReview,
   Check,
@@ -15,6 +16,7 @@ import type {
   Comment,
   Container,
   Issue,
+  ListedChange,
   Person,
   Repository,
   Review,
@@ -22,7 +24,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
-import { leftAsItIs } from './model'
+import { lacking, leftAsItIs } from './model'
 import {
   type Answer,
   answered,
@@ -217,6 +219,143 @@ const toReviewOf = (pull: PullAnswer): ChangeToReview => {
   }
 }
 
+/**
+ * A pull request as GitHub's search lists it, over GraphQL: REST's list
+ * says nothing of reviews or checks, and its search nothing of branches,
+ * where this says all of them in one call.
+ */
+const ListedAnswer = Schema.Struct({
+  id: Schema.String,
+  number: Schema.Number,
+  title: Schema.String,
+  url: Schema.String,
+  state: Schema.String,
+  isDraft: Schema.Boolean,
+  headRefName: Schema.String,
+  baseRefName: Schema.String,
+  headRefOid: Schema.optional(Schema.NullOr(Schema.String)),
+  isCrossRepository: Schema.optional(Schema.Boolean),
+  headRepositoryOwner: Schema.optional(Schema.NullOr(Schema.Struct({ login: Schema.String }))),
+  author: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        __typename: Schema.optional(Schema.String),
+        login: Schema.String,
+        databaseId: Schema.optional(Schema.NullOr(Schema.Number)),
+        name: Schema.optional(Schema.NullOr(Schema.String)),
+      }),
+    ),
+  ),
+  reviewDecision: Schema.optional(Schema.NullOr(Schema.String)),
+  commits: Schema.optional(
+    Schema.Struct({
+      nodes: Schema.Array(
+        Schema.NullOr(
+          Schema.Struct({ commit: Schema.Struct({ statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })) }) }),
+        ),
+      ),
+    }),
+  ),
+  updatedAt: Schema.String,
+})
+type ListedAnswer = typeof ListedAnswer.Type
+
+const SearchAnswer = Schema.Struct({
+  // An issue the search found has none of a pull request's fields: it is left out.
+  search: Schema.Struct({ issueCount: Schema.Number, nodes: Schema.Array(Schema.Unknown) }),
+})
+
+const SEARCH = `query($q: String!, $n: Int!) {
+  search(query: $q, type: ISSUE, first: $n) {
+    issueCount
+    nodes {
+      ... on PullRequest {
+        id number title url state isDraft headRefName baseRefName headRefOid updatedAt
+        isCrossRepository headRepositoryOwner { login }
+        author { __typename login ... on User { databaseId name } ... on Bot { databaseId } }
+        reviewDecision
+        commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+      }
+    }
+  }
+}`
+
+/** A login GitHub could give: letters, digits and hyphens; an app's ends in `[bot]`. */
+const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(\[bot\])?$/
+
+/**
+ * What GitHub's search is asked for a repository's pull requests: newest
+ * change first, narrowed as the query says. Each word of the text is
+ * quoted, so none of it is read as a qualifier; an app is its author as
+ * `app/name`. Undefined for an author no login could be.
+ */
+export const searchOf = (path: ReadonlyArray<string>, query: ChangeQuery): string | undefined => {
+  const author = query.author?.trim().replace(/^@/, '')
+  if (author !== undefined && author !== '' && !LOGIN.test(author)) return undefined
+  const words = (query.text ?? '')
+    .replaceAll('"', ' ')
+    .split(/\s+/)
+    .filter((word) => word !== '')
+  return [
+    `repo:${path.join('/')}`,
+    'is:pr',
+    { open: 'is:open', closed: 'is:closed is:unmerged', merged: 'is:merged', all: '' }[query.state],
+    author === undefined || author === '' ? '' : `author:${author.endsWith('[bot]') ? `app/${author.slice(0, -'[bot]'.length)}` : author}`,
+    query.reviewRequested === true ? 'review-requested:@me' : '',
+    query.draft === undefined ? '' : `draft:${query.draft}`,
+    ...words.map((word) => `"${word}"`),
+    words.length === 0 ? '' : 'in:title',
+    'sort:updated-desc',
+  ]
+    .filter((word) => word !== '')
+    .join(' ')
+}
+
+const listedOf = (pull: ListedAnswer): ListedChange => {
+  const rollup = pull.commits?.nodes[0]?.commit.statusCheckRollup?.state
+  const author = pull.author
+  return {
+    id: pull.id,
+    number: pull.number,
+    title: pull.title,
+    // Never read from a list: what it says is read with the pull request, where it is marked as its author's.
+    body: '',
+    url: pull.url,
+    state: pull.state === 'MERGED' ? 'merged' : pull.state === 'OPEN' ? 'open' : 'closed',
+    draft: pull.isDraft,
+    source: pull.headRefName,
+    target: pull.baseRefName,
+    headSha: pull.headRefOid ?? null,
+    author:
+      author == null
+        ? null
+        : author.__typename === 'Bot'
+          ? { id: String(author.databaseId ?? author.login), login: `${author.login}[bot]`, name: null, bot: true }
+          : { id: String(author.databaseId ?? author.login), login: author.login, name: author.name ?? null, bot: false },
+    additions: null,
+    deletions: null,
+    changedFiles: null,
+    updatedAt: pull.updatedAt,
+    forkOwner: pull.isCrossRepository === true ? (pull.headRepositoryOwner?.login ?? null) : null,
+    reviewDecision:
+      pull.reviewDecision === 'APPROVED'
+        ? 'approved'
+        : pull.reviewDecision === 'CHANGES_REQUESTED'
+          ? 'changes_requested'
+          : pull.reviewDecision === 'REVIEW_REQUIRED'
+            ? 'review_required'
+            : null,
+    checks:
+      rollup === 'SUCCESS'
+        ? 'passed'
+        : rollup === 'FAILURE' || rollup === 'ERROR'
+          ? 'failed'
+          : rollup === 'PENDING' || rollup === 'EXPECTED'
+            ? 'running'
+            : null,
+  }
+}
+
 /** What GitHub calls each verdict a review can post. */
 const EVENTS: Readonly<Record<ReviewEvent, string>> = { approve: 'APPROVE', request_changes: 'REQUEST_CHANGES', comment: 'COMMENT' }
 
@@ -385,6 +524,21 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           ),
         ),
     change: (repository, number) => Effect.map(http.cached(PullAnswer, `${repo(repository)}/pulls/${number}`), changeOf),
+    listChanges: (repository, query) => {
+      const q = searchOf(repository.path, query)
+      if (q === undefined)
+        return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: `Not a GitHub login: ${query.author}` }))
+      return http.graphql(SearchAnswer, graphqlUrl, SEARCH, { q, n: Math.min(Math.max(query.limit, 1), 100) }).pipe(
+        Effect.map(({ search }) => {
+          const changes = search.nodes.flatMap((node) => {
+            const pull = Schema.decodeUnknownOption(ListedAnswer)(node)
+            return pull._tag === 'Some' ? [listedOf(pull.value)] : []
+          })
+          return { changes, more: search.issueCount > changes.length }
+        }),
+        Effect.mapError(lacking('repo (a fine-grained token’s Pull requests: Read)')),
+      )
+    },
     markReady: (repository, change) =>
       http
         .graphql(
