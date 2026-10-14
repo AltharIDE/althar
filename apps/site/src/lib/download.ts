@@ -70,8 +70,8 @@ interface Found {
   href: string
 }
 
-/** The reader's installer, once the release and the chip are known; null where the link is the releases page. */
-async function find(): Promise<Found | null> {
+/** The reader's installer, once the release and the chip are known; null where the link is the releases page. Exported for its tests. */
+export async function findDownload(): Promise<Found | null> {
   const os = detectOs()
   if (!os) return null
   // Asked for by hand, the address stands for the whole system, chip included: the build's, not the one under the browser.
@@ -90,7 +90,7 @@ export function useDownload() {
   const [found, setFound] = useState<Found | null>()
   useEffect(() => {
     let live = true
-    void find().then((it) => {
+    void findDownload().then((it) => {
       if (live) setFound(it)
     })
     return () => {
