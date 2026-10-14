@@ -24,6 +24,7 @@ import { Plans } from './Plans'
 import { finishedBy, listWords, type PullRequestFacts, sectionWords } from './pullRequestStanding'
 import type { Policies } from './Policies'
 import { Projects } from './Projects'
+import { findTasks, foundWords } from './Search'
 import { notesSection, projectOverview } from './handover'
 import { dropNote, keepNote, NOTE_LENGTH, NoteRefused, NOTES_KEPT, notesOf, sayNotes } from './notes'
 import { envelope } from './envelope'
@@ -119,6 +120,7 @@ const Started = Schema.Struct({
   repositories: Schema.optional(Schema.Array(Schema.String)),
 })
 const Named = Schema.Struct({ task: Schema.String })
+const Sought = Schema.Struct({ text: Schema.String })
 /* A thread to read: a task's, or, with none, the coordinator's own; and, to read further back, where the part read before began. */
 const Reading = Schema.Struct({ task: Schema.optional(Schema.String), before: Schema.optional(Schema.Int) })
 const Noted = Schema.Struct({ note: Schema.String })
@@ -294,6 +296,14 @@ export class Coordinator extends Context.Service<
               return `- ${task.slug}: ${task.title} (${state}${task.lead === null ? '' : `, led by ${nameOf(task.lead)}`})${words === '' ? '' : ` — ${words}`}`
             })
             .join('\n')
+        })
+
+      const find = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const { text } = yield* read(Sought, input)
+          if (text.trim() === '') return yield* new ToolRefused({ message: 'Say what to look for. list_tasks lists the newest tasks.' })
+          const working = new Set((yield* sessions.onTasks).map((session) => session.taskId))
+          return foundWords(text, yield* findTasks({ projectId: access.projectId, text, limit: 20 }, working))
         })
 
       const readTask = (access: ToolAccess, input: unknown) =>
@@ -746,6 +756,16 @@ export class Coordinator extends Context.Service<
           "The project's tasks, newest first: what each is, where it stands, who leads it, and, after a dash, how its pull request stands as Althar last saw it: draft or ready for review, checks, commits not pushed yet, merged or closed. A merged pull request is finished: don't suggest merging it. A closed one is as last seen only, since Althar stops watching it and it may have been reopened: say so rather than calling the task finished.",
           nothing,
           (access) => list(access),
+        ),
+        tool(
+          'find_tasks',
+          "Finds the project's tasks by what they were about: words from a title, what the person asked, what a lead reported or built, a pull request's number (#143), an issue's key, a branch, or a file's name. Each word finds the words it begins, and a task must hold them all. Best first: each with where it stands, its pull request and its id, and the words that matched. For a task asked about by what it did rather than its name.",
+          {
+            type: 'object',
+            properties: { text: { type: 'string', description: 'What to look for, in a few words.' } },
+            required: ['text'],
+          },
+          find,
         ),
         tool(
           'read_task',

@@ -10,7 +10,7 @@ import { SqlClient } from 'effect/sql'
 import { canonicalJson, sha256Hex } from '../src/canonicalJson'
 import * as Database from '../src/Database'
 import { ForeignKeyViolations } from '../src/Database'
-import { migrations } from '../src/migrations'
+import { idOf, migrations } from '../src/migrations'
 import { checksums } from '../src/migrations/checksums'
 import { seed } from './fixtures'
 import { InMemory, WebCrypto } from './support'
@@ -49,8 +49,10 @@ describe('schema', () => {
   it.effect('creates every table as STRICT', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
+      // Ordinary tables: a full-text index is a virtual table, with shadow tables of SQLite's own making.
       const tables = yield* sql<{ name: string; sql: string }>`
-        SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'schema_migrations'`
+        SELECT m.name, m.sql FROM sqlite_schema m JOIN pragma_table_list l ON l.schema = 'main' AND l.name = m.name
+        WHERE l.type = 'table' AND m.name NOT LIKE 'sqlite_%' AND m.name <> 'schema_migrations'`
       assert.isAbove(tables.length, 80)
       for (const table of tables) assert.isTrue(table.sql.endsWith(') STRICT'), `${table.name} is not STRICT`)
     }).pipe(Effect.provide(InMemory)),
@@ -127,7 +129,7 @@ describe('schema', () => {
         })
         yield* Effect.provide(referenced, Layer.fresh(Database.layer({ filename })))
         const rebuildDevices = {
-          key: `${String(migrations.length + 1).padStart(4, '0')}_rebuild_devices`,
+          key: `${String(idOf(migrations.at(-1) ?? { key: '0', statements: [] }) + 1).padStart(4, '0')}_rebuild_devices`,
           statements: [
             'CREATE TABLE devices_new (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, created_at TEXT NOT NULL) STRICT',
             'INSERT INTO devices_new SELECT id, name, created_at FROM devices',

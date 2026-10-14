@@ -19,6 +19,7 @@ import {
 } from './handed'
 import { change, timestamp } from './records'
 import { essentials } from './rules'
+import { indexThread } from './Search'
 
 /*
  * The thread's items: what the person reads (docs/architecture/01). An
@@ -59,6 +60,8 @@ export const addItem = (
             ${kind}, ${links.userInputId ?? null}, ${place.deliveryId ?? null}, ${place.sessionId ?? null}, ${links.toolCallId ?? null},
             ${JSON.stringify(content)}, ${yield* timestamp})`
         yield* ledger.notify({ projectId: place.projectId, aggregateType: 'thread_item', aggregateId: id, aggregateRevision: 1 })
+        // What the person asks of a task, and what its lead reports, are what it is found by.
+        if (kind === 'user_message' || kind === 'step_result') yield* indexThread(place.threadId)
       }),
     )
     return id

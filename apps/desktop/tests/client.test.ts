@@ -79,6 +79,9 @@ describe('the client', () => {
 
     const task = await client.createTask({ projectId: project.id, title: 'Say hello' })
     expect((await client.listTasks(project.id)).tasks.map((each) => each.title)).toEqual(['Say hello'])
+    // Found by a word begun, in its project and across every one.
+    expect((await client.searchTasks({ projectId: project.id, text: 'hel' })).tasks.map((each) => each.title)).toEqual(['Say hello'])
+    expect((await client.searchTasks({ text: 'goodbye' })).tasks).toEqual([])
     await client.startSession({ threadId: task.threadId, agentId: 'claude-code' })
     await eventually(
       () => client.getThread(task.threadId),
@@ -228,6 +231,7 @@ describe('the client', () => {
           ListProjects: () => Effect.die('unused'),
           OpenProject: () => Effect.die('unused'),
           ListTasks: () => Effect.die('unused'),
+          SearchTasks: () => Effect.die('unused'),
           CreateTask: () => Effect.die('unused'),
           GetThread: () => Effect.die('unused'),
           GetThreadItem: () => Effect.die('unused'),

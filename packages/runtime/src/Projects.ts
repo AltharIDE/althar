@@ -36,6 +36,7 @@ import {
 } from './git'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
+import { indexTask } from './Search'
 import { Setups } from './Setups'
 
 /*
@@ -624,6 +625,7 @@ export class Projects extends Context.Service<
                 actorId: envelope.actorId,
                 commandId: envelope.commandId,
               })
+              yield* indexTask(taskId)
               // A task started by hand shows in the coordinator's thread as its card; a draft's card comes with its plan.
               if (input.draft !== true) yield* postCard(first.projectId, taskId)
               const [made] = workspaces
@@ -677,6 +679,8 @@ export class Projects extends Context.Service<
             if (prepared._tag === 'Failure') return yield* Effect.failCause(prepared.cause)
             ready.push({ worktree: prepared.value.worktree, branch: prepared.value.branch })
           }
+          // Found by the branches it has now: a repository's docs may have named them otherwise.
+          yield* indexTask(created.taskId)
           // Set up now, without waiting, so a draft's worktree is ready by the time its plan starts.
           yield* (yield* Setups).begin(created.taskId)
           const [made] = ready

@@ -1835,6 +1835,41 @@ export type OutputText = typeof OutputText.Type
 export const DocumentText = Schema.Struct({ path: Schema.String, body: Schema.String, bytes: Schema.Number, lines: Schema.Number })
 export type DocumentText = typeof DocumentText.Type
 
+/** A stretch of what a found task holds, in order: the words that matched what was asked for are `hit`. */
+export const FoundPart = Schema.Struct({ text: Schema.String, hit: Schema.Boolean })
+export type FoundPart = typeof FoundPart.Type
+
+/**
+ * A task found by what it was about (ADR-035): enough to show it in a list
+ * and open it. Where it stands is read as its card's phase is, from the
+ * store and the agents at work, never from git.
+ */
+export const FoundTask = Schema.Struct({
+  taskId: Schema.String,
+  /** Its own thread, which opens it. */
+  threadId: Schema.String,
+  projectId: Schema.String,
+  title: Schema.String,
+  slug: Schema.String,
+  phase: TaskPhase,
+  /** As the store keeps it: draft, open, done or abandoned. */
+  state: Schema.String,
+  /** Its latest pull request, as its host writes it (#143, !12); null where it has none. */
+  pullRequest: Schema.NullOr(Schema.String),
+  /** When what it is found by last changed. */
+  changedAt: Schema.String,
+  /** What matched besides its title, a few words either side, ellipses where it was cut; null where only its title did, or nothing was asked for. */
+  matched: Schema.NullOr(Schema.Array(FoundPart)),
+})
+export type FoundTask = typeof FoundTask.Type
+
+/** The most a search finds at once. */
+export const FOUND_MOST = 50
+
+/** What a search found, best first. */
+export const FoundTasks = Schema.Struct({ tasks: Schema.Array(FoundTask) })
+export type FoundTasks = typeof FoundTasks.Type
+
 /** A part of the whole, 0 to 1. */
 const Part = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 }))
 /** A number of bytes. */
@@ -1957,6 +1992,23 @@ export const Api = RpcGroup.make(
     Schema.Void,
   ),
   call('ListTasks', { projectId: Schema.String }, TaskList),
+  /**
+   * Finds tasks by what they were about: their titles, what the person asked,
+   * what their leads reported and built, their pull requests' numbers and
+   * issues' keys, their branches, and the files their leads changed. In one
+   * project, or every one still in the window; each word typed finds the
+   * words it begins, and every word must be found. Best first, recent first
+   * among equals; with nothing typed, the most recently changed.
+   */
+  call(
+    'SearchTasks',
+    {
+      projectId: Schema.optional(Schema.String),
+      text: Schema.String.check(Schema.isMaxLength(500)),
+      limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: FOUND_MOST }))),
+    },
+    FoundTasks,
+  ),
   command(
     'CreateTask',
     {

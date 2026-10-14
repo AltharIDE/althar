@@ -23,6 +23,7 @@ import { Projects } from './Projects'
 import { Coordinator } from './Coordinator'
 import { Plans } from './Plans'
 import { Runs } from './Runs'
+import { fillIndex } from './Search'
 import { Tasks } from './Tasks'
 import { Secrets } from './Secrets'
 import { Sessions } from './Sessions'
@@ -97,8 +98,8 @@ export const layer = (options: RuntimeLayerOptions) => {
   const work = Tasks.layer.pipe(Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))))
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).
   const signing = AccountSignIns.layer.pipe(Layer.provideMerge(work))
-  // How hard this computer works, and each piece of work's part, while a window shows it.
-  return Layer.mergeAll(Coordinator.layer, MachineLoad.layer).pipe(Layer.provideMerge(signing))
+  // How hard this computer works, and each piece of work's part, while a window shows it. Tasks made before search, indexed.
+  return Layer.mergeAll(Coordinator.layer, MachineLoad.layer, fillIndex).pipe(Layer.provideMerge(signing))
 }
 
 export { envelope } from './envelope'
