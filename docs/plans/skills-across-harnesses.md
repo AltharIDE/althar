@@ -33,7 +33,7 @@ does not resolve a common set or pin skill versions for a run.
 | --- | --- | --- |
 | Claude Code | Personal `~/.claude/skills`; project `.claude/skills`; nested project directories and managed/plugin locations. | Its `CLAUDE_CONFIG_DIR` home shares `skills` along with settings, instructions, agents, commands, plugins, and output styles. The adapter does not populate or update that directory. |
 | Codex | Project `.agents/skills` from the current directory up to repository root; user `$HOME/.agents/skills`; admin and bundled locations. | Its `CODEX_HOME` (normally `~/.codex`) shares a folder named `skills`, plus config, instructions, prompts, and rules. The current Codex docs identify `$HOME/.agents/skills` as the user skill root, so this path deserves an adapter version probe rather than assuming the existing `CODEX_HOME/skills` link is sufficient. |
-| OpenCode | Project `.opencode/skills`, `.claude/skills`, and `.agents/skills`; global `~/.config/opencode/skills`, `~/.claude/skills`, and `~/.agents/skills`. | Its Althar-managed data home excludes OpenCode's own `opencode` data folder and otherwise shares its contents. There is no skill-specific selection or projection in the registry. |
+| OpenCode | Project `.opencode/skills`, `.claude/skills`, and `.agents/skills`; global `~/.config/opencode/skills`, `~/.claude/skills`, and `~/.agents/skills`. | The registry shares OpenCode's data home (normally under `XDG_DATA_HOME`) except its own `opencode` folder. That does not include global skills under the separate config home (`~/.config/opencode/skills`). There is no skill-specific selection or projection in the registry. |
 
 Sources: [Claude Code skills](https://code.claude.com/docs/en/skills),
 [Codex skills](https://developers.openai.com/codex/skills/), and
@@ -77,8 +77,13 @@ which entries are defaults and the commit/hash from which each was built.
 
 User-installed skills use the same store and format. First-run migration may
 scan recognized native skill roots, show a names-and-paths inventory, and let
-the person copy selected skills into Althar. It must leave existing harness
-folders untouched and must not silently overwrite a same-named skill.
+the person copy selected skills into Althar. For each imported skill, record
+a GitHub repository, subpath, and resolved commit SHA only when the source can
+be matched and verified. If it cannot be matched, mark it `local` with its
+import-time content hash; it can only be refreshed by an explicit user
+re-import/reinstall action, not by a GitHub update check. Migration must leave
+existing harness folders untouched and must not silently overwrite a
+same-named skill.
 
 ### 2. Per-project selection and reproducible resolution
 
@@ -99,8 +104,24 @@ and read-only for that run:
 - Codex: the isolated user root's `$HOME/.agents/skills`; verify how the
   supported build resolves this alongside `CODEX_HOME` before implementation
   and never write to the person's actual home.
-- OpenCode: an external read-only directory in the inline `skills` config
-  (OpenCode documents directories and URLs for this setting).
+- OpenCode: the documented global skills root, `~/.config/opencode/skills`,
+  inside an isolated per-run home. Do not put the projection in the repository
+  or assume `OPENCODE_CONFIG_DIR` changes skill discovery: its config docs
+  document that variable for agents, commands, modes, and plugins. Probe the
+  minimum supported OpenCode version to confirm how it resolves the isolated
+  home and whether an explicit skills-directory config is stable before
+  relying on it.
+
+Codex project exclusions should also use its documented per-skill
+`[[skills.config]]` entry with `enabled = false` for the skill path, in the
+isolated run config. Keep the resolved projection limited to selected skills
+as the primary control; the config entry handles a discovered/native skill
+that must be disabled. Codex may shorten descriptions or omit skills when its
+initial catalog exceeds the default budget (about 2% of context, or 8,000
+characters when context size is unknown); `skills.max_context_tokens` can
+change that budget. Preflight should estimate the catalog, warn when it may
+be truncated, and report any omission warning from Codex rather than claim
+that the full selected list reached the model.
 
 Add a skill-delivery capability to each registry entry instead of extending
 the broad `home.shared` allowlists. A running task keeps its snapshot;
@@ -129,10 +150,27 @@ the resolved SHA ([contents API](https://docs.github.com/en/rest/repos/contents#
 Before install or update, stage the new immutable version and present a
 review card with publisher/repository, subpath, resolved SHA, license,
 `SKILL.md` instructions and triggers, complete file list, content hash, and a
-diff against the installed version. Highlight executable files, external
-links, environment/runtime requirements, and any new scripts. The person
-chooses whether to activate that version. Do not execute install hooks,
-build scripts, or skill scripts while fetching, validating, or previewing.
+diff against the installed version. Highlight permission-/lifecycle-related
+frontmatter fields with their values and provider semantics. Claude Code
+treats `allowed-tools` as a temporary pre-approval grant for the invoking
+turn and registers skill `hooks` for the rest of the session. Reject either
+field during default installation and update validation; do not silently
+discard a field or deliver it to Claude Code. Any future exception would
+need a separate explicit trust decision and must still be constrained by
+Althar's permissions. Codex's skill guide documents no SKILL.md permission
+grant equivalent to Claude's `allowed-tools` or skill-level `hooks`; its
+general hooks are configured separately. The Agent Skills specification
+marks `allowed-tools` experimental, so Althar must not assume Codex enforces
+it. OpenCode documents `name`,
+`description`, `license`, `compatibility`, and `metadata`, and ignores
+unknown frontmatter fields, with no documented skill-level `hooks`
+equivalent; its skill allow/ask/deny control is the separate
+`permission.skill` config. Althar should reject unsupported
+authorization-like fields before projection even where a provider currently
+ignores them. The card also highlights executable files, external links,
+environment/runtime requirements, and any new scripts. The person chooses
+whether to activate that version. Do not execute install hooks, build
+scripts, or skill scripts while fetching, validating, or previewing.
 Private repositories should use the existing GitHub connection for
 read-only content access; never ask a skill to handle a GitHub token.
 
@@ -142,9 +180,13 @@ frontmatter, and excessive file counts/sizes. Preserve all relative resources
 so skill references keep working. Trust labels such as `Althar default`,
 `reviewed by user`, and `not reviewed` describe provenance/review only;
 they do not grant tools, filesystem access, network access, secrets, or
-approval. Skills and scripts inherit the run's existing Althar permission and
-sandbox rules. A signature may help establish publisher identity but does
-not establish safety, as noted in the existing architecture.
+approval. Harness-specific skill fields can still affect the harness:
+Claude's `allowed-tools` and `hooks` are rejected by default as above, while
+OpenCode's `permission.skill` and Codex's skill enablement config are
+generated only from Althar settings. Skills and scripts inherit the run's
+existing Althar permission and sandbox rules. A signature may help establish
+publisher identity but does not establish safety, as noted in the existing
+architecture.
 
 The update screen should show installed, available, and changed versions and
 support update one/update selected. Never auto-replace an active version or
@@ -161,23 +203,26 @@ Materialize skills under the app data run overlay, not in `.agents/skills`,
 OpenSpec in a user's repository on project import or task start.
 
 Expose a **Repository files** section in each project's Althar settings, with
-two independent, default-off choices:
+three independent, default-off choices:
 
 | Setting | Default | When enabled |
 | --- | --- | --- |
-| Althar-managed skills | App-managed store | The person explicitly permits a requested skill to be written under the repository's chosen native skill directory. Show its file diff and provenance like other task changes. |
-| OpenSpec artifacts | Private Althar store | The person explicitly permits OpenSpec `openspec/` artifacts to live in and be versioned with this repository. |
+| Write Althar-managed skills | App-managed store | A requested repository write targets the exact harness-native paths: Claude Code `.claude/skills/<skill-id>/`, Codex `.agents/skills/<skill-id>/`, and OpenCode `.opencode/skills/<skill-id>/`. For a task targeting multiple harnesses, show every destination and obtain consent for that set. Show the file diff and provenance like other task changes. |
+| Write OpenSpec artifacts | Private Althar store | The person explicitly permits OpenSpec `openspec/` artifacts to live in and be versioned with this repository. |
+| Push skill/OpenSpec files | Blocked | The person separately and explicitly permits Althar to push changes under the protected skill roots or `openspec/` for this project. This never follows from either write setting. |
 
-Enabling a choice is the durable, per-project authorization; it is visible in
-the project settings and revision history, and is not silently changed by an
-agent or task prompt. It permits that destination when a task explicitly asks
-for the operation; it does not auto-install, sync, commit, or push. With the
-setting off, a direct user request for repository-backed files needs a
-one-time confirmation that names the destination before Althar writes them.
-Existing task review, commit, and push rules still apply.
-The UI should say plainly that repository-backed files can appear in a task
-diff and, if the person commits them, be included in the task branch Althar
-pushes under the normal project flow.
+Each enabled setting is durable, per-project consent visible in settings and
+revision history; an agent or task prompt cannot silently change it. A write
+setting authorizes only the named repository destination when a task
+explicitly asks for the operation. It does not auto-install, sync, commit, or
+push. The separate push setting is the required explicit consent for these
+file classes to leave the machine; it does not itself initiate a push, and
+Althar's ordinary task/branch push flow still applies. With a write setting
+off, a direct user request for repository-backed files needs a one-time
+confirmation naming the destination before Althar writes them. The UI should
+say plainly that repository-backed files can appear in a task diff, can be
+committed only when repository-write consent permits, and can be pushed only
+when the separate push consent is enabled.
 
 When a destination is app-managed, provide the agent a read-only skill bundle
 and OpenSpec context from outside the checkout. Keep OpenSpec authoring in
@@ -196,16 +241,25 @@ Make path-sensitive write denial a release requirement: verify it covers each
 harness's file-edit and shell-write routes for managed skill/OpenSpec paths.
 If a harness cannot enforce that inside the repository, keep Althar's
 artifact-authoring route entirely in the external store for that harness until
-it can; do not describe a staging check alone as preventing writes. In
-addition, Althar's change/commit/push path checks managed-artifact provenance
-against the per-project setting and any recorded one-time grant, and fails
-closed before staging or pushing a managed file without authorization. Do not
-infer authorization from a task plan, a repository instruction, or an
-ignored path. Existing user-authored files remain ordinary repository files;
-the guard applies to Althar-managed install/sync/authoring actions and files
-explicitly marked as managed. The `/openspec/` ignore rule in Althar's own
-`.gitignore` protects only this repository and is not a boundary for a user's
-repository.
+it can; do not describe a staging check alone as preventing writes.
+
+Define protected repository paths independently of provenance: every
+supported native skill root at any repository depth (`**/.agents/skills/**`,
+`**/.claude/skills/**`, and `**/.opencode/skills/**`) and `openspec/**`.
+Before staging or committing, inspect changed
+paths and block changes under a skill root when its write setting is off, or
+under `openspec/` when the OpenSpec write setting is off, unless an explicit
+one-time grant names that destination. This check applies even if no Althar
+marker exists or a harness wrote the file. Before pushing, apply the same
+path-based check and also block any protected path unless the separate push
+setting is enabled. These Git checks are defense in depth and cover untracked
+files and renames; provenance from Althar's install/sync/authoring records is
+a secondary signal for managed files written outside the known roots. Fail
+closed on unknown path classification or missing setting state. Do not infer
+consent from a task plan, repository instruction, a write toggle, or an
+ignored path. The
+`/openspec/` ignore rule in Althar's own `.gitignore` protects only this
+repository and is not a boundary for a user's repository.
 
 ### 5. OpenSpec use in Althar
 
@@ -241,10 +295,11 @@ own push path from publishing private-store artifacts by construction.
 4. **Resolve and deliver per run.** Add user/project bindings, conflict
    handling and run snapshots; implement isolated projections for each
    adapter; add parity/collision diagnostics and probe current native roots.
-5. **Add project guardrails and OpenSpec.** Add the two default-off project
-   settings, private OpenSpec storage/context, path-sensitive write denial,
-   and defense-in-depth checks before staging/commit/push. Add repository
-   mode only behind the corresponding explicit setting.
+5. **Add project guardrails and OpenSpec.** Add independent default-off skill
+   write, OpenSpec write, and protected-file push consent settings; private
+   OpenSpec storage/context; path-sensitive write denial; and path-based
+   checks before staging/commit/push, with provenance as a secondary signal.
+   Add repository mode only behind the corresponding explicit setting.
 6. **Verify before release.** Exercise all adapters against the same fixture
    catalog; prove an app-managed skill and OpenSpec change never appears in
    a repository or task diff; prove opt-in repository mode is visible in the
@@ -258,8 +313,10 @@ own push path from publishing private-store artifacts by construction.
   undecided. A curated set is safer and more portable than automatically
   adopting every skill in a general catalog.
 - Codex's documented `$HOME/.agents/skills` and the current registry's
-  `CODEX_HOME/skills` sharing need a version-specific probe. OpenCode and
-  Claude versions also need probes at implementation time.
+  `CODEX_HOME/skills` sharing need a version-specific probe. Codex may
+  truncate its initial catalog under its context budget; report this and any
+  omissions. OpenCode's isolated-home discovery and Claude versions also
+  need probes at implementation time.
 - Native repo skills can differ by harness and may be automatically loaded.
   Althar must surface this extra context and prove any attempt to suppress it;
   only Althar-managed selection can be promised identical before that work.
@@ -275,8 +332,10 @@ own push path from publishing private-store artifacts by construction.
 - [Agent Skills specification](https://agentskills.io/specification)
 - [Claude Code skills](https://code.claude.com/docs/en/skills)
 - [Codex skills](https://developers.openai.com/codex/skills/)
+- [Codex configuration reference](https://developers.openai.com/codex/config-reference/)
 - [OpenCode skills](https://opencode.ai/docs/skills/)
-- [OpenCode config: external skill directories](https://opencode.ai/docs/config/)
+- [OpenCode skill discovery and permissions](https://opencode.ai/docs/skills/)
+- [OpenCode configuration](https://opencode.ai/docs/config/)
 - [GitHub REST repository contents](https://docs.github.com/en/rest/repos/contents#get-repository-content)
 - [OpenSpec team workflow](https://github.com/Fission-AI/OpenSpec/blob/main/docs/team-workflow.md)
 - [OpenSpec standalone stores (beta)](https://github.com/Fission-AI/OpenSpec/blob/main/docs/stores-beta/user-guide.md)
