@@ -1,0 +1,135 @@
+/* Scrappy: only where the app's own cards sit in each direction, and the two new pieces (D's chip, E's line), in the kit's tokens. */
+
+/* A: the cards inside the bubble, under the words, a little wider than its text. */
+.inBubble {
+  display: grid;
+  gap: 6px;
+  margin: 10px -7px -3px;
+  white-space: normal;
+}
+
+/* B: the cards above the bubble, at its width, as the kit puts what was sent with a message. */
+.above {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.cards {
+  display: grid;
+  gap: 6px;
+  width: min(78%, 540px);
+}
+
+/* C: the cards one under another in the kit's unfurl slot. */
+.stack {
+  display: grid;
+  gap: 6px;
+}
+
+/* D: the kit's file reference chip, holding the tracker's mark, the key and the title. */
+.chip {
+  max-width: 300px;
+  gap: 5px;
+  vertical-align: 1px;
+  cursor: pointer;
+}
+.linear,
+.chip .linear {
+  color: var(--linear);
+}
+.key {
+  flex: none;
+  font: 11px var(--mono);
+  color: var(--t-2);
+}
+.title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+/* the card is the popover: no frame round its own frame */
+.peek {
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: var(--lift-pop);
+  border-radius: 12px;
+}
+
+/* E: a line per link, along the bubble's foot, right-aligned like it. */
+.lines {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: end;
+  gap: 1px;
+}
+.line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--t-2);
+}
+.line:hover {
+  background: var(--n-2);
+}
+.line .title {
+  font-weight: 500;
+}
+.state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.state svg {
+  color: var(--t-3);
+}
+.go {
+  flex: none;
+  color: var(--t-4);
+}
+
+/* The strip of states under the window: the prototype's, not the app's. */
+.strip {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 44px;
+  padding: 0 16px;
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.name {
+  color: var(--t-1);
+  font-weight: 600;
+}
+.grow {
+  flex: 1;
+}
+.frame {
+  height: calc(100vh - 44px);
+}
+.bare {
+  height: 100vh;
+}
