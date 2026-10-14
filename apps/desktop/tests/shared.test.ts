@@ -5,7 +5,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { agentLineOf, brandOf } from '../src/renderer/shared/agents'
 import { knownModelName, standsFor } from '@althar/contracts'
 import { isSending, mergeItems, newestReads, queueShown, sending, unsent, waiting } from '../src/renderer/shared/items'
-import { items } from './fixtures'
+import { change, items } from './fixtures'
+import { latestOf } from '../src/renderer/features/task/Outputs'
+import { stepIndex, stepNames, trackFor } from '../src/renderer/shared/steps'
 import { ago, clock, took, useNow } from '../src/renderer/shared/time'
 
 describe('agents', () => {
@@ -185,5 +187,31 @@ describe('the composer queue', () => {
     expect(queueShown({ turnRunning: false }, false)).toBe(false)
     expect(queueShown(null, false)).toBe(true)
     expect(queueShown(null, true)).toBe(false)
+  })
+})
+
+describe('a task’s rounds of work after its plan (ADR-034)', () => {
+  it('names its follow-up in place of Implement, and its track and step as they stand', () => {
+    const steps = [
+      { key: 'implement' as const, agentId: 'claude-code', model: null, skipped: false },
+      { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+    ]
+    expect(stepNames(steps)).toEqual(['Implement', 'Review'])
+    expect(stepNames(steps, true)).toEqual(['Follow-up', 'Review'])
+    expect(stepIndex(stepNames(steps, true), 'implement')).toBe(0)
+    expect(stepIndex(stepNames(steps, true), 'settle')).toBe(1)
+    expect(trackFor(steps, 'review', false, true).map((step) => step.label)).toEqual(['Follow-up', 'Review'])
+  })
+
+  it('shows its latest pull request in each repository, and the earlier ones newest first', () => {
+    const first = change({ number: 1, state: 'merged', url: 'https://github.test/meridian/api/pull/1' })
+    const second = change({ number: 2, state: 'closed', url: 'https://github.test/meridian/api/pull/2' })
+    const third = change({ number: 3, state: 'open', url: 'https://github.test/meridian/api/pull/3' })
+    expect(latestOf([first, second, third])).toEqual({ latest: [third], earlier: [second, first] })
+    // With none open, the newest is the latest.
+    expect(latestOf([first, second])).toEqual({ latest: [second], earlier: [first] })
+    // In a task of several repositories, each has its own.
+    const web = change({ number: 7, slug: 'web', url: 'https://github.test/meridian/web/pull/7' })
+    expect(latestOf([first, web]).latest).toEqual([first, web])
   })
 })

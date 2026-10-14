@@ -178,12 +178,12 @@ export class Launches extends Context.Service<
             ORDER BY b.created_at, b.rowid`
         })
 
-      /** Where a repository runs for a task: its worktree, or the folder in it the project is about. */
+      /** Where a repository runs for a task: its worktree, or the folder in it the project is about; never a copy it only reads, as a review's. */
       const worktreesOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const rows = yield* sql<{ bindingId: string; path: string }>`
-            SELECT binding_id, path FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId}`
+            SELECT binding_id, path FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND access = 'write'`
           return new Map(rows.map((row) => [row.bindingId, row.path]))
         })
 

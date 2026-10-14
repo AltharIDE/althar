@@ -22,7 +22,9 @@ import { RuntimeConfig } from './Config'
 import { branchFor, conventionsOnBase, ruleOf } from './conventions'
 import { type GitFailed, NotARepository, NotFound, ProjectRefused, RepositoriesNeeded } from './errors'
 import { type Fork, forkOf } from './forks'
+import { makeScratch } from './firstWrite'
 import {
+  addDetachedWorktree,
   addWorktree,
   branchExists,
   commitOf,
@@ -36,6 +38,7 @@ import {
 } from './git'
 import { Instance } from './Instance'
 import { change, fact, timestamp } from './records'
+import { indexTask } from './Search'
 import { Setups } from './Setups'
 
 /*
@@ -43,7 +46,8 @@ import { Setups } from './Setups'
  * project: of the repository it is, of a folder inside one (one package of a
  * monorepo, say), or of the repositories directly inside it, as many as the
  * person keeps. A task gets its own thread, and a worktree of its own on a
- * branch of its own (ADR-006).
+ * branch of its own (ADR-006); a plain one, started with no plan, a worktree
+ * with no branch until its lead changes the repository (`firstWrite.ts`).
  *
  * Git runs outside the store's transactions: the facts are read first, and a
  * task's worktree is added after the task is committed, its workspace marked
@@ -207,7 +211,7 @@ export const slugify = (name: string, fallback: string) => {
 }
 
 /** The first of `slug`, `slug-2`, `slug-3`… that isn't taken. */
-const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
+export const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
   if (!taken.includes(slug)) return slug
   for (let n = 2; ; n += 1) if (!taken.includes(`${slug}-${n}`)) return `${slug}-${n}`
 }
@@ -218,13 +222,16 @@ const freeSlug = (slug: string, taken: ReadonlyArray<string>) => {
  * request doesn't conflict for that reason), falling back to the local branch
  * when origin can't be reached. A branch or folder that already exists, from
  * another project on the same repository or an earlier profile, gets the next
- * free name instead of failing.
+ * free name instead of failing. A plain task's has no branch: it is detached
+ * at that commit, with a scratch folder git ignores, and its branch's name
+ * is kept for when its lead first changes the repository.
  */
 const prepareWorktree = (
   repository: string,
   base: string,
   planned: { readonly worktree: string; readonly branch: string },
   from = 'origin',
+  plain = false,
 ) =>
   Effect.gen(function* () {
     const fetched = yield* fetchBranch(repository, base, from)
@@ -240,8 +247,11 @@ const prepareWorktree = (
       branch = `${planned.branch}-${n}`
       worktree = `${planned.worktree}-${n}`
     }
-    yield* addWorktree(repository, worktree, branch, baseCommit)
-    return { worktree, branch, baseRef, baseCommit, fetched }
+    if (plain) {
+      yield* addDetachedWorktree(repository, worktree, baseCommit)
+      yield* makeScratch(worktree)
+    } else yield* addWorktree(repository, worktree, branch, baseCommit)
+    return { worktree, branch, baseRef, baseCommit, fetched, ...(plain ? { plain } : {}) }
   })
 
 type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | RuntimeConfig | Setups
@@ -289,6 +299,8 @@ export class Projects extends Context.Service<
       readonly repositories?: ReadonlyArray<string>
       /** What the person asked for, in their own words: what its thread starts with, so it is never lost behind the title. */
       readonly request?: string
+      /** A plain task's, started with no plan: its worktrees have no branch until its lead changes the repository. */
+      readonly plain?: boolean
     }): Effect.Effect<CreatedTask, NotFound | RepositoriesNeeded | GitFailed | Failure>
     /** A project's repositories, as this device has them: each one's branch, remote, role, and the fork it is. */
     repositories(projectId: string): Effect.Effect<ReadonlyArray<ProjectRepository>, NotFound | Failure>
@@ -518,11 +530,13 @@ export class Projects extends Context.Service<
         readonly issueKey?: string
         readonly repositories?: ReadonlyArray<string>
         readonly request?: string
+        readonly plain?: boolean
       }) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const commands = yield* Commands
           const { envelope } = input
+          const plain = input.plain === true
           const bindings = yield* sql<{
             projectId: ProjectId
             projectSlug: string
@@ -612,6 +626,8 @@ export class Projects extends Context.Service<
                   branch,
                   state: 'preparing',
                   createdAt,
+                  // A plain task's has its branch only once its lead changes the repository; any other's as it is made.
+                  ...(plain ? {} : { branchedAt: createdAt }),
                 })}`
                 workspaces.push({ id: workspaceId, worktree, branch })
               }
@@ -625,6 +641,7 @@ export class Projects extends Context.Service<
                 actorId: envelope.actorId,
                 commandId: envelope.commandId,
               })
+              yield* indexTask(taskId)
               // A task started by hand shows in the coordinator's thread as its card; a draft's card comes with its plan.
               if (input.draft !== true) yield* postCard(first.projectId, taskId)
               const [made] = workspaces
@@ -647,7 +664,9 @@ export class Projects extends Context.Service<
             // Named as the repository's docs say, where the person has no rule: read now, from where the task starts.
             const docs = rule === null ? (yield* conventionsOnBase(binding.repository, base, remote)).branch : null
             const branch = docs === null ? workspace.branch : branchFor(docs.pattern, { key: input.issueKey ?? null, slug: created.slug })
-            const prepared = yield* Effect.exit(prepareWorktree(binding.repository, base, { worktree: workspace.path, branch }, remote))
+            const prepared = yield* Effect.exit(
+              prepareWorktree(binding.repository, base, { worktree: workspace.path, branch }, remote, plain),
+            )
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 const done = prepared._tag === 'Success'
@@ -678,6 +697,8 @@ export class Projects extends Context.Service<
             if (prepared._tag === 'Failure') return yield* Effect.failCause(prepared.cause)
             ready.push({ worktree: prepared.value.worktree, branch: prepared.value.branch })
           }
+          // Found by the branches it has now: a repository's docs may have named them otherwise.
+          yield* indexTask(created.taskId)
           // Set up now, without waiting, so a draft's worktree is ready by the time its plan starts.
           yield* (yield* Setups).begin(created.taskId)
           const [made] = ready

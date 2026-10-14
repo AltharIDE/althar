@@ -33,6 +33,8 @@ export const keys = {
   repositories: (projectId: string) => ['repositories', projectId] as const,
   connections: ['connections'] as const,
   settings: ['settings'] as const,
+  /** Tasks found by words, in a project or (null) in every one. */
+  search: (projectId: string | null, text: string) => ['search', projectId, text] as const,
   /** What a command printed: kept once it ended, so it never changes. */
   output: (threadId: string, itemId: string) => ['output', threadId, itemId] as const,
   /** A document an agent wrote, as it was after the thread's last call that touched it (`version`). */
@@ -120,6 +122,14 @@ export const reads = (client: Client) => ({
     queryOptions({ queryKey: keys.repositories(projectId), queryFn: () => client.getRepositories(projectId) }),
   connections: () => queryOptions({ queryKey: keys.connections, queryFn: () => client.listConnections() }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
+  // What is found changes with everything a task holds, and nothing on the feed says when: read again as the finder opens, and kept a moment.
+  search: (projectId: string | null, text: string) =>
+    queryOptions({
+      queryKey: keys.search(projectId, text),
+      queryFn: () => client.searchTasks({ text, ...(projectId === null ? {} : { projectId }) }),
+      staleTime: 0,
+      gcTime: 30_000,
+    }),
   output: (threadId: string, itemId: string) =>
     queryOptions({ queryKey: keys.output(threadId, itemId), queryFn: () => client.readOutput(threadId, itemId), gcTime: 5 * 60_000 }),
   document: (threadId: string, path: string, version: string) =>

@@ -11,6 +11,7 @@ import { Instance } from './Instance'
 import { outward } from './outward'
 import { movesIssues, Policies } from './Policies'
 import { change, fact, timestamp } from './records'
+import { indexTask } from './Search'
 import { addItem, updateItem } from './threads'
 import { ToolRefused, ToolServer } from './ToolServer'
 
@@ -276,6 +277,7 @@ export class Issues extends Context.Service<
                 payload: { key: issue.key, url: issue.url },
                 actorId: instance.personId,
               })
+              yield* indexTask(input.taskId)
             }),
           )
           yield* touchCard(input.taskId)
@@ -400,9 +402,10 @@ export class Issues extends Context.Service<
           yield* touchCard(taskId)
         })
 
-      // A task's lead and its reviewers can read the issue it came from, or any other.
+      // A task's lead and its reviewers can read the issue it came from, or any other; it only reads, so a review's lead too.
       const readIssueTool = {
         name: 'read_issue',
+        inReview: true,
         description:
           'An issue on a connected tracker, or in the project’s repository: its title, status and description. Takes its link or its key.',
         input: { type: 'object', properties: { issue: { type: 'string' } }, required: ['issue'] },

@@ -3,9 +3,20 @@ import { useState } from 'react'
 import { expect, userEvent, within } from 'storybook/test'
 
 import { CALLS, NEXT, READY, RUNNING, SETTLED } from '../../fixtures/board'
-import { BoardLane } from '../../foundations/vocabulary'
+import {
+  CHANGE_PERMISSION,
+  CHANGE_READY,
+  CHANGE_RUNNING,
+  CHANGE_RUNNING_PR,
+  PLAIN_PICTURES,
+  PLAIN_WORKING,
+  REVIEW_DRAFTED,
+  REVIEW_RUNNING,
+} from '../../fixtures/kinds'
+import { BoardLane, Outcome, Wait } from '../../foundations/vocabulary'
 import { States } from '../../storybook/States'
 import { AcceptCard } from '../AcceptCard/AcceptCard'
+import { BoardCard } from '../BoardCard/BoardCard'
 import { CallCard } from '../CallCard/CallCard'
 import { NextRow } from '../NextRow/NextRow'
 import { SettledRow } from '../SettledRow/SettledRow'
@@ -50,6 +61,80 @@ function Meridian({ empty = false }: { empty?: boolean }) {
   )
 }
 
+/* A row names its task by its title alone, as the desktop's board does. */
+const UNNAMED = { task: () => '' }
+
+/* The same board, every card one button with nothing to press, by its task's kind: an afternoon's mix. */
+function Kinds() {
+  return (
+    <Board label="Meridian’s work">
+      <BoardColumn lane={BoardLane.Next} count={2}>
+        <BoardList>
+          <NextRow
+            place={1}
+            task=""
+            text={UNNAMED}
+            kind="Change"
+            title="Push button leaves commits behind"
+            wait={Wait.You}
+            reason="Held. Starts when you say"
+            onOpen={() => undefined}
+          />
+          <NextRow
+            place={2}
+            task=""
+            text={UNNAMED}
+            title="Release 0.4 from this Mac"
+            wait={Wait.After}
+            reason="Starts after the copy button merges"
+            onOpen={() => undefined}
+          />
+        </BoardList>
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Running} count={4}>
+        {[CHANGE_RUNNING, PLAIN_WORKING, REVIEW_RUNNING, CHANGE_RUNNING_PR].map((card) => (
+          <BoardCard key={card.title} {...card} onOpen={() => undefined} />
+        ))}
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Yours} count={4}>
+        {[REVIEW_DRAFTED, PLAIN_PICTURES, CHANGE_PERMISSION, CHANGE_READY].map((card) => (
+          <BoardCard key={card.title} {...card} onOpen={() => undefined} />
+        ))}
+      </BoardColumn>
+      <BoardColumn lane={BoardLane.Settled} count={3}>
+        <BoardList>
+          <SettledRow
+            outcome={Outcome.Done}
+            task=""
+            text={UNNAMED}
+            title="Where can each agent’s usage limits be read?"
+            at="1h ago"
+            onOpen={() => undefined}
+          />
+          <SettledRow
+            outcome={Outcome.Merged}
+            task=""
+            text={UNNAMED}
+            kind="Change"
+            title="Let a long dictation scroll in the composer"
+            meta="PR #1184 merged"
+            at="2h ago"
+            onOpen={() => undefined}
+          />
+          <SettledRow
+            outcome={Outcome.Done}
+            task=""
+            text={UNNAMED}
+            title="Release 0.3 from this Mac"
+            at="2d ago"
+            onOpen={() => undefined}
+          />
+        </BoardList>
+      </BoardColumn>
+    </Board>
+  )
+}
+
 const meta = {
   title: 'Board/Board',
   component: Meridian,
@@ -63,6 +148,16 @@ type Story = StoryObj<typeof meta>
 export const Default: Story = {}
 /** A new project: every lane says it is empty. */
 export const Empty: Story = { args: { empty: true } }
+/** Cards with nothing to press, by kind: a change, a review and plain tasks, in the lanes each reaches. */
+export const ByKind: Story = {
+  render: () => <Kinds />,
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    // Each card is one button, its title: nothing else on the board's cards is pressed.
+    for (const article of c.getAllByRole('article')) await expect(within(article).getAllByRole('button')).toHaveLength(1)
+    await expect(c.getByText('Ready to accept')).toBeInTheDocument()
+  },
+}
 
 /** Opening a card rings it, as the dock beside the board shows it. */
 export const OpeningACard: Story = {

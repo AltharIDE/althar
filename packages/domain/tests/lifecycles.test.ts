@@ -73,13 +73,17 @@ describe('lifecycles', () => {
     assert.isFalse(canTransition(nodeAttemptLifecycle, 'held', 'succeeded'))
   })
 
-  it('reopens an abandoned task, and never a merged one', () => {
+  it('reopens an abandoned task, and a merged one only for more work, never as a draft', () => {
     assert.isTrue(canTransition(taskLifecycle, 'open', 'abandoned'))
     assert.isTrue(canTransition(taskLifecycle, 'abandoned', 'open'))
     // Its pull request merged on the host after all, it is done.
     assert.isTrue(canTransition(taskLifecycle, 'abandoned', 'done'))
-    assert.isTrue(isTerminal(taskLifecycle, 'done'))
-    assert.isFalse(canTransition(taskLifecycle, 'done', 'open'))
+    // A merged task goes back to work when its lead does (ADR-034), and is done again once that is.
+    assert.isFalse(isTerminal(taskLifecycle, 'done'))
+    assert.isTrue(canTransition(taskLifecycle, 'done', 'open'))
+    assert.isTrue(canTransition(taskLifecycle, 'open', 'done'))
+    assert.isFalse(canTransition(taskLifecycle, 'done', 'abandoned'))
+    assert.isFalse(canTransition(taskLifecycle, 'done', 'draft'))
   })
 
   it('suspends a stopped run until it runs again or is cancelled', () => {

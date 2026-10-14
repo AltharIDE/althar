@@ -337,24 +337,51 @@ export const parseCommandLine = (text: string): Parsed => {
   return expandShells(commands, opaque)
 }
 
+/**
+ * Whether the expansion at a `$` can set a variable or work out arithmetic,
+ * which can: `$[…]`, `${…}` beyond a plain name (`${X:=.}`, `${a[X=1]}`,
+ * zsh's `${(e)X}`), or zsh's subscript `$a[…]`. `$X` and `${X}` only read.
+ */
+const evaluates = (text: string, at: number) => {
+  const rest = text.slice(at + 1)
+  if (rest.startsWith('[')) return true
+  if (rest.startsWith('{')) return !/^\{[A-Za-z_][A-Za-z0-9_]*\}/.test(rest)
+  return /^[#=~^+]*[A-Za-z_][A-Za-z0-9_]*\[/.test(rest)
+}
+
 /** A command line's commands as written, with the separator that ends each ('' for the last). */
 const splitCommandLine = (text: string) => {
   const commands: Array<Array<string>> = []
   const ends: Array<string> = []
   /** For each command, which of its words are redirect operators, not arguments that look like them (`echo '>'`). */
   const operators: Array<ReadonlySet<number>> = []
+  /** For each command, which of its words the shell expands, outside quotes: a glob, braces, a variable (`*.ts`, `$X`). */
+  const expanded: Array<ReadonlySet<number>> = []
   let words: Array<string> = []
   let operating = new Set<number>()
+  let expanding = new Set<number>()
   let word = ''
   let inWord = false
   /** The word in progress has a quoted or escaped part. */
   let literal = false
+  /** The word in progress has a part the shell expands: a glob or a variable, or braces it may (`{a,b}`, not `stash@{0}`). */
+  let expands = false
+  let braces = false
   let opaque = false
+  /** Parentheses outside quotes: a subshell, a function's definition (`cat () (…)`), zsh's qualifier on a pattern. */
+  let grouped = false
+  /** An expansion that can set a variable or work out arithmetic (`evaluates`). */
+  let evaluated = false
   const endWord = () => {
-    if (inWord) words.push(word)
+    if (inWord) {
+      if (expands || (braces && /\{[^{}]*(,|\.\.)[^{}]*\}/.test(word))) expanding.add(words.length)
+      words.push(word)
+    }
     word = ''
     inWord = false
     literal = false
+    expands = false
+    braces = false
   }
   const endCommand = (separator = '') => {
     endWord()
@@ -362,9 +389,11 @@ const splitCommandLine = (text: string) => {
       commands.push(words)
       ends.push(separator)
       operators.push(operating)
+      expanded.push(expanding)
     }
     words = []
     operating = new Set()
+    expanding = new Set()
   }
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index] ?? ''
@@ -388,6 +417,7 @@ const splitCommandLine = (text: string) => {
           index += 1
         } else {
           if (inner === '`' || (inner === '$' && text[index + 1] === '(')) opaque = true
+          if (inner === '$' && evaluates(text, index)) evaluated = true
           word += inner
         }
       }
@@ -400,7 +430,26 @@ const splitCommandLine = (text: string) => {
       index += 1
       continue
     }
+    // `$'…'`, quoted as C is, where `\'` doesn't end it: kept as written, and expanded, as the shell decodes it into other words.
+    if (char === '$' && text[index + 1] === "'") {
+      let end = index + 2
+      while (end < text.length && text[end] !== "'") end += text[end] === '\\' ? 2 : 1
+      word += `$${text.slice(index + 2, Math.min(end, text.length))}`
+      inWord = true
+      literal = true
+      expands = true
+      index = end
+      continue
+    }
+    // A comment, from a word's start to the line's end: nothing in it runs, and what follows the line does.
+    if (char === '#' && !inWord) {
+      const end = text.indexOf('\n', index)
+      index = (end === -1 ? text.length : end) - 1
+      continue
+    }
     if (char === '`' || (char === '$' && text[index + 1] === '(')) opaque = true
+    if (char === '$' && evaluates(text, index)) evaluated = true
+    if (char === '(' || char === ')') grouped = true
     const separator = SEPARATORS.find((candidate) => rest.startsWith(candidate))
     if (separator !== undefined && !(separator === '&' && rest.startsWith('&>'))) {
       endCommand(separator)
@@ -431,11 +480,13 @@ const splitCommandLine = (text: string) => {
       endWord()
       continue
     }
+    if ('*?[$'.includes(char)) expands = true
+    if (char === '{') braces = true
     word += char
     inWord = true
   }
   endCommand()
-  return { commands, ends, operators, opaque }
+  return { commands, ends, operators, expanded, opaque, grouped, evaluated }
 }
 
 /** Commands as the shell runs them: a script handed to a shell is read as commands of its own. */
@@ -1276,9 +1327,9 @@ interface Flags {
 /**
  * Programs a reader may run. `any` marks those with no flag that writes or
  * runs another program, which may take any flag; the others list theirs. Git,
- * `find` and `sed` are read more closely below.
+ * `find`, `sed`, `printf` and `test` are read more closely below.
  */
-const READS: Readonly<Record<string, Flags | 'any' | 'git' | 'find' | 'sed' | 'env'>> = {
+const READS: Readonly<Record<string, Flags | 'any' | 'git' | 'find' | 'sed' | 'env' | 'printf' | 'test'>> = {
   ls: 'any',
   cat: 'any',
   head: 'any',
@@ -1290,7 +1341,7 @@ const READS: Readonly<Record<string, Flags | 'any' | 'git' | 'find' | 'sed' | 'e
   stat: 'any',
   pwd: 'any',
   echo: 'any',
-  printf: 'any',
+  printf: 'printf',
   which: 'any',
   cut: 'any',
   tr: 'any',
@@ -1303,8 +1354,8 @@ const READS: Readonly<Record<string, Flags | 'any' | 'git' | 'find' | 'sed' | 'e
   nl: 'any',
   true: 'any',
   cd: 'any',
-  test: 'any',
-  '[': 'any',
+  test: 'test',
+  '[': 'test',
   rg: {
     short: 'nNiSFwlcoLvHhuUaz0qsx',
     shortWithValue: 'gtTCABmMe',
@@ -1561,9 +1612,82 @@ const FIND_LOOKS = new Set([
 /** A `sed` script that only prints lines: `1,40p`, `$p`, `/re/p`. Anything else (`w`, `e`, `r`) is refused. */
 const SED_PRINTS = /^((\d+|\$|\/[^/]*\/)(,(\d+|\$|\/[^/]*\/))?)?p$/
 
-/** Git's options before the subcommand a reader may use: none that set config or run a program. */
+/**
+ * The shell's own commands that set a variable, an alias or a function, or
+ * how the shell finds a command, or that run what they're given: after
+ * `read PATH`, `hash -p ./cat cat` or `alias cat=./cat`, a plain `cat` would
+ * run the repository's. Never a reader's, wherever they come in a line.
+ */
+const SHELL_STATE = new Set([
+  'read',
+  'declare',
+  'typeset',
+  'local',
+  'export',
+  'readonly',
+  'set',
+  'unset',
+  'alias',
+  'unalias',
+  'hash',
+  'rehash',
+  'unhash',
+  'enable',
+  'disable',
+  'builtin',
+  'source',
+  '.',
+  'eval',
+  'exec',
+  'trap',
+  'shopt',
+  'setopt',
+  'unsetopt',
+  'emulate',
+  'mapfile',
+  'readarray',
+  'function',
+  'functions',
+  'autoload',
+  'zmodload',
+  'let',
+  'getopts',
+  'integer',
+  'float',
+  'vared',
+  'print',
+])
+
+/**
+ * A `printf` format that only prints what it is given as text (`%s`, `%b`,
+ * `%q`, `%c`, `%%`): zsh works out a number it is given as arithmetic, which
+ * can set a variable (`printf %d PATH=1`) or run a command.
+ */
+const PRINTF_TEXT = /%(%|(\d+\$)?[-+ #0]*\d*(\.\d*)?[sbqc])/g
+
+/** Why a `printf` would set a variable, or work out what it is given as arithmetic; nothing where it only prints. */
+const printfReason = (args: ReadonlyArray<string>): string | undefined => {
+  const [first] = args
+  if (first !== undefined && first.startsWith('-') && first !== '--' && first !== '-')
+    return `\`printf ${first}\` can set a variable, as \`-v\` does, and this role only reads.`
+  const format = first === '--' ? args[1] : first
+  return format !== undefined && format.replace(PRINTF_TEXT, '').includes('%')
+    ? '`printf` may only print text here, as `%s` does: a number it is given is worked out as arithmetic, which can set a variable, and this role only reads.'
+    : undefined
+}
+
+/** `test` operators that work out their operand as a variable's subscript (`-v`, `-R`) or as arithmetic (zsh's `-t`), which can run a command. */
+const TEST_EVALUATES = new Set(['-v', '-R', '-t'])
+
+/**
+ * Git's options before the subcommand a reader may use: none that set config
+ * or run a program. Nor `--git-dir` or `--work-tree`: a repository a pull
+ * request carries, named so, would have its config read, which can name a
+ * program for git to run (a review's lead's git takes no bare repository it
+ * isn't told to, so `-C` into one finds none).
+ */
 const GIT_GLOBAL_LOOKS =
-  /^(-C|--no-pager|-P|--no-optional-locks|--literal-pathspecs|--glob-pathspecs|--noglob-pathspecs|--icase-pathspecs|--git-dir(=.*)?|--work-tree(=.*)?)$/
+  /^(-C|--no-pager|-P|--no-optional-locks|--literal-pathspecs|--glob-pathspecs|--noglob-pathspecs|--icase-pathspecs)$/
 
 /** Git's flags that write a file or run a program, in any subcommand. */
 const GIT_FLAG_WRITES =
@@ -1618,7 +1742,7 @@ const gitReason = (words: ReadonlyArray<string>): string | undefined => {
   for (let index = 0; index < before.length; index += 1) {
     const word = before[index] ?? ''
     if (!GIT_GLOBAL_LOOKS.test(word)) return `\`git ${word}\` can set git's config or run a program, and this role only reads.`
-    if (word === '-C' || word === '--git-dir' || word === '--work-tree') index += 1
+    if (word === '-C') index += 1
   }
   const flag = call.args.find((arg) => GIT_FLAG_WRITES.test(arg))
   if (flag !== undefined) return `\`git ${call.subcommand} ${flag}\` writes a file or runs a program, and this role only reads.`
@@ -1629,13 +1753,27 @@ const gitReason = (words: ReadonlyArray<string>): string | undefined => {
   return `\`git ${call.subcommand}\` can change the repository, and this role only reads.`
 }
 
+/**
+ * The folders a reader may name a program in by its path: the system's and
+ * its package managers', on macOS and Linux, never a repository's. Named so
+ * anywhere else (`./cat`, `node_modules/.bin/cat`, `~/bin/cat`), a program
+ * is what that folder holds, whatever its name says.
+ */
+const SYSTEM_PROGRAMS =
+  /^\/(s?bin|usr\/s?bin|usr\/local\/s?bin|opt\/homebrew\/s?bin|home\/linuxbrew\/\.linuxbrew\/s?bin|snap\/bin|run\/current-system\/sw\/bin|nix\/var\/nix\/profiles\/default\/bin)\/[^/]+$/
+
 /** Why one command would change something or run another program, or nothing when it only looks. */
 const readerWordsReason = (words: ReadonlyArray<string>): string | undefined => {
-  const program = (words[0] ?? '').split('/').at(-1) ?? ''
+  const named = words[0] ?? ''
+  const program = named.split('/').at(-1) ?? ''
   const written = writes(words).filter((target) => target !== '/dev/null')
   if (written.length > 0) return `It would write to ${written[0]}, and this role only reads.`
   // Where a shell's output goes, thrown away.
   if (onlyRedirects(words)) return undefined
+  if (named.includes('/') && !SYSTEM_PROGRAMS.test(named))
+    return `\`${named}\` runs what that folder holds, not the system's \`${program}\`, and this role only reads.`
+  if (SHELL_STATE.has(program))
+    return `\`${program}\` can set a variable, a function or an alias, or how the shell finds a command, and this role only reads.`
   const reads = READS[program]
   if (reads === undefined) return `\`${program}\` isn't on the list of commands that only look, and this role only reads.`
   const args = words.slice(1)
@@ -1647,6 +1785,14 @@ const readerWordsReason = (words: ReadonlyArray<string>): string | undefined => 
         return gitReason(words)
       case 'env':
         return args.length > 0 ? '`env` runs another command, and this role only reads.' : undefined
+      case 'printf':
+        return printfReason(args)
+      case 'test': {
+        const operator = args.find((arg) => TEST_EVALUATES.has(arg))
+        return operator === undefined
+          ? undefined
+          : `\`${program} ${operator}\` works out its operand as a variable or as arithmetic, which can run a command, and this role only reads.`
+      }
       case 'find': {
         const action = args.find((arg) => arg.startsWith('-') && !FIND_LOOKS.has(arg))
         return action === undefined ? undefined : `\`find ${action}\` isn't a test that only looks, and this role only reads.`
@@ -1667,29 +1813,107 @@ const readerWordsReason = (words: ReadonlyArray<string>): string | undefined => 
   return reason === undefined || reason.endsWith('only reads.') ? reason : `${reason.slice(0, -1)}, and this role only reads.`
 }
 
-/** Why a command a reader wants to run would change something, or nothing when it only looks. */
-const readerCommandReason = (text: string): string | undefined => {
-  const { commands, opaque } = parseCommandLine(text)
-  if (opaque) return "Althar can't tell what this command does until it runs, and this role only reads."
-  for (const words of commands) {
-    const reason = readerWordsReason(words)
-    if (reason !== undefined) return reason
+/** A shell, by its program's name: what `sh -c` hands a script to. */
+const SHELLS = /^(ba|z|da|k)?sh$/
+
+/**
+ * Why the words that start a reader's command, before its program, would
+ * change what runs: a variable set for it (`PATH=. cat`, `GIT_EXTERNAL_DIFF=…
+ * git diff`), `env`, which can set one or search a path of its own, `sudo`,
+ * or `exec`, which hands the shell over to it. Timing and niceness wrappers
+ * are only that.
+ */
+const readerLaunchReason = (words: ReadonlyArray<string>): string | undefined => {
+  const before = words.slice(0, words.length - unwrap(words).length)
+  for (const [index, word] of before.entries()) {
+    const set = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(word)?.[1]
+    if (set !== undefined) return `Setting ${set} for a command can change what it runs, and this role only reads.`
+    // `env` alone only prints the environment.
+    if (word === 'env' && index < words.length - 1) return '`env` runs another command, and this role only reads.'
+    if (word === 'sudo') return '`sudo` runs a command as someone else, and this role only reads.'
+    if (word === 'exec') return '`exec` hands the shell over to a command, and this role only reads.'
   }
   return undefined
 }
 
 /**
- * Decides a request from a role that only reads. Nothing here asks a person:
- * a reader's request is allowed or refused.
+ * Why a command a reader wants to run would change something, or run
+ * something that isn't the system's own program, or nothing when it only
+ * looks. Each command of the line is read alike, whatever joins them (`|`,
+ * `&&`, `;`), and a script handed to a shell is read as commands of its own.
+ * A reader may read a repository it doesn't trust, as the lead of a review
+ * does, so a read is decided from what runs, never from a name the
+ * repository could give something else: no program from its folders, no
+ * variable set to change what runs, by a word before it, a shell command
+ * (`printf -v PATH .`, `read`, `hash`, a function named `cat`) or an
+ * expansion (`${PATH:=.}`, `$[PATH=1]`), and no file name the shell expands
+ * into a flag (`rg x *` where a file is named `--pre=./run.sh`).
  */
-export const decideReader = (request: PermissionRequest): ReaderVerdict => {
+const readerCommandReason = (text: string): string | undefined => {
+  if (/[<>]\(/.test(text)) return 'A process substitution, `<(…)`, runs a command of its own, and this role only reads.'
+  const { commands, expanded, opaque, grouped, evaluated } = splitCommandLine(text)
+  if (opaque) return "Althar can't tell what this command does until it runs, and this role only reads."
+  if (grouped)
+    return 'Parentheses start a subshell, define a function or qualify a pattern, any of which can run a command of its own; quote them where they are text, as this role only reads.'
+  if (evaluated)
+    return 'An expansion such as `${X:=…}`, `$[…]` or `$a[…]` can set a variable or work out arithmetic, which changes what runs; name a variable plainly, as `$X`, as this role only reads.'
+  for (const [index, words] of commands.entries()) {
+    const launched = readerLaunchReason(words)
+    if (launched !== undefined) return launched
+    // A wrapper alone runs nothing else: `env` prints the environment.
+    const inner = unwrap(words).length === 0 ? words : unwrap(words)
+    const dropped = words.length - inner.length
+    const [named = '', ...args] = inner
+    const program = named.split('/').at(-1) ?? ''
+    const script = args.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg))
+    if (SHELLS.test(program) && script !== -1 && args[script + 1] !== undefined) {
+      // A shell may only be started plainly (`bash -lc`): `-i`, `--rcfile` and the like have it read a file of its own first.
+      if (named.includes('/') && !SYSTEM_PROGRAMS.test(named))
+        return `\`${named}\` runs what that folder holds, not the system's \`${program}\`, and this role only reads.`
+      const option = args.slice(0, script + 1).find((arg) => !/^-[celuvx]+$/.test(arg))
+      if (option !== undefined) return `\`${program} ${option}\` has the shell read or run more than its script, and this role only reads.`
+      const written = writes(inner).filter((target) => target !== '/dev/null')
+      if (written.length > 0) return `It would write to ${written[0]}, and this role only reads.`
+      const reason = readerCommandReason(args[script + 1] ?? '')
+      if (reason !== undefined) return reason
+      continue
+    }
+    // A program whose flags are read closely can't take one the shell made from a file's name; after `--` none is a flag.
+    const reads = READS[program]
+    if (reads !== undefined && reads !== 'any') {
+      const ends = inner.indexOf('--')
+      const at = [...(expanded[index] ?? [])]
+        .map((each) => each - dropped)
+        .find((each) => each >= 1 && (ends === -1 || each < ends) && !REDIRECTS.includes(inner[each - 1] ?? ''))
+      if (at !== undefined)
+        return `The shell would expand \`${inner[at]}\`, which \`${program}\` could take for a flag where a file's name starts with a dash; quote it or name the files, as this role only reads.`
+    }
+    const reason = readerWordsReason(inner)
+    if (reason !== undefined) return reason
+  }
+  return undefined
+}
+
+/** Why an offline reader's fetch is refused: what it reviews came from outside the project. */
+export const OFFLINE =
+  'This review has no network: the pull request is from outside the project, and its words could send you to a page of their choosing. Read the pull request with read_pull_request, and its code in your copy.'
+
+/**
+ * Decides a request from a role that only reads. Nothing here asks a person:
+ * a reader's request is allowed or refused. `offline`, as the lead of a
+ * review of a pull request from outside the project is, it reaches nothing
+ * on the network: a fetch is refused, as anything the agent's sandbox asks
+ * to reach is, and no command it may run reaches the network anyway.
+ */
+export const decideReader = (request: PermissionRequest, options: { readonly offline?: boolean } = {}): ReaderVerdict => {
   if (ALTHAR_TOOL.test(request.title)) return ALLOW
   switch (request.kind) {
     case 'read':
     case 'search':
     case 'think':
-    case 'fetch':
       return ALLOW
+    case 'fetch':
+      return options.offline === true ? deny(OFFLINE) : ALLOW
     case 'edit':
     case 'delete':
     case 'move':

@@ -29,6 +29,10 @@ import { statements as conflictResolutions } from './0024_conflict_resolutions'
 import { statements as pushRequests } from './0025_push_requests'
 import { statements as projectNotes } from './0026_project_notes'
 import { statements as agentsAtOnce } from './0027_agents_at_once'
+import { statements as taskSeen } from './0028_task_seen'
+import { statements as reviewDrafts } from './0029_review_drafts'
+import { statements as taskSearch } from './0030_task_search'
+import { statements as branchOnFirstWrite } from './0031_branch_on_first_write'
 import { statements as rulesFromAgents } from './0032_rules_from_agents'
 
 export interface Migration {
@@ -76,6 +80,10 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0025_push_requests', statements: pushRequests },
   { key: '0026_project_notes', statements: projectNotes },
   { key: '0027_agents_at_once', statements: agentsAtOnce },
+  { key: '0028_task_seen', statements: taskSeen },
+  { key: '0029_review_drafts', statements: reviewDrafts },
+  { key: '0030_task_search', statements: taskSearch },
+  { key: '0031_branch_on_first_write', statements: branchOnFirstWrite },
   { key: '0032_rules_from_agents', statements: rulesFromAgents },
 ]
 

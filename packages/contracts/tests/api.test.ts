@@ -11,6 +11,7 @@ import {
   ApiError,
   AtOnceCount,
   CommandId,
+  FOUND_MOST,
   Load,
   NewProjectId,
   PAGE,
@@ -18,6 +19,7 @@ import {
   type SentImage,
   SentImages,
   ProjectRulesView,
+  TaskCard,
   ThreadItem,
   WatchEvent,
 } from '../src/Api'
@@ -221,6 +223,7 @@ describe('the API', () => {
         title: 'Add a retry',
         slug: 'add-a-retry',
         phase: 'planned',
+        kind: 'change',
         plan: {
           id: 'plan_1',
           steps: [
@@ -246,6 +249,69 @@ describe('the API', () => {
     })
     assert.strictEqual(task.kind === 'task' && task.content.plan?.steps.length, 2)
     assert.throws(() => decode({ ...base, kind: 'task', content: { taskId: 't1' } }))
+  })
+
+  it('says what a task makes on its card: a plain task with what it handed back, a review with the pull request it reads', () => {
+    const card = Schema.decodeUnknownSync(TaskCard)
+    const plain = {
+      taskId: 't2',
+      threadId: 'th2',
+      title: 'Which partners still call v1?',
+      slug: 'which-partners-still-call-v1',
+      phase: 'ready',
+      kind: 'plain',
+      plan: null,
+      issue: null,
+      change: null,
+      step: null,
+      summary: 'Two do.',
+      lead: 'claude-code',
+      leadModel: null,
+      leadEffort: null,
+      branch: null,
+      startedAt: at,
+      waits: null,
+      queued: null,
+    }
+    const picture = { digest: 'a'.repeat(64), mediaType: 'image/png', bytes: 10, width: 4, height: 3, name: 'home.png', unkept: null }
+    const handed = card({
+      ...plain,
+      handed: {
+        pictures: [picture],
+        files: [
+          { path: 'notes/partners.md', add: 12 },
+          { path: '/tmp/x.csv', add: null },
+        ],
+      },
+    })
+    assert.deepStrictEqual(
+      handed.handed?.files.map((file) => file.add),
+      [12, null],
+    )
+    // Older runtimes said nothing of either.
+    assert.strictEqual(card(plain).handed, undefined)
+    // A file says the lines it added, or that git can't say.
+    assert.throws(() => card({ ...plain, handed: { pictures: [], files: [{ path: 'a.md' }] } }))
+    assert.throws(() => card({ ...plain, kind: 'question' }))
+    assert.throws(() => card({ ...plain, kind: undefined }))
+    const brief = {
+      product: 'github',
+      repository: 'meridian/api',
+      number: 1199,
+      url: 'https://github.com/meridian/api/pull/1199',
+      title: 'Send back won’t restart a dead lead session',
+      author: 'ninemate',
+      outside: true,
+      additions: 58,
+      deletions: 20,
+      findings: 3,
+      blocking: 1,
+      verdict: 'changes',
+      posted: null,
+    }
+    assert.strictEqual(card({ ...plain, kind: 'review', reviewing: brief }).reviewing?.author, 'ninemate')
+    assert.strictEqual(card({ ...plain, kind: 'review', reviewing: { ...brief, verdict: null, additions: null } }).reviewing?.verdict, null)
+    assert.throws(() => card({ ...plain, kind: 'review', reviewing: { ...brief, verdict: 'request_changes' } }))
   })
 
   it('takes a command id only in its own shape, and a change with its cursor', () => {
@@ -336,6 +402,26 @@ describe('the API', () => {
               OpenProject: ({ grant }) => Effect.fail(new ApiError({ reason: 'NotFound', message: `No folder was chosen as ${grant}.` })),
               ReadFolder: () => Effect.die('unused'),
               ListTasks: () => Effect.succeed({ cursor: 0, tasks: [] }),
+              SearchTasks: ({ text, projectId }) =>
+                Effect.succeed({
+                  tasks: [
+                    {
+                      taskId: 'task_1',
+                      threadId: 'th1',
+                      projectId: projectId ?? 'p1',
+                      title: 'Retry the checkout',
+                      slug: 'retry-the-checkout',
+                      phase: 'ready' as const,
+                      state: 'open',
+                      pullRequest: '#143',
+                      changedAt: '2026-10-14T09:00:00.000Z',
+                      matched: [
+                        { text: '…the card ', hit: false },
+                        { text, hit: true },
+                      ],
+                    },
+                  ],
+                }),
               CreateTask: () => Effect.die('unused'),
               GetThread: () => Effect.die('unused'),
               GetFileDiff: () => Effect.die('unused'),
@@ -343,6 +429,7 @@ describe('the API', () => {
               GetOlderSettled: () => Effect.die('unused'),
               GetHome: () => Effect.die('unused'),
               LeftHome: () => Effect.die('unused'),
+              SeeTask: () => Effect.die('unused'),
               Merge: () => Effect.die('unused'),
               Push: () => Effect.die('unused'),
               ReplacePullRequest: () => Effect.die('unused'),
@@ -368,6 +455,7 @@ describe('the API', () => {
               SetModelBlocked: () => Effect.die('unused'),
               GetSettings: () => Effect.die('unused'),
               SetCoAuthor: () => Effect.die('unused'),
+              SetPostTeamReviews: () => Effect.die('unused'),
               SetAgentsAtOnce: () => Effect.die('unused'),
               StartAccountSignIn: () => Effect.die('unused'),
               GetAccountSignIn: () => Effect.die('unused'),
@@ -384,6 +472,9 @@ describe('the API', () => {
               ChangeIssueDraft: () => Effect.void,
               FileIssueDraft: () => Effect.void,
               DiscardIssueDraft: () => Effect.void,
+              ChangeReviewDraft: () => Effect.void,
+              PostReviewDraft: () => Effect.void,
+              DiscardReviewDraft: () => Effect.void,
               AnswerStuck: () => Effect.void,
               StartSession: ({ commandId: id }) => Effect.succeed(id),
               SwitchAgent: () => Effect.die('unused'),
@@ -449,6 +540,7 @@ describe('the API', () => {
               FindAccounts: () => Effect.succeed({ found: [] }),
               SignInAccount: () => Effect.succeed({ line: 'codex login', opened: false }),
               OpenChange: () => Effect.void,
+              SkipReview: () => Effect.void,
               RefreshTask: () => Effect.void,
               StopListening: () => Effect.void,
               StopBackground: () => Effect.void,
@@ -484,6 +576,11 @@ describe('the API', () => {
         assert.throws(() => Schema.decodeUnknownSync(Product)('gitea'))
         // Where Althar's processes can't be read, its work's part is unknown, not none.
         assert.strictEqual((yield* client.GetLoad({})).shares, null)
+        // A search crosses with what matched; one asking for too many, or for pages of text, never leaves.
+        const [found] = (yield* client.SearchTasks({ text: 'retr', projectId: 'p2' })).tasks
+        assert.deepStrictEqual([found?.projectId, found?.matched?.[1]], ['p2', { text: 'retr', hit: true }])
+        assert.isTrue((yield* Effect.exit(client.SearchTasks({ text: 'retr', limit: FOUND_MOST + 1 })))._tag === 'Failure')
+        assert.isTrue((yield* Effect.exit(client.SearchTasks({ text: 'x'.repeat(501) })))._tag === 'Failure')
         const refused = yield* Effect.flip(client.OpenProject({ commandId, grant: 'g1' }))
         assert.strictEqual(refused.message, 'No folder was chosen as g1.')
         assert.deepStrictEqual(

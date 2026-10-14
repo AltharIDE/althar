@@ -123,13 +123,17 @@ export class OutwardUncertain extends Schema.TaggedError<OutwardUncertain>()('Ou
 }) {}
 
 /**
- * A task's pull request opens once its work is done, once, and while the
- * task is open: it is still working, its work stopped short, it is settled,
- * or it has one.
+ * A task's pull request opens once its work is done, and another once its
+ * last merged or closed with commits after it (ADR-034): it is still
+ * working, its work stopped short, it is settled, it has one open, its
+ * branch has nothing that isn't in one, what the lead changed isn't all
+ * committed, or its new commits conflict with the default branch. `detail`
+ * says which files, for the last two.
  */
 export class NoChangeToOpen extends Schema.TaggedError<NoChangeToOpen>()('NoChangeToOpen', {
   taskId: Schema.String,
-  why: Schema.Literals(['working', 'stopped', 'settled', 'opened']),
+  why: Schema.Literals(['working', 'stopped', 'settled', 'opened', 'nothing', 'uncommitted', 'conflicts']),
+  detail: Schema.optional(Schema.String),
 }) {}
 
 /**
