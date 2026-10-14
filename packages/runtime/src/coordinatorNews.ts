@@ -261,7 +261,8 @@ const startedNews = (projectId: string, since: number) =>
  * The plain tasks whose lead started changing the repository since a place in
  * the ledger (DEV-96): each is a change now, on the branch Althar made for it,
  * and its title, written for a question or something to try, may no longer
- * say what it does. A line for each task, with its title now.
+ * say what it does. A line for each task, with its title now; none for a
+ * branch made later in another of its repositories, once it was a change.
  */
 const branchedNews = (projectId: string, since: number) =>
   Effect.gen(function* () {
@@ -270,7 +271,7 @@ const branchedNews = (projectId: string, since: number) =>
       SELECT w.task_id, k.slug, k.title, json_extract(e.payload, '$.to') AS branch FROM record_events e
       JOIN workspaces w ON w.id = e.aggregate_id JOIN tasks k ON k.id = w.task_id
       WHERE e.project_id = ${projectId} AND e.aggregate_type = 'workspace' AND e.sequence > ${since}
-        AND e.type = 'workspace.branched' AND json_extract(e.payload, '$.from') IS NULL
+        AND e.type = 'workspace.branched' AND json_extract(e.payload, '$.from') IS NULL AND json_extract(e.payload, '$.later') IS NULL
       ORDER BY e.sequence`
     return [...new Set(events.map((event) => event.taskId))].map((taskId) => {
       const mine = events.filter((event) => event.taskId === taskId)

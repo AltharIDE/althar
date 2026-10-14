@@ -233,12 +233,20 @@ export const withoutSignIns = (signedOut: string): Readonly<Record<string, strin
 
 /**
  * What the environment of a review's lead adds to `withoutSignIns`' (whose
- * one git setting it keeps): git uses a bare repository only where it is
- * named, never one it finds by itself. A pull request can carry one, under
- * any name, whose config names a program for git to run (an external diff,
- * a signature checker); `git -C` into it would run it.
+ * one git setting it keeps), beside its agent's `reviewing.env`. Git reads
+ * none of the person's config or the system's: a filter, diff or merge
+ * driver defined there (`python -m nbstripout`, a textconv) would run on the
+ * pull request's files as the lead's `git status` or `git diff` reads them,
+ * in the copy, where it finds the pull request's own modules first; the
+ * copy is a repository of its own whose config defines none (`addReadCopy`).
+ * And git uses a bare repository only where it is named, never one it finds
+ * by itself: a pull request can carry one, under any name, whose config
+ * names a program for git to run (an external diff, a signature checker);
+ * `git -C` into it would run it.
  */
 export const readingUntrusted: Readonly<Record<string, string>> = {
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_CONFIG_COUNT: '2',
   GIT_CONFIG_KEY_1: 'safe.bareRepository',
   GIT_CONFIG_VALUE_1: 'explicit',

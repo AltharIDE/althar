@@ -4,6 +4,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Connections } from './Connections'
 import { NotFound } from './errors'
+import { addReadCopy } from './git'
 import { checksLine, checksOf, commentLine, logOf, reviewLine, standing } from './pullRequestWords'
 
 /*
@@ -69,6 +70,19 @@ export const reviewOf = (taskId: string) =>
       onNone: () => null,
       onSome: (seen): ReviewOf => ({ ...seen, linkId: link.id, connectionId: link.connectionId, product: link.product }),
     })
+  })
+
+/**
+ * Makes a review's copy in a new folder: the pull request's head, checked
+ * out detached in a repository of its own (`addReadCopy`), with its head and
+ * where its change starts as refs of the copy's (`refs/althar/review/…`). The
+ * same when a copy whose folder went is put back: the head the lead read,
+ * never where its change starts.
+ */
+export const copyReviewed = (repository: string, path: string, review: Pick<Reviewed, 'head' | 'baseCommit'>) =>
+  addReadCopy(repository, path, review.head, {
+    'refs/althar/review/head': review.head,
+    'refs/althar/review/base': review.baseCommit,
   })
 
 /** A pull request as people say it: pull request #12. */

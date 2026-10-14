@@ -63,9 +63,19 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
   }
 
   // A worktree a crash interrupted: ready if git finished adding it, on its branch or, a plain task's, on none; failed otherwise.
-  const preparing = yield* sql<{ id: string; projectId: ProjectId; path: string; branch: string; branched: number }>`
-    SELECT id, project_id, path, branch, branched_at IS NOT NULL AS branched FROM workspaces
-    WHERE state = 'preparing' AND device_id = ${instance.deviceId}`
+  // A review's copy starts where its pull request's change does, as its review keeps it, not at the head it holds.
+  const preparing = yield* sql<{
+    id: string
+    projectId: ProjectId
+    path: string
+    branch: string
+    branched: number
+    starts: string | null
+  }>`
+    SELECT w.id, w.project_id, w.path, w.branch, w.branched_at IS NOT NULL AS branched,
+      (SELECT json_extract(x.snapshot, '$.baseCommit') FROM external_links x WHERE x.task_id = w.task_id AND x.kind = 'review'
+        ORDER BY x.created_at LIMIT 1) AS starts
+    FROM workspaces w WHERE w.state = 'preparing' AND w.device_id = ${instance.deviceId}`
   for (const workspace of preparing) {
     const branch = yield* currentBranch(workspace.path)
     // With no branch, git finished once the folder is a worktree with a head, which reading it says.
@@ -74,7 +84,7 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
     const revision = yield* change(
       'workspaces',
       workspace.id,
-      Option.isSome(head) ? { state: 'ready', baseCommit: head.value } : { state: 'failed' },
+      Option.isSome(head) ? { state: 'ready', baseCommit: workspace.starts ?? head.value } : { state: 'failed' },
     )
     yield* fact({
       projectId: workspace.projectId,

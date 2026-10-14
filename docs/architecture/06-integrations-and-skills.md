@@ -517,8 +517,17 @@ asks; its thread opens with what they said and the pull request under it.
   request's head (`refs/pull/<n>/head`) and its target branch into refs of
   its own (`refs/althar/reviews/…`), signed in as a push is, and checks the
   head out detached in a folder of the task's: a workspace with access
-  `read`, on no branch. The lead never fetches. Nothing Althar sets up a task
-  with touches the copy: no install, no run of the project, no merge here, no
+  `read`, on no branch. The copy is a repository of its own, not a worktree
+  of the person's: it borrows their repository's objects, and keeps the
+  head and where the change starts as refs of its own. Git runs there, for
+  Althar and for the lead, with none of the person's config or the
+  system's: a filter, diff or merge driver defined there (`python -m
+  nbstripout`, a textconv) would otherwise run on the pull request's files
+  as the copy is checked out, or as `git status` or `git diff` reads it, in
+  the copy, where it finds the pull request's own modules first. A review
+  reopened after its copy's folder went has it made again at the head its
+  lead read. The lead never fetches. Nothing Althar sets up a task with
+  touches the copy: no install, no run of the project, no merge here, no
   conflict round, nothing published.
 - **It runs nothing of it.** The lead's session is in reader mode, under the
   reader rules, as the coordinator's and a reviewer's are (04, "Read-only by
@@ -526,10 +535,18 @@ asks; its thread opens with what they said and the pull request under it.
   the repository is the pull request's to write, a read is decided from what
   runs, never from a name it could give something else: a program named by a
   path outside the system's folders (`./cat`), a variable set for a command
-  (`PATH=. cat`), `env`, `sudo`, a shell started with more than its script
-  (`bash -i`, `--rcfile`), a process substitution, a file name the shell
-  would expand into a flag (`rg x *`), and `git --git-dir` are refused, and
-  no interpreter or package script is ever a read. Nor does it load anything
+  (`PATH=. cat`), `env`, `sudo`, `exec`, a shell started with more than its
+  script (`bash -i`, `--rcfile`), a process substitution, a file name the
+  shell would expand into a flag (`rg x *`), and `git --git-dir` are refused,
+  and no interpreter or package script is ever a read. Nor is anything that
+  would change how a later command is found: a shell command that sets a
+  variable, a function or an alias (`printf -v PATH .`, `read`, `export`,
+  `hash`, `alias`, `set`), parentheses (a subshell, a function named `cat`,
+  zsh's qualifier on a pattern), an expansion that assigns or works out
+  arithmetic (`${PATH:=.}`, `$[…]`, zsh's `$a[…]`), and `printf` or `test`
+  with what zsh works out as arithmetic (`%d`, `-v`, `-t`). Comments and
+  `$'…'` are read as the shell reads them, so neither hides a command after
+  it. Nor does it load anything
   of the repository's own: Claude Code starts with no settings file, the
   repository's or the person's (whose allow rules would approve its
   commands), and its hooks off; OpenCode with no project config, plugins or
@@ -574,7 +591,9 @@ asks; its thread opens with what they said and the pull request under it.
   card in the thread. A comment on a file the pull request hasn't, or a line
   its diff doesn't show, is refused before anything is kept, since GitHub
   would refuse the whole review for it. Drafting again replaces the draft
-  that waits. The person keeps or drops each comment, rewords them, and
+  that waits, or one that wasn't posted, never one perhaps posted; a task
+  drafts one at a time, so two calls at once make one draft, and a call
+  made while its review was posted drafts nothing over it. The person keeps or drops each comment, rewords them, and
   chooses the verdict: the lead's is a suggestion, and on a pull request from
   outside, Approve is never chosen for them. Nothing reaches GitHub until they
   press Post, which posts the review with their verdict and the comments

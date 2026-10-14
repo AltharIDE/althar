@@ -84,6 +84,27 @@ export const branchedWords = (names: ReadonlyArray<string>) => {
   return distinct.length === 1 ? `on its branch ${distinct[0] ?? ''}` : `on its branches ${distinct.join(', ')}`
 }
 
+/** Whether one of the task's worktrees it writes in has its branch here: the task is a change. */
+const changing = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const instance = yield* Instance
+    const [one] = yield* sql<{ id: string }>`
+      SELECT id FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND access = 'write'
+        AND branched_at IS NOT NULL LIMIT 1`
+    return one !== undefined
+  })
+
+/** Worktrees' repositories by the names the person knows them by, the project's first first. */
+const repositoriesOf = (ids: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const names = yield* sql<{ name: string }>`
+      SELECT b.display_name AS name FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+      WHERE w.id IN ${sql.in(ids)} ORDER BY b.created_at, b.rowid`
+    return names.map((one) => one.name).join(', ')
+  })
+
 /**
  * Makes a plain task's branch where its lead first changed the repository:
  * in each of its worktrees with none yet, the first free of its planned name,
@@ -91,8 +112,12 @@ export const branchedWords = (names: ReadonlyArray<string>) => {
  * detached head and changes not committed are on it. Recorded, said in its
  * thread, found by it, and its card read again. Nothing where it has a
  * branch already or wrote nothing; `handed` are pictures its lead hands as
- * evidence now, which aren't work. The branches made. The caller holds the
- * task's lock, so this never runs beside publishing it.
+ * evidence now, which aren't work. Once one of its worktrees has its branch,
+ * the task is a change, and the rest get theirs whatever they hold: one git
+ * couldn't switch is tried again at each later check, its thread told the
+ * first time, and again once it has its branch. The branches made as the
+ * task becomes a change; none as one it was already gets another. The
+ * caller holds the task's lock, so this never runs beside publishing it.
  */
 export const branchOnFirstWrite = (taskId: string, handed: ReadonlyArray<{ readonly worktree: string; readonly file: string }> = []) =>
   Effect.gen(function* () {
@@ -100,22 +125,35 @@ export const branchOnFirstWrite = (taskId: string, handed: ReadonlyArray<{ reado
     const instance = yield* Instance
     const open = (yield* unbranchedOf(taskId)).filter((worktree) => worktree.state === 'ready' && existsSync(worktree.path))
     if (open.length === 0) return []
-    const before = yield* evidencePaths(taskId)
-    const evidence = (worktree: string, file: string) =>
-      before(worktree, file) || handed.some((picture) => picture.worktree === worktree && picture.file === file)
-    const wrote = yield* Effect.forEach(open, (worktree) => wroteIn(worktree, evidence))
-    if (!wrote.includes(true)) return []
-    // Each one now, so the task is all a change; one git can't switch stays as it is, to be tried again at the next turn's end.
+    const already = yield* changing(taskId)
+    if (!already) {
+      const before = yield* evidencePaths(taskId)
+      const evidence = (worktree: string, file: string) =>
+        before(worktree, file) || handed.some((picture) => picture.worktree === worktree && picture.file === file)
+      const wrote = yield* Effect.forEach(open, (worktree) => wroteIn(worktree, evidence))
+      if (!wrote.includes(true)) return []
+    }
+    // Each one now, so the task is all a change; one git can't switch stays as it is, to be tried again at the next check.
     const made: Array<Unbranched & { readonly name: string }> = []
+    const missed: Array<Unbranched> = []
     for (const worktree of open) {
       let name = worktree.branch
       for (let n = 2; yield* branchExists(worktree.path, name); n += 1) name = `${worktree.branch}-${n}`
       const switched = yield* Effect.exit(git(worktree.path, 'switch', '--quiet', '--create', name))
       if (switched._tag === 'Success') made.push({ ...worktree, name })
-      else yield* Effect.logWarning('Could not make a plain task’s branch', switched.cause)
+      else {
+        missed.push(worktree)
+        yield* Effect.logWarning('Could not make a plain task’s branch', switched.cause)
+      }
     }
     const [first] = made
     if (first === undefined) return []
+    const names = branchedWords(made.map((worktree) => worktree.name))
+    const title = already
+      ? `This task is ${names} in ${yield* repositoriesOf(made.map((worktree) => worktree.id))} too now.`
+      : missed.length === 0
+        ? `This task changes files now, ${names}.`
+        : `This task changes files now, ${names}. Althar couldn’t make its branch in ${yield* repositoriesOf(missed.map((worktree) => worktree.id))} yet, and tries again as its lead’s turn ends.`
     yield* sql.withTransaction(
       Effect.gen(function* () {
         const at = yield* timestamp
@@ -127,18 +165,15 @@ export const branchOnFirstWrite = (taskId: string, handed: ReadonlyArray<{ reado
             aggregateId: worktree.id,
             revision,
             type: 'workspace.branched',
-            payload: { from: null, to: worktree.name },
+            // `later`: the task was a change already, which the coordinator was told.
+            payload: { from: null, to: worktree.name, ...(already ? { later: true } : {}) },
             actorId: instance.systemId,
           })
         }
-        yield* addItem({ projectId: first.projectId, threadId: first.threadId }, 'notice', {
-          source: 'runtime',
-          severity: 'info',
-          title: `This task changes files now, ${branchedWords(made.map((worktree) => worktree.name))}.`,
-        })
+        yield* addItem({ projectId: first.projectId, threadId: first.threadId }, 'notice', { source: 'runtime', severity: 'info', title })
         yield* indexTask(taskId)
       }),
     )
     yield* touchCard(taskId)
-    return made.map((worktree) => worktree.name)
+    return already ? [] : made.map((worktree) => worktree.name)
   })

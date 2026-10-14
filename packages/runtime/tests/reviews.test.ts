@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -10,8 +10,10 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { readingUntrusted, withoutSignIns } from '../src/Config'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
+import { git as althar, gitOutcome } from '../src/git'
 import { Instance } from '../src/Instance'
 import { Nudges } from '../src/Nudges'
 import { Projects } from '../src/Projects'
@@ -29,11 +31,25 @@ import {
 import * as Runtime from '../src/Runtime'
 import { findTasks } from '../src/Search'
 import { Sessions } from '../src/Sessions'
+import { Tasks } from '../src/Tasks'
 import { fact } from '../src/records'
 import { transcript } from '../src/threads'
 import { words } from '../src/words'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, items, launches, listTools, repository, runtime, sessionMetas, until } from './support'
+import {
+  callTool,
+  callToolAtOnce,
+  fakeConnectors,
+  HOST,
+  hosted,
+  items,
+  launches,
+  listTools,
+  repository,
+  runtime,
+  sessionMetas,
+  until,
+} from './support'
 
 /*
  * Reviews of someone else's pull request (docs/architecture/06, "Reviewing
@@ -515,6 +531,102 @@ describe('reviewing someone else’s pull request', () => {
     }).pipe(Effect.provide(withQueries(github)))
   })
 
+  it.live('keeps one draft when the lead drafts twice at once, and posts one review where the person’s setting posts it', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    const second = pullRequest(at, github, { title: 'Retry the checkout' })
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      const sql = yield* SqlClient.SqlClient
+      const twice = (access: ToolAccess) =>
+        callToolAtOnce(
+          access,
+          'draft_review',
+          ['First look.', 'Second look.'].map((summary) => ({
+            verdict: 'comment',
+            summary,
+            comments: [{ path: 'send.ts', line: 1, body: summary, severity: 'nit' }],
+          })),
+        )
+      const draftsOf = (taskId: string) =>
+        sql<{ state: string; summary: string }>`SELECT state, summary FROM review_drafts WHERE task_id = ${taskId}`
+      // Drafted twice at once, it is one draft, the one drafted last, and one card.
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const first = yield* reviewTask(projectId)
+      const said = yield* twice(lead(projectId, first.task?.threadId ?? '', first.task?.id ?? ''))
+      assert.isTrue(
+        said.every((one) => one.startsWith('Drafted your review')),
+        said.join('\n'),
+      )
+      const [kept, ...more] = yield* draftsOf(first.task?.id ?? '')
+      assert.deepStrictEqual(more, [])
+      assert.strictEqual(kept?.state, 'pending')
+      assert.lengthOf(yield* cardsIn(first.task?.threadId ?? ''), 1)
+      // Where the person's setting posts their team's reviews, one review reaches GitHub.
+      yield* setPostTeamReviews(true)
+      yield* callTool(coordinator, 'review_pull_request', {
+        pull_request: linkTo(second.pull.number),
+        lead: { agent: 'claude-code' },
+      })
+      const other = yield* reviewTask(projectId)
+      const posted = yield* twice(lead(projectId, other.task?.threadId ?? '', other.task?.id ?? ''))
+      assert.deepStrictEqual(
+        (yield* draftsOf(other.task?.id ?? '')).map((one) => one.state),
+        ['posted'],
+      )
+      assert.deepStrictEqual(
+        github.reviewsPosted.map((one) => one.number),
+        [second.pull.number],
+      )
+      // One call posted it; the other drafted over it before, or was told it was posted while it drafted.
+      assert.isTrue(
+        posted.some((one) => one.startsWith('Posted your review')),
+        posted.join('\n'),
+      )
+      for (const one of posted) assert.match(one, /^Posted your review|was posted while you drafted this/)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('drafts over one that wasn’t posted, and never over one perhaps posted, however many calls come at once', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const { task } = yield* reviewTask(projectId)
+      const threadId = task?.threadId ?? ''
+      const access = lead(projectId, threadId, task?.id ?? '')
+      const reviews = yield* Reviews
+      const instance = yield* Instance
+      yield* callTool(access, 'draft_review', { verdict: 'comment', summary: 'A thought.' })
+      const draftId = (yield* cardsIn(threadId))[0]?.draftId ?? ''
+      github.failNext('postReview', 'rejected')
+      assert.strictEqual((yield* reviews.post(draftId, instance.personId)).state, 'failed')
+      // Not posted, it is drafted over: the same card, waiting again.
+      yield* callTool(access, 'draft_review', { verdict: 'changes', summary: 'Another thought.' })
+      const [again, ...more] = yield* cardsIn(threadId)
+      assert.deepStrictEqual(more, [])
+      assert.deepInclude(again, { draftId, state: 'pending', error: null, summary: 'Another thought.' })
+      // Perhaps posted, no call drafts over it, however many come at once: its warning stays for the person.
+      github.failNext('postReview', 'unreachable')
+      assert.strictEqual((yield* reviews.post(draftId, instance.personId)).state, 'uncertain')
+      const said = yield* callToolAtOnce(access, 'draft_review', [
+        { verdict: 'approve', summary: 'Fine after all.' },
+        { verdict: 'approve', summary: 'Fine, really.' },
+      ])
+      for (const one of said) assert.include(one, 'may be on GitHub already')
+      const [kept, ...others] = yield* cardsIn(threadId)
+      assert.deepStrictEqual(others, [])
+      assert.deepInclude(kept, { draftId, state: 'uncertain', summary: 'Another thought.' })
+      assert.match(kept?.error ?? '', /^Its answer was lost/)
+      assert.lengthOf(github.reviewsPosted, 0)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
   it.live('replaces a draft that waits when the lead drafts again, and a discarded one posts nothing', () => {
     const at = hosted()
     const github = makeFakeService({ pushUrl: () => at.bare })
@@ -956,6 +1068,130 @@ describe('reviewing someone else’s pull request', () => {
           { id: tasks.second, state: 'open' },
         ])
       }).pipe(Effect.provide(withQueries(github, database)))
+    })
+  })
+
+  it.live('makes its copy a repository of its own, where no driver the person’s git defines runs on the pull request’s files', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    // The pull request chooses drivers for its files, by names the person's git defines.
+    writeFileSync(join(at.working, '.gitattributes'), 'README.md filter=repo\n*.ts filter=own diff=own\n')
+    const { pull, head } = pullRequest(at, github)
+    // Each driver leaves a mark where it runs: one in the person's repository's config, the rest in their own.
+    const marks = mkdtempSync(join(tmpdir(), 'althar-marks-'))
+    const driver = (mark: string) => `sh -c 'touch "${marks}/${mark}"; cat "$@"' -`
+    git(at.working, 'config', 'filter.repo.smudge', driver('repo-smudge'))
+    git(at.working, 'config', 'filter.repo.clean', driver('repo-clean'))
+    const own = join(mkdtempSync(join(tmpdir(), 'althar-gitconfig-')), 'gitconfig')
+    for (const [key, mark] of [
+      ['filter.own.smudge', 'own-smudge'],
+      ['filter.own.clean', 'own-clean'],
+      ['diff.own.textconv', 'own-textconv'],
+    ] as const)
+      git(at.working, 'config', '--file', own, key, driver(mark))
+    const before = process.env.GIT_CONFIG_GLOBAL
+    return Effect.gen(function* () {
+      process.env.GIT_CONFIG_GLOBAL = own
+      const { projectId, coordinator } = yield* project(at.working)
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const { task, workspace } = yield* reviewTask(projectId)
+      const copy = workspace?.path ?? ''
+      assert.deepInclude(workspace, { access: 'read', state: 'ready' })
+      // Its own repository, not a worktree of the person's, holding the head and where its change starts as refs of its own.
+      assert.isTrue(statSync(join(copy, '.git')).isDirectory())
+      assert.notInclude(git(at.working, 'worktree', 'list', '--porcelain'), copy)
+      assert.strictEqual(git(copy, 'rev-parse', 'HEAD', 'refs/althar/review/head'), `${head}\n${head}`)
+      assert.strictEqual(git(copy, 'rev-parse', 'refs/althar/review/base'), workspace?.baseCommit)
+      assert.strictEqual(readFileSync(join(copy, 'send.ts'), 'utf8'), 'export const sendBack = () => 1\n')
+      // Checked out, and read by Althar's own git, its status and diff included, no driver ran: git there sees none.
+      const later = new Date(Date.now() + 10_000)
+      for (const file of ['README.md', 'send.ts']) utimesSync(join(copy, file), later, later)
+      assert.strictEqual(yield* althar(copy, 'status', '--porcelain'), '')
+      yield* althar(copy, 'diff', `${workspace?.baseCommit ?? ''}`)
+      assert.notStrictEqual((yield* gitOutcome(copy, 'config', '--get', 'filter.own.smudge')).code, 0)
+      assert.notStrictEqual((yield* gitOutcome(copy, 'config', '--get', 'filter.repo.smudge')).code, 0)
+      // Nor does its lead's: with the person's own git it would run.
+      const leads = (env: Readonly<Record<string, string>>) =>
+        execFileSync('git', ['diff', workspace?.baseCommit ?? '', '--', 'send.ts'], { cwd: copy, env: { ...process.env, ...env } })
+      leads({ ...withoutSignIns(marks), ...readingUntrusted })
+      assert.deepStrictEqual(readdirSync(marks), [])
+      // A comment is placed against the change as the copy shows it.
+      const drafted = yield* callTool(lead(projectId, task?.threadId ?? '', task?.id ?? ''), 'draft_review', {
+        verdict: 'comment',
+        summary: 'Fine.',
+        comments: [{ path: 'send.ts', line: 1, body: 'Here.', severity: 'nit' }],
+      })
+      assert.include(drafted, 'Drafted your review')
+      assert.deepStrictEqual(readdirSync(marks), [])
+      leads({})
+      assert.isNotEmpty(readdirSync(marks))
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (before === undefined) delete process.env.GIT_CONFIG_GLOBAL
+          else process.env.GIT_CONFIG_GLOBAL = before
+        }),
+      ),
+      Effect.provide(withQueries(github)),
+    )
+  })
+
+  it.live('reopened after its copy went, makes it again at the head its lead read, never where the change starts', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull, head } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const { task, workspace } = yield* reviewTask(projectId)
+      const copy = workspace?.path ?? ''
+      const tasks = yield* Tasks
+      yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task?.id ?? '' })
+      rmSync(copy, { recursive: true, force: true })
+      yield* tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: task?.id ?? '' })
+      assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'open')
+      // The pull request's code, as the lead read it, in a copy of its own again; where its change starts, kept for comparing.
+      assert.notStrictEqual(workspace?.baseCommit, head)
+      assert.strictEqual(git(copy, 'rev-parse', 'HEAD'), head)
+      assert.strictEqual(git(copy, 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD')
+      assert.strictEqual(git(copy, 'rev-parse', 'refs/althar/review/base'), workspace?.baseCommit)
+      assert.strictEqual(readFileSync(join(copy, 'send.ts'), 'utf8'), 'export const sendBack = () => 1\n')
+      assert.isTrue(statSync(join(copy, '.git')).isDirectory())
+      // Nothing a plain task's worktree is given: no scratch folder, no setup.
+      assert.isFalse(existsSync(join(copy, '.althar')))
+      assert.strictEqual(git(copy, 'status', '--porcelain'), '')
+      // With no head kept for it, it isn't put back at all.
+      yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', {}), taskId: task?.id ?? '' })
+      rmSync(copy, { recursive: true, force: true })
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE external_links SET snapshot = '{}' WHERE task_id = ${task?.id ?? ''}`
+      const refused = yield* Effect.flip(tasks.reopen({ envelope: yield* Runtime.envelope('task.reopen', {}), taskId: task?.id ?? '' }))
+      assert.strictEqual(tagOf(refused), 'TaskRefused')
+      assert.isFalse(existsSync(copy))
+      assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'abandoned')
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('a copy a restart interrupted is ready once git had made it, read from where its change starts', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull, head } = pullRequest(at, github)
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-reviews-')), 'profile.sqlite')
+    return Effect.gen(function* () {
+      const made = yield* Effect.gen(function* () {
+        const { projectId, coordinator } = yield* project(at.working)
+        yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+        const { task, workspace } = yield* reviewTask(projectId)
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`UPDATE workspaces SET state = 'preparing', base_commit = NULL WHERE task_id = ${task?.id ?? ''}`
+        return { projectId, starts: workspace?.baseCommit ?? null }
+      }).pipe(Effect.provide(withQueries(github, database)))
+      const { workspace } = yield* reviewTask(made.projectId).pipe(Effect.provide(withQueries(github, database)))
+      assert.deepInclude(workspace, { state: 'ready', baseCommit: made.starts })
+      assert.notStrictEqual(made.starts, head)
     })
   })
 
