@@ -130,8 +130,8 @@ export const fakeAgents = (
 ) => {
   const entry = (agentId: string): AgentEntry => ({
     definition: definition(agentId, signedOut, perUse),
-    transport: (cwd, env = {}, options) => {
-      launches.push({ agentId, cwd, env, options })
+    transport: (cwd, env = {}, session) => {
+      launches.push({ agentId, cwd, env, options: session })
       return agentId === 'process'
         ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
         : agentId === 'missing'
@@ -342,7 +342,6 @@ export const notices = (threadId: string) =>
     return rows.map((row) => JSON.parse(row.content) as Readonly<Record<string, string>>)
   })
 
-/** Calls one of Althar's tools as an agent with this access would: over MCP, with the session's token. */
 /** The names of the tools a session is given, as its agent lists them. */
 export const listTools = (access: ToolAccess) =>
   Effect.gen(function* () {
@@ -361,6 +360,7 @@ export const listTools = (access: ToolAccess) =>
     })
   })
 
+/** Calls one of Althar's tools as an agent with this access would: over MCP, with the session's token. */
 export const callTool = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>
   Effect.gen(function* () {
     const toolServer = yield* ToolServer
