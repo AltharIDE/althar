@@ -20,5 +20,6 @@ for (const click of clicks) {
   await page.waitForTimeout(500)
 }
 await page.screenshot({ path: out })
+process.stdout.write(`${page.url()}\n`)
 if (errors.length > 0) process.stdout.write(`${errors.join('\n')}\n`)
 await browser.close()

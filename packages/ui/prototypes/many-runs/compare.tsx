@@ -18,11 +18,11 @@ const taken = import.meta.glob<string>('../../../../.althar/scratch/many-runs/sh
 const pictureOf = (id: string) => Object.entries(taken).find(([path]) => path.endsWith(`/${id}.png`))?.[1]
 
 const STATES: ReadonlyArray<[string, string]> = [
-  ['Project, several running', '?s=busy'],
-  ['Task, several running', '?s=busy#/threads/th1'],
-  ['Many, none running', '?s=many'],
-  ['One', '?s=one'],
-  ['Nothing known yet', '?s=empty'],
+  ['Project, several running', 's=several-running'],
+  ['Task, several running', 's=several-running#/threads/th1'],
+  ['Many, none running', 's=many'],
+  ['One', 's=one'],
+  ['Nothing known yet', 's=nothing-yet'],
 ]
 
 const DIRECTIONS = [
@@ -84,7 +84,10 @@ function Compare() {
             <p style={{ margin: 0, maxWidth: 860 }}>{direction.what}</p>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
               {STATES.map(([name, at]) => (
-                <LinkButton key={name} onClick={() => window.location.assign(`./${direction.key}.html${at}`)}>
+                <LinkButton
+                  key={name}
+                  onClick={() => window.location.assign(`./index.html?d=${direction.shot === 'T' ? 'Today' : direction.shot}&${at}`)}
+                >
                   {name}
                 </LinkButton>
               ))}

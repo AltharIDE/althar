@@ -132,6 +132,33 @@ const launchOf = (run: Run) => {
   }
 }
 
+// The conversations, made once: read again, they keep their ids, so the thread doesn't take them for new ones.
+const coordinatorItems = [
+  items.you('Can you plan a task to make the Download button on the site offer the installer for the visitor’s computer?'),
+  items.tool({ title: 'Read apps/site/src/Download.tsx' }),
+  items.says('The button links to the releases page whatever the computer. I planned a task to pick the .dmg, the AppImage or the .exe.'),
+  items.card(
+    card({
+      taskId: 't1',
+      threadId: 'th1',
+      title: TASK.title,
+      slug: 'download-the-installer',
+      phase: 'running',
+      step: 'implement',
+      branch: TASK.branch,
+    }),
+    'c1',
+  ),
+]
+const threadItems = [
+  items.you('Make the Download button offer the installer for the visitor’s computer: the .dmg on a Mac, the AppImage on Linux.'),
+  items.tool({ title: 'Read apps/site/src/Download.tsx' }),
+  items.says(
+    'The button always links to the releases page. I’ll read the platform from the browser and pick the asset, with the page as the fallback.',
+  ),
+  items.tool({ title: 'Edit apps/site/src/Download.tsx' }),
+]
+
 /** Today's one command: the repository's, where it has one. */
 const todays = () => (proto.get().scenario === 'empty' ? null : 'bun run dev')
 
@@ -149,25 +176,7 @@ const { client } = fakeClient({
       project: { id: 'p1', name: 'althar' },
       runCommand: todays(),
       launches: proto.get().runs.map(launchOf),
-      items: [
-        items.you('Can you plan a task to make the Download button on the site offer the installer for the visitor’s computer?'),
-        items.tool({ title: 'Read apps/site/src/Download.tsx' }),
-        items.says(
-          'The button links to the releases page whatever the computer. I planned a task to pick the .dmg, the AppImage or the .exe.',
-        ),
-        items.card(
-          card({
-            taskId: 't1',
-            threadId: 'th1',
-            title: TASK.title,
-            slug: 'download-the-installer',
-            phase: 'running',
-            step: 'implement',
-            branch: TASK.branch,
-          }),
-          'c1',
-        ),
-      ],
+      items: coordinatorItems,
     }),
   getThread: async () =>
     snapshot({
@@ -184,14 +193,7 @@ const { client } = fakeClient({
           .runs.filter((one) => one.place === 'task')
           .map(launchOf),
       },
-      items: [
-        items.you('Make the Download button offer the installer for the visitor’s computer: the .dmg on a Mac, the AppImage on Linux.'),
-        items.tool({ title: 'Read apps/site/src/Download.tsx' }),
-        items.says(
-          'The button always links to the releases page. I’ll read the platform from the browser and pick the asset, with the page as the fallback.',
-        ),
-        items.tool({ title: 'Edit apps/site/src/Download.tsx' }),
-      ],
+      items: threadItems,
     }),
   runProject: async (_projectId: string, taskId: string | null) => {
     const runnable = proto.get().runnables[0]
@@ -206,61 +208,135 @@ const host = fakeHost()
 const cache = makeQueryClient()
 const services = { client, host, cache, feed: follow(client, cache) }
 
-// What runs changed: the screens read their runs again, as they would on the runtime's word.
+// What runs changed: the screens read their runs again, as they would on the runtime's word; a switch of direction reads nothing.
+let read = { runs: proto.get().runs, scenario: proto.get().scenario }
 proto.subscribe(() => {
+  const { runs, scenario } = proto.get()
+  if (runs === read.runs && scenario === read.scenario) return
+  read = { runs, scenario }
   void cache.invalidateQueries({ queryKey: ['coordinator'] })
   void cache.invalidateQueries({ queryKey: ['thread'] })
 })
 
-/* ——— The strip under the window: which state the page shows, and which screen. ——— */
+/* ——— The switcher under the window: which direction, which state, which screen; the URL keeps them. ——— */
 
-const SCENARIOS: ReadonlyArray<{ value: Scenario; label: string }> = [
-  { value: 'empty', label: 'Nothing known yet' },
-  { value: 'one', label: 'One' },
-  { value: 'many', label: 'Many' },
-  { value: 'busy', label: 'Several running' },
+/** The directions in the switcher's order, each with its key: 1 to 6. */
+const DIRECTIONS: ReadonlyArray<{ value: Direction; name: string }> = [
+  { value: 'A', name: 'Split button' },
+  { value: 'B', name: 'Runs panel' },
+  { value: 'C', name: 'Chips' },
+  { value: 'D', name: 'Launcher' },
+  { value: 'E', name: 'Dock' },
+  { value: 'Today', name: 'Today' },
 ]
 
-function Strip({ name }: { name: string }) {
+/** The states, with the words the URL uses for them. */
+const SCENARIOS: ReadonlyArray<{ value: Scenario; url: string; label: string }> = [
+  { value: 'empty', url: 'nothing-yet', label: 'Nothing yet' },
+  { value: 'one', url: 'one', label: 'One' },
+  { value: 'many', url: 'many', label: 'Many' },
+  { value: 'busy', url: 'several-running', label: 'Several running' },
+]
+
+const directionOf = (word: string | null): Direction | undefined =>
+  DIRECTIONS.find((one) => one.value.toLowerCase() === word?.toLowerCase())?.value
+const scenarioOf = (word: string | null): Scenario | undefined => SCENARIOS.find((one) => one.url === word || one.value === word)?.value
+const nameOf = (direction: Direction) => DIRECTIONS.find((one) => one.value === direction)?.name ?? direction
+
+const titled = (direction: Direction) => {
+  document.title = `${direction === 'Today' ? 'Today' : `${direction} · ${nameOf(direction)}`} · Many things to run`
+}
+
+/** Swaps the direction in place: the same screen, the same state. */
+const go = (direction: Direction) => {
+  proto.set({ direction, opening: null })
+  titled(direction)
+}
+
+// The URL says what the page shows, so a link opens it again: ?d=B&s=several-running, the screen after the #.
+let said = ''
+proto.subscribe(() => {
+  const { direction, scenario } = proto.get()
+  const now = `${direction}/${scenario}`
+  if (now === said) return
+  said = now
+  const params = new URLSearchParams(window.location.search)
+  params.set('d', direction)
+  params.set('s', SCENARIOS.find((one) => one.value === scenario)?.url ?? scenario)
+  window.history.replaceState(window.history.state, '', `${window.location.pathname}?${params.toString()}${window.location.hash}`)
+})
+
+/** Keys 1 to 6 pick a direction, ← and → step through them; never while typing, or inside a menu, dialog or list. */
+const onKey = (event: KeyboardEvent) => {
+  if (event.metaKey || event.ctrlKey || event.altKey) return
+  const target = event.target instanceof Element ? event.target : null
+  if (target?.closest('input, textarea, select, [contenteditable], [role=menu], [role=dialog], [role=listbox]')) return
+  // A switch of the page's own takes the arrows; the digits still pick a direction from it.
+  if (event.key.startsWith('Arrow') && target?.closest('[role=radiogroup]')) return
+  const at = DIRECTIONS.findIndex((one) => one.value === proto.get().direction)
+  const picked =
+    event.key === 'ArrowRight'
+      ? DIRECTIONS[(at + 1) % DIRECTIONS.length]
+      : event.key === 'ArrowLeft'
+        ? DIRECTIONS[(at - 1 + DIRECTIONS.length) % DIRECTIONS.length]
+        : /^[1-9]$/.test(event.key)
+          ? DIRECTIONS[Number(event.key) - 1]
+          : undefined
+  if (picked === undefined) return
+  event.preventDefault()
+  go(picked.value)
+}
+
+function Switcher() {
   const p = useProto()
   if (p.bare) return null
   return (
     <div className={css.strip}>
-      <span className={css.name}>
-        {p.direction} · {name}
-      </span>
+      <Segmented<Direction>
+        label="Direction"
+        value={p.direction}
+        onChange={go}
+        options={DIRECTIONS.map((one, at) => ({
+          value: one.value,
+          label: one.value === 'Today' ? 'Today' : `${one.value} · ${one.name}`,
+          tooltip: { label: one.value === 'Today' ? 'The one Run button, as the app has it now' : one.name, kbd: String(at + 1) },
+        }))}
+      />
       <Segmented<Scenario>
         label="What the project knows to run"
         value={p.scenario}
         onChange={(scenario) => proto.scenario(scenario)}
-        options={SCENARIOS}
+        options={SCENARIOS.map(({ value, label: words }) => ({ value, label: words }))}
       />
       <LinkButton onClick={() => window.location.assign('#/projects/p1?room=both')}>Project</LinkButton>
       <LinkButton onClick={() => window.location.assign('#/threads/th1')}>Task</LinkButton>
       <span className={css.grow} />
-      <LinkButton onClick={() => window.location.assign('./index.html')}>All directions</LinkButton>
+      <span>1–6 or ← → switch</span>
+      <LinkButton onClick={() => window.location.assign('./compare.html')}>Screenshots</LinkButton>
     </div>
   )
 }
 
-export const boot = (direction: Direction, name: string) => {
+/** Opens the app on the direction and state the URL says, or the page's own. */
+export const boot = (direction: Direction = 'A') => {
   const params = new URLSearchParams(window.location.search)
-  const scenario = (params.get('s') as Scenario | null) ?? 'many'
-  proto.set({ direction, opening: (params.get('open') as Opening | null) ?? null, bare: params.has('bare') })
-  proto.scenario(scenario)
+  const shown = directionOf(params.get('d')) ?? direction
+  proto.set({ direction: shown, opening: (params.get('open') as Opening | null) ?? null, bare: params.has('bare') })
+  proto.scenario(scenarioOf(params.get('s')) ?? 'many')
+  titled(shown)
   // Every page opens on althar's tab, whatever another page kept.
   window.localStorage.removeItem('althar.tabs')
   if (window.location.hash === '' || window.location.hash === '#/') window.location.hash = '#/projects/p1?room=both'
+  if (!params.has('bare')) window.addEventListener('keydown', onKey)
   const router = makeRouter({ client, cache })
   const element = document.getElementById('root')
   if (element === null) throw new Error('The page has no #root')
-  document.title = `${direction} · ${name}`
   createRoot(element).render(
     <ServicesProvider value={services}>
       <div className={params.has('bare') ? css.bare : css.frame}>
         <RouterProvider router={router} />
       </div>
-      <Strip name={name} />
+      <Switcher />
     </ServicesProvider>,
   )
 }
