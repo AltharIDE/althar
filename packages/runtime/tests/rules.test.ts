@@ -456,6 +456,129 @@ describe('a role that only reads', () => {
       assert.strictEqual(verdict({ kind: 'execute', title: command, rawInput: { command } }), 'allow', command)
   })
 
+  describe('reading a repository it doesn’t trust, as a review’s lead does', () => {
+    const decided = (command: string) => decideReader(request({ kind: 'execute', title: command, rawInput: { command } }))
+    const refused = (commands: ReadonlyArray<string>, saying?: string) => {
+      for (const command of commands) {
+        const verdict = decided(command)
+        assert.strictEqual(verdict.verdict, 'deny', command)
+        const reason = verdict.verdict === 'deny' ? verdict.reason : ''
+        assert.isTrue(reason.endsWith('this role only reads.'), `${command}: ${reason}`)
+        if (saying !== undefined) assert.include(reason, saying, command)
+      }
+    }
+    const allowed = (commands: ReadonlyArray<string>) => {
+      for (const command of commands) assert.strictEqual(decided(command).verdict, 'allow', command)
+    }
+
+    it('runs a program by its path only from the system’s folders, never one the repository named after one that reads', () => {
+      refused(
+        [
+          './cat README.md',
+          'node_modules/.bin/cat x',
+          '../cat x',
+          'bin/rg retry',
+          '~/bin/cat x',
+          '/tmp/x/cat x',
+          '/usr/bin/../../tmp/cat x',
+        ],
+        'runs what that folder holds',
+      )
+      allowed(['/usr/bin/cat README.md', '/bin/ls -la', '/opt/homebrew/bin/rg retry', '/usr/local/bin/fd -t f', 'cat README.md'])
+    })
+
+    it('sets no variable for a command, and runs nothing through env or sudo', () => {
+      refused(['PATH=. cat x', 'FOO=1 git log', 'GIT_EXTERNAL_DIFF=./diff.sh git diff', 'GIT_CONFIG_PARAMETERS=x git log'], 'Setting')
+      refused(['X=--pre=./run.sh; rg retry $X'])
+      refused(['env PATH=. cat x', 'env -P. cat x', 'env -i cat x', 'nice env cat x'], '`env` runs another command')
+      refused(['sudo cat /etc/hosts', 'sudo -u root cat x'], '`sudo`')
+      // Wrappers that only time or slow a command change nothing it runs; `env` alone prints the environment.
+      allowed(['time git log -1', 'nice -n 5 git log -1', 'timeout 5 git log -1', 'command -v rg', 'env'])
+    })
+
+    it('never takes an interpreter or a package’s script for a read, whatever it is given', () => {
+      refused([
+        'sh run.sh',
+        'bash ./scripts/check',
+        'zsh x',
+        'python setup.py',
+        'python3 -c "print(1)"',
+        '/usr/bin/python3 x.py',
+        'node index.js',
+        'ruby x.rb',
+        'perl -e 1',
+        'npx vitest',
+        'bunx vitest',
+        'npm test',
+        'npm run lint',
+        'bun test',
+        'bun run build',
+        'pnpm install',
+        'yarn',
+        'make',
+        'cargo test',
+        'go test ./...',
+        'deno run x.ts',
+        './configure',
+      ])
+    })
+
+    it('reads every command of a line alike, whatever joins them, and a shell’s script as commands of its own', () => {
+      refused([
+        'cat x | ./run.sh',
+        'cat x && ./cat y',
+        'cat x; PATH=. cat y',
+        'cat x || node y',
+        'cat x & ./run.sh',
+        'cat x\n./run.sh',
+        '(./run.sh)',
+        '{ ./run.sh; }',
+        "bash -c 'cat x; ./run.sh'",
+        'sh -c "FOO=1 git log"',
+        'sh -c \'sh -c "./cat x"\'',
+        "bash -lc 'cat x' > out.txt",
+      ])
+      // A process substitution runs a command of its own.
+      refused(['cat <(./run.sh)', 'diff <(node a.js) b.txt', 'tee >(./run.sh) < x'], 'process substitution')
+      // A shell started plainly, as Codex starts one, may run what only looks; one that reads a file of its own first may not.
+      allowed(["bash -lc 'git log -1'", "sh -c 'cat README.md | head -5'", "bash -c 'rg retry' 2>/dev/null"])
+      refused(["bash -ic 'cat x'", "bash --rcfile ./rc -c 'cat x'", "bash -O extglob -c 'cat x'"], 'read or run more than its script')
+      refused(["./bash -c 'cat x'"], 'runs what that folder holds')
+    })
+
+    it('lets no file name the shell expands become a flag of a program whose flags it reads closely', () => {
+      // A file named `--pre=./run.sh` among them would have rg run it.
+      refused(
+        [
+          'rg retry *',
+          'rg retry src/*',
+          'sort *.txt',
+          'sed -n 1p *.md',
+          'git diff HEAD src/*',
+          'fd {a,b}',
+          "rg $'--pre=./run.sh' x",
+          'rg x $X',
+        ],
+        'The shell would expand',
+      )
+      // Quoted, after `--`, or for a program with no flag that runs anything, it is only a name.
+      allowed([
+        'rg retry -- src/*',
+        "rg 'a*b' src",
+        'rg "a[bc]" src',
+        'cat *.md',
+        'ls src/*',
+        "git log -- '*.ts'",
+        'git stash show stash@{0}',
+      ])
+    })
+
+    it('reads no repository by --git-dir or --work-tree, whose config could name a program for git to run', () => {
+      refused(['git --git-dir=fixtures/repo.git log', 'git --git-dir fixtures/repo.git log', 'git --work-tree=. --git-dir=x status'])
+      allowed(['git -C src log -1'])
+    })
+  })
+
   it('does not let a reader call Flatpak’s broad host bridge directly', () => {
     assert.deepStrictEqual(decideReader(request({ kind: 'execute', title: 'flatpak-spawn --host sh' })), {
       verdict: 'deny',

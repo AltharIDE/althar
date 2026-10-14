@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
-import type { AgentDefinition, AgentId } from '@althar/provider-adapters'
+import type { AgentDefinition, AgentId, SessionOptions } from '@althar/provider-adapters'
 import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, fakeAgentMain } from '@althar/provider-adapters/testing'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -59,8 +59,20 @@ const fakeHomes = mkdtempSync(join(tmpdir(), 'althar-fake-homes-'))
 /** Lines the runtime would have opened in a terminal, such as an account's sign-in. */
 export const opened: Array<string> = []
 
-/** Every fake agent started, where it started, and with the environment its account gave it: its home, or nothing for its usual folder. */
-export const launches: Array<{ readonly agentId: string; readonly cwd: string; readonly env: Readonly<Record<string, string>> }> = []
+/**
+ * Every fake agent started, where it started, with the environment its
+ * account gave it (its home, or nothing for its usual folder), and how its
+ * session was started beyond its role: as a review's lead, untrusted.
+ */
+export const launches: Array<{
+  readonly agentId: string
+  readonly cwd: string
+  readonly env: Readonly<Record<string, string>>
+  readonly options?: SessionOptions | undefined
+}> = []
+
+/** What each session of the fake agent with session options (`claude-code`) was started as: its role, and its options. */
+export const sessionMetas: Array<{ readonly role: 'lead' | 'reader' | undefined; readonly options: SessionOptions | undefined }> = []
 
 export const definition = (id: string, signedOut: ReadonlyArray<string> = [], perUse: ReadonlyArray<string> = []): AgentDefinition => ({
   id: id as AgentId,
@@ -91,7 +103,16 @@ export const definition = (id: string, signedOut: ReadonlyArray<string> = [], pe
   permissions: codexLikeMeanings,
   permissionJudge: { sessionMeta: { fake: { tools: [] } } },
   // One fake agent passes session options, as Claude Code's entry does.
-  ...(id === 'claude-code' ? { sessionMeta: () => ({ fake: { asks: true } }) } : {}),
+  ...(id === 'claude-code'
+    ? {
+        sessionMeta: (role?: 'lead' | 'reader', options?: SessionOptions) => {
+          sessionMetas.push({ role, options })
+          return { fake: { asks: true } }
+        },
+      }
+    : {}),
+  // Each may lead a review of a pull request from outside but `codex`, as the registry's Codex may not.
+  reviewing: { outside: id !== 'codex' },
   knownGaps: [],
 })
 
@@ -109,8 +130,8 @@ export const fakeAgents = (
 ) => {
   const entry = (agentId: string): AgentEntry => ({
     definition: definition(agentId, signedOut, perUse),
-    transport: (cwd, env = {}) => {
-      launches.push({ agentId, cwd, env })
+    transport: (cwd, env = {}, session) => {
+      launches.push({ agentId, cwd, env, options: session })
       return agentId === 'process'
         ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
         : agentId === 'missing'
@@ -319,6 +340,24 @@ export const notices = (threadId: string) =>
       content: string
     }>`SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'notice' ORDER BY sequence`
     return rows.map((row) => JSON.parse(row.content) as Readonly<Record<string, string>>)
+  })
+
+/** The names of the tools a session is given, as its agent lists them. */
+export const listTools = (access: ToolAccess) =>
+  Effect.gen(function* () {
+    const granted = yield* (yield* ToolServer).grant(access)
+    const server = granted.server
+    if (server.type !== 'http') return []
+    return yield* Effect.promise(async () => {
+      const client = new Client({ name: 'test', version: '1.0.0' })
+      const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: server.headers } })
+      await client.connect(transport as Parameters<typeof client.connect>[0])
+      try {
+        return (await client.listTools()).tools.map((tool) => tool.name).toSorted()
+      } finally {
+        await client.close()
+      }
+    })
   })
 
 /** Calls one of Althar's tools as an agent with this access would: over MCP, with the session's token. */

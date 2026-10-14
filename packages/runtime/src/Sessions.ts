@@ -1322,9 +1322,32 @@ export class Sessions extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { definition } = entry
+          // A review's lead only reads, as the coordinator and a reviewer do, and loads nothing of the repository's own settings,
+          // hooks or plugins (the pull request's to write); offline, for a pull request from outside the project.
+          const reads = thread.role !== 'task' || thread.review !== null
+          const untrusted = thread.role === 'task' && thread.review !== null
+          const offline = thread.role === 'task' && thread.review?.outside === true
+          // Only an agent its session holds to reading leads a review (the registry's `reviewing`): never one that runs what its
+          // sandbox contains without asking, which could run the pull request's code, a team's too.
+          if (untrusted && definition.reviewing?.outside !== true) {
+            const summary = `${definition.name} can't be held to reading only: it runs commands its sandbox contains without asking, so it could run the pull request's code. Review it with another agent, such as Claude Code.`
+            yield* sql.withTransaction(
+              Effect.gen(function* () {
+                const revision = yield* moveSession(sessionId, 'failed', { endedAt: yield* timestamp })
+                yield* sessionFact(thread, sessionId, revision, 'provider_session.failed', { reason: summary })
+              }),
+            )
+            yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+              source: 'runtime',
+              severity: 'error',
+              title: `${definition.name} couldn't start.`,
+              description: summary,
+            })
+            return yield* new SessionFailed({ agentId: definition.id, reason: summary, summary })
+          }
           // In the account's home: its sign-in, not the agent's usual one (ADR-012), with what it shares brought up to date.
           yield* accounts.prepare(account)
-          const transport = entry.transport(cwdOf(thread), accounts.env(account))
+          const transport = entry.transport(cwdOf(thread), accounts.env(account), untrusted ? { untrusted } : undefined)
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
           if (transport._tag === 'Process' && processId !== undefined) {
             // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
@@ -1342,9 +1365,6 @@ export class Sessions extends Context.Service<
               launchedAt: yield* timestamp,
             })}`
           }
-          // A review's lead only reads, as the coordinator and a reviewer do; offline, for a pull request from outside the project.
-          const reads = thread.role !== 'task' || thread.review !== null
-          const offline = thread.role === 'task' && thread.review?.outside === true
           const requestContext: RequestContext = {
             projectId: thread.projectId,
             threadId: thread.threadId,
@@ -1404,7 +1424,12 @@ export class Sessions extends Context.Service<
                 mcpServers: [tools.server],
                 ...(definition.sessionMeta === undefined
                   ? {}
-                  : { meta: definition.sessionMeta(reads ? 'reader' : 'lead', offline ? { offline } : undefined) }),
+                  : {
+                      meta: definition.sessionMeta(
+                        reads ? 'reader' : 'lead',
+                        untrusted ? { untrusted, ...(offline ? { offline } : {}) } : undefined,
+                      ),
+                    }),
               })
               if (model !== undefined) yield* agent.setOption(definition.options.model, model)
               // An effort the model doesn't offer is no reason not to start.

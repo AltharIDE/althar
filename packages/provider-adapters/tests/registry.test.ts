@@ -81,6 +81,78 @@ describe('the agent registry', () => {
     assert.include(permissionsOf('lead', { offline: true }).ask, 'WebFetch')
   })
 
+  it('makes Claude Code a review’s lead with no settings file and no hooks, keeping its reader rules and sandbox', () => {
+    type Options = {
+      settingSources?: Array<string>
+      settings: {
+        disableAllHooks?: boolean
+        permissions: { deny: Array<string>; ask: Array<string> }
+        sandbox: { enabled: boolean; autoAllowBashIfSandboxed: boolean }
+      }
+    }
+    const metaOf = agents['claude-code'].sessionMeta
+    if (metaOf === undefined) return assert.fail('Claude Code has session options')
+    const optionsOf = (options?: { offline?: boolean; untrusted?: boolean }) =>
+      (metaOf('reader', options) as { claudeCode: { options: Options } }).claudeCode.options
+    for (const offline of [false, true]) {
+      const untrusted = optionsOf({ untrusted: true, offline })
+      // Neither the repository's settings (its hooks, its allow rules) nor the person's own allow rules load.
+      assert.deepStrictEqual(untrusted.settingSources, [])
+      assert.isTrue(untrusted.settings.disableAllHooks)
+      assert.deepStrictEqual(untrusted.settings.permissions, optionsOf({ offline }).settings.permissions)
+      assert.deepInclude(untrusted.settings.sandbox, { enabled: true, autoAllowBashIfSandboxed: false })
+    }
+    // The coordinator and a reviewer read the person's own code, with their settings, as before.
+    assert.isUndefined(optionsOf().settingSources)
+    assert.isUndefined(optionsOf().settings.disableAllHooks)
+    // A lead's session is never untrusted this way: the option is a review's lead's.
+    assert.isUndefined((metaOf('lead', { untrusted: true }) as { claudeCode: { options: Options } }).claudeCode.options.settingSources)
+  })
+
+  it('reviews a pull request from outside only on an agent its session holds to reading', () => {
+    assert.isTrue(agents['claude-code'].reviewing?.outside)
+    assert.isTrue(agents.opencode.reviewing?.outside)
+    // codex-acp starts every turn on its mode's approval policy, on-request: what its sandbox contains runs without asking.
+    assert.isFalse(agents.codex.reviewing?.outside)
+  })
+
+  it('turns Codex’s web search and hooks off for a review’s lead, beside the person’s MCP servers switched off', () => {
+    const env = agents.codex.reviewing?.env
+    if (env === undefined) return assert.fail('Codex has a review environment')
+    const own = { CODEX_CONFIG: JSON.stringify({ 'mcp_servers.github.command': 'npx', 'mcp_servers.github.enabled': false }) }
+    assert.deepStrictEqual(JSON.parse(env(own).CODEX_CONFIG ?? '{}'), {
+      'mcp_servers.github.command': 'npx',
+      'mcp_servers.github.enabled': false,
+      web_search: 'disabled',
+      'features.hooks': false,
+    })
+    assert.deepStrictEqual(JSON.parse(env({}).CODEX_CONFIG ?? '{}'), { web_search: 'disabled', 'features.hooks': false })
+  })
+
+  it('keeps the repository’s config, plugins and language servers out of an OpenCode review’s lead, and asks for its web search', () => {
+    const env = agents.opencode.reviewing?.env
+    if (env === undefined) return assert.fail('OpenCode has a review environment')
+    const asks = { edit: 'ask', bash: 'ask', webfetch: 'ask', websearch: 'ask' }
+    const own = {
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        permission: { edit: 'ask', bash: 'ask', webfetch: 'ask' },
+        experimental: { continue_loop_on_deny: true },
+        mcp: { github: { enabled: false } },
+      }),
+    }
+    const held = env(own)
+    assert.strictEqual(held.OPENCODE_DISABLE_PROJECT_CONFIG, '1')
+    assert.deepStrictEqual(JSON.parse(held.OPENCODE_CONFIG_CONTENT ?? '{}'), {
+      permission: asks,
+      agent: { build: { permission: asks }, plan: { permission: asks } },
+      experimental: { continue_loop_on_deny: true },
+      mcp: { github: { enabled: false } },
+      lsp: false,
+    })
+    // Without the person's servers to switch off, from its usual config.
+    assert.deepInclude(JSON.parse(env({}).OPENCODE_CONFIG_CONTENT ?? '{}'), { lsp: false, permission: asks })
+  })
+
   it('in a Flatpak, a reader’s commands run without the sandbox and every one asks, as no sandbox can start there', () => {
     const allows = () => {
       const meta = agents['claude-code'].sessionMeta?.('reader') as {

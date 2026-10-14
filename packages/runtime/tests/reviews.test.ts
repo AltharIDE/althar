@@ -7,7 +7,7 @@ import type { ReviewDraftCard } from '@althar/contracts'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Stream } from 'effect'
+import { Duration, Effect, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
@@ -29,10 +29,11 @@ import {
 import * as Runtime from '../src/Runtime'
 import { findTasks } from '../src/Search'
 import { Sessions } from '../src/Sessions'
+import { fact } from '../src/records'
 import { transcript } from '../src/threads'
 import { words } from '../src/words'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, items, launches, repository, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, launches, listTools, repository, runtime, sessionMetas, until } from './support'
 
 /*
  * Reviews of someone else's pull request (docs/architecture/06, "Reviewing
@@ -167,6 +168,9 @@ describe('reviewing someone else’s pull request', () => {
       const threadId = task?.threadId ?? ''
       yield* until(said(threadId), (all) => all.length > 0)
       assert.isTrue(launches.some((launch) => launch.cwd === workspace?.path))
+      // Untrusted, as a reader: nothing of the repository's own settings, hooks or plugins loads, and offline, from outside.
+      assert.deepStrictEqual(launches.find((launch) => launch.cwd === workspace?.path)?.options, { untrusted: true })
+      assert.deepStrictEqual(sessionMetas.at(-1), { role: 'reader', options: { untrusted: true, offline: true } })
       const sessions = yield* Sessions
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId, body: 'settings' })
       const [mode] = yield* until(
@@ -253,19 +257,39 @@ describe('reviewing someone else’s pull request', () => {
       assert.include(read, '- dana reviewed: commented\n> One more look.')
       // Its head moved on since Althar copied it: said so.
       assert.match(read, /Its head is head-1 now; your copy holds [0-9a-f]{12}, as Althar fetched it\./)
-      // A review has no step to finish, and nothing of its own to push or reply on.
-      assert.include(yield* callTool(access, 'finish_step', { summary: 'Done.' }), 'you finish it with draft_review')
-      assert.include(yield* callTool(access, 'push_to_pull_request', {}), 'This task reviews someone else’s pull request')
-      // draft_review is a review's: another task's lead is told so.
+      // A team's pull request: untrusted all the same, but not offline.
+      assert.deepStrictEqual(sessionMetas.at(-1), { role: 'reader', options: { untrusted: true } })
+
+      // It is given only what reads, and draft_review; the rest is refused when called, listed or not: nothing it could change
+      // the project with, such as how it runs, which Althar runs outside any sandbox, and nothing that reaches the host.
+      assert.deepStrictEqual(yield* listTools(access), ['draft_review', 'read_issue', 'read_pull_request'])
+      const refusals = {
+        finish_step: { summary: 'Done.' },
+        set_run_command: { command: 'sh ./serve.sh', setup: 'sh ./setup.sh' },
+        reply_on_pull_request: { body: 'Approved by me.' },
+        push_to_pull_request: {},
+      }
+      for (const [name, input] of Object.entries(refusals))
+        assert.strictEqual(
+          yield* callTool(access, name, input),
+          `This task reviews someone else’s pull request: you read it, with read_pull_request for what it says, and finish it with draft_review, which the person posts. ${name} isn’t for a review.`,
+          name,
+        )
+      const sql = yield* SqlClient.SqlClient
+      assert.deepStrictEqual(yield* sql`SELECT run_command, run_setup FROM repository_bindings`, [{ runCommand: null, runSetup: null }])
+      assert.notInclude(github.calls, 'reply')
+      // draft_review is a review's: another task's lead is told so, and has its own tools as before.
       const other = yield* (yield* Projects).createTask({
         envelope: yield* Runtime.envelope('task.create', {}),
         projectId,
         title: 'Retry checkout',
       })
+      const otherLead = lead(projectId, other.threadId, other.taskId)
       assert.include(
-        yield* callTool(lead(projectId, other.threadId, other.taskId), 'draft_review', { verdict: 'comment', summary: 'Fine.' }),
+        yield* callTool(otherLead, 'draft_review', { verdict: 'comment', summary: 'Fine.' }),
         'draft_review is for one that does',
       )
+      assert.includeMembers(yield* listTools(otherLead), ['finish_step', 'set_run_command', 'push_to_pull_request', 'draft_review'])
     }).pipe(Effect.provide(withQueries(github)))
   })
 
@@ -695,6 +719,226 @@ describe('reviewing someone else’s pull request', () => {
           error: 'Althar closed while posting this. Look on the pull request for it before you post it again.',
         })
         assert.lengthOf(github.reviewsPosted, 0)
+      }).pipe(Effect.provide(withQueries(github, database)))
+    })
+  })
+
+  it.live('leads one only on an agent its session holds to reading, a team’s too, when started and when switched to', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const outside = pullRequest(at, github, { outside: true })
+    const team = pullRequest(at, github, { title: 'Retry the checkout' })
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      const sql = yield* SqlClient.SqlClient
+      // Codex runs what its read-only sandbox contains without asking: it could run the pull request's scripts.
+      assert.include(
+        yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(outside.pull.number), lead: { agent: 'codex' } }),
+        "Fake codex can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this pull request #1's code. Review it with Fake claude-code or Fake opencode.",
+      )
+      // Nor a team's: its code is no more for the reviewer to run.
+      assert.include(
+        yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(team.pull.number), lead: { agent: 'codex' } }),
+        "Fake codex can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this pull request #2's code.",
+      )
+      assert.deepStrictEqual(yield* sql`SELECT id FROM tasks`, [])
+      // Switched to on one from outside, it doesn't start, and the lead there carries on.
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(outside.pull.number), lead: { agent: 'claude-code' } })
+      const { task } = yield* reviewTask(projectId)
+      const threadId = task?.threadId ?? ''
+      yield* until(said(threadId), (all) => all.length > 0)
+      const sessions = yield* Sessions
+      const failed = yield* Effect.flip(sessions.switchAgent({ threadId, agentId: 'codex' }))
+      assert.strictEqual(tagOf(failed), 'SessionFailed')
+      const notices = (yield* items(threadId)).filter((item) => item.kind === 'notice').map((item) => item.content)
+      assert.deepInclude(notices, {
+        source: 'runtime',
+        severity: 'error',
+        title: "Fake codex couldn't start.",
+        description:
+          "Fake codex can't be held to reading only: it runs commands its sandbox contains without asking, so it could run the pull request's code. Review it with another agent, such as Claude Code.",
+      })
+      assert.strictEqual(
+        (yield* sessions.running(threadId)).pipe(
+          Option.map((running) => running.agentId),
+          Option.getOrNull,
+        ),
+        'claude-code',
+      )
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('asked again once its review is over, starts a review of its own, and never prepares the old one again', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      const review = (access: ToolAccess) =>
+        callTool(access, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      yield* review(coordinator)
+      const first = yield* reviewTask(projectId)
+      const firstThread = first.task?.threadId ?? ''
+      yield* until(said(firstThread), (all) => all.length > 0)
+      yield* callTool(lead(projectId, firstThread, first.task?.id ?? ''), 'draft_review', { verdict: 'comment', summary: 'Fine.' })
+      const [card] = yield* cardsIn(firstThread)
+      assert.strictEqual((yield* (yield* Reviews).post(card?.draftId ?? '', instance.personId)).state, 'posted')
+      const settled = yield* reviewTask(projectId)
+      assert.strictEqual(settled.task?.state, 'done')
+      const started = launches.length
+
+      // The same request again, as a coordinator unsure the first went through would make it: it is over, and nothing is redone.
+      assert.include(yield* review(coordinator), "reviewed ninemate's pull request #1 already, and it's over")
+      assert.lengthOf(yield* sql`SELECT id FROM tasks`, 1)
+      assert.deepStrictEqual(yield* reviewTask(projectId), settled)
+      assert.isFalse(existsSync(`${first.workspace?.path ?? ''}-2`))
+      assert.strictEqual(launches.length, started)
+
+      // Asked again in another request, it is a new review: a task, a copy and a lead of its own.
+      const again = yield* review({ ...coordinator, sessionId: 'coordinator-session-2' })
+      assert.match(again, /^Started review-1-send-back-won-t-restart-a-dead-lead-2:/)
+      const second = yield* reviewTask(projectId)
+      assert.notStrictEqual(second.task?.id, first.task?.id)
+      assert.deepInclude(second.task, { state: 'open' })
+      assert.deepInclude(second.workspace, { access: 'read', state: 'ready' })
+      assert.notStrictEqual(second.workspace?.path, first.workspace?.path)
+      // While that one is open, asking again is it.
+      assert.include(yield* review({ ...coordinator, sessionId: 'coordinator-session-3' }), 'already reviews')
+      assert.lengthOf(yield* sql`SELECT id FROM tasks`, 2)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('tells the board when its draft changes, and counts a draft that waits as ready, unless a call waits first', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      const sql = yield* SqlClient.SqlClient
+      const queries = yield* Queries
+      const reviews = yield* Reviews
+      const instance = yield* Instance
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const { task } = yield* reviewTask(projectId)
+      const taskId = task?.id ?? ''
+      const threadId = task?.threadId ?? ''
+      yield* until(said(threadId), (all) => all.length > 0)
+      // The card's item on the board: its revision moves on each time the board is told to read it again.
+      const revision = Effect.map(
+        sql<{ revision: number }>`
+          SELECT i.revision FROM thread_items i JOIN threads t ON t.id = i.thread_id
+          WHERE t.kind = 'coordinator' AND i.kind = 'task' AND json_extract(i.content, '$.taskId') = ${taskId}`,
+        ([row]) => row?.revision ?? 0,
+      )
+      const ready = Effect.map(Effect.orDie(queries.projects), (list) => list.projects.find((one) => one.id === projectId)?.ready)
+      const onBoard = Effect.map(Effect.orDie(queries.board(projectId)), (board) => board.tasks.find((one) => one.taskId === taskId))
+      assert.strictEqual(yield* ready, 0)
+
+      yield* callTool(lead(projectId, threadId, taskId), 'draft_review', {
+        verdict: 'changes',
+        summary: 'Two things.',
+        comments: [
+          { path: 'send.ts', line: 1, body: 'Untested.', severity: 'blocking' },
+          { path: 'README.md', line: 1, body: 'Odd heading.', severity: 'minor' },
+        ],
+      })
+      const [card] = yield* cardsIn(threadId)
+      const draftId = card?.draftId ?? ''
+      // Drafted, with no run, it is the person's to post: ready on the board and in the project's count.
+      assert.strictEqual(yield* ready, 1)
+      let seen = yield* revision
+      const moved = Effect.gen(function* () {
+        const now = yield* revision
+        assert.isAbove(now, seen)
+        seen = now
+      })
+
+      yield* reviews.change(draftId, { comments: [{ id: card?.comments[1]?.id ?? '', kept: false }] }, instance.personId)
+      yield* moved
+      assert.deepInclude((yield* onBoard)?.reviewing, { findings: 1, blocking: 1, verdict: 'changes' })
+      yield* reviews.change(draftId, { verdict: 'comment' }, instance.personId)
+      yield* moved
+      assert.deepInclude((yield* onBoard)?.reviewing, { verdict: 'comment' })
+      github.failNext('postReview', 'rejected')
+      assert.strictEqual((yield* reviews.post(draftId, instance.personId)).state, 'failed')
+      yield* moved
+      // Failed, it still waits for the person.
+      assert.strictEqual(yield* ready, 1)
+
+      // A call on the task waits on them first: it counts once, as that.
+      const at2 = new Date().toISOString()
+      yield* sql`INSERT INTO attention_requests ${sql.insert({
+        id: `attn_${'a'.repeat(32)}`,
+        projectId,
+        taskId,
+        kind: 'question',
+        payload: '{}',
+        state: 'open',
+        createdAt: at2,
+      })}`
+      assert.strictEqual(yield* ready, 0)
+      yield* sql`UPDATE attention_requests SET state = 'answered', answered_at = ${at2}`
+      assert.strictEqual(yield* ready, 1)
+
+      yield* reviews.discard(draftId, instance.personId)
+      yield* moved
+      assert.strictEqual(yield* ready, 0)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('settles, as Althar starts, a task whose review an older Althar posted but closed before settling', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const left = pullRequest(at, github)
+    const reopened = pullRequest(at, github, { title: 'Retry the checkout' })
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-reviews-')), 'althar.sqlite')
+    return Effect.gen(function* () {
+      const tasks = yield* Effect.gen(function* () {
+        const { projectId, coordinator } = yield* project(at.working)
+        const sql = yield* SqlClient.SqlClient
+        const instance = yield* Instance
+        const posted = (number: number) =>
+          Effect.gen(function* () {
+            yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(number), lead: { agent: 'claude-code' } })
+            const { task } = yield* reviewTask(projectId)
+            yield* callTool(lead(projectId, task?.threadId ?? '', task?.id ?? ''), 'draft_review', { verdict: 'comment', summary: 'Fine.' })
+            const [card] = yield* cardsIn(task?.threadId ?? '')
+            const card2 = yield* (yield* Reviews).post(card?.draftId ?? '', instance.personId)
+            assert.strictEqual(card2.state, 'posted')
+            // Posted and settled in one go.
+            assert.strictEqual((yield* reviewTask(projectId)).task?.state, 'done')
+            return task?.id ?? ''
+          })
+        const first = yield* posted(left.pull.number)
+        const second = yield* posted(reopened.pull.number)
+        // As an older Althar left it: posted, then closed before the task settled.
+        yield* sql`UPDATE tasks SET state = 'open', settled_at = NULL WHERE id = ${first}`
+        yield* sql`DELETE FROM record_events WHERE aggregate_type = 'task' AND aggregate_id = ${first} AND type = 'task.done'`
+        // And one settled, then opened again since: it stays open.
+        yield* sql`UPDATE tasks SET state = 'open', settled_at = NULL WHERE id = ${second}`
+        yield* fact({
+          projectId,
+          aggregateType: 'task',
+          aggregateId: second,
+          revision: 9,
+          type: 'task.reopened',
+          actorId: instance.personId,
+        })
+        return { first, second }
+      }).pipe(Effect.provide(withQueries(github, database)))
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const states = yield* sql<{ id: string; state: string }>`SELECT id, state FROM tasks ORDER BY created_at`
+        assert.deepStrictEqual(states, [
+          { id: tasks.first, state: 'done' },
+          { id: tasks.second, state: 'open' },
+        ])
       }).pipe(Effect.provide(withQueries(github, database)))
     })
   })

@@ -615,6 +615,7 @@ export class Queries extends Context.Service<
             readonly onlyAccounts: string | null
             readonly repositories: string
             readonly ready: string
+            readonly drafted: string
           }
         >`
           SELECT p.id, p.name, p.slug, p.ink,
@@ -642,6 +643,10 @@ export class Queries extends Context.Service<
                 AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
                 AND NOT EXISTS (SELECT 1 FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
                   WHERE e.run_id = r.id AND a.state = 'admitted')) AS ready,
+            -- A review has no run: drafted, it is the person's to post, as its card says, unless a call on it waits on them first.
+            (SELECT json_group_array(k.id) FROM tasks k WHERE k.project_id = p.id AND k.state = 'open'
+                AND EXISTS (SELECT 1 FROM review_drafts d WHERE d.task_id = k.id AND d.state IN ('pending', 'failed', 'uncertain'))
+                AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')) AS drafted,
             coalesce((SELECT json_extract(r.rules, '$.usageLimit') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 'move') AS usage_limit,
             coalesce((SELECT json_extract(r.rules, '$.accounts.rotate') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1), 0) AS rotate_accounts,
             (SELECT json_extract(r.rules, '$.accounts.only') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS only_accounts,
@@ -651,9 +656,12 @@ export class Queries extends Context.Service<
         const finished = yield* finishedPlain
         return {
           cursor: at,
-          projects: rows.map((row) => ({
+          projects: rows.map(({ drafted, ...row }) => ({
             ...row,
-            ready: (JSON.parse(row.ready) as ReadonlyArray<string>).filter((id) => !finished.has(id)).length,
+            // Each task once: one ready and drafted both, as a review taken over might be, counts once.
+            ready: [
+              ...new Set([...(JSON.parse(row.ready) as ReadonlyArray<string>), ...(JSON.parse(drafted) as ReadonlyArray<string>)]),
+            ].filter((id) => !finished.has(id)).length,
             rotateAccounts: row.rotateAccounts === 1,
             onlyAccounts:
               row.onlyAccounts === null ? null : (JSON.parse(row.onlyAccounts) as Readonly<Record<string, ReadonlyArray<string>>>),

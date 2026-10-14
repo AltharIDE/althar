@@ -230,6 +230,8 @@ export interface Started {
   readonly outside: boolean
   /** It was under way already: nothing new started. */
   readonly already: boolean
+  /** The review asked for is over (posted, or the task closed): asked again as the same request, nothing starts. */
+  readonly done?: boolean
   /** Its lead started; false where it couldn't, which its thread says. */
   readonly leading: boolean
   /** A review of it posts itself once drafted: the person's setting, for their team's pull request. */
@@ -379,6 +381,15 @@ export class Reviews extends Context.Service<
             const posts = !outside && (yield* postTeamReviews)
             const words = { title: pull.title, author, outside, name, posts }
             if (already !== undefined) return { ...already, ...words, already: true, leading: false } satisfies Started
+            // Only an agent its session holds to reading leads a review (the registry's `reviewing`; Sessions.ts refuses any other
+            // there too): one that runs what its sandbox contains without asking could run the pull request's code, a team's too.
+            const leading = yield* agents.get(input.lead.agentId).pipe(Effect.mapError(() => refused('Althar has no such agent.')))
+            if (leading.definition.reviewing?.outside !== true) {
+              const held = agents.list.filter((entry) => entry.definition.reviewing?.outside === true).map((entry) => entry.definition.name)
+              return yield* refused(
+                `${leading.definition.name} can't be held to reading only: it runs commands its sandbox contains without asking, so it could run this ${name}'s code. Review it with ${held.join(' or ')}.`,
+              )
+            }
 
             // Its head and its target, fetched as a push is signed in, into refs of Althar's own: nothing is a branch here.
             const ref = `refs/althar/reviews/${place.path.join('/')}/${pull.number}`
@@ -416,6 +427,8 @@ export class Reviews extends Context.Service<
               return full.length <= TITLE_LENGTH ? full : `${full.slice(0, TITLE_LENGTH - 1).replace(/\s+\S*$/, '')}…`
             })()
             const commands = yield* Commands
+            // Whether this request made the task now, or its receipt answers for one made before.
+            let made = false
             const created = yield* commands.execute({
               envelope: input.envelope,
               projectId: input.projectId,
@@ -427,6 +440,7 @@ export class Reviews extends Context.Service<
                 path: Schema.String,
               }),
               handle: Effect.gen(function* () {
+                made = true
                 const [live] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${input.projectId} AND archived_at IS NULL`
                 if (live === undefined) return yield* new NotFound({ kind: 'project', id: input.projectId })
                 const at = yield* timestamp
@@ -507,6 +521,10 @@ export class Reviews extends Context.Service<
               }),
             })
 
+            // The same request again, whose task is over (an open one is `already`, above): it stands as it ended. Nothing of it is
+            // prepared again, against the head and the copy it read then; a new request makes a review of its own.
+            if (!made) return { ...created, ...words, already: true, done: true, leading: false } satisfies Started
+
             // The copy, once the task is committed: detached at the head fetched, in a folder no other worktree has.
             let path = created.path
             for (let n = 2; existsSync(path); n += 1) path = `${created.path}-${n}`
@@ -546,7 +564,7 @@ export class Reviews extends Context.Service<
               disposition: 'after_current',
               quiet: true,
             })
-            const leading = yield* sessions
+            const started = yield* sessions
               .start({
                 threadId: created.threadId,
                 agentId: input.lead.agentId,
@@ -558,7 +576,7 @@ export class Reviews extends Context.Service<
                 // A lead that couldn't start says why in the task's thread, and the person starts another there.
                 Effect.catch((error) => Effect.as(Effect.logWarning('A review’s lead could not start', error), false)),
               )
-            return { ...created, ...words, already: false, leading } satisfies Started
+            return { ...created, ...words, already: false, leading: started } satisfies Started
           }),
         )
 
@@ -591,7 +609,10 @@ export class Reviews extends Context.Service<
 
       /**
        * Changes a draft if it stands as `when` needs, checked and changed in
-       * one transaction with its card, so two presses can't both post it.
+       * one transaction with its card, so two presses can't both post it;
+       * and with whatever else `also` changes, such as the task a posted
+       * review settles. Changed, the task's card on the board is told to
+       * read again, as its findings and verdict are read from the draft.
        */
       const transition = (
         draftId: string,
@@ -600,10 +621,11 @@ export class Reviews extends Context.Service<
         type: string,
         actorId: ActorId,
         payload?: (row: Row) => unknown,
+        also?: (row: Row) => Effect.Effect<void, unknown, Store>,
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          return yield* sql.withTransaction(
+          const result = yield* sql.withTransaction(
             Effect.gen(function* () {
               const row = yield* load(draftId)
               if (!when(row)) return { changed: false as const, row }
@@ -620,9 +642,31 @@ export class Reviews extends Context.Service<
                 actorId,
               })
               yield* showCard(draftId)
+              if (also !== undefined) yield* also(after)
               return { changed: true as const, row: after }
             }),
           )
+          if (result.changed) yield* touchCard(result.row.taskId)
+          return result
+        })
+
+      /** Settles a review task once its review is posted, in the transaction that records it posted; one not open stays as it is. */
+      const settle = (row: Row, actorId: ActorId) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${row.taskId}`
+          if (task?.state !== 'open') return
+          const at = yield* timestamp
+          const revision = yield* change('tasks', row.taskId, { state: 'done', settledAt: at })
+          yield* fact({
+            projectId: row.projectId,
+            aggregateType: 'task',
+            aggregateId: row.taskId,
+            revision,
+            type: 'task.done',
+            payload: { reviewed: row.reviewUrl },
+            actorId,
+          })
         })
 
       /** Whether a draft can still change, or be posted: waiting on the person, not posted the last time, or perhaps posted. */
@@ -793,8 +837,8 @@ export class Reviews extends Context.Service<
                 )
               }),
             )
+            yield* touchCard(taskId)
           }
-          yield* touchCard(taskId)
           const name = `${review.words.noun} ${review.words.prefix}${review.number}`
           const counted = comments.length === 1 ? '1 comment' : `${comments.length} comments`
           // The person's own setting posts their team's reviews at once; an outside one always waits for them.
@@ -879,7 +923,6 @@ export class Reviews extends Context.Service<
       const post: Reviews['Service']['post'] = (draftId, actorId) =>
         provide(
           Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient
             const before = yield* load(draftId)
             if (open(before) && before.verdict === null) return yield* new ReviewDraftIncomplete({ draftId, missing: 'verdict' })
             const marked = yield* transition(
@@ -920,28 +963,10 @@ export class Reviews extends Context.Service<
               made._tag === 'Success' ? 'review_draft.posted' : uncertain(made.failure) ? 'review_draft.uncertain' : 'review_draft.failed',
               actorId,
               (now) => (now.state === 'posted' ? { url: now.reviewUrl, verdict, comments: kept.length } : { error: now.error }),
+              // Posted, the review task is done, in the same transaction: a crash between them can't leave a posted review open.
+              (now) => (now.state === 'posted' ? settle(now, actorId) : Effect.void),
             )
             if (made._tag === 'Failure') yield* Effect.logWarning('A review could not be posted', made.failure)
-            // Posted, the review task is done.
-            if (made._tag === 'Success')
-              yield* sql.withTransaction(
-                Effect.gen(function* () {
-                  const [task] = yield* sql<{ state: string }>`SELECT state FROM tasks WHERE id = ${row.taskId}`
-                  if (task?.state !== 'open') return
-                  const at = yield* timestamp
-                  const revision = yield* change('tasks', row.taskId, { state: 'done', settledAt: at })
-                  yield* fact({
-                    projectId: row.projectId,
-                    aggregateType: 'task',
-                    aggregateId: row.taskId,
-                    revision,
-                    type: 'task.done',
-                    payload: { reviewed: ended.row.reviewUrl },
-                    actorId,
-                  })
-                }),
-              )
-            yield* touchCard(row.taskId)
             return yield* cardFor(ended.row)
           }),
         )
@@ -957,7 +982,6 @@ export class Reviews extends Context.Service<
               actorId,
             )
             if (!result.changed) return yield* closed(result.row)
-            yield* touchCard(result.row.taskId)
           }),
         )
 
@@ -980,10 +1004,45 @@ export class Reviews extends Context.Service<
             )
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not settle the review drafts left being posted', cause))),
       )
+      // A review posted whose task an older Althar closed before settling it: settled now, unless it was settled or reopened since.
+      yield* provide(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const left = yield* sql<{ draftId: string }>`
+            SELECT d.id AS draft_id FROM tasks k
+            JOIN review_drafts d ON d.id = (SELECT id FROM review_drafts WHERE task_id = k.id ORDER BY created_at DESC, rowid DESC LIMIT 1)
+            JOIN record_events p ON p.aggregate_type = 'review_draft' AND p.aggregate_id = d.id AND p.type = 'review_draft.posted'
+            WHERE k.state = 'open' AND d.state = 'posted'
+              AND NOT EXISTS (SELECT 1 FROM record_events e WHERE e.aggregate_type = 'task' AND e.aggregate_id = k.id
+                AND e.type IN ('task.done', 'task.reopened') AND e.sequence > p.sequence)`
+          for (const one of left) {
+            const row = yield* load(one.draftId)
+            yield* sql.withTransaction(settle(row, instance.systemId))
+            yield* touchCard(row.taskId)
+          }
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not settle the reviews left posted on an open task', cause))),
+      )
+
+      // A review's lead reads the pull request and drafts its review, and nothing else: every lead tool that isn't one a review
+      // is given (`inReview`) is refused to it, listed or not, as it could change the project or reach outside it (keep how the
+      // project runs, which Althar later runs outside any sandbox; reply or push; finish a step). Read from the task each call.
+      yield* toolServer.guard('lead', (tool, access) =>
+        tool.inReview === true
+          ? Effect.succeed(null)
+          : provide(reviewOf(access.taskId ?? '')).pipe(
+              Effect.map((review) =>
+                review === null
+                  ? null
+                  : `This task reviews someone else’s pull request: you read it, with read_pull_request for what it says, and finish it with draft_review, which the person posts. ${tool.name} isn’t for a review.`,
+              ),
+              Effect.orElseSucceed(() => 'Althar couldn’t tell whether this task may use that. Try again, or tell the person.'),
+            ),
+      )
 
       yield* toolServer.serve('lead', [
         {
           name: 'draft_review',
+          inReview: true,
           description:
             "Drafts your review of the pull request this task reviews, once you have read it: your verdict (approve, changes, or comment), a summary of a few lines in Markdown, and comments, each on a line of the change as it now reads (a file's path from the repository's root, and its line number in the new file), with its severity: blocking, major, minor or nit. It posts nothing: the person sees it as a card, keeps or drops each comment, chooses the verdict (yours is a suggestion) and posts it. Called again, it replaces the draft that waits.",
           input: {

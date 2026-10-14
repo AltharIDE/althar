@@ -4,7 +4,7 @@ import { homedir, tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 
 import { available, type Fetch, type Product, type ProductInfo } from '@althar/connectors'
-import { adapterNode, agents, type AgentDefinition, type Transport, usingLocated } from '@althar/provider-adapters'
+import { adapterNode, agents, type AgentDefinition, type SessionOptions, type Transport, usingLocated } from '@althar/provider-adapters'
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
 import type { Machine } from './atOnce'
@@ -145,8 +145,12 @@ export class RuntimeConfig extends Context.Service<RuntimeConfig, RuntimeOptions
 /** An agent the runtime can start: its registry entry, and how to reach it from a working directory. */
 export interface AgentEntry {
   readonly definition: AgentDefinition
-  /** How to reach it from a working directory, with an account's home in its environment (ADR-012). */
-  readonly transport: (cwd: string, env?: Readonly<Record<string, string>>) => Transport
+  /**
+   * How to reach it from a working directory, with an account's home in its
+   * environment (ADR-012); `untrusted`, as the lead of a review of someone
+   * else's pull request, with what keeps that repository's config from running.
+   */
+  readonly transport: (cwd: string, env?: Readonly<Record<string, string>>, options?: SessionOptions) => Transport
 }
 
 /**
@@ -180,6 +184,10 @@ export class Agents extends Context.Service<
    * isn't passed on either (provider-adapters' process environment). Nor
    * are the MCP servers the person set up for an agent themselves, which
    * Codex and OpenCode would otherwise load beside Althar's (ownTools.ts).
+   * The lead of a review of someone else's pull request also starts with what
+   * its registry entry says keeps that repository's config, hooks and plugins
+   * from loading, and with git that takes no repository the pull request
+   * carries for its own (`readingUntrusted`).
    */
   static readonly registry: Layer.Layer<Agents, never, Installs> = Layer.effect(
     Agents,
@@ -197,10 +205,15 @@ export class Agents extends Context.Service<
         .map(located)
         .map((definition) => ({
           definition,
-          transport: (cwd: string, env: Readonly<Record<string, string>> = {}) => {
+          transport: (cwd: string, env: Readonly<Record<string, string>> = {}, options: SessionOptions = {}) => {
             const spec = definition.launch(adapterNode())
             const own = definition.withoutOwnTools?.({ env: { ...process.env, ...env }, homeDir: homedir(), cwd }) ?? {}
-            return { _tag: 'Process' as const, spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...env } }, cwd }
+            const held = options.untrusted === true ? { ...readingUntrusted, ...definition.reviewing?.env?.({ ...spec.env, ...own }) } : {}
+            return {
+              _tag: 'Process' as const,
+              spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...held, ...env } },
+              cwd,
+            }
           },
         })),
     )
@@ -217,6 +230,19 @@ export const withoutSignIns = (signedOut: string): Readonly<Record<string, strin
   GIT_CONFIG_VALUE_0: '',
   GIT_TERMINAL_PROMPT: '0',
 })
+
+/**
+ * What the environment of a review's lead adds to `withoutSignIns`' (whose
+ * one git setting it keeps): git uses a bare repository only where it is
+ * named, never one it finds by itself. A pull request can carry one, under
+ * any name, whose config names a program for git to run (an external diff,
+ * a signature checker); `git -C` into it would run it.
+ */
+export const readingUntrusted: Readonly<Record<string, string>> = {
+  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_KEY_1: 'safe.bareRepository',
+  GIT_CONFIG_VALUE_1: 'explicit',
+}
 
 /** Crypto from the platform's Web Crypto, which Node and Electron both have. */
 export const WebCrypto: Layer.Layer<Crypto.Crypto> = Layer.succeed(

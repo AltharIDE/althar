@@ -34,7 +34,6 @@ import { conventionsAt } from './conventions'
 import { commitOf, commitsAhead, git, treeOf, uncommittedFiles } from './git'
 import { filesLine, templateAsk } from './pullRequestWords'
 import { evidenceFolderOf, reviewCopyOf, snapshotForReview } from './reviewCopy'
-import { reviewOf } from './reviewing'
 import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
 import { type Answered, Questions, touchQuestion } from './Questions'
@@ -2243,9 +2242,7 @@ export class Runs extends Context.Service<
       const finishStep = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          // A review's lead ends with its draft, which the person posts: it has no step to finish.
-          if (access.taskId !== null && (yield* reviewOf(access.taskId)) !== null)
-            return yield* new ToolRefused({ message: 'This task reviews someone else’s pull request: you finish it with draft_review.' })
+          // A review's lead has no step to finish: it ends with its draft, and is refused every tool but a review's (Reviews.ts).
           const {
             summary,
             findings: settled = [],

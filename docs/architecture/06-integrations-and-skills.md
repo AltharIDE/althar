@@ -522,19 +522,47 @@ asks; its thread opens with what they said and the pull request under it.
   conflict round, nothing published.
 - **It runs nothing of it.** The lead's session is in reader mode, under the
   reader rules, as the coordinator's and a reviewer's are (04, "Read-only by
-  construction"): it reads, searches and runs commands that only look.
+  construction"): it reads, searches and runs commands that only look. Since
+  the repository is the pull request's to write, a read is decided from what
+  runs, never from a name it could give something else: a program named by a
+  path outside the system's folders (`./cat`), a variable set for a command
+  (`PATH=. cat`), `env`, `sudo`, a shell started with more than its script
+  (`bash -i`, `--rcfile`), a process substitution, a file name the shell
+  would expand into a flag (`rg x *`), and `git --git-dir` are refused, and
+  no interpreter or package script is ever a read. Nor does it load anything
+  of the repository's own: Claude Code starts with no settings file, the
+  repository's or the person's (whose allow rules would approve its
+  commands), and its hooks off; OpenCode with no project config, plugins or
+  language servers; Codex with its hooks off. Git takes no bare repository
+  the pull request carries for its own unless named (`safe.bareRepository`).
+- **Only a review's tools.** Its lead is given `read_pull_request`,
+  `read_issue` and `draft_review`; every other lead tool is refused to it
+  when called, listed or not, nothing that could change the project
+  (keeping how it runs, which Althar later runs outside any sandbox) or reach
+  the host (a reply, a push).
 - **From outside, it has no network.** A pull request from a fork, or by an
   author GitHub doesn't name its owner, a member or a collaborator, is from
   outside the team: its code and its words may try to steer whoever reads
-  them. Its lead's reader rules then refuse every fetch as well. What each
-  agent is held to beyond that: Claude Code has WebFetch and WebSearch denied
-  and every command asking, and its sandbox lets a command reach only the
-  domains its settings allow, which are none (as its documentation says, not
-  yet checked against a real session); Codex's read-only sandbox has no
-  network, and what would reach it asks and is refused, though its own web
-  search, where the person's config turns it on, is OpenAI's and not switched
-  off yet; OpenCode has no sandbox, so the rules alone hold it. Each review
-  task's view says what its lead can reach, in a sentence under its header.
+  them. Its lead's reader rules then refuse every fetch as well. Any review,
+  a team's or one from outside, is led only by an agent its session holds to
+  reading:
+  - **Claude Code**: every command asks and meets the rules (none runs
+    because its sandbox would contain it), WebFetch and WebSearch are
+    denied, and its sandbox lets a command reach only the domains its
+    settings allow, which are none (as its documentation says, not yet
+    checked against a real session).
+  - **OpenCode**: it has no sandbox, so the rules alone hold it: every
+    command and fetch asks, and its web search asks too, which the rules
+    refuse.
+  - **Codex** isn't: codex-acp starts every turn on its mode's approval
+    policy, which for its read-only mode asks only to go beyond the sandbox,
+    so a command the sandbox contains runs without asking, and the rules
+    never see it, and it could run the pull request's code, a team's too.
+    The coordinator is told to review it with another agent, and a switch
+    to Codex on a review doesn't start.
+
+  Each review task's view says what its lead can reach, in a sentence under
+  its header.
 - **It reads the pull request through Althar.** `read_pull_request` reads it
   the pull request as GitHub has it now: its description, its checks with the
   end of a failed one's log, and what everyone said, those who aren't the
@@ -553,7 +581,9 @@ asks; its thread opens with what they said and the pull request under it.
   kept, of the commit the lead read, signed as Althar's replies are. Posting
   is guarded as filing an issue draft is: marked first, refused or perhaps
   posted said on the card, never posted again unasked. Posted, the card folds
-  to a line with the review's link, and the task is done.
+  to a line with the review's link, and the task is done, in the same
+  transaction. Asked again once it is done, the coordinator starts a new
+  review; while it is open, the same one answers.
 - **A setting of the person's own** posts a review of their team's pull
   request as soon as it is drafted, with the lead's verdict ("Post reviews of
   my team's pull requests without asking", off by default). A pull request
