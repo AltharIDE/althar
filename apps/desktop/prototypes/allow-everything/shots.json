@@ -1,0 +1,115 @@
+[
+  {
+    "id": "T1",
+    "page": "?d=T&v=rules",
+    "caption": "Today · Rules: the mode is one underlined word in the last sentence, “allowed”; nothing at the top"
+  },
+  {
+    "id": "T2",
+    "page": "?d=T&v=task",
+    "caption": "Today · Task: seven prompts stacked, the deploy in front; it offers Never but no “always allow”, and doesn’t say why"
+  },
+  {
+    "id": "T3",
+    "page": "?d=T&v=board",
+    "caption": "Today · Board: the task waits in Needs you; nothing on any card says how it is allowed"
+  },
+
+  { "id": "A1", "page": "?d=A&v=rules", "caption": "A · Rules: one switch over the rules, off" },
+  {
+    "id": "A2",
+    "page": "?d=A&v=rules&s=project",
+    "caption": "A · Rules: switched on; Ask me and Go ahead quieten (“Off while everything is allowed”), Never stays"
+  },
+  {
+    "id": "A3",
+    "page": "?d=A&v=task",
+    "caption": "A · Task: the card says why there is no “always allow”, with a way out: Allow everything on this task, or Rules"
+  },
+  { "id": "A4", "page": "?d=A&v=task&o=menu", "caption": "A · Task menu: the same switch, “Allow everything on this task”" },
+  {
+    "id": "A5",
+    "page": "?d=A&v=task&s=task",
+    "caption": "A · Task, switched on: “Unrestricted” beside the menu; 4 waiting allowed, 3 sent back to spell out, what went ahead after"
+  },
+  { "id": "A6", "page": "?d=A&v=board&s=task", "caption": "A · Board: “Unrestricted” at the card’s foot" },
+
+  { "id": "B1", "page": "?d=B&v=rules", "caption": "B · Rules: the four modes as a segmented control, with what the chosen one means" },
+  { "id": "B2", "page": "?d=B&v=rules&s=project", "caption": "B · Rules: Allow everything chosen; the lists it turns off quieten" },
+  {
+    "id": "B3",
+    "page": "?d=B&v=task",
+    "caption": "B · Task: the chip “Project default · Allow, except what you keep”; the card’s way out opens it"
+  },
+  {
+    "id": "B4",
+    "page": "?d=B&v=task&o=chip",
+    "caption": "B · The chip open: the four modes for this task, the project’s marked, and what still holds"
+  },
+  {
+    "id": "B5",
+    "page": "?d=B&v=task&s=task",
+    "caption": "B · Overridden: the chip reads “This task · Allow everything”; the waiting cleared"
+  },
+  { "id": "B6", "page": "?d=B&v=board&s=task", "caption": "B · Board: “Allow everything · this task” at the card’s foot" },
+
+  {
+    "id": "C1",
+    "page": "?d=C&v=task",
+    "steps": ["text=Yes, and stop asking on this task"],
+    "caption": "C · Task: “Yes, and stop asking on this task” picked, after the yeses, saying what it covers; the button says it"
+  },
+  {
+    "id": "C2",
+    "page": "?d=C&v=task",
+    "steps": ["text=Yes, and stop asking on this task", "button:has-text(\"Allow and stop asking\")", "wait:1600"],
+    "caption": "C · After: “Stopped asking on this task” with Ask again; 3 sent back; the header says “Not asking on this task”"
+  },
+  { "id": "C3", "page": "?d=C&v=task&s=task&o=menu", "caption": "C · Task menu: “Ask me again on this task”, the other way back" },
+  { "id": "C4", "page": "?d=C&v=board&s=task", "caption": "C · Board: “Not asking on this task” at the card’s foot" },
+
+  {
+    "id": "D1",
+    "page": "?d=D&v=rules&s=project",
+    "caption": "D · Rules: allow everything in meridian for 1 hour, or until turned off; says when it ends and what it goes back to"
+  },
+  {
+    "id": "D2",
+    "page": "?d=D&v=task",
+    "steps": ["text=Yes, and allow everything on this task"],
+    "caption": "D · Task: “Yes, and allow everything on this task” for 1 hour, until it’s ready, or until I turn it off"
+  },
+  { "id": "D3", "page": "?d=D&v=task&o=menu", "caption": "D · Task menu: allow everything on this task, and for how long" },
+  {
+    "id": "D4",
+    "page": "?d=D&v=task&s=task&o=pill",
+    "caption": "D · On: the pill over the composer, “52m left”, opened: until when, one more hour, turn off now; the header says it too"
+  },
+  {
+    "id": "D5",
+    "page": "?d=D&v=task&s=ended",
+    "caption": "D · Ended: a line in the thread with what went ahead while it was on, “Asking again” on the pill, and the next deploy waits again"
+  },
+  { "id": "D6", "page": "?d=D&v=board&s=task", "caption": "D · Board: “Allowing everything · 52m” at the card’s foot" },
+
+  {
+    "id": "BC1",
+    "page": "?d=BC&v=task",
+    "steps": ["text=Yes, and allow everything on this task"],
+    "caption": "B+C · Task: the chip in the header, and the card’s escalation picked; it says the chip takes it back"
+  },
+  {
+    "id": "BC2",
+    "page": "?d=BC&v=task&s=task",
+    "caption": "B+C · After: the chip reads “This task · Allow everything”; the queue cleared, with Back to project default"
+  },
+  {
+    "id": "BC3",
+    "page": "?d=BC&v=task&s=task&o=chip",
+    "caption": "B+C · The chip open after: Allow everything checked, Back to project default"
+  },
+  { "id": "BC4", "page": "?d=BC&v=rules", "caption": "B+C · Rules: as B, the four modes" },
+  { "id": "BC5", "page": "?d=BC&v=board&s=task", "caption": "B+C · Board: “Allow everything · this task” at the card’s foot" },
+
+  { "id": "X1", "page": "?d=BC&v=task&o=compare", "caption": "Compare: the paths side by side, from the bar’s Compare" }
+]
