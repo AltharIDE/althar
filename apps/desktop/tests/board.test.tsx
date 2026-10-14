@@ -835,6 +835,14 @@ describe('each kind’s card', () => {
         handed: { pictures: [], files: [{ path: 'docs/releases/notes-0.4.md', add: 64 }] },
       }),
       task({ taskId: 'k11', title: 'Which partners call v1?', phase: 'ready', kind: 'plain', branch: null }),
+      task({
+        taskId: 'k19',
+        title: 'Sketch the settings',
+        phase: 'ready',
+        kind: 'plain',
+        branch: 'althar/sketch-the-settings',
+        changed: { files: 1, add: 31, del: 0 },
+      }),
       task({ taskId: 'k12', title: 'Asked a question', threadId: 'thk12', phase: 'waiting', kind: 'plain' }),
       task({ taskId: 'k13', title: 'Gave up', threadId: 'thk13', phase: 'waiting' }),
       task({ taskId: 'k14', title: 'Settled plainly', phase: 'settled', state: 'done', kind: 'plain', settledAt: NOW }),
@@ -917,6 +925,12 @@ describe('each kind’s card', () => {
     expect(files.getByText('notes-0.4.md')).toBeTruthy()
     expect(files.getByText('+64')).toBeTruthy()
     expect(within(cardOf('Which partners call v1?')).getByText('Finished')).toBeTruthy()
+    // One that handed nothing back but wrote in the repository: its branch, which stays on this Mac, and how big it is.
+    const sketched = within(cardOf('Sketch the settings'))
+    expect(sketched.getByText('Finished')).toBeTruthy()
+    expect(sketched.getByText('althar/sketch-the-settings')).toBeTruthy()
+    expect(sketched.getByText('+31')).toBeTruthy()
+    expect(sketched.queryByText('Change')).toBeNull()
     // Waiting on a call: the call's kind, and why.
     const question = within(cardOf('Asked a question'))
     expect(question.getByText('Question')).toBeTruthy()
@@ -942,6 +956,8 @@ describe('each kind’s card', () => {
     const settled = screen.getByRole('button', { name: 'Settled plainly' }).closest('li') as HTMLElement
     expect(within(settled).queryByText('Change')).toBeNull()
     expect(within(settled).getByText('Done')).toBeTruthy()
+    // Its branch, where it has one, as any task's.
+    expect(within(settled).getByText('althar/add-a-retry')).toBeTruthy()
     const next = screen.getByRole('button', { name: 'Up next, a change' }).closest('li') as HTMLElement
     expect(within(next).getByText('Change')).toBeTruthy()
   })
