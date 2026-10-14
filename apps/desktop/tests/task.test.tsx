@@ -1214,7 +1214,12 @@ describe('a task', () => {
     expect(asked.textContent).toContain('The agents on it stop.')
     expect(asked.textContent).toContain('Its worktree stays in /w/meridian, as it is.')
     expect(asked.textContent).toContain('Its branch althar/add-a-retry stays. Nothing is pushed or deleted.')
-    expect(asked.textContent).toContain(`PR ${pr.prefix}${pr.number} stays open on GitHub.`)
+    // Its pull request is offered to close on GitHub, on; its branch there to delete, off.
+    expect(within(asked).getByRole('checkbox', { name: `Close pull request ${pr.prefix}${pr.number} on GitHub` })).toHaveProperty(
+      'ariaChecked',
+      'true',
+    )
+    expect(within(asked).getByRole('checkbox', { name: 'Delete its branch on GitHub' })).toHaveProperty('ariaChecked', 'false')
     // Cancelled, nothing happens.
     await userEvent.click(within(asked).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -1226,6 +1231,60 @@ describe('a task', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(client.abandonTask).toHaveBeenCalledTimes(2)
     expect(client.abandonTask).toHaveBeenLastCalledWith('t1')
+    // Abandoned, its pull request is closed on its host, as the person left it on: only then.
+    expect(client.closePullRequest).toHaveBeenCalledTimes(1)
+    expect(client.closePullRequest).toHaveBeenCalledWith({ taskId: 't1', url: pr.url, deleteBranch: false })
+  })
+
+  /** A task with its pull request open, its abandon dialog open: the client, the pull request and the dialog. */
+  const abandoning = async () => {
+    const pr = change({ state: 'open' })
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, changes: [pr] } })) })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Abandon/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Abandon this task?' })
+    return { client, pr, dialog, close: `Close pull request ${pr.prefix}${pr.number} on GitHub` }
+  }
+
+  it('abandons with its pull request left open on its host where the person turns closing off', async () => {
+    const { client, dialog, close } = await abandoning()
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: close }))
+    // Left open, its branch there can't be deleted alone.
+    expect(within(dialog).queryByRole('checkbox', { name: 'Delete its branch on GitHub' })).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(client.abandonTask).toHaveBeenCalledWith('t1')
+    expect(client.closePullRequest).not.toHaveBeenCalled()
+  })
+
+  it('deletes its pull request’s branch on its host too where the person says', async () => {
+    const { client, pr, dialog } = await abandoning()
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Delete its branch on GitHub' }))
+    expect(dialog.textContent).toContain('Its branch althar/add-a-retry stays on this Mac.')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(client.closePullRequest).toHaveBeenCalledWith({ taskId: 't1', url: pr.url, deleteBranch: true })
+  })
+
+  it('says a pull request its host wouldn’t close is still open, and offers to close it again', async () => {
+    const { client, pr, dialog } = await abandoning()
+    vi.mocked(client.closePullRequest).mockRejectedValueOnce(
+      new ApiError({
+        reason: 'ConnectorFailed',
+        message: 'GitHub won’t let this account do that: Resource not accessible by integration.',
+      }),
+    )
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    // Abandoned all the same: the dialog says so, and why the pull request is still open.
+    const after = await screen.findByRole('dialog', { name: 'Task abandoned' })
+    expect(within(after).getByRole('alert').textContent).toBe(
+      `PR ${pr.prefix}${pr.number} is still open. GitHub won’t let this account do that: Resource not accessible by integration.`,
+    )
+    expect(client.abandonTask).toHaveBeenCalledTimes(1)
+    await userEvent.click(within(after).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(client.closePullRequest).toHaveBeenCalledTimes(2)
   })
 
   it('says when abandoning that a planned task’s plan doesn’t start, and nothing stops for one at rest', async () => {

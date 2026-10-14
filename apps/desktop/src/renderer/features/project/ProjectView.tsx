@@ -33,6 +33,7 @@ import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
 import { takesImages, useImages } from '../../shared/useImages'
 import { BoardView } from '../board/BoardView'
+import { useClosePullRequests } from '../board/useClosePullRequests'
 import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
 import type { BoardModel } from '../board/useBoard'
@@ -158,6 +159,8 @@ export function ProjectView({
   const both = useBothWidth()
   const lanes = board.board === null ? null : lanesOf(board.board)
   const yours = lanes === null ? 0 : yoursOf(lanes)
+  // An abandoned task's pull request left open, closed from its row.
+  const closing = useClosePullRequests()
   // b steps through the views, when nothing is being typed; ⌘ and a number belongs to the window's tabs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -469,6 +472,7 @@ export function ProjectView({
                   agents={model.agents}
                   now={now}
                   onOpen={onTask}
+                  closing={closing}
                   {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                 />
               </>

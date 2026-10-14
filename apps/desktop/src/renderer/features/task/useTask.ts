@@ -41,6 +41,19 @@ const NO_ITEMS: ReadonlyArray<ThreadItem> = []
 /** How long changes are gathered before they are read. */
 const GATHER = 25
 
+/** A pull request to close as the task is abandoned: its address, its name in the host's words, and whether its branch goes too. */
+export interface ToClose {
+  readonly url: string
+  readonly name: string
+  readonly deleteBranch: boolean
+}
+
+/** What closing them said, where it didn't all go through. */
+export const closeText = {
+  stillOpen: (name: string, why: string) => `${name} is still open. ${why}`,
+  branchKept: (name: string, why: string) => `${name} is closed, but its branch stays on its host. ${why}`,
+}
+
 export interface TaskModel {
   /** The thread's head and the items read so far, oldest first. */
   readonly snapshot: ThreadSnapshot | null
@@ -91,8 +104,14 @@ export interface TaskModel {
   readonly resume: () => Promise<void>
   /** Whether its lead resolves conflicts on its own, otherwise than its project says; null goes back to the project. */
   readonly setResolveConflicts: (on: boolean | null) => Promise<void>
-  /** Settles it without its change; its worktree and branch stay. Whether it was abandoned. */
-  readonly abandon: () => Promise<boolean>
+  /**
+   * Settles it without its change; its worktree and branch stay. Then closes
+   * on their hosts the pull requests the person left on, each with its
+   * branch there where they said. Whether it was abandoned, and the pull
+   * requests it was to close that are still open, by address: what their
+   * host said is the model's error.
+   */
+  readonly abandon: (close?: ReadonlyArray<ToClose>) => Promise<{ readonly abandoned: boolean; readonly open: ReadonlyArray<string> }>
   /** Opens it again, once abandoned, on its worktree and branch. */
   readonly reopen: () => Promise<void>
   /** Gives it another title, in any state; the title shown is Althar's, once it is back. */
@@ -455,13 +474,26 @@ export const useTask = (threadId: string): TaskModel => {
     skipReview: () => onTask((taskId) => client.skipReview(taskId)),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
     setResolveConflicts: (on) => onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on })),
-    abandon: async () => {
+    abandon: async (close = []) => {
       let abandoned = false
+      const open: Array<string> = []
+      const said: Array<string> = []
       await onTask(async (taskId) => {
         await client.abandonTask(taskId)
         abandoned = true
+        // One at a time, each on its own: one its host refuses doesn't keep the next open.
+        for (const one of close) {
+          try {
+            const { branch } = await client.closePullRequest({ taskId, url: one.url, deleteBranch: one.deleteBranch })
+            if (branch !== null) said.push(closeText.branchKept(one.name, branch))
+          } catch (failure) {
+            open.push(one.url)
+            said.push(closeText.stillOpen(one.name, messageOf(failure)))
+          }
+        }
       })
-      return abandoned
+      if (said.length > 0) setError(said.join(' '))
+      return { abandoned, open }
     },
     reopen: () => onTask((taskId) => client.reopenTask(taskId)),
     rename: (title) => onTask((taskId) => client.renameTask(taskId, title)),

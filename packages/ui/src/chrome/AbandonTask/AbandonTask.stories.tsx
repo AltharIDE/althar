@@ -26,9 +26,56 @@ export const Working: Story = {}
 export const Planned: Story = { args: { activity: TaskActivity.Planned } }
 /** Stopped, or ready: nothing runs, so nothing is said to stop. */
 export const Still: Story = { args: { activity: TaskActivity.Still } }
-/** With a pull request open: it stays open on its host. */
+const PR = { id: 'pr-1206', name: 'pull request #1206', host: 'GitHub' }
+
+/** With a pull request open: closing it on its host is on, deleting its branch there is off. */
 export const WithPullRequest: Story = {
-  args: { activity: TaskActivity.Still, change: { name: 'Pull request #1206', host: 'GitHub' } },
+  args: { activity: TaskActivity.Still, changes: [PR] },
+  play: async ({ args }) => {
+    const page = within(document.body)
+    const dialog = await page.findByRole('dialog', { name: 'Abandon this task?' })
+    await expect(within(dialog).getByRole('checkbox', { name: 'Close pull request #1206 on GitHub' })).toBeChecked()
+    await expect(within(dialog).getByRole('checkbox', { name: 'Delete its branch on GitHub' })).not.toBeChecked()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    await expect(args.onAbandon).toHaveBeenCalledWith({ close: ['pr-1206'], deleteBranch: [] })
+  },
+}
+/** Its branch deleted on the host too: the branch here stays, and the dialog says so. */
+export const DeletingItsBranch: Story = {
+  args: { activity: TaskActivity.Still, changes: [PR] },
+  play: async ({ args }) => {
+    const dialog = await within(document.body).findByRole('dialog', { name: 'Abandon this task?' })
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Delete its branch on GitHub' }))
+    await expect(dialog).toHaveTextContent('Its branch althar/add-a-retry stays on this Mac.')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    await expect(args.onAbandon).toHaveBeenCalledWith({ close: ['pr-1206'], deleteBranch: ['pr-1206'] })
+  },
+}
+/** Left open: nothing is asked of the host, and its branch there can't be deleted alone. */
+export const LeavingItOpen: Story = {
+  args: { activity: TaskActivity.Still, changes: [PR] },
+  play: async ({ args }) => {
+    const dialog = await within(document.body).findByRole('dialog', { name: 'Abandon this task?' })
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Delete its branch on GitHub' }))
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Close pull request #1206 on GitHub' }))
+    await expect(within(dialog).queryByRole('checkbox', { name: 'Delete its branch on GitHub' })).toBeNull()
+    await expect(dialog).toHaveTextContent('Nothing is pushed or deleted.')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    await expect(args.onAbandon).toHaveBeenCalledWith({ close: [], deleteBranch: [] })
+  },
+}
+/** A pull request in each of two repositories, each its own choice. */
+export const TwoPullRequests: Story = {
+  args: { activity: TaskActivity.Still, changes: [PR, { id: 'mr-12', name: 'merge request !12', host: 'GitLab' }] },
+}
+/** Abandoned, but the host wouldn't close it: it says so, and offers to try again. */
+export const CloseFailed: Story = {
+  args: {
+    activity: TaskActivity.Still,
+    changes: [PR],
+    abandoned: true,
+    error: 'Pull request #1206 is still open. GitHub won’t let this account do that: Resource not accessible by integration.',
+  },
 }
 /** Before its worktree was made, it has none to leave. */
 export const NoWorktree: Story = {

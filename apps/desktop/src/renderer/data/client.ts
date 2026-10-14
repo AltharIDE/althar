@@ -329,6 +329,13 @@ export interface Client {
   readonly refreshTask: (taskId: string) => Promise<void>
   /** Stops listening to the task's pull request at this address. */
   readonly stopListening: (taskId: string, url: string) => Promise<void>
+  /**
+   * Closes the task's pull request at this address on its host, unmerged; its branch there too, with `deleteBranch`. What the
+   * host said to deleting the branch, where it didn't.
+   */
+  readonly closePullRequest: (input: { readonly taskId: string; readonly url: string; readonly deleteBranch: boolean }) => Promise<{
+    readonly branch: string | null
+  }>
   /** Stops a command the session on a thread left running. */
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
   /** Clears one that ended by itself from the list. */
@@ -545,6 +552,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
       command((commandId) => api.MergeNote({ commandId, taskId, ...(url === undefined ? {} : { url }) })).then(({ note }) => note),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     stopListening: (taskId, url) => command((commandId) => api.StopListening({ commandId, taskId, url })),
+    closePullRequest: (input) => command((commandId) => api.ClosePullRequest({ commandId, ...input })),
     stopBackground: (threadId, id) => command((commandId) => api.StopBackground({ commandId, threadId, id })),
     clearBackground: (threadId, id) => command((commandId) => api.ClearBackground({ commandId, threadId, id })),
     runProject: (projectId, taskId, threadId) => command((commandId) => api.RunProject({ commandId, projectId, taskId, threadId })),
