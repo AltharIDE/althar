@@ -135,10 +135,28 @@ What changed from the plan, and why:
 
 ## Order
 
-One branch, one pull request, built in this order:
+One branch, one pull request, built in this order, all of it by 14 October:
 
 1. Cards with nothing to press, the kinds, Finished and Done.
-2. Reviews end to end.
+2. Reviews end to end, and then held harder after a review: a review's lead
+   loads none of the repository's settings, hooks or plugins, has only a
+   review's tools, and meets reader rules that judge what runs rather than
+   its name. Codex leads no review of someone else's pull request: codex-acp
+   can't make it ask before a command its sandbox contains.
 3. Search.
 4. Plain tasks with no branch, a branch on first write.
 5. ADR-035, the glossary, and this plan settled.
+
+## After this
+
+- A plain task that becomes a change has no review step; give it one where
+  the project's plans have one.
+- Widening a review (run its tests, read the web) and taking a review over as
+  a change aren't built.
+- A bare `#123` in a project of several hosted repositories asks for the
+  link; in a fork's project a bare number may look on the fork.
+- Not yet checked against real sessions: Claude Code's sandbox network
+  allowlist, OpenCode's environment flags, and a review posted to a real
+  GitHub account.
+- A person's PATH with relative entries (`node_modules/.bin`) could resolve
+  a bare `cat` into the repository; the reader rules can't see that.
