@@ -539,8 +539,15 @@ export class Coordinator extends Context.Service<
             WHERE d.provider_session_id = ${access.sessionId}
               AND d.requested_at = (SELECT max(requested_at) FROM turn_deliveries WHERE provider_session_id = ${access.sessionId})
             ORDER BY di.position`
-          // The same pull request from the same session is the same command: called again, unsure the first worked, it starts nothing twice.
-          const commandId = `cmd_${createHash('sha256').update(`${access.sessionId}\u0000review\u0000${pullRequest.toLowerCase()}`).digest('hex').slice(0, 32)}`
+          // The same pull request in the same turn is the same command: called again, unsure the first worked, it starts nothing
+          // twice. Asked again in another turn, it is a request of its own: the review still open answers it (Reviews.start), and
+          // once that one is over, a new review starts.
+          const [turn] = yield* sql<{ id: string }>`
+            SELECT id FROM turn_deliveries WHERE provider_session_id = ${access.sessionId} ORDER BY requested_at DESC, rowid DESC LIMIT 1`
+          const commandId = `cmd_${createHash('sha256')
+            .update(`${access.sessionId}\u0000${turn?.id ?? ''}\u0000review\u0000${pullRequest.toLowerCase()}`)
+            .digest('hex')
+            .slice(0, 32)}`
           const started = yield* reviews
             .start({
               envelope: yield* envelope('task.review', { pullRequest: pullRequest.toLowerCase() }, commandId, instance.coordinatorId),
@@ -552,6 +559,8 @@ export class Coordinator extends Context.Service<
             .pipe(
               Effect.catch((error) => Effect.fail(error instanceof ReviewRefused ? new ToolRefused({ message: error.message }) : error)),
             )
+          if (started.done === true)
+            return `${started.slug} reviewed ${started.author}'s ${started.name} already, and it's over. Asked again in another message, a new review starts.`
           if (started.already)
             return `${started.slug} already reviews ${started.author}'s ${started.name}; message its lead to ask it more.`
           const reach = started.outside

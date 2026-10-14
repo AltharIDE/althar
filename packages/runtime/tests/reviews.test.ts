@@ -768,6 +768,49 @@ describe('reviewing someone else’s pull request', () => {
     }).pipe(Effect.provide(withQueries(github)))
   })
 
+  it.live('asked again once its review is over, starts a review of its own, and never prepares the old one again', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull } = pullRequest(at, github)
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      const sql = yield* SqlClient.SqlClient
+      const instance = yield* Instance
+      const review = (access: ToolAccess) =>
+        callTool(access, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      yield* review(coordinator)
+      const first = yield* reviewTask(projectId)
+      const firstThread = first.task?.threadId ?? ''
+      yield* until(said(firstThread), (all) => all.length > 0)
+      yield* callTool(lead(projectId, firstThread, first.task?.id ?? ''), 'draft_review', { verdict: 'comment', summary: 'Fine.' })
+      const [card] = yield* cardsIn(firstThread)
+      assert.strictEqual((yield* (yield* Reviews).post(card?.draftId ?? '', instance.personId)).state, 'posted')
+      const settled = yield* reviewTask(projectId)
+      assert.strictEqual(settled.task?.state, 'done')
+      const started = launches.length
+
+      // The same request again, as a coordinator unsure the first went through would make it: it is over, and nothing is redone.
+      assert.include(yield* review(coordinator), "reviewed ninemate's pull request #1 already, and it's over")
+      assert.lengthOf(yield* sql`SELECT id FROM tasks`, 1)
+      assert.deepStrictEqual(yield* reviewTask(projectId), settled)
+      assert.isFalse(existsSync(`${first.workspace?.path ?? ''}-2`))
+      assert.strictEqual(launches.length, started)
+
+      // Asked again in another request, it is a new review: a task, a copy and a lead of its own.
+      const again = yield* review({ ...coordinator, sessionId: 'coordinator-session-2' })
+      assert.match(again, /^Started review-1-send-back-won-t-restart-a-dead-lead-2:/)
+      const second = yield* reviewTask(projectId)
+      assert.notStrictEqual(second.task?.id, first.task?.id)
+      assert.deepInclude(second.task, { state: 'open' })
+      assert.deepInclude(second.workspace, { access: 'read', state: 'ready' })
+      assert.notStrictEqual(second.workspace?.path, first.workspace?.path)
+      // While that one is open, asking again is it.
+      assert.include(yield* review({ ...coordinator, sessionId: 'coordinator-session-3' }), 'already reviews')
+      assert.lengthOf(yield* sql`SELECT id FROM tasks`, 2)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
   it.live('refuses a host that takes no reviews', () => {
     const at = hosted()
     const gitlab = makeFakeService({ product: 'gitlab', pushUrl: () => at.bare })

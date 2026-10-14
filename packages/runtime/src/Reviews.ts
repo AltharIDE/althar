@@ -230,6 +230,8 @@ export interface Started {
   readonly outside: boolean
   /** It was under way already: nothing new started. */
   readonly already: boolean
+  /** The review asked for is over (posted, or the task closed): asked again as the same request, nothing starts. */
+  readonly done?: boolean
   /** Its lead started; false where it couldn't, which its thread says. */
   readonly leading: boolean
   /** A review of it posts itself once drafted: the person's setting, for their team's pull request. */
@@ -425,6 +427,8 @@ export class Reviews extends Context.Service<
               return full.length <= TITLE_LENGTH ? full : `${full.slice(0, TITLE_LENGTH - 1).replace(/\s+\S*$/, '')}…`
             })()
             const commands = yield* Commands
+            // Whether this request made the task now, or its receipt answers for one made before.
+            let made = false
             const created = yield* commands.execute({
               envelope: input.envelope,
               projectId: input.projectId,
@@ -436,6 +440,7 @@ export class Reviews extends Context.Service<
                 path: Schema.String,
               }),
               handle: Effect.gen(function* () {
+                made = true
                 const [live] = yield* sql<{ id: string }>`SELECT id FROM projects WHERE id = ${input.projectId} AND archived_at IS NULL`
                 if (live === undefined) return yield* new NotFound({ kind: 'project', id: input.projectId })
                 const at = yield* timestamp
@@ -515,6 +520,10 @@ export class Reviews extends Context.Service<
                 return { taskId, slug, threadId, workspaceId, path }
               }),
             })
+
+            // The same request again, whose task is over (an open one is `already`, above): it stands as it ended. Nothing of it is
+            // prepared again, against the head and the copy it read then; a new request makes a review of its own.
+            if (!made) return { ...created, ...words, already: true, done: true, leading: false } satisfies Started
 
             // The copy, once the task is committed: detached at the head fetched, in a folder no other worktree has.
             let path = created.path
