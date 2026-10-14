@@ -5,6 +5,7 @@ import { expect, fireEvent, fn, userEvent, within } from 'storybook/test'
 import { FIRST_RUN, NONE_READY } from '../../fixtures/setup'
 import { RuntimeState } from '../../foundations/vocabulary'
 import { States } from '../../storybook/States'
+import { SettingList, UsageData } from '../../setup/Preferences/Preferences'
 import { Start, type StartProps, type StartRepository } from './Start'
 
 /* The repositories a first run finds where people keep code, most recently worked on first. */
@@ -19,6 +20,23 @@ const LOOKED_IN = '~/Projects, ~/Developer, ~/code'
 
 const onCreate = fn()
 const onPick = fn()
+const onUsage = fn()
+
+/* What Althar sends, as the app gives it: usage data, on as it starts. */
+function Privacy() {
+  const [on, setOn] = useState(true)
+  return (
+    <SettingList>
+      <UsageData
+        on={on}
+        onChange={(next) => {
+          setOn(next)
+          onUsage(next)
+        }}
+      />
+    </SettingList>
+  )
+}
 
 /* As a consumer keeps it: what is ticked, and the name, from the first one until it is given. */
 function Picking(props: Partial<StartProps>) {
@@ -124,6 +142,19 @@ export const NoneFound: Story = {
 /** No agent ready: a project can still be made, and says so. */
 export const NoneReady: Story = { args: { runtimes: NONE_READY } }
 
+/** What Althar sends, at the sheet's foot, before anything is: usage data, on, with its line; turned off at once. */
+export const WithPrivacy: Story = {
+  args: { privacy: <Privacy /> },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const privacy = c.getByRole('region', { name: 'Privacy' })
+    const usage = within(privacy).getByRole('switch', { name: 'Usage data' })
+    await expect(usage).toBeChecked()
+    await userEvent.click(usage)
+    await expect(onUsage).toHaveBeenCalledWith(false)
+  },
+}
+
 export const AllStates: Story = {
   render: (args) => (
     <States
@@ -131,6 +162,19 @@ export const AllStates: Story = {
       cells={[
         { state: 'looking', node: <Start {...args} runtimes={null} repositories={null} /> },
         { state: 'found', node: <Start {...args} /> },
+        {
+          state: 'with privacy',
+          node: (
+            <Start
+              {...args}
+              privacy={
+                <SettingList>
+                  <UsageData on onChange={fn()} />
+                </SettingList>
+              }
+            />
+          ),
+        },
         {
           state: 'forming',
           node: <Start {...args} picked={['meridian', 'infra']} name="meridian" />,
