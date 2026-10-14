@@ -293,6 +293,7 @@ describe('the API', () => {
     assert.throws(() => card({ ...plain, kind: 'question' }))
     assert.throws(() => card({ ...plain, kind: undefined }))
     const brief = {
+      product: 'github',
       repository: 'meridian/api',
       number: 1199,
       url: 'https://github.com/meridian/api/pull/1199',
