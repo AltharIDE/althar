@@ -23,6 +23,20 @@ describe('what a command left running says', () => {
     assert.isNull(servingAt(''))
   })
 
+  it('opens a prototype workbench at its page, which is its address, past a port another was using', () => {
+    // As `bun run prototype <folder>` prints it, in this repository's workbench.
+    const printed = [
+      '$ vp dev --config packages/prototype-workbench/vite.config.ts .althar/scratch/board-card',
+      'Port 5400 is in use, trying another one...',
+      '',
+      '  VITE+ v1.0.0-rc.0  ',
+      '',
+      '  ➜  Local:   http://localhost:5401/',
+      '  ➜  Network: use --host to expose',
+    ].join('\n')
+    assert.strictEqual(servingAt(printed), 'http://localhost:5401/')
+  })
+
   it('reads its exit code where Claude Code wrote it at the end, and nothing where it didn’t', () => {
     assert.strictEqual(exitCodeIn('error: Port 5173 is in use\n[exited with code 1]\n'), 1)
     assert.isNull(exitCodeIn('[exited with code 1]\nand then more'))

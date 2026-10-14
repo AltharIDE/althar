@@ -407,6 +407,19 @@ describe('setting up a task’s worktree', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('tells the lead to show a prototype as one live page, switched in place, its server left running', () =>
+    Effect.gen(function* () {
+      const { task } = yield* taskIn(repository())
+      yield* setUp(task.taskId)
+      const brief = yield* lead(task.threadId)
+      assert.include(brief, 'a slim bar at the bottom switches between the directions, A, B, C…, and the states they show, in place')
+      assert.include(brief, 'Not an index page linking to a page per direction.')
+      assert.include(brief, 'Where the repository has a prototype workbench, as its docs say, build on it.')
+      assert.include(brief, "leave it running when you finish: it shows in the task's Running pill")
+      assert.include(brief, 'Screenshots are secondary')
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('shows a setup that failed, with the end of what it printed, and starts the lead all the same, told what failed', () =>
     Effect.gen(function* () {
       const failing = "echo 'resolving'; echo 'npm ERR! missing: left-pad' >&2; exit 3"

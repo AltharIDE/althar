@@ -1075,6 +1075,20 @@ describe('the coordinator', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('asks for a prototype as one live page the person clicks through, and never for its server to stop', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { threadId } = yield* opened
+      yield* say(threadId, 'hello')
+      const [first] = yield* until(
+        sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${threadId} ORDER BY requested_at`,
+        (rows) => rows.length === 1,
+      )
+      assert.include(first?.prompt ?? '', 'ask its lead for one live page, with the directions switched in place from a bar at the bottom')
+      assert.include(first?.prompt ?? '', "Don't ask a lead to stop it: once idle, it holds no agent's place.")
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live("reads the remote's default branch, and throws away what it wrote there each turn", () =>
     Effect.gen(function* () {
       const projects = yield* Projects

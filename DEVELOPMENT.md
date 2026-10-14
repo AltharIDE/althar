@@ -29,6 +29,8 @@ From the repository root:
 | `bun run dev` | The pitch site, at `http://localhost:5290` |
 | `bun --filter @althar/desktop dev` | Builds the desktop app and opens it |
 | `bun --filter @althar/ui storybook` | The UI package's Storybook, at `http://localhost:6006` (see [Showing a change works](#showing-a-change-works) for a port of a task's own) |
+| `bun run prototype <folder>` | A prototype on the prototype workbench, at the first free port from `http://localhost:5400` (see [Prototyping](#prototyping)) |
+| `bun run prototype:shoot <address>` | Screenshots of every direction and state of a prototype being served |
 | `bun run check` | Format, type-aware lint and type checks, in every package |
 | `bun run fix` | The same, fixing what can be fixed |
 | `bun run test` | Unit and component tests, in every package |
@@ -44,6 +46,7 @@ Each app and package has its own README with its own commands.
 | [`apps/pitch`](apps/pitch) | The brief and research note, as a static site |
 | [`apps/site`](apps/site) | The public site: the developer page, the shifts and the thesis |
 | [`packages/ui`](packages/ui) | `@althar/ui`, the interface components, with a Storybook |
+| [`packages/prototype-workbench`](packages/prototype-workbench) | `@althar/prototype-workbench`: one live page for a prototype, its directions switched in place, and its screenshots |
 | [`packages/domain`](packages/domain) | `@althar/domain`: identifiers, vocabularies, lifecycles and commands, as Effect schemas |
 | [`packages/persistence-sqlite`](packages/persistence-sqlite) | `@althar/persistence-sqlite`: the local store, its schema ([schema.sql](packages/persistence-sqlite/schema.sql)) and migrations |
 | [`packages/provider-adapters`](packages/provider-adapters) | `@althar/provider-adapters`: how Althar talks to agents over ACP, and the agent registry |
@@ -123,6 +126,50 @@ Mac, Chromium and Electron can't start (Chromium exits with `SIGTRAP`), so run
 the shooting command outside the sandbox; Storybook itself runs inside it,
 since a lead may listen on localhost.
 
+A prototype is shown differently: live, on its page, with screenshots second
+([Prototyping](#prototyping)).
+
+## Prototyping
+
+A prototype is something to click through and compare in place, so it is a
+live page, not screenshots, and not Storybook. Build it on the prototype
+workbench ([`packages/prototype-workbench`](packages/prototype-workbench)):
+one page, the direction shown full-bleed, and a slim bar at the bottom that
+switches between its directions (A, B, C…, and Today, the app as it is) and
+the states they show, in place, keeping the same screen and state. Side by
+side puts the directions next to each other at one state. The address says
+what is shown (`?d=B&s=pushing`), and the keys are `1`–`9`, `←` `→`, `[` `]`
+for the states, `S` for side by side and `H` to hide the bar.
+
+1. **Start it.** Copy [`example/prototype.tsx`](packages/prototype-workbench/example/prototype.tsx)
+   into a folder of its own: in a quick task, its scratch folder
+   (`.althar/scratch/<name>/`), which git ignores. A `prototype.tsx` is all
+   the folder needs: it declares the directions (`{ key, name, render }`),
+   the states, the fixtures for each state and Today, and draws them with the
+   kit's real components. Product screens are imported, never changed.
+   `useShared` keeps what the person did in one direction as they switch.
+2. **Run it**, in the background, and leave it running:
+
+   ```bash
+   bun run prototype .althar/scratch/<name>
+   ```
+
+   It serves at the first free port from 5400, and the address it prints is
+   the page. An agent's server shows in the task's Running pill, which opens
+   the page, and once idle it doesn't hold an agent's place. It polls for
+   edits, so it sees them even when started in the sandbox.
+3. **Shoot it**, outside the sandbox, once it is served:
+
+   ```bash
+   bun run prototype:shoot http://localhost:5400 --out test-results/<name>
+   ```
+
+   Every direction at every state from the live page, in order (Today1,
+   A1, A2…, then each state side by side), with a caption each in what it
+   prints and in `shots.md`. `--clean` leaves the bar out.
+
+A lead hands the page's address in `built`, and the shots as evidence.
+
 ## Reviewing on Linux
 
 A Mac can't stand in for every Linux leg; these are run on a real
@@ -145,7 +192,7 @@ change promises.
 
 Work on a branch and open a pull request to `main`. On a pull request:
 
-- **GitHub Actions** runs a package's workflow when its files change: `pitch` for `apps/pitch`, `site` for `apps/site` and the UI kit it uses, `ui` for `packages/ui`, `harness` for `packages/contracts`, `packages/domain`, `packages/persistence-sqlite`, `packages/provider-adapters`, `packages/runtime` and `apps/cli`, and `desktop` for `apps/desktop` and everything it builds on. The desktop app's end-to-end tests run in CI with the fake agent, under a virtual display. The agent adapter's contract runs in CI against a scripted fake agent; the real agents run only on demand (`bun run test:agents` in `packages/provider-adapters`, and `e2e/real.spec.ts` in `apps/desktop`), since they need sign-in and cost usage. Every workflow also runs when the root `package.json`, `bun.lock` or `vite.config.ts` changes.
+- **GitHub Actions** runs a package's workflow when its files change: `pitch` for `apps/pitch`, `site` for `apps/site` and the UI kit it uses, `ui` for `packages/ui`, `prototype-workbench` for `packages/prototype-workbench` and the kit it draws with, `harness` for `packages/contracts`, `packages/domain`, `packages/persistence-sqlite`, `packages/provider-adapters`, `packages/runtime` and `apps/cli`, and `desktop` for `apps/desktop` and everything it builds on. The desktop app's end-to-end tests run in CI with the fake agent, under a virtual display. The agent adapter's contract runs in CI against a scripted fake agent; the real agents run only on demand (`bun run test:agents` in `packages/provider-adapters`, and `e2e/real.spec.ts` in `apps/desktop`), since they need sign-in and cost usage. Every workflow also runs when the root `package.json`, `bun.lock` or `vite.config.ts` changes.
 - **Cloudflare Workers Builds** builds the pitch site. A branch gets a preview deployment (`wrangler preview`), and `main` deploys to production. The preview build fails without the `previews` block in `apps/pitch/wrangler.jsonc`, so keep it.
 
 Merge only when every check is green, the Cloudflare one included.
