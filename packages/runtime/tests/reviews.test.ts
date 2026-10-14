@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -10,8 +10,10 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { readingUntrusted, withoutSignIns } from '../src/Config'
 import { Connections } from '../src/Connections'
 import { Coordinator } from '../src/Coordinator'
+import { git as althar, gitOutcome } from '../src/git'
 import { Instance } from '../src/Instance'
 import { Nudges } from '../src/Nudges'
 import { Projects } from '../src/Projects'
@@ -940,6 +942,93 @@ describe('reviewing someone else’s pull request', () => {
           { id: tasks.second, state: 'open' },
         ])
       }).pipe(Effect.provide(withQueries(github, database)))
+    })
+  })
+
+  it.live('makes its copy a repository of its own, where no driver the person’s git defines runs on the pull request’s files', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    // The pull request chooses drivers for its files, by names the person's git defines.
+    writeFileSync(join(at.working, '.gitattributes'), 'README.md filter=repo\n*.ts filter=own diff=own\n')
+    const { pull, head } = pullRequest(at, github)
+    // Each driver leaves a mark where it runs: one in the person's repository's config, the rest in their own.
+    const marks = mkdtempSync(join(tmpdir(), 'althar-marks-'))
+    const driver = (mark: string) => `sh -c 'touch "${marks}/${mark}"; cat "$@"' -`
+    git(at.working, 'config', 'filter.repo.smudge', driver('repo-smudge'))
+    git(at.working, 'config', 'filter.repo.clean', driver('repo-clean'))
+    const own = join(mkdtempSync(join(tmpdir(), 'althar-gitconfig-')), 'gitconfig')
+    for (const [key, mark] of [
+      ['filter.own.smudge', 'own-smudge'],
+      ['filter.own.clean', 'own-clean'],
+      ['diff.own.textconv', 'own-textconv'],
+    ] as const)
+      git(at.working, 'config', '--file', own, key, driver(mark))
+    const before = process.env.GIT_CONFIG_GLOBAL
+    return Effect.gen(function* () {
+      process.env.GIT_CONFIG_GLOBAL = own
+      const { projectId, coordinator } = yield* project(at.working)
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+      const { task, workspace } = yield* reviewTask(projectId)
+      const copy = workspace?.path ?? ''
+      assert.deepInclude(workspace, { access: 'read', state: 'ready' })
+      // Its own repository, not a worktree of the person's, holding the head and where its change starts as refs of its own.
+      assert.isTrue(statSync(join(copy, '.git')).isDirectory())
+      assert.notInclude(git(at.working, 'worktree', 'list', '--porcelain'), copy)
+      assert.strictEqual(git(copy, 'rev-parse', 'HEAD', 'refs/althar/review/head'), `${head}\n${head}`)
+      assert.strictEqual(git(copy, 'rev-parse', 'refs/althar/review/base'), workspace?.baseCommit)
+      assert.strictEqual(readFileSync(join(copy, 'send.ts'), 'utf8'), 'export const sendBack = () => 1\n')
+      // Checked out, and read by Althar's own git, its status and diff included, no driver ran: git there sees none.
+      const later = new Date(Date.now() + 10_000)
+      for (const file of ['README.md', 'send.ts']) utimesSync(join(copy, file), later, later)
+      assert.strictEqual(yield* althar(copy, 'status', '--porcelain'), '')
+      yield* althar(copy, 'diff', `${workspace?.baseCommit ?? ''}`)
+      assert.notStrictEqual((yield* gitOutcome(copy, 'config', '--get', 'filter.own.smudge')).code, 0)
+      assert.notStrictEqual((yield* gitOutcome(copy, 'config', '--get', 'filter.repo.smudge')).code, 0)
+      // Nor does its lead's: with the person's own git it would run.
+      const leads = (env: Readonly<Record<string, string>>) =>
+        execFileSync('git', ['diff', workspace?.baseCommit ?? '', '--', 'send.ts'], { cwd: copy, env: { ...process.env, ...env } })
+      leads({ ...withoutSignIns(marks), ...readingUntrusted })
+      assert.deepStrictEqual(readdirSync(marks), [])
+      // A comment is placed against the change as the copy shows it.
+      const drafted = yield* callTool(lead(projectId, task?.threadId ?? '', task?.id ?? ''), 'draft_review', {
+        verdict: 'comment',
+        summary: 'Fine.',
+        comments: [{ path: 'send.ts', line: 1, body: 'Here.', severity: 'nit' }],
+      })
+      assert.include(drafted, 'Drafted your review')
+      assert.deepStrictEqual(readdirSync(marks), [])
+      leads({})
+      assert.isNotEmpty(readdirSync(marks))
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (before === undefined) delete process.env.GIT_CONFIG_GLOBAL
+          else process.env.GIT_CONFIG_GLOBAL = before
+        }),
+      ),
+      Effect.provide(withQueries(github)),
+    )
+  })
+
+  it.live('a copy a restart interrupted is ready once git had made it, read from where its change starts', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const { pull, head } = pullRequest(at, github)
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-reviews-')), 'profile.sqlite')
+    return Effect.gen(function* () {
+      const made = yield* Effect.gen(function* () {
+        const { projectId, coordinator } = yield* project(at.working)
+        yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(pull.number), lead: { agent: 'claude-code' } })
+        const { task, workspace } = yield* reviewTask(projectId)
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`UPDATE workspaces SET state = 'preparing', base_commit = NULL WHERE task_id = ${task?.id ?? ''}`
+        return { projectId, starts: workspace?.baseCommit ?? null }
+      }).pipe(Effect.provide(withQueries(github, database)))
+      const { workspace } = yield* reviewTask(made.projectId).pipe(Effect.provide(withQueries(github, database)))
+      assert.deepInclude(workspace, { state: 'ready', baseCommit: made.starts })
+      assert.notStrictEqual(made.starts, head)
     })
   })
 

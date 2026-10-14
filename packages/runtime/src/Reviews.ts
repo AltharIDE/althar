@@ -13,12 +13,12 @@ import { Agents, RuntimeConfig } from './Config'
 import { Connections } from './Connections'
 import { envelope } from './envelope'
 import { NotFound } from './errors'
-import { commitOf, fetchRefs, git, gitOutcome } from './git'
+import { commitOf, fetchRefs, gitOutcome } from './git'
 import { Instance } from './Instance'
 import { freeSlug, slugify } from './Projects'
 import { signed } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
-import { type ReviewOf, reviewOf, type Reviewed } from './reviewing'
+import { copyReviewed, type ReviewOf, reviewOf, type Reviewed } from './reviewing'
 import { indexTask } from './Search'
 import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
@@ -29,10 +29,13 @@ import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
  * someone else's pull request"). A review is a task: the coordinator starts
  * one (`review_pull_request`), and Althar fetches the pull request's head
  * into a read-only copy of its own, recorded as the task's workspace with
- * access `read`, detached, on no branch. The task's lead reads it in reader
- * mode under the reader rules: it runs nothing of it, and, for a pull request
- * from outside the project, reaches no network (Sessions.ts). Nothing Althar
- * sets up a task with (an install, a run) touches the copy.
+ * access `read`, detached, on no branch: a repository of its own that
+ * borrows the person's objects, where git runs with none of the person's
+ * config, so no filter or diff driver of theirs runs on its files
+ * (`addReadCopy`). The task's lead reads it in reader mode under the reader
+ * rules: it runs nothing of it, and, for a pull request from outside the
+ * project, reaches no network (Sessions.ts). Nothing Althar sets up a task
+ * with (an install, a run) touches the copy.
  *
  * The lead drafts its review with `draft_review`: a verdict, a summary, and
  * comments on lines. The draft is a card in the task's thread, kept in
@@ -525,10 +528,10 @@ export class Reviews extends Context.Service<
             // prepared again, against the head and the copy it read then; a new request makes a review of its own.
             if (!made) return { ...created, ...words, already: true, done: true, leading: false } satisfies Started
 
-            // The copy, once the task is committed: detached at the head fetched, in a folder no other worktree has.
+            // The copy, once the task is committed: a repository of its own, detached at the head fetched, in a folder of its own.
             let path = created.path
             for (let n = 2; existsSync(path); n += 1) path = `${created.path}-${n}`
-            const copied = yield* Effect.exit(git(place.binding.repository, 'worktree', 'add', '--detach', path, head.value))
+            const copied = yield* Effect.exit(copyReviewed(place.binding.repository, path, reviewed))
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 const done = copied._tag === 'Success'

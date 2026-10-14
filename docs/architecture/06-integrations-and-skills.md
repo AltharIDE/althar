@@ -517,9 +517,17 @@ asks; its thread opens with what they said and the pull request under it.
   request's head (`refs/pull/<n>/head`) and its target branch into refs of
   its own (`refs/althar/reviews/…`), signed in as a push is, and checks the
   head out detached in a folder of the task's: a workspace with access
-  `read`, on no branch. The lead never fetches. Nothing Althar sets up a task
-  with touches the copy: no install, no run of the project, no merge here, no
-  conflict round, nothing published.
+  `read`, on no branch. The copy is a repository of its own, not a worktree
+  of the person's: it borrows their repository's objects, and keeps the
+  head and where the change starts as refs of its own. Git runs there, for
+  Althar and for the lead, with none of the person's config or the
+  system's: a filter, diff or merge driver defined there (`python -m
+  nbstripout`, a textconv) would otherwise run on the pull request's files
+  as the copy is checked out, or as `git status` or `git diff` reads it, in
+  the copy, where it finds the pull request's own modules first. The lead
+  never fetches. Nothing Althar sets up a task with touches the copy: no
+  install, no run of the project, no merge here, no conflict round, nothing
+  published.
 - **It runs nothing of it.** The lead's session is in reader mode, under the
   reader rules, as the coordinator's and a reviewer's are (04, "Read-only by
   construction"): it reads, searches and runs commands that only look. Since
