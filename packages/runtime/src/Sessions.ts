@@ -1582,7 +1582,7 @@ export class Sessions extends Context.Service<
               Effect.timeoutOption(SESSION_START_TIMEOUT),
               Effect.flatMap((result) => {
                 if (Option.isNone(result)) {
-                  return Effect.fail(new Error(`Timed out waiting for ${definition.name} to set up a session (2 minutes).`))
+                  return Effect.fail(new Error(`Timed out waiting for ${definition.name} to set up a session.`))
                 }
                 return Effect.succeed(result.value)
               }),
