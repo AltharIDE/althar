@@ -1522,6 +1522,8 @@ export const AttentionRequest = Schema.Struct({
   /** Why it waits for the person: the rule that keeps it for them. */
   reason: Schema.String,
   command: Schema.NullOr(Schema.String),
+  /** The command as it reads at a glance (see BackgroundCommand); absent where it is not shortened or there is no command. */
+  label: Schema.optional(Schema.String),
   /** For a step that needs the person: which, and why. */
   stuck: Schema.NullOr(StuckStep),
   /** For an agent's question: what it asks, field by field; it is answered in the thread, where it was asked. */

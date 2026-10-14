@@ -84,6 +84,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.glance {
+  min-width: 0;
+}
 .command {
   font-size: 11.5px;
 }

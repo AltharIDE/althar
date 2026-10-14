@@ -232,12 +232,14 @@ const callOf = (request: {
   readonly askerModel?: string | null
 }) => {
   const payload = parse(request.payload)
+  const command = text(payload, 'command') || null
   return {
     id: request.id,
     kind: request.kind === 'stuck' ? ('stuck' as const) : request.kind === 'question' ? ('question' as const) : ('permission' as const),
     title: request.kind === 'question' ? questionTitle(questionOf(payload)) : text(payload, 'title'),
     reason: text(payload, 'reason'),
-    command: text(payload, 'command') || null,
+    command,
+    ...(command === null ? {} : { label: shortCommand(command) }),
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
     ...(request.kind === 'question'
       ? { question: askedOf(payload, { agentId: request.askerAgentId ?? null, model: request.askerModel ?? null }) }
