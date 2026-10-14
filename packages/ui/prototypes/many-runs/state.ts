@@ -294,6 +294,15 @@ export const proto = {
     set({ runnables: list })
   },
   makeDefault: (id: string) => set({ defaultId: id }),
+  /** Puts them in this order, the first the default: as the app orders them. */
+  order: (ids: ReadonlyArray<string>) =>
+    set({
+      runnables: [
+        ...ids.flatMap((id) => state.runnables.filter((one) => one.id === id)),
+        ...state.runnables.filter((one) => !ids.includes(one.id)),
+      ],
+      defaultId: ids[0] ?? state.defaultId,
+    }),
 
   /** Asks the coordinator what the repository runs: it reads a moment, then offers what it found. */
   ask: () => {

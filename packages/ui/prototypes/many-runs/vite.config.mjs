@@ -22,6 +22,8 @@ const seams = [
   { importer: 'features/task/TaskView.tsx', id: '@althar/ui', to: 'seams/taskUi.ts' },
   // The project's settings: in D, what it runs is one of their modules.
   { importer: 'features/project/ProjectSettings.tsx', id: '@althar/ui', to: 'seams/settingsUi.ts' },
+  // The Run button as built, in a task's bar: there only for A as built, where the directions don't draw their own.
+  { importer: 'features/task/TaskView.tsx', id: '../runs/Runs', to: 'seams/Runs.tsx' },
 ]
 
 /** @type {import('vite-plus').Plugin} */

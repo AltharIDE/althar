@@ -27,7 +27,8 @@ import {
   snapshot,
 } from '../../../../apps/desktop/tests/fixtures'
 import { css, label } from './parts'
-import { type Direction, type Opening, proto, type Run, type Scenario, TASK, useProto } from './state'
+import { SCRIPTS } from './scripts'
+import { type Direction, type Goes, type Opening, proto, type Run, type Scenario, TASK, useProto } from './state'
 
 /* ——— What the fake runtime holds: althar, its board of real tasks, a task under way. ——— */
 
@@ -124,6 +125,7 @@ const launchOf = (run: Run) => {
     id: run.id,
     command: runnable?.command ?? '',
     ...(runnable === undefined ? {} : { label: label(runnable) }),
+    runnableId: run.runnableId,
     url: run.url,
     startedAt: iso(run.startedAt),
     ended: run.endedAt === null ? null : { at: iso(run.endedAt), code: run.code },
@@ -159,8 +161,33 @@ const threadItems = [
   items.tool({ title: 'Edit apps/site/src/Download.tsx' }),
 ]
 
-/** Today's one command: the repository's, where it has one. */
-const todays = () => (proto.get().scenario === 'empty' ? null : 'bun run dev')
+/** What the project runs, as the runtime hands it on (ADR-036): in its order, the first its default. */
+const runnablesOf = () => {
+  const { runnables, defaultId } = proto.get()
+  const first = runnables.find((one) => one.id === defaultId)
+  return [...(first === undefined ? [] : [first]), ...runnables.filter((one) => one !== first)].map((one) => ({
+    id: one.id,
+    name: one.name ?? null,
+    command: one.command,
+    repository: 'althar',
+    own: one.source === 'repository',
+    from: one.source,
+  }))
+}
+
+/** How a run of a command goes, in the page: what serves on which port, what opens a window, what finishes. */
+const goesOf = (command: string): Goes =>
+  /storybook/.test(command)
+    ? { kind: 'serves', port: 6006 }
+    : /preview/.test(command)
+      ? { kind: 'serves', port: 4290 }
+      : /site/.test(command)
+        ? { kind: 'serves', port: 5320 }
+        : /desktop.* dev/.test(command)
+          ? { kind: 'window' }
+          : /\bdev\b/.test(command)
+            ? { kind: 'serves', port: 5290 }
+            : { kind: 'finishes' }
 
 const { client } = fakeClient({
   listProjects: async () => ({ cursor: 3, projects }),
@@ -174,7 +201,7 @@ const { client } = fakeClient({
   getCoordinator: async () =>
     coordinatorSnapshot({
       project: { id: 'p1', name: 'althar' },
-      runCommand: todays(),
+      runnables: runnablesOf(),
       launches: proto.get().runs.map(launchOf),
       items: coordinatorItems,
     }),
@@ -187,7 +214,7 @@ const { client } = fakeClient({
         slug: 'download-the-installer',
         branch: TASK.branch,
         worktree: '/Users/balazs/Althar/althar/download-the-installer',
-        runCommand: todays(),
+        runnables: runnablesOf(),
         launches: proto
           .get()
           .runs.filter((one) => one.place === 'task')
@@ -195,13 +222,26 @@ const { client } = fakeClient({
       },
       items: threadItems,
     }),
-  runProject: async (_projectId: string, taskId: string | null) => {
-    const runnable = proto.get().runnables[0]
-    if (runnable !== undefined) proto.run(runnable.id, taskId === null ? 'main' : 'task')
+  runProject: async (_projectId: string, taskId: string | null, _threadId: string | null, runnableId?: string) => {
+    const id = runnableId ?? runnablesOf()[0]?.id
+    if (id !== undefined) proto.run(id, taskId === null ? 'main' : 'task')
     return launchOf(proto.get().runs[0]!)
   },
   stopLaunch: async (id: string) => proto.stop(id),
   clearLaunch: async (id: string) => proto.clear(id),
+  keepRunnable: async ({ id, name, command }) => {
+    const was = proto.get().runnables.find((one) => one.id === id)
+    if (was !== undefined) {
+      proto.edit(was.id, { name: name ?? undefined, command: command ?? was.command })
+      return { id: was.id }
+    }
+    const kept = command ?? 'bun run dev'
+    return { id: proto.add({ ...(name === null ? {} : { name }), command: kept, where: 'here', source: 'person', goes: goesOf(kept) }) }
+  },
+  dropRunnable: async (_projectId: string, id: string) => proto.remove(id),
+  orderRunnables: async (_projectId: string, ids: ReadonlyArray<string>) => proto.order(ids),
+  getRepositoryScripts: async () =>
+    SCRIPTS.map((one) => ({ repository: 'althar', package: one.pkg, name: one.name, body: one.body, command: one.command })),
 })
 
 const host = fakeHost()
@@ -209,11 +249,11 @@ const cache = makeQueryClient()
 const services = { client, host, cache, feed: follow(client, cache) }
 
 // What runs changed: the screens read their runs again, as they would on the runtime's word; a switch of direction reads nothing.
-let read = { runs: proto.get().runs, scenario: proto.get().scenario }
+let read = { runs: proto.get().runs, runnables: proto.get().runnables, defaultId: proto.get().defaultId }
 proto.subscribe(() => {
-  const { runs, scenario } = proto.get()
-  if (runs === read.runs && scenario === read.scenario) return
-  read = { runs, scenario }
+  const { runs, runnables, defaultId } = proto.get()
+  if (runs === read.runs && runnables === read.runnables && defaultId === read.defaultId) return
+  read = { runs, runnables, defaultId }
   void cache.invalidateQueries({ queryKey: ['coordinator'] })
   void cache.invalidateQueries({ queryKey: ['thread'] })
 })
@@ -227,7 +267,7 @@ const DIRECTIONS: ReadonlyArray<{ value: Direction; name: string }> = [
   { value: 'C', name: 'Chips' },
   { value: 'D', name: 'Launcher' },
   { value: 'E', name: 'Dock' },
-  { value: 'Today', name: 'Today' },
+  { value: 'Today', name: 'A as built' },
 ]
 
 /** The states, with the words the URL uses for them. */
@@ -244,7 +284,7 @@ const scenarioOf = (word: string | null): Scenario | undefined => SCENARIOS.find
 const nameOf = (direction: Direction) => DIRECTIONS.find((one) => one.value === direction)?.name ?? direction
 
 const titled = (direction: Direction) => {
-  document.title = `${direction === 'Today' ? 'Today' : `${direction} · ${nameOf(direction)}`} · Many things to run`
+  document.title = `${direction === 'Today' ? nameOf(direction) : `${direction} · ${nameOf(direction)}`} · Many things to run`
 }
 
 /** Swaps the direction in place: the same screen, the same state. */
@@ -298,8 +338,11 @@ function Switcher() {
         onChange={go}
         options={DIRECTIONS.map((one, at) => ({
           value: one.value,
-          label: one.value === 'Today' ? 'Today' : `${one.value} · ${one.name}`,
-          tooltip: { label: one.value === 'Today' ? 'The one Run button, as the app has it now' : one.name, kbd: String(at + 1) },
+          label: one.value === 'Today' ? one.name : `${one.value} · ${one.name}`,
+          tooltip: {
+            label: one.value === 'Today' ? 'The split Run button as built, the real one, on this page’s data' : one.name,
+            kbd: String(at + 1),
+          },
         }))}
       />
       <Segmented<Scenario>
