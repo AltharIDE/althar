@@ -7,7 +7,7 @@ import type { ReviewDraftCard } from '@althar/contracts'
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Stream } from 'effect'
+import { Duration, Effect, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Connections } from '../src/Connections'
@@ -32,7 +32,7 @@ import { Sessions } from '../src/Sessions'
 import { transcript } from '../src/threads'
 import { words } from '../src/words'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, items, launches, repository, runtime, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, launches, repository, runtime, sessionMetas, until } from './support'
 
 /*
  * Reviews of someone else's pull request (docs/architecture/06, "Reviewing
@@ -167,6 +167,9 @@ describe('reviewing someone else’s pull request', () => {
       const threadId = task?.threadId ?? ''
       yield* until(said(threadId), (all) => all.length > 0)
       assert.isTrue(launches.some((launch) => launch.cwd === workspace?.path))
+      // Untrusted, as a reader: nothing of the repository's own settings, hooks or plugins loads, and offline, from outside.
+      assert.deepStrictEqual(launches.find((launch) => launch.cwd === workspace?.path)?.options, { untrusted: true })
+      assert.deepStrictEqual(sessionMetas.at(-1), { role: 'reader', options: { untrusted: true, offline: true } })
       const sessions = yield* Sessions
       yield* sessions.send({ envelope: yield* Runtime.envelope('thread.send', {}), threadId, body: 'settings' })
       const [mode] = yield* until(
@@ -253,6 +256,8 @@ describe('reviewing someone else’s pull request', () => {
       assert.include(read, '- dana reviewed: commented\n> One more look.')
       // Its head moved on since Althar copied it: said so.
       assert.match(read, /Its head is head-1 now; your copy holds [0-9a-f]{12}, as Althar fetched it\./)
+      // A team's pull request: untrusted all the same, but not offline.
+      assert.deepStrictEqual(sessionMetas.at(-1), { role: 'reader', options: { untrusted: true } })
       // A review has no step to finish, and nothing of its own to push or reply on.
       assert.include(yield* callTool(access, 'finish_step', { summary: 'Done.' }), 'you finish it with draft_review')
       assert.include(yield* callTool(access, 'push_to_pull_request', {}), 'This task reviews someone else’s pull request')
@@ -697,6 +702,52 @@ describe('reviewing someone else’s pull request', () => {
         assert.lengthOf(github.reviewsPosted, 0)
       }).pipe(Effect.provide(withQueries(github, database)))
     })
+  })
+
+  it.live('leads one from outside only on an agent its session holds to reading, when started and when switched to', () => {
+    const at = hosted()
+    const github = makeFakeService({ pushUrl: () => at.bare })
+    github.addRepository(['meridian', 'api'])
+    const outside = pullRequest(at, github, { outside: true })
+    const team = pullRequest(at, github, { title: 'Retry the checkout' })
+    return Effect.gen(function* () {
+      const { projectId, coordinator } = yield* project(at.working)
+      const sql = yield* SqlClient.SqlClient
+      // Codex runs what its read-only sandbox contains without asking: it could run the pull request's scripts.
+      assert.include(
+        yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(outside.pull.number), lead: { agent: 'codex' } }),
+        "Fake codex can't be held to reading only here: it runs commands its sandbox contains without asking, and this pull request #1 is from outside the project. Review it with Fake claude-code or Fake opencode.",
+      )
+      assert.deepStrictEqual(yield* sql`SELECT id FROM tasks`, [])
+      // A team's pull request it reviews, held as far as it can be.
+      assert.match(
+        yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(team.pull.number), lead: { agent: 'codex' } }),
+        /^Started review-2-retry-the-checkout/,
+      )
+      // Switched to on one from outside, it doesn't start, and the lead there carries on.
+      yield* callTool(coordinator, 'review_pull_request', { pull_request: linkTo(outside.pull.number), lead: { agent: 'claude-code' } })
+      const { task } = yield* reviewTask(projectId)
+      const threadId = task?.threadId ?? ''
+      yield* until(said(threadId), (all) => all.length > 0)
+      const sessions = yield* Sessions
+      const failed = yield* Effect.flip(sessions.switchAgent({ threadId, agentId: 'codex' }))
+      assert.strictEqual(tagOf(failed), 'SessionFailed')
+      const notices = (yield* items(threadId)).filter((item) => item.kind === 'notice').map((item) => item.content)
+      assert.deepInclude(notices, {
+        source: 'runtime',
+        severity: 'error',
+        title: "Fake codex couldn't start.",
+        description:
+          "Fake codex can't be held to reading only here: it runs commands its sandbox contains without asking, and this pull request is from outside the project. Review it with another agent, such as Claude Code.",
+      })
+      assert.strictEqual(
+        (yield* sessions.running(threadId)).pipe(
+          Option.map((running) => running.agentId),
+          Option.getOrNull,
+        ),
+        'claude-code',
+      )
+    }).pipe(Effect.provide(withQueries(github)))
   })
 
   it.live('refuses a host that takes no reviews', () => {

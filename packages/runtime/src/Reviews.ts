@@ -379,6 +379,15 @@ export class Reviews extends Context.Service<
             const posts = !outside && (yield* postTeamReviews)
             const words = { title: pull.title, author, outside, name, posts }
             if (already !== undefined) return { ...already, ...words, already: true, leading: false } satisfies Started
+            // From outside, only an agent its session holds to reading leads it (the registry's `reviewing`; Sessions.ts refuses
+            // any other there too): one that runs what its sandbox contains without asking could run the pull request's code.
+            const leading = yield* agents.get(input.lead.agentId).pipe(Effect.mapError(() => refused('Althar has no such agent.')))
+            if (outside && leading.definition.reviewing?.outside !== true) {
+              const held = agents.list.filter((entry) => entry.definition.reviewing?.outside === true).map((entry) => entry.definition.name)
+              return yield* refused(
+                `${leading.definition.name} can't be held to reading only here: it runs commands its sandbox contains without asking, and this ${name} is from outside the project. Review it with ${held.join(' or ')}.`,
+              )
+            }
 
             // Its head and its target, fetched as a push is signed in, into refs of Althar's own: nothing is a branch here.
             const ref = `refs/althar/reviews/${place.path.join('/')}/${pull.number}`
@@ -546,7 +555,7 @@ export class Reviews extends Context.Service<
               disposition: 'after_current',
               quiet: true,
             })
-            const leading = yield* sessions
+            const started = yield* sessions
               .start({
                 threadId: created.threadId,
                 agentId: input.lead.agentId,
@@ -558,7 +567,7 @@ export class Reviews extends Context.Service<
                 // A lead that couldn't start says why in the task's thread, and the person starts another there.
                 Effect.catch((error) => Effect.as(Effect.logWarning('A review’s lead could not start', error), false)),
               )
-            return { ...created, ...words, already: false, leading } satisfies Started
+            return { ...created, ...words, already: false, leading: started } satisfies Started
           }),
         )
 
