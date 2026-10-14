@@ -111,6 +111,8 @@ export const text = {
   working: 'Working',
   needsYou: 'Needs you',
   ready: 'Ready for you',
+  /** A review of someone else's pull request, drafted: the person's to post. */
+  drafted: 'Review drafted',
   done: 'Done',
   abandoned: 'Abandoned',
   idle: 'Idle',
@@ -155,6 +157,8 @@ export const statusOf = (
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
   // Ready, but its lead couldn't resolve a conflict with its default branch: it needs the person before it can be accepted.
   if (phase === 'ready' && snapshot.task.handedBack != null) return { status: TaskStatus.Yours, state: text.needsYou }
+  // A review drafted is the person's to post (DEV-96).
+  if (phase === 'ready' && snapshot.task.review != null) return { status: TaskStatus.Yours, state: text.drafted }
   // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
   if (phase === 'ready') return { status: TaskStatus.Yours, state: text.ready }
   // Abandoned, it says so in place of where it stood, as stopped does.

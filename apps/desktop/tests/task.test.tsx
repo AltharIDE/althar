@@ -214,13 +214,21 @@ describe('a task', () => {
       getThread: vi.fn(async () =>
         thread({
           items: [items.says('It needs a test.'), items.review()],
-          task: { ...base.task, title: 'Review #1212: Honour Retry-After on refund webhooks', request: 'Review this one', review },
+          task: {
+            ...base.task,
+            title: 'Review #1212: Honour Retry-After on refund webhooks',
+            request: 'Review this one',
+            review,
+            phase: 'ready',
+          },
         }),
       ),
     })
     withServices(<Task />, client)
     // Its thread opens with what the person asked, and the pull request under it.
     await screen.findByText('Review this one')
+    // Drafted, its header says so: the review is the person's to post.
+    expect(screen.getByText('Review drafted')).toBeTruthy()
     expect(screen.getAllByText('Honour Retry-After on refund webhooks').length).toBeGreaterThan(1)
     // Under its header, what its lead can reach: from outside, no network.
     const reach = screen.getByLabelText('What this review’s lead can reach')
