@@ -5,6 +5,7 @@ import { Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 
 import {
+  AgentRules,
   AgentsAtOnce,
   Api,
   ApiError,
@@ -17,6 +18,7 @@ import {
   Product,
   type SentImage,
   SentImages,
+  ProjectRulesView,
   TaskCard,
   ThreadItem,
   WatchEvent,
@@ -324,6 +326,32 @@ describe('the API', () => {
     assert.strictEqual(PAGE, 100)
   })
 
+  it('takes the agents’ rules as each becomes a command rule or is skipped with why, and a kept rule with where it came from', () => {
+    const from = { agent: 'claude', file: '.claude/settings.json' }
+    const read = Schema.decodeUnknownSync(AgentRules)({
+      projectId: 'p1',
+      offered: true,
+      files: [{ from, readable: true }],
+      rules: [
+        { id: 'a', from, said: 'Bash(rm -rf:*)', decision: 'never', rule: { pattern: 'rm -rf', match: 'prefix' } },
+        { id: 'b', from, said: 'Read(./.env)', decision: 'never', skipped: 'paths' },
+      ],
+    })
+    assert.strictEqual(read.rules.length, 2)
+    const decode = Schema.decodeUnknownSync(AgentRules)
+    assert.throws(() => decode({ ...read, rules: [{ id: 'c', from, said: 'Bash', decision: 'never', skipped: 'everything' }] }))
+    assert.throws(() => decode({ ...read, files: [{ from: { agent: 'cursor', file: '.cursor/rules' }, readable: true }] }))
+    assert.throws(() =>
+      decode({ ...read, rules: [{ id: 'd', from, said: 'Bash(x)', decision: 'deny', rule: { pattern: 'x', match: 'exact' } }] }),
+    )
+    const view = Schema.decodeUnknownSync(ProjectRulesView.fields.commands)([
+      { pattern: 'rm -rf', decision: 'never', from },
+      { pattern: 'npm publish', decision: 'ask' },
+    ])
+    assert.deepStrictEqual(view[0]?.from, from)
+    assert.isUndefined(view[1]?.from)
+  })
+
   it('takes a load only as parts of the whole and bytes', () => {
     const load = { cpu: 0.5, memoryUsed: 8e9, memoryTotal: 16e9, pressure: null, shares: [], history: [] }
     const share = {
@@ -502,6 +530,8 @@ describe('the API', () => {
               LeaveOutRepository: () => Effect.die('unused'),
               SetRepository: () => Effect.die('unused'),
               SetProjectRules: () => Effect.die('unused'),
+              ReadAgentRules: () => Effect.die('unused'),
+              ImportAgentRules: () => Effect.die('unused'),
               SetProjectAccounts: () => Effect.void,
               RenameAccount: () => Effect.void,
               RemoveAccount: () => Effect.void,

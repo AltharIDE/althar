@@ -112,6 +112,7 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | Always allowed, Go ahead | `alwaysAllow` kinds, `allow` command rules | What is let through without asking, short of what always asks or is never allowed: kinds, and commands by how they start or exactly. Where the coordinator decides, these answer before it is asked. Answering a permission with "always allow" adds one (ADR-018). The rules screen's sentence for it is "Go ahead". |
 | The rest | the mode, `permissions` | What happens to what no rule keeps: allowed, the coordinator decides, ask me, or allow everything. A kind of request on no list is with the rest. |
 | Allow always, Never allow | an answer that keeps a rule, by its scope | An answer that is also kept in the project's rules: for this exact command, commands starting the same way, or the kind of request. Offered only where the rule would hold. |
+| Rules from your agents, Import from your agents | `ReadAgentRules`, `ImportAgentRules` | What the agents' own settings (`.claude/settings.json`, Codex's rules, `opencode.json`) would add to a project's rules, offered once as the project opens and from the rules screen. The person takes all of it, some or none; a rule taken says the file it came from (ADR-036). |
 | Allowed by the project's rules | a decision a rule made | The quiet line under a turn for what an allow rule let through, opening to each command and its rule. |
 | Settled | terminal states | Calls answered, changes accepted, tasks abandoned, plain tasks seen (Done). |
 

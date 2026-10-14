@@ -1,6 +1,7 @@
 import { agentVersion } from '@althar/provider-adapters'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep } from 'node:path'
 
 import {
@@ -38,6 +39,7 @@ import { MachineLoad } from './MachineLoad'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
+import { offerOf, readAgentRules } from './agentRules'
 import { accountsOf, movesIssues, Policies, type ProjectRules, resolvesConflicts, ruleSetOf, usageLimitOf } from './Policies'
 import { Models } from './Models'
 import { Installs } from './Installs'
@@ -279,6 +281,16 @@ export const handlers = Api.toLayer(
         moveIssues: movesIssues(rules),
       }
     }
+
+    /** What the agents' own settings say for a project (ADR-036), read now from its repositories and the person's home folder. */
+    const agentRulesOf = (projectId: string) =>
+      Effect.gen(function* () {
+        const repositories = yield* sql<{ name: string; path: string }>`
+          SELECT b.display_name AS name, l.path FROM repository_bindings b
+          JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+          WHERE b.project_id = ${projectId} AND b.detached_at IS NULL ORDER BY b.created_at, b.rowid`
+        return yield* readAgentRules(repositories, config.home ?? homedir())
+      })
 
     /* An account as the window shows it: signed in, checked at most once a minute, paid for how, and out until when. */
     const accountStatus = (account: Account, recheck: boolean) =>
@@ -1027,6 +1039,37 @@ export const handlers = Api.toLayer(
               // Its leads newly resolving conflicts, what conflicts already is resolved now, not at the next (ADR-030).
               if (!resolvesConflicts(was) && resolvesConflicts(kept.rules)) yield* pullRequests.resolveNow({ projectId })
               return yield* rulesView(projectId, kept)
+            }),
+          ),
+        ),
+      ReadAgentRules: ({ projectId }) =>
+        api(
+          Effect.gen(function* () {
+            const [project] = yield* sql<{ id: ProjectId; offers: number }>`
+              SELECT id, offers_agent_rules AS offers FROM projects WHERE id = ${projectId}`
+            if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+            const { files, found } = yield* agentRulesOf(projectId)
+            const { rules } = yield* policies.current(project.id)
+            return {
+              projectId,
+              offered: project.offers === 1,
+              files,
+              rules: offerOf(found, rules.commands ?? []).map(({ rule, skipped, ...each }) =>
+                rule === undefined ? { ...each, skipped } : { ...each, rule },
+              ),
+            }
+          }),
+        ),
+      ImportAgentRules: ({ commandId, projectId, ids }) =>
+        once(
+          commandId,
+          api(
+            Effect.gen(function* () {
+              const { found } = yield* agentRulesOf(projectId)
+              yield* policies.adopt(projectId, found, ids, instance.personId)
+              // A call still waiting that the rules now settle is answered by them.
+              yield* permissions.reconsider(projectId)
+              return yield* rulesView(projectId, yield* policies.current(projectId as ProjectId))
             }),
           ),
         ),

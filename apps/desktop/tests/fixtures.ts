@@ -1,6 +1,7 @@
 import type {
   AccountSignInState,
   AgentModels,
+  AgentRules,
   AgentStatus,
   ChangeSummary,
   ConnectGuide,
@@ -891,6 +892,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     dropProjectNote: vi.fn(async () => {}),
     getVocabulary: vi.fn(async () => ['RefundLedger', 'useEffect']),
     setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({ ...projectRules, ...change, projectId })),
+    readAgentRules: vi.fn(async (projectId: string): Promise<AgentRules> => ({ projectId, offered: false, files: [], rules: [] })),
+    importAgentRules: vi.fn(async (projectId: string) => ({ ...projectRules, projectId })),
     addAccount: vi.fn(async (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => ({
       ...usual('acc_added', 'signed_out'),
       name: input.name,

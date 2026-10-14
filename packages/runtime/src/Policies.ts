@@ -1,11 +1,12 @@
 import { type ActorId, Ids, newId, type ProjectId } from '@althar/domain'
-import type { Ledger } from '@althar/persistence-sqlite'
+import type { Ledger, RevisionConflict, RowNotFound } from '@althar/persistence-sqlite'
 import { Context, type Crypto, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
-import { NotFound, RuleOnAnotherList, RulesChanged } from './errors'
+import { type Found, offerOf, withImported } from './agentRules'
+import { AgentRulesChanged, NotFound, RuleOnAnotherList, RulesChanged } from './errors'
 import { Instance } from './Instance'
-import { fact, timestamp } from './records'
+import { change as changeRow, fact, timestamp } from './records'
 import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rules'
 
 /*
@@ -23,6 +24,12 @@ import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rule
  * with who is free and when the reset is.
  */
 export type UsageLimit = 'move' | 'wait' | 'ask'
+
+/** An agent's settings file a rule was copied from (ADR-036): the agent, and the file as the person would find it. */
+export const RuleSource = Schema.Struct({
+  agent: Schema.Literals(['claude', 'codex', 'opencode']),
+  file: Schema.String,
+})
 
 export const ProjectRules = Schema.Struct({
   source: Schema.String,
@@ -42,6 +49,8 @@ export const ProjectRules = Schema.Struct({
         decision: Schema.Literals(['ask', 'never', 'allow']),
         /** By the whole line; by how it starts without it. */
         match: Schema.optional(Schema.Literals(['prefix', 'exact'])),
+        /** Where it was copied from, for one taken from an agent's own settings (ADR-036): the agent, and its file. */
+        from: Schema.optional(RuleSource),
       }),
     ),
   ),
@@ -188,6 +197,20 @@ export class Policies extends Context.Service<
     ): Effect.Effect<ProjectRules, SqlError.SqlError | Schema.SchemaError | NotFound | RulesChanged | RuleOnAnotherList>
     /** A new revision of the project's rules with a rule an "always" answer keeps, recorded as whoever answered: none where it holds already. */
     remember(projectId: string, rule: Remembered, actorId: ActorId): Effect.Effect<void, SqlError.SqlError | Schema.SchemaError | NotFound>
+    /**
+     * Takes the rules chosen, by id, of what the agents' own settings offer
+     * (ADR-036), as a revision recorded as the person's, each kept with
+     * where it came from; none where none is chosen. Either way the project's
+     * offer to start from them is answered, and the answer recorded. A
+     * choice of something no longer offered, as when a file changed since it
+     * was read, takes nothing.
+     */
+    adopt(
+      projectId: string,
+      found: ReadonlyArray<Found>,
+      chosen: ReadonlyArray<string>,
+      actorId: ActorId,
+    ): Effect.Effect<ProjectRules, SqlError.SqlError | Schema.SchemaError | NotFound | AgentRulesChanged | RowNotFound | RevisionConflict>
     /** A new revision of the project's rules for agents' accounts, recorded as the person's. */
     setAccounts(
       projectId: string,
@@ -317,10 +340,20 @@ export class Policies extends Context.Service<
                   if (value === null || (typeof value === 'string' && value.trim() === '')) delete kept[key]
                   else if (value !== undefined) kept[key] = value.trim()
                 }
+                // Where a rule was copied from stays with it while it stays as it is: only the runtime says where one came from.
+                const sourced = commands?.map((rule) => {
+                  const was = (rules.commands ?? []).find(
+                    (other) =>
+                      other.pattern === rule.pattern &&
+                      (other.match ?? 'prefix') === (rule.match ?? 'prefix') &&
+                      other.decision === rule.decision,
+                  )
+                  return was?.from === undefined ? rule : { ...rule, from: was.from }
+                })
                 const changed: ProjectRules = {
                   ...(kept as ProjectRules),
                   ...rest,
-                  ...(commands === undefined ? {} : { commands }),
+                  ...(sourced === undefined ? {} : { commands: sourced }),
                   source: 'person',
                 }
                 next = changed
@@ -335,6 +368,41 @@ export class Policies extends Context.Service<
             revise(projectId, actorId, (rules) => {
               const next = withRemembered(rules, rule)
               return JSON.stringify(next) === JSON.stringify(rules) ? undefined : { ...next, source: 'person' }
+            }),
+          ),
+        adopt: (projectId, found, chosen, actorId) =>
+          provide(
+            Effect.gen(function* () {
+              const sql = yield* SqlClient.SqlClient
+              return yield* sql.withTransaction(
+                Effect.gen(function* () {
+                  const ids = new Set(chosen)
+                  let taken: ProjectRules['commands'] = []
+                  yield* revise<AgentRulesChanged>(projectId, actorId, (rules) => {
+                    const offer = offerOf(found, rules.commands ?? [])
+                    // What was chosen from what was read, which the files no longer say: nothing is taken.
+                    if ([...ids].some((id) => !offer.some((each) => each.id === id && each.rule !== undefined)))
+                      return Effect.fail(new AgentRulesChanged({ projectId }))
+                    const commands = withImported(rules.commands ?? [], offer, ids)
+                    taken = commands.filter((command) => !(rules.commands ?? []).includes(command))
+                    return taken.length === 0 ? undefined : { ...rules, commands, source: 'person' }
+                  })
+                  const [project] = yield* sql<{ id: ProjectId; offers: number }>`
+                    SELECT id, offers_agent_rules AS offers FROM projects WHERE id = ${projectId}`
+                  if (project === undefined) return yield* new NotFound({ kind: 'project', id: projectId })
+                  const revision = yield* changeRow('projects', project.id, { offersAgentRules: 0 })
+                  yield* fact({
+                    projectId: project.id,
+                    aggregateType: 'project',
+                    aggregateId: project.id,
+                    revision,
+                    type: 'project.agent_rules_taken',
+                    payload: { offered: project.offers === 1, taken },
+                    actorId,
+                  })
+                  return (yield* current(project.id)).rules
+                }),
+              )
             }),
           ),
         setAccounts: (projectId, accounts, actorId) =>

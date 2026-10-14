@@ -5,6 +5,7 @@ import type { ChoiceWords } from '../../foundations/vocabularyText'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { Menu, MenuCheckboxItem, MenuGroup, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { Popover } from '../../primitives/Popover/Popover'
 import {
@@ -45,6 +46,8 @@ export interface RuleCommand {
   pattern: string
   match: CommandMatch
   place: CommandPlace
+  /** Where it was copied from, for one taken from an agent's own settings: its file, as the person would find it. */
+  from?: string
 }
 
 /** An agent with more than one account, and its accounts in the person's order. */
@@ -132,6 +135,10 @@ export interface ProjectRulesText {
     rotate: { first: ChoiceWords; next: ChoiceWords }
     note: string
   }
+  /** Under a sentence: the commands in it copied from an agent's settings file. */
+  from: (file: string) => string
+  /** Opens what the agents' own settings would add. */
+  importFromAgents: string
   token: Partial<CommandTokenText>
   hint: Partial<NewCommandHintText>
 }
@@ -322,6 +329,8 @@ export const projectRulesText: ProjectRulesText = {
     },
     note: 'In your order from Settings. Going on with the next holds for every agent in this project',
   },
+  from: (file) => `From ${file}: `,
+  importFromAgents: 'Import from your agents',
   token: {},
   hint: {},
 }
@@ -374,6 +383,8 @@ export type ProjectRulesProps = RootProps<
     /** The accounts the project may use, by agent; an agent not named may use every one. */
     allowed: Readonly<Record<string, readonly string[]>>
     onAllowedChange: (agentId: string, accountIds: readonly string[]) => void
+    /** Opens what the agents' own settings would add to the rules. Without it, there is no way to it here. */
+    onImport?: () => void
     text?: Partial<ProjectRulesText>
   }
 >
@@ -478,6 +489,7 @@ export function ProjectRules({
   onRotateChange,
   allowed,
   onAllowedChange,
+  onImport,
   text,
   className,
   ...rest
@@ -634,6 +646,38 @@ export function ProjectRules({
         text={t.hint}
       />
     ) : null
+  /** Under a sentence, the commands in it copied from an agent's settings, by the file each came from. */
+  const sources = (place: CommandPlace) => {
+    const files = new Map<string, Array<RuleCommand>>()
+    for (const command of commands)
+      if (command.place === place && command.from !== undefined) files.set(command.from, [...(files.get(command.from) ?? []), command])
+    if (files.size === 0) return null
+    return (
+      <p className={s.sources}>
+        {[...files].map(([file, copied]) => (
+          <span key={file} className={s.source}>
+            {t.from(file)}
+            {join(
+              copied.map((command) => <code key={command.id}>{command.pattern}</code>),
+              t.and,
+            )}
+            .
+          </span>
+        ))}
+      </p>
+    )
+  }
+  /** What goes under a sentence: how a command being added matches, and where its copied commands came from. */
+  const below = (place: CommandPlace) => {
+    const how = hint(place)
+    const from = sources(place)
+    return how === null && from === null ? undefined : (
+      <>
+        {how}
+        {from}
+      </>
+    )
+  }
   const clauseRef = (place: CommandPlace) => (element: HTMLLIElement | null) => {
     clauses.current[place] = element
   }
@@ -663,7 +707,15 @@ export function ProjectRules({
           <Heading level={headingLevel} className={s.title}>
             {t.title}
           </Heading>
-          <p className={s.lede}>{t.lede(project)}</p>
+          <p className={s.lede}>
+            {t.lede(project)}
+            {onImport !== undefined && (
+              <>
+                {' · '}
+                <LinkButton onClick={onImport}>{t.importFromAgents}</LinkButton>
+              </>
+            )}
+          </p>
         </div>
         <CharterKey text={t.key} className={s.key} />
       </header>
@@ -673,7 +725,7 @@ export function ProjectRules({
           {t.fixed}
         </Clause>
 
-        <Clause label={t.label.never} headingLevel={sub} ref={clauseRef(RulePlace.Never)} below={hint(RulePlace.Never)}>
+        <Clause label={t.label.never} headingLevel={sub} ref={clauseRef(RulePlace.Never)} below={below(RulePlace.Never)}>
           {neverKinds.length > 0 && neverCommands.length > 0 ? (
             <>
               {t.never.does(t.agents)}
@@ -703,7 +755,7 @@ export function ProjectRules({
           label={t.label.ask}
           headingLevel={sub}
           ref={clauseRef(RulePlace.Ask)}
-          below={hint(RulePlace.Ask)}
+          below={below(RulePlace.Ask)}
           {...(allowAll ? { off: t.off } : {})}
         >
           {askKinds.length > 0 && askCommands.length > 0 ? (
@@ -735,7 +787,7 @@ export function ProjectRules({
           label={t.label.allow}
           headingLevel={sub}
           ref={clauseRef(RulePlace.Allow)}
-          below={hint(RulePlace.Allow)}
+          below={below(RulePlace.Allow)}
           {...(allowAll ? { off: t.off } : {})}
         >
           {goAhead.length > 0 ? (

@@ -6,6 +6,7 @@ import {
   LinkButton,
   ResizeHandle,
   Room,
+  RulesOffer,
   TaskFace,
   Thread,
   ThreadDivider,
@@ -38,6 +39,7 @@ import { firstNeedOf, needsOf } from '../board/needs'
 import type { BoardModel } from '../board/useBoard'
 import { ConnectDialog, type Opening, openingFor } from '../connections/ConnectDialog'
 import type { ConnectionsModel } from '../connections/useConnections'
+import type { AgentRulesModel } from '../rules/useAgentRules'
 import { Card, type CardActions } from './Card'
 import { DraftCard, type DraftActions } from './DraftCard'
 import { lastSettledOf, partsOf, tasksOf, trackersOf } from './front'
@@ -137,6 +139,7 @@ export function ProjectView({
   connections,
   onTask,
   settings,
+  agentRules,
   room: opening = Room.Talk,
   onRoomChange,
 }: {
@@ -144,6 +147,12 @@ export function ProjectView({
   board: BoardModel
   connections: ConnectionsModel
   onTask: (threadId: string) => void
+  /**
+   * The offer, once, as the project opens, to start its rules from its
+   * agents' own settings (ADR-036): reviewing them, which opens them on the
+   * rules screen, or taking none. Without it, it isn't offered here.
+   */
+  agentRules?: { readonly model: AgentRulesModel; readonly onReview: () => void }
   /** The project's settings: its name and colour, its repositories, its rules, removing it; without them, no way to them. */
   settings?: ProjectSettingsActions
   /** The view it opens on: the one a task's bar chose, or the one the person was last on. */
@@ -411,6 +420,19 @@ export function ProjectView({
                     >
                       {text.earlier}
                     </ThreadDivider>
+                  )}
+                  {agentRules?.model.offering === true && (
+                    <RulesOffer
+                      count={agentRules.model.rules.length}
+                      onReview={agentRules.onReview}
+                      onDecline={() => void agentRules.model.decline()}
+                      declining={agentRules.model.declining}
+                    />
+                  )}
+                  {agentRules?.model.offering === true && agentRules.model.error !== null && (
+                    <p className={s.failure} role="alert">
+                      {agentRules.model.error}
+                    </p>
                   )}
                   {coordinator.items.length === 0 && model.streaming.size === 0 && <p className={s.quiet}>{text.empty(name)}</p>}
                   {/* The coordinator only reads: what it hands back is pictures, which open in the lightbox; it writes no documents. */}

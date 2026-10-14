@@ -35,4 +35,5 @@ export const checksums: Readonly<Record<string, string>> = {
   '0029_review_drafts': '8c081396ca8e55ae5fa75d2fc4921b6d05b13ca4bdb3ca0cee4cd428d132868f',
   '0030_task_search': '115fda4ca39ce227de0b386dfc3f5f832ff8f0255ffad879079ca2b5457728f2',
   '0031_branch_on_first_write': '6f74ce130bd700d9f703fa1b3d0e98532d37b9557e91b8ebe1b2d6a017540c87',
+  '0032_rules_from_agents': 'c2f6bc74f6369a34683ffb3a5f92c2e9f5eac656a51f3e99ca48dcac885fe2d1',
 }

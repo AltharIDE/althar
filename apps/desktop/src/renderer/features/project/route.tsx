@@ -8,6 +8,7 @@ import { ThreadPending } from '../../shared/Pending'
 import { useBoard } from '../board/useBoard'
 import { useLastRoom } from '../tabs/TabsFrame'
 import { useConnections } from '../connections/useConnections'
+import { useAgentRules } from '../rules/useAgentRules'
 import { ProjectView } from './ProjectView'
 import { useProject } from './useProject'
 import { useProjectSettings } from './useProjectSettings'
@@ -29,6 +30,11 @@ function Project() {
       board={useBoard(projectId)}
       connections={useConnections()}
       onTask={(threadId) => void navigate({ to: '/threads/$threadId', params: { threadId } })}
+      agentRules={{
+        model: useAgentRules(projectId),
+        // Reviewed on the rules screen, where what is taken shows at once.
+        onReview: () => void navigate({ to: '/projects/$projectId/rules', params: { projectId }, search: { import: true } }),
+      }}
       settings={{
         model: settings,
         onRepositories: () => void navigate({ to: '/projects/$projectId/repositories', params: { projectId } }),

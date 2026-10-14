@@ -106,6 +106,10 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
     : []),
   // Its rules, which an answer can change too (Allow always, Deny always), only while they show.
   ...(event.projectId !== null && event.aggregateType === 'policy' ? [{ key: keys.rules(event.projectId), offScreen: false }] : []),
+  // Taking the agents' rules answers the offer, and what the project has decides what they still offer.
+  ...(event.projectId !== null && (event.aggregateType === 'policy' || event.aggregateType === 'project')
+    ? [{ key: keys.agentRules(event.projectId), offScreen: false }]
+    : []),
   // Its notes, which the coordinator keeps as the person decides, only while they show.
   ...(event.projectId !== null && event.aggregateType === 'project_note' ? [{ key: keys.notes(event.projectId), offScreen: false }] : []),
 ]

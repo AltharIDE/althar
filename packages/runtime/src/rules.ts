@@ -4,6 +4,8 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
 import type { PermissionRequest } from '@althar/provider-adapters'
 
+import type { RuleSource } from './agentRules'
+
 /*
  * The rules for agents' requests (ADR-013). What no project can change:
  * agents reach a code host only through Althar, and never read
@@ -77,6 +79,8 @@ export interface CommandRule {
   readonly pattern: string
   readonly decision: 'ask' | 'never' | 'allow'
   readonly match?: 'prefix' | 'exact' | undefined
+  /** Where it was copied from, for one taken from an agent's own settings (ADR-036). */
+  readonly from?: RuleSource | undefined
 }
 
 /** What let a request through without asking (ADR-018): a kind the project always allows, or a command rule. */
@@ -1073,6 +1077,16 @@ const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray
 const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'think']
 
 /**
+ * Why no project may let a command line through, whatever its rules say
+ * (ADR-011): a code host is reached through Althar, so `gh` and `glab`
+ * only look, and no one reads credentials, wherever they are in the line.
+ */
+export const fixedReason = (text: string): string | undefined =>
+  parseCommandLine(text)
+    .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
+    .find((reason) => reason !== undefined)
+
+/**
  * Decides a permission request from the rules and the project's (ADR-013).
  * What no project can change comes first: a code host is reached only
  * through Althar, and no one reads credentials. A request can be several
@@ -1099,10 +1113,7 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   const project = context.project ?? MVP_RULES
   const named = request.kind === 'execute' || request.kind === 'other' ? commandRule(commandOf(request), project.commands) : undefined
   if (request.kind === 'execute' || request.kind === 'other') {
-    // A code host is reached through Althar: `gh` and `glab` only look, and no one reads credentials, wherever they are in the command.
-    const refused = parseCommandLine(commandOf(request))
-      .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
-      .find((reason) => reason !== undefined)
+    const refused = fixedReason(commandOf(request))
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
     if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
   }

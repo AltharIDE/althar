@@ -94,7 +94,7 @@ CREATE TABLE projects (
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   archived_at TEXT CHECK (archived_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1)
-, ink TEXT NOT NULL DEFAULT 'clay' CHECK (ink IN ('clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber'))) STRICT;
+, ink TEXT NOT NULL DEFAULT 'clay' CHECK (ink IN ('clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber')), offers_agent_rules INTEGER NOT NULL DEFAULT 0 CHECK (offers_agent_rules IN (0, 1))) STRICT;
 
 CREATE TABLE policies (
   id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 4) = 'pol_' AND length(id) = 36 AND substr(id, 5) NOT GLOB '*[^0-9a-f]*'),
