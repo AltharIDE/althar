@@ -279,7 +279,7 @@ export const handlers = Api.toLayer(
       }
     }
 
-    /** What the agents' own settings say for a project (ADR-034), read now from its repositories and the person's home folder. */
+    /** What the agents' own settings say for a project (ADR-036), read now from its repositories and the person's home folder. */
     const agentRulesOf = (projectId: string) =>
       Effect.gen(function* () {
         const repositories = yield* sql<{ name: string; path: string }>`

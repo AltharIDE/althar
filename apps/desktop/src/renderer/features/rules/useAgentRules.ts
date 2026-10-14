@@ -10,7 +10,7 @@ import { useServices } from '../../data/services'
 
 /*
  * The agents' own settings as the first draft of a project's rules
- * (ADR-034): what their files say, read each time it is shown, as the kit's
+ * (ADR-036): what their files say, read each time it is shown, as the kit's
  * proposal, each rule that can't be one of the project's with why. The
  * offer made as a project opened stands until the person answers it, from
  * its card or the proposal: taking some, or none. Taking them keeps the

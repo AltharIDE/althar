@@ -79,7 +79,7 @@ export interface CommandRule {
   readonly pattern: string
   readonly decision: 'ask' | 'never' | 'allow'
   readonly match?: 'prefix' | 'exact' | undefined
-  /** Where it was copied from, for one taken from an agent's own settings (ADR-034). */
+  /** Where it was copied from, for one taken from an agent's own settings (ADR-036). */
   readonly from?: RuleSource | undefined
 }
 

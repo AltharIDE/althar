@@ -8,7 +8,7 @@ import { fixedReason } from './rules'
 
 /*
  * The agents' own permission settings, as the first draft of a project's
- * rules (DEV-41, ADR-034). Teams tune them for months: Claude Code's
+ * rules (DEV-41, ADR-036). Teams tune them for months: Claude Code's
  * `permissions` in `.claude/settings.json`, Codex's rules, OpenCode's
  * `permission` in `opencode.json`. Althar reads them, says what each rule
  * would be in the project's rules, or why it can't be one, and the person

@@ -13,7 +13,7 @@ import { CommandToken } from '../Charter/Charter'
 import s from './RulesImport.module.css'
 
 /*
- * A project's rules started from its agents' own settings (ADR-034): what
+ * A project's rules started from its agents' own settings (ADR-036): what
  * their files say, as a proposal. Each rule that can be one of the
  * project's sits under the sentence it would join, Never, Always ask me or
  * Go ahead, with where it came from and how the file wrote it, and the

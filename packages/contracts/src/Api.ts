@@ -317,7 +317,7 @@ export const CommandRule = Schema.Struct({
 })
 export type CommandRule = typeof CommandRule.Type
 
-/** An agent whose own permission settings a project's rules can start from (ADR-034). */
+/** An agent whose own permission settings a project's rules can start from (ADR-036). */
 export const RulesAgent = Schema.Literals(['claude', 'codex', 'opencode'])
 export type RulesAgent = typeof RulesAgent.Type
 
@@ -325,12 +325,12 @@ export type RulesAgent = typeof RulesAgent.Type
 export const RuleSource = Schema.Struct({ agent: RulesAgent, file: Schema.String })
 export type RuleSource = typeof RuleSource.Type
 
-/** A command rule as the project keeps it, with where it was copied from, for one taken from an agent's settings (ADR-034). */
+/** A command rule as the project keeps it, with where it was copied from, for one taken from an agent's settings (ADR-036). */
 export const KeptCommandRule = Schema.Struct({ ...CommandRule.fields, from: Schema.optional(RuleSource) })
 export type KeptCommandRule = typeof KeptCommandRule.Type
 
 /**
- * Why one of an agent's rules isn't one of the project's (ADR-034): it is on
+ * Why one of an agent's rules isn't one of the project's (ADR-036): it is on
  * paths, the web, an MCP tool or another tool; it is for every command; its
  * wildcard, or its words, can't be said the same way; it is for one of
  * OpenCode's agents; what no project can change says it already; the
@@ -370,7 +370,7 @@ export const AgentRule = Schema.Union([
 ])
 export type AgentRule = typeof AgentRule.Type
 
-/** What a project's agents' own settings offer its rules, read now from their files (ADR-034). */
+/** What a project's agents' own settings offer its rules, read now from their files (ADR-036). */
 export const AgentRules = Schema.Struct({
   projectId: Schema.String,
   /** Whether the offer made as the project was opened still stands: once, until the person answers it. */
@@ -2252,7 +2252,7 @@ export const Api = RpcGroup.make(
     },
     ProjectRulesView,
   ),
-  /** What the agents' own settings would add to a project's rules, read now from their files (ADR-034); nothing changes. */
+  /** What the agents' own settings would add to a project's rules, read now from their files (ADR-036); nothing changes. */
   call('ReadAgentRules', { projectId: Schema.String }, AgentRules),
   /**
    * Takes the rules chosen, by id, of what `ReadAgentRules` offers, into the

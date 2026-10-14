@@ -149,7 +149,7 @@ export function ProjectView({
   onTask: (threadId: string) => void
   /**
    * The offer, once, as the project opens, to start its rules from its
-   * agents' own settings (ADR-034): reviewing them, which opens them on the
+   * agents' own settings (ADR-036): reviewing them, which opens them on the
    * rules screen, or taking none. Without it, it isn't offered here.
    */
   agentRules?: { readonly model: AgentRulesModel; readonly onReview: () => void }

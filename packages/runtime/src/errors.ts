@@ -96,7 +96,7 @@ export class RulesChanged extends Schema.TaggedError<RulesChanged>()('RulesChang
   expected: Schema.Number,
 }) {}
 
-/** A choice of the agents' own rules that they no longer offer (ADR-034): a settings file changed since it was read. */
+/** A choice of the agents' own rules that they no longer offer (ADR-036): a settings file changed since it was read. */
 export class AgentRulesChanged extends Schema.TaggedError<AgentRulesChanged>()('AgentRulesChanged', {
   projectId: Schema.String,
 }) {}

@@ -253,7 +253,7 @@ export interface Client {
   readonly getVocabulary: (projectId: string) => Promise<ReadonlyArray<string>>
   /** Changes what is given of a project's rules; the rules as they are after it. */
   readonly setProjectRules: (input: ProjectRulesChange) => Promise<ProjectRulesView>
-  /** What the agents' own settings would add to a project's rules, read now from their files (ADR-034). */
+  /** What the agents' own settings would add to a project's rules, read now from their files (ADR-036). */
   readonly readAgentRules: (projectId: string) => Promise<AgentRules>
   /** Takes the rules chosen, by id, of what the agents' settings offer; with none, answers the offer; the rules as they are after it. */
   readonly importAgentRules: (projectId: string, ids: ReadonlyArray<string>) => Promise<ProjectRulesView>

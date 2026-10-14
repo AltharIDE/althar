@@ -1,4 +1,4 @@
-# ADR-034: A project's rules can start from its agents' own settings
+# ADR-036: A project's rules can start from its agents' own settings
 
 - **Status:** Accepted
 - **Date:** 2026-10-13

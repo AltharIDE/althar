@@ -16,7 +16,7 @@ import type { RulesModel } from './useRules'
  * named; and what a usage limit does, with the accounts work runs on. A
  * kind of request sits in one sentence: moving it writes it on one list
  * and takes it off the others. What the agents' own settings would add
- * opens over it (ADR-034), and a command taken from them says where it came
+ * opens over it (ADR-036), and a command taken from them says where it came
  * from. Escape goes back to the project.
  */
 

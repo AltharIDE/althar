@@ -25,7 +25,7 @@ import { type AlwaysRule, type ProjectRuleSet, type RuleId, RULES } from './rule
  */
 export type UsageLimit = 'move' | 'wait' | 'ask'
 
-/** An agent's settings file a rule was copied from (ADR-034): the agent, and the file as the person would find it. */
+/** An agent's settings file a rule was copied from (ADR-036): the agent, and the file as the person would find it. */
 export const RuleSource = Schema.Struct({
   agent: Schema.Literals(['claude', 'codex', 'opencode']),
   file: Schema.String,
@@ -49,7 +49,7 @@ export const ProjectRules = Schema.Struct({
         decision: Schema.Literals(['ask', 'never', 'allow']),
         /** By the whole line; by how it starts without it. */
         match: Schema.optional(Schema.Literals(['prefix', 'exact'])),
-        /** Where it was copied from, for one taken from an agent's own settings (ADR-034): the agent, and its file. */
+        /** Where it was copied from, for one taken from an agent's own settings (ADR-036): the agent, and its file. */
         from: Schema.optional(RuleSource),
       }),
     ),
@@ -199,7 +199,7 @@ export class Policies extends Context.Service<
     remember(projectId: string, rule: Remembered, actorId: ActorId): Effect.Effect<void, SqlError.SqlError | Schema.SchemaError | NotFound>
     /**
      * Takes the rules chosen, by id, of what the agents' own settings offer
-     * (ADR-034), as a revision recorded as the person's, each kept with
+     * (ADR-036), as a revision recorded as the person's, each kept with
      * where it came from; none where none is chosen. Either way the project's
      * offer to start from them is answered, and the answer recorded. A
      * choice of something no longer offered, as when a file changed since it

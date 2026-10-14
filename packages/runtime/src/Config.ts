@@ -47,7 +47,7 @@ export interface RuntimeOptions {
     readonly list: () => ReadonlyArray<{ readonly id: string; readonly name: string }>
     readonly open: (editor: string, folder: string, file: string | null, line: number | null) => Effect.Effect<boolean>
   }
-  /** The person's home folder, where agents keep their own settings (ADR-034); the system's unless a test says. */
+  /** The person's home folder, where agents keep their own settings (ADR-036); the system's unless a test says. */
   readonly home?: string
   readonly appVersion: string
   /** What this device is called, when the profile is new. */

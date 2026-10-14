@@ -152,7 +152,7 @@ const options = {
   },
   appVersion: process.env.ALTHAR_APP_VERSION ?? '0.0.0',
   deviceName: hostname(),
-  // The end-to-end tests give a home of their own, so the agents' settings the tester keeps aren't read (ADR-034).
+  // The end-to-end tests give a home of their own, so the agents' settings the tester keeps aren't read (ADR-036).
   ...(process.env.ALTHAR_CODE_HOME ? { home: process.env.ALTHAR_CODE_HOME } : {}),
 }
 
