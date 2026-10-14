@@ -512,6 +512,13 @@ needs Issues: Read and write, which is set on the app itself.
 A review is a task. The coordinator starts one (`review_pull_request`, [04](04-coordinator.md))
 when the person asks for a review, or pastes a pull request's link and
 asks; its thread opens with what they said and the pull request under it.
+Asked to review someone's pull requests without their numbers, it finds
+them first (`find_pull_requests`), through each host's list call
+(`CodeHost.listChanges`): GitHub's search over GraphQL, which says each
+one's branches, review decision and checks in one call; GitLab's, and
+Bitbucket's, lists. A listing refused for a scope says which
+(`ConnectorFailed.scope`); a host that can't list says so
+(`noListing`).
 
 - **Its lead reads a copy, fetched by Althar.** Althar fetches the pull
   request's head (`refs/pull/<n>/head`) and its target branch into refs of
