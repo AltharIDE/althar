@@ -990,9 +990,26 @@ export class Reviews extends Context.Service<
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not settle the review drafts left being posted', cause))),
       )
 
+      // A review's lead reads the pull request and drafts its review, and nothing else: every lead tool that isn't one a review
+      // is given (`inReview`) is refused to it, listed or not, as it could change the project or reach outside it (keep how the
+      // project runs, which Althar later runs outside any sandbox; reply or push; finish a step). Read from the task each call.
+      yield* toolServer.guard('lead', (tool, access) =>
+        tool.inReview === true
+          ? Effect.succeed(null)
+          : provide(reviewOf(access.taskId ?? '')).pipe(
+              Effect.map((review) =>
+                review === null
+                  ? null
+                  : `This task reviews someone else’s pull request: you read it, with read_pull_request for what it says, and finish it with draft_review, which the person posts. ${tool.name} isn’t for a review.`,
+              ),
+              Effect.orElseSucceed(() => 'Althar couldn’t tell whether this task may use that. Try again, or tell the person.'),
+            ),
+      )
+
       yield* toolServer.serve('lead', [
         {
           name: 'draft_review',
+          inReview: true,
           description:
             "Drafts your review of the pull request this task reviews, once you have read it: your verdict (approve, changes, or comment), a summary of a few lines in Markdown, and comments, each on a line of the change as it now reads (a file's path from the repository's root, and its line number in the new file), with its severity: blocking, major, minor or nit. It posts nothing: the person sees it as a card, keeps or drops each comment, chooses the verdict (yours is a suggestion) and posts it. Called again, it replaces the draft that waits.",
           input: {

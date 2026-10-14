@@ -3258,17 +3258,10 @@ export class Changes extends Context.Service<
             : provide(call(taskId, value, access)).pipe(
                 Effect.catch((error) => {
                   if (error instanceof ToolRefused) return Effect.fail(error)
+                  // A review's lead, reading someone else's pull request, never gets here: its tools are a review's (Reviews.ts).
                   if (error instanceof NotFound && error.kind === 'pull request')
-                    // A review's lead reads someone else's pull request, and Althar posts nothing for it there but the person's review.
-                    return Effect.flatMap(provide(Effect.orElseSucceed(reviewOf(taskId), () => null)), (review) =>
-                      Effect.fail(
-                        new ToolRefused({
-                          message:
-                            review === null
-                              ? 'This task has no pull request yet. Althar opens one when the plan’s steps are done.'
-                              : 'This task reviews someone else’s pull request: nothing goes on it from here but your review, which the person posts. Put what you would say in draft_review.',
-                        }),
-                      ),
+                    return Effect.fail(
+                      new ToolRefused({ message: 'This task has no pull request yet. Althar opens one when the plan’s steps are done.' }),
                     )
                   if (error instanceof NotConnected || (error instanceof NotFound && error.kind === 'connection'))
                     return Effect.fail(
@@ -3288,17 +3281,21 @@ export class Changes extends Context.Service<
       })
 
       yield* toolServer.serve('lead', [
-        leadTool(
-          'read_pull_request',
-          "The task's pull request as it stands, or each of them in a task of several repositories: its state, its checks (with the end of a failed check's log), and what people said on it, with each line comment's thread id. In a review, the pull request it reviews: its description too, and what everyone said on it.",
-          { type: 'object', properties: {} },
-          (taskId) =>
-            Effect.gen(function* () {
-              // A review reads the pull request it reviews, someone else's, as its host has it now.
-              const review = (yield* urlsOf(taskId)).length === 0 ? yield* reviewOf(taskId) : null
-              return review === null ? yield* read(taskId) : yield* readReviewed(review)
-            }),
-        ),
+        {
+          ...leadTool(
+            'read_pull_request',
+            "The task's pull request as it stands, or each of them in a task of several repositories: its state, its checks (with the end of a failed check's log), and what people said on it, with each line comment's thread id. In a review, the pull request it reviews: its description too, and what everyone said on it.",
+            { type: 'object', properties: {} },
+            (taskId) =>
+              Effect.gen(function* () {
+                // A review reads the pull request it reviews, someone else's, as its host has it now.
+                const review = (yield* urlsOf(taskId)).length === 0 ? yield* reviewOf(taskId) : null
+                return review === null ? yield* read(taskId) : yield* readReviewed(review)
+              }),
+          ),
+          // It only reads, so a review's lead has it too.
+          inReview: true,
+        },
         leadTool(
           'reply_on_pull_request',
           "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. In a task of several repositories, pull_request names the one to reply on, by its repository and number, as read_pull_request names it: web#3. For answering what people said; a change to the code is a commit, which the person pushes: ask them to with push_to_pull_request.",

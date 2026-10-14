@@ -32,7 +32,7 @@ import { Sessions } from '../src/Sessions'
 import { transcript } from '../src/threads'
 import { words } from '../src/words'
 import type { ToolAccess } from '../src/ToolServer'
-import { callTool, fakeConnectors, HOST, hosted, items, launches, repository, runtime, sessionMetas, until } from './support'
+import { callTool, fakeConnectors, HOST, hosted, items, launches, listTools, repository, runtime, sessionMetas, until } from './support'
 
 /*
  * Reviews of someone else's pull request (docs/architecture/06, "Reviewing
@@ -258,19 +258,37 @@ describe('reviewing someone else’s pull request', () => {
       assert.match(read, /Its head is head-1 now; your copy holds [0-9a-f]{12}, as Althar fetched it\./)
       // A team's pull request: untrusted all the same, but not offline.
       assert.deepStrictEqual(sessionMetas.at(-1), { role: 'reader', options: { untrusted: true } })
-      // A review has no step to finish, and nothing of its own to push or reply on.
-      assert.include(yield* callTool(access, 'finish_step', { summary: 'Done.' }), 'you finish it with draft_review')
-      assert.include(yield* callTool(access, 'push_to_pull_request', {}), 'This task reviews someone else’s pull request')
-      // draft_review is a review's: another task's lead is told so.
+
+      // It is given only what reads, and draft_review; the rest is refused when called, listed or not: nothing it could change
+      // the project with, such as how it runs, which Althar runs outside any sandbox, and nothing that reaches the host.
+      assert.deepStrictEqual(yield* listTools(access), ['draft_review', 'read_issue', 'read_pull_request'])
+      const refusals = {
+        finish_step: { summary: 'Done.' },
+        set_run_command: { command: 'sh ./serve.sh', setup: 'sh ./setup.sh' },
+        reply_on_pull_request: { body: 'Approved by me.' },
+        push_to_pull_request: {},
+      }
+      for (const [name, input] of Object.entries(refusals))
+        assert.strictEqual(
+          yield* callTool(access, name, input),
+          `This task reviews someone else’s pull request: you read it, with read_pull_request for what it says, and finish it with draft_review, which the person posts. ${name} isn’t for a review.`,
+          name,
+        )
+      const sql = yield* SqlClient.SqlClient
+      assert.deepStrictEqual(yield* sql`SELECT run_command, run_setup FROM repository_bindings`, [{ runCommand: null, runSetup: null }])
+      assert.notInclude(github.calls, 'reply')
+      // draft_review is a review's: another task's lead is told so, and has its own tools as before.
       const other = yield* (yield* Projects).createTask({
         envelope: yield* Runtime.envelope('task.create', {}),
         projectId,
         title: 'Retry checkout',
       })
+      const otherLead = lead(projectId, other.threadId, other.taskId)
       assert.include(
-        yield* callTool(lead(projectId, other.threadId, other.taskId), 'draft_review', { verdict: 'comment', summary: 'Fine.' }),
+        yield* callTool(otherLead, 'draft_review', { verdict: 'comment', summary: 'Fine.' }),
         'draft_review is for one that does',
       )
+      assert.includeMembers(yield* listTools(otherLead), ['finish_step', 'set_run_command', 'push_to_pull_request', 'draft_review'])
     }).pipe(Effect.provide(withQueries(github)))
   })
 
