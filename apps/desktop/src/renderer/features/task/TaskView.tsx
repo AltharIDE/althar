@@ -524,8 +524,8 @@ export function TaskView({
               },
             }
           : {})}
-        // Its folder opens in the editor files open in, once it has a worktree.
-        {...(snapshot.task.branch === null || editor === undefined
+        // Its folder opens in the editor files open in, once it has a worktree: a plain task's has no branch, but is there.
+        {...(snapshot.task.worktree === null || editor === undefined
           ? {}
           : { onOpen: () => editors.open(editor.id), editor: editor.name, text: { open: openInText.in } })}
       />

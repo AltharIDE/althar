@@ -1120,6 +1120,13 @@ describe('a task', () => {
     expect(await shownFor(true, true)).toEqual([false, false])
   })
 
+  it('offers its folder for a plain task with no branch, and none where it has no worktree', async () => {
+    const plain = await taskMenu({ phase: 'ready', branch: null, actions: ['abandon'] }, null)
+    expect(plain.offered).toEqual(['Open in Zed', 'Abandon'])
+    plain.view.unmount()
+    expect((await taskMenu({ phase: 'held', branch: null, worktree: null, actions: ['abandon'] }, null)).offered).toEqual(['Abandon'])
+  })
+
   it('offers no say on its conflicts once it settles', async () => {
     const { offered } = await taskMenu({ phase: 'settled', state: 'done', actions: [] }, null)
     expect(offered).toEqual(['Open in Zed'])

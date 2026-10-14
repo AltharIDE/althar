@@ -5,13 +5,16 @@ import { filesOf } from './handed'
 
 /*
  * What a task makes, read from what it has and never stored (DEV-96, the
- * plan in docs/plans/task-as-container.md). A change ends in a pull request
- * of its own, or its branch pushed (its plan's end is draft, ready or none),
- * or has one, or has commits or changes on its branch. A review reads
- * someone else's pull request, with nothing of its own. Anything else is
- * plain: a question, a prototype, a release from this Mac. Since what a
- * task has only grows, a task only moves toward change: a plain task that
- * writes is one, and so is a review the person takes over.
+ * plan in docs/plans/task-as-container.md). A change has a branch of its own
+ * (every planned task has one from its start, whatever its plan's end, as
+ * one that merges here when accepted has no pull request to end in), a pull
+ * request, or commits or changes on its branch; a plan that ends in a pull
+ * request, or its branch pushed, says so before anything else does. A review
+ * reads someone else's pull request, with nothing of its own. Anything else
+ * is plain: a task with no branch yet, as the coordinator's start_task makes
+ * one, a question, a prototype, a release from this Mac. Since what a task
+ * has only grows, a task only moves toward change: a plain task that writes
+ * gets its branch and is one, and so is a review the person takes over.
  */
 
 /** A field of something parsed from the store, if it is an object with one. */
@@ -28,16 +31,18 @@ export interface KindFacts {
   readonly changes: number
   /** It has commits on its branch, or changes there not committed yet. */
   readonly made: boolean
+  /** It has a branch of its own: every planned task from its start, a plain one once its lead changes the repository. */
+  readonly branched: boolean
 }
 
 /** Whether a plan's end makes a task a change by itself: a pull request, or its branch pushed. */
 export const endsInChange = (end: string | null): boolean => end === 'draft' || end === 'ready' || end === 'none'
 
-/** A task's kind, from what it has now. */
+/** A task's kind, from what it has now. A branch alone isn't work of a review's own: what it has made is. */
 export const kindOf = (facts: KindFacts): TaskKind => {
   const own = facts.changes > 0 || facts.made
   if (facts.reviewing !== null && !own) return 'review'
-  return own || endsInChange(facts.end) ? 'change' : 'plain'
+  return own || facts.branched || endsInChange(facts.end) ? 'change' : 'plain'
 }
 
 /**

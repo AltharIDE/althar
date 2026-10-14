@@ -238,6 +238,40 @@ describe('schema', () => {
     ),
   )
 
+  it.effect('takes every worktree made before plain tasks as made on its branch, when it was made', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const before = migrations.findIndex((migration) => migration.key === '0031_branch_on_first_write')
+        const made = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { projectId, deviceId, actorId, createdAt } = yield* seed
+          const bindingId = yield* newId(Ids.repositoryBinding)
+          yield* sql`INSERT INTO repository_bindings ${sql.insert({ id: bindingId, projectId, slug: 'meridian', role: 'other', displayName: 'meridian', createdAt })}`
+          const taskId = yield* newId(Ids.task)
+          yield* sql`INSERT INTO tasks ${sql.insert({ id: taskId, projectId, title: 'Retry', slug: 'retry', state: 'open', createdByActorId: actorId, createdAt })}`
+          yield* sql`INSERT INTO workspaces ${sql.insert({
+            id: yield* newId(Ids.workspace),
+            projectId,
+            taskId,
+            bindingId,
+            deviceId,
+            access: 'write',
+            path: '/worktrees/meridian/retry/meridian',
+            baseRef: 'main',
+            branch: 'althar/retry',
+            state: 'ready',
+            createdAt,
+          })}`
+          return createdAt
+        }).pipe(Effect.provide(WebCrypto))
+        const createdAt = yield* Effect.provide(made, Layer.fresh(Database.layer({ filename, migrations: migrations.slice(0, before) })))
+        const read = Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ branchedAt: string | null }>`SELECT branched_at FROM workspaces`)
+        const after = yield* Effect.provide(read, Layer.fresh(Database.layer({ filename })))
+        assert.deepStrictEqual(after, [{ branchedAt: createdAt }])
+      }),
+    ),
+  )
+
   it.effect('refuses to open a database whose rows point at nothing', () =>
     withFile((filename) =>
       Effect.gen(function* () {

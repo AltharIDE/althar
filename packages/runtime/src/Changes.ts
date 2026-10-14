@@ -197,6 +197,8 @@ interface PublishRow {
   readonly workspaceId: string
   readonly path: string
   readonly branch: string
+  /** 0 for a plain task's worktree with no branch yet, which has nothing to publish. */
+  readonly branched: number
   readonly baseCommit: string | null
   readonly baseRef: string | null
   readonly bindingId: string
@@ -724,7 +726,7 @@ export class Changes extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const tasks = yield* sql<PublishRow>`
             SELECT k.title, b.display_name AS name, b.slug, t.id AS thread_id, w.id AS workspace_id, w.path, w.branch, w.base_commit, w.base_ref, b.id AS binding_id,
-              b.remote_fingerprints AS remotes, b.default_base_ref AS default_base, b.change_target
+              w.branched_at IS NOT NULL AS branched, b.remote_fingerprints AS remotes, b.default_base_ref AS default_base, b.change_target
             FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
             JOIN workspaces w ON w.task_id = k.id AND w.device_id = ${instance.deviceId} AND w.access = 'write'
             JOIN repository_bindings b ON b.id = w.binding_id
@@ -882,6 +884,8 @@ export class Changes extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // A plain task's worktree with no branch yet holds nothing of its own: there is no branch to push (DEV-96).
+          if (given.branched === 0) return { kind: 'nothing', left: [] } as const
           let task = given
           // A fork's branch goes to the fork, whatever else its clone's remotes name; its pull request, where the project says.
           const fork = yield* namedRemotes(task.path).pipe(
@@ -1541,7 +1545,10 @@ export class Changes extends Context.Service<
           if (now !== undefined) yield* poll(now)
         })
 
-      /** The task's repositories here, each with its worktree and the default branch it merges into, in the order the project has them. */
+      /**
+       * The task's repositories here, each with its worktree and the default branch it merges into, in the order the project has them:
+       * those on a branch, as a plain task's with none yet has nothing to merge or conflict (DEV-96).
+       */
       const repositoriesHere = (taskId: string) =>
         Effect.flatMap(
           SqlClient.SqlClient,
@@ -1551,7 +1558,7 @@ export class Changes extends Context.Service<
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.branched_at IS NOT NULL
             ORDER BY b.created_at, b.rowid`,
         )
 
@@ -1586,6 +1593,8 @@ export class Changes extends Context.Service<
           const cant = (why: CantMerge['why'], detail = '') => new CantMerge({ taskId, why, detail })
           if (task.state !== 'open') return yield* cant('settled')
           const all = yield* repositoriesHere(taskId)
+          // A plain task with no branch yet has nothing the person could have seen to merge.
+          if (all.length === 0) return yield* cant('changed')
           const repositories = all.filter((repository) => repository.opened === 0)
           if (repositories.length === 0) return yield* cant('pull_request')
           const several = all.length > 1
@@ -1689,7 +1698,7 @@ export class Changes extends Context.Service<
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.branched_at IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL)
             ORDER BY b.created_at, b.rowid`
           const pushed: Array<{ branch: string; remote: string }> = []
@@ -1733,7 +1742,7 @@ export class Changes extends Context.Service<
             FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.branched_at IS NOT NULL
               AND NOT EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL)`
           const pushed: Array<{ branch: string; remote: string }> = []
           for (const repository of repositories) {

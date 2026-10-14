@@ -12,7 +12,7 @@ import { Changes } from './Changes'
 import { suggestedCoordinator } from './coordinatorChoice'
 import { Accounts } from './Accounts'
 import { Agents } from './Config'
-import { NotFound } from './errors'
+import { NotFound, TaskRefused } from './errors'
 import { taskShown } from './evidence'
 import { Instance } from './Instance'
 import { DraftUntitled, IssueDrafts, IssueTargetNeeded } from './IssueDrafts'
@@ -34,6 +34,7 @@ import { type Disposition, Sessions } from './Sessions'
 import { blockedModelsOf } from './preferences'
 import type { InputImage } from './sentImages'
 import { SignIns } from './SignIns'
+import { Tasks } from './Tasks'
 import { addItem, transcript } from './threads'
 import { ToolRefused, ToolServer, type Tool, type ToolAccess } from './ToolServer'
 import { describeModels, type Route, routeTo, usableModels } from './usableModels'
@@ -85,6 +86,7 @@ type Store =
   | Busy
   | Accounts
   | Reviews
+  | Tasks
 
 const Drafted = Schema.Struct({
   title: Schema.String,
@@ -127,6 +129,8 @@ const ToReview = Schema.Struct({
   lead: Schema.Struct({ ...StepPick.fields, reason: Schema.optional(Schema.String) }),
 })
 const Named = Schema.Struct({ task: Schema.String })
+/* A task, by its slug or id, and the title it is given now. */
+const Retitled = Schema.Struct({ task_id: Schema.String, title: Schema.String })
 const Sought = Schema.Struct({ text: Schema.String })
 /* A thread to read: a task's, or, with none, the coordinator's own; and, to read further back, where the part read before began. */
 const Reading = Schema.Struct({ task: Schema.optional(Schema.String), before: Schema.optional(Schema.Int) })
@@ -272,9 +276,18 @@ export class Coordinator extends Context.Service<
       const list = (access: ToolAccess) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const tasks = yield* sql<{ id: string; slug: string; title: string; state: string; run: string | null; lead: string | null }>`
+          const tasks = yield* sql<{
+            id: string
+            slug: string
+            title: string
+            state: string
+            run: string | null
+            lead: string | null
+            unbranched: number
+          }>`
             SELECT k.id, k.slug, k.title, k.state,
               (SELECT r.state FROM runs r WHERE r.task_id = k.id ORDER BY r.created_at DESC LIMIT 1) AS run,
+              EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.branched_at IS NULL) AS unbranched,
               (SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
                 WHERE t.task_id = k.id AND t.kind = 'task' ORDER BY s.started_at DESC LIMIT 1) AS lead
             FROM tasks k WHERE k.project_id = ${access.projectId} ORDER BY k.created_at DESC LIMIT 50`
@@ -300,7 +313,9 @@ export class Coordinator extends Context.Service<
                     : task.run === 'succeeded'
                       ? 'ready'
                       : task.state
-              const words = found === undefined ? '' : listWords(found)
+              // A plain task that hasn't changed the repository has no branch, and nothing to ship.
+              const words =
+                task.unbranched === 1 ? 'no branch: it has changed nothing in the repository' : found === undefined ? '' : listWords(found)
               return `- ${task.slug}: ${task.title} (${state}${task.lead === null ? '' : `, led by ${nameOf(task.lead)}`})${words === '' ? '' : ` — ${words}`}`
             })
             .join('\n')
@@ -321,8 +336,9 @@ export class Coordinator extends Context.Service<
           const task = yield* taskOf(access, reference)
           const results = yield* sql<{ content: string }>`
             SELECT content FROM thread_items WHERE thread_id = ${task.threadId} AND kind = 'step_result' ORDER BY sequence`
-          const workspaces = yield* sql<{ branch: string; path: string; name: string }>`
-            SELECT w.branch, w.path, b.display_name AS name FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
+          const workspaces = yield* sql<{ branch: string; path: string; name: string; branched: number }>`
+            SELECT w.branch, w.path, b.display_name AS name, w.branched_at IS NOT NULL AS branched
+            FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             WHERE w.task_id = ${task.id} AND w.device_id = ${instance.deviceId} ORDER BY b.created_at, b.rowid`
           const seen = yield* pullRequests(task.id)
           const found = task.state === 'done' && seen !== undefined ? { ...seen, unmerged: 0 } : seen
@@ -335,8 +351,8 @@ export class Coordinator extends Context.Service<
             unverified.length === 0 ? '' : `What its lead couldn't show working:\n${unverified.map((line) => `- ${line}`).join('\n')}`,
             yield* issueWords(task.id),
             workspaces.length === 1
-              ? `Branch ${workspaces[0]?.branch ?? ''}, in ${workspaces[0]?.path ?? ''}.`
-              : workspaces.map((workspace) => `${workspace.name}: branch ${workspace.branch}, in ${workspace.path}.`).join('\n'),
+              ? `${upper(branchWords(workspaces[0]))}, in ${workspaces[0]?.path ?? ''}.`
+              : workspaces.map((workspace) => `${workspace.name}: ${branchWords(workspace)}, in ${workspace.path}.`).join('\n'),
             ...results.map((row) => {
               const result = JSON.parse(row.content) as { step?: string; verdict?: string; summary?: string }
               return `${result.step ?? 'step'}${result.verdict === undefined ? '' : ` (${result.verdict})`}: ${result.summary ?? ''}`
@@ -346,6 +362,13 @@ export class Coordinator extends Context.Service<
             .filter((line) => line !== '')
             .join('\n\n')
         })
+
+      /** A task's branch in a repository, or that it has none yet: a plain task whose lead hasn't changed the repository. */
+      const branchWords = (workspace: { readonly branch: string; readonly branched: number } | undefined) =>
+        workspace === undefined || workspace.branched === 1
+          ? `branch ${workspace?.branch ?? ''}`
+          : 'no branch yet: its lead has changed nothing in the repository'
+      const upper = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`
 
       /** The issue a task came from, where it stands as last seen, and whether Althar moved it to In Progress as the task started. */
       const issueWords = (taskId: string) =>
@@ -427,8 +450,11 @@ export class Coordinator extends Context.Service<
           return `Dropped ${id}.`
         })
 
-      /** Drafts a task, from an issue where one is named: the task made, or the one this session made under that title before. */
-      const drafting = (access: ToolAccess, { title, description, issue: from, repositories }: typeof Drafted.Type) =>
+      /**
+       * Drafts a task, from an issue where one is named: the task made, or the one this session made under that title before.
+       * `plain`, for one started with no plan: its worktrees have no branch until its lead changes the repository.
+       */
+      const drafting = (access: ToolAccess, { title, description, issue: from, repositories }: typeof Drafted.Type, plain = false) =>
         Effect.gen(function* () {
           // A title is read at a glance, in a line on every screen: the rest of what was asked goes in the description.
           if (title.trim().length > TITLE_LENGTH)
@@ -466,6 +492,7 @@ export class Coordinator extends Context.Service<
               ...(issue === undefined ? {} : { issueKey: issue.key }),
               ...(repositories === undefined ? {} : { repositories }),
               ...(request === undefined ? {} : { request }),
+              ...(plain ? { plain } : {}),
             })
             .pipe(
               // A project of several repositories needs to hear which the task changes: said so, with the ones it has.
@@ -495,14 +522,15 @@ export class Coordinator extends Context.Service<
        * A mini task: drafted and started in one go, with no plan for the
        * person to look over. One lead, no review, and nothing outside the
        * project when it is done; the person sees it as a card, already
-       * running.
+       * running. It is a plain task: its worktree has no branch until its
+       * lead changes the repository (DEV-96).
        */
       const startNow = (access: ToolAccess, input: unknown) =>
         Effect.gen(function* () {
           const { lead: pick, ...drafted } = yield* read(Started, input)
           // The lead is found first, so a model that can't be used drafts nothing.
           const lead = yield* stepOf(access.projectId, pick)
-          const { created } = yield* drafting(access, drafted)
+          const { created } = yield* drafting(access, drafted, true)
           // Called again, unsure the first worked, it doesn't start the same task twice.
           if ((yield* taskOf(access, created.taskId)).state !== 'draft') return `${created.slug} has started already.`
           const planId = yield* plans.propose({
@@ -563,6 +591,41 @@ export class Coordinator extends Context.Service<
           if (!started.leading)
             return `Started ${started.slug} to review ${started.author}'s ${started.name}, "${started.title}", but its lead couldn't start: its thread says why, and the person starts another there. Tell them.`
           return `Started ${started.slug}: its lead reviews ${started.author}'s ${started.name}, "${started.title}", from a read-only copy of its code, running nothing of it. ${reach} ${posting} The person sees it as a card; say in a sentence that it's under way.`
+        })
+
+      /**
+       * Gives a task another title, as the person can: for one whose work
+       * became a change (a plain task whose lead changed the repository), when
+       * its title no longer says what it does. Its slug and branch stay, and
+       * what the person asked stays in its thread.
+       */
+      const renameTask = (access: ToolAccess, input: unknown) =>
+        Effect.gen(function* () {
+          const { task_id: reference, title } = yield* read(Retitled, input)
+          const task = yield* taskOf(access, reference)
+          yield* (yield* Tasks)
+            .rename({
+              envelope: yield* envelope('task.rename', { taskId: task.id, title: title.trim() }, undefined, instance.coordinatorId),
+              taskId: task.id,
+              title,
+            })
+            .pipe(
+              Effect.catch((error) =>
+                error instanceof TaskRefused
+                  ? Effect.fail(
+                      new ToolRefused({
+                        message:
+                          error.why === 'title_too_long'
+                            ? `That title is ${title.trim().length} characters. Keep it to ${TITLE_LENGTH}: what the task does, in a few words.`
+                            : 'Give it a title: what the task does, in a few words.',
+                      }),
+                    )
+                  : Effect.fail(error),
+              ),
+            )
+          return title.trim() === task.title
+            ? `${task.slug} is called that already.`
+            : `Renamed ${task.slug} to “${title.trim()}”. Its slug and branch stay as they were; the person sees the new title on its card.`
         })
 
       /** The models the coordinator can give work to in the project, as it reads them. */
@@ -925,7 +988,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'start_task',
-          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it, and an effort it lists where it matters; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. A change worth reviewing, or that should end in a pull request, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
+          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it, and an effort it lists where it matters; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. It starts with no branch; if its lead changes the repository, Althar puts that on a branch of its own and the task is a change from then. A change worth reviewing, or that should end in a pull request, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
           {
             type: 'object',
             properties: {
@@ -962,6 +1025,19 @@ export class Coordinator extends Context.Service<
             required: ['pull_request', 'lead'],
           },
           review,
+        ),
+        tool(
+          'rename_task',
+          `Gives a task another title, at most ${TITLE_LENGTH} characters, as the person can. For a task whose work became a change, such as a plain task whose lead started changing the repository, when its title no longer says what it does: say what it does now, in a few words. What the person asked stays in its thread, and its slug and branch stay as they are.`,
+          {
+            type: 'object',
+            properties: {
+              task_id: { type: 'string', description: "The task's slug, as list_tasks shows it, or its id." },
+              title: { type: 'string', maxLength: TITLE_LENGTH },
+            },
+            required: ['task_id', 'title'],
+          },
+          renameTask,
         ),
         tool(
           'message_lead',

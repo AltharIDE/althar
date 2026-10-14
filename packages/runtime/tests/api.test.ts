@@ -1361,33 +1361,40 @@ describe('the coordinator, through the API', () => {
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
         const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
-        const start = (title: string, description: string) =>
-          client.StartTask({
-            commandId: commandId(),
-            projectId: project.id,
-            title,
-            description,
-            steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
-          })
-        const question = yield* start('Which partners still call v1?', '[lead:finish]')
-        const change = yield* start('Retry', '[lead:finish] [lead:edit]')
-        const both = yield* eventually(client.GetBoard({ projectId: project.id }), (board) =>
-          [question.id, change.id].every((id) => board.tasks.some((one) => one.taskId === id && one.phase === 'ready')),
+        // A plain task is one the coordinator starts with no plan; one the person starts is on a branch, a change, though it makes nothing.
+        const coordinator = yield* client.GetCoordinator({ projectId: project.id })
+        yield* client.Send({
+          commandId: commandId(),
+          threadId: coordinator.threadId,
+          body: 'Which partners still call v1? [coordinator:start] [lead:finish]',
+          disposition: 'after_current',
+        })
+        const change = yield* client.StartTask({
+          commandId: commandId(),
+          projectId: project.id,
+          title: 'Retry',
+          description: '[lead:finish]',
+          steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        })
+        const both = yield* eventually(
+          client.GetBoard({ projectId: project.id }),
+          (board) => board.tasks.length === 2 && board.tasks.every((one) => one.phase === 'ready'),
         )
-        assert.deepStrictEqual(
+        assert.sameDeepMembers(
           both.tasks.map((one) => [one.title, one.kind]),
           [
-            ['Which partners still call v1?', 'plain'],
+            ['Which partners still call v1', 'plain'],
             ['Retry', 'change'],
           ],
         )
-        yield* client.SeeTask({ commandId: commandId(), taskId: question.id })
+        const question = both.tasks.find((one) => one.kind === 'plain')
+        yield* client.SeeTask({ commandId: commandId(), taskId: question?.taskId ?? '' })
         yield* client.SeeTask({ commandId: commandId(), taskId: change.id })
         const board = yield* client.GetBoard({ projectId: project.id })
-        assert.deepStrictEqual(
+        assert.sameDeepMembers(
           board.tasks.map((one) => [one.title, one.phase]),
           [
-            ['Which partners still call v1?', 'settled'],
+            ['Which partners still call v1', 'settled'],
             ['Retry', 'ready'],
           ],
         )

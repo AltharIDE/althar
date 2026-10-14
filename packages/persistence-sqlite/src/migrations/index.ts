@@ -32,6 +32,7 @@ import { statements as agentsAtOnce } from './0027_agents_at_once'
 import { statements as taskSeen } from './0028_task_seen'
 import { statements as reviewDrafts } from './0029_review_drafts'
 import { statements as taskSearch } from './0030_task_search'
+import { statements as branchOnFirstWrite } from './0031_branch_on_first_write'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -81,6 +82,7 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0028_task_seen', statements: taskSeen },
   { key: '0029_review_drafts', statements: reviewDrafts },
   { key: '0030_task_search', statements: taskSearch },
+  { key: '0031_branch_on_first_write', statements: branchOnFirstWrite },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>
