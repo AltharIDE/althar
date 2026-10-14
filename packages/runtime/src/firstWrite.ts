@@ -55,7 +55,7 @@ interface Unbranched {
   readonly state: string
 }
 
-/** The task's worktrees here that have no branch yet, the project's first first. */
+/** The task's own worktrees here that have no branch yet, the project's first first: never a review's copy, which only reads. */
 const unbranchedOf = (taskId: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
@@ -64,7 +64,7 @@ const unbranchedOf = (taskId: string) =>
       SELECT w.id, w.project_id, t.id AS thread_id, w.path, w.branch, w.base_commit, w.state
       FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
       JOIN threads t ON t.task_id = w.task_id AND t.kind = 'task'
-      WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.branched_at IS NULL
+      WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.branched_at IS NULL
       ORDER BY b.created_at, b.rowid`
   })
 

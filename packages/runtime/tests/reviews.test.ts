@@ -622,6 +622,8 @@ describe('reviewing someone else’s pull request', () => {
       const { projectId } = yield* project(at.working)
       const coordinator = yield* Coordinator
       const threadId = yield* coordinator.thread(projectId)
+      const branches = () => execFileSync('git', ['for-each-ref', '--format=%(refname)', 'refs/heads'], { cwd: at.working }).toString()
+      const before = branches()
       const body = `Review ${linkTo(pull.number)} please [coordinator:review] [lead:review]`
       yield* coordinator.say({ envelope: yield* Runtime.envelope('thread.send', { body }), threadId, body, disposition: 'after_current' })
       const task = yield* until(
@@ -640,6 +642,20 @@ describe('reviewing someone else’s pull request', () => {
           ['send.ts', 1, 'minor'],
         ],
       )
+      // Its lead's turn over, its copy is still only read: no branch is made of it, in the copy or the person's repository.
+      const sessions = yield* Sessions
+      yield* until(
+        Effect.map(sessions.running(task[0]?.threadId ?? ''), (running) =>
+          Option.exists(running, (session) => !session.turnRunning) ? [true] : [],
+        ),
+        (done) => done.length > 0,
+        Duration.seconds(20),
+      )
+      // What Althar does as a turn ends, done.
+      yield* Effect.sleep('1 second')
+      const sql = yield* SqlClient.SqlClient
+      assert.deepStrictEqual(yield* sql`SELECT branched_at FROM workspaces WHERE task_id = ${task[0]?.id ?? ''}`, [{ branchedAt: null }])
+      assert.strictEqual(branches(), before)
     }).pipe(Effect.provide(withQueries(github)))
   })
 

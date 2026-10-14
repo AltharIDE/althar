@@ -282,6 +282,9 @@ describe('seeing a task', () => {
       // Told it finished while it hadn't, nothing settles: what is written is read again.
       yield* tasks.see({ taskId: working.taskId, finished: true })
       assert.strictEqual((yield* row(working.taskId)).state, 'open')
+      // Nor a change, its run passed and its branch made, told it is a plain task that finished, as a screen read before it was.
+      yield* tasks.see({ taskId: change.taskId, finished: true })
+      assert.strictEqual((yield* row(change.taskId)).state, 'open')
 
       // The plain task that finished is done once seen, recorded as any task done is.
       yield* see(question.taskId)

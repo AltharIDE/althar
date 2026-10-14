@@ -287,7 +287,7 @@ export class Coordinator extends Context.Service<
           }>`
             SELECT k.id, k.slug, k.title, k.state,
               (SELECT r.state FROM runs r WHERE r.task_id = k.id ORDER BY r.created_at DESC LIMIT 1) AS run,
-              EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.branched_at IS NULL) AS unbranched,
+              EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.access = 'write' AND w.branched_at IS NULL) AS unbranched,
               (SELECT s.agent_id FROM provider_sessions s JOIN threads t ON t.id = s.thread_id
                 WHERE t.task_id = k.id AND t.kind = 'task' ORDER BY s.started_at DESC LIMIT 1) AS lead
             FROM tasks k WHERE k.project_id = ${access.projectId} ORDER BY k.created_at DESC LIMIT 50`

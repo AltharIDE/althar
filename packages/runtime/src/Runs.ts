@@ -1114,7 +1114,7 @@ export class Runs extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ taskId: string }>`
             SELECT t.task_id FROM threads t WHERE t.id = ${threadId} AND t.kind = 'task'
-              AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = t.task_id AND w.branched_at IS NULL)`
+              AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = t.task_id AND w.access = 'write' AND w.branched_at IS NULL)`
           if (thread !== undefined) yield* changes.exclusive(thread.taskId, branchOnFirstWrite(thread.taskId))
         }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look for a plain task’s first change', cause)))
 
