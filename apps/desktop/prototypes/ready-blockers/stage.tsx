@@ -1,10 +1,12 @@
 import { AcceptCard, BoardCard } from '@althar/ui'
 import type { ReactNode } from 'react'
-import { useMemo } from 'react'
+import { useLayoutEffect, useMemo } from 'react'
 
-import { makeQueryClient } from '../../src/renderer/data/reads'
+import type { HomeSnapshot } from '@althar/contracts'
+
 import { follow } from '../../src/renderer/data/feed'
-import { ServicesProvider } from '../../src/renderer/data/services'
+import { keys, makeQueryClient } from '../../src/renderer/data/reads'
+import { type Services, ServicesProvider } from '../../src/renderer/data/services'
 import { BoardView, readyCardOf, runningCardOf } from '../../src/renderer/features/board/BoardView'
 import { lanesOf } from '../../src/renderer/features/board/lanes'
 import { HomeView } from '../../src/renderer/features/home/HomeView'
@@ -15,12 +17,16 @@ import { agents, fakeClient, fakeHost } from '../../tests/fixtures'
 import { type Direction, DirectionContext } from './directions'
 import { boardOf, type Case, CASES, homeOf, NOW, taskOf } from './scenario'
 
-/* The page's frames: each a shot, captioned. What is inside each is the app's own view or card, fed the scenario. */
+/*
+ * What the pages show: the app's own board, home and cards, fed the
+ * scenario, each under its direction. They fill what they're put in, so the
+ * live page can be the window; the comparison captions them as shots.
+ */
 
 const noop = () => undefined
 const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
 
-/** A shot: its label (T1, A2), what it shows, and the app inside. */
+/** A shot on the comparison page: its label, what it shows, and the app inside. */
 export function Shot({
   label,
   title,
@@ -96,15 +102,34 @@ function HomeNow() {
   return <HomeView model={useHome()} start={useStart()} onProject={noop} onTalk={noop} onTask={noop} />
 }
 
-/** The app's home, its runtime the desktop tests' fake client, saying the scenario. */
+/**
+ * The home's runtime, one for the page: the desktop tests' fake client,
+ * which says whatever the home was last given. Switching direction gives it
+ * the direction's home and puts that in its cache, so the home changes in
+ * place, read already, rather than being read again and arriving again.
+ */
+let runtime: { readonly services: Services; given: HomeSnapshot } | undefined
+const runtimeFor = (first: HomeSnapshot) => {
+  if (runtime === undefined) {
+    const { client } = fakeClient({ getHome: async () => runtime?.given ?? first })
+    const cache = makeQueryClient()
+    runtime = { services: { client, host: fakeHost(), cache, feed: follow(client, cache) }, given: first }
+  }
+  return runtime
+}
+
+/** The app's home, saying the scenario as the direction has it: today's runtime, or the directions' (a ready task stays ready while its lead resolves). */
 export function Home({ direction }: { direction: Direction }) {
   const today = direction.key === 'today'
-  const services = useMemo(() => {
-    const snapshot = homeOf(today, direction.sorted === true)
-    const { client } = fakeClient({ getHome: async () => snapshot })
-    const cache = makeQueryClient()
-    return { client, host: fakeHost(), cache, feed: follow(client, cache) }
-  }, [today, direction.sorted])
+  const sorted = direction.sorted === true
+  const given = useMemo(() => homeOf(today, sorted), [today, sorted])
+  const { services } = runtimeFor(given)
+  useLayoutEffect(() => {
+    const now = runtimeFor(given)
+    if (now.given === given) return
+    now.given = given
+    now.services.cache.setQueryData(keys.home, given)
+  }, [given])
   return (
     <DirectionContext value={direction}>
       <div className="home">
@@ -124,7 +149,6 @@ export function Bug() {
   const one = CASES.find((each) => each.key === 'running')
   const change = one?.task.change
   if (one === undefined || change == null) return null
-  const brand = productBrand('github')
   return (
     <div className="states two">
       <div className="cell">
@@ -134,7 +158,7 @@ export function Bug() {
             task={one.task.slug}
             title={one.task.title}
             prs={[{ repo: 'althar', number: change.number, add: change.additions ?? 0, del: change.deletions ?? 0 }]}
-            host={{ name: 'GitHub', ...(brand === undefined ? {} : { brand }) }}
+            host={{ name: 'GitHub', brand: productBrand('github') }}
             checks={change.checks?.passed ?? 0}
             onOpen={noop}
             text={{ task: () => '' }}

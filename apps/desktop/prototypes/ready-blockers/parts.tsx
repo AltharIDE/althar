@@ -62,10 +62,11 @@ export function StatusLine({ standing }: { standing: Standing }) {
   return (
     <span className={s.line}>
       <Tell said={said(first)} words={said(first).phrase} />
+      {/* The rest without a glyph, each still in its tone: a failure after commits to push is still red. */}
       {rest.map((one) => (
         <span key={one.kind} className={s.line}>
           <span className={s.sep}>·</span>
-          <span className={s.rest}>{said(one).phrase}</span>
+          <span className={join(s.rest, s[said(one).tone])}>{said(one).phrase}</span>
         </span>
       ))}
     </span>

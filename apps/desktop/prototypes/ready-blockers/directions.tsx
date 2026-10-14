@@ -20,6 +20,10 @@ export interface Direction {
   /** The shots' letter: T for today. */
   readonly letter: string
   readonly name: string
+  /** Its name on the switcher: a word or two. */
+  readonly short: string
+  /** What it does, in a line, beside the switcher. */
+  readonly tagline: string
   readonly gist: string
   /** How it handles checks that are still running. */
   readonly running: string
@@ -59,6 +63,8 @@ const today: Direction = {
   key: 'today',
   letter: 'T',
   name: 'Today',
+  short: 'Today',
+  tagline: 'Main as it is: Ready to accept, and one fact about its checks.',
   gist: 'Main as it is: the card says Ready to accept, and one fact about its checks. A conflict, unpushed commits, a draft or a review asking for changes don’t reach the card; a conflict the lead resolves moves the task back to Running.',
   running: 'Says “2 of 5 checks passed”, in grey, like any other fact.',
   needs: '—',
@@ -68,6 +74,8 @@ const a: Direction = {
   key: 'a',
   letter: 'A',
   name: 'A · A status line and the next thing to do',
+  short: 'Status line',
+  tagline: 'One line of what stands, and the one next thing to do at its end; on the home, that’s the button.',
   gist: 'The foot of the card says, in one line, everything that stands, the most pressing first in its colour. At its end, where the old accept card said Review, the one next thing to do: Push 2 commits, Ask the lead to fix it, Accept and merge. On the home that becomes the line’s button.',
   running:
     'Stays in place and stays quiet: a cobalt dot and “Checks running, 2 of 5 passed”. Its next thing is DEV-91’s Merge when checks pass.',
@@ -93,6 +101,8 @@ const b: Direction = {
   key: 'b',
   letter: 'B',
   name: 'B · Chips, green when clear',
+  short: 'Chips',
+  tagline: 'Checks, Main and Push as chips on every card, green when clear.',
   gist: 'Three small chips on every ready card, always in the same place: Checks, Main, Push. Green when clear, cobalt while running, warm when it needs a hand, red when it failed. Draft, a review asking for changes and behind main add a chip only when they stand. Each chip says the whole of it on hover.',
   running: 'The checks chip turns cobalt with a dot and counts: 2/5. The card stays where it is.',
   needs: 'The same facts as A. Nothing new to press.',
@@ -120,6 +130,8 @@ const c: Direction = {
   key: 'c',
   letter: 'C',
   name: 'C · Needs you, sorted by readiness',
+  short: 'Sorted',
+  tagline: 'Needs you in groups: Good to merge, Blocked, then Waiting, faded, at the bottom.',
   gist: 'Ready cards gather in three groups under Needs you: Good to merge first, then Blocked (something only you can clear), then Waiting (checks running, or the lead resolving a conflict), faded and smaller, at the bottom. Each card says its one reason. The home sorts its ready lines the same way, its kind word the group.',
   running:
     'Waits in a group at the bottom, faded, without its PR chip, until the checks end; then it moves up to Good to merge or Blocked.',
@@ -158,6 +170,8 @@ const d: Direction = {
   key: 'd',
   letter: 'D',
   name: 'D · A list of what blocks, only when something does',
+  short: 'Blocker list',
+  tagline: 'One green “Good to merge”, or a short list of what blocks, a row each.',
   gist: 'With nothing in the way the card says one green line: Good to merge. When something blocks, a short list takes its place, a row each, in plain sentences: “2 commits not on the PR yet”, “harness / verify failed (4 of 5 passed)”. The home’s line says “Good to merge”, or what stands before merging.',
   running: 'Checks running is a row of the list like any other, cobalt, with how many are left.',
   needs: 'The same facts as A.',
@@ -209,6 +223,8 @@ const e: Direction = {
   key: 'e',
   letter: 'E',
   name: 'E · The card’s word says it, in whose colour',
+  short: 'Card’s word',
+  tagline: 'The card’s top word names the one thing in the way: violet when yours, cobalt when CI or the lead is on it.',
   gist: 'The word at the top of the card, which already says where a task stands, names the one thing in the way, in the colour of whose move it is: violet when it’s yours (Merge conflict, 3 commits to push, Check failed, Good to merge), cobalt with a dot when CI or the lead is on it (Checks running, Resolving a conflict). The foot says the detail, and the rest of what stands. The home’s kind word is the same word.',
   running: 'The card turns cobalt, like a running card: not yours yet. It stays in Needs you so it doesn’t jump lanes.',
   needs: 'The same facts as A. No new parts: the card’s word and status already exist.',
