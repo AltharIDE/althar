@@ -156,9 +156,7 @@ describe('finding an agent’s command', () => {
       () => ({ command: '/home/me/.var/app/dev.althar.app/data/althar/agents/claude-code/current/claude', whose: 'althar' }),
       'dev.althar.app',
     )
-    expect(downloaded.signIn.login).toBe(
-      '/home/me/.var/app/dev.althar.app/data/althar/agents/claude-code/current/claude auth login',
-    )
+    expect(downloaded.signIn.login).toBe('/home/me/.var/app/dev.althar.app/data/althar/agents/claude-code/current/claude auth login')
   })
 
   it('finds the Claude Code the Agent SDK ships for this computer, and none for one it has no build for', () => {
