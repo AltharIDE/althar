@@ -186,6 +186,26 @@ describe('reading commands', () => {
     assert.deepStrictEqual(parseCommandLine("echo 'unclosed").commands, [['echo', 'unclosed']])
   })
 
+  it('reads a comment and a C-quoted word as the shell does, so neither hides a command after it', () => {
+    // A comment runs nothing to its line's end; the next line runs, whatever quote the comment opened.
+    assert.deepStrictEqual(parseCommandLine("echo x # it's\ngit push --force origin main\n'").commands, [
+      ['echo', 'x'],
+      ['git', 'push', '--force', 'origin', 'main'],
+      [''],
+    ])
+    assert.deepStrictEqual(parseCommandLine('git log --format=%H#x -1; echo a#b').commands, [
+      ['git', 'log', '--format=%H#x', '-1'],
+      ['echo', 'a#b'],
+    ])
+    // In `$'…'`, `\'` doesn't end the word: what follows it is a command of its own.
+    assert.deepStrictEqual(parseCommandLine("echo $'it\\'s'; git push --force origin main").commands, [
+      ['echo', "$it\\'s"],
+      ['git', 'push', '--force', 'origin', 'main'],
+    ])
+    for (const line of ["echo x # '\ngit push --force origin main\n'", "echo $'\\''; git push --force origin main"])
+      assert.deepStrictEqual(run(line), { verdict: 'ask', reason: 'A force push always asks.', held: true }, line)
+  })
+
   it('reads the command from the raw input when the agent gives one', () => {
     assert.strictEqual(commandOf(request({ title: 'Run a command', rawInput: { command: 'git push --force' } })), 'git push --force')
     assert.strictEqual(
@@ -576,6 +596,79 @@ describe('a role that only reads', () => {
     it('reads no repository by --git-dir or --work-tree, whose config could name a program for git to run', () => {
       refused(['git --git-dir=fixtures/repo.git log', 'git --git-dir fixtures/repo.git log', 'git --work-tree=. --git-dir=x status'])
       allowed(['git -C src log -1'])
+    })
+
+    it('runs no shell command that sets a variable, a function or an alias, or how the shell finds a command', () => {
+      // Each would have a plain `cat` after it run the repository's own.
+      refused(['printf -v PATH .; cat README.md', 'printf -vPATH .; cat x', "printf $'-v' PATH .; cat x"])
+      refused(
+        [
+          'read PATH < paths.txt; cat x',
+          'declare PATH=.; cat x',
+          'typeset PATH=.',
+          'local PATH=.',
+          'export PATH=.',
+          'readonly X',
+          'set -a',
+          'unset PATH',
+          'alias cat=./cat',
+          'hash -p ./cat cat',
+          'enable -f ./x.so x',
+          'builtin printf -v PATH .',
+          'trap ./run.sh EXIT',
+          'shopt -s expand_aliases',
+          'setopt aliases',
+          'mapfile -t PATH < x',
+          'readarray PATH < x',
+          'let PATH=1',
+          'getopts a PATH',
+          'function cat { ./run.sh; }',
+          'command export PATH=.',
+          'time unset PATH',
+        ],
+        'how the shell finds a command',
+      )
+      refused(['exec cat x', 'exec -a x cat y'], '`exec`')
+      // A function named for a program that reads, defined in any of a shell's ways; a subshell; zsh's qualifier on a pattern.
+      refused(
+        ['cat () ( ./run.sh ); cat x', 'cat ()(./run.sh); cat x', 'cat() { ./run.sh; }', "ls *(e:'./run.sh':)", 'ls =(./run.sh)'],
+        'Parentheses',
+      )
+      // An expansion that assigns or works out arithmetic, in bash's ways or zsh's, quoted or not.
+      refused(
+        [
+          'echo ${BASH_CMDS[cat]:=./cat}; cat x',
+          'echo "${PATH:=.}"',
+          'echo ${X::=y}',
+          'echo $[PATH=1]; cat x',
+          'echo ${a[PATH=1]}',
+          'echo $path[PATH=1]; cat x',
+          'echo "${(e)X}"',
+          'echo ${X:PATH=1}',
+        ],
+        'set a variable or work out arithmetic',
+      )
+      // zsh works out what `printf` takes as a number, and what `test -v` and `-t` take, as arithmetic, which can run a command.
+      refused(["printf %d 'a[$(./run.sh)]'", "printf '%*s' 'PATH=1' x", "printf '%(%s)T' 1"], 'only print text')
+      refused(["test -v 'a[$(./run.sh)]'", "[ -t 'a[$(./run.sh)]' ]", 'test -R x', '[ -n x -a -v y ]'], 'works out its operand')
+      // What only prints, tests a file or names a variable plainly stays a read; parentheses quoted or escaped are text.
+      allowed([
+        "printf '%s\\n' hi",
+        "printf '%-10s|%5.2s|%%|%b|%q|%c\\n' a b c d e",
+        "printf -- '-v %s' x",
+        'printf -',
+        'test -f package.json && cat package.json',
+        '[ -d src ]',
+        'echo $HOME ${HOME}',
+        "rg 'retry(' src",
+        'rg "a(b|c)" src',
+        'find . \\( -name a -o -name b \\)',
+        'cat README.md # the start',
+        'command -v rg',
+      ])
+      // A comment opens no quote: the line after it is read as a command of its own.
+      refused(["echo x # '\n./run.sh\n'"], 'runs what that folder holds')
+      refused(["echo $'\\''; ( ./run.sh )"], 'Parentheses')
     })
   })
 

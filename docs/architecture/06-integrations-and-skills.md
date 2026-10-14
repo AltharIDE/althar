@@ -526,10 +526,18 @@ asks; its thread opens with what they said and the pull request under it.
   the repository is the pull request's to write, a read is decided from what
   runs, never from a name it could give something else: a program named by a
   path outside the system's folders (`./cat`), a variable set for a command
-  (`PATH=. cat`), `env`, `sudo`, a shell started with more than its script
-  (`bash -i`, `--rcfile`), a process substitution, a file name the shell
-  would expand into a flag (`rg x *`), and `git --git-dir` are refused, and
-  no interpreter or package script is ever a read. Nor does it load anything
+  (`PATH=. cat`), `env`, `sudo`, `exec`, a shell started with more than its
+  script (`bash -i`, `--rcfile`), a process substitution, a file name the
+  shell would expand into a flag (`rg x *`), and `git --git-dir` are refused,
+  and no interpreter or package script is ever a read. Nor is anything that
+  would change how a later command is found: a shell command that sets a
+  variable, a function or an alias (`printf -v PATH .`, `read`, `export`,
+  `hash`, `alias`, `set`), parentheses (a subshell, a function named `cat`,
+  zsh's qualifier on a pattern), an expansion that assigns or works out
+  arithmetic (`${PATH:=.}`, `$[…]`, zsh's `$a[…]`), and `printf` or `test`
+  with what zsh works out as arithmetic (`%d`, `-v`, `-t`). Comments and
+  `$'…'` are read as the shell reads them, so neither hides a command after
+  it. Nor does it load anything
   of the repository's own: Claude Code starts with no settings file, the
   repository's or the person's (whose allow rules would approve its
   commands), and its hooks off; OpenCode with no project config, plugins or
