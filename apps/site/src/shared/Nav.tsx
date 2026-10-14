@@ -4,6 +4,7 @@ import { type CSSProperties, useEffect, useId, useRef, useState } from 'react'
 import { LINKS } from '../content/facts'
 import { useHydrated, useStill } from '../lib/browser'
 import { cx } from '../lib/cx'
+import { useDownload } from '../lib/download'
 import { useHere } from '../lib/pathname'
 import { glassDrop, type GlassDrop } from './glassDrop'
 import { useLightUnder } from './lightUnder'
@@ -67,6 +68,8 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
   // The hero's opening starts once the page's script runs; so does the nav's entrance, timed to follow it. Held still, it is simply there.
   const opened = useHydrated()
   const held = useStill()
+  // The reader's own installer once known, the releases page until then. It reads Download either way: the capsule keeps its width.
+  const download = useDownload()
 
   useEffect(() => {
     if (!row.current || !drop.current) return
@@ -162,7 +165,7 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
             <a className={s.github} href={LINKS.repo} data-drop aria-label="GitHub" style={nth(1 + PAGES.length)}>
               <BrandMark brand={Brand.GitHub} size={16} />
             </a>
-            <a className={s.download} href={LINKS.releases} style={nth(2 + PAGES.length)}>
+            <a className={s.download} href={download.href} title={download.os ? download.label : undefined} style={nth(2 + PAGES.length)}>
               <i aria-hidden="true" />
               Download
             </a>
