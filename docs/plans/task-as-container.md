@@ -15,17 +15,19 @@ locally, in `packages/ui/src/prototypes/task-as-container/`, not committed).
   no shelf. The coordinator starts each task configured; it can reshape
   itself later; everything is on the board.
 - **A task's kind is read from what it has, never stored.**
-  - **Change:** it has a branch of its own (every planned task, from its
-    start, whatever its plan's end), a pull request or commits; a plan that
-    ends in a pull request (`end` is `draft`, `ready` or `none`) says so
-    first. A docs pull request is a change.
+  - **Plain:** a quick task, one the coordinator starts at once with
+    `start_task` (a question, a prototype, a release from this Mac, a walk
+    through the code), whose plan stays on this Mac (`here`), ends in
+    nothing, and has no pull request, whatever its lead wrote.
   - **Review:** it reviews someone else's pull request, and has no work of
     its own.
-  - **Plain:** everything else, a task with no branch yet: a question, a
-    prototype, a release from this Mac, a walk through the code.
-- **A task only moves toward Change.** A plain task that writes becomes a
-  change; a review the person takes over becomes a change that builds on
-  it. One task, one thread, one card: nothing restarts.
+  - **Change:** everything else: every planned task, whatever its plan's
+    end; a quick task the person had made a change; any task with a pull
+    request. A docs pull request is a change.
+- **A task only moves toward Change, when the person says so.** A quick
+  task's lead makes it a change when the person asks; a review the person
+  takes over becomes a change that builds on it. One task, one thread, one
+  card: nothing restarts.
 - **A card has nothing to press.** The whole card opens its task, where a
   permission is answered and the lead is told what's next.
 
@@ -68,40 +70,64 @@ Then, at most, one card in the card and one fact under it:
   Reviews of outside pull requests always wait for Post.
 - Posted, the card folds to a line with the review's link; the task settles.
 
-## Plain tasks: no branch first, a branch on first write
+## Plain tasks: no branch first, a branch on first write, a change when the person asks
 
 What was built (14 October 2026), refined with the person from what was
 planned here:
 
 - A task the coordinator starts with `start_task` (no plan: a question, a
-  quick look, a prototype, a release run from this Mac) is plain. It starts
-  in a worktree of its own with **no branch**, detached at the commit its
-  default branch is at, its branch's name planned as any task's
-  (`workspaces.branch`) and `workspaces.branched_at` null (migration 0031).
-  Planned tasks (`propose_plan`) are unchanged: on a branch from the start.
+  quick look, a prototype, a release run from this Mac) is a quick task, and
+  plain. Its plan says it stays here (`PlanParameters.here`) and ends in
+  nothing. It starts in a worktree of its own with **no branch**, detached at
+  the commit its default branch is at, its branch's name planned as any
+  task's (`workspaces.branch`) and `workspaces.branched_at` null (migration
+  0031). Planned tasks (`propose_plan`) are unchanged: on a branch from the
+  start.
 - Its setup (ADR-023) still runs, so the project's tools work in its lead's
   sandbox.
 - It has a scratch folder, `.althar/scratch/`, whose own `.gitignore`
   ignores everything in it, so git sees nothing there and no tracked file or
-  repository setting changes. Its lead's brief says: throwaway files
-  (prototypes, notes, screenshots) go there; anything it changes in the
-  repository itself makes the task a change on a branch of its own.
-- **First write.** Whenever its lead's turn ends, and when it calls
-  `finish_step`, a plain task with new commits or changes not committed that
-  aren't evidence or scratch gets its branch right there (`git switch -c`,
-  carrying both), under the task's lock, so it never runs beside publishing
-  it. Althar records `workspace.branched` (`from: null`), says in the thread
-  "This task changes files now, on its branch althar/…", reads its card and
-  its search row again, and tells the coordinator in its news, which retitles
-  it with `rename_task` where its title no longer says what it does, keeping
-  what the person asked in the thread. The lead keeps its session and folder.
-- A task's kind follows its branch: a task with one is a change (every
-  planned task, from its start, whatever its plan's end); one without is
-  plain. A plain task that changed nothing is never asked what it built.
+  repository setting changes. Its lead's brief says: this task is for trying
+  something out, and nothing of it leaves this Mac; throwaway files
+  (prototypes, notes, screenshots) go in the scratch folder; writing in the
+  repository is fine and stays on a local branch; and if the person asks to
+  make it a real change, call `make_it_a_change`.
+- **First write keeps the work safe, and nothing more.** Whenever its lead's
+  turn ends, and when it calls `finish_step`, a quick task with new commits
+  or changes not committed that aren't evidence or scratch gets its branch
+  right there (`git switch -c`, carrying both), under the task's lock, so it
+  never runs beside publishing it, and nothing is lost on a detached head.
+  Althar records `workspace.branched` (`from: null`), says in the thread
+  "This task's work is on a branch of its own now, althar/…, which stays on
+  this Mac", and reads its card and its search row again. The task stays
+  plain: Finished when its lead is done, Done once seen, its branch shown on
+  its card and its row. Nothing is pushed and no pull request opens, with
+  its host connected or not, and a round of it offers none. The lead keeps
+  its session and folder.
+- **Made a change when the person asks.** As the person tries what the
+  lead made, they may say: I really like this, can we make it a real thing?
+  The lead calls `make_it_a_change` with a title for what the change does, a
+  reviewer (a model, as `propose_plan` names one; none only where the person
+  said so) and a pull request, a draft or ready for review. Its branch is
+  made then where it has none; in one transaction the task is renamed
+  (`Tasks.rename`, so its card and its search row follow), its plan, the
+  plan's run and the run under way take the review and the ending and drop
+  `here`, its thread says "This task is a change now: reviewed by …, it
+  opens a draft pull request when it's done", and the coordinator's news
+  says what it became. A round under way publishes when it is done
+  (`PlanParameters.publishes`), with all the work since the task started
+  counted as the round's, so all of it is reviewed; where the last run had
+  ended and no round is under way, one opens with the new ending. The lead's
+  next `finish_step` goes through the review, then the pull request opens.
+  The tool is offered only on a quick task not made one yet, and refused,
+  with why, on a planned task, a review and one made a change already.
+- A quick task started before its plan said `here` is read as a change, as
+  it was once it had a branch.
 - With no branch there is nothing to ship: the board shows no branch or
   size, and publishing, merging here and pushing refuse or aren't offered.
 - "Fix it" on a finished plain task continues the same task: a follow-up
-  round (ADR-034) in the same folder, which branches it if it writes.
+  round (ADR-034) in the same folder, which branches it if it writes, and
+  stays plain.
 
 What changed from the plan, and why:
 
@@ -117,6 +143,17 @@ What changed from the plan, and why:
   that runs the project's tests or tools fails in its sandbox, which refuses
   the package manager's cache outside the worktree. Correctness wins over
   the install's cost.
+- **First write no longer makes a change** (the person's decision, 14
+  October). As first built, a quick task that wrote became a change on its
+  branch, the coordinator retitled it, and it published as the project's
+  changes do: a prototype opened a draft pull request once its host was
+  connected (PR #162), which nobody asked for. Whether a task ends in a pull
+  request is the person's intent, never a side effect of files being
+  written: in the person's words, prototyping, they tell the lead they like
+  it and ask to make it a real thing, and the lead renames the task, adds
+  the review step, and adds an output, a pull request. So the kind follows
+  the plan, not the branch, and the coordinator no longer hears of a first
+  write.
 
 ## Search
 
@@ -149,8 +186,9 @@ One branch, one pull request, built in this order, all of it by 14 October:
 
 ## After this
 
-- A plain task that becomes a change has no review step; give it one where
-  the project's plans have one.
+- The task's screen still offers a quick task with a branch the same ways
+  to ship as a change (open a pull request, merge here); the person asking
+  its lead is the way meant for it.
 - Widening a review (run its tests, read the web) and taking a review over as
   a change aren't built.
 - A bare `#123` in a project of several hosted repositories asks for the

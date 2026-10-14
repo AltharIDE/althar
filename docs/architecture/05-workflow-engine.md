@@ -281,19 +281,21 @@ round ends as any of the lead's steps does, with `finish_step`, its review
 where the plan has one (the person can skip it from the menu); with nothing
 new, when the lead finishes or its turn ends, it closes and the task is back
 where it was, a merged one done at the time it first settled. A round never
-publishes by itself: what it commits goes to the task's open pull request
-when the person pushes it, or, once the last merged or closed, into a **new
-pull request** the person opens from the task, on a new branch from the
-default branch as the host has it, its new commits cherry-picked onto it,
-never forced. Between turns a round takes no place among the agents at work
+publishes by itself (but for the one a quick task is made a change in,
+below): what it commits goes to the task's open pull request when the person
+pushes it, or, once the last merged or closed, into a **new pull request**
+the person opens from the task, on a new branch from the default branch as
+the host has it, its new commits cherry-picked onto it, never forced. A
+quick task's round offers none. Between turns a round takes no place among the agents at work
 ([ADR-032](../decisions/032-agents-at-once-on-this-machine.md)). Whenever an
 agent on a task is in a turn, starting, or waiting for a place, its card says
 Running, whatever the task was.
 
-### A plain task's first change
+### A quick task's first write, and making it a change
 
-A task the coordinator starts with `start_task` has no branch: its worktree
-is detached where it started
+A task the coordinator starts with `start_task` is a quick task: its plan
+stays on this Mac (`here`) and ends in nothing, and its worktree has no
+branch, detached where it started
 ([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)).
 Whenever its lead's turn ends, or its session goes, and when it calls
 `finish_step`, Althar looks at what it has: new commits, or changes not
@@ -302,13 +304,25 @@ With either, it makes the task's branch there (`git switch -c` in each of its
 worktrees, the first free of the planned name), so commits made with no
 branch and changes not committed are on it; under the task's lock, one at a
 time with publishing it. It records `workspace.branched` (`from: null`),
-says so in the thread, reads the task's card and search row again, and puts
-it in the coordinator's news. Nothing else changes: the step, the lead's
-session and its folder are the same, and the run goes on to its ending as
-the plan has it, which for a change publishes as the project's do. With no
-branch, the run ends without publishing anything, and its lead's report
-needs only its summary. A follow-up round on a plain task that is done works
-in the same folder, and branches it if it writes.
+says so in the thread, and reads the task's card and search row again.
+Nothing else changes: the step, the lead's session and its folder are the
+same, the task is still plain, and its run ends without publishing anything,
+nor offering to, as does a follow-up round of it. With no branch, its lead's
+report needs only its summary.
+
+It becomes a change only when the person asks its lead to make it one, and
+the lead calls `make_it_a_change`: a title, a reviewer, and a draft pull
+request or one ready for review. Its branch is made then where it has none.
+In one transaction the task is renamed, and its plan, the run of its plan
+(which a later round copies) and the run under way take the review and the
+ending and no longer stay here, with a patch to the run's graph; its thread
+and the coordinator's news say so. A round under way then publishes when it
+is done, as its plan's run would (`publishes`), its start moved back to where
+the task's worktrees started, so all the quick task's work is the round's,
+reviewed whole and in the pull request. Where the last run had ended and no
+round is under way, one opens on the lead's session with that ending. The
+lead's next `finish_step` goes through the review, and the run publishes as
+any change does.
 
 ## Dynamic graph evolution
 

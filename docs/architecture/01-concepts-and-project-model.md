@@ -278,8 +278,11 @@ everything in it for what its lead throws away. Its branch's name is planned
 as any task's, and Althar makes the branch where the lead first changes the
 repository, with that work on it, as its turn ends or as it reports
 (`workspaces.branched_at`;
-[ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)). The
-lead stays in the same folder and session; the task is a change from then.
+[ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)), so
+nothing is lost. The lead stays in the same folder and session, the branch
+stays on this Mac, and the task stays plain until the person asks its lead to
+make it a change (`make_it_a_change`), which makes its branch then where it
+has none.
 
 Working on a plain branch in the user's own checkout may come later, as an
 explicit per-project choice. It relaxes the rules above and must say so where
