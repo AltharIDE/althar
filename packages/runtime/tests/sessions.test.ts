@@ -4,7 +4,8 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect, Layer, Option, Stream } from 'effect'
+import { Cause, Duration, Effect, Exit, Fiber, Layer, Option, Stream } from 'effect'
+import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import { AlreadyDelivered, AttentionClosed, NoSession, NotFound, SessionFailed, SessionRunning } from '../src/errors'
@@ -725,6 +726,57 @@ describe('sessions', () => {
         assert.strictEqual((yield* ended(created.threadId, 1))[0]?.state, 'completed')
       }).pipe(Effect.provide(runtime())),
     )
+
+    it.effect('times out an ACP startup, records the failure and leaves the current lead running', () => {
+      let entered!: () => void
+      const waitingForStartup = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const sql = yield* SqlClient.SqlClient
+        const { task: created } = yield* task()
+        const first = yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
+        const attempt = yield* Effect.fork(
+          Effect.exit(sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode' })),
+        )
+        yield* Effect.promise(() => waitingForStartup)
+        const timeout = yield* Effect.fork(Effect.timeoutOption(Fiber.join(attempt), Duration.minutes(3)))
+        yield* TestClock.adjust(Duration.minutes(3))
+        const finished = yield* Fiber.join(timeout)
+        assert.isTrue(Option.isSome(finished), 'the startup attempt should finish before the test guard')
+        assert.isTrue(Exit.isFailure(finished.value))
+        const error = Cause.failureOption(finished.value.cause)
+        assert.isTrue(Option.isSome(error))
+        assert.instanceOf(error.value, SessionFailed)
+        assert.include(error.value.summary, 'Timed out waiting for Fake opencode to set up a session (2 minutes).')
+
+        assert.strictEqual((yield* session(first))?.state, 'active')
+        assert.strictEqual(Option.getOrUndefined(yield* sessions.running(created.threadId))?.sessionId, first)
+        const states = yield* sql<{ agentId: string; state: string }>`
+          SELECT agent_id, state FROM provider_sessions ORDER BY started_at, id`
+        assert.deepStrictEqual(states, [
+          { agentId: 'codex', state: 'active' },
+          { agentId: 'opencode', state: 'failed' },
+        ])
+        const notices = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'notice')
+        assert.strictEqual(notices.at(-1)?.content.title, "Fake opencode couldn't start.")
+        assert.include(String(notices.at(-1)?.content.description), 'Timed out waiting for Fake opencode to set up a session')
+      }).pipe(
+        Effect.provide(
+          runtime(':memory:', {}, {
+            each: {
+              opencode: {
+                beforeNewSession: () =>
+                  new Promise<void>(() => {
+                    entered()
+                  }),
+              },
+            },
+          }),
+        ),
+      )
+    }),
 
     it.live('starts one session when two starts race', () =>
       Effect.gen(function* () {
