@@ -27,7 +27,11 @@ See [ADR-004](../decisions/004-coordinator-is-an-agent-session.md).
 - starts something small at once, without a plan (a mini task): trying
   something out, checking how something behaves. One lead it picks, no
   review, nothing outside the project when it is done, and no countdown
-  (`start_task`);
+  (`start_task`). It is a plain task, in a worktree with no branch until its
+  lead changes the repository; then it is a change on its branch, which the
+  coordinator hears of at its next turn and retitles where its title no
+  longer says what it does (`rename_task`,
+  [ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md));
 - runs the project for the person, with no agent, when they ask, and keeps how
   it runs when Althar can't tell (ADR-023);
 - follows the work, and passes messages to a task's lead;
@@ -106,7 +110,8 @@ provisional.
 | `draft_issue` | Drafts an issue on a connected tracker, as a card the person files, changes or discards; nothing is filed on its word ([06](06-integrations-and-skills.md#drafting-issues)) | Command |
 | `list_models` | The models it can use now, by maker, with their scores and each one's efforts: the ids a step takes, the one it starts at by itself, and the person's default where they set one | Query |
 | `propose_plan` | Steps, a model per step and, where it matters, an effort that model offers, optional steps. An effort it doesn't offer is refused with the ones it does; left out, the step starts at the person's default for the model, or else the model's own | Command |
-| `start_task` | Drafts a mini task and starts it at once: one lead, at an effort as `propose_plan` takes one, no review, nothing outside the project when it is done | Command |
+| `start_task` | Drafts a mini task and starts it at once: one lead, at an effort as `propose_plan` takes one, no review, nothing outside the project when it is done; a plain task, with no branch until its lead changes the repository | Command |
+| `rename_task` | Gives a task another title, as the person can, for one whose work became a change; its slug and branch stay, and what the person asked stays in its thread | Command |
 | `run_project` | Runs the project with no agent: the default branch in a copy of its own, or a task's worktree (ADR-023) | Command |
 | `set_run_command` | Keeps how the project runs, for Althar to run it; leads have it too (ADR-023) | Command |
 | `order_tasks` | Orders a batch | Command |

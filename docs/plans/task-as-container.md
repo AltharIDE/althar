@@ -15,13 +15,14 @@ locally, in `packages/ui/src/prototypes/task-as-container/`, not committed).
   no shelf. The coordinator starts each task configured; it can reshape
   itself later; everything is on the board.
 - **A task's kind is read from what it has, never stored.**
-  - **Change:** its plan ends in a pull request (`end` is `draft`, `ready`
-    or `none`), or it has commits or a pull request. A docs pull request is
-    a change.
-  - **Review:** it reviews someone else's pull request, and has no branch
-    of its own.
-  - **Plain:** everything else: a question, a prototype, a release from
-    this Mac, a walk through the code.
+  - **Change:** it has a branch of its own (every planned task, from its
+    start, whatever its plan's end), a pull request or commits; a plan that
+    ends in a pull request (`end` is `draft`, `ready` or `none`) says so
+    first. A docs pull request is a change.
+  - **Review:** it reviews someone else's pull request, and has no work of
+    its own.
+  - **Plain:** everything else, a task with no branch yet: a question, a
+    prototype, a release from this Mac, a walk through the code.
 - **A task only moves toward Change.** A plain task that writes becomes a
   change; a review the person takes over becomes a change that builds on
   it. One task, one thread, one card: nothing restarts.
@@ -67,19 +68,55 @@ Then, at most, one card in the card and one fact under it:
   Reviews of outside pull requests always wait for Post.
 - Posted, the card folds to a line with the review's link; the task settles.
 
-## Plain tasks: a copy first, a worktree on first write
+## Plain tasks: no branch first, a branch on first write
 
-- A plain task starts on a read-only copy of its repositories (as the
-  coordinator's folder is), not a worktree: no branch, no install.
-- When its lead needs to change files it asks Althar (`need_worktree`).
-  Althar makes a worktree at the commit the copy was at, on a branch named as
-  any task's, and hands the lead to a fresh session in it, briefed from the
-  thread as the coordinator's handover is (ADR-031). The task is a change
-  from then: its next round has the project's usual steps and ending.
-- The coordinator retitles it at its next turn (a `rename_task` tool, and a
-  line in its news), keeping what the person asked in the thread.
+What was built (14 October 2026), refined with the person from what was
+planned here:
+
+- A task the coordinator starts with `start_task` (no plan: a question, a
+  quick look, a prototype, a release run from this Mac) is plain. It starts
+  in a worktree of its own with **no branch**, detached at the commit its
+  default branch is at, its branch's name planned as any task's
+  (`workspaces.branch`) and `workspaces.branched_at` null (migration 0031).
+  Planned tasks (`propose_plan`) are unchanged: on a branch from the start.
+- Its setup (ADR-023) still runs, so the project's tools work in its lead's
+  sandbox.
+- It has a scratch folder, `.althar/scratch/`, whose own `.gitignore`
+  ignores everything in it, so git sees nothing there and no tracked file or
+  repository setting changes. Its lead's brief says: throwaway files
+  (prototypes, notes, screenshots) go there; anything it changes in the
+  repository itself makes the task a change on a branch of its own.
+- **First write.** Whenever its lead's turn ends, and when it calls
+  `finish_step`, a plain task with new commits or changes not committed that
+  aren't evidence or scratch gets its branch right there (`git switch -c`,
+  carrying both), under the task's lock, so it never runs beside publishing
+  it. Althar records `workspace.branched` (`from: null`), says in the thread
+  "This task changes files now, on its branch althar/…", reads its card and
+  its search row again, and tells the coordinator in its news, which retitles
+  it with `rename_task` where its title no longer says what it does, keeping
+  what the person asked in the thread. The lead keeps its session and folder.
+- A task's kind follows its branch: a task with one is a change (every
+  planned task, from its start, whatever its plan's end); one without is
+  plain. A plain task that changed nothing is never asked what it built.
+- With no branch there is nothing to ship: the board shows no branch or
+  size, and publishing, merging here and pushing refuse or aren't offered.
 - "Fix it" on a finished plain task continues the same task: a follow-up
-  round (ADR-034) whose lead asks for a worktree.
+  round (ADR-034) in the same folder, which branches it if it writes.
+
+What changed from the plan, and why:
+
+- **The same folder, not a copy.** A copy and a worktree made at first write
+  would move the lead to a new folder mid-task: its paths, what it left
+  running, and the prototype it was serving would all be somewhere else.
+  A worktree with no branch keeps everything where it is.
+- **The same session, no `need_worktree` and no handover.** A fresh session
+  briefed from the thread loses the agent's own context exactly when the work
+  turns into a change. Reading what the lead did, rather than asking it to
+  ask, also catches a lead that writes without asking.
+- **Setup kept.** The plan said no install; without one, a lead's quick look
+  that runs the project's tests or tools fails in its sandbox, which refuses
+  the package manager's cache outside the worktree. Correctness wins over
+  the install's cost.
 
 ## Search
 
@@ -103,5 +140,5 @@ One branch, one pull request, built in this order:
 1. Cards with nothing to press, the kinds, Finished and Done.
 2. Reviews end to end.
 3. Search.
-4. Plain tasks on a copy, a worktree on first write.
+4. Plain tasks with no branch, a branch on first write.
 5. ADR-035, the glossary, and this plan settled.

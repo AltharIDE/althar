@@ -14,13 +14,17 @@
   call. People asked for temporary chats, a prototype kind, a document kind;
   prototyped, each turned out to be a task with less in it. DEV-96.
 - **Decision:** one primitive, the task; its kind is read from what it has.
-  - **Three kinds, never stored.** A **change** is a task whose plan ends in
-    a pull request (its ending is `draft`, `ready` or `none`), or that has
-    commits or a pull request: a docs pull request is a change. A **review**
-    reviews someone else's pull request and has no branch of its own. A
-    **plain** task is everything else. The runtime reads the kind for each
-    card from the task's plan, workspaces, pull requests and review; nothing
-    writes it, so nothing can disagree with it.
+  - **Three kinds, never stored.** A **change** is a task with a branch of
+    its own, a pull request or commits; a plan that ends in a pull request
+    (its ending is `draft`, `ready` or `none`) says so before anything else
+    does. Every planned task has its branch from its start, so it is a
+    change whatever its ending: one that merges here when it is accepted has
+    no pull request to end in. A docs pull request is a change. A **review**
+    reviews someone else's pull request and has no work of its own. A
+    **plain** task is everything else: a task with no branch yet. The
+    runtime reads the kind for each card from the task's plan, workspaces,
+    pull requests and review; nothing writes it, so nothing can disagree
+    with it.
   - **A task only moves toward change.** A plain task that writes becomes a
     change; a review the person takes over becomes a change that builds on
     it. It is one task, thread and card throughout: nothing restarts, and
@@ -51,13 +55,21 @@
     and picks the verdict (never Approve for them on an outside pull
     request), then posts. A setting of their own posts reviews of their
     team's pull requests without asking; outside ones always wait.
-  - **A plain task starts on a copy.** A read-only copy of its repositories,
-    as the coordinator's folder is, with no branch and no install. When its
-    lead needs to change files it asks for a worktree (`need_worktree`), at
-    the commit the copy was at, and goes on in a fresh session there, briefed
-    from the thread as the coordinator's handover is
-    ([ADR-031](031-coordinator-handed-over-before-it-fills.md)). From then it
-    is a change: its next round has the project's steps and ending.
+  - **A plain task starts with no branch.** What the coordinator starts
+    with `start_task` (no plan: a question, a quick look, a prototype, a
+    release run from this Mac) works in a worktree of its own, detached at
+    the commit its default branch is at, set up as any task's is
+    ([ADR-023](023-althar-runs-the-project.md)), with a scratch folder git
+    ignores for what its lead throws away. Where its lead first changes the
+    repository, with new commits or changes not committed that aren't
+    evidence it handed, Althar makes the task's branch right there, as the
+    lead's turn ends or as it calls `finish_step`, with that work on it: the
+    same folder, the same lead and session. It says so in the task's thread
+    ("This task changes files now, on its branch …"), and tells the
+    coordinator, which retitles the task (`rename_task`) where its title no
+    longer says what it does. From then it is a change, published as the
+    project's changes are. With no branch there is nothing to ship, and a
+    lead that changed nothing finishes with its summary alone.
   - **Tasks can be found.** ⌘K in a project and on the home searches titles,
     what the person asked, the lead's summaries and what it built, pull
     request numbers, branches and files touched; the coordinator's
@@ -82,15 +94,27 @@
   - **A review inbox, fed from the host.** Polling every connected
     repository for review requests is a feature of its own; asking the
     coordinator, or pasting a link, covers what people do now.
-  - **A worktree for every task, as before.** It costs a branch and an
-    install per question, and a card that offers a pull request for work
-    that will never be one.
+  - **A worktree on a branch for every task, as before.** It costs a branch
+    per question, and a card that offers a pull request for work that will
+    never be one.
+  - **A plain task on a read-only copy, moved to a worktree when its lead
+    asks (`need_worktree`), in a fresh session briefed from the thread.**
+    The lead would lose its own context, and its folder, with what it had
+    running there, exactly when the work turns into a change; and a lead
+    that writes without asking would go unseen. A worktree with no branch
+    keeps both, and what the lead did, not what it asked, decides.
+  - **No install for a plain task.** Its lead's quick look often runs the
+    project's tests or tools, which fail without one in a sandbox that
+    refuses the package manager's folders outside the worktree.
 - **Trade-off:** The kind can change under the person's eyes, from plain to
-  change, which is what happened to the work; the card says so, and the
-  coordinator's retitle says why. A plain task's lead moving to a worktree
-  starts a fresh session, which carries what the thread says but not the
-  agent's own context. A review in reader mode can't run the pull request's
-  tests; its lead reads the checks the host ran instead.
+  change, which is what happened to the work; the card and the thread say
+  so, and the coordinator's retitle says why. A plain task still costs a
+  worktree and its install, as any task does. Its branch is made at the end
+  of the turn that wrote, not as the file is written, so mid-turn the task
+  still reads plain, and work a lead leaves outside its scratch folder, a
+  screenshot it hasn't handed yet, makes it a change. A review in reader
+  mode can't run the pull request's tests; its lead reads the checks the
+  host ran instead.
 - **Related:** the triage checkpoint (PR #116's exploration) will show on a
   running card's top line, which takes any word; DEV-91 (merging once
   checks pass) will be a change's state, not a kind.
