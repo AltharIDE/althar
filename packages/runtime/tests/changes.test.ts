@@ -25,6 +25,7 @@ import { taskShown } from '../src/evidence'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import { Sessions } from '../src/Sessions'
+import { Tasks } from '../src/Tasks'
 import * as Runtime from '../src/Runtime'
 import { callTool, fakeConnectors, HOST, hosted, items, repository, runtime, turns, until } from './support'
 
@@ -878,6 +879,108 @@ describe('a pull request, by the person and the lead', () => {
       assert.lengthOf(yield* changes.ofTask(created.taskId), 0)
       assert.isNull(yield* changes.endFor(project.projectId))
     }).pipe(Effect.provide(runtimeWith({})))
+  })
+})
+
+describe('an abandoned task’s pull request', () => {
+  /** A task whose pull request is open on the fake GitHub, ready for the person: its project, its task and its thread. */
+  const opened = (github: FakeService, working: string) =>
+    Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      assert.strictEqual(github.changes[0]?.state, 'open')
+      return { projectId, taskId: ready?.taskId ?? '', threadId: ready?.threadId ?? '', url: github.changes[0]?.url ?? '' }
+    })
+  const abandon = (taskId: string) =>
+    Effect.flatMap(Tasks, (tasks) =>
+      Effect.flatMap(Runtime.envelope('task.abandon', { taskId }), (envelope) => tasks.abandon({ envelope, taskId })),
+    )
+  const fresh = () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return { working, github }
+  }
+
+  it.live('stays open on its host when the person doesn’t close it, and its card says so, as the host does after', () => {
+    const { working, github } = fresh()
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      const { projectId, taskId, threadId } = yield* opened(github, working)
+      yield* abandon(taskId)
+      // Abandoning alone asks nothing of the host: the pull request is open there, and the card says it is.
+      assert.notInclude(github.calls, 'closeChange')
+      assert.strictEqual(github.changes[0]?.state, 'open')
+      const [card] = yield* cards(projectId)
+      assert.strictEqual(card?.phase, 'settled')
+      assert.strictEqual(card?.change?.state, 'open')
+      // Not listened to any more, as an older Althar left it, it is read from the host once: still open there, it says open.
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE external_links SET listening = 0 WHERE task_id = ${taskId} AND kind = 'change'`
+      yield* changes.readSettled
+      assert.strictEqual((yield* changes.ofTask(taskId))[0]?.state, 'open')
+      // Closed on GitHub by hand since, the next read says so, in the card and the thread.
+      github.close(1)
+      yield* changes.readSettled
+      const [seen] = yield* changes.ofTask(taskId)
+      assert.strictEqual(seen?.state, 'closed')
+      assert.isFalse(seen?.listening)
+      assert.strictEqual((yield* cards(projectId))[0]?.change?.state, 'closed')
+      assert.isTrue((yield* arrivals(threadId)).some((arrival) => arrival['kind'] === 'closed'))
+      // Closed, it isn't read again.
+      const reads = github.calls.filter((call) => call === 'change').length
+      yield* changes.readSettled
+      assert.strictEqual(github.calls.filter((call) => call === 'change').length, reads)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('is closed on its host when the person says, its branch deleted where they ask', () => {
+    const { working, github } = fresh()
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      const { projectId, taskId, threadId, url } = yield* opened(github, working)
+      yield* abandon(taskId)
+      const closed = yield* changes.close(taskId, url, { deleteBranch: true })
+      assert.strictEqual(closed.change.state, 'closed')
+      assert.isNull(closed.branch)
+      assert.strictEqual(github.changes[0]?.state, 'closed')
+      assert.deepStrictEqual(github.branchesDeleted, [1])
+      // Closed, it is listened to no more, the card says closed, and the thread says it closed.
+      const [seen] = yield* changes.ofTask(taskId)
+      assert.strictEqual(seen?.state, 'closed')
+      assert.isFalse(seen?.listening)
+      assert.strictEqual((yield* cards(projectId))[0]?.change?.state, 'closed')
+      assert.isTrue((yield* arrivals(threadId)).some((arrival) => arrival['kind'] === 'closed'))
+      // Pressed again, nothing more is asked of the host.
+      const asked = github.calls.filter((call) => call === 'closeChange' || call === 'deleteBranch').length
+      yield* changes.close(taskId, url, { deleteBranch: true })
+      assert.strictEqual(github.calls.filter((call) => call === 'closeChange' || call === 'deleteBranch').length, asked)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('stays open where the host refuses to close it, and says why; a branch it won’t delete is said apart', () => {
+    const { working, github } = fresh()
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      const { projectId, taskId, url } = yield* opened(github, working)
+      yield* abandon(taskId)
+      github.failNext('closeChange', 'forbidden', undefined, 403)
+      const refused = yield* Effect.flip(changes.close(taskId, url, { deleteBranch: true }))
+      assert.strictEqual(refused instanceof Error ? refused.name : String(refused), 'ConnectorFailed')
+      assert.strictEqual(words(refused, String).message, "GitHub won't let this account do that: The fake closeChange failed (forbidden).")
+      assert.strictEqual(github.changes[0]?.state, 'open')
+      assert.strictEqual((yield* changes.ofTask(taskId))[0]?.state, 'open')
+      assert.strictEqual((yield* cards(projectId))[0]?.change?.state, 'open')
+      assert.deepStrictEqual(github.branchesDeleted, [])
+      // Tried again, it closes; the branch the host won't delete stays, and what it said is returned.
+      github.failNext('deleteBranch', 'forbidden', undefined, 403)
+      const closed = yield* changes.close(taskId, url, { deleteBranch: true })
+      assert.strictEqual(closed.change.state, 'closed')
+      assert.strictEqual(closed.branch, 'The fake deleteBranch failed (forbidden)')
+      assert.strictEqual(github.changes[0]?.state, 'closed')
+      assert.deepStrictEqual(github.branchesDeleted, [])
+    }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })
 
