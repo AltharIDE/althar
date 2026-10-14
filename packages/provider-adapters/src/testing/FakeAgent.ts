@@ -1308,13 +1308,17 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // A lead that stalls or loops, where a marker says so.
       const stalled = await playStall(session, text, update)
       if (stalled !== undefined) return stalled
-      // With Althar's tools, a marker in the prompt says which role to play.
-      const played = await playRole(
-        session,
-        text,
-        (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
-        (plan) => leaveTests(params.sessionId, session, client, plan),
-      )
+      // With Althar's tools, a marker in the prompt says which role to play; but what the person names as a scenario is played
+      // as one, whatever its session's markers say, as a lead keeps its session after its step (ADR-034).
+      const named = (Object.values(scenarios) as ReadonlyArray<string>).includes(text)
+      const played = named
+        ? undefined
+        : await playRole(
+            session,
+            text,
+            (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+            (plan) => leaveTests(params.sessionId, session, client, plan),
+          )
       // Stopped while it played its part, the turn was cancelled, as an agent says.
       if (played !== undefined && session.cancelled) return { stopReason: 'cancelled' }
       if (played !== undefined) {

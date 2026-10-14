@@ -59,7 +59,7 @@ import type { Models } from './Models'
 import type { Policies } from './Policies'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
-import { touchCard } from './cards'
+import { touchCard, touchTask } from './cards'
 import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
 import { git, PUSHED } from './git'
@@ -976,8 +976,9 @@ export class Sessions extends Context.Service<
                   : `${running.entry.definition.name} doesn't take images, so ${withheld === 1 ? 'the image' : `the ${withheld} images`} you sent ${withheld === 1 ? "wasn't" : "weren't"} passed on to it.`,
               },
             )
-          // A task's card says when its lead or reviewer is at work.
-          if (thread.role !== 'coordinator') yield* touchCard(thread.taskId)
+          // A task's card says when its lead or reviewer is at work, and so does its thread, open: what was read of it while a round
+          // opened for the person's words (ADR-034), before this, says it isn't.
+          if (thread.role !== 'coordinator') yield* touchTask(thread.taskId)
           yield* live.publish({
             _tag: 'TurnStarted',
             threadId: thread.threadId,
