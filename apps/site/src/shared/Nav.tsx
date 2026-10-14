@@ -140,7 +140,7 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
         if (open && e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) close()
       }}
     >
-      {open && <div className={s.scrim} aria-hidden="true" />}
+      <div className={s.scrim} aria-hidden="true" />
       <header ref={bar} className={s.bar} onPointerLeave={() => lens.current?.point(null)}>
         <span className={s.glass} aria-hidden="true" />
         <span className={s.tint} aria-hidden="true" />
@@ -192,17 +192,17 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
           </span>
         </div>
       </header>
-      <div id={sheet} ref={sheetEl} className={cx(s.sheet, sheetUnder && s.lit, sheetUnder === 'ink' && s.ink)}>
+      <div id={sheet} ref={sheetEl} inert={!open} className={cx(s.sheet, sheetUnder && s.lit, sheetUnder === 'ink' && s.ink)}>
         <span className={s.glass} aria-hidden="true" />
         <span className={s.tint} aria-hidden="true" />
         <span className={s.graphite} aria-hidden="true" />
         <nav aria-label="Site">
-          {PAGES.map((p) => (
-            <a key={p.href} href={p.href} onClick={close} aria-current={here(p.href) ? 'page' : undefined}>
+          {PAGES.map((p, i) => (
+            <a key={p.href} href={p.href} style={nth(i)} onClick={close} aria-current={here(p.href) ? 'page' : undefined}>
               {p.name}
             </a>
           ))}
-          <a href={LINKS.repo} onClick={close}>
+          <a href={LINKS.repo} style={nth(PAGES.length)} onClick={close}>
             <BrandMark brand={Brand.GitHub} size={16} />
             GitHub
           </a>
