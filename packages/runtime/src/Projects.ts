@@ -257,6 +257,20 @@ const prepareWorktree = (
 type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | RuntimeConfig | Setups
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
 
+/** A repository's own way to run, last in its project's list of what it runs (ADR-036), as the repository is bound. */
+const ownRunnable = (projectId: string, bindingId: string, createdAt: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [last] = yield* sql<{ position: number | null }>`SELECT max(position) AS position FROM runnables WHERE project_id = ${projectId}`
+    yield* sql`INSERT INTO runnables ${sql.insert({
+      id: yield* newId(Ids.runnable),
+      projectId,
+      bindingId,
+      position: (last?.position ?? -1) + 1,
+      createdAt,
+    })}`
+  })
+
 export class Projects extends Context.Service<
   Projects,
   {
@@ -483,6 +497,7 @@ export class Projects extends Context.Service<
                   verifiedAt: createdAt,
                   createdAt,
                 })}`
+                yield* ownRunnable(projectId, bindingId, createdAt)
               }
               const coordinatorThreadId = yield* newId(Ids.thread)
               yield* sql`INSERT INTO threads ${sql.insert({ id: coordinatorThreadId, projectId, kind: 'coordinator', ownerActorId: instance.personId, createdAt })}`
@@ -902,6 +917,7 @@ export class Projects extends Context.Service<
                   verifiedAt: createdAt,
                   createdAt,
                 })}`
+                yield* ownRunnable(projectId, bindingId, createdAt)
                 added.push(repository.name)
               }
               if (added.length > 0) yield* changed(projectId, 'project.repositories_added', { repositories: added }, commandId)

@@ -221,7 +221,7 @@ describe('reviewing someone else’s pull request', () => {
       })
       // Nothing of it merges here, or runs.
       assert.deepStrictEqual(snapshot.task.here, [])
-      assert.isNull(snapshot.task.runCommand)
+      assert.lengthOf(snapshot.task.runnables, 0)
 
       // Its lead reads it through Althar: from outside, said so; with nothing more said on it yet.
       const read = yield* callTool(lead(projectId, threadId, task?.id ?? ''), 'read_pull_request', {})

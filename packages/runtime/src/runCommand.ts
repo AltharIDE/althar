@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { basename, join, relative } from 'node:path'
 
 /*
  * How a repository runs, worked out from what is in it (ADR-023), until a
@@ -13,6 +13,10 @@ import { join } from 'node:path'
  * What makes a fresh copy ready is one thing, kept or worked out: Althar runs
  * it before each run, and in a task's worktree once, when it is made, before
  * its lead starts.
+ *
+ * Its package.json files' scripts, the root's and each workspace's, are what
+ * the person picks something more to run from (ADR-036), each as the command
+ * that runs it from the repository's root.
  */
 
 export interface RunCommand {
@@ -157,3 +161,98 @@ export const runOf = (
 
 /** The line a shell runs: what makes it ready, then the command. */
 export const lineOf = (run: RunCommand) => (run.setup === null ? run.command : `(${run.setup}) && ${run.command}`)
+
+/** A script a package.json says, and the command that runs it from the repository's root. */
+export interface Script {
+  /** The package it is in, by its name: `althar`, `@althar/ui`. */
+  readonly package: string
+  readonly name: string
+  /** What the script itself says. */
+  readonly body: string
+  /** `bun run dev`, `bun --filter @althar/ui storybook`. */
+  readonly command: string
+}
+
+/** Scripts only an install, a publish or a version bump runs: never something to run by hand. */
+const LIFECYCLE = new Set([
+  'preinstall',
+  'install',
+  'postinstall',
+  'prepare',
+  'prepublish',
+  'prepublishOnly',
+  'prepack',
+  'postpack',
+  'preversion',
+  'version',
+  'postversion',
+])
+
+/** The folders a workspaces pattern names under `folder`: for `apps/*`, each folder in apps with a package.json; for `apps/web`, that one. */
+const workspaceFolders = (folder: string, pattern: string): ReadonlyArray<string> => {
+  if (pattern.startsWith('!')) return []
+  const wild = /^(.*?)\/\*\*?$/.exec(pattern.replace(/\/+$/, ''))
+  if (wild === null) return existsSync(join(folder, pattern, 'package.json')) ? [join(folder, pattern)] : []
+  const parent = join(folder, wild[1] ?? '')
+  try {
+    return readdirSync(parent, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => join(parent, entry.name))
+      .filter((child) => existsSync(join(child, 'package.json')))
+      .sort()
+  } catch {
+    return []
+  }
+}
+
+/** How a workspace's script runs from the repository's root, by the package manager's own words for it. */
+const inWorkspace = (manager: string, workspace: string, script: string) => {
+  switch (manager) {
+    case 'bun':
+      return `bun --filter ${workspace} ${script}`
+    case 'pnpm':
+      return `pnpm --filter ${workspace} ${script}`
+    case 'yarn':
+      return `yarn workspace ${workspace} ${script}`
+    default:
+      return `npm run ${script} --workspace ${workspace}`
+  }
+}
+
+/** A package.json's scripts worth running by hand, as name and body. */
+const scriptsOf = (manifest: Readonly<Record<string, unknown>>): ReadonlyArray<readonly [string, string]> =>
+  Object.entries(recordOf(manifest.scripts) ?? {}).flatMap(([name, body]) =>
+    typeof body === 'string' && !LIFECYCLE.has(name) ? [[name, body] as const] : [],
+  )
+
+/**
+ * The scripts in the package.json in `folder` and in each of its workspaces,
+ * the root's first, each with the command that runs it from `folder` with
+ * the package manager its lockfile names. None where it has no package.json.
+ */
+export const scriptsIn = (folder: string, root: string = folder): ReadonlyArray<Script> => {
+  const manifest = manifestIn(folder)
+  if (manifest === undefined) return []
+  const manager = managerOf(folder, root)?.name ?? 'npm'
+  const own = typeof manifest.name === 'string' ? manifest.name : basename(folder)
+  const scripts: Array<Script> = scriptsOf(manifest).map(([name, body]) => ({
+    package: own,
+    name,
+    body,
+    command: `${manager} run ${name}`,
+  }))
+  const folders = new Set(
+    workspacesOf(manifest).flatMap((pattern) => (typeof pattern === 'string' ? workspaceFolders(folder, pattern) : [])),
+  )
+  for (const workspace of folders) {
+    const inner = manifestIn(workspace)
+    if (inner === undefined) continue
+    const path = relative(folder, workspace)
+    // A workspace with no name is named by its folder, which Yarn can't run it by.
+    const named = typeof inner.name === 'string' ? inner.name : undefined
+    if (named === undefined && manager === 'yarn') continue
+    for (const [name, body] of scriptsOf(inner))
+      scripts.push({ package: named ?? path, name, body, command: inWorkspace(manager, named ?? `./${path}`, name) })
+  }
+  return scripts
+}

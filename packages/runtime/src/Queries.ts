@@ -477,6 +477,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         content: {
           launchId: text(content, 'launchId'),
           taskId: text(content, 'taskId') || null,
+          runnableId: text(content, 'runnableId') || null,
           where: text(content, 'where'),
           command: text(content, 'command'),
           url: text(content, 'url') || null,
@@ -1908,7 +1909,7 @@ export class Queries extends Context.Service<
               merged: said.merged,
               actions: [...actionsOf(standing)],
               planId: standing.planId,
-              runCommand: yield* launches.commandFor(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => null)),
+              runnables: yield* launches.runnables(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => [])),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
               resolveConflicts: {
                 task: head.resolveConflicts === null ? null : head.resolveConflicts === 1,
@@ -1958,7 +1959,7 @@ export class Queries extends Context.Service<
             items,
             earlier,
             host,
-            runCommand: yield* launches.commandFor(projectId, null).pipe(Effect.orElseSucceed(() => null)),
+            runnables: yield* launches.runnables(projectId, null).pipe(Effect.orElseSucceed(() => [])),
             // Every run in the project, the tasks' too: the coordinator's screen is the project's.
             launches: yield* launches.ofProject(projectId),
           } satisfies CoordinatorSnapshot
