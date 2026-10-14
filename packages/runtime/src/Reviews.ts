@@ -19,6 +19,7 @@ import { freeSlug, slugify } from './Projects'
 import { signed } from './pullRequestWords'
 import { change, fact, timestamp } from './records'
 import { type ReviewOf, reviewOf, type Reviewed } from './reviewing'
+import { indexTask } from './Search'
 import { Sessions } from './Sessions'
 import { addItem, updateItem } from './threads'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
@@ -500,6 +501,8 @@ export class Reviews extends Context.Service<
                   commandId: input.envelope.commandId,
                 })
                 yield* postCard(input.projectId, taskId)
+                // Found by the pull request it reviews, as by its title.
+                yield* indexTask(taskId)
                 return { taskId, slug, threadId, workspaceId, path }
               }),
             })

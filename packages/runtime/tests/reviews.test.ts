@@ -26,6 +26,7 @@ import {
   startingVerdict,
 } from '../src/Reviews'
 import * as Runtime from '../src/Runtime'
+import { findTasks } from '../src/Search'
 import { Sessions } from '../src/Sessions'
 import { transcript } from '../src/threads'
 import { words } from '../src/words'
@@ -355,6 +356,11 @@ describe('reviewing someone else’s pull request', () => {
           Duration.seconds(20),
         )
         assert.deepInclude(onBoard, { kind: 'review' })
+        // Found by the pull request it reviews.
+        assert.deepStrictEqual(
+          (yield* findTasks({ projectId, text: 'PR #1' }, new Set())).map((found) => found.taskId),
+          [task?.id ?? ''],
+        )
         assert.deepInclude(onBoard?.reviewing, { number: 1, author: 'ninemate', outside: true, findings: 2, blocking: 1 })
 
         // With no verdict chosen, nothing posts.
