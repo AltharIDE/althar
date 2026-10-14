@@ -1865,11 +1865,9 @@ export class Sessions extends Context.Service<
       /** A review task's lead's brief: someone else's pull request, where its copy is, what it may do, and how it drafts. */
       const reviewTaskBrief = (thread: TaskThread, review: Reviewed) =>
         Effect.gen(function* () {
-          return [
-            ...reviewingBrief({ title: thread.title, description: thread.description, cwd: thread.cwd, review }),
-            ...askedFor(thread),
-            ...(yield* threadSoFar(thread.threadId)),
-          ].join('\n\n')
+          return [...reviewingBrief({ cwd: thread.cwd, review }), ...askedFor(thread), ...(yield* threadSoFar(thread.threadId))].join(
+            '\n\n',
+          )
         })
 
       /** A reviewer's brief: the task, how to see the change, what it may do, and how to report. */

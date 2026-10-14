@@ -329,9 +329,7 @@ export class Reviews extends Context.Service<
               }),
             )
             if (binding === undefined)
-              return yield* refused(
-                `That pull request is on ${ref.path.join('/')}, which isn’t one of the project’s repositories${bindings.length === 0 ? '' : ` (${bindings.map((one) => one.name).join(', ')})`}.`,
-              )
+              return yield* refused(`That pull request is on ${ref.path.join('/')}, which isn’t one of the project’s repositories.`)
             return { connectionId: found.connectionId, host: found.host, path: ref.path, number: ref.number, binding }
           }
           const number = /^#?(\d+)$/.exec(wanted)?.[1]
@@ -349,17 +347,13 @@ export class Reviews extends Context.Service<
           return { connectionId: only.connectionId, host: only.host, path: only.path, number: Number(number), binding: only.binding }
         })
 
-      /** Says a host's failure as the coordinator tells the person. */
-      const hostWords = (error: unknown) =>
-        error instanceof ConnectorFailed
-          ? refused(
-              error.reason === 'not_found'
-                ? 'That pull request isn’t there, or Althar’s sign-in can’t see it.'
-                : error.reason === 'unauthorized'
-                  ? 'The host didn’t take Althar’s sign-in. The person signs in again in Settings.'
-                  : `The host said: ${error.message}`,
-            )
-          : error
+      /** Says a host's failure as the coordinator tells the person: a sign-in it didn't take reaches the person through Connections. */
+      const hostWords = (error: ConnectorFailed) =>
+        refused(
+          error.reason === 'not_found'
+            ? 'That pull request isn’t there, or Althar’s sign-in can’t see it.'
+            : `The host said: ${error.message}`,
+        )
 
       const start: Reviews['Service']['start'] = (input) =>
         provide(
@@ -367,9 +361,6 @@ export class Reviews extends Context.Service<
             const sql = yield* SqlClient.SqlClient
             const place = yield* placeOf(input.projectId, input.pullRequest)
             const { host } = place
-            const adapters = yield* connections.adapters(place.connectionId)
-            if (adapters.info.state !== 'ready')
-              return yield* refused('Althar’s sign-in to the host needs renewing. The person signs in again in Settings.')
             if (!host.capabilities.reviews)
               return yield* refused(`Althar reviews GitHub pull requests only, for now; this ${host.words.noun} is elsewhere.`)
             const repository = yield* host.repository(place.path).pipe(Effect.mapError(hostWords))
@@ -397,8 +388,9 @@ export class Reviews extends Context.Service<
             ])
             const head = fetched ? yield* commitOf(place.binding.repository, `${ref}/head`).pipe(Effect.option) : Option.none()
             if (Option.isNone(head)) return yield* refused(`Althar couldn’t fetch the ${name}’s code. Try again, or tell the person.`)
+            // Where its change starts: where its head meets its base; or, for histories that never meet, its base.
             const met = yield* gitOutcome(place.binding.repository, 'merge-base', `${ref}/base`, head.value)
-            const baseCommit = met.code === 0 && met.stdout !== '' ? met.stdout : null
+            const baseCommit = met.code === 0 ? met.stdout : yield* commitOf(place.binding.repository, `${ref}/base`)
 
             const reviewed: Reviewed = {
               repository: place.path,
@@ -419,7 +411,8 @@ export class Reviews extends Context.Service<
             }
             const title = (() => {
               const full = `Review ${host.words.prefix}${pull.number}: ${pull.title}`
-              return full.length <= TITLE_LENGTH ? full : `${full.slice(0, TITLE_LENGTH - 1).trimEnd()}…`
+              // Cut at a word, so it reads as words.
+              return full.length <= TITLE_LENGTH ? full : `${full.slice(0, TITLE_LENGTH - 1).replace(/\s+\S*$/, '')}…`
             })()
             const commands = yield* Commands
             const created = yield* commands.execute({
@@ -476,7 +469,7 @@ export class Reviews extends Context.Service<
                   access: 'read',
                   path,
                   baseRef: pull.target,
-                  branch: pull.fork === null || pull.fork.length === 0 ? pull.source : `${pull.fork[0] ?? ''}:${pull.source}`,
+                  branch: pull.fork === null ? pull.source : [...pull.fork.slice(0, 1), pull.source].join(':'),
                   state: 'preparing',
                   createdAt: at,
                 })}`
@@ -521,7 +514,7 @@ export class Reviews extends Context.Service<
                 const revision = yield* change(
                   'workspaces',
                   created.workspaceId,
-                  done ? { state: 'ready', path, baseCommit: baseCommit ?? head.value } : { state: 'failed' },
+                  done ? { state: 'ready', path, baseCommit } : { state: 'failed' },
                 )
                 yield* fact({
                   projectId: input.projectId,
@@ -587,9 +580,9 @@ export class Reviews extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const row = yield* load(draftId)
           const card = yield* cardFor(row)
-          const [item] = yield* sql<{ id: string }>`
+          const items = yield* sql<{ id: string }>`
             SELECT id FROM thread_items WHERE thread_id = ${row.threadId} AND kind = 'review_draft' AND json_extract(content, '$.draftId') = ${draftId}`
-          if (item !== undefined) yield* updateItem(row.projectId, item.id, card)
+          for (const item of items) yield* updateItem(row.projectId, item.id, card)
           return card
         })
 
@@ -638,11 +631,7 @@ export class Reviews extends Context.Service<
        * request's code, or a line the change doesn't show, which the host
        * would refuse, and the whole review with it.
        */
-      const misplaced = (
-        copy: string,
-        baseCommit: string | null,
-        comments: ReadonlyArray<{ readonly path: string; readonly line: number }>,
-      ) =>
+      const misplaced = (copy: string, baseCommit: string, comments: ReadonlyArray<{ readonly path: string; readonly line: number }>) =>
         Effect.gen(function* () {
           const shown = new Map<string, ReadonlyArray<readonly [number, number]>>()
           const wrong: Array<string> = []
@@ -658,7 +647,6 @@ export class Reviews extends Context.Service<
               wrong.push(`${where} isn’t in the pull request’s code`)
               continue
             }
-            if (baseCommit === null) continue
             if (!shown.has(comment.path)) {
               const diff = yield* gitOutcome(
                 copy,
@@ -672,7 +660,8 @@ export class Reviews extends Context.Service<
                 '--',
                 comment.path,
               )
-              shown.set(comment.path, diff.code === 0 ? shownLines(diff.stdout) : [])
+              // A diff git couldn't give shows nothing: every line of it is refused, rather than guessed.
+              shown.set(comment.path, shownLines(diff.stdout))
             }
             if (!(shown.get(comment.path) ?? []).some(([from, to]) => comment.line >= from && comment.line <= to))
               wrong.push(`${where} isn’t a line the pull request changes, or shows beside a change`)
@@ -715,10 +704,10 @@ export class Reviews extends Context.Service<
             return yield* new ToolRefused({ message: `That’s ${given.length} comments; keep to ${COMMENTS}, the ones that matter most.` })
           if (given.some((comment) => comment.body === ''))
             return yield* new ToolRefused({ message: 'Every comment needs words: say what is wrong, or drop it.' })
-          const [workspace] = yield* sql<{ path: string }>`
+          const copies = yield* sql<{ path: string }>`
             SELECT path FROM workspaces WHERE task_id = ${taskId} AND device_id = ${instance.deviceId} AND access = 'read' AND state = 'ready' LIMIT 1`
-          if (workspace !== undefined) {
-            const wrong = yield* misplaced(workspace.path, review.baseCommit, given)
+          for (const copy of copies) {
+            const wrong = yield* misplaced(copy.path, review.baseCommit, given)
             if (wrong.length > 0)
               return yield* new ToolRefused({
                 message: `${wrong.join('; ')}. GitHub takes comments only on lines the change shows, so it would refuse the whole review. Put each on a line of the change as it now reads, or say it in the summary, and call draft_review again.`,
@@ -804,24 +793,23 @@ export class Reviews extends Context.Service<
           }
           yield* touchCard(taskId)
           const name = `${review.words.noun} ${review.words.prefix}${review.number}`
+          const counted = comments.length === 1 ? '1 comment' : `${comments.length} comments`
           // The person's own setting posts their team's reviews at once; an outside one always waits for them.
           if (!review.outside && (yield* postTeamReviews)) {
             const posted = yield* post(draftId, instance.systemId)
             return posted.state === 'posted'
-              ? `Posted your review of ${name} (${VERDICT_WORDS[asked.verdict]}, ${comments.length === 1 ? '1 comment' : `${comments.length} comments`}): the person posts their team's reviews without asking. Say in a sentence or two what you found.`
-              : `Drafted your review of ${name}. The person's setting posts their team's reviews at once, but it didn't post: ${posted.error ?? ''} They see why on its card.`
+              ? `Posted your review of ${name} (${VERDICT_WORDS[asked.verdict]}, ${counted}): the person posts their team's reviews without asking. Say in a sentence or two what you found.`
+              : `Drafted your review of ${name}. The person's setting posts their team's reviews at once, but it didn't post; they see why on its card.`
           }
-          return `Drafted your review of ${name} (you suggest ${VERDICT_WORDS[asked.verdict]}, ${comments.length === 1 ? '1 comment' : `${comments.length} comments`}). Nothing is posted until the person posts it from its card, where they choose the verdict and keep or drop each comment; they see it there, so don't repeat it. Say in a sentence or two what you found.${verdict === null ? ' It comes from outside the project, so Approve is theirs to choose.' : ''}`
+          return `Drafted your review of ${name} (you suggest ${VERDICT_WORDS[asked.verdict]}, ${counted}). Nothing is posted until the person posts it from its card, where they choose the verdict and keep or drop each comment; they see it there, so don't repeat it. Say in a sentence or two what you found.${verdict === null ? ' It comes from outside the project, so Approve is theirs to choose.' : ''}`
         })
 
       /** Who a review posts as: the connection's account. */
       const accountOf = (review: ReviewOf) =>
-        review.connectionId === null
-          ? Effect.succeed(null)
-          : connections.adapters(review.connectionId).pipe(
-              Effect.map((adapters) => adapters.info.account.login),
-              Effect.orElseSucceed(() => null),
-            )
+        connections.adapters(review.connectionId).pipe(
+          Effect.map((adapters): string | null => adapters.info.account.login),
+          Effect.orElseSucceed(() => null),
+        )
 
       /* ---- The person's say ---- */
 
@@ -876,11 +864,11 @@ export class Reviews extends Context.Service<
             case 'unauthorized':
               return 'GitHub didn’t take Althar’s sign-in. Sign in again in Settings, then try again.'
             case 'forbidden':
-              return `GitHub says this account may not review it${error.message === '' ? '.' : `: ${error.message}`}`
+              return `GitHub says this account may not review it: ${error.message}`
             case 'rate_limited':
               return 'GitHub asks Althar to wait before trying again.'
             default:
-              return error.message === '' ? 'GitHub refused it.' : error.message
+              return error.message
           }
         return 'The connection to GitHub is gone. Connect it again, then try again.'
       }
@@ -905,9 +893,8 @@ export class Reviews extends Context.Service<
             const made = yield* connections.adapters(row.connectionId).pipe(
               Effect.flatMap((adapters): Effect.Effect<PostedReview, unknown> => {
                 const host = adapters.host
-                if (host === undefined) return Effect.fail(new NotFound({ kind: 'connection', id: row.connectionId }))
-                // Wanting its sign-in again, the host isn't asked: it would refuse.
-                if (adapters.info.state !== 'ready')
+                // Wanting its sign-in again, or gone, the host isn't asked: it would refuse.
+                if (host === undefined || adapters.info.state !== 'ready')
                   return Effect.fail(new ConnectorFailed({ product: row.product, reason: 'unauthorized', message: '' }))
                 return Effect.flatMap(host.repository(row.repository.split('/')), (repository) =>
                   host.postReview(repository, row.number, {
