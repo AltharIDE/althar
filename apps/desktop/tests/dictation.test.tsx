@@ -1,6 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { Composer, DictationTray } from '@althar/ui'
@@ -10,6 +9,7 @@ import { microphonesOf, microphoneToUse } from '../src/renderer/shared/dictation
 import type { Frame, Record } from '../src/renderer/shared/dictation/recorder'
 import { bytes, lengthOf, timeLeft, trayText } from '../src/renderer/shared/dictation/text'
 import { useDictation } from '../src/renderer/shared/dictation/useDictation'
+import { setDraftText, useDraft } from '../src/renderer/shared/drafts'
 import { fakeClient, fakeHost } from './fixtures'
 import { withServices } from './render'
 
@@ -71,9 +71,9 @@ const fakeRecord = (seconds = 2, fail?: DOMException) => {
   return { record, cancel, use, hear }
 }
 
-function Harness({ record, onSubmit, initial = '' }: { record: Record; onSubmit?: (text: string) => void; initial?: string }) {
-  const [draft, setDraft] = useState(initial)
-  const voice = useDictation(setDraft, { record, projectId: 'p1' })
+function Harness({ record, onSubmit, thread = 'thread:th1' }: { record: Record; onSubmit?: (text: string) => void; thread?: string }) {
+  const [draft, setDraft] = useDraft(thread)
+  const voice = useDictation(thread, { record, projectId: 'p1' })
   return (
     <Composer
       value={draft}
@@ -92,7 +92,14 @@ const show = (
   record: Record,
   props: { onSubmit?: (text: string) => void; initial?: string } = {},
   client = fakeClient().client,
-) => withServices(<Harness record={record} {...props} />, client, fakeHost({ dictation }))
+) => {
+  if (props.initial !== undefined) setDraftText('thread:th1', props.initial)
+  return withServices(
+    <Harness record={record} {...(props.onSubmit ? { onSubmit: props.onSubmit } : {})} />,
+    client,
+    fakeHost({ dictation }),
+  )
+}
 
 /** The faint words the composer draws where what is said will land. */
 const faint = () => document.querySelector('[aria-hidden="true"][class*="interim"]')?.textContent ?? ''
@@ -403,13 +410,18 @@ describe('dictation’s edges', () => {
     }
   })
 
-  it('throws away what it was hearing when the composer goes', async () => {
+  it('stops listening when the composer goes, and writes down what was said into its thread’s draft', async () => {
     const { record, cancel } = fakeRecord()
-    const { unmount } = show(fakeDictation(state({}, { ready: true })).dictation, record)
+    const host = fakeDictation(state({}, { ready: true }))
+    const { unmount } = show(host.dictation, record)
     await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
     await screen.findByRole('button', { name: /^Stop dictating/ })
     unmount()
-    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(cancel).not.toHaveBeenCalled()
+    await waitFor(() => expect(host.dictation.transcribe).toHaveBeenCalledTimes(1))
+    show(host.dictation, record)
+    await waitFor(() => expect(field()).toHaveProperty('value', 'check the retry path'))
+    expect(screen.getByText('What you said was written down while you were away.')).toBeTruthy()
   })
 })
 
@@ -500,8 +512,8 @@ describe('the shortcut', () => {
     const { client } = fakeClient()
     withServices(
       <>
-        <Harness record={first.record} />
-        <Harness record={second.record} />
+        <Harness record={first.record} thread="thread:th1" />
+        <Harness record={second.record} thread="thread:th2" />
       </>,
       client,
       fakeHost({ dictation: host.dictation }),

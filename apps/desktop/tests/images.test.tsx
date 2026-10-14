@@ -212,7 +212,7 @@ describe('the images waiting in a composer', () => {
   const codex = { name: 'Codex', takes: false }
 
   it('reads what is added, shows it, and sends it with the message, drawn from its own bytes', async () => {
-    const { result } = renderHook(() => useImages(asIs))
+    const { result } = renderHook(() => useImages('thread:th1', asIs))
     const bytes = png(640, 400)
     act(() => result.current.props(claude).onAddImages([fileOf(bytes, 'shot.png')]))
     expect(result.current.props(claude).images).toEqual([{ id: 'image-1', name: 'shot.png', reading: true }])
@@ -231,7 +231,7 @@ describe('the images waiting in a composer', () => {
   })
 
   it('says why it refused one, takes one off, and takes no more than a message carries', async () => {
-    const { result } = renderHook(() => useImages(asIs))
+    const { result } = renderHook(() => useImages('thread:th1', asIs))
     const svg = new TextEncoder().encode('<svg/>')
     act(() => result.current.props(claude).onAddImages([fileOf(svg, 'logo.svg'), fileOf(png(1, 1), 'a.png')]))
     await waitFor(() => expect(result.current.props(claude).imageNote).toBe(text.unsupported('logo.svg')))
@@ -246,7 +246,7 @@ describe('the images waiting in a composer', () => {
   })
 
   it('holds the message back while an image is still being read', () => {
-    const { result } = renderHook(() => useImages(asIs))
+    const { result } = renderHook(() => useImages('thread:th1', asIs))
     const slow = fileOf(png(1, 1), 'slow.png')
     Object.defineProperty(slow, 'arrayBuffer', { value: () => new Promise<ArrayBuffer>(() => undefined) })
     act(() => result.current.props(claude).onAddImages([slow]))
@@ -259,7 +259,7 @@ describe('the images waiting in a composer', () => {
   })
 
   it('takes none for an agent that doesn’t take images, and holds back those added before it was picked, saying why', async () => {
-    const { result } = renderHook(() => useImages(asIs))
+    const { result } = renderHook(() => useImages('thread:th1', asIs))
     act(() => result.current.props(codex).onAddImages([fileOf(png(1, 1), 'a.png')]))
     expect(result.current.props(codex)).toMatchObject({ images: [], imageNote: text.refused('Codex') })
     act(() => result.current.props(claude).onAddImages([fileOf(png(1, 1), 'a.png')]))
@@ -279,7 +279,7 @@ describe('the images waiting in a composer', () => {
   })
 
   it('gives back what went with a message Althar didn’t take, bytes and all, before any added since', async () => {
-    const { result } = renderHook(() => useImages(asIs))
+    const { result } = renderHook(() => useImages('thread:th1', asIs))
     const bytes = png(640, 400)
     act(() => result.current.props(claude).onAddImages([fileOf(bytes, 'shot.png')]))
     await waitFor(() => expect(result.current.props(claude).images[0]?.src).toBeDefined())
@@ -319,7 +319,7 @@ describe('the images waiting in a composer', () => {
   })
 
   it('says a queued message’s images don’t fit beside those waiting, and holds back more than a message carries', () => {
-    const { result } = renderHook(() => useImages(asIs))
+    const { result } = renderHook(() => useImages('thread:th1', asIs))
     const picture = (n: number) => ({
       digest: n.toString(16).padStart(64, '0'),
       mediaType: 'image/png',
@@ -353,7 +353,7 @@ describe('the images waiting in a composer', () => {
   })
 
   it('puts back the images of a message taken back from the queue, to go again by their digests', () => {
-    const { result } = renderHook(() => useImages(asIs))
+    const { result } = renderHook(() => useImages('thread:th1', asIs))
     act(() =>
       result.current.restore([
         { digest: 'd'.repeat(64), mediaType: 'image/png', bytes: 68, width: 1, height: 1, name: 'shot.png', unkept: null },
