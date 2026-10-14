@@ -67,6 +67,9 @@ import { actionsOf, standingOf } from './Tasks'
 /** Session states in which a session is working on its thread. */
 const LIVE = ['starting', 'active', 'waiting_approval', 'cancelling']
 
+/** A task's branch as its screens show it, from its first worktree `w`: none for a plain task's that has no branch yet (DEV-96). */
+const SHOWN_BRANCH = 'CASE WHEN w.branched_at IS NULL THEN NULL ELSE w.branch END AS branch'
+
 /** How many tasks, or cards, a screen reads at once: each may start git. */
 const AT_ONCE = 8
 
@@ -656,7 +659,7 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           return yield* sql<TaskSummary>`
-            SELECT k.id, k.project_id, k.title, k.slug, t.id AS thread_id, k.state, w.branch,
+            SELECT k.id, k.project_id, k.title, k.slug, t.id AS thread_id, k.state, ${sql.unsafe(SHOWN_BRANCH)},
               (SELECT s.agent_id FROM provider_sessions s WHERE s.thread_id = t.id AND s.state IN (${sql.unsafe(live)})
                 ORDER BY s.started_at DESC LIMIT 1) AS agent_id,
               (SELECT count(*) FROM attention_requests a WHERE a.task_id = k.id AND a.state = 'open') AS waiting,
@@ -796,13 +799,14 @@ export class Queries extends Context.Service<
             branch: string
             baseRef: string | null
             baseCommit: string | null
+            branched: number
             root: string | null
             opened: number
             taskId: string
             projectId: string
           }>`
             SELECT b.slug, b.display_name AS name, coalesce(b.default_base_ref, w.base_ref) AS default_branch, w.path, w.branch, w.base_ref, w.base_commit,
-              l.path AS root, w.task_id, w.project_id,
+              w.branched_at IS NOT NULL AS branched, l.path AS root, w.task_id, w.project_id,
               EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
             FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
             LEFT JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
@@ -919,7 +923,9 @@ export class Queries extends Context.Service<
        * their default branch here yet, each with its default branch and its
        * branch's head as it stands. In several repositories, each file is
        * named under its repository's, and the commits are all of theirs.
-       * Every worktree is read at the same time, and looked at once.
+       * Every worktree is read at the same time, and looked at once. A plain
+       * task's worktree with no branch yet has nothing of its own: what its
+       * lead writes there is a change once Althar makes its branch.
        */
       const gitOf = (taskId: string, wants: { readonly changed: boolean; readonly here: boolean; readonly fresh?: boolean }) =>
         Effect.gen(function* () {
@@ -936,7 +942,7 @@ export class Queries extends Context.Service<
           const shown = (worktree: string) => (file: ChangedFile) =>
             !(file.uncommitted && file.status === 'added' && pictures(worktree, file.path))
           const each = yield* Effect.forEach(
-            worktrees,
+            worktrees.filter((worktree) => worktree.branched === 1),
             (worktree) =>
               Effect.gen(function* () {
                 const owner = { path: worktree.path, taskId: worktree.taskId, projectId: worktree.projectId }
@@ -1275,10 +1281,10 @@ export class Queries extends Context.Service<
 
       /**
        * The plain tasks that finished and wait to be seen (DEV-96), by id:
-       * their latest run passed, they have no pull request, no plan ending in
-       * one, and nothing on their branch. One stays in its project's Needs
-       * you, but asks nothing of the person, so nothing counts it: not the
-       * tabs, the home, the edge or the Dock.
+       * their latest run passed, they have no branch (so nothing in git of
+       * their own), no pull request, and no plan ending in one. One stays in
+       * its project's Needs you, but asks nothing of the person, so nothing
+       * counts it: not the tabs, the home, the edge or the Dock.
        */
       const finishedPlain = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
@@ -1287,11 +1293,11 @@ export class Queries extends Context.Service<
           JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id ORDER BY created_at DESC LIMIT 1)
           JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
           WHERE k.state = 'open' AND r.state = 'succeeded'
+            AND NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = k.id AND w.branched_at IS NOT NULL)
             AND NOT EXISTS (SELECT 1 FROM external_links l WHERE l.task_id = k.id AND l.kind = 'change')
             AND coalesce((SELECT json_extract(parameters, '$.end') FROM task_plans WHERE task_id = k.id AND state IN ('proposed', 'accepted')
               ORDER BY proposed_at DESC LIMIT 1), '') NOT IN ('draft', 'ready', 'none')`
-        const plain = yield* Effect.filter(rows, (row) => Effect.map(madeOf(row.id), (made) => !made), { concurrency: AT_ONCE })
-        return new Set(plain.map((row) => row.id))
+        return new Set(rows.map((row) => row.id))
       })
 
       /**
@@ -1354,8 +1360,10 @@ export class Queries extends Context.Service<
             answersWait: number
             turnWaits: number
             runPlan: string | null
+            branched: number
           }>`
-            SELECT t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, w.branch,
+            SELECT t.id AS thread_id, k.title, k.slug, k.state, k.settled_at, ${sql.unsafe(SHOWN_BRANCH)},
+              EXISTS (SELECT 1 FROM workspaces f WHERE f.task_id = k.id AND f.branched_at IS NOT NULL) AS branched,
               p.id AS plan_id, p.state AS plan_state, p.parameters, p.starts_at,
               r.state AS run_state, r.created_at AS run_at, r.plan_id AS run_plan,
               (SELECT n.node_key FROM node_attempts a JOIN nodes n ON n.id = a.node_id JOIN workflow_executions e ON e.id = n.execution_id
@@ -1452,12 +1460,14 @@ export class Queries extends Context.Service<
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // Someone else's pull request it reviews: none yet, until reviews are read (DEV-96).
           const reviewing = null
-          // What it makes: where its pull requests and its plan don't say, git does, by what is on its branch; for a task that
-          // settled, once, as nothing changes it until it opens again.
-          const decided = changes.length > 0 || (reviewing === null && endsInChange(end))
-          const settledAs = task.state === 'done' || task.state === 'abandoned' ? `${taskId}:${task.settledAt}` : null
+          // What it makes: a branch, a pull request or its plan says so; else git does, by what is on its branch (a review's, which
+          // a branch alone doesn't make a change); for a task that settled, once, as nothing changes it until it opens again.
+          const branched = task.branched === 1
+          const decided = changes.length > 0 || (reviewing === null && (branched || endsInChange(end)))
+          // By its branch too: a round that wrote and was given up settles it again at the same time, a change now.
+          const settledAs = task.state === 'done' || task.state === 'abandoned' ? `${taskId}:${task.settledAt}:${task.branched}` : null
           const kept = settledAs === null ? undefined : settledKinds.get(settledAs)
-          const kind = kept ?? kindOf({ reviewing, end, changes: changes.length, made: decided ? false : yield* madeOf(taskId) })
+          const kind = kept ?? kindOf({ reviewing, end, changes: changes.length, branched, made: decided ? false : yield* madeOf(taskId) })
           if (settledAs !== null) settledKinds.set(settledAs, kind)
           return {
             taskId,
@@ -1536,8 +1546,11 @@ export class Queries extends Context.Service<
           // Ready, what merges here is read from git; without a pull request, so is its size: its branch's. A change at work
           // without one shows its branch's size so far.
           const atWork = (card.phase === 'running' || card.phase === 'stopped') && card.kind === 'change' && card.change === null
+          // A plain task with no branch yet has nothing of its own in git to size.
           const said =
-            card.phase === 'ready' || atWork ? yield* gitOf(row.id, { changed: card.change === null, here: card.phase === 'ready' }) : null
+            (card.phase === 'ready' || atWork) && card.branch !== null
+              ? yield* gitOf(row.id, { changed: card.change === null, here: card.phase === 'ready' })
+              : null
           const changed =
             said !== null && card.change === null
               ? {
@@ -1791,7 +1804,7 @@ export class Queries extends Context.Service<
             projectResolves: number | null
           }>`
             SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.request, k.slug, k.state,
-              k.settled_at, w.branch, w.path AS worktree, w.base_ref, w.base_commit, k.resolve_conflicts,
+              k.settled_at, ${sql.unsafe(SHOWN_BRANCH)}, w.path AS worktree, w.base_ref, w.base_commit, k.resolve_conflicts,
               (SELECT json_extract(r.rules, '$.resolveConflicts') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS project_resolves
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)

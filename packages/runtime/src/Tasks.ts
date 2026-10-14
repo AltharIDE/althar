@@ -8,7 +8,8 @@ import { SqlClient } from 'effect/sql'
 import { touchCard } from './cards'
 import { TITLE_LENGTH } from './Coordinator'
 import { NotFound, TaskRefused } from './errors'
-import { branchExists, restoreWorktree } from './git'
+import { makeScratch } from './firstWrite'
+import { branchExists, restoreDetachedWorktree, restoreWorktree } from './git'
 import { Instance } from './Instance'
 import { Plans } from './Plans'
 import { touchQuestion } from './Questions'
@@ -32,7 +33,8 @@ import { Setups } from './Setups'
  * than ended, and its agents stop. Its worktree and branch stay where they
  * are, since Althar never removes the person's worktrees for them (01).
  * Reopening opens it on them again, putting back a worktree whose folder
- * went, which Althar sets up again: a run that was cut short resumes like a
+ * went, which Althar sets up again (a plain task's that never had a branch
+ * with none still, where it started): a run that was cut short resumes like a
  * stopped one, a run that passed is ready again, and a plan that never
  * started waits, held. A merged task is done for good.
  */
@@ -346,9 +348,17 @@ export class Tasks extends Context.Service<
           const [project] = yield* sql<{ id: string }>`
             SELECT id FROM projects WHERE id = ${standing.projectId} AND archived_at IS NULL`
           if (project === undefined) return yield* new NotFound({ kind: 'project', id: standing.projectId })
-          // Its worktrees, each put back on its branch where its folder went: git runs before the task is written.
-          const worktrees = yield* sql<{ id: string; path: string; branch: string; repository: string }>`
-            SELECT w.id, w.path, w.branch, l.path AS repository FROM workspaces w
+          // Its worktrees, each put back on its branch where its folder went: git runs before the task is written. A plain task's
+          // that never had one is put back with none, where it started, as it was made (DEV-96).
+          const worktrees = yield* sql<{
+            id: string
+            path: string
+            branch: string
+            branched: number
+            baseCommit: string | null
+            repository: string
+          }>`
+            SELECT w.id, w.path, w.branch, w.branched_at IS NOT NULL AS branched, w.base_commit, l.path AS repository FROM workspaces w
             JOIN repository_bindings b ON b.id = w.binding_id
             JOIN repository_locations l ON l.binding_id = w.binding_id AND l.device_id = ${instance.deviceId}
             WHERE w.task_id = ${input.taskId} AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
@@ -356,9 +366,14 @@ export class Tasks extends Context.Service<
           let restored = false
           for (const worktree of worktrees) {
             if (existsSync(worktree.path)) continue
-            if (!(yield* branchExists(worktree.repository, worktree.branch)))
-              return yield* new TaskRefused({ taskId: input.taskId, why: 'branch_gone' })
-            yield* restoreWorktree(worktree.repository, worktree.path, worktree.branch)
+            if (worktree.branched === 0 && worktree.baseCommit !== null) {
+              yield* restoreDetachedWorktree(worktree.repository, worktree.path, worktree.baseCommit)
+              yield* makeScratch(worktree.path)
+            } else {
+              if (!(yield* branchExists(worktree.repository, worktree.branch)))
+                return yield* new TaskRefused({ taskId: input.taskId, why: 'branch_gone' })
+              yield* restoreWorktree(worktree.repository, worktree.path, worktree.branch)
+            }
             // Put back, it is a fresh one, with nothing installed: it is set up again. Said at once, so a later one that
             // can't be put back doesn't leave this one taken for set up when the person tries again.
             yield* sql.withTransaction(

@@ -371,9 +371,17 @@ export const namedRemotes = (cwd: string, which: 'fetch' | 'push' = 'fetch') =>
 export const addWorktree = (repository: string, path: string, branch: string, base: string) =>
   git(repository, 'worktree', 'add', '-b', branch, path, base)
 
+/** Adds a worktree with no branch, detached at a commit: a plain task's, until its lead first changes the repository. */
+export const addDetachedWorktree = (repository: string, path: string, commit: string) =>
+  git(repository, 'worktree', 'add', '--detach', path, commit)
+
 /** Puts back a worktree whose folder is gone, on the branch it had: git forgets the missing one first. */
 export const restoreWorktree = (repository: string, path: string, branch: string) =>
   Effect.andThen(git(repository, 'worktree', 'prune'), git(repository, 'worktree', 'add', path, branch))
+
+/** Puts back a worktree whose folder is gone that never had a branch, detached where it started. */
+export const restoreDetachedWorktree = (repository: string, path: string, commit: string) =>
+  Effect.andThen(git(repository, 'worktree', 'prune'), addDetachedWorktree(repository, path, commit))
 
 /** The files the worktree hasn't committed, changed, new or deleted, ignored files aside; by path, sorted. */
 export const uncommittedFiles = (cwd: string) =>

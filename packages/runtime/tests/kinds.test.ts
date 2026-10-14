@@ -6,6 +6,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Coordinator } from '../src/Coordinator'
 import { Instance } from '../src/Instance'
 import { endsInChange, handedOf, kindOf } from '../src/kinds'
 import { Plans } from '../src/Plans'
@@ -15,14 +16,17 @@ import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
 import { Tasks } from '../src/Tasks'
 import { addItem } from '../src/threads'
-import { repository, runtime, until } from './support'
+import type { ToolAccess } from '../src/ToolServer'
+import { callTool, repository, runtime, until } from './support'
 
 /*
  * A task's kind is read from what it has, never stored (DEV-96): a change
- * has a pull request, commits or changes on its branch, or a plan that ends
- * in one; anything else is plain. A plain task that finished waits on its
- * board as Finished, and nothing else counts it; seeing it settles it as
- * done, and writing to its lead opens it again.
+ * has a branch (every planned task from its start), a pull request, commits
+ * or changes on its branch, or a plan that ends in one; anything else is
+ * plain, as a task the coordinator starts with start_task is until its lead
+ * changes the repository. A plain task that finished waits on its board as
+ * Finished, and nothing else counts it; seeing it settles it as done, and
+ * writing to its lead opens it again.
  */
 
 const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
@@ -58,6 +62,19 @@ const planned = (projectId: string, title: string, description: string, plan: { 
     return task
   })
 
+/** A plain task, as the coordinator starts one with start_task: no plan to look over, and no branch until its lead writes. */
+const plain = (projectId: string, title: string, description: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const threadId = yield* (yield* Coordinator).thread(projectId)
+    const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+    assert.match(yield* callTool(access, 'start_task', { title, description, lead: { agent: 'codex' } }), /^Started /)
+    const [task] = yield* sql<{ taskId: string; threadId: string }>`
+      SELECT k.id AS task_id, t.id AS thread_id FROM tasks k JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+      WHERE k.project_id = ${projectId} AND k.title = ${title}`
+    return task ?? assert.fail('no task')
+  })
+
 /** The task's card once it stands where `check` wants it. */
 const cardOnce = (taskId: string, check: (card: { readonly phase: string }) => boolean) =>
   Effect.gen(function* () {
@@ -81,9 +98,11 @@ const row = (taskId: string) =>
 const picture = (digest: string, name: string) => ({ sha256: digest, mediaType: 'image/png', bytes: 120, width: 8, height: 6, name })
 
 describe("a task's kind", () => {
-  it('is a change once it has, or will have, a pull request or work of its own; a review with nothing of its own; else plain', () => {
-    const none = { reviewing: null, end: null, changes: 0, made: false }
+  it('is a change once it has a branch, or has or will have a pull request or work of its own; a review with nothing of its own; else plain', () => {
+    const none = { reviewing: null, end: null, changes: 0, made: false, branched: false }
     assert.strictEqual(kindOf(none), 'plain')
+    // A planned task has its branch from its start, whatever its end: one that merges here has none.
+    assert.strictEqual(kindOf({ ...none, branched: true }), 'change')
     for (const end of ['draft', 'ready', 'none']) assert.strictEqual(kindOf({ ...none, end }), 'change', end)
     assert.strictEqual(kindOf({ ...none, end: 'merge' }), 'plain')
     assert.strictEqual(kindOf({ ...none, changes: 1 }), 'change')
@@ -104,6 +123,8 @@ describe("a task's kind", () => {
     }
     assert.strictEqual(kindOf({ ...none, reviewing }), 'review')
     assert.strictEqual(kindOf({ ...none, reviewing, end: 'draft' }), 'review')
+    // A branch alone isn't a review's own work.
+    assert.strictEqual(kindOf({ ...none, reviewing, branched: true }), 'review')
     // A review the person takes over, with work of its own, is a change.
     assert.strictEqual(kindOf({ ...none, reviewing, made: true }), 'change')
     assert.isFalse(endsInChange(null))
@@ -131,41 +152,46 @@ describe("a task's kind", () => {
     assert.isNull(handedOf({ evidence: [] }, [{ files: [] }]))
   })
 
-  it.live('is read from what the task has: plain until it makes something, a change once it does, or plans to', () =>
+  it.live('is read from what the task has: plain with no branch, a change with one, with commits, or a plan that ends in one', () =>
     Effect.gen(function* () {
       const queries = yield* Queries
       const project = yield* open
-      const question = yield* planned(project.projectId, 'Which partners still call v1?', '[lead:finish]')
+      const question = yield* plain(project.projectId, 'Which partners still call v1?', '[lead:finish]')
       const change = yield* planned(project.projectId, 'Retry the checkout', '[lead:finish] [lead:edit]')
+      // Planned, in a project with no host, so it merges here when accepted: its plan has no end, and it makes nothing.
+      const kept = yield* planned(project.projectId, 'Keep the old checkout', '[lead:finish]')
       const later = yield* planned(project.projectId, 'Sign webhooks', '', { end: 'draft', later: true })
 
-      const plain = yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
-      assert.deepInclude(plain, { kind: 'plain', handed: null, reviewing: null })
+      const plainCard = yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
+      assert.deepInclude(plainCard, { kind: 'plain', handed: null, reviewing: null })
       assert.strictEqual((yield* cardOnce(change.taskId, (card) => card.phase === 'ready')).kind, 'change')
-      // Its plan ends in a pull request: a change before it has done anything.
+      // On its branch from its start, it is a change though it made nothing, and ready to accept.
+      assert.strictEqual((yield* cardOnce(kept.taskId, (card) => card.phase === 'ready')).kind, 'change')
+      // Its plan ends in a pull request, and it has its branch: a change before it has done anything.
       assert.deepInclude(yield* queries.card(later.taskId), { phase: 'planned', kind: 'change' })
 
       // Finished, it waits on its board, and nothing else counts it as waiting on the person.
       const board = yield* queries.board(project.projectId)
-      assert.deepStrictEqual(
+      assert.sameDeepMembers(
         board.tasks.filter((task) => task.phase === 'ready').map((task) => [task.title, task.kind]),
         [
           ['Which partners still call v1?', 'plain'],
           ['Retry the checkout', 'change'],
+          ['Keep the old checkout', 'change'],
         ],
       )
       const home = yield* queries.home()
-      assert.deepStrictEqual(
+      assert.sameMembers(
         home.tasks.map((task) => task.title),
-        ['Retry the checkout'],
+        ['Retry the checkout', 'Keep the old checkout'],
       )
       const summary = (yield* queries.projects).projects.find((one) => one.id === project.projectId)
-      assert.strictEqual(summary?.ready, 1)
+      assert.strictEqual(summary?.ready, 2)
       assert.deepStrictEqual([...(yield* queries.finished)], [question.taskId])
     }).pipe(Effect.provide(withQueries())),
   )
 
-  it.live('becomes a change as a plain task writes, and a change at work shows how big its branch is so far', () =>
+  it.live('is a change from its start when planned, and at work shows how big its branch is so far', () =>
     Effect.gen(function* () {
       const queries = yield* Queries
       const sessions = yield* Sessions
@@ -173,9 +199,11 @@ describe("a task's kind", () => {
       const project = yield* open
       const looking = yield* planned(project.projectId, 'Look around', '[lead:wait]')
       const card = yield* cardOnce(looking.taskId, (one) => one.phase === 'running')
-      assert.strictEqual(card.kind, 'plain')
-      assert.isNull((yield* queries.board(project.projectId)).tasks.find((task) => task.taskId === looking.taskId)?.changed)
-      // Its lead writes a file in its worktree: it is a change now, its size read from git.
+      assert.strictEqual(card.kind, 'change')
+      assert.deepInclude((yield* queries.board(project.projectId)).tasks.find((task) => task.taskId === looking.taskId)?.changed, {
+        files: 0,
+      })
+      // Its lead writes a file in its worktree: its size is read from git.
       const [workspace] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${looking.taskId}`
       writeFileSync(join(workspace?.path ?? '', 'notes.md'), 'one\ntwo\n')
       // As a lead's edit comes: with its tool call, which is what tells what git says is worth reading again.
@@ -196,7 +224,7 @@ describe("a task's kind", () => {
   it.live('shows what a plain task handed back while it waits: its report’s pictures and the files it named', () =>
     Effect.gen(function* () {
       const project = yield* open
-      const question = yield* planned(project.projectId, 'Prototype the empty state', '[lead:finish]')
+      const question = yield* plain(project.projectId, 'Prototype the empty state', '[lead:finish]')
       yield* cardOnce(question.taskId, (card) => card.phase === 'ready')
       const place = { projectId: project.projectId as ProjectId, threadId: question.threadId }
       yield* addItem(place, 'agent_message', {
@@ -229,7 +257,7 @@ describe('seeing a task', () => {
       const tasks = yield* Tasks
       const sql = yield* SqlClient.SqlClient
       const project = yield* open
-      const question = yield* planned(project.projectId, 'Which partners still call v1?', '[lead:finish]')
+      const question = yield* plain(project.projectId, 'Which partners still call v1?', '[lead:finish]')
       const change = yield* planned(project.projectId, 'Retry the checkout', '[lead:finish] [lead:edit]')
       const working = yield* planned(project.projectId, 'Hold the line', '[lead:wait]')
       yield* cardOnce(question.taskId, (card) => card.phase === 'ready')

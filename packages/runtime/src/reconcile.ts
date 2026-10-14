@@ -62,12 +62,15 @@ export const reconcile = Effect.fn('reconcile')(function* (instance: {
     })
   }
 
-  // A worktree a crash interrupted: ready if git finished adding it, failed otherwise.
-  const preparing = yield* sql<{ id: string; projectId: ProjectId; path: string; branch: string }>`
-    SELECT id, project_id, path, branch FROM workspaces WHERE state = 'preparing' AND device_id = ${instance.deviceId}`
+  // A worktree a crash interrupted: ready if git finished adding it, on its branch or, a plain task's, on none; failed otherwise.
+  const preparing = yield* sql<{ id: string; projectId: ProjectId; path: string; branch: string; branched: number }>`
+    SELECT id, project_id, path, branch, branched_at IS NOT NULL AS branched FROM workspaces
+    WHERE state = 'preparing' AND device_id = ${instance.deviceId}`
   for (const workspace of preparing) {
     const branch = yield* currentBranch(workspace.path)
-    const head = branch === workspace.branch ? yield* git(workspace.path, 'rev-parse', 'HEAD').pipe(Effect.option) : Option.none()
+    // With no branch, git finished once the folder is a worktree with a head, which reading it says.
+    const added = workspace.branched === 1 ? branch === workspace.branch : branch === undefined
+    const head = added ? yield* git(workspace.path, 'rev-parse', 'HEAD').pipe(Effect.option) : Option.none()
     const revision = yield* change(
       'workspaces',
       workspace.id,

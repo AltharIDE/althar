@@ -82,8 +82,9 @@ export const indexTask = Effect.fn('Search.indexTask')(function* (taskId: string
     ORDER BY i.created_at, i.sequence`
   const links = yield* sql<{ key: string; ref: string; at: string }>`
     SELECT key, ref, created_at AS at FROM external_links WHERE task_id = ${taskId} ORDER BY created_at`
+  // Its branches once made: a plain task's has none until its lead changes the repository.
   const branches = yield* sql<{ branch: string }>`
-    SELECT branch FROM workspaces WHERE task_id = ${taskId}
+    SELECT branch FROM workspaces WHERE task_id = ${taskId} AND branched_at IS NOT NULL
     UNION SELECT c.branch FROM repository_changes c JOIN change_sets s ON s.id = c.change_set_id WHERE s.task_id = ${taskId}`
   const worktrees = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${taskId}`
   // What its agents changed, as their tool calls name the files: read in the store, in SQLite's own JSON.

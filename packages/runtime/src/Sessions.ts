@@ -67,6 +67,7 @@ import { evidenceFolderOf, reviewCopyOf } from './reviewCopy'
 import { Setups } from './Setups'
 import type { InputImage } from './sentImages'
 import { evidenceForReview } from './evidence'
+import { scratchOf } from './firstWrite'
 import { defaultEffortOf } from './preferences'
 import { addItem, betweenTurns, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import {
@@ -109,7 +110,10 @@ interface TaskRepository {
   /** What it is to the project, as the person set it. */
   readonly role: string
   readonly worktree: string
+  /** Its branch; for a plain task's that has none yet, the one it gets once its lead changes the repository. */
   readonly branch: string
+  /** 1 once it is on its branch; 0 for a plain task's that has none yet. */
+  readonly branched: number
   readonly baseRef: string
   readonly baseCommit: string | null
   readonly defaultBranch: string
@@ -693,8 +697,8 @@ export class Sessions extends Context.Service<
             } satisfies ThreadContext as ThreadContext
           // The task's repositories, each in its worktree here, the first first.
           const repositories = yield* sql<TaskRepository>`
-            SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.base_ref, w.base_commit,
-              coalesce(b.default_base_ref, w.base_ref) AS default_branch, b.folder AS within
+            SELECT b.display_name AS name, b.role, w.path AS worktree, w.branch, w.branched_at IS NOT NULL AS branched, w.base_ref,
+              w.base_commit, coalesce(b.default_base_ref, w.base_ref) AS default_branch, b.folder AS within
             FROM threads t
             JOIN workspaces w ON w.task_id = t.task_id AND w.device_id = ${instance.deviceId} AND w.state = 'ready'
             JOIN repository_bindings b ON b.id = w.binding_id
@@ -1916,6 +1920,8 @@ export class Sessions extends Context.Service<
           // Althar pushed of it or a remote's copy of it here. None of these says it was never pushed, so nothing here allows rewriting it.
           const published = yield* Effect.forEach(thread.repositories, (repository) =>
             Effect.gen(function* () {
+              // With no branch yet, nothing of it is anywhere else.
+              if (repository.branched === 0) return ''
               // Where the host last saw its head, else what Althar pushed.
               const [change] = yield* sql<{ url: string; at: string | null }>`
                 SELECT c.pull_request_url AS url, coalesce(
@@ -1949,7 +1955,10 @@ export class Sessions extends Context.Service<
           const changed = states.flatMap((state) => (state.changed === '' ? [] : [state.changed])).join('\n')
           const status = states.flatMap((state) => (state.status === '' ? [] : [state.status])).join('\n')
           const where = (repository: TaskRepository) =>
-            `${repository.worktree}, on the branch ${repository.branch}, which started from ${repository.baseRef}${repository.baseCommit === null ? '' : ` at ${repository.baseCommit.slice(0, 12)}`}${repository.within === null ? '' : `. The project is its folder ${repository.within}: start there, and change the rest of the repository where the task needs it`}`
+            `${repository.worktree}, ${repository.branched === 0 ? 'with no branch yet, at' : `on the branch ${repository.branch}, which started from`} ${repository.baseRef}${repository.baseCommit === null ? '' : ` at ${repository.baseCommit.slice(0, 12)}`}${repository.within === null ? '' : `. The project is its folder ${repository.within}: start there, and change the rest of the repository where the task needs it`}`
+          // A plain task's worktrees have no branch until its lead changes the repository (DEV-96).
+          const unbranched = thread.repositories.filter((repository) => repository.branched === 0)
+          const [plainFirst] = unbranched
           return [
             why.kind === 'start'
               ? several
@@ -1966,6 +1975,11 @@ export class Sessions extends Context.Service<
               : [
                   `The project's other repositories, to read but not change (they are the person's own checkouts, on whatever branch they left them): ${others.map((other) => `${withRole(other.name, other.role)}, at ${other.path}`).join('; ')}.`,
                 ]),
+            ...(plainFirst === undefined
+              ? []
+              : [
+                  `This task has no branch yet: it is a question, a look around or something to try, and it leaves the repository as it found it. Put what you'd throw away, such as prototypes, notes and screenshots, in ${unbranched.length === 1 ? `its scratch folder, ${scratchOf(plainFirst.worktree)}` : `each worktree's scratch folder, .althar/scratch`}, which git ignores: the task stays as it is. Anything you change in the repository itself, committed or not, makes the task a change on a branch of its own, ${plainFirst.branch}: Althar makes it when your turn ends, or when you call finish_step, with your work on it, and you carry on there in the same folder. From then the task is published as the project's changes are, and you commit on its branch as on any task. Where you changed nothing in the repository, finish_step needs only your summary.`,
+                ]),
             // How the step ends: the lead says so, with what the person reads instead of the whole turn.
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
             // After its plan, what the person asks for is a round of work of its own (ADR-034).
@@ -1977,7 +1991,10 @@ export class Sessions extends Context.Service<
             // Althar reaches the code host for the task (ADR-011).
             "Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: when the plan's steps are done, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. read_issue reads the issue the task came from, or any other.",
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
-            `${published.join(' ')} Bring the default branch in by merging it, never by rebasing, and never amend or squash commits that were or may have been pushed: a pull request would no longer take your commits. Where Althar says a branch is published, go by that, not by git status or a remote you can't fetch.`,
+            [
+              ...published.filter((said) => said !== ''),
+              "Bring the default branch in by merging it, never by rebasing, and never amend or squash commits that were or may have been pushed: a pull request would no longer take your commits. Where Althar says a branch is published, go by that, not by git status or a remote you can't fetch.",
+            ].join(' '),
             ...(resolves?.resolves === 1
               ? [
                   "This project has you resolve a conflict with the default branch on your own: Althar tells you when it finds one, and what to merge. Commit the merge as soon as the conflicts are settled and the quick checks pass, and don't end your turn with it uncommitted or while you wait on something running in the background: Althar looks at the branch when your turn ends. If the full test suites then find something, fix it in one follow-up commit on top of the merge. On a pull request, Althar pushes that merge itself once you commit it, with that one fix if you made it, and then a fix you commit on top when Althar tells you its checks failed, as one commit. Nothing else you commit is pushed for you, and you still never push.",
@@ -2014,7 +2031,8 @@ export class Sessions extends Context.Service<
             '- list_models, for the models you can give work to now, with how each scores, whether a plan pays for it, and the efforts it takes.',
             '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial; each with an effort where it matters. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
             "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built. It shows over the composer with where it answers. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command.",
-            "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
+            "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once, with no branch. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
+            "- rename_task, when a task's work became a change (a task started with start_task whose lead began changing the repository, which your news says) and its title no longer says what it does: give it one that does, in a few words. What the person asked stays in its thread.",
             '- list_tasks, read_task and read_thread, to see what is under way and how it went; read_task says what a finished task built. read_thread without a task reads your conversation with the person, back to its start.',
             "- find_tasks, when the person asks about a task by what it did rather than its name (the retry fix, PR 143, the task that changed the login page): it finds the project's tasks by words from their titles, what was asked, what their leads reported and built, pull request numbers, branches and files.",
             "- read_issue and find_issues, for the issues on the person's connected trackers and in the project's repository. When the person points at an issue, read it, and draft the task from it with its link or key as draft_task's issue.",

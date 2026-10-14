@@ -665,6 +665,19 @@ const playRole = async (
         session.played.add('[lead:serve]')
         await serve(text.includes('[lead:serve-exits]'))
       }
+      // What a plain task's lead does in the turn it is asked, where the words it was given say so: writes a file in the
+      // repository and leaves it uncommitted (`[lead:write]`), commits one on whatever its worktree is on (`[lead:commit]`),
+      // or keeps a sketch in its scratch folder, which git ignores (`[lead:sketch]`). Without `[lead:finish]`, its turn ends there.
+      const writes = text.includes('[lead:write]')
+      const commits = text.includes('[lead:commit]')
+      const sketches = text.includes('[lead:sketch]')
+      if (writes) appendFileSync(join(session.cwd, 'draft.md'), 'A first draft.\n')
+      if (commits) commitIn(session.cwd, 'change.txt', 'Change it')
+      if (sketches) {
+        mkdirSync(join(session.cwd, '.althar', 'scratch'), { recursive: true })
+        writeFileSync(join(session.cwd, '.althar', 'scratch', 'sketch.html'), '<p>A sketch.</p>\n')
+      }
+      if ((writes || commits || sketches) && !text.includes('[lead:finish]')) return 'Did it, without reporting.'
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
         const aside = session.markers.has('[lead:set-aside]')
@@ -714,7 +727,9 @@ const playRole = async (
         }
       }
       const finish = async () => {
-        const answer = await call('finish_step', { summary: 'Did the task.', built: BUILT, ...evidence() })
+        // A lead that says only what it did, `[lead:terse]`: nothing of what the task built.
+        const built = session.markers.has('[lead:terse]') ? {} : { built: BUILT }
+        const answer = await call('finish_step', { summary: 'Did the task.', ...built, ...evidence() })
         const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
         if (template === undefined) return answer
         const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')

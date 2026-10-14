@@ -24,6 +24,7 @@ import { Agents, RuntimeConfig } from './Config'
 import { Changes, type Published } from './Changes'
 import { NotConnected } from './Connections'
 import { AttentionClosed, NoChangeToOpen, NotFound, NothingToWaitFor } from './errors'
+import { branchedWords, branchOnFirstWrite, unbranched } from './firstWrite'
 import { Instance } from './Instance'
 import { Issues } from './Issues'
 import { Limits, outWords, whenWords } from './Limits'
@@ -790,6 +791,8 @@ export class Runs extends Context.Service<
             if (task === undefined) return yield* new NotFound({ kind: 'task', id: taskId })
             // An abandoned task's branch stays as it is; so does a merged one's, but for commits after its pull requests.
             if (task.state === 'abandoned') return yield* new NoChangeToOpen({ taskId, why: 'settled' })
+            // A plain task that hasn't changed the repository has no branch: there is nothing to open one for.
+            if (yield* unbranched(taskId)) return yield* new NoChangeToOpen({ taskId, why: 'nothing' })
             const opened = yield* changes.ofTask(taskId)
             // By repository: one whose pull request is open takes pushes, one whose last merged or closed with commits after it a new one.
             const after = opened.length > 0 ? yield* changes.unshipped(taskId) : []
@@ -853,6 +856,8 @@ export class Runs extends Context.Service<
       const conclude = (run: RunRow) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // A plain task whose lead changed nothing in the repository has no branch, and nothing to send anywhere: it is done.
+          if (yield* unbranched(run.taskId)) return yield* finish(run, 'succeeded')
           // A round of work never publishes by itself (ADR-034): what it committed goes to the task's open pull request from its
           // card, or in a new one the person opens there once the last merged or closed.
           if (run.planId === null) {
@@ -1098,6 +1103,21 @@ export class Runs extends Context.Service<
       const stepOf = (key: string): StuckInfo['step'] =>
         key === 'review' ? 'review' : key === 'settle' ? 'settle' : key === 'publish' ? 'publish' : 'implement'
 
+      /**
+       * Where a task's lead's turn ends, or its session goes, a plain task
+       * whose lead changed the repository gets its branch (`firstWrite.ts`),
+       * one thing at a time with publishing the task. Nothing for any other
+       * thread, or a task with its branch already.
+       */
+      const firstWriteOn = (threadId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ taskId: string }>`
+            SELECT t.task_id FROM threads t WHERE t.id = ${threadId} AND t.kind = 'task'
+              AND EXISTS (SELECT 1 FROM workspaces w WHERE w.task_id = t.task_id AND w.branched_at IS NULL)`
+          if (thread !== undefined) yield* changes.exclusive(thread.taskId, branchOnFirstWrite(thread.taskId))
+        }).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look for a plain task’s first change', cause)))
+
       /** Told once when its turn ends without the report its step needs. */
       const reminders = {
         lead: "Your step isn't done until you call Althar's finish_step tool. If you have done it, call finish_step now with your summary. If you can't go on without the person, call it saying what you need from them.",
@@ -1117,6 +1137,8 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           if (event._tag !== 'TurnEnded' && event._tag !== 'SessionEnded') return
+          // A plain task whose lead changed the repository in the turn that ended is a change now, on a branch of its own.
+          yield* firstWriteOn(event.threadId)
           const on = yield* stepOn(event.threadId)
           // A turn the person interrupted is theirs to carry on; a round of work it left with nothing new goes back where it was.
           if (event._tag === 'TurnEnded' && event.state === 'interrupted') {
@@ -2236,6 +2258,17 @@ export class Runs extends Context.Service<
             handed,
             worktrees.map((worktree) => worktree.path),
           )
+          // A plain task whose lead changed the repository is a change from here, on its branch, before anything below reads it; what
+          // it hands as evidence now isn't a change. One that changed nothing has no branch still, and has built nothing to say.
+          const branched =
+            access.taskId === null
+              ? []
+              : yield* changes.exclusive(access.taskId, branchOnFirstWrite(access.taskId, evidenceFiles(evidence)))
+          const plain = access.taskId !== null && (yield* unbranched(access.taskId))
+          const reply = (said: string) =>
+            branched.length === 0
+              ? said
+              : `${said} You changed the repository, so the task is a change now, ${branchedWords(branched)}: commit there.`
           const itemId = yield* newId(Ids.threadItem)
           const shows = Effect.gen(function* () {
             const kept = yield* keepEvidence({ projectId: access.projectId as ProjectId, itemId, folders: [] }, evidence)
@@ -2254,14 +2287,14 @@ export class Runs extends Context.Service<
             access.taskId === null ? [] : yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${access.taskId} LIMIT 1`
           if (underWay === undefined && planned === undefined) {
             // A task started without a plan has no steps: the summary is still what the person reads, and what it built, its end.
-            if (built === null) return yield* new ToolRefused({ message: builtAsk(false) })
+            if (built === null && !plain) return yield* new ToolRefused({ message: builtAsk(false) })
             yield* addItem(
               { projectId: access.projectId as ProjectId, threadId: access.threadId },
               'step_result',
               { step: 'implement', summary, ...builds, ...descriptions, ...(yield* shows) },
               { id: itemId },
             )
-            return 'Althar has your summary.'
+            return reply('Althar has your summary.')
           }
           // After its plan, the lead's report opens a round of work of its own, which it finishes (ADR-034).
           const current = underWay ?? (access.taskId === null ? undefined : (yield* openRound(access.taskId, access.sessionId, true))?.run)
@@ -2276,7 +2309,7 @@ export class Runs extends Context.Service<
           // that made nothing new needn't say it.
           const workBefore = step === 'settle' ? ((JSON.parse(attempt.input) as { before?: string }).before ?? '') : ''
           const workAfter = step === 'settle' ? yield* digestAll(current.taskId) : ''
-          if (built === null && !quiet && (step === 'implement' || workAfter !== workBefore))
+          if (built === null && !quiet && !plain && (step === 'implement' || workAfter !== workBefore))
             return yield* new ToolRefused({ message: builtAsk(step === 'settle') })
           // A task that ends on its host pushes commits only: what isn't committed is the lead's to commit or clear away first.
           const end = (yield* stepsOf(current)).end ?? (yield* changes.endFor(current.projectId, current.taskId))
@@ -2334,13 +2367,15 @@ export class Runs extends Context.Service<
             // A pull request that merged while it ran settles the task now.
             yield* Effect.ignore(changes.settleIfMerged(current.taskId))
             yield* touchCard(current.taskId)
-            return 'Althar has your summary. Nothing on the branch changed this round, so the task is back where it was.'
+            return `Althar has your summary. Nothing ${plain ? 'in the repository' : 'on the branch'} changed this round, so the task is back where it was.`
           }
           if (step === 'implement') {
             const next = yield* review(current, 0)
-            return next === undefined
-              ? 'Althar has your summary. The task is ready for the person.'
-              : 'Althar has your summary. A review starts now; wait for its findings.'
+            return reply(
+              next === undefined
+                ? 'Althar has your summary. The task is ready for the person.'
+                : 'Althar has your summary. A review starts now; wait for its findings.',
+            )
           }
           // Another round only if settling changed the code, and rounds are left.
           if (workAfter !== workBefore && attempt.iteration + 1 < ROUNDS) {
