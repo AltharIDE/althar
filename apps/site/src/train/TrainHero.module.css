@@ -1,0 +1,108 @@
+/* The first screen as a carriage: the landscape on a canvas behind, the
+   photograph of the carriage over it with its windows cut out, the words
+   in the middle window, the lead under it. */
+
+.hero {
+  --wall: #120c08;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  height: clamp(640px, 100svh, 1060px);
+  background: var(--wall);
+  color: #fff;
+  /* The stage measures the photograph against this box. */
+  container-type: size;
+}
+
+/* What the camera sees, moved as one: its pivot the window's upper middle, where the words are. */
+.camera { position: absolute; inset: 0; z-index: -1; transform-origin: 50% 42%; will-change: transform; }
+
+/* The landscape, softened a touch: the lens is focused on the passengers. */
+.scene {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  filter: blur(0.6px) brightness(1.04);
+}
+
+/* What passes close by, over the landscape: as sharp as the screen's pixels, set over the glass by the script. */
+.near { position: absolute; pointer-events: none; }
+
+/* The light through the glass, over the view and under the carriage: too bright as eyes find it, and on the beats. */
+.flash {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 70% 62% at 50% 38%, #fffaf0, rgba(255, 248, 236, 0.8) 55%, rgba(255, 244, 228, 0.45));
+  mix-blend-mode: screen;
+}
+.defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/*
+ * The photograph, covering the box as `object-fit: cover` would, but keeping
+ * its focus point (--fx, --fy, in the plate's px) as near the middle as the
+ * cover allows. --u is a plate px in CSS px. Everything set in the window
+ * uses the same measure, so it stands where the glass is.
+ */
+.stage {
+  position: absolute; inset: 0;
+  --fx: var(--fx-wide);
+  --u: max(100cqw / var(--pw), 100cqh / var(--ph));
+  --px: clamp(100cqw - var(--pw) * var(--u), 50cqw - var(--fx) * var(--u), 0px);
+  --py: clamp(100cqh - var(--ph) * var(--u), 50cqh - var(--fy) * var(--u), 0px);
+}
+.plate {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  left: var(--px); top: var(--py);
+  width: calc(var(--pw) * var(--u)); height: calc(var(--ph) * var(--u));
+  will-change: transform;
+}
+.photo { display: block; width: 100%; height: 100%; }
+/* The carriage dimming as the light outside is taken: masked by the photograph, so only the carriage darkens. */
+.dim { position: absolute; inset: 0; background: #000; opacity: 0; mask-size: 100% 100%; -webkit-mask-size: 100% 100%; }
+/* Up out of the dark as the train sets off (--dark, from the script); dark until it has drawn the first frame, so the scene comes up once, whole. */
+.curtain { position: absolute; inset: 0; z-index: 1; background: #000; opacity: 0; pointer-events: none; }
+@media (scripting: enabled) { .curtain { opacity: var(--dark, 1); } }
+
+/* Film's grain over the whole, stepping as film does, and the corners falling dark as a lens has them. */
+.grain, .vignette { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.grain { inset: -64px; background-size: 128px 128px; opacity: 0.7; mix-blend-mode: overlay; }
+@media (prefers-reduced-motion: no-preference) { .grain { animation: grain 0.5s steps(6) infinite; } }
+@keyframes grain {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-37px, 22px); }
+  40% { transform: translate(18px, -41px); }
+  60% { transform: translate(-12px, 9px); }
+  80% { transform: translate(41px, 30px); }
+  100% { transform: translate(0, 0); }
+}
+.vignette {
+  background:
+    radial-gradient(ellipse 90% 85% at 50% 42%, transparent 58%, rgba(0, 0, 0, 0.45) 100%),
+    linear-gradient(transparent 72%, rgba(8, 4, 2, 0.7));
+}
+
+/* The middle window's glass: the view as the train sets off (its picture set by the script, PLATE.view) stands in it until the landscape is drawn, and without scripts. */
+.glass {
+  position: absolute;
+  z-index: 0;
+  left: calc(var(--px) + var(--wx) * var(--u));
+  top: calc(var(--py) + var(--wy) * var(--u));
+  width: calc(var(--ww) * var(--u));
+  height: calc(var(--wh) * var(--u));
+  border-radius: calc(var(--wr) * var(--u));
+  background: #4f86dc center / cover no-repeat;
+  /* As the landscape's canvas is shown. */
+  filter: brightness(1.04);
+}
+/* Giving way to the landscape: at once as the train sets off in the dark, softly if it comes after. */
+.hero[data-drawn] .glass { opacity: 0; visibility: hidden; transition: opacity 0.5s ease-out, visibility 0s 0.5s; }
+
+/* The words, set by the look (Looks.module.css): those in the scene, and those that stand still in front of it. They wait for the train to set off, as the launch has them; crawlers read them in the HTML all the same. */
+.words, .steady { display: contents; }
+@media (scripting: enabled) { .hero:not([data-begun]) :is(.words, .steady) { visibility: hidden; } }
+
+@media (max-width: 760px) {
+  .stage { --fx: var(--fx-phone); }
+}

@@ -1,0 +1,71 @@
+/* The look's words (looks.tsx). Those in the scene are set inside the
+   stage, by the photograph's measure: --px, --py (where the plate stands),
+   --u (a plate px in CSS px), --wx, --wy, --ww, --wh (the middle window).
+   Those that stand still (the foot) are set on the first screen itself. */
+
+/* The middle window, kept on the screen when a phone crops it. */
+.window {
+  position: absolute;
+  z-index: 2;
+  left: max(12px, calc(var(--px) + var(--wx) * var(--u)));
+  right: max(12px, calc(100cqw - var(--px) - (var(--wx) + var(--ww)) * var(--u)));
+  top: calc(var(--py) + var(--wy) * var(--u));
+  height: calc(var(--wh) * var(--u));
+  color: #fff;
+}
+/* Each word rises out of its own mask; the padding keeps ascenders, descenders and italics whole, and the margins give the room back. */
+.mask { display: inline-block; overflow: hidden; vertical-align: top; padding: 0.1em 0.08em 0.2em; margin: -0.1em -0.08em -0.2em; }
+.word { display: inline-block; transform-origin: 0 100%; }
+.hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* The lead, on the dark of the carriage's foot. */
+.lead { font-size: 15px; line-height: 1.55; letter-spacing: -0.006em; text-wrap: pretty; color: rgba(255, 248, 240, 0.86); text-shadow: 0 1px 14px rgba(0, 0, 0, 0.7); }
+
+/* Without scripts, in the scene, under the photograph: the window's frame and the passengers stand in front of it. With them, the scene paints it (bigword.ts) and this stands in only if it can't. */
+.depthWord {
+  position: absolute;
+  z-index: 0;
+  left: calc(var(--px) + var(--wx) * var(--u));
+  width: calc(var(--ww) * var(--u));
+  top: calc(var(--py) + (var(--wy) + var(--wh) * 0.34) * var(--u));
+  font-family: 'Inter Display', var(--display);
+  font-size: min(calc(var(--ww) * var(--u) * 0.4), 44cqw);
+  font-weight: 800;
+  line-height: 0.8;
+  letter-spacing: -0.06em;
+  text-align: center;
+  color: #fff;
+  text-shadow: 0 10px 60px rgba(6, 18, 60, 0.25);
+}
+.depthWord span { display: inline-block; padding-right: 0.05em; }
+.depthH1 {
+  padding: max(64px, calc(var(--wh) * var(--u) * 0.11)) 28px 0;
+  font-family: 'Inter Display', var(--display);
+  font-size: clamp(26px, min(var(--ww) * var(--u) * 0.042, var(--wh) * var(--u) * 0.09), 52px);
+  font-weight: 500;
+  line-height: 1.08;
+  letter-spacing: -0.032em;
+  text-align: center;
+  text-wrap: balance;
+  text-shadow: 0 2px 30px rgba(8, 22, 80, 0.4);
+}
+.depthFoot {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: clamp(22px, 4vh, 40px);
+  width: min(620px, calc(100cqw - 32px));
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+.depthWays > div { justify-content: center; }
+
+@media (max-width: 760px) {
+  .depthH1 { padding-top: 76px; font-size: clamp(26px, 7.4vw, 32px); }
+  /* The window runs off a phone's sides: the word is set on the screen instead, still behind the man. */
+  .depthWord { left: 0; width: calc(100cqw - 14px); font-size: 37cqw; text-align: right; }
+}
