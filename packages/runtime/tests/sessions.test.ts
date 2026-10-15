@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect, Layer, Option } from 'effect'
+import { Effect, Fiber, Layer, Option } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { AlreadyDelivered, AttentionClosed, NoSession, NotFound, SessionFailed, SessionRunning } from '../src/errors'
@@ -350,6 +350,32 @@ describe('sessions', () => {
       assert.include(reply, '[claude-code] Hello')
       assert.include(reply, 'Carry on with the task from where it stands.')
     }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('describes the session the runtime holds while a handover starts', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const { task: created } = yield* task()
+      const first = yield* sessions.start({ threadId: created.threadId, agentId: 'codex', model: 'large', effort: 'high' })
+      yield* settled(created.threadId, 1)
+
+      // The new row exists, but its slow connection has not replaced the session the runtime still holds.
+      const switching = yield* Effect.forkChild(sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode', model: 'small' }))
+      yield* until(sql<{ state: string }>`SELECT state FROM provider_sessions WHERE thread_id = ${created.threadId}`, (rows) =>
+        rows.some((row) => row.state === 'starting'),
+      )
+      const during = yield* queries.thread(created.threadId, { limit: 0 })
+      assert.deepStrictEqual(
+        [during.session?.id, during.session?.agentId, during.session?.model, during.session?.effort, during.session?.held],
+        [first, 'codex', 'large', 'high', true],
+      )
+
+      yield* Fiber.join(switching)
+      const after = yield* queries.thread(created.threadId, { limit: 0 })
+      assert.deepStrictEqual([after.session?.agentId, after.session?.model, after.session?.held], ['opencode', 'small', true])
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { each: { opencode: { slowStart: 500 } } }))))),
   )
 
   it.live('hands the thread over with what the person said: the new lead takes it first, after its brief, and the old one never does', () =>
