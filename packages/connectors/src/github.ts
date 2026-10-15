@@ -458,17 +458,23 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         }))
         return [...fromRuns, ...fromStatuses]
       }),
-    checkLog: (repository, check) => {
+    checkLog: (repository, check, whole = false) => {
       // Only GitHub Actions keeps logs Althar can read: a check run's id is its job's.
       const match = /^run:(\d+):github-actions$/.exec(check.id)
       if (match === null) return Effect.succeed(null)
       return http.text(`${repo(repository)}/actions/jobs/${match[1]}/logs`).pipe(
-        Effect.map(tail),
+        Effect.map((log) => (whole ? log : tail(log))),
         Effect.catchIf(
           (error) => error.reason === 'not_found' || error.reason === 'forbidden',
           () => Effect.succeed(null),
         ),
       )
+    },
+    rerun: (repository, check) => {
+      // Only a GitHub Actions job runs again from here: its check run's id is the job's.
+      const match = /^run:(\d+):github-actions$/.exec(check.id)
+      if (match === null) return Effect.succeed(false)
+      return http.json(Schema.Unknown, 'POST', `${repo(repository)}/actions/jobs/${match[1]}/rerun`).pipe(Effect.as(true))
     },
     activity: (repository, number, cursor) =>
       Effect.gen(function* () {

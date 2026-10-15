@@ -1416,6 +1416,10 @@ export class Queries extends Context.Service<
               AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
           // A conflict round: its lead is at work on it, though between turns, or it is the person's now.
           const round = yield* (yield* Changes).conflictStanding(taskId)
+          // A change in Althar's hands is under way while its checks run, and while its lead fixes them (ADR-040).
+          const hands =
+            task.runState === 'succeeded' ? yield* (yield* Changes).inHands(taskId).pipe(Effect.orElseSucceed(() => null)) : null
+          const seeing = hands !== null && !hands.given
           const resolving = round?.state === 'resolving' ? round : undefined
           const lead = yield* sessions.running(task.threadId)
           const reviewer = task.review === null ? Option.none() : yield* sessions.running(task.review)
@@ -1453,7 +1457,7 @@ export class Queries extends Context.Service<
             if (draftWaits !== undefined && task.state === 'open') return 'ready'
             // Merged, it is settled, unless commits after its pull requests are in none yet.
             if (task.state === 'done') return unshipped === null ? 'settled' : 'ready'
-            if (task.runState === 'succeeded') return 'ready'
+            if (task.runState === 'succeeded') return seeing && hands.running ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
             return working || task.held !== null ? 'running' : 'stopped'
@@ -1515,7 +1519,19 @@ export class Queries extends Context.Service<
             earlier: changes.filter((candidate) => candidate !== shown).toReversed(),
             unshipped,
             // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
-            step: task.step ?? (resolving === undefined || phase !== 'running' ? null : resolving.checks ? 'checks' : 'conflict'),
+            step:
+              task.step ??
+              (phase !== 'running'
+                ? null
+                : resolving !== undefined
+                  ? resolving.checks
+                    ? 'checks'
+                    : 'conflict'
+                  : seeing
+                    ? busy || !hands.running
+                      ? 'checks'
+                      : 'checks_running'
+                    : null),
             followUp: task.runState === 'running' && task.runPlan === null,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (implement?.agentId || null),

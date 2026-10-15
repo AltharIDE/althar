@@ -515,7 +515,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
           }
         }),
       ),
-    checkLog: (repository, check) => {
+    checkLog: (repository, check, whole = false) => {
       const match = /^pipeline:(\d+)$/.exec(check.id)
       if (match === null) return Effect.succeed(null)
       const run = `${repo(repository.path)}/pipelines/${match[1]}`
@@ -524,7 +524,8 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         const failed = steps.values.find((step) => step.state?.result?.name === 'FAILED' || step.state?.result?.name === 'ERROR')
         if (failed === undefined) return null
         // A finished step's log has moved to storage elsewhere; Bitbucket redirects there.
-        return tail(yield* http.text(`${run}/steps/${encodeURIComponent(failed.uuid)}/log`))
+        const log = yield* http.text(`${run}/steps/${encodeURIComponent(failed.uuid)}/log`)
+        return whole ? log : tail(log)
       }).pipe(
         Effect.catchIf(
           (error) => error.reason === 'not_found' || error.reason === 'forbidden',
@@ -532,6 +533,8 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         ),
       )
     },
+    // A pipeline runs again only whole, as a new one: not a check of its own.
+    rerun: () => Effect.succeed(false),
     activity: (repository, number, cursor) =>
       Effect.gen(function* () {
         // Read whole, to find each reply's thread; by ETag, so a quiet pull request costs little.

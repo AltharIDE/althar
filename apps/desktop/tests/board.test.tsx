@@ -715,6 +715,69 @@ describe('every state the board shows', () => {
     expect(screen.queryByRole('button', { name: /^Close PR/ })).toBeNull()
   })
 
+  describe('a task waiting for a free agent', () => {
+    const waiting = { phase: 'running' as const, step: 'implement', queued: { busy: 4, atOnce: 4 }, startedAt: '2026-10-01T10:00:00.000Z' }
+    const draw = (...tasks: BoardTask[]) =>
+      withServices(
+        <BoardView lanes={lanesOf(board({ tasks, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} />,
+        fakeClient().client,
+      )
+
+    it('shows nothing of progress before its first step has had an agent: no steps, branch or clock', () => {
+      draw(task({ ...waiting, title: 'Not yet', branch: 'althar/not-yet', changed: { files: 0, add: 0, del: 0 }, planWaits: true }))
+      expect(screen.getByText('Waiting')).toBeTruthy()
+      expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
+      expect(screen.queryByRole('list', { name: 'Steps' })).toBeNull()
+      expect(screen.queryByText('althar/not-yet')).toBeNull()
+      expect(screen.queryByText('0s')).toBeNull()
+    })
+
+    it('keeps the steps done so far and its real branch once work was done, with no step shown as under way', () => {
+      draw(
+        task({
+          ...waiting,
+          title: 'Midway',
+          branch: 'althar/midway',
+          changed: { files: 2, add: 14, del: 3 },
+          step: 'review',
+          startedAt: '2026-10-01T09:30:00.000Z',
+        }),
+      )
+      expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
+      const track = screen.getByRole('list', { name: 'Steps' })
+      expect(within(track).getByText('Implement').closest('li')?.className).toMatch(/done/)
+      // The step it waits on isn't drawn as running: the kit's track stands still and empty for a waiting task.
+      expect(track.getAttribute('data-status')).toBe('queued')
+      expect(screen.getByText('althar/midway')).toBeTruthy()
+      expect(screen.getByText('+14')).toBeTruthy()
+      expect(screen.getByText('30m')).toBeTruthy()
+    })
+
+    it('shows no branch chip for an empty diff on a running or a ready card, and still one whose size is unknown', () => {
+      draw(
+        task({
+          taskId: 'r',
+          title: 'Running, nothing yet',
+          phase: 'running',
+          step: 'implement',
+          branch: 'althar/running-empty',
+          changed: { files: 0, add: 0, del: 0 },
+        }),
+        task({
+          taskId: 'k',
+          title: 'Ready, nothing changed',
+          phase: 'ready',
+          branch: 'althar/ready-empty',
+          changed: { files: 0, add: 0, del: 0 },
+        }),
+        task({ taskId: 'u', title: 'Running, unknown', phase: 'running', step: 'implement', branch: 'althar/unknown-size', changed: null }),
+      )
+      expect(screen.queryByText('althar/running-empty')).toBeNull()
+      expect(screen.queryByText('althar/ready-empty')).toBeNull()
+      expect(screen.getByText('althar/unknown-size')).toBeTruthy()
+    })
+  })
+
   it('shows work its lead is resolving a conflict for at work, and what it couldn’t resolve as stuck, with why', () => {
     const why = 'The lead couldn’t resolve the conflict with main, in README.md. The merge of origin/main isn’t committed.'
     const lanes = lanesOf(

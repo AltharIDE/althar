@@ -45,6 +45,8 @@ export interface FakeServiceOptions {
   readonly conflictsOf?: (number: number) => boolean | undefined
   /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
   readonly checksFor?: (number: number, sha: string) => ReadonlyArray<Pick<Check, 'name' | 'state'> & { readonly log?: string }> | undefined
+  /** Whether the host can run a check again; it can, unless a test says. A check run again is in `reruns`. */
+  readonly reruns?: boolean
 }
 
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
@@ -88,6 +90,8 @@ export interface FakeControls {
   failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string, status?: number): void
   /** Every change opened, with every comment on it, Althar's included. */
   readonly changes: ReadonlyArray<ChangeRequest>
+  /** The ids of the checks Althar ran again, in order. */
+  readonly reruns: ReadonlyArray<string>
   /** Every issue `create` filed, in order, as it was filed: labels and all, since the fake takes any label. */
   readonly created: ReadonlyArray<Issue>
   commentsOn(number: number): ReadonlyArray<Comment>
@@ -155,6 +159,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const reviews = new Map<number, Array<Review>>()
   const checks = new Map<number, Array<Check>>()
   const logs = new Map<string, string | null>()
+  const reran: Array<string> = []
+  const starting = new Set<string>()
   const issues = new Map<string, Issue>()
   const assigned = new Set<string>()
   const issueComments = new Map<string, Array<string>>()
@@ -309,18 +315,34 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           changes.find((candidate) => candidate.headSha === sha || options.headOf?.(candidate.number) === sha) ??
           changes.find((candidate) => `head-${candidate.number}` === sha)
         const ran = change === undefined ? undefined : options.checksFor?.(change.number, sha)
-        if (change === undefined || ran === undefined) return Effect.succeed(change === undefined ? [] : (checks.get(change.number) ?? []))
+        if (change === undefined || ran === undefined)
+          return Effect.succeed(
+            change === undefined
+              ? []
+              : (checks.get(change.number) ?? []).map((check) =>
+                  starting.delete(check.id) ? { ...check, state: 'running' as const } : check,
+                ),
+          )
         return Effect.succeed(
           ran.map((check, index): Check => {
             const id = `check-${change.number}-${sha}-${index}`
             logs.set(id, check.log ?? null)
-            return { id, name: check.name, state: check.state, url: null, summary: null }
+            // Run again, a check shows as running for a reading, as a host's does once it has started it again.
+            const again = starting.delete(id)
+            return { id, name: check.name, state: again ? 'running' : check.state, url: null, summary: null }
           }),
         )
       }),
     checkLog: (_repository, check) =>
       Effect.andThen(called('checkLog'), () => {
         return Effect.succeed(logs.get(check.id) ?? null)
+      }),
+    rerun: (_repository, check) =>
+      Effect.andThen(called('rerun'), () => {
+        if (options.reruns === false) return Effect.succeed(false)
+        reran.push(check.id)
+        starting.add(check.id)
+        return Effect.succeed(true)
       }),
     activity: (_repository, number, cursor) =>
       Effect.andThen(called('activity'), () => {
@@ -555,6 +577,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         ...(retryAt === undefined ? {} : { retryAt }),
         ...(status === undefined ? {} : { status }),
       }),
+    get reruns() {
+      return reran
+    },
     get changes() {
       return [...changes]
     },

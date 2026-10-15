@@ -92,6 +92,8 @@ export interface TaskModel {
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
+  /** Has the agent on the task compact its context, after what it was told before. */
+  readonly compact: () => Promise<void>
   /** Puts the lead on another model or effort, or hands the task to another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
   /** Hands the task to another agent with what the person says, and any images: the new lead's first turn, after its brief. */
@@ -463,6 +465,7 @@ export const useTask = (threadId: string): TaskModel => {
       }
     },
     interrupt: () => act(() => client.interrupt(threadId)),
+    compact: () => act(() => client.compact(threadId)),
     choose: (choice) =>
       act(async () => {
         const session = snapshot?.session

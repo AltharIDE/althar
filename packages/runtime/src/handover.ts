@@ -32,8 +32,37 @@ export const HANDOVER_AT = 0.8
 export const dueForHandover = (context: { readonly used: number; readonly size: number } | null) =>
   context !== null && context.size > 0 && context.used >= context.size * HANDOVER_AT
 
+/**
+ * How full a task's lead's context may get, in tokens, before Althar hands it
+ * to a fresh session between turns, whatever its window holds (ADR-038): a
+ * million-token window never comes near 80%, and every call reads all of it
+ * again.
+ */
+export const LEAD_HANDOVER_TOKENS = 200_000
+
+/** At a break in a lead's work, a context this full is handed over too: the next turn starts afresh at little cost. */
+export const LEAD_BREAK_TOKENS = 80_000
+
+/** How long an agent's prompt cache lives, in milliseconds: a lead idle longer reads its whole context afresh anyway, which makes a break. */
+export const CACHE_LIFE = 5 * 60_000
+
+/**
+ * Whether a lead whose context is this full is handed to a fresh session
+ * before its next turn: past `LEAD_HANDOVER_TOKENS` or 80% of its window at
+ * any turn; past `LEAD_BREAK_TOKENS` at a break (a step done, the task made a
+ * change, or idle past its cache's life).
+ */
+export const dueForLeadHandover = (context: { readonly used: number; readonly size: number } | null, atBreak: boolean) =>
+  context !== null &&
+  context.size > 0 &&
+  (context.used >= Math.min(context.size * HANDOVER_AT, LEAD_HANDOVER_TOKENS) || (atBreak && context.used >= LEAD_BREAK_TOKENS))
+
 /** About how many characters a token holds, in the words and code a brief is written in: to judge a brief's size before an agent reads it. */
 const CHARS_PER_TOKEN = 4
+
+/** Whether a lead's brief is well under the context it replaces: a handover that saves little isn't worth the lead's thread of thought. */
+export const shrinks = (brief: string, context: { readonly used: number } | null) =>
+  context === null || brief.length / CHARS_PER_TOKEN < context.used / 2
 
 /** The most of a fresh session's context its brief may take: a session that would start fuller would soon be due again. */
 export const FRESH_ROOM = 0.4
