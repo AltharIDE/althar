@@ -1611,6 +1611,8 @@ export class Changes extends Context.Service<
               return { repository, plan, settle }
             }),
           )
+          for (const { repository, plan } of plans)
+            if (plan.kind === 'unreadable') return yield* cant('unreadable', named(repository, `${plan.checkout}\n${plan.detail}`))
           const conflicting = plans.flatMap(({ repository, plan }) =>
             plan.kind === 'conflicts' ? [{ repository, files: plan.files }] : [],
           )
@@ -1638,6 +1640,8 @@ export class Changes extends Context.Service<
               plan.kind === 'move' ? [{ root: repository.root, branch: repository.base, plan, repository }] : [],
             ),
           )
+          if (refused?.problem?.kind === 'unreadable')
+            return yield* cant('unreadable', named(refused.repository, `${refused.problem.checkout}\n${refused.problem.detail}`))
           if (refused !== null)
             return yield* refused.plan.checkout === null
               ? cant('moved', several ? `${refused.repository.name}’s ${refused.branch}` : refused.branch)

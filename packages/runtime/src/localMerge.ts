@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 
-import { commitOf, git, gitOutcome } from './git'
+import { commitOf, git, gitExactly, gitOutcome, trackedStatus } from './git'
 
 /*
  * Merging a task's branch into its repository's default branch on this Mac,
@@ -33,19 +33,30 @@ export type MergePlan =
   | { readonly kind: 'conflicts'; readonly files: ReadonlyArray<string> }
   /** It can't now: the branch is checked out in a working tree with changes not committed, or files git doesn't track where the merge puts some. */
   | { readonly kind: 'busy'; readonly checkout: string; readonly untracked: ReadonlyArray<string> }
+  /** It can't safely check the checkout, including its submodules. Keep the complete diagnostic, not just its last line. */
+  | { readonly kind: 'unreadable'; readonly checkout: string; readonly detail: string }
   /** It can't: there's no such branch here. */
   | { readonly kind: 'missing' }
 
 /** The working tree of `root`'s repository that has `branch` checked out, if any. */
 export const checkedOut = (root: string, branch: string) =>
-  Effect.map(git(root, 'worktree', 'list', '--porcelain'), (listing) => {
+  Effect.map(gitExactly(root, 'worktree', 'list', '--porcelain', '-z'), (listing) => {
     let path: string | null = null
-    for (const line of listing.split('\n')) {
+    for (const line of listing.split('\0')) {
       if (line.startsWith('worktree ')) path = line.slice('worktree '.length)
       else if (line === `branch refs/heads/${branch}`) return path
+      else if (line === '') path = null
     }
     return null
   })
+
+const checkCheckout = (checkout: string) =>
+  trackedStatus(checkout).pipe(
+    Effect.match({
+      onFailure: (error) => ({ kind: 'unreadable', checkout, detail: error.stderr }) as const,
+      onSuccess: (changes) => (changes === '' ? null : ({ kind: 'busy', checkout, untracked: [] } as const)),
+    }),
+  )
 
 /** What merging `head` into `branch` in the repository at `root` would do, with `message` for a merge commit. Nothing moves. */
 export const planMerge = (root: string, branch: string, head: string, message: string) =>
@@ -56,8 +67,8 @@ export const planMerge = (root: string, branch: string, head: string, message: s
       return { kind: 'already' } as const satisfies MergePlan
     const checkout = yield* checkedOut(root, branch)
     if (checkout !== null) {
-      const changes = yield* git(checkout, 'status', '--porcelain', '--untracked-files=no')
-      if (changes !== '') return { kind: 'busy', checkout, untracked: [] } as const satisfies MergePlan
+      const problem = yield* checkCheckout(checkout)
+      if (problem !== null) return problem satisfies MergePlan
     }
     const merge = yield* mergeOf(root, tip, head, message)
     if (merge.kind === 'conflicts') return merge
@@ -113,7 +124,7 @@ type Move = Extract<MergePlan, { kind: 'move' }>
 export const applyMerge = (root: string, branch: string, plan: Move) =>
   plan.checkout === null
     ? git(root, 'update-ref', `refs/heads/${branch}`, plan.to, plan.from)
-    : git(plan.checkout, 'merge', '--ff-only', '--quiet', plan.to)
+    : git(plan.checkout, '-c', 'submodule.recurse=false', 'merge', '--ff-only', '--quiet', plan.to)
 
 /** Puts `branch` back where `plan` found it, only while it's where the merge left it, and, in a checkout, nothing changed since. */
 export const undoMerge = (root: string, branch: string, plan: Move) =>
@@ -121,7 +132,7 @@ export const undoMerge = (root: string, branch: string, plan: Move) =>
     if (plan.checkout === null) return yield* git(root, 'update-ref', `refs/heads/${branch}`, plan.from, plan.to)
     const on = yield* gitOutcome(plan.checkout, 'symbolic-ref', '--quiet', 'HEAD')
     if (on.stdout.trim() !== `refs/heads/${branch}` || (yield* commitOf(plan.checkout, 'HEAD')) !== plan.to) return ''
-    return yield* git(plan.checkout, 'reset', '--keep', '--quiet', plan.from)
+    return yield* git(plan.checkout, '-c', 'submodule.recurse=false', 'reset', '--keep', '--quiet', plan.from)
   })
 
 /**
@@ -131,12 +142,19 @@ export const undoMerge = (root: string, branch: string, plan: Move) =>
  */
 export const applyMerges = <M extends { readonly root: string; readonly branch: string; readonly plan: Move }>(moves: ReadonlyArray<M>) =>
   Effect.gen(function* () {
+    // Planning may take time across repositories. Read every checkout again
+    // before any ref moves, so a newly unreadable submodule stops them all.
+    for (const move of moves) {
+      if (move.plan.checkout === null) continue
+      const problem = yield* checkCheckout(move.plan.checkout)
+      if (problem !== null) return { ...move, problem }
+    }
     const done: Array<M> = []
     for (const move of moves.toSorted((one, other) => Number(one.plan.checkout !== null) - Number(other.plan.checkout !== null))) {
       const applied = yield* Effect.exit(applyMerge(move.root, move.branch, move.plan))
       if (applied._tag === 'Failure') {
         for (const undo of done.toReversed()) yield* Effect.ignore(undoMerge(undo.root, undo.branch, undo.plan))
-        return move
+        return { ...move, problem: null }
       }
       done.push(move)
     }
