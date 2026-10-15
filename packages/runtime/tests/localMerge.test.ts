@@ -531,6 +531,16 @@ describe('merging a task here', () => {
       )
       assert.strictEqual(git(open ?? '', 'rev-parse', 'elsewhere'), moves[1]?.before)
       git(open ?? '', 'checkout', '-q', 'main')
+      // A branch checked out nowhere when planned, checked out since: its ref doesn't move from under that checkout.
+      git(bare ?? '', 'checkout', '-q', 'main')
+      const attached = yield* applyMerges(moves)
+      assert.strictEqual(attached?.root, bare)
+      assert.deepStrictEqual(attached?.problem, { kind: 'moved' })
+      assert.deepStrictEqual(
+        moves.map((move) => git(move.root, 'rev-parse', 'main')),
+        moves.map((move) => move.before),
+      )
+      git(bare ?? '', 'checkout', '-q', 'mine')
       // Nothing in the way, every one moves.
       assert.isNull(yield* applyMerges(moves))
       assert.deepStrictEqual(

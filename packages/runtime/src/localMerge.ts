@@ -151,9 +151,13 @@ export const applyMerges = <M extends { readonly root: string; readonly branch: 
     // Planning may take time across repositories. Read every checkout again
     // before any ref moves, so a newly unreadable submodule stops them all,
     // as does one switched to another branch, or its branch moved, since: a
-    // fast-forward there would move whatever it has now.
+    // fast-forward there would move whatever it has now. A branch checked
+    // out nowhere must still be: moving its ref would leave a checkout behind.
     for (const move of moves) {
-      if (move.plan.checkout === null) continue
+      if (move.plan.checkout === null) {
+        if ((yield* checkedOut(move.root, move.branch)) !== null) return { ...move, problem: { kind: 'moved' } as const }
+        continue
+      }
       if (!(yield* stillOn(move.plan.checkout, move.branch, move.plan.from))) return { ...move, problem: { kind: 'moved' } as const }
       const problem = yield* checkCheckout(move.plan.checkout)
       if (problem !== null) return { ...move, problem }
