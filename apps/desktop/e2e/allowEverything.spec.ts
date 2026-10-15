@@ -98,9 +98,10 @@ test('allows everything on a task or a project, clearing what waits, and says so
     await expect(page.getByRole('button', { name: 'Allow all 2' })).toBeVisible()
     await page.getByRole('button', { name: 'Back to meridian' }).click()
     await page.getByRole('radio', { name: /^Board/ }).click()
+    // The card shows its oldest call: the agent asked for both at once, so either may be it.
     await expect(
       cardOf('Tag the release')
-        .getByText(/make deploy/)
+        .getByText(/make deploy|npm run deploy/)
         .first(),
     ).toBeVisible()
     await expect(cardOf('Tag the release').getByText('Unrestricted')).toHaveCount(0)
@@ -120,7 +121,7 @@ test('allows everything on a task or a project, clearing what waits, and says so
 
     // Turned on, the other task's stack went ahead: it waits on no one, and like every task in the project it says Unrestricted.
     await expect(cardOf('Tag the release').getByText('Unrestricted')).toBeVisible()
-    await expect(cardOf('Tag the release').getByText(/make deploy/)).toHaveCount(0)
+    await expect(cardOf('Tag the release').getByText(/make deploy|npm run deploy/)).toHaveCount(0)
     // A task planned now starts unrestricted, and says so up next.
     await page.getByRole('radio', { name: /^Conversation/ }).click()
     await planTask(page, 'Rotate the keys')

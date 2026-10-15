@@ -23,16 +23,15 @@ test('names the task whose server keeps a place, and stops it from the plan that
   const { electronApp, page } = await launch(home)
   try {
     await openFirstProject(electronApp, page, repository(projects))
-    // One at a time.
-    await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
-    await page.keyboard.press('Meta+,')
-    const settings = page.getByRole('dialog', { name: 'Settings' })
-    await settings.getByRole('button', { name: /^Keep awake/ }).click()
+    // One at a time, from the quick settings: the gear at the end of the bar, which comes with the first project.
+    await page.getByRole('button', { name: /^Althar settings/ }).click()
+    const settings = page.getByRole('dialog', { name: 'Quick settings' })
     const slider = settings.getByRole('slider', { name: 'Agents at once' })
     await slider.focus()
     await page.keyboard.press('Home')
     await expect(slider).toHaveAttribute('aria-valuenow', '1')
     await page.keyboard.press('Escape')
+    await expect(settings).toHaveCount(0)
     await page
       .getByRole('navigation', { name: 'Projects' })
       .getByRole('button', { name: /^meridian/ })

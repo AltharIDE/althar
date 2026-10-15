@@ -1,6 +1,7 @@
 import type { Room } from '@althar/ui'
 
 import type { Client } from '../../data/client'
+import type { Section } from '../settings/sections'
 import { type Kept, keptFrom, type Place } from './tabs'
 
 /*
@@ -128,3 +129,14 @@ export const closed =
     open: kept.open.filter((id) => id !== projectId),
     places: Object.fromEntries(Object.entries(kept.places).filter(([id]) => id !== projectId)),
   })
+
+/** Going into the settings gives them a tab, beside the home's, and keeps which section they are on. */
+export const settingsOn =
+  (section: Section) =>
+  (kept: Kept): Kept => ({ ...kept, settings: section })
+
+/** The settings' tab closes, and forgets its section. */
+export const settingsClosed = (kept: Kept): Kept => {
+  const { settings: _closed, ...rest } = kept
+  return rest
+}

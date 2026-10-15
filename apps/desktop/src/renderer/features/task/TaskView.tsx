@@ -54,6 +54,7 @@ import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, takesImages, useImages } from '../../shared/useImages'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
+import { Runs } from '../runs/Runs'
 import { PushRequestOf } from '../../shared/PushRequestOf'
 import { behindText, listeningOf, useHeard } from './behind'
 import { PermissionCalls } from './PermissionCall'
@@ -523,10 +524,21 @@ export function TaskView({
           onClick={() => changes.show()}
         />
       )}
+      {/* What it built runs with no agent, in its worktree (ADR-044); a review runs nothing of what it reads. */}
+      {snapshot.task.worktree !== null && snapshot.task.review == null && (
+        <Runs
+          projectId={snapshot.project.id}
+          project={snapshot.project.name}
+          taskId={snapshot.task.id}
+          runnables={snapshot.task.runnables}
+          launches={snapshot.task.launches}
+          now={now}
+          onRun={(id) => void model.runProject(id)}
+          onStop={(id) => void model.stopLaunch(id)}
+        />
+      )}
       <TaskMenu
         onRename={() => setRenaming(true)}
-        // What it built runs with no agent, where its repository says how.
-        {...(snapshot.task.runCommand === null ? {} : { run: { command: snapshot.task.runCommand, onRun: () => void model.runProject() } })}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
         {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
@@ -778,7 +790,12 @@ export function TaskView({
                 onAnswerQuestion={model.answerQuestion}
                 {...(asking == null ? {} : { focusQuestion: asking })}
                 run={(run) => (
-                  <RunOf run={run} now={now} onStop={(id) => void model.stopLaunch(id)} onRunAgain={() => void model.runProject()} />
+                  <RunOf
+                    run={run}
+                    now={now}
+                    onStop={(id) => void model.stopLaunch(id)}
+                    onRunAgain={(_taskId, runnableId) => void model.runProject(runnableId)}
+                  />
                 )}
                 // A review the lead drafted is posted from its card, only when the person says.
                 review={(draft) => (

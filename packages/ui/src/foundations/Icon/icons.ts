@@ -72,6 +72,16 @@ function MoreDots(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+/* Two columns of three dots: a handle to drag something by, drawn as the three dots are. */
+const grip = (cx: number, cy: number) => createElement('circle', { key: `${cx}:${cy}`, cx, cy, r: 1.5, fill: 'currentColor' })
+function Grip(props: SVGProps<SVGSVGElement>) {
+  return createElement(
+    'svg',
+    { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeLinecap: 'round', ...props },
+    [9, 15].flatMap((cx) => [5.5, 12, 18.5].map((cy) => grip(cx, cy))),
+  )
+}
+
 export const ICONS = {
   work: TaskList,
   knowledge: Book,
@@ -96,6 +106,8 @@ export const ICONS = {
   square: Square,
   pencil: EditPencil,
   more: MoreDots,
+  /** A handle to drag something into another place by. */
+  grip: Grip,
   gear: Settings,
   file: Page,
   folder: Folder,

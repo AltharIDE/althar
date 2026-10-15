@@ -55,3 +55,38 @@ describe('the window’s own buttons', () => {
     expect(document.activeElement).toBe(buttons[0])
   })
 })
+
+describe('the settings’ tab', () => {
+  const nav = (container: HTMLElement) => within(container.querySelector<HTMLElement>('nav')!)
+
+  it('has none until settings are open', () => {
+    const { container } = renderTabs()
+    expect(nav(container).queryByRole('button', { name: 'Settings' })).toBeNull()
+  })
+
+  it('sits beside the home’s, and has the window alone while it does', () => {
+    const { container } = renderTabs({ settings: { current: true, onSelect: vi.fn(), onClose: vi.fn() } })
+    const tabs = nav(container)
+    const [home, settings] = tabs.getAllByRole('button').filter((button) => !button.getAttribute('aria-label'))
+    expect(home?.textContent).toBe('Home')
+    expect(settings?.textContent).toBe('Settings')
+    expect(settings?.getAttribute('aria-current')).toBe('page')
+    // The project the window was in before keeps its tab, without the window.
+    expect(tabs.getByRole('button', { name: /^Meridian/ }).getAttribute('aria-current')).toBeNull()
+    expect(tabs.getByRole('button', { name: /^Home/ }).getAttribute('aria-current')).toBeNull()
+  })
+
+  it('stays beside the home’s while another tab has the window, and hands on its press and its close', () => {
+    const onSelect = vi.fn()
+    const onClose = vi.fn()
+    const { container } = renderTabs({ current: null, settings: { current: false, onSelect, onClose } })
+    const tabs = nav(container)
+    const settings = tabs.getByRole('button', { name: 'Settings' })
+    expect(settings.getAttribute('aria-current')).toBeNull()
+    expect(tabs.getByRole('button', { name: /^Home/ }).getAttribute('aria-current')).toBe('page')
+    fireEvent.click(settings)
+    expect(onSelect).toHaveBeenCalledOnce()
+    fireEvent.click(tabs.getByRole('button', { name: 'Close Settings' }))
+    expect(onClose).toHaveBeenCalledOnce()
+  })
+})
