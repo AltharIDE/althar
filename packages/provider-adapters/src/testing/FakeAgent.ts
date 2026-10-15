@@ -113,6 +113,13 @@ export const scenarios = {
    * says what was chosen (`chosen=allow_once`).
    */
   run: 'run ',
+  /**
+   * Followed by commands apart by `; `, `run each make deploy; ./deploy.sh`:
+   * asks to run them all at once, as an agent's parallel tool calls do, so
+   * they wait together; says what was chosen for each, in order
+   * (`chosen=allow_once,allow_once`).
+   */
+  runEach: 'run each ',
 } as const
 
 /** A 480 × 300 PNG of a page, as a screenshot tool hands it back. */
@@ -1206,17 +1213,21 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       if (images.length > 0)
         await say(`saw images: ${images.map((image) => `${image.mimeType} ${Buffer.from(image.data, 'base64').length} B`).join(', ')}\n\n`)
 
-      /** Asks permission; cancelling the turn withdraws the request. */
+      // How many asks wait at once, as several do from `run each`: they share one abort, let go as the last is answered.
+      let asking = 0
+      /** Asks permission; cancelling the turn withdraws the request, and any asked with it. */
       const ask = async (toolCall: acp.ToolCallUpdate, offered: Array<acp.PermissionOption>) => {
-        session.abort = new AbortController()
+        const abort = (session.abort ??= new AbortController())
+        asking += 1
         const answer = await client
           .request<acp.RequestPermissionResponse, acp.RequestPermissionRequest>(
             acp.methods.client.session.requestPermission,
             { sessionId: params.sessionId, toolCall, options: offered },
-            { cancellationSignal: session.abort.signal },
+            { cancellationSignal: abort.signal },
           )
           .catch(() => undefined)
-        session.abort = undefined
+        asking -= 1
+        if (asking === 0) session.abort = undefined
         if (answer === undefined) return 'withdrawn'
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
@@ -1374,7 +1385,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return ended()
       }
       if (text === scenarios.stubborn) session.stubborn = true
-      const scenario = resumed ? scenarios.stubborn : text.startsWith(scenarios.run) ? scenarios.commandChoices : text
+      const scenario = resumed
+        ? scenarios.stubborn
+        : text.startsWith(scenarios.runEach)
+          ? scenarios.runEach
+          : text.startsWith(scenarios.run)
+            ? scenarios.commandChoices
+            : text
 
       switch (scenario) {
         case scenarios.commandChoices:
@@ -1403,6 +1420,31 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say(`chosen=${chosen}`)
           if (scenario === scenarios.deniedThenWait) while (!session.cancelled) await pause(10)
           return session.cancelled || chosen === 'cancel' || chosen === 'cancelled' ? { stopReason: 'cancelled' } : ended()
+        }
+        case scenarios.runEach: {
+          const calls = text
+            .slice(scenarios.runEach.length)
+            .split('; ')
+            .map((line) => {
+              session.runs += 1
+              return { toolCallId: `run-${session.runs}`, title: `Run ${line}`, kind: 'execute' as const, rawInput: { command: line } }
+            })
+          for (const toolCall of calls) await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
+          const chosen = await Promise.all(
+            calls.map(async (toolCall) => {
+              const answer = await ask(toolCall, commandOptions)
+              await update({
+                sessionUpdate: 'tool_call_update',
+                toolCallId: toolCall.toolCallId,
+                status: answer.startsWith('allow') ? 'completed' : 'failed',
+              })
+              return answer
+            }),
+          )
+          await say(`chosen=${chosen.join(',')}`)
+          return session.cancelled || chosen.some((answer) => answer === 'cancel' || answer === 'cancelled')
+            ? { stopReason: 'cancelled' }
+            : ended()
         }
         case scenarios.question:
         case scenarios.questions: {

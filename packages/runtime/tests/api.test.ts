@@ -304,19 +304,20 @@ describe('the API', () => {
         const [live] = (yield* Fiber.join(streamed)) as ReadonlyArray<WatchEvent>
         assert.strictEqual(live?._tag === 'Streaming' ? live.threadId : undefined, task.threadId)
 
-        // A page of the newest, then the one before it, and one item by id.
+        // A page of the newest, reaching back to the start of its round, what the person said; then the one before it, and one item by id.
         const newest = yield* client.GetThread({ threadId: task.threadId, limit: 1 })
-        assert.deepStrictEqual(texts(newest), ['Hello'])
+        assert.deepStrictEqual(texts(newest), ['hello', 'Hello'])
         assert.isTrue(newest.earlier)
         const before = yield* client.GetThread({ threadId: task.threadId, before: newest.items[0]?.sequence ?? 0, limit: 1 })
-        assert.deepStrictEqual(texts(before), ['hello'])
+        assert.isTrue(texts(before).every((text) => text?.startsWith('echo: You are working on a task') === true))
+        assert.isFalse(before.earlier)
         // What the agent already has can't be taken back.
         assert.strictEqual(
-          (yield* Effect.flip(client.TakeBack({ commandId: commandId(), itemId: before.items[0]?.id ?? '' }))).message,
+          (yield* Effect.flip(client.TakeBack({ commandId: commandId(), itemId: newest.items[0]?.id ?? '' }))).message,
           "The agent already has that message, so it can't be taken back.",
         )
         assert.isEmpty((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).items)
-        const reply = yield* client.GetThreadItem({ threadId: task.threadId, itemId: newest.items[0]?.id ?? '' })
+        const reply = yield* client.GetThreadItem({ threadId: task.threadId, itemId: newest.items[1]?.id ?? '' })
         assert.deepStrictEqual(reply.content, { text: 'Hello', pictures: [], files: [] })
 
         // A tool call keeps what the thread shows: the files it touched, not its raw input and output.
@@ -825,6 +826,7 @@ describe('project rules, through the API', () => {
           projectId: project.id,
           revision: 1,
           permissions: 'rules',
+          allowEverything: false,
           alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
           never: [],
           alwaysAllow: [],
@@ -884,8 +886,22 @@ describe('project rules, through the API', () => {
           [null, null, true, ['force-push'], true],
         )
         assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
+        // Allow everything is a switch over the mode (ADR-043): the mode is kept under it, and holds again once it is off.
+        const allowing = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          permissions: 'coordinator',
+          allowEverything: true,
+        })
+        assert.deepStrictEqual([allowing.permissions, allowing.allowEverything], ['coordinator', true])
+        const off = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, allowEverything: false })
+        assert.deepStrictEqual([off.permissions, off.allowEverything], ['coordinator', false])
         const missing = yield* Effect.flip(client.GetProjectRules({ projectId: 'proj_missing' }))
         assert.strictEqual(missing.reason, 'NotFound')
+        const noTask = yield* Effect.flip(
+          client.SetTaskAllowEverything({ commandId: commandId(), taskId: 'task_missing', allowEverything: true }),
+        )
+        assert.strictEqual(noTask.reason, 'NotFound')
       }),
     ),
   )

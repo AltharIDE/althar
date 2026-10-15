@@ -3,8 +3,9 @@ import { Brand } from '@althar/ui'
 import { describe, expect, it, vi } from 'vitest'
 
 import { agentLineOf, brandOf } from '../src/renderer/shared/agents'
-import { knownModelName, standsFor } from '@althar/contracts'
+import { knownModelName, standsFor, type Unfurl } from '@althar/contracts'
 import { isSending, mergeItems, newestReads, queueShown, sending, unsent, waiting } from '../src/renderer/shared/items'
+import { keyOf, pastedIn } from '../src/renderer/shared/pasted'
 import { change, items } from './fixtures'
 import { latestOf } from '../src/renderer/features/task/Outputs'
 import { stepIndex, stepNames, trackFor } from '../src/renderer/shared/steps'
@@ -213,5 +214,60 @@ describe('a task’s rounds of work after its plan (ADR-034)', () => {
     // In a task of several repositories, each has its own.
     const web = change({ number: 7, slug: 'web', url: 'https://github.test/meridian/web/pull/7' })
     expect(latestOf([first, web]).latest).toEqual([first, web])
+  })
+})
+
+describe('links the person pasted', () => {
+  // The tracker gives its own address, with the title's slug; the runtime keeps the one pasted.
+  const issue: Unfurl = {
+    kind: 'issue',
+    product: 'linear',
+    key: 'MER-231',
+    title: 'Rate-limit refunds',
+    url: 'https://linear.app/m/issue/MER-231/rate-limit-refunds',
+    pasted: 'https://linear.app/m/issue/MER-231',
+    status: { name: 'Todo', category: 'todo' },
+    priority: null,
+    container: null,
+  }
+  // Unfurled before the runtime kept what was pasted: known by its own address.
+  const pull: Unfurl = {
+    kind: 'change',
+    product: 'github',
+    key: 'PR #1206',
+    title: 'Rate-limit charges',
+    url: 'https://github.com/m/a/pull/1206',
+    state: 'merged',
+    repository: 'm/a',
+  }
+
+  it('are found where they were pasted, without the punctuation after them', () => {
+    expect(pastedIn('Do https://linear.app/m/issue/MER-231, like https://github.com/m/a/pull/1206.', [issue, pull])).toEqual([
+      'Do ',
+      issue,
+      ', like ',
+      pull,
+      '.',
+    ])
+    expect(pastedIn('https://github.com/m/a/pull/1206', [pull])).toEqual([pull])
+  })
+
+  it('are found each time they were pasted', () => {
+    expect(pastedIn('https://linear.app/m/issue/MER-231 again https://linear.app/m/issue/MER-231', [issue])).toEqual([
+      issue,
+      ' again ',
+      issue,
+    ])
+  })
+
+  it('leave an address that didn’t unfurl as it was written, even one that starts like one that did', () => {
+    const said = 'Not https://linear.app/m/issue/MER-2310 or https://example.com/x, nor this.'
+    expect(pastedIn(said, [issue])).toEqual([said])
+    expect(pastedIn('Nothing linked', [])).toEqual(['Nothing linked'])
+  })
+
+  it('read as their key, a pull request’s as its number', () => {
+    expect(keyOf(issue)).toBe('MER-231')
+    expect(keyOf(pull)).toBe('#1206')
   })
 })

@@ -18,6 +18,17 @@
 .cmd code {
   font: inherit;
 }
+/* a long command scrolls in its block, whole, rather than lengthen the card */
+.cmdText {
+  flex: 1;
+  min-width: 0;
+  max-height: 11.5em;
+  overflow: auto;
+}
+.copy {
+  flex: none;
+  align-self: flex-start;
+}
 .prompt {
   flex: none;
   color: var(--t-3);

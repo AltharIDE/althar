@@ -1,0 +1,51 @@
+.verdict {
+  display: block;
+}
+.said {
+  margin: 0;
+  font-family: var(--font-prose);
+  font-size: var(--prose-size);
+  line-height: var(--prose-lh);
+  color: var(--t-1);
+}
+.findings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.finding {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.where {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+}
+.weight,
+.heavy {
+  flex: none;
+  font-weight: 600;
+  color: var(--t-3);
+}
+.heavy {
+  color: var(--warm);
+}
+.at {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.claim {
+  --prose-lh: 1.55;
+}
