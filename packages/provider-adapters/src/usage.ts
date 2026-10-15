@@ -91,14 +91,14 @@ export type UsageRead =
   /** The agent couldn't be asked, or its answer wasn't one Althar knows: a fault to show, in words. */
   | { readonly kind: 'failed'; readonly message: string }
 
-const record = (value: unknown): Record<string, unknown> | null =>
+export const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null
 
 /** An answer that isn't the shape Codex documents: a fault, not "no windows". */
-class Unrecognized extends Error {}
+export class Unrecognized extends Error {}
 
 /** A time given in epoch seconds, absent as undefined; one that is no date at all is unrecognized. */
-const iso = (seconds: unknown) => {
+export const isoSeconds = (seconds: unknown) => {
   if (seconds === null || seconds === undefined) return undefined
   const date = typeof seconds === 'number' ? new Date(seconds * 1000) : null
   if (date === null || Number.isNaN(date.getTime())) throw new Unrecognized('a reset time that is no date')
@@ -111,7 +111,7 @@ const codexWindow = (raw: unknown, label: string | undefined): UsageWindow | nul
   if (window === null || typeof window.usedPercent !== 'number' || !Number.isFinite(window.usedPercent))
     throw new Unrecognized('a window without a use')
   const minutes = typeof window.windowDurationMins === 'number' ? window.windowDurationMins : undefined
-  const resetsAt = iso(window.resetsAt)
+  const resetsAt = isoSeconds(window.resetsAt)
   return {
     kind: windowKind(minutes),
     ...(label === undefined ? {} : { label }),
@@ -138,7 +138,7 @@ const codexSnapshotWindows = (snapshot: Record<string, unknown>, extra: boolean)
     throw new Unrecognized('a spend limit that is no object')
   if (spend !== null) {
     if (typeof spend.remainingPercent !== 'number') throw new Unrecognized('a spend limit without a remaining share')
-    const resetsAt = iso(spend.resetsAt)
+    const resetsAt = isoSeconds(spend.resetsAt)
     windows.push({
       kind: 'other',
       label: 'Spend limit',

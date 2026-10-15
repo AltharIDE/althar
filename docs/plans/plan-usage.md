@@ -290,11 +290,15 @@ before building on it):
 
 ## Stages
 
-**Started 15 October:** stage 1's model, warning rule and Codex source are in
-`packages/provider-adapters/src/usage.ts` (tests in `tests/usage.test.ts`).
-Not yet: the per-(agent, provider) usage-source registry and its contract
-test, and anything that reads a token (stage 0, the exception, is decided
-and written; no reader is built yet).
+**Built so far (15 October):** in `packages/provider-adapters`, the usage model,
+warning rule and Codex source (`usage.ts`); the per-(agent, provider)
+registry with its classification and allowlist (`usageSources.ts`); and the
+allowlisted usage reader and the only credential-store module
+(`usageRead.ts`, `credentialStore.ts`), with the contract test
+(`tests/usageSources.test.ts`) that enforces ADR-043. **No endpoint source is
+confirmed**, so the reader refuses all of them: each is enabled by its own
+spike and a read of the provider's terms. Not yet: the Claude source,
+the notices and the usage tab.
 
 One pull request each. Stages 0 to 5 are Althar's; 6 to 8 are upstream and
 run in parallel.
