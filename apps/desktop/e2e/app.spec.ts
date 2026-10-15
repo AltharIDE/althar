@@ -86,7 +86,7 @@ test('makes the first project of a repository it found, starts a task, and talks
     await expect(page.getByText('Needs you', { exact: true })).toBeVisible()
     await expect(page.getByText('Needs your permission')).toBeVisible()
     await page.screenshot({ path: 'test-results/call.png' })
-    await page.getByRole('button', { name: /^Allow/ }).click()
+    await page.getByRole('button', { name: /^Allow(?! everything)/ }).click()
     await expect(page.getByText('chosen=allow_once')).toBeVisible()
     await expect(page.getByText('Needs you', { exact: true })).toHaveCount(0)
 
