@@ -15,7 +15,11 @@ const only = process.argv.slice(2)
 
 const browser = await chromium.launch()
 const shoot = async (shot) => {
-  const page = await browser.newPage({ viewport: { width: 1440, height: shot.height ?? 900 }, deviceScaleFactor: 2 })
+  // The pills' shots (P…) are at 1×, of the composer's end only.
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: shot.height ?? 900 },
+    deviceScaleFactor: shot.clip === undefined ? 2 : 1,
+  })
   const errors = []
   page.on('pageerror', (error) => errors.push(String(error)))
   await page.goto(`http://localhost:5397/${shot.page}`)
@@ -27,7 +31,8 @@ const shoot = async (shot) => {
     await page.waitForTimeout(600)
   }
   await page.mouse.move(0, 450)
-  await page.screenshot({ path: resolve(out, `${shot.id}.png`) })
+  const [x, y, width, height] = shot.clip ?? []
+  await page.screenshot({ path: resolve(out, `${shot.id}.png`), ...(shot.clip === undefined ? {} : { clip: { x, y, width, height } }) })
   process.stdout.write(`${shot.id}  ${errors.length === 0 ? 'ok' : errors.join(' | ')}\n`)
   await page.close()
 }

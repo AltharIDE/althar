@@ -67,11 +67,22 @@ export function Wave({ levels, className }: { levels: ReadonlyArray<number>; cla
 }
 
 /** Who it goes to: the project's mark, then the coordinator or the task. */
-export function To({ address, className, children }: { address: Address; className?: string; children?: ReactNode }) {
+export function To({
+  address,
+  className,
+  children,
+  short = false,
+}: {
+  address: Address
+  className?: string
+  children?: ReactNode
+  /** Only who, where room is short: the project's mark beside it says where. */
+  short?: boolean
+}) {
   return (
-    <span className={`${s.to} ${className ?? ''}`}>
+    <span className={`${s.to} ${className ?? ''}`} title={short ? toLine(address) : undefined}>
       <ProjectMark seed="p1" ink={ProjectInk.Clay} size={14} />
-      <span className={s.toText}>{toLine(address)}</span>
+      <span className={s.toText}>{short ? (address.kind === 'coordinator' ? 'To the coordinator' : 'To the lead') : toLine(address)}</span>
       {children}
     </span>
   )

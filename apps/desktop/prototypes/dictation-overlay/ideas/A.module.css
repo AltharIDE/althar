@@ -28,6 +28,36 @@
   cursor: grabbing;
 }
 
+/* among the pills over a composer: as tall as Running and Listening, on paper as they are, with the live colour saying it's you */
+.compact {
+  gap: 7px;
+  height: 26px;
+  max-width: 420px;
+  padding: 0 3px 0 10px;
+  background: var(--paper);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--live) 45%, var(--line-2)),
+    var(--lift-card);
+}
+.compact .to {
+  max-width: 170px;
+  padding-left: 7px;
+}
+.compact .tail {
+  max-width: 120px;
+  font-size: 11.5px;
+}
+
+/* in the composer's own row of pills, first of them */
+.inRow {
+  order: -1;
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .state {
   display: inline-flex;
   align-items: center;

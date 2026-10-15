@@ -161,8 +161,9 @@ const sentItems = (key: string): ReadonlyArray<ThreadItem> =>
 
 /* ——— The coordinator's conversation: where the dictation tasks came from. ——— */
 
-export const coordinatorOf = () =>
+export const coordinatorOf = (crowd: Crowd) =>
   coordinatorSnapshot({
+    launches: launchesOf(crowd),
     threadId: 'th-coordinator',
     project: { id: 'p1', name: 'althar' },
     items: [
@@ -236,7 +237,100 @@ const SCROLL_WORK = (slug: string): ReadonlyArray<ThreadItem> => [
   ),
 ]
 
-const threadOf = (one: BoardTask, work: ReadonlyArray<ThreadItem>, running: boolean): ThreadSnapshot =>
+/* ——— What else runs over a composer, by how crowded it is. ——— */
+
+export type Crowd = 'none' | 'some' | 'crowded'
+
+const serving = (id: string, command: string, label: string, url: string | null, minutes: number, ended?: number) => ({
+  id,
+  command,
+  label,
+  url,
+  startedAt: ago(minutes),
+  ended: ended === undefined ? null : { at: ago(1), code: ended },
+})
+
+/** What a task's lead left running. */
+const backgroundOf = (crowd: Crowd, slug: string) =>
+  crowd === 'none'
+    ? []
+    : crowd === 'some'
+      ? [serving('bg-1', `cd ${worktreeOf(slug)} && bun run storybook 2>&1 | tail -20`, 'bun run storybook', 'http://localhost:6116/', 6)]
+      : [
+          serving('bg-1', `cd ${worktreeOf(slug)} && bun run storybook 2>&1 | tail -20`, 'bun run storybook', 'http://localhost:6116/', 6),
+          serving(
+            'bg-2',
+            `cd ${worktreeOf(slug)} && bunx vp dev --config ./prototypes/scroll/vite.config.mjs`,
+            'vp dev',
+            'http://localhost:5398/',
+            4,
+          ),
+          serving('bg-3', 'bun --filter @althar/ui test -- --watch ComposerDictation', 'bun test --watch', null, 3),
+          serving('bg-4', 'bunx tsc -p packages/ui --noEmit', 'tsc', null, 2, 2),
+        ]
+
+/** The pull requests a task listens to. */
+const listenedOf = (crowd: Crowd) =>
+  crowd === 'none'
+    ? []
+    : [
+        change({
+          number: 166,
+          title: 'Let a long dictation scroll in the composer',
+          repository: 'AltharIDE/althar',
+          url: 'https://github.com/AltharIDE/althar/pull/166',
+        }),
+        ...(crowd === 'crowded'
+          ? [
+              change({
+                number: 163,
+                title: 'Keep quick tasks on this Mac',
+                repository: 'AltharIDE/althar',
+                url: 'https://github.com/AltharIDE/althar/pull/163',
+              }),
+            ]
+          : []),
+      ]
+
+/** Crowded, a reviewer says something on the pull request a moment after the task opens, and the pill over the composer says it. */
+export const HEARD_AFTER = 2500
+let heardAt: number | null = null
+export const hearSoon = () => {
+  heardAt = Date.now() + HEARD_AFTER
+}
+const heardOf = (crowd: Crowd): ReadonlyArray<ThreadItem> =>
+  crowd === 'crowded' && heardAt !== null && Date.now() >= heardAt
+    ? [
+        {
+          ...items.arrival({
+            from: 'codex',
+            where: 'PR #166',
+            text: 'Following stops when you scroll up, but nothing brings you back to the end. Add a way back?',
+          }),
+          createdAt: new Date(heardAt).toISOString(),
+        },
+      ]
+    : []
+
+/** What Althar runs of the project itself, as the coordinator's composer shows it. */
+export const launchesOf = (crowd: Crowd) =>
+  crowd === 'none'
+    ? []
+    : [
+        { ...serving('run-1', 'bun dev', 'bun dev', 'http://localhost:5173/', 22), taskId: null, where: 'main' },
+        ...(crowd === 'crowded'
+          ? [
+              {
+                ...serving('run-2', 'bun dev', 'bun dev', 'http://localhost:5174/', 8),
+                taskId: 'quick',
+                where: 'Keep quick tasks on this Mac',
+              },
+              { ...serving('run-3', 'bun run e2e', 'bun run e2e', null, 5, 1), taskId: 'keep', where: 'Keep composer text and dictation' },
+            ]
+          : []),
+      ]
+
+const threadOf = (one: BoardTask, work: ReadonlyArray<ThreadItem>, running: boolean, crowd: Crowd): ThreadSnapshot =>
   snapshot({
     threadId: one.threadId,
     project: { id: 'p1', name: 'althar' },
@@ -256,19 +350,20 @@ const threadOf = (one: BoardTask, work: ReadonlyArray<ThreadItem>, running: bool
       stepAt: one.startedAt,
       startedAt: one.startedAt,
       actions: one.phase === 'running' ? ['stop', 'abandon'] : ['abandon'],
+      changes: listenedOf(crowd),
     },
-    session: { ...snapshot().session!, model: 'opus', turnRunning: running },
-    items: [...work, ...sentItems(`thread:${one.threadId}`)],
+    session: { ...snapshot().session!, model: 'opus', turnRunning: running, background: backgroundOf(crowd, one.slug) },
+    items: [...work, ...heardOf(crowd), ...sentItems(`thread:${one.threadId}`)],
   })
 
-export const threadSnapshotOf = (threadId: string): ThreadSnapshot => {
+export const threadSnapshotOf = (threadId: string, crowd: Crowd): ThreadSnapshot => {
   const one = TASKS.find((candidate) => candidate.threadId === threadId) ?? scroll
-  if (one.taskId === 'scroll') return threadOf(one, SCROLL_WORK(one.slug), true)
+  if (one.taskId === 'scroll') return threadOf(one, SCROLL_WORK(one.slug), true, crowd)
   const work: ReadonlyArray<ThreadItem> = [
     tool('Read the code it changes', 'read', null, 8, one.slug),
     when(items.says(`Working on it: ${one.title.toLowerCase()}.`), 6),
   ]
-  return threadOf(one, work, one.phase === 'running')
+  return threadOf(one, work, one.phase === 'running', crowd)
 }
 
 /* ——— How hard this Mac works: normally, and while it writes down a long dictation with the suites running. ——— */

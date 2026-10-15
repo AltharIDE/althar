@@ -4,7 +4,7 @@ import { useEffect } from 'react'
 import { LinkButton, Segmented, Select } from '@althar/ui'
 
 import { navigate } from './nav'
-import { act, type Idea, IDEAS, type Preset, PRESETS, useLive } from './voice'
+import { A_PLACES, act, type APlace, type Crowd, CROWDS, type Idea, IDEAS, type Preset, PRESETS, useLive } from './voice'
 import s from './page.module.css'
 
 const PLACES: ReadonlyArray<[string, string]> = [
@@ -50,7 +50,10 @@ export function Switcher() {
     return () => window.removeEventListener('keydown', onKey)
   }, [live.idea, live.preset, live.session])
 
-  const note = IDEAS.find((one) => one.value === live.idea)?.note ?? ''
+  const note =
+    live.idea === 'A'
+      ? (A_PLACES.find((one) => one.value === live.place)?.note ?? '')
+      : (IDEAS.find((one) => one.value === live.idea)?.note ?? '')
   return (
     <div className={s.switcher}>
       <Segmented<Idea>
@@ -59,7 +62,16 @@ export function Switcher() {
         onChange={act.setIdea}
         options={IDEAS.map((one, index) => ({ value: one.value, label: one.label, kbd: String(index + 1) }))}
       />
-      <Select<Preset> label="State" value={live.preset} onChange={act.setPreset} options={PRESETS} width={210} />
+      {live.idea === 'A' && (
+        <Segmented<APlace>
+          label="Where A goes among the pills"
+          value={live.place}
+          onChange={act.setPlace}
+          options={A_PLACES.map((one) => ({ value: one.value, label: one.label }))}
+        />
+      )}
+      <Select<Preset> label="State" value={live.preset} onChange={act.setPreset} options={PRESETS} width={200} />
+      <Select<Crowd> label="What else runs" value={live.crowd} onChange={act.setCrowd} options={CROWDS} width={200} />
       <LinkButton onClick={() => act.setPreset(live.preset)}>Start over</LinkButton>
       <span className={s.places}>
         {PLACES.map(([label, path]) => (

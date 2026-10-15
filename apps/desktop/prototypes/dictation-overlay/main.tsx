@@ -13,7 +13,7 @@ import { makeQueryClient } from '../../src/renderer/data/reads'
 import { ServicesProvider } from '../../src/renderer/data/services'
 import { makeRouter } from '../../src/renderer/router'
 import { fakeClient, fakeHost, repositories } from '../../tests/fixtures'
-import { althar, boardOf, coordinatorOf, homeOf, loadOf, threadSnapshotOf } from './data'
+import { althar, boardOf, coordinatorOf, HEARD_AFTER, hearSoon, homeOf, loadOf, threadSnapshotOf } from './data'
 import { A } from './ideas/A'
 import { B } from './ideas/B'
 import { C } from './ideas/C'
@@ -30,8 +30,8 @@ const { client } = fakeClient({
   getRepositories: async () => [{ ...repositories[0]!, id: 'repo_althar', name: 'althar', path: althar.repository, host: null, tasks: 9 }],
   getHome: async () => homeOf(),
   getBoard: async () => boardOf(),
-  getCoordinator: async () => coordinatorOf(),
-  getThread: async (threadId: string) => threadSnapshotOf(threadId),
+  getCoordinator: async () => coordinatorOf(store.get().crowd),
+  getThread: async (threadId: string) => threadSnapshotOf(threadId, store.get().crowd),
   // Writing down a long dictation while the suites run: the Mac is busy, and the meter says so.
   getLoad: async () => loadOf(store.get().session.slow && store.get().session.phase === 'writing'),
   // What the person sends from a composer lands at the end of its thread, as from a dictation.
@@ -49,13 +49,36 @@ window.localStorage.setItem('althar.both', '560')
 
 const router = makeRouter({ client, cache }, createMemoryHistory({ initialEntries: [store.get().path] }))
 keepRouter(router)
-router.subscribe('onResolved', ({ toLocation }) => visit(toLocation.href))
+router.subscribe('onResolved', ({ toLocation }) => {
+  visit(toLocation.href)
+  if (toLocation.href.startsWith('/threads/')) hearLater()
+})
 
-// The idea, the state and where the window is go in the address, so a link opens the same.
+/** Crowded, the task's pull request hears from its reviewer a moment after you open it. */
+let hearing: number | null = null
+const hearLater = () => {
+  if (store.get().crowd !== 'crowded') return
+  hearSoon()
+  if (hearing !== null) window.clearTimeout(hearing)
+  hearing = window.setTimeout(() => void cache.invalidateQueries(), HEARD_AFTER + 50)
+}
+hearLater()
+
+// A crowd of another size: the screens read again.
+let crowdShown = store.get().crowd
+store.subscribe(() => {
+  if (store.get().crowd === crowdShown) return
+  crowdShown = store.get().crowd
+  void cache.invalidateQueries()
+  hearLater()
+})
+
+// The idea, the state, the crowd, A's place and where the window is go in the address, so a link opens the same.
 let shown = ''
 store.subscribe(() => {
-  const { idea, preset, path, still } = store.get()
-  const address = `?idea=${idea}&state=${preset}&at=${path.replace(/&/g, '%26')}${still ? '&still' : ''}`
+  const { idea, preset, path, still, crowd, place } = store.get()
+  const extra = `${crowd === 'none' ? '' : `&crowd=${crowd}`}${idea === 'A' && place !== 'centre' ? `&place=${place}` : ''}`
+  const address = `?idea=${idea}&state=${preset}${extra}&at=${path.replace(/&/g, '%26')}${still ? '&still' : ''}`
   if (address === shown) return
   shown = address
   window.history.replaceState(null, '', address)

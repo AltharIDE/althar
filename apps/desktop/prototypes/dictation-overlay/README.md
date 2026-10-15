@@ -52,6 +52,20 @@ Every overlay has pause, stop (writing it down), throw away (with Undo), back to
 - E2 E, then on the board, which has no composer: a pill, going to the task looked at last.
 - M1 Moved on again (A): two tasks later, still to the coordinator, and it says what you looked at.
 - M2 Back at the conversation: the overlay goes, and the words are in its composer, live.
+- P1–P8 A among the composer's other pills (Running, Listening), at 1× and cropped to the composer's end: see below.
+
+## A among the pills
+
+A composer already has a row of pills over it, at its left: Running (what the lead left running, or what Althar runs of the project) and Listening (the pull requests a task listens to, which says for a moment what one just heard). The row wraps upward when they don't fit. "What else runs" in the bar fills them from the fake data the screens read: nothing, a server and a pull request, or crowded (three processes and one that exited, two pull requests, and a reviewer's comment a moment after the task opens). With A on, a second switch says where its pill goes among them; it is in the address as `&place=` and `&crowd=`.
+
+- **Centre**, as first drawn: centred over the composer, it sits on the pills once there are any (P1).
+- **Right end**: at the composer's right, on the pills' line; where they leave no room it moves up a row (P2).
+- **In their row**: one more pill in the composer's own row, first and nearest the field, as tall as the others, with "To the coordinator" only (the project's mark says where) and the last few words; the others move along and wrap above it, as the row already does (P3, P5). Running's list opens above it, untouched (P6).
+- **Above them**: the full pill, centred over the whole stack (P4).
+
+In all but Centre, the card (opened, or written and waiting) opens above the whole stack, so the pills stay in sight (P7); a pill's list opened then goes over the card (P8).
+
+What it showed: at this width, Running and Listening already take a row each, so with the dictation it is three rows. I'd take **In their row**: it is the row's own way of saying something runs beside the conversation, it never covers a pill, and the dictation's pill stays nearest the field, where the person's eye already is. Above them is the fallback if the dictation must stay the full pill with more of its words.
 
 ## Which I'd pick
 

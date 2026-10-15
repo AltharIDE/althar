@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
-import { titleOf } from './data'
+import { type Crowd, titleOf } from './data'
 import { addSent } from './sent'
 
 /*
@@ -56,6 +56,33 @@ export const PRESETS: ReadonlyArray<{ readonly value: Preset; readonly label: st
   { value: 'finished', label: 'Written, to send' },
   { value: 'failed', label: 'Couldn’t write it down' },
   { value: 'again', label: 'Moved on again' },
+]
+
+/** What else floats over the composer you land on: nothing, a server and a pull request, or all of it at once. */
+export type { Crowd }
+
+export const CROWDS: ReadonlyArray<{ readonly value: Crowd; readonly label: string }> = [
+  { value: 'none', label: 'Nothing else running' },
+  { value: 'some', label: 'A server, a pull request' },
+  { value: 'crowded', label: 'Crowded' },
+]
+
+/** Where A's pill goes among those pills. */
+export type APlace = 'centre' | 'right' | 'row' | 'above'
+
+export const A_PLACES: ReadonlyArray<{ readonly value: APlace; readonly label: string; readonly note: string }> = [
+  { value: 'centre', label: 'Centre', note: 'As first drawn: centred just above the composer, whatever else is there.' },
+  {
+    value: 'right',
+    label: 'Right end',
+    note: 'At the composer’s right edge; the pills keep the left. Where they reach it, it moves up a row.',
+  },
+  {
+    value: 'row',
+    label: 'In their row',
+    note: 'One more pill in the row over the composer, the first, nearest the field; the others move along.',
+  },
+  { value: 'above', label: 'Above them', note: 'Centred above the whole stack of pills, never in their row.' },
 ]
 
 /* ——— Who it goes to. ——— */
@@ -241,6 +268,10 @@ export interface Live {
   readonly moved: Moved | null
   /** Words written for a composer that isn't on screen, waiting to go into its field. */
   readonly pending: Readonly<Record<string, string>>
+  /** What else runs over the composer you land on. */
+  readonly crowd: Crowd
+  /** Where A's pill goes among them. */
+  readonly place: APlace
 }
 
 const params = new URLSearchParams(window.location.search)
@@ -250,6 +281,8 @@ const presetFrom = (value: string | null): Preset => PRESETS.find((one) => one.v
 const firstPreset = presetFrom(params.get('state'))
 
 let live: Live = {
+  crowd: CROWDS.find((one) => one.value === params.get('crowd'))?.value ?? 'none',
+  place: A_PLACES.find((one) => one.value === params.get('place'))?.value ?? 'centre',
   idea: ideaOf(params.get('idea')),
   preset: firstPreset,
   still: params.has('still'),
@@ -352,6 +385,9 @@ const settleLater = (phase: Phase) => {
 
 export const act = {
   setIdea: (idea: Idea) => store.set({ idea, moved: null }),
+  setCrowd: (crowd: Crowd) => store.set({ crowd }),
+  /** Another place for A's pill: it leaves wherever it was dragged. */
+  setPlace: (place: APlace) => store.set({ place, pos: null }),
   /** A state from the picker: the dictation starts again from it, where the window is. */
   setPreset: (preset: Preset) => {
     store.set({ preset, session: presetOf(preset), moved: null, pending: {}, open: params.has('open') })
