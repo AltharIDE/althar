@@ -54,6 +54,11 @@ Per agent and provider, today:
 
 ### The exception to rule 3
 
+Decided: [ADR-043](../decisions/043-a-usage-read-may-use-an-accounts-token-once.md).
+An OpenCode 2.x account has no endpoint source (its credentials moved into
+`opencode.db`, and `auth list` says "can't tell"), so it shows a fault, not
+quiet "no data".
+
 Architecture 03 rule 3 says Althar never reads an agent's credential cache,
 and the provider endpoints need that token. Required coverage cannot be met
 without it, so the plan amends the rule (an architecture change, stage 0,
@@ -288,14 +293,17 @@ before building on it):
 **Started 15 October:** stage 1's model, warning rule and Codex source are in
 `packages/provider-adapters/src/usage.ts` (tests in `tests/usage.test.ts`).
 Not yet: the per-(agent, provider) usage-source registry and its contract
-test, and anything that reads a token (stage 0 is not approved).
+test, and anything that reads a token (stage 0, the exception, is decided
+and written; no reader is built yet).
 
 One pull request each. Stages 0 to 5 are Althar's; 6 to 8 are upstream and
 run in parallel.
 
-0. **Amend rule 3** in architecture 03 with the narrow usage read above, and
-   record it as a decision (ADR). Needs the person's word before anything
-   reads a token.
+0. **Amend rule 3** (done, docs only, 15 October): the narrow usage read is
+   in architecture 03 and
+   [ADR-043](../decisions/043-a-usage-read-may-use-an-accounts-token-once.md),
+   approved by the person. Its reader, allowlist and contract test are still
+   to build, in the stages below.
 1. **Model and Codex source.** `AccountStatus` with its `windows`
    (`provider-adapters`), a Codex source (app-server with the account's
    home), the threshold rule above as a pure function with tests (each

@@ -403,9 +403,18 @@ never under running work.
   architecture 03 rule 3), errors only as the floor. Claude is the exception
   to the endpoint step (Anthropic's terms). Don't write our own ACP proposal
   unless #2316 is declined. Open until #2316 is accepted or declined.
-- [ ] **Amend rule 3 for a usage read.** The endpoint step reads an account's
-  token in memory for one call to the provider's usage URL. Needs the
-  person's word and an ADR before any code ([plan](plans/plan-usage.md#the-exception-to-rule-3)).
+- [x] **Amend rule 3 for a usage read.** Settled on 15 October 2026 with the
+  person: a narrow exception, an account's token in memory for one call to a
+  per-provider allowlisted usage URL, never written, refreshed, logged or
+  sent elsewhere, no Claude endpoint
+  ([ADR-043](decisions/043-a-usage-read-may-use-an-accounts-token-once.md),
+  [architecture 03](architecture/03-agent-runtime-and-auth.md#the-usage-read)).
+- [ ] **OpenCode 2.x usage.** Its credentials moved into `opencode.db` and
+  `auth list` says "can't tell", so an OpenCode 2.x account has no usage
+  source and shows a fault until OpenCode documents a way to read one
+  account's credential or usage, and the registry reads
+  `auth list --standalone --format json`
+  ([research](plans/plan-usage.md#the-exception-to-rule-3)).
 - [ ] **Claude accounts with no session.** Can the Agent SDK's
   `usage_EXPERIMENTAL…()` or a probe session read them within Anthropic's
   terms? If not, they stay uncovered until Anthropic allows a read.
