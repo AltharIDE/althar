@@ -1374,6 +1374,19 @@ describe('finding pull requests to review', () => {
     }).pipe(Effect.provide(withQueries(github)))
   })
 
+  it.live('says where none of the newest the host read match, and older ones weren’t read', () => {
+    const { at, github } = listing({ listReads: 2 })
+    github.addPullRequest({ path: ['meridian', 'api'], title: 'An old draft', author: 'dana', draft: true })
+    for (const title of ['Ready one', 'Ready two']) github.addPullRequest({ path: ['meridian', 'api'], title, author: 'dana' })
+    return Effect.gen(function* () {
+      const { coordinator } = yield* project(at.working)
+      assert.strictEqual(
+        (yield* callTool(coordinator, 'find_pull_requests', { draft: true })).split('\n')[0],
+        'meridian/api: none of the newest open pull requests Althar read match, and older ones weren’t read: narrow it with author or text.',
+      )
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
   it.live('says plainly where a host can’t list them, and which scope the connection lacks', () => {
     const none = listing({ lists: false })
     const lacking = listing({ listLacks: 'repo (a fine-grained token’s Pull requests: Read)' })

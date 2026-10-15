@@ -515,8 +515,10 @@ asks; its thread opens with what they said and the pull request under it.
 Asked to review someone's pull requests without their numbers, it finds
 them first (`find_pull_requests`), through each host's list call
 (`CodeHost.listChanges`): GitHub's search over GraphQL, which says each
-one's branches, review decision and checks in one call; GitLab's, and
-Bitbucket's, lists. A listing refused for a scope says which
+one's branches, review decision and checks in one call, and, a POST with no
+ETag, is kept a minute so the same search again costs nothing; GitLab's,
+and Bitbucket's, cached lists, Data Center's read page after page where
+Althar narrows them itself. A listing refused for a scope says which
 (`ConnectorFailed.scope`); a host that can't list says so
 (`noListing`).
 

@@ -1,7 +1,8 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Duration, Effect } from 'effect'
+import { TestClock } from 'effect/testing'
 
-import { checkRunState, makeGitHub, searchOf, tail } from '../src/github'
+import { checkRunState, LISTING_KEPT_MS, makeGitHub, searchOf, tail } from '../src/github'
 import { fromOutside, type Issue, type Repository } from '../src/model'
 import { type Route, stubFetch, variablesOf } from './stub'
 
@@ -751,6 +752,23 @@ describe('GitHub listing pull requests', () => {
       const all = github([['POST', `${API}/graphql`, { json: { data: { search: { issueCount: 1, nodes: [listed()] } } } }]])
       assert.isFalse((yield* all.host.listChanges(repository, { state: 'open', limit: 500 })).more)
       assert.deepInclude(variablesOf(all.sent[0]), { n: 100 })
+    }),
+  )
+
+  it.effect('answers the same search again within a minute from memory, and asks again after', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([['POST', `${API}/graphql`, { json: SEARCHED }]])
+      const asked = { state: 'open', author: 'ninemate', limit: 30 } as const
+      const first = yield* host.listChanges(repository, asked)
+      yield* TestClock.adjust(Duration.millis(LISTING_KEPT_MS - 1))
+      assert.deepStrictEqual(yield* host.listChanges(repository, asked), first)
+      assert.lengthOf(sent, 1)
+      // Narrowed otherwise, it is another search.
+      yield* host.listChanges(repository, { ...asked, draft: true })
+      assert.lengthOf(sent, 2)
+      yield* TestClock.adjust(Duration.millis(1))
+      yield* host.listChanges(repository, asked)
+      assert.lengthOf(sent, 3)
     }),
   )
 

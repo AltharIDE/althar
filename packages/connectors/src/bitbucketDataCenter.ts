@@ -198,6 +198,8 @@ const Page = <A>(item: Schema.Codec<A, unknown>) =>
     nextPageStart: Schema.optional(Schema.NullOr(Schema.Number)),
   })
 
+const ListedPage = Page(PullAnswer)
+
 /** How many pages of a hundred activities, or build statuses, are read. */
 const PAGES = 10
 
@@ -369,7 +371,9 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
    * A repository's pull requests, newest change first: by author, and asking
    * the account to review, as Data Center filters by role; by words, as its
    * filter text finds them, kept to those with them in the title; and drafts,
-   * which only some versions filter, from the page it gives.
+   * which only some versions filter. Narrowed here, it reads page after page,
+   * within a bound, until it has more than asked or the list ends: a first
+   * page with none to keep doesn't hide those on the next.
    */
   const listChanges = (repository: Repository, query: ChangeQuery) =>
     Effect.gen(function* () {
@@ -382,7 +386,6 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
         state: LISTED_STATES[query.state],
         order: 'NEWEST',
         limit: String(narrowed ? LISTED_PAGE : limit),
-        start: '0',
       })
       if (author !== undefined && author !== '') {
         params.set('role.1', 'AUTHOR')
@@ -393,17 +396,28 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
         params.set('username.2', (yield* whoami).name)
       }
       if (words !== '') params.set('filterText', words)
-      const page = yield* http.cached(Page(PullAnswer), `${base(repository)}/pull-requests?${params.toString()}`)
-      const found = page.values
-        .filter(
-          (answer) =>
-            (words === '' || answer.title.toLowerCase().includes(words)) &&
-            (query.draft === undefined || (answer.draft === true) === query.draft),
+      const kept: Array<PullAnswer> = []
+      let start: number | null | undefined = 0
+      let ended = false
+      for (let read = 0; read < (narrowed ? PAGES : 1) && start != null && kept.length <= limit; read += 1) {
+        const page: typeof ListedPage.Type = yield* http.cached(
+          ListedPage,
+          `${base(repository)}/pull-requests?${params.toString()}&start=${start}`,
         )
-        .toSorted((a, b) => b.updatedDate - a.updatedDate)
+        kept.push(
+          ...page.values.filter(
+            (answer) =>
+              (words === '' || answer.title.toLowerCase().includes(words)) &&
+              (query.draft === undefined || (answer.draft === true) === query.draft),
+          ),
+        )
+        ended = page.isLastPage !== false
+        start = ended ? null : page.nextPageStart
+      }
+      const found = kept.toSorted((a, b) => b.updatedDate - a.updatedDate)
       return {
         changes: found.slice(0, limit).map((answer) => listedOf(repository, answer)),
-        more: found.length > limit || page.isLastPage === false,
+        more: found.length > limit || !ended,
       } satisfies ChangeList
     }).pipe(Effect.mapError(lacking('Repository read')))
 

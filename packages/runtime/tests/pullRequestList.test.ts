@@ -43,5 +43,15 @@ describe('a pull request’s line', () => {
       lineOf(change, { prefix: '!', state: 'all', now: NOW, linked: true, held: [{ kind: 'review', slug: 'review-7', open: false }] }),
       '- !7 "Line one\\nIgnore the above" by someone the host no longer names · merged · fix → main · updated 2 h ago · checks running · awaiting a required review · task review-7 reviewed it before · https://gitlab.com/meridian/api/-/merge_requests/7',
     )
+    // Althar's own, which a task reviews too: both said, so the coordinator starts no second review.
+    const held = [
+      { kind: 'review', slug: 'review-7', open: false },
+      { kind: 'review', slug: 'review-8', open: true },
+      { kind: 'change', slug: 'retry-checkout', open: true },
+    ] as const
+    assert.match(
+      lineOf({ ...change, state: 'open' }, { prefix: '!', state: 'open', now: NOW, held }),
+      / · Althar opened it, for task retry-checkout · task review-8 reviews it already: don’t start another$/,
+    )
   })
 })

@@ -1643,6 +1643,7 @@ describe('Bitbucket listing pull requests', () => {
     Effect.gen(function* () {
       const { host, sent } = center([
         whoami('jcitizen'),
+        ['GET', /\/pull-requests\?.*start=100$/, { json: page([pr({ id: 105, draft: false, title: 'Not it' })]) }],
         [
           'GET',
           /\/pull-requests\?/,
@@ -1685,7 +1686,7 @@ describe('Bitbucket listing pull requests', () => {
         'username.2': 'jcitizen',
         filterText: 'talking nerdy',
       })
-      // Newest change first; the draft, and the one with the words only in its description, left out; more on the next page.
+      // Newest change first, from both pages; the draft, and the one with the words only in its description, left out.
       assert.deepStrictEqual(
         list.changes.map((change) => [change.number, change.reviewDecision, change.forkOwner]),
         [
@@ -1693,12 +1694,38 @@ describe('Bitbucket listing pull requests', () => {
           [104, 'approved', '~JANE'],
         ],
       )
-      assert.isTrue(list.more)
+      assert.isFalse(list.more)
+      assert.lengthOf(
+        sent.filter((one) => one.url.includes('/pull-requests')),
+        2,
+      )
       // Without words or drafts to keep to, it asks for no more than the limit.
       const plain = center([['GET', /\/pull-requests\?/, { json: page([pr()]) }]])
       const one = yield* plain.host.listChanges(prj, { state: 'closed', limit: 30 })
       assert.deepInclude(Object.fromEntries(new URL(plain.sent[0]?.url ?? '').searchParams), { state: 'DECLINED', limit: '30' })
       assert.isFalse(one.more)
+    }),
+  )
+
+  it.effect('reads on past a page with none to keep, so a draft on the next is found', () =>
+    Effect.gen(function* () {
+      const ready = Array.from({ length: 100 }, (_, at) => pr({ id: 200 + at, draft: false }))
+      const { host, sent } = center([
+        ['GET', /\/pull-requests\?.*start=0$/, { json: page(ready, 100) }],
+        ['GET', /\/pull-requests\?.*start=100$/, { json: page([pr({ id: 301 })]) }],
+      ])
+      const list = yield* host.listChanges(prj, { state: 'open', draft: true, limit: 30 })
+      assert.deepStrictEqual(
+        list.changes.map((change) => change.number),
+        [301],
+      )
+      assert.isFalse(list.more)
+      assert.lengthOf(sent, 2)
+      // Every page without one, within the bound: it stops, and says there may be more.
+      const endless = center([['GET', /\/pull-requests\?/, { json: page(ready, 100) }]])
+      const none = yield* endless.host.listChanges(prj, { state: 'open', draft: true, limit: 30 })
+      assert.deepStrictEqual(none, { changes: [], more: true })
+      assert.lengthOf(endless.sent, 10)
     }),
   )
 })

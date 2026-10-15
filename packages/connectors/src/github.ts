@@ -1,4 +1,4 @@
-import { Effect, Schema } from 'effect'
+import { Clock, Effect, Schema } from 'effect'
 
 import { type Access, type AccessInput, type AccessLine, type AccessNeed, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
@@ -7,6 +7,7 @@ import { makeHttp, paged } from './http'
 import type {
   Account,
   Activity,
+  ChangeList,
   ChangeQuery,
   ChangeRequest,
   ChangeToReview,
@@ -409,10 +410,19 @@ const Listed = Schema.Struct({
   archived: Schema.optional(Schema.Boolean),
 })
 
+/**
+ * How long a listing is kept: a GraphQL search is a POST, with no ETag to ask
+ * "anything new?" by, so the same search again within a minute is answered
+ * from memory, and a coordinator asking twice costs GitHub nothing more.
+ */
+export const LISTING_KEPT_MS = 60_000
+
 export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'github' as const
   const api = options.apiUrl.replace(/\/+$/, '')
   const graphqlUrl = api.endsWith('/api/v3') ? `${api.slice(0, -'/v3'.length)}/graphql` : `${api}/graphql`
+  /** Listings by their search, with when each was asked. */
+  const listings = new Map<string, { readonly at: number; readonly list: ChangeList }>()
   const http = makeHttp({
     product,
     fetch: options.fetch,
@@ -524,21 +534,27 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           ),
         ),
     change: (repository, number) => Effect.map(http.cached(PullAnswer, `${repo(repository)}/pulls/${number}`), changeOf),
-    listChanges: (repository, query) => {
-      const q = searchOf(repository.path, query)
-      if (q === undefined)
-        return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: `Not a GitHub login: ${query.author}` }))
-      return http.graphql(SearchAnswer, graphqlUrl, SEARCH, { q, n: Math.min(Math.max(query.limit, 1), 100) }).pipe(
-        Effect.map(({ search }) => {
-          const changes = search.nodes.flatMap((node) => {
-            const pull = Schema.decodeUnknownOption(ListedAnswer)(node)
-            return pull._tag === 'Some' ? [listedOf(pull.value)] : []
-          })
-          return { changes, more: search.issueCount > changes.length }
-        }),
-        Effect.mapError(lacking('repo (a fine-grained token’s Pull requests: Read)')),
-      )
-    },
+    listChanges: (repository, query) =>
+      Effect.gen(function* () {
+        const q = searchOf(repository.path, query)
+        if (q === undefined)
+          return yield* Effect.fail(new ConnectorFailed({ product, reason: 'rejected', message: `Not a GitHub login: ${query.author}` }))
+        const n = Math.min(Math.max(query.limit, 1), 100)
+        const key = `${n} ${q}`
+        const now = yield* Clock.currentTimeMillis
+        const kept = listings.get(key)
+        if (kept !== undefined && now - kept.at < LISTING_KEPT_MS) return kept.list
+        const { search } = yield* http
+          .graphql(SearchAnswer, graphqlUrl, SEARCH, { q, n })
+          .pipe(Effect.mapError(lacking('repo (a fine-grained token’s Pull requests: Read)')))
+        const changes = search.nodes.flatMap((node) => {
+          const pull = Schema.decodeUnknownOption(ListedAnswer)(node)
+          return pull._tag === 'Some' ? [listedOf(pull.value)] : []
+        })
+        const list: ChangeList = { changes, more: search.issueCount > changes.length }
+        listings.set(key, { at: now, list })
+        return list
+      }),
     markReady: (repository, change) =>
       http
         .graphql(

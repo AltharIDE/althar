@@ -55,14 +55,21 @@ const CHECKS: Readonly<Record<NonNullable<ListedChange['checks']>, string>> = {
   running: 'checks running',
 }
 
-/** What Althar knows of a pull request: the task it opened it for, or the tasks that review it, the open one first. */
+/** What Althar knows of a pull request: the task it opened it for, and the task that reviews it, or did. */
 const heldWords = (held: ReadonlyArray<Held> | undefined): string => {
   const opened = held?.find((one) => one.kind === 'change')
-  if (opened !== undefined) return `Althar opened it, for task ${opened.slug}`
   const reviewing = held?.find((one) => one.kind === 'review' && one.open)
-  if (reviewing !== undefined) return `task ${reviewing.slug} reviews it already: don’t start another`
   const reviewed = held?.find((one) => one.kind === 'review')
-  return reviewed === undefined ? '' : `task ${reviewed.slug} reviewed it before`
+  return [
+    opened === undefined ? '' : `Althar opened it, for task ${opened.slug}`,
+    reviewing !== undefined
+      ? `task ${reviewing.slug} reviews it already: don’t start another`
+      : reviewed === undefined
+        ? ''
+        : `task ${reviewed.slug} reviewed it before`,
+  ]
+    .filter((part) => part !== '')
+    .join(' · ')
 }
 
 /** One pull request's line: never its description, and its title as data, in quotes. */
@@ -161,7 +168,10 @@ export const findPullRequests = (projectId: string, asked: PullRequestQuery) =>
           if ('failed' in listed) return `${where}: ${listed.failed}`
           const { changes, more } = listed.list
           const which = query.state === 'all' ? `${noun}s` : `${query.state} ${noun}s`
-          if (changes.length === 0) return `${where}: no ${which} match.`
+          if (changes.length === 0)
+            return more
+              ? `${where}: none of the newest ${which} Althar read match, and older ones weren’t read: narrow it with author or text.`
+              : `${where}: no ${which} match.`
           return [
             `${upper(which)} in ${where}, newest change first:`,
             ...changes.map((change) =>

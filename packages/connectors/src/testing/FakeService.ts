@@ -51,6 +51,8 @@ export interface FakeServiceOptions {
   readonly lists?: boolean
   /** A scope the connection lacks, which listing changes needs: listing is refused for it, as a host refuses a token without it. */
   readonly listLacks?: string
+  /** How many of the newest it reads before narrowing them, as a host that narrows a page at a time stops: all unless said. */
+  readonly listReads?: number
 }
 
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
@@ -294,17 +296,17 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           .toLowerCase()
           .split(/\s+/)
           .filter((word) => word !== '')
-        const found = changes
-          .filter(
-            (change) =>
-              repositoryOf.get(change.number) === repository.id &&
-              (query.state === 'all' || change.state === query.state) &&
-              (query.author === undefined || change.author?.login.toLowerCase() === query.author.toLowerCase()) &&
-              words.every((word) => change.title.toLowerCase().includes(word)) &&
-              (query.reviewRequested !== true || (asked.get(change.number) ?? []).includes(me.login)) &&
-              (query.draft === undefined || change.draft === query.draft),
-          )
+        const newest = changes
+          .filter((change) => repositoryOf.get(change.number) === repository.id && (query.state === 'all' || change.state === query.state))
           .toSorted((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : b.number - a.number))
+        const read = newest.slice(0, options.listReads ?? newest.length)
+        const found = read.filter(
+          (change) =>
+            (query.author === undefined || change.author?.login.toLowerCase() === query.author.toLowerCase()) &&
+            words.every((word) => change.title.toLowerCase().includes(word)) &&
+            (query.reviewRequested !== true || (asked.get(change.number) ?? []).includes(me.login)) &&
+            (query.draft === undefined || change.draft === query.draft),
+        )
         const listed = found.slice(0, query.limit).map((change): ListedChange => {
           // Each reviewer's latest verdict: a request for changes holds over an approval.
           const latest = new Map((reviews.get(change.number) ?? []).map((review) => [review.author.login, review.verdict]))
@@ -330,7 +332,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
                     : 'passed',
           }
         })
-        return Effect.succeed({ changes: listed, more: found.length > listed.length } satisfies ChangeList)
+        return Effect.succeed({ changes: listed, more: found.length > listed.length || read.length < newest.length } satisfies ChangeList)
       }),
     markReady: (_repository, change) =>
       Effect.andThen(called('markReady'), () => {
