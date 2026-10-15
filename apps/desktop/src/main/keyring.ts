@@ -73,7 +73,13 @@ export interface SafeStorageLike {
   decryptStringAsync: (value: Buffer) => Promise<{ result: string; shouldReEncrypt: boolean }>
 }
 
-export type SealReply = { value: string } | { error: string; keyring: true }
+export type SealReply = { value: string } | { error: string; keyring: true; unreadable?: true }
+
+/**
+ * A seal no key here opens: the keyring answered, it just can't open this. Marked `unreadable` as well, so the runtime has the
+ * sign-in made again (`reauth_required`) rather than report the keychain away, as `sealFailure` does off the portal.
+ */
+const unopenable: SealReply = { error: portalSealUnavailable, keyring: true, unreadable: true }
 
 const safeSyncKeyring = (storage: SafeStorageLike, platform: NodeJS.Platform): boolean => {
   try {
@@ -130,14 +136,14 @@ export const sealWithPortal = async (
     } catch {
       // A portal-sealed value cannot be opened by the session fallback.
     }
-    return { error: portalSealUnavailable, keyring: true }
+    return unopenable
   }
-  if (!sealedBySyncKeyring(sealed)) return { error: portalSealUnavailable, keyring: true }
+  if (!sealedBySyncKeyring(sealed)) return unopenable
   if (!safeSyncKeyring(storage, platform)) return { error: keyringUnavailable(platform), keyring: true }
   try {
     return { value: storage.decryptString(sealed) }
   } catch {
-    return { error: portalSealUnavailable, keyring: true }
+    return unopenable
   }
 }
 

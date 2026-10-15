@@ -135,11 +135,19 @@ describe('the Secret portal and session fallback', () => {
 
   it('does not open shared-service or fixed-key async seals, or fall back from a failed portal seal', async () => {
     const shared = storage()
-    expect(await sealWithPortal(false, encoded('v11'), shared, 'linux')).toEqual({ error: portalSealUnavailable, keyring: true })
+    expect(await sealWithPortal(false, encoded('v11'), shared, 'linux')).toEqual({
+      error: portalSealUnavailable,
+      keyring: true,
+      unreadable: true,
+    })
     expect(vi.mocked(shared.decryptString)).not.toHaveBeenCalled()
 
     const failedPortal = storage({ decryptStringAsync: vi.fn(async () => Promise.reject(new Error('portal unavailable'))) })
-    expect(await sealWithPortal(false, encoded('v12'), failedPortal, 'linux')).toEqual({ error: portalSealUnavailable, keyring: true })
+    expect(await sealWithPortal(false, encoded('v12'), failedPortal, 'linux')).toEqual({
+      error: portalSealUnavailable,
+      keyring: true,
+      unreadable: true,
+    })
     expect(vi.mocked(failedPortal.decryptString)).not.toHaveBeenCalled()
   })
 })
