@@ -38,7 +38,17 @@ import { MachineLoad } from './MachineLoad'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
-import { accountsOf, movesIssues, Policies, type ProjectRules, resolvesConflicts, ruleSetOf, usageLimitOf } from './Policies'
+import {
+  accountsOf,
+  allowsEverything,
+  modeOf,
+  movesIssues,
+  Policies,
+  type ProjectRules,
+  resolvesConflicts,
+  ruleSetOf,
+  usageLimitOf,
+} from './Policies'
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
@@ -264,7 +274,8 @@ export const handlers = Api.toLayer(
       const accounts = accountsOf(rules)
       return {
         projectId,
-        permissions: set.mode,
+        permissions: modeOf(rules),
+        allowEverything: allowsEverything(rules),
         alwaysAsk: set.ask,
         never: set.never,
         alwaysAllow: set.allow,
@@ -652,6 +663,15 @@ export const handlers = Api.toLayer(
           api(
             Effect.flatMap(envelope('task.set_conflicts', { taskId, resolveConflicts }, commandId), (said) =>
               pullRequests.setResolveConflicts({ envelope: said, taskId, resolveConflicts }),
+            ),
+          ),
+        ),
+      SetTaskAllowEverything: ({ commandId, taskId, allowEverything }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.set_allow_everything', { taskId, allowEverything }, commandId), (said) =>
+              permissions.allowEverything({ envelope: said, taskId, on: allowEverything }),
             ),
           ),
         ),

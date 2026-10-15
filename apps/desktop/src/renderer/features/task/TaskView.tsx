@@ -252,10 +252,13 @@ const firstChange = (view: FileView): number | undefined => {
 export function TaskView({
   model,
   onBack,
+  onRules,
 }: {
   model: TaskModel
   /** Back to the project, on Escape. */
   onBack: () => void
+  /** Opens its project's rules, from a card the project always asks about. */
+  onRules?: () => void
 }) {
   const [draft, setDraft] = useState('')
   const voice = useDictation(setDraft, { projectId: model.snapshot?.project.id ?? null })
@@ -521,6 +524,12 @@ export function TaskView({
                 choice: conflictsChoice(snapshot.task.resolveConflicts.task),
                 project: snapshot.task.resolveConflicts.project,
                 onChange: (choice: TaskConflicts) => void model.setResolveConflicts(choice === 'project' ? null : choice === 'on'),
+              },
+              // And whether everything its agents ask is allowed: by its own switch, or its project's.
+              allowEverything: {
+                on: snapshot.task.allowEverything.task,
+                project: snapshot.task.allowEverything.project,
+                onChange: (on: boolean) => void model.setAllowEverything(on),
               },
             }
           : {})}
@@ -789,6 +798,13 @@ export function TaskView({
               requests={snapshot.attention.filter((request) => request.kind === 'permission')}
               project={snapshot.project.name}
               onAnswer={model.answer}
+              // Out of what the project always asks about: everything on this task allowed, where it isn't yet; or the rules.
+              wayOut={{
+                ...(snapshot.task.allowEverything.task || snapshot.task.phase === 'settled'
+                  ? {}
+                  : { onAllowEverything: () => void model.setAllowEverything(true) }),
+                ...(onRules === undefined ? {} : { onRules }),
+              }}
             />
           </Thread>
         </TaskFace>

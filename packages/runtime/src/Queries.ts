@@ -72,6 +72,11 @@ const LIVE = ['starting', 'active', 'waiting_approval', 'cancelling']
 /** A task's branch as its screens show it, from its first worktree `w`: none for a plain task's that has no branch yet (DEV-96). */
 const SHOWN_BRANCH = 'CASE WHEN w.branched_at IS NULL THEN NULL ELSE w.branch END AS branch'
 
+/** Whether a project's rules allow everything now (ADR-036): by the switch, or as an earlier revision said it, as a mode. 1 or 0. */
+const PROJECT_ALLOWS = (projectId: string) =>
+  `(SELECT json_extract(r.rules, '$.allowEverything') IS 1 OR json_extract(r.rules, '$.permissions') IS 'allow'
+    FROM policies r WHERE r.project_id = ${projectId} ORDER BY r.revision DESC LIMIT 1)`
+
 /** How many tasks, or cards, a screen reads at once: each may start git. */
 const AT_ONCE = 8
 
@@ -238,6 +243,8 @@ const callOf = (request: {
     title: request.kind === 'question' ? questionTitle(questionOf(payload)) : text(payload, 'title'),
     reason: text(payload, 'reason'),
     command: text(payload, 'command') || null,
+    // A permission the rules keep for the person whatever they let through: no "always allow" can answer it.
+    ...(request.kind === 'permission' && field(payload, 'held') === true ? { held: true } : {}),
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
     ...(request.kind === 'question'
       ? { question: askedOf(payload, { agentId: request.askerAgentId ?? null, model: request.askerModel ?? null }) }
@@ -1579,7 +1586,22 @@ export class Queries extends Context.Service<
                   del: said.files.reduce((sum, file) => sum + file.del, 0),
                 }
               : null
-          const read = { ...card, state: row.state, createdAt: row.createdAt, settledAt: row.settledAt, changed, here: said?.here ?? [] }
+          // Not settled, whether nothing it asks waits for the person: by its own switch, or its project's (ADR-036).
+          const sql = yield* SqlClient.SqlClient
+          const [allows] =
+            card.phase === 'settled'
+              ? []
+              : yield* sql<{ allows: number | null }>`
+                  SELECT k.allow_everything = 1 OR ${sql.unsafe(PROJECT_ALLOWS('k.project_id'))} AS allows FROM tasks k WHERE k.id = ${row.id}`
+          const read = {
+            ...card,
+            state: row.state,
+            createdAt: row.createdAt,
+            settledAt: row.settledAt,
+            changed,
+            here: said?.here ?? [],
+            ...(allows?.allows === 1 ? { allowEverything: true } : {}),
+          }
           if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, read)
           // Back at work, what was kept of it as it settled goes: settled again, at the same time, it may say more.
           else for (const key of settledCards.keys()) if (key.startsWith(`${row.id}:`)) settledCards.delete(key)
@@ -1822,10 +1844,13 @@ export class Queries extends Context.Service<
             settledAt: string | null
             resolveConflicts: number | null
             projectResolves: number | null
+            allowEverything: number
+            projectAllows: number | null
           }>`
             SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.request, k.slug, k.state,
               k.settled_at, ${sql.unsafe(SHOWN_BRANCH)}, w.path AS worktree, w.base_ref, w.base_commit, k.resolve_conflicts,
-              (SELECT json_extract(r.rules, '$.resolveConflicts') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS project_resolves
+              (SELECT json_extract(r.rules, '$.resolveConflicts') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS project_resolves,
+              k.allow_everything, ${sql.unsafe(PROJECT_ALLOWS('p.id'))} AS project_allows
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE t.id = ${threadId} AND t.kind = 'task'`
@@ -1914,6 +1939,7 @@ export class Queries extends Context.Service<
                 task: head.resolveConflicts === null ? null : head.resolveConflicts === 1,
                 project: head.projectResolves === 1,
               },
+              allowEverything: { task: head.allowEverything === 1, project: head.projectAllows === 1 },
               review: yield* reviewBriefOf(head.taskId),
             },
             session,

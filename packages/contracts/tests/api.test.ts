@@ -455,6 +455,7 @@ describe('the API', () => {
               StopSession: () => Effect.void,
               StopTask: () => Effect.void,
               SetTaskResolveConflicts: () => Effect.void,
+              SetTaskAllowEverything: () => Effect.void,
               ResumeTask: () => Effect.void,
               AbandonTask: () => Effect.void,
               RenameTask: () => Effect.void,

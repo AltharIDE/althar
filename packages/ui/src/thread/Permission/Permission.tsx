@@ -61,6 +61,12 @@ export interface PermissionRequest {
   cmd: string
   /** Why it asks, in its own words. */
   why?: string
+  /**
+   * Where the rules keep it for the person whatever else would answer: why no
+   * "always allow" is offered, and a way out, in the consumer's words. Said
+   * under the answers.
+   */
+  held?: ReactNode
   /** The model asking. */
   agent?: ModelInfo
   /** The step it is on. */
@@ -227,6 +233,7 @@ function Card({
   what,
   cmd,
   why,
+  held,
   agent,
   step,
   prefix,
@@ -380,6 +387,7 @@ function Card({
             </div>
           ))}
         </fieldset>
+        {held && <p className={s.why}>{held}</p>}
         <AskFoot>
           <Button type="submit" variant="signal" kbd="↵">
             {no ? t.deny : t.allow}

@@ -91,6 +91,8 @@ export interface TaskModel {
   readonly resume: () => Promise<void>
   /** Whether its lead resolves conflicts on its own, otherwise than its project says; null goes back to the project. */
   readonly setResolveConflicts: (on: boolean | null) => Promise<void>
+  /** Allows everything its agents ask, short of what its project never allows, or takes it back: what waits goes ahead. */
+  readonly setAllowEverything: (on: boolean) => Promise<void>
   /** Settles it without its change; its worktree and branch stay. Whether it was abandoned. */
   readonly abandon: () => Promise<boolean>
   /** Opens it again, once abandoned, on its worktree and branch. */
@@ -455,6 +457,7 @@ export const useTask = (threadId: string): TaskModel => {
     skipReview: () => onTask((taskId) => client.skipReview(taskId)),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
     setResolveConflicts: (on) => onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on })),
+    setAllowEverything: (on) => onTask((taskId) => client.setTaskAllowEverything({ taskId, allowEverything: on })),
     abandon: async () => {
       let abandoned = false
       await onTask(async (taskId) => {

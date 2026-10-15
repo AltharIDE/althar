@@ -1120,6 +1120,47 @@ describe('a task', () => {
     expect(await shownFor(true, true)).toEqual([false, false])
   })
 
+  it('allows everything on it from its menu, and says Unrestricted beside the menu while it does, by its own switch or its project’s', async () => {
+    const { client, view } = await taskMenu({})
+    expect(screen.queryByText('Unrestricted')).toBeNull()
+    await userEvent.click(screen.getByRole('menuitemcheckbox', { name: /Allow everything on this task/ }))
+    await waitFor(() => expect(client.setTaskAllowEverything).toHaveBeenCalledWith({ taskId: 't1', allowEverything: true }))
+    view.unmount()
+    const shownFor = async (own: boolean, project: boolean) => {
+      const { client } = fakeClient({
+        getThread: vi.fn(async () => thread({ task: { ...thread().task, allowEverything: { task: own, project } } })),
+      })
+      const shown = withServices(<Task />, client)
+      await screen.findByRole('button', { name: 'More for this task' })
+      const said = screen.queryByText('Unrestricted') !== null
+      shown.unmount()
+      return said
+    }
+    expect(await shownFor(true, false)).toBe(true)
+    expect(await shownFor(false, true)).toBe(true)
+    expect(await shownFor(false, false)).toBe(false)
+  })
+
+  it('says why a call the project always asks about has no always allow, and allows everything on the task from it', async () => {
+    const call = {
+      id: 'a1',
+      kind: 'permission' as const,
+      stuck: null,
+      title: 'Run make deploy',
+      reason: 'Deploying or publishing always asks.',
+      command: 'make deploy',
+      held: true,
+      createdAt: '2026-09-29T12:00:00.000Z',
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ attention: [call, { ...call, id: 'a2', held: false, command: 'git push' }] })),
+    })
+    withServices(<Task />, client)
+    await screen.findByText(/always asks you about this, so there’s no “always allow”/)
+    await userEvent.click(screen.getByRole('button', { name: 'Allow everything on this task' }))
+    await waitFor(() => expect(client.setTaskAllowEverything).toHaveBeenCalledWith({ taskId: 't1', allowEverything: true }))
+  })
+
   it('offers its folder for a plain task with no branch, and none where it has no worktree', async () => {
     const plain = await taskMenu({ phase: 'ready', branch: null, actions: ['abandon'] }, null)
     expect(plain.offered).toEqual(['Open in Zed', 'Abandon'])
