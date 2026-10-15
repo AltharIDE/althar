@@ -432,7 +432,9 @@ the provider's usage URL on a per-(agent, provider) allowlist (`https`, one
 host and path each), parse the windows, and drop the token. It may never
 write, refresh, copy, cache, persist, log or send the token elsewhere, call
 any other URL, follow a redirect to another host, or change anything in the
-agent's home. No Anthropic host is on the allowlist. A contract test, against
+agent's home. A caller names a registry source, never supplies one; the token
+is scanned out of its file without building the rest of it, from a file that
+is neither a symlink nor outside the home. No Anthropic host is on the allowlist. A contract test, against
 a fake home, token and server, enforces the allowlist, that exactly one
 request carries the token, that the home is byte-identical afterwards, that
 the token is nowhere in what comes out, and that only the reader's module

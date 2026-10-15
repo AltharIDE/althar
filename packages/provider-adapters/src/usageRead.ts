@@ -1,6 +1,7 @@
 import { readTokenField, type TokenLocation } from './credentialStore'
 import { type AccountUsage, Unrecognized } from './usage'
-import { allowedEndpoints, type EndpointSource, endpointProblem } from './usageSources'
+import type { AgentId } from './registry'
+import { allowedEndpoints, type EndpointSource, endpointProblem, type UsagePair, usagePairs } from './usageSources'
 
 /*
  * The usage read (ADR-043): an account's access token, read in memory for one
@@ -25,7 +26,24 @@ export type EndpointRead =
   | { readonly kind: 'usage'; readonly usage: AccountUsage; readonly stale: boolean }
   | { readonly kind: 'fault'; readonly fault: UsageFault; readonly message: string; readonly last?: AccountUsage }
 
-export interface UsageReaderDeps {
+/** The account a read is for: bound to its agent and provider, so a source is only used for its own pair. */
+export interface UsageAccount {
+  readonly agent: AgentId
+  readonly provider: string
+  readonly home: string
+  /** The agent's major version. A source for one version is not read when this is unknown. */
+  readonly agentMajor?: number
+}
+
+/**
+ * What a reader is built from. The production reader (`usageReader`) takes
+ * none of it from a caller: the registry, the allowlist and the credential
+ * store are fixed. Only tests build another, from this file directly; the
+ * package does not export `buildUsageReader`.
+ */
+export interface UsagePolicy {
+  readonly pairs?: ReadonlyArray<UsagePair>
+  readonly allowed?: ReadonlyArray<{ readonly host: string; readonly path: string }>
   readonly fetch?: (
     url: string,
     init: { method: 'GET'; headers: Record<string, string>; redirect: 'manual'; signal: AbortSignal },
@@ -35,7 +53,6 @@ export interface UsageReaderDeps {
   }>
   readonly readToken?: (home: string, location: TokenLocation) => Promise<string | null>
   readonly now?: () => Date
-  readonly allowed?: ReadonlyArray<{ readonly host: string; readonly path: string }>
   /** In ms. */
   readonly timeout?: number
 }
@@ -52,27 +69,26 @@ const fault = (kind: UsageFault, message: string, last?: AccountUsage): Endpoint
 })
 
 export interface UsageReader {
-  /** One account's windows from `source`, for the agent's version if it has a major. */
-  readonly read: (source: EndpointSource, account: { readonly home: string; readonly agentMajor?: number }) => Promise<EndpointRead>
+  /**
+   * One account's windows from the registry's source `sourceId`, which must
+   * be one of the sources of the account's own (agent, provider) plan pair.
+   */
+  readonly read: (sourceId: string, account: UsageAccount) => Promise<EndpointRead>
 }
 
 /** A reader with its own memory of when each account was last asked and what it said (windows only, never a token). */
-export const createUsageReader = (deps: UsageReaderDeps = {}): UsageReader => {
-  const fetcher = deps.fetch ?? ((url, init) => fetch(url, init))
-  const tokenOf = deps.readToken ?? readTokenField
-  const now = deps.now ?? (() => new Date())
-  const allowed = deps.allowed ?? allowedEndpoints
-  const timeout = deps.timeout ?? 15_000
-  const memory = new Map<string, { at: number; usage?: AccountUsage; notBefore: number; strikes: number }>()
+export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
+  const pairs = policy.pairs ?? usagePairs
+  const fetcher = policy.fetch ?? ((url, init) => fetch(url, init))
+  const tokenOf = policy.readToken ?? readTokenField
+  const now = policy.now ?? (() => new Date())
+  const allowed = policy.allowed ?? allowedEndpoints
+  const timeout = policy.timeout ?? 15_000
+  const memory = new Map<string, { usage?: AccountUsage; notBefore: number; strikes: number }>()
+  /** A read under way for an account: a second asker gets its answer, not a second call. */
+  const inflight = new Map<string, Promise<EndpointRead>>()
 
-  const read: UsageReader['read'] = async (source, account) => {
-    const refused = endpointProblem(source, allowed)
-    if (refused !== null) return fault('unreachable', `The usage source is not allowed: ${refused}.`)
-    if (!source.confirmed) return fault('unreachable', 'This usage source has not been confirmed yet.')
-    if (source.agentMajor !== undefined && account.agentMajor !== undefined && source.agentMajor !== account.agentMajor)
-      return fault('unreachable', `This usage source is for version ${source.agentMajor} of the agent.`)
-
-    const key = `${source.id}\n${account.home}`
+  const run = async (source: EndpointSource, account: UsageAccount, key: string): Promise<EndpointRead> => {
     const before = memory.get(key)
     const at = now().getTime()
     // Within the interval, or backing off after a 429: the last windows, not another call.
@@ -81,7 +97,13 @@ export const createUsageReader = (deps: UsageReaderDeps = {}): UsageReader => {
         ? fault('unreachable', 'The provider asked Althar to wait.')
         : { kind: 'usage', usage: before.usage, stale: true }
 
-    const remember = (patch: { usage?: AccountUsage; notBefore: number; strikes: number }) => memory.set(key, { at, ...patch })
+    // The interval is taken before anything is awaited, so no second read can start inside it.
+    const remember = (patch: { usage?: AccountUsage; notBefore: number; strikes: number }) => memory.set(key, patch)
+    remember({
+      ...(before?.usage === undefined ? {} : { usage: before.usage }),
+      notBefore: at + MIN_INTERVAL,
+      strikes: before?.strikes ?? 0,
+    })
     const failed = (kind: UsageFault, message: string, strikes = 0, backoff = MIN_INTERVAL) => {
       remember({ ...(before?.usage === undefined ? {} : { usage: before.usage }), notBefore: at + backoff, strikes })
       return fault(kind, message, before?.usage)
@@ -132,5 +154,30 @@ export const createUsageReader = (deps: UsageReaderDeps = {}): UsageReader => {
       return failed('source_changed', 'The usage answer was not what Althar knows.')
     }
   }
+
+  const read: UsageReader['read'] = async (sourceId, account) => {
+    // The source is the registry's, for this account's own pair: a caller names it, and cannot supply one.
+    const source = pairs
+      .filter((pair) => pair.agent === account.agent && pair.provider === account.provider && pair.pays === 'plan')
+      .flatMap((pair) => pair.sources)
+      .find((candidate): candidate is EndpointSource => candidate.kind === 'endpoint' && candidate.id === sourceId)
+    if (source === undefined) return fault('unreachable', 'This account has no such usage source.')
+    const refused = endpointProblem(source, allowed)
+    if (refused !== null) return fault('unreachable', `The usage source is not allowed: ${refused}.`)
+    if (!source.confirmed) return fault('unreachable', 'This usage source has not been confirmed yet.')
+    // A source for one version is read only for a version known to match.
+    if (source.agentMajor !== undefined && account.agentMajor !== source.agentMajor)
+      return fault('unreachable', `This usage source is for version ${source.agentMajor} of the agent, and this one is not known to be.`)
+
+    const key = `${source.id}\n${account.home}`
+    const going = inflight.get(key)
+    if (going !== undefined) return going
+    const started = run(source, account, key).finally(() => inflight.delete(key))
+    inflight.set(key, started)
+    return started
+  }
   return { read }
 }
+
+/** The reader the package uses: the registry's sources, the fixed allowlist, and one memory shared by every caller. */
+export const usageReader: UsageReader = buildUsageReader()

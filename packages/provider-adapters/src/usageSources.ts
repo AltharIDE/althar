@@ -213,3 +213,21 @@ export const openCodeCredentials = (output: string): ReadonlyArray<OpenCodeCrede
   }
   return found
 }
+
+/** What an OpenCode credential comes to: the pair that covers it, or why none does. A gap is a fault, never quiet. */
+export type CredentialResolution =
+  | { readonly kind: 'covered'; readonly pair: UsagePair }
+  | { readonly kind: 'cannot_classify' }
+  | { readonly kind: 'no_pair'; readonly provider: string }
+
+/** The pair a sign-in belongs to. A key is the key pair; a plan needs a declared plan pair for its provider. */
+export const resolveOpenCodeCredential = (credential: OpenCodeCredential): CredentialResolution => {
+  if (credential.pays === 'unknown') return { kind: 'cannot_classify' }
+  const pair = usagePairs.find(
+    (candidate) =>
+      candidate.agent === 'opencode' &&
+      candidate.pays === credential.pays &&
+      (credential.pays === 'key' ? candidate.provider === 'api-key' : candidate.provider === credential.provider),
+  )
+  return pair === undefined ? { kind: 'no_pair', provider: credential.provider } : { kind: 'covered', pair }
+}

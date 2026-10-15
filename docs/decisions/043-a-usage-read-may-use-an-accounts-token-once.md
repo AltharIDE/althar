@@ -61,6 +61,19 @@
     - **Network down or a timeout:** the same, never a zero.
     - **An answer that isn't the documented shape:** "usage source changed",
       a fault. Never "no limits".
+  - **The caller names a source; it cannot supply one.** The reader takes a
+    source id and the account's (agent, provider), and finds the source in the
+    registry for that pair's plan. The allowlist and the credential store are
+    fixed in the production reader (`usageReader`); nothing a caller passes
+    can widen either. A source for one agent version (OpenCode 1.x) is read
+    only for a version known to match, never when it is unknown.
+  - **The token is taken out of its file without reading the rest.** The
+    store scans the file a chunk at a time, passes over every value that is
+    not on the path (a refresh token, another provider's entry), stops at the
+    one string and builds only that. A file that is a symlink, or resolves
+    outside the account's home, is refused.
+  - **One read at a time per account.** Callers asking together share one
+    call, and the minute is taken before anything is awaited.
   - **The reader is one module.** Only it may import the code that opens an
     agent's credential store. A test fails if another file does.
   - **How a contract test enforces it** (`usageSources`, run by every

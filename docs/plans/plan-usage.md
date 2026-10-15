@@ -7,8 +7,10 @@
 > Delete this file when the last step ships, and move anything that lasted
 > into the architecture docs.
 
-Researched on 15 October 2026 against upstream `main` (`af3023a`). Design and
-decision only: nothing is implemented.
+Researched on 15 October 2026 against upstream `main` (`af3023a`). Decided
+(ADR-043) and partly built: the Codex source, the usage-source registry, the
+allowlisted reader and its contract test are in `provider-adapters` (see
+Stages). Not built: the Claude source, the notices and the usage tab.
 
 ## Goal
 
