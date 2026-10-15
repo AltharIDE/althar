@@ -140,7 +140,18 @@ export class NoChangeToOpen extends Schema.TaggedError<NoChangeToOpen>()('NoChan
  */
 export class CantMerge extends Schema.TaggedError<CantMerge>()('CantMerge', {
   taskId: Schema.String,
-  why: Schema.Literals(['pull_request', 'settled', 'changed', 'conflicts', 'resolving', 'busy', 'unreadable', 'untracked', 'moved', 'missing']),
+  why: Schema.Literals([
+    'pull_request',
+    'settled',
+    'changed',
+    'conflicts',
+    'resolving',
+    'busy',
+    'unreadable',
+    'untracked',
+    'moved',
+    'missing',
+  ]),
   detail: Schema.String,
 }) {}
 

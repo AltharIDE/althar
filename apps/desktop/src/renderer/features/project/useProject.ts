@@ -290,12 +290,7 @@ export const useProject = (projectId: string): ProjectModel => {
            * twice; started first, a send that fails was never queued. One already starting, as for a
            * message just before, reads this one next.
            */
-          if (
-            threadId !== null &&
-            coordinator !== null &&
-            (coordinator.session === null || !coordinator.session.held) &&
-            choice !== null
-          )
+          if (threadId !== null && coordinator !== null && (coordinator.session === null || !coordinator.session.held) && choice !== null)
             await client.startSession(startOf(threadId, choice)).catch((failure: unknown) => {
               if (!(failure instanceof ApiError && failure.reason === 'SessionRunning')) throw failure
             })
