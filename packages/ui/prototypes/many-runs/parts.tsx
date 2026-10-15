@@ -51,7 +51,7 @@ export const sourceText: Record<Source, string> = {
 
 const iso = (ms: number) => new Date(ms).toISOString()
 
-/** How its run stands, in a few words: Starting, localhost:5290 · up 12m, Failed 8m ago · exit 1. Null where it hasn't run. */
+/** How its run stands, in a few words: Starting, localhost:5320 · up 12m, Failed 8m ago · exit 1. Null where it hasn't run. */
 export const stateOf = (runnable: Runnable, run: Run | null, now: string): string | null => {
   if (run === null) return null
   const ended = run.endedAt === null ? '' : ago(iso(run.endedAt), new Date(now))
@@ -133,10 +133,10 @@ export const outputOf = (runnable: Runnable, run: Run | null): { lines: string[]
   const port = run.url === null ? null : addressOf(run.url)
   const tail = (() => {
     switch (runnable.id) {
-      case 'pitch':
+      case 'dev':
         return [
-          '@althar/pitch dev: VITE+ v1.0.0-rc.0  ready in 412 ms',
-          `@althar/pitch dev:   ➜  Local:   http://${port ?? 'localhost:5290'}/`,
+          '@althar/site dev: VITE+ v1.0.0-rc.0  ready in 412 ms',
+          `@althar/site dev:   ➜  Local:   http://${port ?? 'localhost:5320'}/`,
         ]
       case 'storybook':
       case 'found-storybook':
@@ -205,7 +205,7 @@ export type AddWay = 'type' | 'scripts' | 'ask'
 const goesOf = (script: Script): Goes => {
   if (/storybook/.test(script.name)) return { kind: 'serves', port: 6006 }
   if (script.name === 'dev' && script.pkg === '@althar/desktop') return { kind: 'window' }
-  if (script.name === 'dev' || script.name === 'site') return { kind: 'serves', port: script.name === 'site' ? 5320 : 5290 }
+  if (script.name === 'dev' || script.name === 'site') return { kind: 'serves', port: 5320 }
   if (script.name === 'preview') return { kind: 'serves', port: 4290 }
   return { kind: 'finishes' }
 }
@@ -222,11 +222,11 @@ export function AddForm({ way: first, onDone, compact = false }: { way: AddWay; 
   const ids = useId()
   const [way, setWay] = useState<AddWay>(first)
   const opening = p.opening
-  const [command, setCommand] = useState(opening === 'add' ? 'bun --filter @althar/pitch preview' : '')
-  const [name, setName] = useState(opening === 'add' ? 'Pitch site, as built' : '')
+  const [command, setCommand] = useState(opening === 'add' ? 'bun --filter @althar/site preview' : '')
+  const [name, setName] = useState(opening === 'add' ? 'Public site, as built' : '')
   const [where, setWhere] = useState<'here' | 'main'>('here')
   const kept = new Set(p.runnables.map((one) => one.command))
-  const [picked, setPicked] = useState<readonly string[]>(opening === 'scripts' ? ['althar:check', '@althar/pitch:preview'] : [])
+  const [picked, setPicked] = useState<readonly string[]>(opening === 'scripts' ? ['althar:check', '@althar/site:preview'] : [])
   const [find, setFind] = useState('')
   const [asked, setAsked] = useState(opening === 'asked' || opening === 'ask')
   useEffect(() => {
@@ -298,7 +298,7 @@ export function AddForm({ way: first, onDone, compact = false }: { way: AddWay; 
               id={`${ids}-name`}
               style={{ width: '100%' }}
               value={name}
-              placeholder="Pitch site"
+              placeholder="Public site"
               onChange={(event) => setName(event.target.value)}
             />
           </FormRow>

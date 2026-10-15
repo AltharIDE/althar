@@ -28,7 +28,7 @@ type Showing = { kind: 'all' } | { kind: 'one'; id: string } | { kind: 'edit'; i
 
 const showingOf = (opening: Opening, task: boolean): Showing =>
   opening === 'detail' || opening === 'output'
-    ? { kind: 'one', id: task ? 'storybook' : 'pitch' }
+    ? { kind: 'one', id: task ? 'storybook' : 'dev' }
     : opening === 'edit'
       ? { kind: 'edit', id: 'storybook' }
       : opening === 'add' || opening === 'scripts' || opening === 'ask' || opening === 'asked'

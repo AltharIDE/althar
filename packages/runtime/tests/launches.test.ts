@@ -134,7 +134,7 @@ describe('what a repository offers to run', () => {
     const here = folder()
     write(here, {
       name: 'althar',
-      scripts: { dev: 'bun --filter @althar/pitch dev', prepare: 'vp config', test: 'vp test' },
+      scripts: { dev: 'bun --filter @althar/site dev', prepare: 'vp config', test: 'vp test' },
       workspaces: ['apps/*', 'packages/ui', '!apps/old'],
     })
     writeFileSync(join(here, 'bun.lock'), '')
@@ -145,7 +145,7 @@ describe('what a repository offers to run', () => {
     assert.deepStrictEqual(
       scriptsIn(here).map((script) => [script.package, script.name, script.body, script.command]),
       [
-        ['althar', 'dev', 'bun --filter @althar/pitch dev', 'bun run dev'],
+        ['althar', 'dev', 'bun --filter @althar/site dev', 'bun run dev'],
         ['althar', 'test', 'vp test', 'bun run test'],
         ['@althar/desktop', 'dev', 'electron .', 'bun --filter @althar/desktop dev'],
         ['apps/unnamed', 'start', 'node .', 'bun --filter ./apps/unnamed start'],

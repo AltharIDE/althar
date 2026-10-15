@@ -14,7 +14,7 @@ import { addressOf } from '../../../../../apps/desktop/src/renderer/shared/runni
 import { css, isLive, label, RunGlyph, sourceText, stateOf, useDialogs, useRuns, whereOf } from '../parts'
 import type { Runnable } from '../state'
 
-/** The chip's short name, so several fit in the bar: Pitch site, Storybook, UI tests. */
+/** The chip's short name, so several fit in the bar: Public site, Storybook, UI tests. */
 const short = (one: Runnable) =>
   (one.name ?? one.command).replace('Desktop end-to-end tests', 'E2E tests').replace('Probe the agents’ tools', 'Probe tools')
 
