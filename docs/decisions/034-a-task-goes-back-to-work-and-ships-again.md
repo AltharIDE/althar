@@ -136,13 +136,17 @@
     The commits stay on its branch, in its worktree, as abandoning keeps
     them: Althar keeps where each worktree was, in a ref of its own
     (`refs/althar/left-out/<worktree>`), and only what is committed after it
-    counts again. It isn't offered while a round of work or an agent's turn
-    may still add to them. Abandoning isn't the answer for a merged task:
+    counts again, and only that goes in a next pull request: its new branch
+    starts from the default branch after a merge, else from the closed pull
+    request's head, and takes the commits after it, cherry-picked, never
+    the task's branch as it is. It isn't offered while a round of work or an
+    agent's turn may still add to them. Abandoning isn't the answer for a merged task:
     its change is in.
   - **Commits the default branch has count for nothing.** Commits after a
     pull request that the default branch has already, as this Mac has it
     (as Althar last fetched it for a next pull request, as the worktree
-    started from it, and its own branch), aren't in none: those a merge of
+    started from it, and its own branch, each read on its own, since any
+    may be behind the rest), aren't in none: those a merge of
     the default branch brought into the task's branch, and those whose
     change it has under another hash, cherry-picked into another pull
     request that merged (by patch, as `git cherry` tells). DEV-58's count

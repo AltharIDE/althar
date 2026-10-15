@@ -224,8 +224,14 @@ export interface Unshipped {
   readonly change: ChangeSummary | null
   /** When that pull request opened: its next is described from what came after. */
   readonly openedAt: string | null
-  /** That pull request's head, as the branch has it; or, `moved` or with none, where its branch started. */
+  /**
+   * Where its commits are counted from: that pull request's head, as the
+   * branch has it, or, `moved` or with none, where its branch started; or,
+   * where the person left out what came after that, where they did.
+   */
   readonly head: string
+  /** That pull request's head, or where its branch started, before what the person left out: `head`, where they left out nothing. */
+  readonly shipped: string
   /** The worktree is on a branch made for its next pull request already, which didn't open: it goes on that one. */
   readonly moved: boolean
   /** The commits after it, oldest first, merges left out. */
@@ -810,7 +816,10 @@ export class Changes extends Context.Service<
        * the host. What the lead changed and didn't commit would go with
        * neither, so it refuses; and where the commits conflict with the
        * default branch, the worktree goes back to its branch, and it says
-       * which files.
+       * which files. Where the person left out commits after it, the new
+       * branch never has them: it starts from the default branch after a
+       * merge, else from that pull request's head, and takes only the commits
+       * after where they left them out, cherry-picked.
        */
       const rebranch = (
         projectId: ProjectId,
@@ -825,40 +834,45 @@ export class Changes extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
+          // What the person left out goes in none: a branch that has it isn't the one, nor is the task's branch as it is.
+          const leftOut = next.head !== next.shipped
           // Made for it already, by a try that didn't open it, the branch is the one.
-          if (next.moved) return task
+          if (next.moved && !leftOut) return task
           const changed = (yield* git(task.path, '-c', 'core.quotePath=false', 'diff', '--name-only', 'HEAD'))
             .split('\n')
             .filter((file) => file !== '')
           if (changed.length > 0) return yield* new NoChangeToOpen({ taskId, why: 'uncommitted', detail: filesWord(changed) })
           const fresh = yield* nextBranch(task, pushTarget)
           let base = task.baseCommit
+          // Where the new branch starts, the commits after `head` cherry-picked onto it; null where it is the task's branch as it is.
+          let start: string | null = leftOut ? next.shipped : null
           if (next.change.state === 'merged') {
             // The default branch as its host has it now, with what merged: as this Mac last saw it, it may not have that yet.
             const tip = yield* fetchInto(task.path, baseTarget, target, `refs/althar/base/${target}`)
             if (tip === null)
               return yield* new GitFailed({ args: ['fetch', target], cwd: task.path, stderr: `Couldn't fetch ${target} from the host.` })
             base = tip
-            if (yield* onHead(task.path, tip)) yield* git(task.path, 'checkout', '-q', '-b', fresh)
-            else {
-              // The commits as the branch has them now, after the fetch: what the lead committed meanwhile goes too.
-              const from = yield* commitOf(task.path, 'HEAD')
-              const commits = (yield* git(task.path, 'rev-list', '--reverse', '--no-merges', `${next.head}..${from}`))
-                .split('\n')
-                .filter((line) => line !== '')
-              yield* git(task.path, 'checkout', '-q', '-b', fresh, tip)
-              const conflicted = yield* pickOnto(task.path, commits)
-              // One committed as it switched would be left on the old branch alone: it goes back to it, and says the lead is at work.
-              const moved = (yield* commitOf(task.path, `refs/heads/${task.branch}`).pipe(Effect.orElseSucceed(() => ''))) !== from
-              if (conflicted !== null || moved) {
-                yield* Effect.ignore(git(task.path, 'checkout', '-q', task.branch))
-                yield* Effect.ignore(git(task.path, 'branch', '-D', fresh))
-                return yield* new NoChangeToOpen(
-                  conflicted === null ? { taskId, why: 'working' } : { taskId, why: 'conflicts', detail: filesWord(conflicted) },
-                )
-              }
+            start = leftOut || !(yield* onHead(task.path, tip)) ? tip : null
+          }
+          if (start === null) yield* git(task.path, 'checkout', '-q', '-b', fresh)
+          else {
+            // The commits as the branch has them now, after the fetch: what the lead committed meanwhile goes too.
+            const from = yield* commitOf(task.path, 'HEAD')
+            const commits = (yield* git(task.path, 'rev-list', '--reverse', '--no-merges', `${next.head}..${from}`))
+              .split('\n')
+              .filter((line) => line !== '')
+            yield* git(task.path, 'checkout', '-q', '-b', fresh, start)
+            const conflicted = yield* pickOnto(task.path, commits)
+            // One committed as it switched would be left on the old branch alone: it goes back to it, and says the lead is at work.
+            const moved = (yield* commitOf(task.path, `refs/heads/${task.branch}`).pipe(Effect.orElseSucceed(() => ''))) !== from
+            if (conflicted !== null || moved) {
+              yield* Effect.ignore(git(task.path, 'checkout', '-q', task.branch))
+              yield* Effect.ignore(git(task.path, 'branch', '-D', fresh))
+              return yield* new NoChangeToOpen(
+                conflicted === null ? { taskId, why: 'working' } : { taskId, why: 'conflicts', detail: filesWord(conflicted) },
+              )
             }
-          } else yield* git(task.path, 'checkout', '-q', '-b', fresh)
+          }
           yield* sql.withTransaction(
             Effect.gen(function* () {
               const revision = yield* change('workspaces', task.workspaceId, { branch: fresh, baseCommit: base })
@@ -2088,8 +2102,9 @@ export class Changes extends Context.Service<
        * cherry-picked into another pull request that merged has it under
        * another hash (by patch, as `git cherry` tells). The default branch as
        * this Mac has it: as Althar last fetched it for a next pull request, as
-       * the worktree started from it, and its own branch. All of them, where
-       * git can't say.
+       * the worktree started from it, and its own branch, each read on its
+       * own, since any may be behind the rest. All of them, where git can't
+       * say.
        */
       const notOnDefault = (
         repository: { readonly path: string; readonly baseRef: string | null; readonly defaultBase: string | null },
@@ -2109,20 +2124,22 @@ export class Changes extends Context.Service<
             const tip = (yield* gitOutcome(repository.path, 'rev-parse', '--verify', '-q', `${ref}^{commit}`)).stdout
             if (tip !== '' && !tips.includes(tip)) tips.push(tip)
           }
-          const [first, ...rest] = tips
-          if (first === undefined) return commits
-          const listed = yield* gitOutcome(
-            repository.path,
-            'rev-list',
-            '--no-merges',
-            '--right-only',
-            '--cherry-pick',
-            `${first}...HEAD`,
-            `^${head}`,
-            ...rest.map((tip) => `^${tip}`),
-          )
-          if (listed.code !== 0) return commits
-          const kept = new Set(listed.stdout.split('\n').filter((line) => line !== ''))
+          // Each on its own, as each may be fresher than the rest: a commit counts only where none has it, by hash or by patch.
+          let kept = new Set(commits)
+          for (const tip of tips) {
+            const listed = yield* gitOutcome(
+              repository.path,
+              'rev-list',
+              '--no-merges',
+              '--right-only',
+              '--cherry-pick',
+              `${tip}...HEAD`,
+              `^${head}`,
+            )
+            if (listed.code !== 0) continue
+            const lacks = new Set(listed.stdout.split('\n').filter((line) => line !== ''))
+            kept = new Set([...kept].filter((commit) => lacks.has(commit)))
+          }
           return commits.filter((commit) => kept.has(commit))
         })
 
@@ -2191,6 +2208,7 @@ export class Changes extends Context.Service<
                 if (candidate !== null && head === undefined && (yield* onHead(repository.path, candidate))) head = candidate
             }
             if (head === undefined) continue
+            const shipped = head
             // What the person left out after it stays out: the count starts where they did, while the branch still has it.
             const left = (yield* gitOutcome(
               repository.path,
@@ -2242,6 +2260,7 @@ export class Changes extends Context.Service<
                   ? null
                   : { ...seen, linkId: repository.linkId, product: repository.product, listening: repository.listening === 1 },
               head,
+              shipped,
               commits,
               moved,
               ...lines,

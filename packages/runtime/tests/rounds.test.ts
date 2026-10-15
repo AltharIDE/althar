@@ -1050,6 +1050,78 @@ describe('a merged task with commits after its pull request', () => {
   )
 
   it.live(
+    'never ships what the person left out in its next pull request: after a merge its lead brought in, and after a close',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const runs = yield* Runs
+        const tasks = yield* Tasks
+        const task = yield* merged(working, bare, github)
+        // Its lead brings main in, with what merged: the branch has main's tip, as a new pull request starts from.
+        git(task.path, 'fetch', '-q', bare, 'main')
+        git(task.path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'merge', '-q', '--no-edit', 'FETCH_HEAD')
+        commitIn(task.path, 'left.txt', 'Left out')
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+        yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
+        commitIn(task.path, 'kept.txt', 'Kept')
+        const [ready] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+        assert.deepStrictEqual(ready?.unshipped, { commits: 1, add: 1, del: 0 })
+
+        // The pull request has what the card said, and nothing the person left out.
+        yield* runs.publish(task.taskId)
+        assert.strictEqual(github.changes[1]?.source, 'althar/add-a-retry-2')
+        assert.strictEqual(git(bare, 'log', '--format=%s', 'main..althar/add-a-retry-2'), 'Kept')
+        assert.strictEqual(git(bare, 'diff', '--name-only', 'main', 'althar/add-a-retry-2'), 'kept.txt')
+        // The commit left out is still on the task's first branch.
+        assert.strictEqual(git(task.path, 'log', '-1', '--format=%s', 'althar/add-a-retry^'), 'Left out')
+
+        // Closed without merging, its next has all of the closed one, and what came after what was left out.
+        github.close(2)
+        yield* (yield* Changes).refresh(task.taskId)
+        yield* until(cards(task.projectId), (all) => all[0]?.change?.state === 'closed')
+        commitIn(task.path, 'left.txt', 'Left out again')
+        yield* until(cards(task.projectId), (all) => all[0]?.unshipped != null)
+        yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
+        yield* until(cards(task.projectId), (all) => all[0]?.unshipped == null)
+        commitIn(task.path, 'kept.txt', 'Kept again')
+        yield* until(cards(task.projectId), (all) => all[0]?.unshipped?.commits === 1)
+        yield* runs.publish(task.taskId)
+        assert.strictEqual(github.changes[2]?.source, 'althar/add-a-retry-3')
+        assert.strictEqual(git(bare, 'log', '--format=%s', 'main..althar/add-a-retry-3'), 'Kept again\nKept')
+        assert.strictEqual(git(bare, 'diff', '--name-only', 'main', 'althar/add-a-retry-3'), 'kept.txt')
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
+    'finds a commit cherry-picked into the default branch on whichever copy of it has it, a stale one beside it or not',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const task = yield* merged(working, bare, github)
+        const slider = commitIn(task.path, 'slider.txt', 'Slider')
+        yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
+        // Althar fetched main for a next pull request once: that copy stays as it was then, behind what merges after.
+        git(task.path, 'update-ref', 'refs/althar/base/main', git(working, 'rev-parse', 'main'))
+
+        // The slider is cherry-picked into another pull request, which merges; this Mac's main has it, the copy Althar fetched doesn't.
+        const clone = mkdtempSync(join(tmpdir(), 'althar-theirs-'))
+        execFileSync('git', ['clone', '-q', bare, clone])
+        git(clone, 'fetch', '-q', task.path, slider)
+        git(clone, '-c', 'user.name=Host', '-c', 'user.email=host@althar.test', 'cherry-pick', slider)
+        git(clone, 'push', '-q', 'origin', 'main')
+        git(working, 'pull', '-q', '--ff-only', bare, 'main')
+        const [settled] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
+        assert.isNull(settled?.unshipped ?? null)
+        assert.deepStrictEqual(yield* (yield* Changes).unshipped(task.taskId), [])
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
     'doesn’t count commits the default branch has already: brought in by a merge, or cherry-picked into another pull request',
     () => {
       const { working, bare, github } = onGitHub()
