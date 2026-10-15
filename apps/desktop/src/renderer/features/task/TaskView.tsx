@@ -3,31 +3,33 @@ import { useEffect, useRef, useState } from 'react'
 import type { TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
   AbandonTask,
-  ChangeView,
   BackCrumb,
+  ChangeView,
   ChromeButton,
+  commandDown,
+  Composer,
   Delivery,
+  DictationTray,
   DiffLineKind,
   type FileView,
-  Composer,
-  DictationTray,
+  Finished,
   Issue,
-  TaskActivity,
   LinkButton,
   Listening,
   type ModelInfo,
+  modKey,
+  ReachLine,
   Running,
+  TaskActivity,
+  type TaskConflicts,
   TaskFace,
   TaskHeader,
-  ReachLine,
-  type TaskConflicts,
   TaskMenu,
   TaskStatus,
-  Finished,
   Thread,
   ThreadDivider,
-  ThreadShellProvider,
   ThreadMeasure,
+  ThreadShellProvider,
   ThreadSkeleton,
   TitleBar,
 } from '@althar/ui'
@@ -134,7 +136,7 @@ export const text = {
   loadingEarlier: 'Showing…',
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
-  diffKey: '⌘D',
+  diffKey: modKey('D'),
 }
 
 /**
@@ -307,7 +309,7 @@ export function TaskView({
   const { show } = changes
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== 'd' || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return
+      if (event.key.toLowerCase() !== 'd' || !commandDown(event) || event.shiftKey || event.altKey) return
       if (files.length === 0) return
       event.preventDefault()
       show()

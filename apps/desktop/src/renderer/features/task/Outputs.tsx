@@ -9,6 +9,7 @@ import {
   Diverged,
   Evidence,
   type ModelInfo,
+  modKey,
   type PullRequest,
   ThreadMeasure,
 } from '@althar/ui'
@@ -98,7 +99,7 @@ export const text = {
   named: (change: ChangeSummary) => `${change.short} ${change.prefix}${change.number}`,
   /** What a review that asked for changes found; its words are in the conversation. */
   found: (n: number) => (n === 1 ? '1 finding' : `${n} findings`),
-  diffKey: '⌘D',
+  diffKey: modKey('D'),
 }
 
 /**

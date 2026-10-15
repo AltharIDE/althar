@@ -1,5 +1,6 @@
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
+import { device } from '../../foundations/device'
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
@@ -104,8 +105,8 @@ export interface KeepAwakeText {
 }
 
 export const keepAwakeText: KeepAwakeText = {
-  title: 'Keep this Mac awake while work runs',
-  note: 'Work stops when the Mac sleeps. The display can still sleep.',
+  title: `Keep ${device.this} awake while work runs`,
+  note: `Work stops when ${device.the} sleeps. The display can still sleep.`,
   battery: 'On battery too',
   batteryNote: 'Otherwise only while it’s plugged in.',
 }
@@ -160,13 +161,13 @@ export interface AgentsAtOnceText {
 export const agentsAtOnceText: AgentsAtOnceText = {
   title: 'Agents at once',
   note: (n, { count, memory, cores }) => {
-    if (n === count) return `${n}: this Mac has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`
-    if (n === 1) return '1: one at a time. The calmest this Mac can be.'
-    if (n < count) return `${n}: fewer than this Mac could carry.`
-    if (n <= count + 2) return `${n}: a little more than this Mac’s ${memory} GB suggests. Tests may slow down.`
-    return `${n}: well past what this Mac’s ${memory} GB suggests. Expect it to run hot.`
+    if (n === count) return `${n}: ${device.this} has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`
+    if (n === 1) return `1: one at a time. The calmest ${device.this} can be.`
+    if (n < count) return `${n}: fewer than ${device.this} could carry.`
+    if (n <= count + 2) return `${n}: a little more than ${device.this}’s ${memory} GB suggests. Tests may slow down.`
+    return `${n}: well past what ${device.this}’s ${memory} GB suggests. Expect it to run hot.`
   },
-  mark: ({ count }) => `${count} · this Mac`,
+  mark: ({ count }) => `${count} · ${device.this}`,
   reset: 'Use the default',
 }
 
@@ -431,7 +432,7 @@ export interface NotificationSoundText {
 
 export const notificationSoundText: NotificationSoundText = {
   title: 'Sound',
-  note: 'One of this Mac’s alert sounds, with each notification.',
+  note: `One of ${device.this}’s alert sounds, with each notification.`,
   none: 'None',
   system: 'The system’s sound',
   play: (sound) => `Play ${sound}`,

@@ -1,5 +1,6 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
+import { device } from '../../foundations/device'
 import type { CodeHost } from '../../foundations/codeHost'
 import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
@@ -157,12 +158,12 @@ export const newProjectText: NewProjectText = {
   leaveOut: (name) => `Leave out ${name}`,
   choose: 'Choose a folder…',
   chooseNote: 'or drop folders on the window. A folder of several repositories adds each.',
-  found: 'On this Mac',
-  foundLike: (name) => `On this Mac, named like ${name}`,
+  found: `On ${device.this}`,
+  foundLike: (name) => `On ${device.this}, named like ${name}`,
   add: 'Add',
   addLabel: (name) => `Add ${name}`,
   inProject: (project) => `in ${project}`,
-  more: (count) => `${count} more on this Mac`,
+  more: (count) => `${count} more on ${device.this}`,
   read: 'What Althar read',
   connected: (host, owners, account) => (
     <>

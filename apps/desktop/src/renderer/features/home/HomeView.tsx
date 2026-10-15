@@ -1,7 +1,7 @@
 import { type DragEvent, useEffect, useState } from 'react'
 
 import type { HomeCall, HomeEvent, HomeTask, ProjectSummary } from '@althar/contracts'
-import { type IconName, PermissionAnswers, ProjectInk, type ProjectRef, TaskStatus } from '@althar/ui'
+import { commandDown, type IconName, PermissionAnswers, ProjectInk, type ProjectRef, TaskStatus } from '@althar/ui'
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
 import { queuedOfWords } from '../../shared/agents'
@@ -150,7 +150,7 @@ export function HomeView({
   // ⌘, opens and closes settings. ⌘N and ⌘ and a number belong to the window's tabs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key !== ',') return
+      if (!commandDown(event) || event.shiftKey || event.altKey || event.key !== ',') return
       setSettings((now) => !now)
       event.preventDefault()
     }

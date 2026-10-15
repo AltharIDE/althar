@@ -1,7 +1,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 
-import { LoadMeter, ProjectTabs, TitleBar, type Room, UpdateReady } from '@althar/ui'
+import { LoadMeter, primaryDown, ProjectTabs, type Room, TitleBar, UpdateReady } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { FinderView } from '../finder/FinderView'
@@ -164,7 +164,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
         newProject()
         return
       }
-      if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
+      if (primaryDown(event) && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
         const id = byNumber(ids, Number(event.key))
         if (id === undefined) return
         event.preventDefault()

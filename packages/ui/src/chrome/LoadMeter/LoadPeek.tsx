@@ -1,5 +1,6 @@
 import { useId } from 'react'
 
+import { device } from '../../foundations/device'
 import { BrandMark } from '../../foundations/Marks/Marks'
 import { MemoryPressure } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
@@ -44,7 +45,7 @@ export interface LoadPeekText {
 }
 
 export const loadPeekText: LoadPeekText = {
-  machine: 'This Mac',
+  machine: device.This,
   level: { [LoadLevel.Quiet]: 'Quiet', [LoadLevel.Busy]: 'Busy', [LoadLevel.Full]: 'Full' },
   cpu: 'CPU',
   memory: 'Memory',

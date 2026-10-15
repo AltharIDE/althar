@@ -3,9 +3,9 @@ import { useEffect, useRef, useState } from 'react'
 import { type AgentStatus, type ConnectionList, MOST_AT_ONCE } from '@althar/contracts'
 import {
   type AgentGlance,
+  AgentInstall,
   AgentsAtOnce,
   type AgentTab,
-  AgentInstall,
   AgentTabList,
   AgentTabPanel,
   AgentTabs,
@@ -35,6 +35,7 @@ import {
   IconButton,
   KeepAwake,
   type MarkGlance,
+  modKey,
   NotificationSettings,
   NotificationSound,
   type NotifyChoices,
@@ -99,7 +100,7 @@ import { type PostTeamReviewsModel, usePostTeamReviews } from './usePostTeamRevi
 
 export const text = {
   title: 'Settings',
-  kbd: '⌘,',
+  kbd: modKey(','),
   agents: 'Agents',
   counted: (agents: number, accounts: number) =>
     `${agents === 1 ? '1 agent' : `${agents} agents`} · ${accounts === 1 ? '1 account' : `${accounts} accounts`}`,

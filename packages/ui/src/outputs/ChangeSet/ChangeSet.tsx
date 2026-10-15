@@ -1,5 +1,6 @@
 import { useId, useState, type ReactNode } from 'react'
 
+import { device } from '../../foundations/device'
 import { Icon } from '../../foundations/Icon/Icon'
 import type { CodeHost } from '../../foundations/codeHost'
 import { BrandMark } from '../../foundations/Marks/Marks'
@@ -118,7 +119,7 @@ export const changeSetText: ChangeSetText = {
   },
   order: (numbers) => (numbers.length > 1 ? `In order: ${numbers.map((n) => `#${n}`).join(', then ')}` : 'Squashes into the base branch'),
   mergeHere: (base) => `Merge into ${base}`,
-  here: 'Merges on this Mac',
+  here: `Merges on ${device.this}`,
   push: (remote) => `Push to ${remote}`,
   notOn: (remote) => `Not on ${remote} yet`,
   behindOn: (n, remote) => (n === 1 ? `1 commit not on ${remote} yet` : `${n} commits not on ${remote} yet`),

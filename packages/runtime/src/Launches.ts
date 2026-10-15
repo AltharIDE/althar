@@ -7,6 +7,7 @@ import { spawnOwned } from '@althar/provider-adapters'
 import { Context, Crypto, Deferred, Duration, Effect, Exit, Layer, Schema, Scope } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { thisDevice } from './device'
 import { RuntimeConfig } from './Config'
 import { freshCopy } from './coordinatorFolder'
 import { Instance } from './Instance'
@@ -291,7 +292,9 @@ export class Launches extends Context.Service<
               return yield* new LaunchRefused({
                 why: 'elsewhere',
                 message:
-                  input.taskId === null ? 'The project has no repository on this Mac to run.' : 'The task has no worktree here to run.',
+                  input.taskId === null
+                    ? `The project has no repository on ${thisDevice()} to run.`
+                    : 'The task has no worktree here to run.',
               })
             // A run already going in the same place is the one there is: two would want the same port.
             for (const { binding } of places) {
@@ -453,7 +456,7 @@ export class Launches extends Context.Service<
             if (binding === undefined)
               return yield* new LaunchRefused({
                 why: 'elsewhere',
-                message: 'The project has no repository on this Mac to keep a way to run.',
+                message: `The project has no repository on ${thisDevice()} to keep a way to run.`,
               })
             if (input.repository === undefined && bindings.length > 1)
               return yield* new LaunchRefused({
