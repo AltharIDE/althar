@@ -293,9 +293,10 @@ service's model.
     nothing uncommitted there, and no file git doesn't track where the merge
     puts one, so the person's own work is never touched.
   - Submodule checkouts never move with it. Only a submodule whose recorded
-    commit the merge changes is read, and it must be clean, at the commit
-    recorded for it; any other is left alone, whatever its state, even one
-    git can't read. A checkout or such a submodule that can't be read stops
+    commit the merge changes is read, and it must be clean (its untracked
+    files aside, which nothing moves), at the commit recorded for it; any
+    other is left alone, whatever its state, even one git can't read. A
+    checkout or such a submodule that can't be read stops
     every repository, with its path and git's complete diagnostic. Every
     destination is checked again, and must still have the branch, before any
     ref moves. See the

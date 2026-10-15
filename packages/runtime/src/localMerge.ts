@@ -89,7 +89,8 @@ const recordedIn = (listing: string, column: number) => {
 /**
  * Whether the submodules moving `checkout` from `from` to `to` changes can
  * be left where they are: each checked out there must be at the commit
- * `from` and the index record for it, with nothing not committed. One the
+ * `from` and the index record for it, with no change to a file it tracks:
+ * its untracked files stay, as its checkout does, so they don't count. One the
  * merge adds, which `from` has no commit for, is left alone.
  */
 const checkSubmodules = (root: string, checkout: string, from: string, to: string) =>

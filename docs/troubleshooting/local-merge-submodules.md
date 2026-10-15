@@ -19,7 +19,8 @@ Before merging, Althar reads each submodule whose recorded commit the merge
 changes, if it is checked out. The merge is refused, and nothing moves in any
 repository, if that submodule:
 
-- has changes not committed,
+- has changes not committed to files it tracks (files git doesn't track there
+  don't count: the merge never touches them),
 - isn't at the commit the default branch records for it (left behind by an
   earlier merge, say: run `git submodule update`), or
 - can't be read. The refusal gives the submodule's path and everything git
