@@ -5,7 +5,7 @@
 # Codex, through the permission the manifest asks for),
 # data that persists beside the profile (its home is fresh each run), and
 # permissions (no host filesystem or ssh-agent socket, but the tray watcher
-# and the keyring reachable). The window's own
+# and the keyring reachable, and KWallet on KDE). The window's own
 # behavior is
 # the same X11 smoke the other packages use: ALTHAR_BIN=/usr/bin/althar
 # ALTHAR_ARGS=--ozone-platform=x11 scripts/x11-smoke.sh. Needs the app
@@ -29,6 +29,8 @@ echo "$perms" | grep -qE '(^|[=;])network(;|$)' && ok "network shared" || bad "n
 echo "$perms" | grep -qE '(^|[=;])ipc(;|$)' && ok "shared memory allowed (ipc)" || bad "shared memory (ipc)"
 echo "$perms" | grep -q 'wayland' && ok "wayland allowed" || bad "wayland allowed"
 echo "$perms" | grep -q 'org.freedesktop.secrets' && ok "the keyring is reachable (org.freedesktop.secrets)" || bad "keyring reachable"
+echo "$perms" | grep -q 'org.kde.kwalletd6' && ok "KWallet is reachable (org.kde.kwalletd6)" || bad "KWallet reachable (org.kde.kwalletd6)"
+echo "$perms" | grep -q 'org.kde.kwalletd5' && ok "Plasma 5's KWallet is reachable (org.kde.kwalletd5)" || bad "KWallet reachable (org.kde.kwalletd5)"
 echo "$perms" | grep -q 'org.kde.StatusNotifierWatcher' && ok "the tray watcher is reachable (org.kde.StatusNotifierWatcher)" || bad "tray watcher reachable"
 echo "$perms" | grep -q 'org.freedesktop.Flatpak' && ok "the device is reachable (org.freedesktop.Flatpak)" || bad "device reachable"
 echo "$perms" | grep -q 'ssh-auth' && bad "ssh agent is not exposed" || ok "ssh agent is not exposed"
@@ -69,6 +71,20 @@ if [ -n "$claude_bin" ]; then
 else
   bad "the bundled Claude Code CLI is installed"
 fi
+
+# On KDE the sealing key lives in KWallet itself (keyring.ts): the sandbox reaches the wallet service and asks only whether it is
+# on and which wallet is the network one, never what it holds.
+case "${XDG_CURRENT_DESKTOP:-}" in
+  *KDE*)
+    service=org.kde.kwalletd6; [ "${KDE_SESSION_VERSION:-6}" = 5 ] && service=org.kde.kwalletd5
+    wallet="--session --dest $service --object-path /modules/${service#org.kde.} --method org.kde.KWallet"
+    enabled=$(run "gdbus call $wallet.isEnabled")
+    case "$enabled" in *true*) ok "KWallet answers from the sandbox and is on ($service)";; *) bad "KWallet answers from the sandbox ($service said: ${enabled:-nothing})";; esac
+    network=$(run "gdbus call $wallet.networkWallet")
+    case "$network" in *\'?*\'*) ok "the wallet Chromium keeps the key in is named ($network)";; *) bad "KWallet names its network wallet";; esac
+    ;;
+  *) echo "SKIP: not KDE, so no KWallet check" ;;
+esac
 
 run 'test -f /app/share/applications/dev.althar.app.desktop && grep -q "StartupWMClass=dev.althar.app" /app/share/applications/dev.althar.app.desktop' && ok "the desktop entry is there, with the right class" || bad "desktop entry"
 run 'test -f /app/share/metainfo/dev.althar.app.metainfo.xml && test -f /app/share/icons/hicolor/512x512/apps/dev.althar.app.png' && ok "metainfo and icon are there" || bad "metainfo and icon"

@@ -83,7 +83,8 @@ are its own environment's (git inside, the device outside, the window's entry
 and its permissions). The permission to talk to `org.freedesktop.Flatpak` is
 broad: it lets the app run commands on the device, which is how the app
 reaches the person's tools. The other permissions cover network, display,
-GPU and the keyring. What the Flatpak reaches and what it does not is in
+GPU and the keyring (on KDE, KWallet itself, so a sign-in survives a
+restart). What the Flatpak reaches and what it does not is in
 [ADR-027](../../docs/decisions/027-what-the-flatpak-reaches.md). In short:
 
 - The person's own OpenCode and Codex, and editors, are found and run on the
