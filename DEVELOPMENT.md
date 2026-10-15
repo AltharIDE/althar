@@ -37,6 +37,12 @@ From the repository root:
 
 Each app and package has its own README with its own commands.
 
+The full suites are heavy: the desktop app's end-to-end run takes much of a
+Mac for its length. While you work, run what your change touches (the checks
+and tests of the packages you changed and of those that build on them, and
+the end-to-end specs for what you changed), and leave the rest to CI, which
+runs every suite on the pull request.
+
 ## The repository
 
 | Path | What's there |
@@ -117,6 +123,16 @@ There are two ways to screenshot this repository's interface, both headless:
   built app and saves what it shows with `page.screenshot`, as
   `apps/desktop/e2e/evidence.spec.ts` does; `bun run test:e2e e2e/your.spec.ts`
   builds the app and runs it.
+
+Shoot at 1×, and only what changed where you can. The command above shoots a
+story at 1× already, and a story's frame is just the component. In a spec, the
+app's window on a Retina Mac shoots at 2× unless told otherwise: pass
+`scale: 'css'` to `page.screenshot` and to an element's `screenshot`, and take
+one element (`page.getByRole(…).screenshot({ scale: 'css' })`) rather than the
+window. An agent reads each shot it looks at into its
+context, where it stays: a Retina shot of the whole window costs it as much as
+a few thousand words, and one cropped at 1× a tenth of that. Look at each shot
+once.
 
 Shots go in `test-results/`, which git ignores. In an agent's sandbox on a
 Mac, Chromium and Electron can't start (Chromium exits with `SIGTRAP`), so run

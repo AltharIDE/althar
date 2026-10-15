@@ -229,7 +229,7 @@ interface Running {
   readonly stopRequest: Deferred.Deferred<StopRequest>
   readonly ended: Deferred.Deferred<void>
   /** The brief the session's first turn starts with, and what it asks for when no input is waiting. */
-  brief: { readonly text: string; readonly closing: string } | undefined
+  brief: Brief | undefined
   /** Takes back the session's Althar tools. */
   readonly revokeTools: Effect.Effect<void>
   turnRunning: boolean
@@ -280,6 +280,14 @@ type StopRequest = { readonly state: 'completed' } | { readonly state: 'supersed
 
 /** Why a session's brief is written: a start, another agent taking over, or the same one started afresh to keep its context small. */
 type Why = { readonly kind: 'start' } | { readonly kind: 'takeover'; readonly from: string | undefined } | { readonly kind: 'handover' }
+
+/** What a new session's first turn starts with, and what it asks for with nothing waiting; `byPerson`, where the person started it. */
+interface Brief {
+  readonly text: string
+  readonly closing: string
+  /** The person started or switched to the agent: its first turn is theirs, and goes on at once (ADR-037). */
+  readonly byPerson?: boolean
+}
 
 type Store =
   | Artifacts
@@ -447,6 +455,8 @@ export class Sessions extends Context.Service<
       readonly message?: { readonly envelope: CommandEnvelope; readonly body: string; readonly images?: ReadonlyArray<InputImage> }
       /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
       readonly accountId?: string
+      /** The person switched, not Althar: the new agent's first turn is theirs, and goes on at once (ADR-037). */
+      readonly byPerson?: boolean
     }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
     interrupt(threadId: string): Effect.Effect<void, NoSession>
@@ -510,7 +520,14 @@ export class Sessions extends Context.Service<
     ): Effect.Effect<void>
     gateTurns(
       gate: (
-        agent: { readonly taskId: string; readonly threadId: string; readonly sessionId: string; readonly review: boolean },
+        agent: {
+          readonly taskId: string
+          readonly threadId: string
+          readonly sessionId: string
+          readonly review: boolean
+          /** Its first turn after the person started or switched to it: theirs, as what they say is. */
+          readonly byPerson: boolean
+        },
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) => Effect.Effect<boolean>,
     ): Effect.Effect<void>
@@ -558,7 +575,13 @@ export class Sessions extends Context.Service<
         Effect.void
       /* What a lead's or a reviewer's turns wait for, once Busy says (gateTurns): until then, nothing. */
       let gate = (
-        _agent: { readonly taskId: string; readonly threadId: string; readonly sessionId: string; readonly review: boolean },
+        _agent: {
+          readonly taskId: string
+          readonly threadId: string
+          readonly sessionId: string
+          readonly review: boolean
+          readonly byPerson: boolean
+        },
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) => Effect.as(work(Effect.void), true)
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
@@ -1245,7 +1268,13 @@ export class Sessions extends Context.Service<
             // is still queued after one wakes it again, and asks again.
             if (running.stopping || !(running.brief !== undefined || (yield* hasQueued(thread.threadId)))) return
             yield* gate(
-              { taskId: thread.taskId, threadId: thread.threadId, sessionId: running.sessionId, review: thread.role === 'reviewer' },
+              {
+                taskId: thread.taskId,
+                threadId: thread.threadId,
+                sessionId: running.sessionId,
+                review: thread.role === 'reviewer',
+                byPerson: running.brief?.byPerson === true,
+              },
               (begun) =>
                 Effect.suspend(() => {
                   if (running.stopping) return Effect.succeed(false)
@@ -1510,10 +1539,7 @@ export class Sessions extends Context.Service<
         })
 
       /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
-      const activate = (
-        connected: Effect.Success<ReturnType<typeof connectSession>>,
-        brief: { readonly text: string; readonly closing: string },
-      ) =>
+      const activate = (connected: Effect.Success<ReturnType<typeof connectSession>>, brief: Brief) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { sessionId, entry, account, thread, connection, agent, scope, revokeTools } = connected
@@ -1764,7 +1790,8 @@ export class Sessions extends Context.Service<
                 commandId: input.envelope.commandId,
                 disposition,
                 body: input.body,
-                authorActorId: input.envelope.actorId,
+                // What Althar writes quietly is its own, whoever's command it came with: the person's words are only what they say.
+                authorActorId: input.quiet === true ? instance.systemId : input.envelope.actorId,
                 state: 'queued',
                 acceptedAt: yield* timestamp,
               })}`
@@ -2090,7 +2117,7 @@ export class Sessions extends Context.Service<
             // After its plan, what the person asks for is a round of work of its own (ADR-034).
             "Once the plan's steps are done, what the person asks you for is a round of work of its own: when you have done it, call finish_step the same way, with your summary and evidence. Where they only asked something and you changed nothing, answer them; there is nothing to finish. What you commit after the task's pull request merged or closed goes in a new pull request, which the person opens from the task.",
             // What the lead shows of its work: evidence that fits the task, and what it couldn't show.
-            "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo or a version bump, a single note saying so is enough. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check.",
+            "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo or a version bump, a single note saying so is enough. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check. Take a screenshot at 1× (a device scale of 1, not a Retina 2×), of only the part that changed where you can, and look at each once: every picture you read stays in your context for the rest of the task, and a whole Retina screen costs as much as a few thousand words.",
             // What the task built, which ends it: the person reads it before the proof, and it is said again when the work changes.
             "When you finish the task, say in finish_step's `built` what it has built, as it stands now, the way you would wrap up a session for the person: what it does for them now, the main changes and where they are, anything left open or decided along the way (\"the images aren't in the pull request because…\"), and what they should do next (try it at its local address, push, check it on a real device). A few lines or a short list, in plain words, about where it ended rather than how it got there: a review finding you fixed belongs only if it changed what was built. For a prototype or anything to look at, say how to see it. Settling a review that changes the work, say it again, so it never describes an earlier version; and once the plan's steps are done, when you change the work after (a failed check, what people said on the pull request), call finish_step again with `built` as it now stands.",
             // Althar reaches the code host for the task (ADR-011).
@@ -2217,6 +2244,7 @@ export class Sessions extends Context.Service<
         readonly about?: 'limit' | 'stall'
         readonly accountId?: string
         readonly message?: { readonly envelope: CommandEnvelope; readonly body: string; readonly images?: ReadonlyArray<InputImage> }
+        readonly byPerson?: boolean
       }) =>
         exclusive(
           input.threadId,
@@ -2251,7 +2279,11 @@ export class Sessions extends Context.Service<
                 ...(input.message.images === undefined ? {} : { images: input.message.images }),
               })
             const brief = yield* briefFor(thread, { kind: 'takeover', from })
-            return yield* activate(connected, { text: brief, closing: 'Carry on with the task from where it stands.' })
+            return yield* activate(connected, {
+              text: brief,
+              closing: 'Carry on with the task from where it stands.',
+              ...(input.byPerson === true ? { byPerson: true } : {}),
+            })
           }),
         )
 
