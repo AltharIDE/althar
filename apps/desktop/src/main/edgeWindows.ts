@@ -1,7 +1,8 @@
 import { join } from 'node:path'
 
-import { BrowserWindow, Menu, nativeImage, nativeTheme, type Rectangle, screen, Tray } from 'electron'
+import { app, BrowserWindow, Menu, nativeImage, nativeTheme, type Rectangle, screen, Tray } from 'electron'
 
+import { darkPanel, type Scheme, watchColorScheme } from './colorScheme'
 import {
   DEFAULT_EDGE,
   type EdgePlace,
@@ -213,10 +214,11 @@ export const startEdge = (host: EdgeHost): Edge => {
 
   /* ---- the menu bar ---- */
 
+  let scheme: Scheme | undefined
   const picture = (yours: boolean) => {
-    // A Windows taskbar follows the system's mode. A Linux panel's colour isn't the app theme's (Electron says light where the
-    // desktop gives no word, on a dark KDE panel too), and most are dark: there the mark is light.
-    const dark = process.platform === 'linux' || nativeTheme.shouldUseDarkColors
+    // A Windows taskbar follows the system's mode. On Linux Electron's nativeTheme says light where it has no word, on a dark
+    // panel too, so the desktop's setting comes from the Settings portal; with none, most panels are dark: the mark is light.
+    const dark = process.platform === 'linux' ? darkPanel(scheme) : nativeTheme.shouldUseDarkColors
     const image = nativeImage.createFromPath(join(host.pictures, markFile(process.platform, dark, yours)))
     // The menu bar draws a template in its own colour, light or dark, whatever is behind it; elsewhere the file is the colour.
     if (process.platform === 'darwin') image.setTemplateImage(true)
@@ -340,6 +342,15 @@ export const startEdge = (host: EdgeHost): Edge => {
   nativeTheme.on('updated', () => {
     if (process.platform !== 'darwin' && tray !== undefined && !tray.isDestroyed()) tray.setImage(picture(waiting > 0))
   })
+
+  // On Linux the portal tells when the desktop's light/dark setting changes, and the mark is drawn again.
+  if (process.platform === 'linux') {
+    const stop = watchColorScheme((next) => {
+      scheme = next
+      if (tray !== undefined && !tray.isDestroyed()) tray.setImage(picture(waiting > 0))
+    })
+    app.once('will-quit', stop)
+  }
 
   const first = readEdge(host.profile()).then((place) => {
     chosen = place

@@ -1,0 +1,57 @@
+import { type ChildProcess, execFile, spawn } from 'node:child_process'
+
+/** The XDG Settings portal's `org.freedesktop.appearance` `color-scheme`: 0 is no preference, 1 dark, 2 light. */
+export type Scheme = 0 | 1 | 2
+
+const PORTAL = ['--session', '--dest', 'org.freedesktop.portal.Desktop', '--object-path', '/org/freedesktop/portal/desktop']
+
+/** The scheme in what gdbus prints for a read, `(<<uint32 1>>,)`, or for the change signal; nothing where it names no scheme. */
+export const parseScheme = (text: string): Scheme | undefined => {
+  const value = /uint32 ([012])\b/.exec(text)?.[1]
+  return value === undefined ? undefined : (Number(value) as Scheme)
+}
+
+/** Whether the panel is dark. Chromium cannot say on Linux, and most panels are dark: light only where the desktop says light. */
+export const darkPanel = (scheme: Scheme | undefined): boolean => scheme !== 2
+
+/**
+ * Follows the desktop's light/dark setting through the Settings portal, which a Flatpak sandbox can reach and Electron's own
+ * nativeTheme does not report on Linux. Calls `changed` with each scheme it learns; `undefined` where there is no portal.
+ * Needs gdbus (in the Flatpak runtime); without it nothing is reported and the caller's default stands.
+ */
+export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void): (() => void) => {
+  let monitor: ChildProcess | undefined
+  let stopped = false
+
+  execFile(
+    'gdbus',
+    ['call', ...PORTAL, '--method', 'org.freedesktop.portal.Settings.ReadOne', 'org.freedesktop.appearance', 'color-scheme'],
+    { timeout: 5000 },
+    (error, out) => {
+      if (!stopped) changed(error === null ? parseScheme(out) : undefined)
+    },
+  )
+
+  try {
+    monitor = spawn('gdbus', ['monitor', ...PORTAL], { stdio: ['ignore', 'pipe', 'ignore'] })
+    let pending = ''
+    monitor.stdout?.on('data', (chunk: Buffer) => {
+      const lines = (pending + chunk.toString()).split('\n')
+      pending = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.includes('SettingChanged') || !line.includes('color-scheme')) continue
+        const scheme = parseScheme(line)
+        if (scheme !== undefined && !stopped) changed(scheme)
+      }
+    })
+    monitor.on('error', () => undefined)
+    monitor.unref()
+  } catch {
+    // No gdbus: the default stands.
+  }
+
+  return () => {
+    stopped = true
+    monitor?.kill()
+  }
+}

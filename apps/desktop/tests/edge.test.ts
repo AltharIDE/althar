@@ -8,7 +8,8 @@ import { LOGO_BORE, LOGO_SECTION } from '@althar/ui'
 
 import { BORE, SECTION } from '../scripts/trayPictures'
 import { readAppIcon, writeAppIcon } from '../src/main/appIcon'
-import { edgeIn, markFile, trayItems, notchIn, pointerOn, readEdge, sheetBounds, writeEdge } from '../src/main/edge'
+import { darkPanel, parseScheme } from '../src/main/colorScheme'
+import { edgeIn, markFile, notchIn, pointerOn, readEdge, sheetBounds, trayItems, writeEdge } from '../src/main/edge'
 
 /*
  * Where Althar shows while the person is in another app: the notch AppKit
@@ -134,5 +135,22 @@ describe('the tray off a Mac', () => {
     expect(trayItems(0).map((item) => ('label' in item ? item.label : '-'))).toEqual(['Open Althar', '-', 'Quit Althar'])
     expect(trayItems(1)[1]).toMatchObject({ label: '1 thing waiting on you', action: 'open' })
     expect(trayItems(3)[1]).toMatchObject({ label: '3 things waiting on you' })
+  })
+})
+
+describe('the desktop colour scheme on Linux', () => {
+  it('reads the portal value, as gdbus prints it for a read and for the change signal', () => {
+    expect(parseScheme('(<<uint32 1>>,)\n')).toBe(1)
+    expect(parseScheme('(<uint32 2>,)')).toBe(2)
+    const signal = "SettingChanged ('org.freedesktop.appearance', 'color-scheme', <uint32 0>)"
+    expect(parseScheme(`/org/freedesktop/portal/desktop: org.freedesktop.portal.Settings.${signal}`)).toBe(0)
+    expect(parseScheme('Error: no such interface')).toBeUndefined()
+  })
+
+  it('has a light mark on a dark panel unless the desktop says light', () => {
+    expect(darkPanel(1)).toBe(true)
+    expect(darkPanel(2)).toBe(false)
+    expect(darkPanel(0)).toBe(true)
+    expect(darkPanel(undefined)).toBe(true)
   })
 })
