@@ -1,5 +1,6 @@
 /* What it does, or the ask; the commit as the host shows it; and what goes out, under it. */
 .coAuthor {
+  container-type: inline-size;
   display: grid;
   gap: 14px;
 }
@@ -11,30 +12,70 @@
   color: var(--t-2);
 }
 
-/* turned off: the ask, set large over the commit */
+/* turned off: the ask, on a card of its own over the commit, Althar's mark coming up in a little light at its corner */
 .ask {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 18px;
+  overflow: hidden;
+  padding: 20px 20px 18px 22px;
+  border-radius: 14px;
+  background:
+    radial-gradient(85% 120% at 100% 0%, var(--live-dim) 0%, transparent 62%),
+    var(--paper);
+  box-shadow:
+    0 0 0 1px var(--line-2),
+    var(--lift-card);
+  animation: arrive var(--slow) var(--ease-fold) both;
+}
+.askWords {
   display: grid;
   justify-items: start;
   gap: 8px;
-  padding: 2px 0 4px;
-  animation: arrive var(--slow) var(--ease-fold) both;
 }
 .big {
-  max-width: 22ch;
+  max-width: 24ch;
   margin: 0;
-  font-size: 21px;
+  font-family: var(--font-display);
+  font-size: 22px;
   font-weight: 650;
-  line-height: 1.22;
+  line-height: 1.2;
   letter-spacing: -0.02em;
   color: var(--t-1);
   text-wrap: balance;
 }
 .why {
-  max-width: 52ch;
-  margin: 0 0 4px;
+  max-width: 48ch;
+  margin: 0;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--t-2);
+  text-wrap: pretty;
+}
+.askActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 8px;
+}
+.askMark {
+  display: grid;
+  place-items: center;
+  margin: -4px -2px 0 0;
+}
+/* where it is narrow, the mark goes over the words */
+@container (width < 420px) {
+  .ask {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .askMark {
+    grid-row: 1;
+    justify-self: start;
+    margin: 0;
+  }
 }
 
 /* a commit as GitHub shows it: its message, then who made it */

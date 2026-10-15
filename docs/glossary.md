@@ -119,9 +119,11 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 
 | On screen | In the model | What it is |
 |---|---|---|
-| Althar 0.1.1 is ready, Restart | an update Squirrel has in place (`main/updates.ts`) | A newer Althar, downloaded in the background, said in one quiet line in the window's bar and Settings' foot. Restart is there only while no work runs; otherwise the line says it installs when you quit. Checking and downloading never show. |
+| Quick settings | `QuickSettings` | Althar's settings that are changed often, in a panel from the gear at the end of the window's bar on every screen, or ⌘,: Keep awake, Notifications, Sound and CPU and memory, a press each, and Agents at once. A card's name opens its section on the Settings tab; All settings, or ⌘⇧,, opens the tab where it was. |
+| Settings | the Settings tab, `/settings/<section>` (`SettingsPage`) | All of Althar's own settings, as a tab beside Home while they are open, kept between launches on the section they were on: the quick settings' cards down the side, then the sections by what each is about (Agents, Code hosts and trackers, Work on this Mac, Reviews and pull requests, Notifications, Appearance, Editor, About Althar). A setting to come goes in the section it is about. A project's own settings stay in the project. |
+| Althar 0.1.1 is ready, Restart | an update Squirrel has in place (`main/updates.ts`) | A newer Althar, downloaded in the background, said in one quiet line in the window's bar and in Settings' About Althar. Restart is there only while no work runs; otherwise the line says it installs when you quit. Checking and downloading never show. |
 | Check for Updates… | `checkNow` | In the app menu: looks now, and says in a dialog what it found. |
-| What's new | a release's notes | In Settings' foot, beside the version: that version's GitHub Release, in the browser. |
+| What's new | a release's notes | In the quick settings' foot and Settings' About Althar, beside the version: that version's GitHub Release, in the browser. |
 | CPU, MEM; This Mac's load | `GetLoad`, `LoadMeter` (ADR-029) | How hard the computer works, as two short meters in the window's bar, Althar's work's part of each in cobalt; "Memory is tight" or "Memory is short" beside them when macOS says so. Clicked, the last two minutes, the figures, and what each task, coordinator and default branch running uses. On by default; "Show how hard this Mac works" in Settings, or "Show in the bar" in the peek, turns it off for every window. |
 
 ## Words the interface doesn't use

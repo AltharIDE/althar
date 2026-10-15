@@ -5,6 +5,7 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 import { Logo } from '../../foundations/Logo/Logo'
 import { EdgeSpot } from '../../foundations/vocabulary'
 import { States } from '../../storybook/States'
+import { ControlSheet } from '../ControlCenter/ControlCenter'
 import { EdgeMini } from '../EdgeMini/EdgeMini'
 import {
   AgentsAtOnce,
@@ -81,10 +82,11 @@ const menuMark = (
 )
 
 /* How many agents at once, as a consumer keeps it: the person's number, or none for the default. */
-function AtOnce() {
+function AtOnce({ compact = false }: { compact?: boolean }) {
   const [own, setOwn] = useState<number | null>(null)
   return (
     <AgentsAtOnce
+      compact={compact}
       count={own ?? MACHINE.count}
       machine={MACHINE}
       onChange={(count) => {
@@ -220,6 +222,30 @@ export const AgentsAtOnceSetting: Story = {
     await expect(count).toHaveAttribute('aria-valuenow', '3')
     await userEvent.keyboard('{ArrowRight}')
     await expect(onAtOnce).toHaveBeenLastCalledWith(null)
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
+  },
+}
+
+/** Compact, alone on a sheet, as the quick settings have it: one plain line, a step for each number, no scale. */
+export const AgentsAtOnceCompact: Story = {
+  render: () => (
+    <div style={{ width: 416 }}>
+      <ControlSheet>
+        <AtOnce compact />
+      </ControlSheet>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const count = c.getByRole('slider', { name: 'Agents at once' })
+    await expect(count).toHaveAttribute('aria-valuetext', '4, this Mac’s default')
+    await expect(c.getByText('More tasks than this wait their turn.')).toBeInTheDocument()
+    count.focus()
+    await userEvent.keyboard('{ArrowRight}{ArrowRight}')
+    await expect(count).toHaveAttribute('aria-valuenow', '6')
+    // Past the default the line stays the same; the way back follows it.
+    await expect(c.getByText('More tasks than this wait their turn.')).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Use the default' }))
     await expect(count).toHaveAttribute('aria-valuenow', '4')
   },
 }

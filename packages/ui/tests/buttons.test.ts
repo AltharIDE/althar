@@ -40,6 +40,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'outputs/ChangeView/ChangeView.tsx': 'a file in the list of what changed',
   'screens/Start/Start.tsx': 'the ways to start, as large options',
   'setup/ConnectCard/ConnectCard.tsx': 'the ways in to a service, as large options',
+  'setup/SettingsNav/SettingsNav.tsx': 'a section in the list down the side of Settings',
   /* a shape of its own */
   'composer/ContextRing/ContextRing.tsx': 'the ring',
   'chrome/LoadMeter/LoadMeter.tsx': 'the meters, drawn in steps as the ring is drawn',
