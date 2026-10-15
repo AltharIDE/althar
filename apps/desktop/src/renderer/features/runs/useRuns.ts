@@ -6,11 +6,12 @@ import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 
 /*
- * What a project runs, as one screen acts on it (ADR-036): running one here,
- * stopping its run, keeping one, changing, dropping and ordering them, the
- * repository's scripts to pick from, and asking the coordinator to work out
- * what is worth running. Each says what went wrong if it did; the screens
- * read what the project runs again as the runtime says it changed.
+ * What a project runs, as one screen keeps it (ADR-036): keeping one,
+ * changing, dropping and ordering them, the repository's scripts to pick
+ * from, and asking the coordinator to work out what is worth running. Each
+ * says what went wrong if it did; the screens read what the project runs
+ * again as the runtime says it changed. Running and stopping are the
+ * screen's own.
  */
 
 /** What the coordinator is asked, in the person's words, to work out what the project runs. */
@@ -18,10 +19,6 @@ export const askText =
   'Work out what this project runs besides its default, and keep each thing worth running by hand with keep_run: a dev server, Storybook, the app itself, tests in watch mode. Then tell me what you kept.'
 
 export interface RunsModel {
-  /** Runs one here. */
-  readonly run: (runnableId: string) => Promise<void>
-  /** Stops a run. */
-  readonly stop: (launchId: string) => Promise<void>
   /** Keeps one, new or changed: whether it was kept. */
   readonly keep: (input: {
     readonly id?: string
@@ -51,17 +48,7 @@ export const nameOf = (script: RepositoryScript, root: boolean) => {
   return root ? named : `${named} · ${script.package.replace(/^@[^/]+\//, '')}`
 }
 
-export function useRuns({
-  projectId,
-  taskId,
-  threadId,
-}: {
-  readonly projectId: string
-  /** The task whose worktree it runs in; null for a copy of the default branch. */
-  readonly taskId: string | null
-  /** The thread a run's card goes in. */
-  readonly threadId: string | null
-}): RunsModel {
+export function useRuns({ projectId }: { readonly projectId: string }): RunsModel {
   const { client, cache } = useServices()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -83,8 +70,6 @@ export function useRuns({
   }, [])
 
   return {
-    run: async (runnableId) => void (await act(() => client.runProject(projectId, taskId, threadId, runnableId))),
-    stop: async (launchId) => void (await act(() => client.stopLaunch(launchId))),
     keep: (input) => act(() => client.keepRunnable({ projectId, ...input })),
     keepScripts: (picked) =>
       act(async () => {

@@ -30,6 +30,8 @@ export interface PickableScript {
   command: string
   /** What the script itself says. */
   body: string
+  /** Its repository, said where the project has more than one, as the same script can be in each. */
+  repository?: string
 }
 
 export interface AddRunnableText {
@@ -116,7 +118,9 @@ export function AddRunnable({
   const [repository, setRepository] = useState<string | null>(repositories[0] ?? null)
   const [find, setFind] = useState('')
   const [picked, setPicked] = useState<readonly string[]>([])
-  const found = (scripts ?? []).filter((one) => `${one.command} ${one.body}`.toLowerCase().includes(find.trim().toLowerCase()))
+  const found = (scripts ?? []).filter((one) =>
+    `${one.command} ${one.body} ${one.repository ?? ''}`.toLowerCase().includes(find.trim().toLowerCase()),
+  )
   const count = way === 'scripts' ? picked.length : 1
   const ready = way === 'type' ? command.trim() !== '' : way === 'scripts' ? picked.length > 0 : true
   const submit = () => {
@@ -200,7 +204,10 @@ export function AddRunnable({
               <div className={s.scroll}>
                 <CheckList
                   label={t.scripts}
-                  items={found.map((one) => ({ id: one.id, label: `${one.command}  ·  ${one.body}` }))}
+                  items={found.map((one) => ({
+                    id: one.id,
+                    label: `${one.command}  ·  ${one.body}${one.repository === undefined ? '' : `  ·  ${one.repository}`}`,
+                  }))}
                   value={picked}
                   onChange={setPicked}
                 />
@@ -398,10 +405,12 @@ export interface RunnablesProps {
   onRemove: (id: string) => void
   onAdd: () => void
   onClose: () => void
+  /** What went wrong ordering or removing one. */
+  error?: string
   text?: Partial<RunnablesText>
 }
 
-export function Runnables({ project, runnables, onMove, onDefault, onEdit, onRemove, onAdd, onClose, text }: RunnablesProps) {
+export function Runnables({ project, runnables, onMove, onDefault, onEdit, onRemove, onAdd, onClose, error, text }: RunnablesProps) {
   const t = { ...runnablesText, ...text }
   return (
     <Dialog
@@ -454,6 +463,11 @@ export function Runnables({ project, runnables, onMove, onDefault, onEdit, onRem
             )
           })}
         </ol>
+      )}
+      {error !== undefined && (
+        <p className={s.error} role="alert">
+          {error}
+        </p>
       )}
     </Dialog>
   )

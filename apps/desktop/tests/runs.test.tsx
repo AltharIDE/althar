@@ -1,4 +1,4 @@
-import type { Launch } from '@althar/contracts'
+import { ApiError, type Launch } from '@althar/contracts'
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -9,7 +9,7 @@ import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { STARTING_FOR, targetsOf } from '../src/renderer/features/runs/Runs'
 import { askText, nameOf } from '../src/renderer/features/runs/useRuns'
-import { coordinatorSnapshot, fakeClient, runnables, scripts } from './fixtures'
+import { coordinatorSnapshot, fakeClient, repositories, runnables, scripts } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -35,9 +35,10 @@ const launch = (overrides: Partial<Launch>): Launch => ({
 })
 
 /** The project's front, read, with what it runs. */
-const shown = async (launches: ReadonlyArray<Launch> = []) => {
+const shown = async (launches: ReadonlyArray<Launch> = [], more: Parameters<typeof fakeClient>[0] = {}) => {
   const { client, emit } = fakeClient({
     getCoordinator: vi.fn(async () => coordinatorSnapshot({ runnables, launches })),
+    ...more,
   })
   withServices(<Project />, client)
   await screen.findByText(/^Ask the coordinator about/)
@@ -122,6 +123,32 @@ describe('what the project runs, from its front', () => {
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: askText, disposition: 'after_current' }))
   })
 
+  it('says over the composer what went wrong running one from the button', async () => {
+    const { client } = await shown()
+    vi.mocked(client.runProject).mockRejectedValueOnce(
+      new ApiError({ reason: 'LaunchRefused', message: 'Could not fetch main from origin.' }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Run bun run dev' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not fetch main from origin.')
+  })
+
+  it('offers a script kept in one repository again in another, saying which', async () => {
+    const web = { ...repositories[0]!, id: 'repo_web', name: 'meridian-web', path: '/Users/me/code/meridian-web' }
+    await shown([], {
+      getRepositories: vi.fn(async () => [repositories[0]!, web]),
+      getRepositoryScripts: vi.fn(async () => [...scripts, { ...scripts[2]!, repository: 'meridian-web' }]),
+    })
+    await userEvent.click((await listed()).getByRole('menuitem', { name: 'Add something to run…' }))
+    const pick = within(await screen.findByRole('dialog', { name: 'Add something to run' }))
+    await userEvent.click(pick.getByRole('radio', { name: 'From package.json' }))
+    // Storybook is kept in meridian-api, not in meridian-web; its dev server is kept.
+    const offered = await pick.findAllByRole('checkbox')
+    expect(offered.map((one) => one.closest('label')?.textContent)).toEqual([
+      'bun run test:watch  ·  vitest  ·  meridian-api',
+      'bun --filter @meridian/ui storybook  ·  storybook dev  ·  meridian-web',
+    ])
+  })
+
   it('says what went wrong adding one, and keeps the dialog open', async () => {
     const { client } = await shown()
     vi.mocked(client.keepRunnable).mockRejectedValueOnce(new Error('The project has no repository on this Mac to run it in.'))
@@ -163,6 +190,21 @@ describe('what the project runs, from its front', () => {
       within(await screen.findByRole('dialog', { name: 'What meridian runs' })).getByRole('button', { name: 'Add something to run' }),
     )
     expect(await screen.findByRole('dialog', { name: 'Add something to run' })).toBeTruthy()
+  })
+
+  it('says in the whole list what went wrong removing or ordering one', async () => {
+    const { client } = await shown()
+    vi.mocked(client.dropRunnable).mockRejectedValueOnce(
+      new ApiError({ reason: 'SqlError', message: 'Storybook is running; stop it first.' }),
+    )
+    await userEvent.click((await listed()).getByRole('menuitem', { name: 'Edit the list…' }))
+    const list = within(await screen.findByRole('dialog', { name: 'What meridian runs' }))
+    await userEvent.click(list.getByRole('button', { name: 'Remove Storybook' }))
+    expect((await list.findByRole('alert')).textContent).toBe('Storybook is running; stop it first.')
+    // Done, and opened again, it starts afresh.
+    await userEvent.click(list.getByRole('button', { name: 'Done' }))
+    await userEvent.click((await listed()).getByRole('menuitem', { name: 'Edit the list…' }))
+    expect(within(await screen.findByRole('dialog', { name: 'What meridian runs' })).queryByRole('alert')).toBeNull()
   })
 })
 

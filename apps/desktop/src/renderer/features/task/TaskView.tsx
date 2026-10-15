@@ -503,10 +503,11 @@ export function TaskView({
           projectId={snapshot.project.id}
           project={snapshot.project.name}
           taskId={snapshot.task.id}
-          threadId={snapshot.threadId}
           runnables={snapshot.task.runnables}
           launches={snapshot.task.launches}
           now={now}
+          onRun={(id) => void model.runProject(id)}
+          onStop={(id) => void model.stopLaunch(id)}
         />
       )}
       <TaskMenu

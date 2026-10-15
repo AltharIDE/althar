@@ -57,6 +57,9 @@ export const List: Story = {
 /** Everything taken out. */
 export const Empty: Story = { args: { runnables: [] } }
 
+/** The runtime said no to removing or ordering one. */
+export const ListFailed: Story = { args: { error: 'Storybook is running; stop it first.' } }
+
 /** Adding one by typing its command and a name for it. */
 export const AddTyped: StoryObj<typeof AddRunnable> = {
   render: (args) => <AddRunnable {...args} />,
@@ -92,6 +95,27 @@ export const AddFromScripts: StoryObj<typeof AddRunnable> = {
     await userEvent.click(page.getByRole('checkbox', { name: /bun run build && electron/ }))
     await userEvent.click(page.getByRole('button', { name: 'Add 2' }))
     await expect(args.onAddScripts).toHaveBeenCalledWith(['storybook', 'desktop'])
+  },
+}
+
+/** In a project of several repositories, the same script in each, each saying which. */
+export const ScriptsInSeveral: StoryObj<typeof AddRunnable> = {
+  render: (args) => <AddRunnable {...args} />,
+  args: {
+    ...AddTyped.args,
+    way: 'scripts',
+    repositories: ['althar', 'althar-site'],
+    scripts: [
+      { id: 'althar:storybook', command: 'bun run storybook', body: 'storybook dev --port 6006', repository: 'althar' },
+      { id: 'site:storybook', command: 'bun run storybook', body: 'storybook dev --port 6007', repository: 'althar-site' },
+    ],
+  } as StoryObj<typeof AddRunnable>['args'],
+  play: async ({ args }) => {
+    const page = within(document.body)
+    await userEvent.type(await page.findByRole('textbox', { name: /Find among 2 scripts/ }), 'site')
+    await userEvent.click(page.getByRole('checkbox', { name: /althar-site/ }))
+    await userEvent.click(page.getByRole('button', { name: 'Add' }))
+    await expect(args.onAddScripts).toHaveBeenCalledWith(['site:storybook'])
   },
 }
 

@@ -369,10 +369,11 @@ export function ProjectView({
                 projectId={projectId}
                 project={kept?.name ?? name}
                 taskId={null}
-                threadId={coordinator.threadId}
                 runnables={coordinator.runnables}
                 launches={coordinator.launches}
                 now={now}
+                onRun={(id) => void model.runProject(null, id)}
+                onStop={(id) => void model.stopLaunch(id)}
               />
             ),
           })}
