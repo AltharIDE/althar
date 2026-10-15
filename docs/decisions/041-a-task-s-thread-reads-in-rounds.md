@@ -88,7 +88,10 @@
   says while a turn runs now moves in the thread when the lead reads it.
   Threads written before roles keep their notices where they were; the
   screen reads the old ones by their words.
-- **Related:** [ADR-034](034-a-task-goes-back-to-work-and-ships-again.md)
+- **Related:** [ADR-037](037-what-the-person-does-goes-first.md) (what
+  Althar writes for an agent is Althar's input, so what the coordinator passed
+  on is known by the words it is passed on with),
+  [ADR-034](034-a-task-goes-back-to-work-and-ships-again.md)
   (a round of work after the plan), [ADR-018](018-allow-always-keeps-a-rule.md) (the
   line saying what the project's rules let through, under a round's work).
   The coordinator's own thread still reads in turns.

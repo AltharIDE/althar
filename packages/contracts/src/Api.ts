@@ -2246,6 +2246,11 @@ export const Api = RpcGroup.make(
    */
   command('SetAgentsAtOnce', { count: Schema.NullOr(AtOnceCount) }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
+  /**
+   * Asks the thread's agent to compact its context, as a turn of its own after
+   * what was said before; it never waits for a place among the agents at work.
+   */
+  command('CompactContext', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
   /** Stops a task: every agent on it stops, and the step it was on waits until the person resumes it. */
   command('StopTask', { taskId: Schema.String }, Schema.Void),

@@ -54,6 +54,11 @@ export interface RuntimeOptions {
   readonly countdown?: Duration.Duration
   /** How often a task's pull requests are asked for news while it listens: 30 seconds unless a test says otherwise. */
   readonly listenEvery?: Duration.Duration
+  /**
+   * How long after a change's work comes back its pull request may show no checks before Althar takes it to have none: a
+   * host registers its checks a few seconds after a push. A minute unless a test says otherwise (ADR-040).
+   */
+  readonly checksAppear?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
   /** Althar's GitHub App, by its slug, for where it is installed on an owner. */
@@ -103,6 +108,8 @@ export interface BusyOptions {
   readonly sample?: Duration.Duration
   /** How long what an agent left running must stay below real CPU before it stops taking a place: 30 seconds. */
   readonly quiet?: Duration.Duration
+  /** How long an agent waiting on the person's answer, to a question or a permission, keeps its place: five minutes. */
+  readonly askGrace?: Duration.Duration
   /**
    * The CPU time of each process in the tree of each of these agents (the agent's process and everything it started), by
    * process and in milliseconds, by thread; null where it can't be said, as for an agent that is no process of its own:

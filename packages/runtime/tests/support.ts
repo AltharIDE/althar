@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -32,24 +32,31 @@ import { Secrets } from '../src/Secrets'
 import type { LoadOptions } from '../src/MachineLoad'
 import type { ModelFactsOptions } from '../src/ModelFacts'
 
+/** The repository every test starts from, made once per worker: copying it is much quicker than running git anew. */
+let template: string | undefined
+
 /** A git repository with one commit on `main`. */
 export const repository = () => {
+  if (template === undefined) {
+    template = mkdtempSync(join(tmpdir(), 'althar-template-'))
+    const run = (...args: Array<string>) =>
+      execFileSync('git', args, {
+        cwd: template,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 'Test',
+          GIT_AUTHOR_EMAIL: 'test@althar.test',
+          GIT_COMMITTER_NAME: 'Test',
+          GIT_COMMITTER_EMAIL: 'test@althar.test',
+        },
+      })
+    run('init', '-q', '-b', 'main')
+    writeFileSync(join(template, 'README.md'), '# Meridian\n')
+    run('add', '.')
+    run('commit', '-q', '-m', 'Start')
+  }
   const path = mkdtempSync(join(tmpdir(), 'althar-repo-'))
-  const run = (...args: Array<string>) =>
-    execFileSync('git', args, {
-      cwd: path,
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: 'Test',
-        GIT_AUTHOR_EMAIL: 'test@althar.test',
-        GIT_COMMITTER_NAME: 'Test',
-        GIT_COMMITTER_EMAIL: 'test@althar.test',
-      },
-    })
-  run('init', '-q', '-b', 'main')
-  writeFileSync(join(path, 'README.md'), '# Meridian\n')
-  run('add', '.')
-  run('commit', '-q', '-m', 'Start')
+  cpSync(template, path, { recursive: true })
   return path
 }
 
@@ -203,6 +210,8 @@ export const runtime = (
     readonly countdown?: Duration.Duration
     readonly connectors?: Layer.Layer<Connectors>
     readonly listenEvery?: Duration.Duration
+    /** How long a pull request may show no checks before it counts as having none; none at all unless a test says. */
+    readonly checksAppear?: Duration.Duration
     readonly each?: Readonly<Record<string, FakeAgentOptions>>
     /** Agents signed in on a key, paid per use, rather than a plan. */
     readonly perUse?: ReadonlyArray<string>
@@ -241,6 +250,7 @@ export const runtime = (
     secrets: Secrets.memory(),
     connectors: more.connectors ?? fakeConnectors({}),
     ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),
+    checksAppear: more.checksAppear ?? Duration.zero,
     ...(more.stalls === undefined ? {} : { stalls: more.stalls }),
     ...(more.stopGrace === undefined ? {} : { stopGrace: more.stopGrace }),
     ...(more.permissionJudgeTimeout === undefined ? {} : { permissionJudgeTimeout: more.permissionJudgeTimeout }),
