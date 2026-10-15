@@ -63,6 +63,7 @@ project checkout, with metadata in Althar's store. A proposed layout is:
   catalog.json                 # packaged default catalog and pinned revision
   objects/<content-hash>/       # immutable skill trees
   installs.json                # source, pinned commit, path, hashes, review state
+                               # (source: github | local | althar-default)
   runs/<run-id>/<adapter>/      # read-only adapter projection for one run
 ```
 
@@ -176,8 +177,12 @@ read-only content access; never ask a skill to handle a GitHub token.
 
 Validate the Agent Skills metadata and directory-name rules. Reject path
 traversal, unsafe symlinks, files that escape the skill root, malformed
-frontmatter, and excessive file counts/sizes. Preserve all relative resources
-so skill references keep working. Trust labels such as `Althar default`,
+frontmatter, and excessive file counts/sizes. Reject, at fetch time, any
+selected path outside the chosen skill directory, so a repository's `hooks/`,
+`commands/`, plugin manifests (`.claude-plugin/`, `.codex-plugin/`, and
+similar) and `package.json` are never fetched or stored. Inside a skill
+directory, preserve all relative resources so skill references keep
+working; the review card flags executable files there. Trust labels such as `Althar default`,
 `reviewed by user`, and `not reviewed` describe provenance/review only;
 they do not grant tools, filesystem access, network access, secrets, or
 approval. Harness-specific skill fields can still affect the harness:
@@ -311,27 +316,36 @@ material inside each `skills/` tree before shipping.
    OpenSpec workflow) live in it directly.
 2. Take `skills/<name>/` directories only. Do not take upstream hooks,
    commands, personas, plugin manifests or `package.json`: they run code or
-   assume one harness, and the install path in section 3 already rejects them.
+   assume one harness. This is a catalog-build rule, enforced for installs by
+   the subtree-only fetch in section 3.
    Superpowers' bootstrap skill assumes its SessionStart hook; it needs a
    decision or an Althar-authored equivalent, not a blind copy.
 3. Curate, don't union. The two sets overlap (test-driven development,
    debugging, planning, review). Pick one skill per job so a run does not carry
    two competing procedures and spend skill-catalog budget twice; resolve name
    collisions in the catalog, not at run time.
-4. The app ships a **vendored snapshot** of the catalog at a pinned catalog
+4. `althar-skills` is hosted under the account Althar's own repositories use
+   (`ninemate`), decided in stage 1.
+5. The app ships a **vendored snapshot** of the catalog at a pinned catalog
    version, with each upstream's `LICENSE` and an attribution file (a
    `THIRD_PARTY` notice) alongside, so first run works offline. This is the
    default baseline; it lands in the shared store (section 1) like any other
-   source, marked `source: althar-default`.
-5. Updates reach people as **catalog releases**, not app releases: the app
-   checks the catalog repo, shows the changed-file diff per skill (section 3),
+   source, with `source: althar-default` in `installs.json`.
+6. Updates reach people as **catalog releases**, not app releases. The check
+   is off until the person turns it on or presses "Check for updates"; it
+   sends one unauthenticated GitHub request for the catalog's latest release
+   and nothing about the person, their projects, or their installed skills
+   beyond what any HTTPS request reveals (IP, user agent). The app shows the changed-file diff per skill (section 3),
    and applies only on approval. Users can deselect, pin back, or add their own
    GitHub sources; their choices are bindings over the store and survive
    catalog updates.
-6. Curation is periodic and human: a scheduled job opens a catalog PR when an
+7. Curation is periodic and human: a scheduled job opens a catalog PR when an
    upstream head moves, listing the diff per pinned skill; a person reads it
-   (and the Stage 6 fixture runs on all adapters) before the pin moves.
-   Nothing auto-follows an upstream branch.
+   (and the stage 6 fixture runs on all adapters) before the pin moves.
+   Nothing auto-follows an upstream branch. The job is a maintainer-side
+   automation with write access to the `althar-skills` repository only, using
+   a token scoped to it; it never touches a user's repositories, and the app
+   never runs it.
 
 If the licence reading or a skill's contents change the answer for a given
 skill, drop that skill from the catalog; the structure above doesn't depend on
@@ -339,9 +353,10 @@ either upstream.
 
 ## Staged implementation after the newest Althar
 
-1. **Lock product decisions.** Create `althar-skills` per section 6; choose
-   the initial skills from the two MIT sources and record licences; confirm default versus per-project skill selection;
-   pin supported harness versions; decide whether to consume OpenSpec's beta
+1. **Lock product decisions.** Create `althar-skills` per section 6 (owner
+   account included); choose the initial skills from the two MIT sources and
+   record licences; confirm default versus per-project skill selection; pin
+   supported harness versions; decide whether to consume OpenSpec's beta
    stores or keep artifacts in Althar's own store.
 2. **Build catalog and store.** Bundle a pinned default catalog; add immutable
    local versions and provenance; import selected existing skills without
