@@ -1,3 +1,4 @@
+import { modKey } from '../../foundations/keys'
 import { Room } from '../../foundations/vocabulary'
 import { Segmented, type SegmentedOption } from '../../primitives/Segmented/Segmented'
 
@@ -21,7 +22,7 @@ export interface RoomSwitchText {
 export const roomSwitchText: RoomSwitchText = {
   label: 'View',
   room: { [Room.Talk]: 'Conversation', [Room.Board]: 'Board', [Room.Both]: 'Both' },
-  key: (n) => `⌘${n}`,
+  key: (n) => modKey(String(n)),
   news: 'new messages',
 }
 

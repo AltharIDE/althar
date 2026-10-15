@@ -2,16 +2,18 @@ import { useEffect, useRef, useState } from 'react'
 
 import type { ThreadSnapshot } from '@althar/contracts'
 import {
-  ChangeView,
   BackCrumb,
+  ChangeView,
   ChromeButton,
+  Composer,
   Delivery,
   DiffLineKind,
   type FileView,
-  Composer,
   Issue,
   LinkButton,
   type ModelInfo,
+  modKey,
+  primaryDown,
   TaskFace,
   TaskHeader,
   TaskMenu,
@@ -104,7 +106,7 @@ export const text = {
   loadingEarlier: 'Showing…',
   files: (count: number) => (count === 1 ? '1 file' : `${count} files`),
   reviewDiff: 'Review the changes',
-  diffKey: '⌘D',
+  diffKey: modKey('D'),
 }
 
 /**
@@ -230,7 +232,7 @@ export function TaskView({
   const { show } = changes
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== 'd' || !(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return
+      if (event.key.toLowerCase() !== 'd' || !primaryDown(event) || event.shiftKey || event.altKey) return
       if (files.length === 0) return
       event.preventDefault()
       show()

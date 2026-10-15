@@ -1,6 +1,8 @@
 import { Checkbox } from 'radix-ui'
 import { type DragEvent, useId, useRef, useState } from 'react'
 
+import { keys, modKey } from '../../foundations/keys'
+import { device } from '../../foundations/device'
 import { HalftoneMark } from '../../foundations/HalftoneMark/HalftoneMark'
 import { Icon } from '../../foundations/Icon/Icon'
 import { Light } from '../../foundations/Light/Light'
@@ -68,7 +70,7 @@ export interface StartText {
 }
 
 export const startText: StartText = {
-  looking: 'Looking around this Mac…',
+  looking: `Looking around ${device.this}…`,
   lookingNote: 'Asking each agent who it is signed in as, and looking for repositories where code is usually kept.',
   pick: 'Where should they work?',
   nowhere: 'Where is your code?',
@@ -81,7 +83,7 @@ export const startText: StartText = {
         : `${count} agents are ready.`,
   pickNote: 'Pick the repositories your first project works in. One is fine; a project can hold several.',
   agents: 'Agents',
-  agentsLabel: 'Agents on this Mac',
+  agentsLabel: `Agents on ${device.this}`,
   asking: 'asking…',
   readyOf: (ready, of) => `${ready} of ${of} ready`,
   repositories: 'Repositories',
@@ -89,13 +91,13 @@ export const startText: StartText = {
   lookedIn: (where) => `in ${where}`,
   searching: 'Looking…',
   none: 'None found in the usual places.',
-  add: { title: 'Add a folder…', note: 'anywhere on this Mac', kbd: '⌘N' },
+  add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: modKey('N') },
   project: 'Your first project',
   name: 'Project name',
   more: 'Tick more, or drop folders on the window.',
   leaveOut: (name) => `Leave ${name} out`,
   create: 'Make the project',
-  createKbd: '⌘⏎',
+  createKbd: modKey(keys.return),
 }
 
 export interface StartProps extends Omit<RuntimesProps, 'label' | 'className' | 'text' | 'runtimes'> {

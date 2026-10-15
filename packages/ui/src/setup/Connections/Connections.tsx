@@ -1,5 +1,6 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
+import { device } from '../../foundations/device'
 import type { Brand } from '../../foundations/brands/brands'
 import { Icon } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
@@ -131,7 +132,7 @@ export const connectionsText: ConnectionsText = {
   token: (service) => `${service} token`,
   makeToken: (service) => `Make one on ${service}`,
   makeTokenForKey: 'Make a token for this key',
-  tokenNote: 'Kept encrypted on this Mac, for Althar alone. It’s never shown again.',
+  tokenNote: `Kept encrypted on ${device.this}, for Althar alone. It’s never shown again.`,
   emptyToken: 'Paste the token first',
   emptyUser: 'Type the email the token belongs to',
   emptyKey: 'Paste the API key the token was made for',

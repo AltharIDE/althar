@@ -6,6 +6,7 @@ import { knownModelName } from '@althar/contracts'
 import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { thisDevice } from './device'
 import { Changes } from './Changes'
 import { Accounts } from './Accounts'
 import { Agents } from './Config'
@@ -234,7 +235,7 @@ export class Coordinator extends Context.Service<
             `Repositories:\n${repositories
               .map(
                 (repository) =>
-                  `- ${withRole(repository.name, repository.role)} (${repository.base ?? 'main'}), on this Mac at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
+                  `- ${withRole(repository.name, repository.role)} (${repository.base ?? 'main'}), on ${thisDevice()} at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
               )
               .join('\n')}`,
             `Tasks: ${counts?.open ?? 0} open, ${counts?.drafts ?? 0} planned and not yet started.`,

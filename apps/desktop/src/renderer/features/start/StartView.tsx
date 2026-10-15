@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect } from 'react'
 
 import type { AgentStatus, ProjectSummary } from '@althar/contracts'
-import { Button, PermissionPolicy, type RuntimeEntry, RuntimeState, SourceOrigin, TitleBar } from '@althar/ui'
+import { Button, PermissionPolicy, primaryDown, type RuntimeEntry, RuntimeState, SourceOrigin, TitleBar } from '@althar/ui'
 import { NewProject, Start } from '@althar/ui/screens'
 
 import { brandOf } from '../../shared/agents'
@@ -13,7 +13,6 @@ import { text as rulesText } from '../rules/RulesView'
 import s from './Start.module.css'
 import { useFirstProject } from './useFirstProject'
 import type { StartModel } from './useStart'
-import { device, platform } from '../../shared/device'
 
 /*
  * Where the window starts. With no project yet, the kit's Start screen: the
@@ -30,16 +29,6 @@ export const text = {
     because: (name: string, n: number) => `Althar found ${n} git repositories in ${name}. Leave out any its tasks shouldn’t change.`,
     sources: { label: 'Repositories', note: 'The ones its tasks may change. You can add others from elsewhere.' },
     foot: 'Althar read these folders and changed nothing in them. Tasks work in worktrees of their own.',
-  },
-  /** The kit's first screen, in this computer's words, with the keys this system has. */
-  first: () => {
-    const key = platform === 'darwin' ? '⌘' : 'Ctrl+'
-    return {
-      looking: `Looking around ${device.this}…`,
-      agentsLabel: `Agents on ${device.this}`,
-      add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: `${key}N` },
-      createKbd: platform === 'darwin' ? '⌘⏎' : 'Ctrl+Enter',
-    }
   },
 }
 
@@ -181,11 +170,10 @@ function First({
       if (made !== null) onProject(made.id)
     })
 
-  // ⌘N adds a folder, ⌘⏎ makes the project, as the screen says; Ctrl off a Mac.
+  // ⌘N adds a folder, ⌘⏎ makes the project, as the screen says; Ctrl+N and Ctrl+Enter off a Mac.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const command = platform === 'darwin' ? event.metaKey : event.ctrlKey
-      if (!command || event.shiftKey || event.altKey) return
+      if (!primaryDown(event) || event.shiftKey || event.altKey) return
       if (event.key.toLowerCase() === 'n') {
         event.preventDefault()
         void project.add()
@@ -220,8 +208,6 @@ function First({
         onCreate={make}
         creating={project.making}
         {...(error === null ? {} : { error })}
-        text={text.first()}
-        runtimesText={{ missing: `Not installed on ${device.this}` }}
       />
       {model.unremoved !== null && <StartError model={model} />}
     </div>

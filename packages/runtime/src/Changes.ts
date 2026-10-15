@@ -16,6 +16,7 @@ import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { thisDevice } from './device'
 import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
@@ -955,7 +956,7 @@ export class Changes extends Context.Service<
             title: several
               ? `Merged here: ${merged.map((one) => `${one.repository} into ${one.branch}`).join(', ')}.`
               : `Merged into ${merged[0]?.branch ?? 'its default branch'} here.`,
-            description: 'On this Mac only: nothing was pushed.',
+            description: `On ${thisDevice()} only: nothing was pushed.`,
           })
           // Merged, its task is done, as a merged pull request's is, once any others it has are merged too.
           yield* settleIfDone(taskId, { actorId: instance.personId, here: merged })

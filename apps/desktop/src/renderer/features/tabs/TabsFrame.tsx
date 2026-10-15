@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useSyncExternalStore } from 'react'
 
-import { ProjectTabs, type Room } from '@althar/ui'
+import { primaryDown, ProjectTabs, type Room } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { tabsStoreOf } from './store'
@@ -47,7 +47,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   useEffect(() => {
     const ids = order === '' ? [] : order.split(' ')
     const onKey = (event: KeyboardEvent) => {
-      if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
+      if (primaryDown(event) && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
         const id = byNumber(ids, Number(event.key))
         if (id === undefined) return
         event.preventDefault()

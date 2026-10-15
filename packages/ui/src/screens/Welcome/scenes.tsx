@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 
+import { device } from '../../foundations/device'
 import { Board, BoardColumn, BoardList } from '../../board/Board/Board'
 import { CallCard } from '../../board/CallCard/CallCard'
 import { NextRow } from '../../board/NextRow/NextRow'
@@ -475,10 +476,10 @@ export function AgentsScene({ live, instant }: SceneProps) {
   )
   return (
     <div ref={root} className={s.agents}>
-      <Panel title="Agents on this Mac" className={s.agentsPanel}>
+      <Panel title={`Agents on ${device.this}`} className={s.agentsPanel}>
         <div className={s.block}>
           <Runtimes
-            label="Agents on this Mac"
+            label={`Agents on ${device.this}`}
             runtimes={AGENTS.map((a): RuntimeEntry =>
               a.id === 'codex' && codex === RuntimeState.Checking ? { id: a.id, name: a.name, brand: a.brand, state: codex } : a,
             )}

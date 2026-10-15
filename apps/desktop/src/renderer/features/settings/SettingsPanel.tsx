@@ -3,8 +3,8 @@ import { useEffect, useState } from 'react'
 import type { AgentStatus, ConnectionList } from '@althar/contracts'
 import {
   type AgentGlance,
-  type AgentTab,
   AgentInstall,
+  type AgentTab,
   AgentTabs,
   Choices,
   CoAuthor,
@@ -19,11 +19,12 @@ import {
   ControlSheet,
   ControlToggle,
   DockPreview,
+  EdgePlaces,
   Icon,
   IconButton,
   KeepAwake,
   type MarkGlance,
-  EdgePlaces,
+  modKey,
   NotificationSettings,
   NotificationSound,
   type NotifyChoices,
@@ -68,7 +69,7 @@ import { type CoAuthorModel, useCoAuthor } from './useCoAuthor'
 
 export const text = {
   title: 'Settings',
-  kbd: '⌘,',
+  kbd: modKey(','),
   agents: 'Agents',
   counted: (agents: number, accounts: number) =>
     `${agents === 1 ? '1 agent' : `${agents} agents`} · ${accounts === 1 ? '1 account' : `${accounts} accounts`}`,

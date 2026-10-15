@@ -1,6 +1,7 @@
 import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
+import { thisDevice } from './device'
 import type { AccountRefused } from './Accounts'
 import type { CantMerge, NoChangeToOpen, ProjectRefused } from './errors'
 
@@ -40,7 +41,7 @@ export const agentSaid = (error: unknown): string | undefined => {
     case 'AgentStartFailed': {
       const command = text(error, 'command')
       return /ENOENT/.test(text(error, 'reason'))
-        ? `${command} isn't installed, or isn't on this Mac's PATH.`
+        ? `${command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
         : sentence(`${command} wouldn't start: ${text(error, 'reason')}`)
     }
     case 'AgentExited': {
@@ -166,7 +167,7 @@ export const words = (
       case 'NoChangeToOpen':
         return noChangeToOpen[text(error, 'why') as NoChangeToOpen['why']] ?? noChangeToOpen.working
       case 'SignOutFailed':
-        return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on this Mac any more, remove it anyway; its sign-in may stay behind.`
+        return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on ${thisDevice()} any more, remove it anyway; its sign-in may stay behind.`
       case 'AccountRefused':
         return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Althar can't add that account."
       case 'ChangedSinceSeen':
@@ -223,7 +224,7 @@ const cantMerge = {
     `The default branch is checked out in ${where} with changes not committed. Commit or put them away, then merge again.`,
   untracked: (files: string) => `The merge would overwrite files git doesn’t track: ${files}. Move them away, then merge again.`,
   moved: (branch: string) => `${branch} moved while Althar was merging, so nothing was merged. Merge again.`,
-  missing: (branch: string) => `This Mac has no ${branch} branch to merge into.`,
+  missing: (branch: string) => `${thisDevice().replace(/^t/, 'T')} has no ${branch} branch to merge into.`,
 } as const satisfies Record<CantMerge['why'], (detail: string) => string>
 
 /** Why a task has no pull request to open, by reason. */

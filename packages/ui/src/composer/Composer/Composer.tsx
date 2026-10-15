@@ -1,5 +1,6 @@
 import { useId, useLayoutEffect, useRef, type FormEvent, type ReactNode, type RefObject } from 'react'
 
+import { keys, modKey, primaryDown } from '../../foundations/keys'
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
@@ -62,11 +63,11 @@ export const composerText: ComposerText = {
   sendKey: '↵',
   queue: 'Queue',
   stop: 'Interrupt the lead',
-  stopKey: '⌘.',
+  stopKey: modKey('.'),
   queueNote: 'Enter queues it; the lead reads it next',
   sendNow: 'Send now',
   sendNowNote: 'Interrupt the lead with this; it carries on with both',
-  sendNowKey: '⌘↵',
+  sendNowKey: modKey(keys.enter),
   newlineNote: 'Shift+Enter for a new line',
   dictate: 'Dictate',
   stopDictating: (elapsed) => `Stop dictating, ${elapsed}`,
@@ -224,7 +225,7 @@ export function Composer({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
-            if ((e.metaKey || e.ctrlKey) && canSendNow) {
+            if (primaryDown(e) && canSendNow) {
               e.preventDefault()
               sendNow()
               return

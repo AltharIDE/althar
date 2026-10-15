@@ -1,5 +1,6 @@
 import { Children, type ReactNode, useId, useLayoutEffect, useRef, useState } from 'react'
 
+import { modKey } from '../../foundations/keys'
 import { HomeLane } from '../../foundations/vocabulary'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
 import { HomeRest } from '../../home/HomeRest/HomeRest'
@@ -66,7 +67,7 @@ export const homeText: HomeText = {
   title: 'Home',
   projects: 'Projects',
   openFolder: 'Open a folder',
-  openFolderKbd: '⌘N',
+  openFolderKbd: modKey('N'),
   rest: {
     fresh: (project) => `Nothing in ${project} yet`,
     allFresh: 'Nothing in your projects yet',

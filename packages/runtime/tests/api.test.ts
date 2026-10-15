@@ -12,6 +12,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Cause, Context, Duration, Effect, Fiber, Layer, Stream } from 'effect'
 import { RpcClient } from 'effect/rpc'
 
+import { thisDevice } from '../src/device'
 import { connection, isInside, services } from '../src/Api'
 import {
   ChangedSinceSeen,
@@ -401,14 +402,14 @@ describe('the API', () => {
         const refused = yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'missing' }))
         assert.deepStrictEqual(
           [refused.reason, refused.message],
-          ['SessionFailed', "missing couldn't start. althar-no-such-agent isn't installed, or isn't on this Mac's PATH."],
+          ['SessionFailed', `missing couldn't start. althar-no-such-agent isn't installed, or isn't on ${thisDevice()}'s PATH.`],
         )
         const thread = yield* client.GetThread({ threadId: task.threadId })
         assert.deepStrictEqual(thread.items.at(-1)?.content, {
           source: 'runtime',
           severity: 'error',
           title: "Fake missing couldn't start.",
-          description: "althar-no-such-agent isn't installed, or isn't on this Mac's PATH.",
+          description: `althar-no-such-agent isn't installed, or isn't on ${thisDevice()}'s PATH.`,
         })
         assert.strictEqual(
           (yield* Effect.flip(client.GetThreadItem({ threadId: task.threadId, itemId: 'itm_missing' }))).reason,

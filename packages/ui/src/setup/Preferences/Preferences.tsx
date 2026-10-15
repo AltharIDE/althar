@@ -1,6 +1,7 @@
 import { RadioGroup } from 'radix-ui'
 import { type CSSProperties, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
+import { device } from '../../foundations/device'
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
@@ -104,8 +105,8 @@ export interface KeepAwakeText {
 }
 
 export const keepAwakeText: KeepAwakeText = {
-  title: 'Keep this Mac awake while work runs',
-  note: 'Work stops when the Mac sleeps. The display can still sleep.',
+  title: `Keep ${device.this} awake while work runs`,
+  note: `Work stops when ${device.the} sleeps. The display can still sleep.`,
   battery: 'On battery too',
   batteryNote: 'Otherwise only while it’s plugged in.',
 }
@@ -251,7 +252,7 @@ export interface NotificationSoundText {
 
 export const notificationSoundText: NotificationSoundText = {
   title: 'Sound',
-  note: 'One of this Mac’s alert sounds, with each notification.',
+  note: `One of ${device.this}’s alert sounds, with each notification.`,
   none: 'None',
   system: 'The system’s sound',
   play: (sound) => `Play ${sound}`,

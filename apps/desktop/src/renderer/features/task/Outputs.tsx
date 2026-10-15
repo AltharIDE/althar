@@ -1,5 +1,15 @@
 import type { ChangeSummary, ChangedFile, TaskRepositoryMerged, ThreadSnapshot } from '@althar/contracts'
-import { Button, type ChangeCheck, ChangeSet, ChangeState, CheckState, type ModelInfo, type PullRequest, ThreadMeasure } from '@althar/ui'
+import {
+  Button,
+  type ChangeCheck,
+  ChangeSet,
+  ChangeState,
+  CheckState,
+  type ModelInfo,
+  modKey,
+  type PullRequest,
+  ThreadMeasure,
+} from '@althar/ui'
 
 import { type NameModel, useModelNames } from '../../shared/modelNames'
 import { checkOf } from '../../shared/checks'
@@ -67,7 +77,7 @@ export const text = {
   resolve: 'Ask the lead to resolve it',
   /** What a review that asked for changes found; its words are in the conversation. */
   found: (n: number) => (n === 1 ? '1 finding' : `${n} findings`),
-  diffKey: '⌘D',
+  diffKey: modKey('D'),
 }
 
 /**
