@@ -282,7 +282,7 @@ before building on it):
 
 | | Claude Code | Codex | OpenCode |
 |---|---|---|---|
-| Adapter now / latest | `claude-agent-acp` 0.88.0 / 0.90.0 | `codex-acp` 2.1.1 / 2.2.2 | OpenCode's own |
+| Adapter now / latest | `claude-agent-acp` 0.90.0 (Althar pins it, patched) / 0.90.0 | `codex-acp` 2.1.1 / 2.2.2 | OpenCode's own |
 | Plan windows over ACP today | Partly: `_meta` on `usage_update`, one window per event, dropped before a turn's first usage | No: held, not sent | No |
 | Context and cost `usage_update` | `used`, `size`, `cost` | `used`, `size` | `used`, `size`, `cost` |
 | ACP version | v1 (v2 opt-in) | v1 and v2 on `main` | v1 |
@@ -312,8 +312,10 @@ before building on it):
   is enabled by its own spike and a read of the provider's terms. Until then
   an OpenCode account on a plan shows a fault, not a number.
 - **Claude Code's adapter drops a window that arrives before a turn's first
-  usage figure** (#1127); the plan's patch for it is not carried yet, so the
-  first reading can be late. Accounts with no session show a fault.
+  usage figure** (#1127): Althar carries a patch for it (`patches/`, applied
+  by bun to the pinned 0.90.0; a test fails if it is not applied, and a bump
+  of the adapter needs the patch made again). Accounts with no session show a
+  fault.
 
 The app side (usage overlay on Cmd/Ctrl+U, the bar badge, the Talk-room
 notice) is built in `apps/desktop` and `packages/ui`.

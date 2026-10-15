@@ -542,7 +542,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       "Its sandbox denies writes to a repository's tracked `.claude/` files, so git can fail to check those out inside it.",
       // Not checked against a real session yet: what its sandbox does when the start folder holds worktrees rather than being one.
       "In a task of several repositories it starts in the folder that holds the worktrees, which isn't one, so its sandbox may not let git write the repositories' `.git`; a commit then runs outside the sandbox and asks, and Althar's rules answer it.",
-      'The adapter forwards one plan window per event in usage_update `_meta["_claude/rateLimit"]`, but drops it before a turn’s first usage figure (claude-agent-acp #1127).',
+      'The adapter forwards one plan window per event in usage_update `_meta["_claude/rateLimit"]`, and Althar patches the adapter (patches/) so it is not dropped before a turn’s first usage figure (claude-agent-acp #1127).',
     ],
   },
   codex: {

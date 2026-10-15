@@ -412,7 +412,7 @@ in two layers:
      `usage_update` `_meta["_claude/rateLimit"]` (the Agent SDK's
      `rate_limit_event`), and drops it if it arrives before a turn's first
      usage figure ([#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127)),
-     so Althar carries a patch for that. An account with no session is read
+     so Althar carries a patch for that (`patches/`, on the pinned version). An account with no session is read
      through the SDK's usage report, or a probe session; both are
      unverified. Step 4 is not used: Anthropic's terms bar it.
    - Codex: app-server's `account/rateLimits/read` and

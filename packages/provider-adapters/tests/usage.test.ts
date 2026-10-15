@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import { type AgentDefinition, agents } from '../src/registry'
@@ -359,5 +363,20 @@ describe('Claude Code’s rate-limit event', () => {
       used: 10,
       size: 100,
     })
+  })
+})
+
+describe('the patch to Claude Code’s adapter', () => {
+  it('is applied: a rate-limit event is sent even before the turn’s first usage figure (claude-agent-acp #1127)', () => {
+    const adapter = join(
+      dirname(createRequire(import.meta.url).resolve('@agentclientprotocol/claude-agent-acp/package.json')),
+      'dist/acp-agent.js',
+    )
+    const code = readFileSync(adapter, 'utf8')
+    const at = code.indexOf('case "rate_limit_event"')
+    expect(at, 'the adapter handles the event').toBeGreaterThan(0)
+    const handler = code.slice(at, code.indexOf('case "conversation_reset"', at))
+    expect(handler).toContain('lastAssistantTotalUsage ?? session.contextUsedTokens ?? 0')
+    expect(handler).not.toContain('lastAssistantTotalUsage !== null')
   })
 })

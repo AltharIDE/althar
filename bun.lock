@@ -298,6 +298,9 @@
     "electron",
     "sharp",
   ],
+  "patchedDependencies": {
+    "@agentclientprotocol/claude-agent-acp@0.90.0": "patches/@agentclientprotocol%2Fclaude-agent-acp@0.90.0.patch",
+  },
   "overrides": {
     "@posthog/core": "1.57.4",
     "@posthog/types": "1.415.2",
