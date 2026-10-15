@@ -39,6 +39,8 @@ const port = process.parentPort
 const dir = join(process.env.ALTHAR_SPEECH ?? '.', PARAKEET.id)
 /* The end-to-end tests' stand-in: a model that comes down at once and hears the same words every time. */
 const fake = __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_SPEECH === '1'
+/* How long the stand-in takes to write anything down, in ms: a busy machine, or a long dictation. */
+const fakeSlow = fake ? Number(process.env.ALTHAR_FAKE_SPEECH_SLOW ?? 0) || 0 : 0
 
 const say = (message: Record<string, unknown>) => port.postMessage(message)
 
@@ -126,7 +128,10 @@ const answer = async (request: Request): Promise<unknown> => {
     case 'transcribe': {
       const { samples, sampleRate } = request
       if (!(samples instanceof Float32Array) || typeof sampleRate !== 'number') throw new Error('Nothing to write down.')
-      if (fake) return 'Also check the webhook retry path.'
+      if (fake) {
+        if (fakeSlow > 0) await new Promise((done) => setTimeout(done, fakeSlow))
+        return 'Also check the webhook retry path.'
+      }
       // One at a time: the window writes down as someone speaks, and again as they stop.
       const run = turn.then(async () => {
         const model = await load()

@@ -55,7 +55,7 @@ test('adds an account to an agent, and names the one that ran out when a task mo
     await page.getByRole('button', { name: /^Open task/ }).click()
     await expect(page.getByRole('heading', { name: 'Add a retry to the checkout call', level: 1 })).toBeVisible()
     await expect(page.getByText(/^Claude Code \(main\) reached its usage limit, until .+\. Codex takes over(, on .+)?\.$/)).toBeVisible()
-    await expect(page.getByText('Did the task.')).toBeVisible()
+    await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
     await page.screenshot({ path: 'test-results/accounts-moved.png', animations: 'disabled' })
   } finally {
     await electronApp.close()

@@ -26,7 +26,7 @@ import { ToolRefused, ToolServer } from './ToolServer'
  * once, never back from further along, and never at the task's cost.
  */
 
-/** A link, unfurled where it was pasted: an issue or a change, as its service has it. */
+/** A link, unfurled where it was pasted: an issue or a change, as its service has it, with the address as the message has it (`pasted`), which can differ from the service's own (`url`). */
 export type Unfurl =
   | {
       readonly kind: 'issue'
@@ -34,6 +34,7 @@ export type Unfurl =
       readonly key: string
       readonly title: string
       readonly url: string
+      readonly pasted: string
       readonly status: { readonly name: string; readonly category: StatusCategory }
       readonly priority: { readonly level: string; readonly name: string } | null
       readonly container: string | null
@@ -44,6 +45,7 @@ export type Unfurl =
       readonly key: string
       readonly title: string
       readonly url: string
+      readonly pasted: string
       readonly state: 'draft' | 'open' | 'merged' | 'closed'
       readonly repository: string
     }
@@ -134,6 +136,7 @@ export class Issues extends Context.Service<
               key: issue.key,
               title: issue.title,
               url: issue.url,
+              pasted: link,
               status: issue.status,
               priority: issue.priority,
               container: issue.container,
@@ -148,6 +151,7 @@ export class Issues extends Context.Service<
             key: `${found.host.words.short} ${found.host.words.prefix}${change.number}`,
             title: change.title,
             url: change.url,
+            pasted: link,
             state: change.state === 'open' && change.draft ? 'draft' : change.state,
             repository: found.ref.path.join('/'),
           } satisfies Unfurl

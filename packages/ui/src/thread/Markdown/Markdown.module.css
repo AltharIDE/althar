@@ -68,7 +68,9 @@
 .md pre {
   padding: 10px 12px;
   border-radius: 8px;
-  background: var(--n-2);
+  /* a sheet of its own: on --n-2 it was the ground a task's thread sits on, and only its copy's empty band showed */
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
   font: 11.5px/1.6 var(--mono);
   color: var(--t-1);
   white-space: pre-wrap;
@@ -80,6 +82,10 @@
 .block pre {
   margin: 0;
   padding-top: 36px;
+}
+.oneLine pre {
+  padding-top: 10px;
+  padding-right: 44px;
 }
 .copy {
   position: absolute;

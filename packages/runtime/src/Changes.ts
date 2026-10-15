@@ -13,9 +13,26 @@ import {
   type Repository,
 } from '@althar/connectors'
 import { PushRequestItem } from '@althar/contracts'
+import type { PermissionRequest } from '@althar/provider-adapters'
 import { type ActorId, type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
+import {
+  Cause,
+  Clock,
+  Context,
+  type Crypto,
+  Deferred,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Queue,
+  Ref,
+  Schema,
+  Scope,
+  Semaphore,
+  Stream,
+} from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from './Busy'
@@ -68,6 +85,7 @@ import {
   answerHint,
   bodyOf,
   checksForLead,
+  checksForLeadAlone,
   checksLine,
   checksOf,
   commentForLead,
@@ -85,6 +103,7 @@ import { change, fact, timestamp } from './records'
 import { indexTask } from './Search'
 import { Policies, resolvesConflictsFor, ruleSetOf } from './Policies'
 import { Sessions } from './Sessions'
+import { spanOf } from './stallWatch'
 import { addItem, updateItem } from './threads'
 import { readReviewed, reviewOf } from './reviewing'
 import { ToolRefused, ToolServer, type ToolAccess } from './ToolServer'
@@ -145,6 +164,10 @@ const Snapshot = Schema.Struct({
       ),
     }),
   ),
+  /** The branch it merges into; absent from a snapshot kept before this was. */
+  target: Schema.optional(Schema.String),
+  /** Whether the host says it conflicts with that branch; null where it hasn't said, absent from one kept before this was. */
+  conflicts: Schema.optional(Schema.NullOr(Schema.Boolean)),
 })
 type Snapshot = typeof Snapshot.Type
 
@@ -277,6 +300,29 @@ export const listenDue = (input: {
 
 /** How many failing checks' logs the lead gets, and how many comments a reading of the pull request shows. */
 const LOGS_TO_LEAD = 2
+
+/** How many times a change's lead may try to fix its failing checks alone; the next failure makes the change the person's (ADR-040). */
+export const FIX_ROUNDS = 3
+
+/** How long a change's checks may run, while Althar sees them through, before the change is the person's (ADR-041). */
+export const STUCK_AFTER = Duration.minutes(45)
+
+/** How long a check run again may take to show it runs before a failure is taken as its result (ADR-041). */
+const RERUN_SHOWS = Duration.minutes(3)
+
+/** How long `push_tag` waits for the person before it returns, and the lead is told later: well within what agents wait for a tool. */
+export const TAG_ANSWERED_WITHIN = Duration.seconds(30)
+
+/** How many lines of a check's log `read_check_log` gives at a time. */
+const LOG_PAGE = 300
+
+/** A change in Althar's hands: how often its checks failed since its work came back, whether they run now, and whether it gave up. */
+export interface Hands {
+  readonly failed: number
+  readonly running: boolean
+  /** Its checks failed again after `FIX_ROUNDS` fixes: it is the person's now. */
+  readonly given: boolean
+}
 const COMMENTS_SHOWN = 30
 /** How many of the commits a push would send its request lists; it says how many there are in all. */
 const COMMITS_SHOWN = 20
@@ -310,6 +356,8 @@ const snapshotOf = (
   repository: [...repository],
   words: { noun: words.noun, short: words.short, prefix: words.prefix },
   checks,
+  target: change.target,
+  conflicts: change.conflicts ?? null,
 })
 
 type Store =
@@ -393,6 +441,13 @@ export class Changes extends Context.Service<
     publish(input: PublishInput): Effect.Effect<Published, unknown>
     /** The task's repositories whose last pull request merged or closed with commits after it: what a next pull request would have. */
     unshipped(taskId: string): Effect.Effect<ReadonlyArray<Unshipped>, unknown>
+    /**
+     * Whether the task's change is in Althar's hands (ADR-040), as `handsOf`
+     * says: null where it isn't; else how often its checks failed, whether
+     * they run now, and whether Althar gave it to the person once they failed
+     * again after `FIX_ROUNDS` fixes.
+     */
+    inHands(taskId: string): Effect.Effect<Hands | null, unknown>
     /**
      * Settles a task with pull requests as done where every repository of it
      * is merged and no commit is left after its pull requests, as a merge
@@ -536,6 +591,8 @@ export class Changes extends Context.Service<
       const live = yield* Live
       const scope = yield* Scope.Scope
       const every = (yield* RuntimeConfig).listenEvery ?? Duration.seconds(30)
+      const checksAppear = Duration.toMillis((yield* RuntimeConfig).checksAppear ?? Duration.minutes(1))
+      const stuckAfter = (yield* RuntimeConfig).checksStuck ?? STUCK_AFTER
       /* One thing at a time on a task's pull request: a reply's receipt is kept before listening reads the reply back. */
       const locks = new Map<string, Semaphore.Semaphore>()
       const locked = (taskId: string) => {
@@ -1780,6 +1837,124 @@ export class Changes extends Context.Service<
           return pushed
         })
 
+      /**
+       * Pushes a tag the lead made to the remote its repository's work goes
+       * to, with the person's own git, as they would from a terminal: never
+       * forced, so a tag the remote has already stays as it is there. Agents
+       * have no sign-in to the code host, so Althar pushes for them, once the
+       * request is allowed as the lead's own `git push` of it would be: a tag
+       * often starts a release, so the rules hold it for the person
+       * (ADR-013), short of a project that allows everything or never this.
+       */
+      const pushTag = (taskId: string, input: unknown, access: ToolAccess) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const asked = yield* Schema.decodeUnknownEffect(TagAsked)(input).pipe(
+            Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
+          )
+          const tag = asked.tag.trim().replace(/^refs\/tags\//, '')
+          const repositories = yield* sql<{ slug: string; base: string; root: string; worktree: string }>`
+            SELECT b.slug, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree
+            FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
+            ORDER BY b.created_at, b.rowid`
+          const named = asked.repository == null ? null : String(asked.repository).trim()
+          const candidates = named === null ? repositories : repositories.filter((one) => one.slug === named)
+          const [repository] = candidates
+          if (repository === undefined || candidates.length > 1)
+            return yield* new ToolRefused({
+              message:
+                repositories.length === 0
+                  ? 'This task has no repository of its own to push a tag from.'
+                  : `Say which repository with repository, as one of: ${repositories.map((one) => one.slug).join(', ')}.`,
+            })
+          // A name git takes for a tag, and never one read as an option.
+          const valid = yield* gitOutcome(repository.root, 'check-ref-format', `refs/tags/${tag}`)
+          if (tag === '' || tag.startsWith('-') || valid.code !== 0)
+            return yield* new ToolRefused({ message: `\`${tag}\` isn't a name git takes for a tag.` })
+          const [commit = null] = yield* commitsOf(repository.worktree, [`refs/tags/${tag}`])
+          if (commit === null)
+            return yield* new ToolRefused({
+              message: `There's no tag ${tag} here. Make it first, with \`git tag ${tag}\` on the commit it's for, then call push_tag.`,
+            })
+          const remote = yield* remoteOf(repository.root, repository.base)
+          if (remote === null) return yield* new ToolRefused({ message: `${repository.slug} has no remote to push ${tag} to.` })
+          if (Option.isNone(yield* sessions.running(access.threadId)))
+            return yield* new ToolRefused({ message: 'Only a running lead can push a tag.' })
+          const command = `git push ${remote} refs/tags/${tag}`
+          const request: PermissionRequest = {
+            sessionId: access.sessionId,
+            toolCallId: `push_tag:${yield* newId(Ids.permissionRequest)}`,
+            title: command,
+            kind: 'execute',
+            rawInput: { command },
+            paths: [],
+            options: [
+              { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+              { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+            ],
+          }
+          // What became of it, in words for the lead: pushed, or why not.
+          const settled = Effect.gen(function* () {
+            const decision = yield* sessions.askPermission(access.threadId, request)
+            if (decision.decision !== 'allow')
+              return `${tag} wasn't pushed: ${decision.reason ?? "the person didn't allow it"}. Don't push it another way.`
+            yield* gitWithin(60_000, repository.root, 'push', '--', remote, `refs/tags/${tag}:refs/tags/${tag}`)
+            yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: `Pushed tag ${tag} to ${remote}.`,
+            })
+            return `Pushed ${tag}, on ${commit.slice(0, 8)}, to ${remote}.`
+          }).pipe(
+            Effect.catchTag('GitFailed', (failed) =>
+              /! \[rejected\].*\(already exists\)/i.test(failed.stderr)
+                ? Effect.succeed(`${remote} has a tag ${tag} already, on another commit, so ${tag} wasn't pushed. Althar doesn't move it.`)
+                : refusal(taskId, remote, failed).pipe(
+                    Effect.catchTag('PushRefused', (refused) =>
+                      Effect.succeed(
+                        refused.why === 'denied'
+                          ? `${remote} didn't take the person's sign-in, so ${tag} wasn't pushed. Tell the person.`
+                          : `${remote} refused ${tag}${refused.said === undefined || refused.said === '' ? '' : `: ${refused.said}`}. Tell the person.`,
+                      ),
+                    ),
+                    Effect.catchTag('GitFailed', (other) =>
+                      Effect.succeed(`Pushing ${tag} failed: ${other.stderr.trim().split('\n').at(-1) ?? ''}`),
+                    ),
+                  ),
+            ),
+            Effect.catchTag('NoSession', () => Effect.succeed(`${tag} wasn't pushed: the session that asked has ended.`)),
+          )
+          // Answered soon, as by the rules or a person looking, the call says what happened; else the lead is told once it is, so a
+          // call isn't held past what an agent waits for a tool.
+          const said = yield* Deferred.make<string>()
+          const state = yield* Ref.make<'waiting' | 'late' | 'done'>('waiting')
+          yield* Effect.forkIn(
+            provide(
+              Effect.gen(function* () {
+                const words = yield* settled
+                yield* Deferred.succeed(said, words)
+                const late = yield* Ref.modify(state, (now) => [now === 'late', 'done' as const])
+                if (!late || Option.isNone(yield* sessions.running(access.threadId))) return
+                yield* sessions.send({
+                  envelope: yield* envelope('thread.send', { threadId: access.threadId }, undefined, instance.systemId),
+                  threadId: access.threadId,
+                  body: words,
+                  quiet: true,
+                })
+              }),
+            ),
+            scope,
+          )
+          const soon = yield* Deferred.await(said).pipe(Effect.timeoutOption(TAG_ANSWERED_WITHIN))
+          if (Option.isSome(soon)) return soon.value
+          const late = yield* Ref.modify(state, (now) => (now === 'done' ? [false, now] : [true, 'late' as const]))
+          if (!late) return yield* Deferred.await(said)
+          return `Asked the person to allow pushing ${tag} to ${remote}. Nothing goes up until they do; you'll be told when it's pushed, or if it isn't.`
+        })
+
       const reply = (
         taskId: string,
         input: { readonly body: string; readonly threadId: string | null; readonly by: string | null; readonly url?: string },
@@ -1921,19 +2096,157 @@ export class Changes extends Context.Service<
         })
 
       /** Tells the task's lead, if one is running, what it should hear. */
-      const tellLead = (link: LinkRow, parts: ReadonlyArray<string>) =>
+      /**
+       * Whether the task's change is in Althar's hands (ADR-040): its plan's
+       * run ended well and opened its pull requests, one is open, and the
+       * person hasn't opened the task since. Then Althar sees its checks
+       * through: the change is under way while they run, a failure goes to its
+       * lead, started again where it must be, and the lead's fix goes up
+       * without asking, for `FIX_ROUNDS` fixes. Checks a
+       * pull request hasn't shown yet, within `checksAppear` of the work
+       * coming back, count as running where the repository's pull requests
+       * have had checks before: a host registers them after a push.
+       */
+      const handsOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const rows = yield* sql<{ outcome: string | null; endedAt: string; pushedAt: string | null; failed: number; hasChecks: number }>`
+            SELECT
+              -- What the checks of its head say: those of a head before it, which a push has left behind, say nothing.
+              CASE WHEN json_extract(l.snapshot, '$.checks.sha') = json_extract(l.snapshot, '$.headSha')
+                THEN json_extract(l.snapshot, '$.checks.outcome') END AS outcome,
+              r.ended_at,
+              -- When Althar last pushed to it: its checks may take a moment to show after that too.
+              (SELECT max(c.updated_at) FROM repository_changes c WHERE c.pull_request_url = json_extract(l.snapshot, '$.url')) AS pushed_at,
+              -- Whether the repository's pull requests, this one included, have had checks before: one with none never will, and isn't
+              -- kept waiting.
+              EXISTS (SELECT 1 FROM external_links e JOIN observations c ON c.subject_type = 'external_link' AND c.subject_id = e.id
+                AND c.kind = 'checks' WHERE e.project_id = l.project_id AND e.kind = 'change'
+                AND json_extract(e.snapshot, '$.repository') = json_extract(l.snapshot, '$.repository')) AS has_checks,
+              -- By commit: one run again after it failed is still one failure.
+              (SELECT count(DISTINCT json_extract(o.payload, '$.sha')) FROM observations o WHERE o.subject_type = 'external_link'
+                AND o.subject_id = l.id AND o.kind = 'checks' AND json_extract(o.payload, '$.outcome') = 'failed'
+                AND o.observed_at >= r.ended_at) AS failed
+            FROM tasks k JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id AND plan_id IS NOT NULL ORDER BY created_at DESC LIMIT 1)
+            JOIN external_links l ON l.task_id = k.id AND l.kind = 'change'
+            WHERE k.id = ${taskId} AND k.state = 'open' AND r.state = 'succeeded'
+              AND r.ended_at IS NOT NULL AND (k.seen_at IS NULL OR k.seen_at < r.ended_at)
+              AND json_extract(l.snapshot, '$.state') = 'open'
+              -- Nor once the person has said anything on the task since, or stopped its lead: it is theirs.
+              AND NOT EXISTS (SELECT 1 FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id JOIN threads h ON h.id = i.thread_id
+                WHERE h.task_id = k.id AND a.kind = 'person' AND i.accepted_at >= r.ended_at)
+              AND NOT EXISTS (SELECT 1 FROM observations o WHERE o.subject_type = 'external_link' AND o.subject_id = l.id
+                AND o.kind = 'taken' AND o.observed_at >= r.ended_at)`
+          if (rows.length === 0) return null
+          const now = yield* Clock.currentTimeMillis
+          const failed = Math.max(...rows.map((row) => row.failed))
+          const running = rows.some(
+            (row) =>
+              row.outcome === 'running' ||
+              ((row.outcome === null || row.outcome === 'none') &&
+                row.hasChecks === 1 &&
+                now - Math.max(Date.parse(row.endedAt), row.pushedAt === null ? 0 : Date.parse(row.pushedAt)) < checksAppear),
+          )
+          return { failed, running, given: failed > FIX_ROUNDS } satisfies Hands
+        })
+
+      /** A quiet line in the task's thread. */
+      const sayOn = (link: LinkRow, title: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${link.taskId} AND kind = 'task'`
+          if (thread !== undefined)
+            yield* addItem({ projectId: link.projectId, threadId: thread.id }, 'notice', { source: 'runtime', severity: 'info', title })
+        })
+
+      /** Whether a conflict round is under way on the task: resolving, or seeing the checks on what it pushed through. */
+      const roundUnderWay = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM conflict_resolutions WHERE task_id = ${taskId} AND state IN ('resolving', 'checking') LIMIT 1`
+          return row !== undefined
+        })
+
+      /** Whether Althar ran the checks on this commit again after they failed (ADR-041). */
+      const ranAgain = (link: LinkRow, sha: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [row] = yield* sql<{ at: string }>`
+            SELECT observed_at AS at FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
+              AND kind = 'checks_rerun' AND json_extract(payload, '$.id') = ${`rerun:${sha}`} LIMIT 1`
+          if (row === undefined) return null
+          // Its run again is under way once the host has shown it running; a failure before that is the old one, still showing.
+          const [started] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
+              AND kind = 'checks_rerun_started' AND json_extract(payload, '$.id') = ${`rerun-started:${sha}`} LIMIT 1`
+          return { at: row.at, started: started !== undefined }
+        })
+
+      /**
+       * Checks that have run on a commit longer than STUCK_AFTER, while the
+       * change is in Althar's hands, make it the person's: the thread says
+       * how long, once (ADR-041).
+       */
+      const stuckOn = (link: LinkRow, name: string, sha: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [since] = yield* sql<{ at: string }>`
+            SELECT observed_at AS at FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
+              AND kind = 'checks_running' AND json_extract(payload, '$.id') = ${`running:${sha}`} LIMIT 1`
+          if (since === undefined) return
+          const ran = (yield* Clock.currentTimeMillis) - Date.parse(since.at)
+          if (ran < Duration.toMillis(stuckAfter)) return
+          const hands = yield* handsOf(link.taskId)
+          if (hands === null || hands.given) return
+          if (!(yield* heard(link, 'checks_stuck', `stuck:${sha}`, { sha }))) return
+          yield* taken(link.taskId, 'stuck')
+          yield* sayOn(link, `The checks on ${name} have run for ${spanOf(ran)}, so the change is yours now.`)
+        })
+
+      /** Whether the task's plan is still under way, as while it publishes, its pull request open already. */
+      const publishing = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [run] = yield* sql<{ state: string }>`
+            SELECT state FROM runs WHERE task_id = ${taskId} AND plan_id IS NOT NULL ORDER BY created_at DESC LIMIT 1`
+          return run?.state === 'running'
+        })
+
+      /** Says in the task's thread that its checks still failed after FIX_ROUNDS fixes while Althar saw them through: the change is the person's now. */
+      const gaveUp = (link: LinkRow, name: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [thread] = yield* sql<{ id: string }>`SELECT id FROM threads WHERE task_id = ${link.taskId} AND kind = 'task'`
+          if (thread === undefined) return
+          yield* addItem({ projectId: link.projectId, threadId: thread.id }, 'notice', {
+            source: 'runtime',
+            severity: 'warning',
+            title: `The checks on ${name} still fail after ${FIX_ROUNDS} fixes by its lead, so the change is yours now.`,
+          })
+        })
+
+      /**
+       * Tells the task's lead, quietly, when it has a session; with `wake`,
+       * one that has none is started again for it, on the agent it was last
+       * on (ADR-040).
+       */
+      const tellLead = (link: LinkRow, parts: ReadonlyArray<string>, wake = false) =>
         Effect.gen(function* () {
           if (parts.length === 0) return
           const sql = yield* SqlClient.SqlClient
           const [thread] = yield* sql<{ id: string; state: string }>`
             SELECT t.id, k.state FROM threads t JOIN tasks k ON k.id = t.task_id WHERE t.task_id = ${link.taskId} AND t.kind = 'task'`
-          if (thread === undefined || thread.state !== 'open' || Option.isNone(yield* sessions.running(thread.id))) return
+          if (thread === undefined || thread.state !== 'open') return
+          const running = Option.isSome(yield* sessions.running(thread.id))
+          if (!running && !wake) return
           yield* sessions.send({
-            envelope: yield* envelope('thread.send', { threadId: thread.id, heard: link.id }),
+            envelope: yield* envelope('thread.send', { threadId: thread.id, heard: link.id }, undefined, instance.systemId),
             threadId: thread.id,
             body: parts.join('\n\n'),
             quiet: true,
           })
+          if (!running) yield* sessions.startLast(thread.id)
         })
 
       /**
@@ -1973,17 +2286,57 @@ export class Changes extends Context.Service<
           const now = { ...read, headSha: yield* caughtUp(link, read, host, repository) }
           const name = nameOf(before)
           const forLead: Array<string> = []
+          let alone = false
+          let rerunning = false
           let happened = false
           let checks = before.checks
-          if (now.headSha !== null) {
-            const sum = checksOf(now.headSha, yield* host.checks(repository, now.headSha))
+          // While its plan still publishes, how its checks end waits: once the run has ended, they are heard as the change's,
+          // and a failure goes where it should (ADR-040).
+          const held = now.headSha !== null && (yield* publishing(link.taskId))
+          if (held) happened = true
+          // Checks the host won't show Althar don't stop it hearing the rest: the thread says so, once a commit, and a change in
+          // Althar's hands is the person's, since Althar can't see its checks through (ADR-041).
+          const ran =
+            now.headSha === null || held
+              ? null
+              : yield* host.checks(repository, now.headSha).pipe(
+                  Effect.catchIf(
+                    (error) => error.reason === 'forbidden' || error.reason === 'not_found',
+                    (error) =>
+                      Effect.gen(function* () {
+                        if (yield* heard(link, 'checks_unreadable', `unreadable:${now.headSha}`, { message: error.message })) {
+                          const hands = yield* handsOf(link.taskId)
+                          if (hands !== null && !hands.given) yield* taken(link.taskId, 'unreadable')
+                          yield* sayOn(
+                            link,
+                            `Althar can't read the checks on ${name}: its host refused them (${error.message}). It still listens for what people say on it${hands !== null && !hands.given ? ', and the change is yours now' : ''}.`,
+                          )
+                        }
+                        return null
+                      }),
+                  ),
+                )
+          if (now.headSha !== null && ran !== null) {
+            const sum = checksOf(now.headSha, ran)
             const finished = sum.outcome === 'passed' || sum.outcome === 'failed'
-            // Checks still running keep the pull request worth asking about.
-            if (sum.outcome === 'running') happened = true
+            // A check run again after it failed is heard again when it ends: once the host has shown it running again, or, one too
+            // quick to be seen so, after RERUN_SHOWS. Until then a failure is the old one.
+            const reran = yield* ranAgain(link, sum.sha)
+            // Checks still running keep the pull request worth asking about; too long, while Althar sees them through, and the change is
+            // the person's. Running again after a rerun, from when they show so.
+            if (sum.outcome === 'running') {
+              happened = true
+              yield* heard(link, 'checks_running', `running:${sum.sha}`, { sha: sum.sha })
+              if (reran !== null && !reran.started) yield* heard(link, 'checks_rerun_started', `rerun-started:${sum.sha}`, { sha: sum.sha })
+              yield* stuckOn(link, name, sum.sha)
+            }
+            const settled =
+              reran === null || reran.started || (yield* Clock.currentTimeMillis) - Date.parse(reran.at) > Duration.toMillis(RERUN_SHOWS)
             if (
               finished &&
+              settled &&
               (before.checks?.sha !== sum.sha || before.checks.outcome !== sum.outcome) &&
-              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}`, { ...sum }))
+              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}${reran !== null ? ':again' : ''}`, { ...sum }))
             ) {
               happened = true
               yield* arrive(link, {
@@ -1995,17 +2348,43 @@ export class Changes extends Context.Service<
                 failing: sum.failing,
                 url: now.url,
               })
-              if (sum.outcome === 'failed') {
+              // In Althar's hands, what failed is run again once before the lead is told: it may have failed by chance. Not the checks
+              // on a merge a conflict round pushed: the round sees those through itself.
+              const hands = sum.outcome === 'failed' ? yield* handsOf(link.taskId) : null
+              const failedChecks = ran.filter((candidate) => candidate.state === 'failed')
+              const again =
+                hands !== null && !hands.given && !reran && !(yield* roundUnderWay(link.taskId))
+                  ? (yield* Effect.forEach(failedChecks, (check) =>
+                      host.rerun(repository, check).pipe(Effect.orElseSucceed(() => false)),
+                    )).some(Boolean)
+                  : false
+              if (again) {
+                yield* heard(link, 'checks_rerun', `rerun:${sum.sha}`, { sha: sum.sha })
+                yield* sayOn(
+                  link,
+                  `Running ${sum.failing.join(', ')} on ${name} again, once, in case ${sum.failing.length === 1 ? 'it' : 'they'} failed by chance.`,
+                )
+                rerunning = true
+              } else if (sum.outcome === 'failed') {
                 const logs: Array<string> = []
-                const all = yield* host.checks(repository, now.headSha)
+                const all = ran
                 for (const check of all.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_TO_LEAD)) {
                   const log = yield* host.checkLog(repository, check).pipe(Effect.orElseSucceed(() => null))
                   if (log !== null) logs.push(logOf(check.name, log))
                 }
-                forLead.push(checksForLead(sum, name, logs))
+                // In Althar's hands, its lead fixes them alone, started again if it must be, and its fix goes up as it pushes;
+                // after FIX_ROUNDS failures the change is the person's (ADR-040).
+                if (hands !== null && !hands.given) {
+                  alone = true
+                  forLead.push(checksForLeadAlone(sum, name, logs, FIX_ROUNDS - hands.failed + 1))
+                } else {
+                  if (hands?.failed === FIX_ROUNDS + 1) yield* gaveUp(link, name)
+                  forLead.push(checksForLead(sum, name, logs))
+                }
               }
             }
-            checks = sum
+            // Run again, they are running as far as Althar knows: how they end next is heard, however soon.
+            checks = rerunning || !settled ? { ...sum, outcome: 'running' } : sum
           }
           const activity = yield* host.activity(repository, before.number, link.cursor)
           const replies = activity.comments.length === 0 ? new Set<string>() : yield* repliesOf(link.id)
@@ -2064,7 +2443,7 @@ export class Changes extends Context.Service<
           const theRounds = yield* checked(link, before.url, now, host, repository).pipe(
             Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not hear the checks on a resolved conflict', cause), false)),
           )
-          yield* tellLead(link, theRounds ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead)
+          yield* tellLead(link, theRounds ? forLead.filter((part) => !part.startsWith('Checks failed')) : forLead, alone && !theRounds)
           if (now.state === 'open' && now.conflicts === true)
             yield* conflicted(link, before, now, host, repository).pipe(
               Effect.catchCause((cause) => Effect.logWarning('Could not ask the lead to resolve a conflict', cause)),
@@ -2442,38 +2821,42 @@ export class Changes extends Context.Service<
           const id = yield* newId(Ids.conflictResolution)
           const place = yield* placeOf(task.taskId, url)
           const body = noteFor(conflicts, place, null)
-          const room = yield* busy.enter(task.taskId, (room) =>
-            sql.withTransaction(
-              Effect.gen(function* () {
-                const at = yield* timestamp
-                yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
-                  id,
-                  projectId: task.projectId,
-                  taskId: task.taskId,
-                  pullRequestUrl: url,
-                  conflicts: JSON.stringify(conflicts),
-                  attempt: 1,
-                  state: 'resolving',
-                  waiting: room ? null : JSON.stringify({ attempt: 1, body, why: {}, since: at } satisfies RoundWaiting),
-                  createdAt: at,
-                  updatedAt: at,
-                })}`
-                yield* fact({
-                  projectId: task.projectId,
-                  aggregateType: 'conflict_resolution',
-                  aggregateId: id,
-                  revision: 1,
-                  type: 'conflict_resolution.started',
-                  payload: {
-                    url,
-                    conflicts: conflicts.map((one) => ({ repository: one.repository, branch: one.branch, files: one.files })),
-                    ...(room ? {} : { waiting: true }),
-                  },
-                  actorId: instance.systemId,
-                })
-                return room
-              }),
-            ),
+          const room = yield* busy.enter(
+            task.taskId,
+            (room) =>
+              sql.withTransaction(
+                Effect.gen(function* () {
+                  const at = yield* timestamp
+                  yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+                    id,
+                    projectId: task.projectId,
+                    taskId: task.taskId,
+                    pullRequestUrl: url,
+                    conflicts: JSON.stringify(conflicts),
+                    attempt: 1,
+                    state: 'resolving',
+                    waiting: room ? null : JSON.stringify({ attempt: 1, body, why: {}, since: at } satisfies RoundWaiting),
+                    createdAt: at,
+                    updatedAt: at,
+                  })}`
+                  yield* fact({
+                    projectId: task.projectId,
+                    aggregateType: 'conflict_resolution',
+                    aggregateId: id,
+                    revision: 1,
+                    type: 'conflict_resolution.started',
+                    payload: {
+                      url,
+                      conflicts: conflicts.map((one) => ({ repository: one.repository, branch: one.branch, files: one.files })),
+                      ...(room ? {} : { waiting: true }),
+                    },
+                    actorId: instance.systemId,
+                  })
+                  return room
+                }),
+              ),
+            // A conflict put to the lead: the work of a task under way.
+            { order: 'underway' },
           )
           const [own] = yield* sql<{ resolveConflicts: number | null }>`SELECT resolve_conflicts FROM tasks WHERE id = ${task.taskId}`
           const as = own?.resolveConflicts === 1 ? 'as you said for this task' : 'as the project’s rules say'
@@ -2499,6 +2882,7 @@ export class Changes extends Context.Service<
         return yield* Effect.forEach(rows, (round) =>
           Effect.map(decodeWaiting(round.waiting ?? ''), (waited) => ({
             taskId: round.taskId,
+            order: 'underway' as const,
             since: waited.since,
             start: provide(locked(round.taskId)(askWaiting(round.id))),
           })),
@@ -2881,15 +3265,19 @@ export class Changes extends Context.Service<
           // The lead takes a place among the agents at work on this machine to fix them, or the round keeps its ask and waits for one.
           const body = fixNoteFor(place, { failing: sum.failing, logs })
           const why = { failing: sum.failing }
-          const room = yield* busy.enter(round.taskId, (room) =>
-            Effect.gen(function* () {
-              const since = yield* timestamp
-              const waiting = room
-                ? {}
-                : { waiting: JSON.stringify({ attempt: round.attempt + 1, body, why, since } satisfies RoundWaiting) }
-              yield* reviseRound(round, 'conflict_resolution.checks_failed', { state: 'resolving', ...waiting }, why)
-              return room
-            }),
+          const room = yield* busy.enter(
+            round.taskId,
+            (room) =>
+              Effect.gen(function* () {
+                const since = yield* timestamp
+                const waiting = room
+                  ? {}
+                  : { waiting: JSON.stringify({ attempt: round.attempt + 1, body, why, since } satisfies RoundWaiting) }
+                yield* reviseRound(round, 'conflict_resolution.checks_failed', { state: 'resolving', ...waiting }, why)
+                return room
+              }),
+            // Checks to fix: the work of a task under way.
+            { order: 'underway' },
           )
           yield* addItem(thread, 'notice', {
             source: 'runtime',
@@ -2935,9 +3323,33 @@ export class Changes extends Context.Service<
           })
         })
 
+      /**
+       * The person took the task's change into their own hands: they stopped
+       * its lead, or pushed to it. It is no longer in Althar's (ADR-040): each
+       * of its pull requests says so, for `handsOf` to read.
+       */
+      const taken = (taskId: string, how: 'stopped' | 'interrupted' | 'pushed' | 'stuck' | 'unreadable') =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const at = yield* timestamp
+          for (const link of yield* sql<{ id: string; projectId: string }>`
+            SELECT id, project_id FROM external_links WHERE task_id = ${taskId} AND kind = 'change'`)
+            yield* sql`INSERT OR IGNORE INTO observations ${sql.insert({
+              id: yield* newId(Ids.observation),
+              projectId: link.projectId,
+              subjectType: 'external_link',
+              subjectId: link.id,
+              kind: 'taken',
+              payload: JSON.stringify({ id: `taken:${at}`, how }),
+              source: 'althar',
+              observedAt: at,
+            })}`
+        })
+
       /** The person stopped or interrupted a task's lead: what it was resolving waits for them, and checks that fail don't ask it again. */
       const leadStopped = (taskId: string, how: 'stopped' | 'interrupted') =>
         Effect.gen(function* () {
+          yield* taken(taskId, how)
           for (const round of yield* underWay(taskId)) {
             if (round.state === 'resolving') {
               yield* settleRound(round.id, { why: `You ${how} the lead.`, stopped: true })
@@ -3198,6 +3610,57 @@ export class Changes extends Context.Service<
       const PushAsked = Schema.Struct({
         pull_request: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
       })
+      const TagAsked = Schema.Struct({ tag: Schema.String, repository: Schema.optional(Schema.NullOr(Schema.String)) })
+      const LogAsked = Schema.Struct({
+        check: Schema.String,
+        from_line: Schema.optional(Schema.NullOr(Schema.Number)),
+        pull_request: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
+      })
+
+      /**
+       * A check's whole log on the task's pull request, a page at a time
+       * (ADR-041): the lead reads from where it asks, the last page without,
+       * and is told where the pages before and after start. Never more than a
+       * page into its context at once.
+       */
+      const readCheckLog = (taskId: string, input: unknown) =>
+        Effect.gen(function* () {
+          const asked = yield* Schema.decodeUnknownEffect(LogAsked)(input).pipe(
+            Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
+          )
+          const named = asked.pull_request == null ? null : String(asked.pull_request).trim().toLowerCase()
+          const seen = yield* urlsOf(taskId)
+          const chosen = named === null ? undefined : seen.find((candidate) => isNamed(candidate, named))
+          if (named !== null && chosen === undefined)
+            return yield* new ToolRefused({
+              message: `This task's pull requests are ${seen.map(shortNameOf).join(', ')}. Name one of those.`,
+            })
+          const { snapshot, host, repository } = yield* current(taskId, chosen?.url)
+          const now = yield* host.change(repository, snapshot.number)
+          if (now.headSha === null) return `${nameOf(snapshot)} has no commits, so no checks.`
+          const all = yield* host.checks(repository, now.headSha)
+          const check = all.find((candidate) => candidate.name.toLowerCase() === asked.check.trim().toLowerCase())
+          if (check === undefined)
+            return yield* new ToolRefused({
+              message: `${nameOf(snapshot)} has no check called "${asked.check}". Its checks: ${all.length === 0 ? 'none' : all.map((one) => one.name).join(', ')}.`,
+            })
+          const log = yield* host.checkLog(repository, check, true)
+          if (log === null)
+            return `Althar can't read ${check.name}'s log on ${nameOf(snapshot)}: its host keeps none Althar can read.${check.url === null ? '' : ` Its page: ${check.url}`}`
+          const lines = log.trimEnd().split('\n')
+          const from = Math.min(Math.max(1, Math.floor(asked.from_line ?? lines.length - LOG_PAGE + 1)), lines.length)
+          const to = Math.min(lines.length, from + LOG_PAGE - 1)
+          const around = [
+            ...(from > 1 ? [`from_line ${Math.max(1, from - LOG_PAGE)} reads the page before`] : []),
+            ...(to < lines.length ? [`from_line ${to + 1} reads on`] : []),
+          ]
+          return [
+            `Lines ${from} to ${to} of ${lines.length} of ${check.name}'s log on ${nameOf(snapshot)}${around.length === 0 ? '' : `; ${around.join(', ')}`}:`,
+            '```',
+            lines.slice(from - 1, to).join('\n'),
+            '```',
+          ].join('\n')
+        })
 
       /** Whether the lead names this pull request: by its repository and number, as read_pull_request does (web#3), its whole path, or its number. */
       const isNamed = (candidate: Snapshot, asked: string) =>
@@ -3306,6 +3769,16 @@ export class Changes extends Context.Service<
           inReview: true,
         },
         leadTool(
+          'read_check_log',
+          "Reads a check's whole log on the task's pull request, a page of lines at a time: by the check's name, as read_pull_request gives it, from from_line, or its last page without one. In a task of several repositories, pull_request names the one, as read_pull_request names it: web#3. For a failure whose cause isn't in the end of the log you were given.",
+          {
+            type: 'object',
+            properties: { check: { type: 'string' }, from_line: { type: 'integer', minimum: 1 }, pull_request: { type: 'string' } },
+            required: ['check'],
+          },
+          (taskId, input) => readCheckLog(taskId, input),
+        ),
+        leadTool(
           'reply_on_pull_request',
           "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. In a task of several repositories, pull_request names the one to reply on, by its repository and number, as read_pull_request names it: web#3. For answering what people said; a change to the code is a commit, which the person pushes: ask them to with push_to_pull_request.",
           {
@@ -3396,6 +3869,20 @@ export class Changes extends Context.Service<
                   })
                 }
                 const { link, snapshot, where, ahead, left } = chosen
+                const unpushed = left.length === 0 ? [] : [`Not included, since they aren't committed: ${filesWord(left)}.`]
+                // Before the person has seen the change, its checks are Althar's to see through: a fix for checks that failed goes up at
+                // once (ADR-040). Anything else waits for the person, as ever.
+                const hands = yield* handsOf(taskId)
+                const failing = snapshot.checks?.outcome === 'failed' && snapshot.checks.sha === snapshot.headSha
+                if (hands !== null && !hands.given && failing) {
+                  const pushed = yield* Effect.exit(push(taskId, ahead.head, snapshot.url))
+                  if (pushed._tag === 'Success')
+                    return [
+                      `Pushed ${commitsWord(ahead.count)} to ${where}: the person hasn't seen the change yet, so a fix goes up as you make it. Its checks run again, and you'll be told if they fail.`,
+                      ...unpushed,
+                    ].join(' ')
+                  yield* Effect.logWarning('Could not push the fix by itself: the person is asked instead', pushed.cause)
+                }
                 const waiting = yield* askedOf(taskId, snapshot.url)
                 const already = waiting.find((one) => one.content.head === ahead.head)
                 if (already !== undefined)
@@ -3418,16 +3905,23 @@ export class Changes extends Context.Service<
                 } satisfies Asked)
                 return [
                   `Asked the person to push ${commitsWord(ahead.count)} to ${where}. They see them in the task's thread with a Push button; nothing goes up until they press it, and you'll be told when they have.`,
-                  ...(left.length === 0 ? [] : [`Not included, since they aren't committed: ${filesWord(left)}.`]),
+                  ...unpushed,
                 ].join(' ')
               }),
             ),
+        ),
+        leadTool(
+          'push_tag',
+          "Pushes a tag you've made to the remote the repository's work goes to, as `git push <remote> refs/tags/<tag>` would; you can't push it yourself, since you have no sign-in to the code host. Make the tag first with `git tag` on the commit it's for, such as v1.2.0 on the release's commit on the default branch. A tag often starts a release, so it waits for the person to allow it, as such a push of yours would, and returns once it's pushed or they've said no. It never moves a tag the remote has already. In a task of several repositories, repository names the one.",
+          { type: 'object', properties: { tag: { type: 'string' }, repository: { type: 'string' } }, required: ['tag'] },
+          (taskId, input, access) => pushTag(taskId, input, access),
         ),
       ])
 
       return Changes.of({
         publish: (input) => provide(publish(input)),
         unshipped: (taskId) => provide(unshippedOf(taskId)),
+        inHands: (taskId) => provide(handsOf(taskId)),
         // Only a task with pull requests: one with none is settled by merging it here, as the person says.
         settleIfMerged: (taskId) =>
           provide(
@@ -3437,8 +3931,10 @@ export class Changes extends Context.Service<
               }),
             ),
           ),
-        push: (taskId, head, url) => provide(locked(taskId)(push(taskId, head, url))),
-        replace: (taskId, head, replaces, url) => provide(locked(taskId)(replace(taskId, head, replaces, url))),
+        // The person pushing takes the change into their hands: from here, its lead's fixes wait for them (ADR-040).
+        push: (taskId, head, url) => provide(locked(taskId)(Effect.andThen(taken(taskId, 'pushed'), push(taskId, head, url)))),
+        replace: (taskId, head, replaces, url) =>
+          provide(locked(taskId)(Effect.andThen(taken(taskId, 'pushed'), replace(taskId, head, replaces, url)))),
         mergeNote: (taskId, url) => provide(locked(taskId)(mergeNote(taskId, url))),
         markReady: (taskId, url) => provide(locked(taskId)(markReady(taskId, url))),
         exclusive: (taskId, effect) => locked(taskId)(effect),

@@ -29,10 +29,14 @@ concurrency:
 
 jobs:
   # What is released, checked before anyone is asked to approve: a tag that is v<apps/desktop's version>, on a commit on
-  # main, or a run by hand from main; release notes for the version; and no published release of it already.
+  # main, or a run by hand from main; release notes for the version; no published release of it already; and every
+  # suite passed on the commit.
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
       version: ${{ steps.what.outputs.version }}
       tag: ${{ steps.what.outputs.tag }}
@@ -78,6 +82,18 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      # Main may be red between releases, a release may not: post-merge.yml, the heavy suites, has to have passed on this
+      # very commit. Merges in quick succession share a post-merge run, so a commit can have none of its own.
+      - name: The heavy suites passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          passed="$(gh run list --workflow post-merge.yml --commit "$GITHUB_SHA" --status success --json databaseId --jq length)"
+          if [ "$passed" = 0 ]; then
+            echo "::error::post-merge hasn't passed on ${GITHUB_SHA::8}. Wait for its run, or start one" \
+              "(gh workflow run post-merge.yml --ref $GITHUB_REF_NAME), then re-run this."
+            exit 1
+          fi
 
   # Althar for Apple silicon: signed with the Developer ID, notarized, stapled and checked by bun run release, which
   # fails unless all of that holds (CI=true). On macOS 26 on Apple silicon, GitHub's standard runner, free for a public

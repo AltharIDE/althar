@@ -1570,3 +1570,162 @@ describe('Bitbucket Data Center as a code host', () => {
     }),
   )
 })
+
+describe('Bitbucket listing pull requests', () => {
+  it.effect('asks Cloud for them in its query language, with their participants, and reads where those left them', () =>
+    Effect.gen(function* () {
+      const { host, sent } = cloud([
+        ['GET', `${CLOUD}/user`, { json: vincent }],
+        [
+          'GET',
+          /\/pullrequests\?/,
+          {
+            json: {
+              values: [
+                pull({
+                  participants: [
+                    { approved: false, state: 'changes_requested' },
+                    { approved: true, state: 'approved' },
+                  ],
+                }),
+                pull({ id: 553, draft: false, participants: [{ approved: true, state: 'approved' }] }),
+                pull({ id: 554, state: 'DECLINED' }),
+              ],
+              next: `${ACE}/pullrequests?page=2`,
+            },
+          },
+        ],
+      ])
+      const list = yield* host.listChanges(ace, {
+        state: 'closed',
+        author: 'Mitch McCue',
+        text: 'settings',
+        reviewRequested: true,
+        draft: false,
+        limit: 3,
+      })
+      const asked = new URL(sent.find((one) => one.url.includes('/pullrequests'))?.url ?? '')
+      assert.deepStrictEqual(asked.searchParams.getAll('state'), ['DECLINED', 'SUPERSEDED'])
+      assert.deepInclude(Object.fromEntries(asked.searchParams), { pagelen: '3', sort: '-updated_on', fields: '+values.participants' })
+      assert.strictEqual(
+        asked.searchParams.get('q'),
+        `author.nickname = "Mitch McCue" AND title ~ "settings" AND reviewers.uuid = "${vincent.uuid}" AND draft = false`,
+      )
+      assert.isTrue(list.more)
+      assert.deepStrictEqual(
+        list.changes.map((change) => [change.number, change.state, change.reviewDecision, change.body]),
+        [
+          [552, 'open', 'changes_requested', ''],
+          [553, 'open', 'approved', ''],
+          [554, 'closed', null, ''],
+        ],
+      )
+    }),
+  )
+
+  it.effect('names the scope Cloud needs where it refuses', () =>
+    Effect.gen(function* () {
+      const { host } = cloud([
+        [
+          'GET',
+          /\/pullrequests\?/,
+          { status: 403, json: { type: 'error', error: { message: 'Your credentials lack one or more required privilege scopes.' } } },
+        ],
+      ])
+      assert.deepInclude(yield* Effect.flip(host.listChanges(ace, { state: 'open', limit: 30 })), {
+        reason: 'forbidden',
+        scope: 'read:pullrequest:bitbucket',
+      })
+    }),
+  )
+
+  it.effect('asks Data Center by role and filter text, keeps those with the words in the title, and drafts as asked', () =>
+    Effect.gen(function* () {
+      const { host, sent } = center([
+        whoami('jcitizen'),
+        ['GET', /\/pull-requests\?.*start=100$/, { json: page([pr({ id: 105, draft: false, title: 'Not it' })]) }],
+        [
+          'GET',
+          /\/pull-requests\?/,
+          {
+            json: page(
+              [
+                pr({ updatedDate: 1359085920000 }),
+                pr({
+                  id: 102,
+                  draft: false,
+                  title: 'Talking Nerdy again',
+                  updatedDate: 1359095920000,
+                  reviewers: [{ user: jane, status: 'NEEDS_WORK' }],
+                }),
+                pr({ id: 103, draft: false, title: 'Something else', description: 'Talking nerdy, only here' }),
+                pr({ id: 104, draft: false, fromRef: ref('fix', 'cafe', '~JANE') }),
+              ],
+              100,
+            ),
+          },
+        ],
+      ])
+      const list = yield* host.listChanges(prj, {
+        state: 'all',
+        author: 'tom',
+        text: 'Talking Nerdy',
+        reviewRequested: true,
+        draft: false,
+        limit: 5,
+      })
+      const asked = new URL(sent.find((one) => one.url.includes('/pull-requests'))?.url ?? '')
+      assert.deepStrictEqual(Object.fromEntries(asked.searchParams), {
+        state: 'ALL',
+        order: 'NEWEST',
+        limit: '100',
+        start: '0',
+        'role.1': 'AUTHOR',
+        'username.1': 'tom',
+        'role.2': 'REVIEWER',
+        'username.2': 'jcitizen',
+        filterText: 'talking nerdy',
+      })
+      // Newest change first, from both pages; the draft, and the one with the words only in its description, left out.
+      assert.deepStrictEqual(
+        list.changes.map((change) => [change.number, change.reviewDecision, change.forkOwner]),
+        [
+          [102, 'changes_requested', null],
+          [104, 'approved', '~JANE'],
+        ],
+      )
+      assert.isFalse(list.more)
+      assert.lengthOf(
+        sent.filter((one) => one.url.includes('/pull-requests')),
+        2,
+      )
+      // Without words or drafts to keep to, it asks for no more than the limit.
+      const plain = center([['GET', /\/pull-requests\?/, { json: page([pr()]) }]])
+      const one = yield* plain.host.listChanges(prj, { state: 'closed', limit: 30 })
+      assert.deepInclude(Object.fromEntries(new URL(plain.sent[0]?.url ?? '').searchParams), { state: 'DECLINED', limit: '30' })
+      assert.isFalse(one.more)
+    }),
+  )
+
+  it.effect('reads on past a page with none to keep, so a draft on the next is found', () =>
+    Effect.gen(function* () {
+      const ready = Array.from({ length: 100 }, (_, at) => pr({ id: 200 + at, draft: false }))
+      const { host, sent } = center([
+        ['GET', /\/pull-requests\?.*start=0$/, { json: page(ready, 100) }],
+        ['GET', /\/pull-requests\?.*start=100$/, { json: page([pr({ id: 301 })]) }],
+      ])
+      const list = yield* host.listChanges(prj, { state: 'open', draft: true, limit: 30 })
+      assert.deepStrictEqual(
+        list.changes.map((change) => change.number),
+        [301],
+      )
+      assert.isFalse(list.more)
+      assert.lengthOf(sent, 2)
+      // Every page without one, within the bound: it stops, and says there may be more.
+      const endless = center([['GET', /\/pull-requests\?/, { json: page(ready, 100) }]])
+      const none = yield* endless.host.listChanges(prj, { state: 'open', draft: true, limit: 30 })
+      assert.deepStrictEqual(none, { changes: [], more: true })
+      assert.lengthOf(endless.sent, 10)
+    }),
+  )
+})

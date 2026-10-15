@@ -38,7 +38,17 @@ import { MachineLoad } from './MachineLoad'
 import { Issues } from './Issues'
 import { Limits } from './Limits'
 import { Live } from './Live'
-import { accountsOf, movesIssues, Policies, type ProjectRules, resolvesConflicts, ruleSetOf, usageLimitOf } from './Policies'
+import {
+  accountsOf,
+  allowsEverything,
+  modeOf,
+  movesIssues,
+  Policies,
+  type ProjectRules,
+  resolvesConflicts,
+  ruleSetOf,
+  usageLimitOf,
+} from './Policies'
 import { Models } from './Models'
 import { Installs } from './Installs'
 import { Permissions } from './Permissions'
@@ -265,7 +275,8 @@ export const handlers = Api.toLayer(
       const accounts = accountsOf(rules)
       return {
         projectId,
-        permissions: set.mode,
+        permissions: modeOf(rules),
+        allowEverything: allowsEverything(rules),
         alwaysAsk: set.ask,
         never: set.never,
         alwaysAllow: set.allow,
@@ -607,6 +618,8 @@ export const handlers = Api.toLayer(
                 ...(model === undefined ? {} : { model }),
                 ...(effort === undefined ? {} : { effort }),
                 ...(message === undefined ? {} : { message }),
+                // The person's switch: its first turn goes on at once (ADR-037).
+                byPerson: true,
               })
               // Links in what the person said unfurl on their message, as when it is sent on its own.
               if (message !== undefined) yield* Effect.forkDetach(issues.unfurlInput(message.envelope.commandId))
@@ -644,6 +657,13 @@ export const handlers = Api.toLayer(
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
       Interrupt: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
+      CompactContext: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.compact', { threadId }, commandId), (made) => sessions.compact({ envelope: made, threadId })),
+          ),
+        ),
       // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
       StopSession: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })))),
@@ -653,6 +673,15 @@ export const handlers = Api.toLayer(
           api(
             Effect.flatMap(envelope('task.set_conflicts', { taskId, resolveConflicts }, commandId), (said) =>
               pullRequests.setResolveConflicts({ envelope: said, taskId, resolveConflicts }),
+            ),
+          ),
+        ),
+      SetTaskAllowEverything: ({ commandId, taskId, allowEverything }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('task.set_allow_everything', { taskId, allowEverything }, commandId), (said) =>
+              permissions.allowEverything({ envelope: said, taskId, on: allowEverything }),
             ),
           ),
         ),
@@ -1083,7 +1112,30 @@ export const handlers = Api.toLayer(
       StopListening: ({ commandId, taskId, url }) => once(commandId, api(pullRequests.stopListening(taskId, url))),
       StopBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.stopBackground(threadId, id))),
       ClearBackground: ({ commandId, threadId, id }) => once(commandId, api(sessions.clearBackground(threadId, id))),
-      RunProject: ({ commandId, projectId, taskId, threadId }) => once(commandId, api(launches.start({ projectId, taskId, threadId }))),
+      RunProject: ({ commandId, projectId, taskId, threadId, runnableId }) =>
+        once(commandId, api(launches.start({ projectId, taskId, threadId, ...(runnableId === undefined ? {} : { runnableId }) }))),
+      KeepRunnable: ({ commandId, projectId, id, name, command, repository }) =>
+        once(
+          commandId,
+          api(
+            Effect.map(
+              launches.keepRunnable({
+                projectId,
+                ...(id === undefined ? {} : { id }),
+                name,
+                command,
+                ...(repository === undefined ? {} : { repository }),
+                actorId: instance.personId,
+              }),
+              (kept) => ({ id: kept.id }),
+            ),
+          ),
+        ),
+      DropRunnable: ({ commandId, projectId, id }) =>
+        once(commandId, api(launches.dropRunnable({ projectId, id, actorId: instance.personId }))),
+      OrderRunnables: ({ commandId, projectId, ids }) =>
+        once(commandId, api(launches.orderRunnables({ projectId, ids, actorId: instance.personId }))),
+      GetRepositoryScripts: ({ projectId }) => api(launches.scripts(projectId)),
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),

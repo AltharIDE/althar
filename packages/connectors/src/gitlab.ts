@@ -8,6 +8,7 @@ import { tail } from './github'
 import type {
   Account,
   Activity,
+  ChangeList,
   ChangeRequest,
   Check,
   CheckState,
@@ -15,6 +16,7 @@ import type {
   Comment,
   Container,
   Issue,
+  ListedChange,
   MergeMethod,
   Person,
   Repository,
@@ -22,7 +24,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
-import { leftAsItIs, noReviews } from './model'
+import { lacking, leftAsItIs, noReviews } from './model'
 import { answered, failedOf, probe, type Reached, reachLine, readAs, refusalOf, seenOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
@@ -213,6 +215,27 @@ const changeOf = (request: MergeAnswer): ChangeRequest => ({
       ? {}
       : { conflicts: request.has_conflicts === true }),
 })
+
+/** GitLab's state for each a list can ask for. */
+const LISTED_STATES = { open: 'opened', closed: 'closed', merged: 'merged', all: 'all' } as const
+
+/**
+ * A merge request as a list gives it. Its merge status says what still
+ * holds it up, and so whether a reviewer asked for changes, an approval it
+ * needs is missing, or its pipeline is still running; not an approval given,
+ * nor a pipeline that failed, which a list doesn't say.
+ */
+const listedOf = (request: MergeAnswer): ListedChange => {
+  const status = request.detailed_merge_status
+  return {
+    ...changeOf(request),
+    // Never read from a list: what it says is read with the merge request.
+    body: '',
+    forkOwner: null,
+    reviewDecision: status === 'requested_changes' ? 'changes_requested' : status === 'not_approved' ? 'review_required' : null,
+    checks: status === 'ci_still_running' ? 'running' : null,
+  }
+}
 
 /**
  * How the project merges, its own choice first: squashed where its squash
@@ -459,6 +482,22 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           ? changeOf(request)
           : { ...changeOf(request), additions: size.additions, deletions: size.deletions, changedFiles: size.files }
       }),
+    listChanges: (repository, query) =>
+      Effect.gen(function* () {
+        const limit = Math.min(Math.max(query.limit, 1), 99)
+        const params = new URLSearchParams({ state: LISTED_STATES[query.state], order_by: 'updated_at', sort: 'desc' })
+        // One more than asked: whether there are more, without counting them all.
+        params.set('per_page', String(limit + 1))
+        if (query.author !== undefined && query.author.trim() !== '') params.set('author_username', query.author.trim().replace(/^@/, ''))
+        if (query.text !== undefined && query.text.trim() !== '') {
+          params.set('search', query.text.trim())
+          params.set('in', 'title')
+        }
+        if (query.reviewRequested === true) params.set('reviewer_username', (yield* account).login)
+        if (query.draft !== undefined) params.set('wip', query.draft ? 'yes' : 'no')
+        const requests = yield* http.cached(Schema.Array(MergeAnswer), `${project(repository)}/merge_requests?${params.toString()}`)
+        return { changes: requests.slice(0, limit).map(listedOf), more: requests.length > limit } satisfies ChangeList
+      }).pipe(Effect.mapError(lacking('read_api'))),
     markReady: (repository, change) =>
       Effect.gen(function* () {
         // Its title as it is now, not as Althar last read it: a rename on GitLab since stays.
@@ -535,16 +574,22 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           })),
         ]
       }),
-    checkLog: (repository, check) => {
+    checkLog: (repository, check, whole = false) => {
       const match = /^job:(\d+):(\d+)$/.exec(check.id)
       if (match === null) return Effect.succeed(null)
       return http.text(`${api}/projects/${match[1]}/jobs/${match[2]}/trace`).pipe(
-        Effect.map(tail),
+        Effect.map((log) => (whole ? log : tail(log))),
         Effect.catchIf(
           (error) => error.reason === 'not_found' || error.reason === 'forbidden',
           () => Effect.succeed(null),
         ),
       )
+    },
+    rerun: (_repository, check) => {
+      // A pipeline's job runs again as a new job, on the same commit.
+      const match = /^job:(\d+):(\d+)$/.exec(check.id)
+      if (match === null) return Effect.succeed(false)
+      return http.json(Schema.Unknown, 'POST', `${api}/projects/${match[1]}/jobs/${match[2]}/retry`).pipe(Effect.as(true))
     },
     activity: (repository, number, cursor) =>
       Effect.gen(function* () {

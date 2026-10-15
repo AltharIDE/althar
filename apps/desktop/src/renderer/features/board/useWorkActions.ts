@@ -94,7 +94,10 @@ export const useWorkActions = (): WorkActions => {
               message: 'This task has no lead to start. Pick an agent for it first.',
             })
           await client.send({ threadId: task.threadId, body: note, disposition: 'after_current' })
-          if (restarting && lead !== null) await client.startSession({ threadId: task.threadId, agentId: lead })
+          if (restarting && lead !== null)
+            await client.startSession({ threadId: task.threadId, agentId: lead }).catch(() => {
+              // The note is already queued. Reporting a failure now would encourage a retry that sends it twice.
+            })
         }),
       [busy, client],
     ),

@@ -1,6 +1,6 @@
 {
   "name": "@althar/desktop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Althar's desktop app: Electron, with the runtime in a utility process and the interface in the window.",
   "license": "Apache-2.0",
@@ -22,8 +22,8 @@
     "release": "node scripts/release.ts"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.88.0",
-    "@agentclientprotocol/codex-acp": "2.1.1",
+    "@agentclientprotocol/claude-agent-acp": "0.90.0",
+    "@agentclientprotocol/codex-acp": "2.2.2",
     "@althar/connectors": "workspace:*",
     "@althar/contracts": "workspace:*",
     "@althar/provider-adapters": "workspace:*",

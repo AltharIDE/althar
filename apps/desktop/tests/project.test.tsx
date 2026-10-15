@@ -84,14 +84,21 @@ describe('running the project, with no agent', () => {
   it('runs its default branch from the project’s front, shows it over the coordinator’s composer, and stops and clears it there', async () => {
     const { client, emit } = fakeClient({
       listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
-      getCoordinator: vi.fn(async () => coordinatorSnapshot({ runCommand: 'npm run dev' })),
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          runnables: [{ id: 'rnbl_dev', name: null, command: 'npm run dev', repository: 'meridian', own: true, from: 'repository' }],
+        }),
+      ),
     })
     withServices(<WithSettings />, client)
+    // Once the conversation is read, its front offers what the project runs.
+    await screen.findByText(/^Ask the coordinator about/)
     await userEvent.click(await screen.findByRole('button', { name: 'Run npm run dev' }))
-    expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc')
+    expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc', 'rnbl_dev')
     const launch = {
       id: 'proc_1',
       taskId: null,
+      runnableId: 'rnbl_dev',
       where: 'main',
       command: 'npm run dev',
       url: 'http://localhost:5199/',
@@ -132,8 +139,9 @@ describe('running the project, with no agent', () => {
     const opened = vi.spyOn(window, 'open').mockImplementation(() => null)
     withServices(<WithSettings />, client)
     const main = within(await screen.findByRole('article', { name: 'Run of main' }))
-    // Nothing says how the project runs: its front offers no run.
+    // Nothing says how the project runs: its front offers the ways to say what runs, and nothing to run.
     expect(screen.queryByRole('button', { name: 'Run npm run dev' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Run' })).toBeTruthy()
     await userEvent.click(main.getByRole('button', { name: 'Open localhost:5199' }))
     expect(opened).toHaveBeenCalledWith('http://localhost:5199/', '_blank')
     await userEvent.click(main.getByRole('button', { name: 'Stop npm run dev' }))
