@@ -357,7 +357,7 @@ export class Busy extends Context.Service<
           )
         })
 
-      /** Whether the person's own words wait in the thread to be delivered: then a turn there is theirs. */
+      /** Whether the person's own words wait in the thread to be delivered: then a turn there is theirs. What Althar writes quietly is its own. */
       const personSaid = (threadId: string) =>
         Effect.map(
           sql<{ one: number }>`

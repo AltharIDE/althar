@@ -1726,7 +1726,8 @@ export class Sessions extends Context.Service<
                 commandId: input.envelope.commandId,
                 disposition,
                 body: input.body,
-                authorActorId: input.envelope.actorId,
+                // What Althar writes quietly is its own, whoever's command it came with: the person's words are only what they say.
+                authorActorId: input.quiet === true ? instance.systemId : input.envelope.actorId,
                 state: 'queued',
                 acceptedAt: yield* timestamp,
               })}`

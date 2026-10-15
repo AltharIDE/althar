@@ -603,12 +603,12 @@ describe('Agents at once', () => {
       )
       const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
       assert.strictEqual(second.outcome, 'waiting')
-      // The person says more to the first while its turn runs; then that turn ends.
+      // The person says more to the first while its turn runs, at length; then that turn ends.
       const turns = (yield* turnsOn(first.threadId)).length
-      yield* say(first.threadId, 'Look again.', 'after_current')
+      yield* say(first.threadId, scenarios.slow, 'after_current')
       yield* sessions.interrupt(first.threadId)
-      // What the person said goes on first, though the second waited longer; the second waits on.
-      yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1)
+      // What the person said goes on first, though the second waited longer; the second waits on while it runs.
+      yield* until(turnsOn(first.threadId), (rows) => rows.length === turns + 1 && rows.at(-1)?.state === 'delivered')
       assert.deepStrictEqual((yield* attempts(second.taskId)).at(-1), { step: 'implement', state: 'held', holdReason: 'machine_busy' })
       assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
     }).pipe(Effect.provide(machine(1))),
