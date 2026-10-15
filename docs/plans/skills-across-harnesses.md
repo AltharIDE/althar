@@ -280,10 +280,67 @@ Althar. Repository mode remains opt-in and uses the normal OpenSpec layout.
 In either mode, OpenSpec itself does not commit or push; Althar must keep its
 own push path from publishing private-store artifacts by construction.
 
+### 6. Default catalog: sources, licensing, and how we carry them
+
+Candidates for the default set: [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills)
+(25 skills under `skills/`, plus `agents/`, `references/`, hooks and
+per-harness plugin manifests) and [obra/superpowers](https://github.com/obra/superpowers)
+(15 skills under `skills/`, plus plugin manifests for many harnesses and a
+SessionStart-hook bootstrap). Checked on 2026-10-15: both `LICENSE` files are
+**MIT** (Copyright 2025 Addy Osmani; Copyright 2025 Jesse Vincent), so
+redistribution, modification and bundling are allowed provided each copy keeps
+its copyright and licence text. Upstream heads at that check:
+`aeac41d4` (2026-10-13) and `bb92a77` (2026-10-10). This is a licence reading
+for planning, not legal advice; confirm per-file headers and any third-party
+material inside each `skills/` tree before shipping.
+
+**Options considered**
+
+| Option | For | Against |
+| --- | --- | --- |
+| Fork both into `althar-skills` | Full control, easy local edits | Two diverging forks to merge by hand; whole-repo forks drag in hooks, plugins and commands we must not load; edits make every upstream update a conflict |
+| Copy skills into the Althar repo as the baseline | Offline, versioned with the app | Skill churn becomes app-release churn; third-party text in the app repo; no path for users to take newer versions except an app update |
+| **Curated catalog repo of pins, with a vendored snapshot in the app** | Upstream stays the source of truth; we choose, review and pin exactly which skills ship; one mechanism for default and user installs | A small repo to maintain |
+
+**Recommendation: a curated `althar-skills` catalog, not forks.**
+
+1. `althar-skills` holds a catalog manifest, not mirrored repos: per entry the
+   upstream repo, a full commit SHA, the skill subpath, licence, and our review
+   note. Skills we change are kept as small, named patches next to the entry
+   (rare; the goal is to carry none). Original Althar skills (for example the
+   OpenSpec workflow) live in it directly.
+2. Take `skills/<name>/` directories only. Do not take upstream hooks,
+   commands, personas, plugin manifests or `package.json`: they run code or
+   assume one harness, and the install path in section 3 already rejects them.
+   Superpowers' bootstrap skill assumes its SessionStart hook; it needs a
+   decision or an Althar-authored equivalent, not a blind copy.
+3. Curate, don't union. The two sets overlap (test-driven development,
+   debugging, planning, review). Pick one skill per job so a run does not carry
+   two competing procedures and spend skill-catalog budget twice; resolve name
+   collisions in the catalog, not at run time.
+4. The app ships a **vendored snapshot** of the catalog at a pinned catalog
+   version, with each upstream's `LICENSE` and an attribution file (a
+   `THIRD_PARTY` notice) alongside, so first run works offline. This is the
+   default baseline; it lands in the shared store (section 1) like any other
+   source, marked `source: althar-default`.
+5. Updates reach people as **catalog releases**, not app releases: the app
+   checks the catalog repo, shows the changed-file diff per skill (section 3),
+   and applies only on approval. Users can deselect, pin back, or add their own
+   GitHub sources; their choices are bindings over the store and survive
+   catalog updates.
+6. Curation is periodic and human: a scheduled job opens a catalog PR when an
+   upstream head moves, listing the diff per pinned skill; a person reads it
+   (and the Stage 6 fixture runs on all adapters) before the pin moves.
+   Nothing auto-follows an upstream branch.
+
+If the licence reading or a skill's contents change the answer for a given
+skill, drop that skill from the catalog; the structure above doesn't depend on
+either upstream.
+
 ## Staged implementation after the newest Althar
 
-1. **Lock product decisions.** Select the initial default catalog and its
-   source repo/licenses; confirm default versus per-project skill selection;
+1. **Lock product decisions.** Create `althar-skills` per section 6; choose
+   the initial skills from the two MIT sources and record licences; confirm default versus per-project skill selection;
    pin supported harness versions; decide whether to consume OpenSpec's beta
    stores or keep artifacts in Althar's own store.
 2. **Build catalog and store.** Bundle a pinned default catalog; add immutable
@@ -306,12 +363,16 @@ own push path from publishing private-store artifacts by construction.
    diff and follows normal commit/push policy; test update pinning, rollback,
    malformed archives, unsafe paths/symlinks, and unchanged active-run
    snapshots.
+7. **Document.** Once the implementation is final, write the ADR (shared
+   store, catalog-of-pins sourcing, repository boundary defaults) and user and
+   contributor docs; not before, so they describe what shipped.
 
 ## Open decisions and risks
 
-- The default catalog's upstream/source and exact first-party skills remain
-  undecided. A curated set is safer and more portable than automatically
-  adopting every skill in a general catalog.
+- The exact skills picked from agent-skills and superpowers are undecided
+  (section 6 gives the sourcing model, not the list). Skill contents were not
+  audited for this doc; each must be read for hook/plugin assumptions,
+  `allowed-tools`/`hooks` frontmatter, and harness-specific wording.
 - Codex's documented `$HOME/.agents/skills` and the current registry's
   `CODEX_HOME/skills` sharing need a version-specific probe. Codex may
   truncate its initial catalog under its context budget; report this and any
