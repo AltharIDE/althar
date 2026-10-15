@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { keyringIsSafe, keyringUnavailable, passwordStore, sealFailure } from '../src/main/keyring'
+import { keyringIsSafe, keyringUnavailable, passwordStore, sealFailure, walletOf } from '../src/main/keyring'
 
 describe('sealing secrets by keyring', () => {
   it('takes a real keyring on Linux, and nothing else', () => {
@@ -35,6 +35,21 @@ describe('what main answers when safeStorage throws', () => {
   })
 })
 
+describe('which KWallet a Flatpak on KDE asks for', () => {
+  // The sandbox's environment has XDG_CURRENT_DESKTOP=KDE and no KDE_SESSION_VERSION: the bus is what says.
+  it('asks the session bus, since the sandbox is not told the Plasma version', () => {
+    expect(walletOf((name) => name === 'org.kde.kwalletd6', undefined)).toBe('kwallet6')
+    expect(walletOf((name) => name === 'org.kde.kwalletd5', undefined)).toBe('kwallet5')
+    expect(walletOf((name) => name.startsWith('org.kde.kwalletd'), undefined)).toBe('kwallet6')
+  })
+
+  it('falls back to Plasma 6, unless the person said the session is 5', () => {
+    expect(walletOf(() => false, undefined)).toBe('kwallet6')
+    expect(walletOf(() => false, '6')).toBe('kwallet6')
+    expect(walletOf(() => false, '5')).toBe('kwallet5')
+  })
+})
+
 describe('the password store Electron is asked for', () => {
   it('asks for libsecret where Electron would pick plain text, and leaves a choice of the person’s alone', () => {
     expect(passwordStore([], undefined, false, 'linux')).toBe('gnome-libsecret')
@@ -46,8 +61,7 @@ describe('the password store Electron is asked for', () => {
     expect(passwordStore(['--password-store', 'basic'], undefined, false, 'linux')).toBeNull()
     // In a Flatpak libsecret keeps its own file keyring, whose key Chromium doesn't find again: KDE asks for KWallet itself, and everywhere else libsecret.
     expect(passwordStore([], 'KDE', true, 'linux')).toBe('kwallet6')
-    expect(passwordStore([], 'KDE', true, 'linux', '6')).toBe('kwallet6')
-    expect(passwordStore([], 'KDE', true, 'linux', '5')).toBe('kwallet5')
+    expect(passwordStore([], 'KDE', true, 'linux', 'kwallet5')).toBe('kwallet5')
     expect(passwordStore([], 'ubuntu:GNOME', true, 'linux')).toBe('gnome-libsecret')
     expect(passwordStore([], 'sway', true, 'linux')).toBe('gnome-libsecret')
     expect(passwordStore(['--password-store=gnome-libsecret'], 'KDE', true, 'linux')).toBeNull()

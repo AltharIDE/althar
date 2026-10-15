@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -47,7 +48,7 @@ import {
 } from 'electron'
 
 import { appMenu, windowOptions } from './windowOptions'
-import { keyringIsSafe, keyringUnavailable, passwordStore, sealFailure } from './keyring'
+import { keyringIsSafe, keyringUnavailable, passwordStore, sealFailure, walletOf } from './keyring'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -126,12 +127,38 @@ app.setName('Althar')
 if (process.platform !== 'darwin') app.on('browser-window-created', (_event, window) => window.setMenuBarVisibility(false))
 
 // Off a Mac, ask for a secret service where Electron would fall back to plain text (keyring.ts).
+/** Whether the session bus has an owner for a name: asked of its own daemon, which the sandbox may always talk to. A bus that doesn't answer has none. */
+const busOwns = (name: string) => {
+  try {
+    return (
+      execFileSync(
+        'gdbus',
+        [
+          'call',
+          '--session',
+          '--dest',
+          'org.freedesktop.DBus',
+          '--object-path',
+          '/org/freedesktop/DBus',
+          '--method',
+          'org.freedesktop.DBus.NameHasOwner',
+          name,
+        ],
+        { encoding: 'utf8', timeout: 2000 },
+      ).trim() === '(true,)'
+    )
+  } catch {
+    return false
+  }
+}
+const flatpak = process.env.FLATPAK_ID !== undefined
+const kde = (process.env.XDG_CURRENT_DESKTOP ?? '').toLowerCase().split(':').includes('kde')
 const store = passwordStore(
   process.argv,
   process.env.XDG_CURRENT_DESKTOP,
-  process.env.FLATPAK_ID !== undefined,
+  flatpak,
   process.platform,
-  process.env.KDE_SESSION_VERSION,
+  flatpak && kde ? walletOf(busOwns, process.env.KDE_SESSION_VERSION) : undefined,
 )
 if (store !== null) app.commandLine.appendSwitch('password-store', store)
 
