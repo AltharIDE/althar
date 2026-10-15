@@ -1,0 +1,6 @@
+/* What Althar says of a pull request, with the pull request close under it. */
+.published {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

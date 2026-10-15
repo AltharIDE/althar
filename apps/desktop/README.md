@@ -22,6 +22,8 @@ The app shares its profile and worktrees with the command-line client (`apps/cli
 | `ALTHAR_FAKE_REMOTE` | None. With the fakes, the bare repository that pushes to the fake GitHub land in |
 | `ALTHAR_FAIL_MIGRATION=1` | Off. Adds a migration that always fails, so the window shows what an update that couldn't move the data looks like. Run the app on a profile once without it first, so there is data to copy. Packaged builds leave it out |
 | `ALTHAR_GITHUB_CLIENT_ID`, `ALTHAR_GITLAB_CLIENT_ID`, `ALTHAR_LINEAR_CLIENT_ID` | None. The public ids of Althar's apps on those services, for signing in through the browser; without one, the service takes a pasted token |
+| `DO_NOT_TRACK=1` | Off. Keeps usage data off, whatever its switch in Settings says |
+| `ALTHAR_POSTHOG_KEY`, `ALTHAR_POSTHOG_HOST` | None. Usage data's PostHog project, read by `bun run package` and `bun run release` only (also from `apps/desktop/.env`, see `.env.example`); every other build sends nothing. The release workflow takes them from the repository's variables of the same names |
 | `ALTHAR_UPDATE_FEED` | None. A packaged app reads updates from GitHub Releases; this points it at a feed on this Mac instead (an `http://127.0.0.1` address), to try an update. Any other address is ignored |
 
 ## Work on it

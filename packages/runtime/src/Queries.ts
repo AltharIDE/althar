@@ -78,6 +78,22 @@ const AT_ONCE = 8
 /** How many of the lead's reports a thread reads beside its page, newest first: far more than a task's rounds. */
 const REPORTS = 200
 
+/** How many items further back, at most, a page of a task's thread reaches for the start of its first round: one enormous round loads in pages. */
+const ROUND_REACH = 2_000
+
+/**
+ * What starts a round of a task's thread, as SQL over its item `i` and that
+ * item's input `u`: an ask the lead's work answers. What the person said,
+ * once the lead has it; what Althar says that isn't its own housekeeping
+ * (`aside`), such as what the coordinator passed on, a conflict or failed
+ * checks; a review's verdict or what publishing found; and what arrived on
+ * a pull request.
+ */
+const ROUND_ASK = `(i.kind = 'user_message' AND coalesce(u.state, 'delivered') = 'delivered')
+  OR (i.kind = 'notice' AND json_extract(i.content, '$.source') = 'runtime' AND coalesce(json_extract(i.content, '$.role'), '') <> 'aside')
+  OR (i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('review', 'publish'))
+  OR i.kind = 'arrival'`
+
 /** A worktree on this device, and the task it is for: what is kept of it goes when its task leaves the screens. */
 interface Owner {
   readonly path: string
@@ -232,12 +248,14 @@ const callOf = (request: {
   readonly askerModel?: string | null
 }) => {
   const payload = parse(request.payload)
+  const command = text(payload, 'command') || null
   return {
     id: request.id,
     kind: request.kind === 'stuck' ? ('stuck' as const) : request.kind === 'question' ? ('question' as const) : ('permission' as const),
     title: request.kind === 'question' ? questionTitle(questionOf(payload)) : text(payload, 'title'),
     reason: text(payload, 'reason'),
-    command: text(payload, 'command') || null,
+    command,
+    ...(command === null ? {} : { label: shortCommand(command) }),
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
     ...(request.kind === 'question'
       ? { question: askedOf(payload, { agentId: request.askerAgentId ?? null, model: request.askerModel ?? null }) }
@@ -379,6 +397,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
     case 'notice': {
       const severity = text(content, 'severity')
       const description = text(content, 'description')
+      const role = text(content, 'role')
       return {
         ...base,
         kind: 'notice',
@@ -387,6 +406,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           severity: severity === 'error' || severity === 'warning' ? severity : 'info',
           title: text(content, 'title'),
           description: description === '' ? null : description,
+          ...(role === 'aside' || role === 'relayed' ? { role } : {}),
         },
       }
     }
@@ -690,7 +710,14 @@ export class Queries extends Context.Service<
 
       const itemRows = (
         threadId: string,
-        where: { readonly before?: number; readonly itemId?: string; readonly limit: number; readonly reports?: boolean },
+        where: {
+          readonly before?: number
+          /** The first sequence read, where the page starts at a given item. */
+          readonly from?: number
+          readonly itemId?: string
+          readonly limit: number
+          readonly reports?: boolean
+        },
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -716,6 +743,7 @@ export class Queries extends Context.Service<
               -- A message taken back takes no place on a page; read by id, it says it was taken back.
               AND ${where.itemId === undefined ? sql`(u.state IS NULL OR u.state <> 'withdrawn')` : sql`i.id = ${where.itemId}`}
               AND ${where.before === undefined ? sql`1 = 1` : sql`i.sequence < ${where.before}`}
+              AND ${where.from === undefined ? sql`1 = 1` : sql`i.sequence >= ${where.from}`}
               AND ${where.reports === true ? sql`i.kind = 'step_result' AND json_extract(i.content, '$.step') IN ('implement', 'settle')` : sql`1 = 1`}
             ORDER BY i.sequence DESC LIMIT ${where.limit + 1}`
           // One more than asked for says whether there are earlier ones.
@@ -1416,6 +1444,10 @@ export class Queries extends Context.Service<
               AND json_extract(content, '$.step') IN ('implement', 'settle') ORDER BY sequence DESC LIMIT 1`
           // A conflict round: its lead is at work on it, though between turns, or it is the person's now.
           const round = yield* (yield* Changes).conflictStanding(taskId)
+          // A change in Althar's hands is under way while its checks run, and while its lead fixes them (ADR-040).
+          const hands =
+            task.runState === 'succeeded' ? yield* (yield* Changes).inHands(taskId).pipe(Effect.orElseSucceed(() => null)) : null
+          const seeing = hands !== null && !hands.given
           const resolving = round?.state === 'resolving' ? round : undefined
           const lead = yield* sessions.running(task.threadId)
           const reviewer = task.review === null ? Option.none() : yield* sessions.running(task.review)
@@ -1453,7 +1485,7 @@ export class Queries extends Context.Service<
             if (draftWaits !== undefined && task.state === 'open') return 'ready'
             // Merged, it is settled, unless commits after its pull requests are in none yet.
             if (task.state === 'done') return unshipped === null ? 'settled' : 'ready'
-            if (task.runState === 'succeeded') return 'ready'
+            if (task.runState === 'succeeded') return seeing && hands.running ? 'running' : 'ready'
             if (task.runState !== null && task.runState !== 'running') return 'stopped'
             // Held for a reset, it carries on on its own: under way, not stopped.
             return working || task.held !== null ? 'running' : 'stopped'
@@ -1515,7 +1547,19 @@ export class Queries extends Context.Service<
             earlier: changes.filter((candidate) => candidate !== shown).toReversed(),
             unshipped,
             // Resolving a conflict, or fixing the checks on the merge, is a step of its own while it lasts.
-            step: task.step ?? (resolving === undefined || phase !== 'running' ? null : resolving.checks ? 'checks' : 'conflict'),
+            step:
+              task.step ??
+              (phase !== 'running'
+                ? null
+                : resolving !== undefined
+                  ? resolving.checks
+                    ? 'checks'
+                    : 'conflict'
+                  : seeing
+                    ? busy || !hands.running
+                      ? 'checks'
+                      : 'checks_running'
+                    : null),
             followUp: task.runState === 'running' && task.runPlan === null,
             summary: latest === undefined ? null : text(parse(latest.content), 'summary') || null,
             lead: task.lead ?? (implement?.agentId || null),
@@ -1787,13 +1831,41 @@ export class Queries extends Context.Service<
           return events
         })
 
-      /** A page of a thread's items, as screens show them. */
-      const pageOf = (threadId: string, page: { readonly before?: number; readonly limit?: number }) =>
+      /**
+       * A page of a task's thread reaches back to the start of the round its
+       * first item is in, so it never opens partway through the lead's work
+       * on one ask: to the latest ask at or before that item, or to the
+       * thread's start where there is none, at most ROUND_REACH items further.
+       * `earlier` then says whether anything comes before its new first item.
+       */
+      const fromRound = (threadId: string, page: { readonly items: ReadonlyArray<ItemRow>; readonly earlier: boolean }) =>
         Effect.gen(function* () {
-          const { items, earlier } = yield* itemRows(threadId, {
+          const [first] = page.items
+          if (first === undefined || !page.earlier) return page
+          const sql = yield* SqlClient.SqlClient
+          const [ask] = yield* sql<{ sequence: number }>`
+            SELECT i.sequence FROM thread_items i LEFT JOIN user_inputs u ON u.id = i.user_input_id
+            WHERE i.thread_id = ${threadId} AND i.sequence <= ${first.sequence} AND (${sql.unsafe(ROUND_ASK)})
+            ORDER BY i.sequence DESC LIMIT 1`
+          if (ask?.sequence === first.sequence) return page
+          const back = yield* itemRows(threadId, {
+            before: first.sequence,
+            ...(ask === undefined ? {} : { from: ask.sequence }),
+            limit: ROUND_REACH,
+          })
+          const items = [...back.items, ...page.items]
+          const { earlier } = yield* itemRows(threadId, { before: items[0]?.sequence ?? first.sequence, limit: 0 })
+          return { items, earlier }
+        })
+
+      /** A page of a thread's items, as screens show them; a task's starts at a round (`fromRound`). */
+      const pageOf = (threadId: string, page: { readonly before?: number; readonly limit?: number }, rounds = false) =>
+        Effect.gen(function* () {
+          const read = yield* itemRows(threadId, {
             ...(page.before === undefined ? {} : { before: page.before }),
             limit: page.limit ?? PAGE,
           })
+          const { items, earlier } = rounds ? yield* fromRound(threadId, read) : read
           const shown = yield* Effect.forEach(items, (row) => (row.kind === 'task' ? cardOf(row) : Effect.succeed(itemOf(row))), {
             concurrency: AT_ONCE,
           })
@@ -1831,7 +1903,7 @@ export class Queries extends Context.Service<
             WHERE t.id = ${threadId} AND t.kind = 'task'`
           if (head === undefined) return yield* new NotFound({ kind: 'task thread', id: threadId })
           // What the store says comes first, together, so it is as of the cursor; git after.
-          const { items, earlier } = yield* pageOf(threadId, page)
+          const { items, earlier } = yield* pageOf(threadId, page, true)
           // The lead's reports, whatever page they're on: the task's finished view is read from them.
           const reports = (yield* itemRows(threadId, { reports: true, limit: REPORTS })).items.map(itemOf)
           const attention = yield* sql<{

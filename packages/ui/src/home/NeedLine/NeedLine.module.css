@@ -84,6 +84,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.glance {
+  min-width: 0;
+}
 .command {
   font-size: 11.5px;
 }
@@ -183,6 +186,13 @@
   .brief {
     grid-area: brief;
     font-size: 11.5px;
+  }
+  .glance {
+    grid-area: brief;
+    overflow: hidden;
+  }
+  .glance .brief {
+    grid-area: auto;
   }
   .kind,
   .whose {

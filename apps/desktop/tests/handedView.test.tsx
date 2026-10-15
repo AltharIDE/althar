@@ -94,7 +94,7 @@ describe('what an agent hands back, on a task', () => {
     const user = userEvent.setup()
     const { client } = fakeClient({ getThread: vi.fn(async () => handing()) })
     withServices(<Task />, client)
-    await user.click(await screen.findByRole('button', { name: /Worked for/ }))
+    await user.click(await screen.findByRole('button', { name: /orked \d/ }))
     expect(client.readOutput).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: /Ran npm test/ }))
     expect(await screen.findByText(/refunds\/router/)).toBeTruthy()
@@ -125,7 +125,7 @@ describe('what an agent hands back, on a task', () => {
       readOutput: vi.fn(async () => ({ text: 'compiling\nwarning: unused import\n', dropped: 0 })),
     })
     withServices(<Task />, client)
-    await user.click(await screen.findByRole('button', { name: /Worked for/ }))
+    await user.click(await screen.findByRole('button', { name: /orked \d/ }))
     await user.click(screen.getByRole('button', { name: /Run npm run build/ }))
     expect(await screen.findByText('warning: unused import')).toBeTruthy()
     expect(screen.getByText('Tool execution aborted')).toBeTruthy()
@@ -138,7 +138,7 @@ describe('what an agent hands back, on a task', () => {
       readOutput: vi.fn(async () => Promise.reject(new ApiError({ reason: 'NotFound', message: "That output isn't there any more." }))),
     })
     withServices(<Task />, client)
-    await user.click(await screen.findByRole('button', { name: /Worked for/ }))
+    await user.click(await screen.findByRole('button', { name: /orked \d/ }))
     await user.click(screen.getByRole('button', { name: /Ran npm test/ }))
     expect(await screen.findByText("That output isn't there any more.")).toBeTruthy()
   })
@@ -149,8 +149,8 @@ describe('what an agent hands back, on a task', () => {
     const live = { ...base, session: base.session === null ? null : { ...base.session, turnRunning: true } }
     const { client, emit } = fakeClient({ getThread: vi.fn(async () => live) })
     withServices(<Task />, client)
-    await screen.findByRole('button', { name: /Working for/ })
-    await userEvent.click(screen.getByRole('button', { name: /Working for/ }))
+    await screen.findByRole('button', { name: /Working · / })
+    await userEvent.click(screen.getByRole('button', { name: /Working · / }))
     act(() => emit({ _tag: 'Output', threadId: 'th1', itemId: run.id, text: ' ✓ charges/limit (14)\n ⋯ webhooks', dropped: 0 }))
     expect(await screen.findByText(/charges\/limit/)).toBeTruthy()
     expect(screen.getByText(/⋯ webhooks/)).toBeTruthy()
@@ -168,7 +168,7 @@ describe('what an agent hands back, on a task', () => {
       readOutput: vi.fn(async () => ({ text: 'ready in 12 ms\n', dropped: 0 })),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: /Working for/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /Working · / }))
     expect(await screen.findByText(/ready in 12 ms/)).toBeTruthy()
     expect(client.readOutput).toHaveBeenCalledWith('th1', run.id)
     act(() => emit({ _tag: 'Output', threadId: 'th1', itemId: run.id, text: 'ready in 12 ms\nlistening on 4000\n', dropped: 0 }))
@@ -182,7 +182,7 @@ describe('what an agent hands back, on a task', () => {
     const readOutput = vi.fn().mockResolvedValue({ text: 'ready\n', dropped: 0 })
     const { client, emit, rewatch } = fakeClient({ getThread: vi.fn(async () => live), readOutput })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: /Working for/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /Working · / }))
     expect(await screen.findByText(/^ready$/)).toBeTruthy()
     act(() => emit({ _tag: 'Output', threadId: 'th1', itemId: run.id, text: 'ready\ncompiled\n', dropped: 0 }))
     expect(await screen.findByText(/^compiled$/)).toBeTruthy()
@@ -200,7 +200,7 @@ describe('what an agent hands back, on a task', () => {
     const readOutput = vi.fn(() => new Promise<{ text: string; dropped: number }>((resolve) => (answer = resolve)))
     const { client, emit } = fakeClient({ getThread: vi.fn(async () => live), readOutput })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: /Working for/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /Working · / }))
     await waitFor(() => expect(readOutput).toHaveBeenCalled())
     act(() => emit({ _tag: 'Output', threadId: 'th1', itemId: run.id, text: 'older\nnewer\n', dropped: 0 }))
     expect(await screen.findByText(/^newer$/)).toBeTruthy()
@@ -209,22 +209,24 @@ describe('what an agent hands back, on a task', () => {
     expect(screen.getByText(/^newer$/)).toBeTruthy()
   })
 
-  it('opens the turn’s screenshots in the lightbox, the arrows moving between them, and focus coming back', async () => {
+  it('opens what the lead shows large in the lightbox, focus coming back, and what it looked at small under the step that read it', async () => {
     const user = userEvent.setup()
     const { client } = fakeClient({ getThread: vi.fn(async () => handing()) })
     withServices(<Task />, client)
-    const shots = await screen.findByRole('list', { name: 'Screenshots' })
-    const before = within(shots).getByRole('img', { name: 'before.png' })
-    expect(before.getAttribute('src')).toBe(`althar-picture://shot/${'a'.repeat(64)}?w=1120`)
-    const open = within(shots).getByRole('button', { name: 'View before.png full size' })
+    // What it means the person to see stands with what it said, large.
+    const open = await screen.findByRole('button', { name: 'View after.png full size' })
+    expect(within(open).getByRole('img', { name: 'after.png' }).getAttribute('src')).toBe(`althar-picture://shot/${'b'.repeat(64)}?w=1120`)
     await user.click(open)
-    const dialog = await screen.findByRole('dialog', { name: 'before.png' })
-    expect(within(dialog).getByRole('img', { name: 'before.png' }).getAttribute('src')).toBe(`althar-picture://shot/${'a'.repeat(64)}`)
-    await user.keyboard('{ArrowRight}')
-    expect(screen.getByRole('dialog', { name: 'after.png' })).toBeTruthy()
+    const dialog = await screen.findByRole('dialog', { name: 'after.png' })
+    expect(within(dialog).getByRole('img', { name: 'after.png' }).getAttribute('src')).toBe(`althar-picture://shot/${'b'.repeat(64)}`)
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     await waitFor(() => expect(document.activeElement).toBe(open))
+    // What it looked at as it worked stays with its work, under the step.
+    expect(screen.queryByRole('button', { name: 'View before.png full size' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: /^Worked/ }))
+    await user.click(await screen.findByRole('button', { name: 'View before.png full size' }))
+    expect(await screen.findByRole('dialog', { name: 'before.png' })).toBeTruthy()
   })
 
   it('reads the document the lead wrote from its worktree, and opens it beside the thread', async () => {
@@ -341,7 +343,7 @@ describe('what an agent hands back, on a task', () => {
     await user.click(within(card).getByRole('button', { name: 'Open in editor' }))
     expect(client.openInEditor).toHaveBeenCalledWith(expect.objectContaining({ path: '/w/meridian/report.csv' }))
     expect(screen.getByRole('columnheader', { name: 'Budget' })).toBeTruthy()
-    // The document's card copies its markdown; the turn's own Copy, after it, what the turn said.
+    // The document's card copies its markdown; the round's own Copy, after it, what the lead said last.
     const turn = screen.getAllByRole('article').find((article) => article.textContent?.includes('Here it is.'))
     expect(within(turn ?? document.body).getAllByRole('button', { name: 'Copy' })).toHaveLength(2)
   })

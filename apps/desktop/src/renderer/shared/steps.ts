@@ -20,11 +20,13 @@ export const stepText = {
     // A conflict round's lead, once the task's steps are done: the conflict with its default branch, or the checks on the merge.
     conflict: 'Resolving a conflict',
     checks: 'Fixing the checks',
+    // A change the person hasn't seen yet, while its checks run (ADR-040).
+    checks_running: 'Checks running',
   } as Readonly<Record<string, string>>,
 }
 
-/** Whether a step is a conflict round's, after the plan's steps. */
-export const afterSteps = (step: string | null) => step === 'conflict' || step === 'checks'
+/** Whether a step comes after the plan's steps: a conflict round's, or the checks of a change Althar sees through. */
+export const afterSteps = (step: string | null) => step === 'conflict' || step === 'checks' || step === 'checks_running'
 
 /** The names of the steps it takes: on a round of work after its plan (ADR-034), its lead's follow-up in place of Implement. */
 export const stepNames = (steps: ReadonlyArray<PlanStep>, followUp = false): ReadonlyArray<string> =>

@@ -4,8 +4,6 @@ import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
   Arrived,
   CodeBlock,
-  Evidence,
-  FindingState,
   Issue,
   IssueRef,
   LinkButton,
@@ -15,23 +13,16 @@ import {
   Question,
   type QuestionAnswer,
   Reasoning,
-  Review,
-  type ReviewFinding,
-  Severity,
-  Step,
-  StepState,
   Terminal,
   ThreadDivider,
   Tool,
   ToolState,
   Turn,
-  Verdict,
   WorkedFor,
   You,
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
-import { piecesOf } from './evidence'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
 import { sentAttachments } from './images'
@@ -112,13 +103,6 @@ export const text = {
       .join('\n')}`,
 }
 
-const SEVERITY: Readonly<Record<StepResult['findings'][number]['severity'], Severity>> = {
-  blocking: Severity.High,
-  major: Severity.High,
-  minor: Severity.Medium,
-  nit: Severity.Low,
-}
-
 /**
  * Althar setting up the task's worktree before its lead starts (ADR-023): a
  * line across the thread while it runs, and once it went through. Failed,
@@ -196,7 +180,8 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
   )
 }
 
-function PartView({ part, threadId }: { part: Part; threadId: string }) {
+/** A part of a turn as the thread draws it: what it said, a thought, a tool call, its plan, a notice. */
+export function PartView({ part, threadId }: { part: Part; threadId: string }) {
   switch (part.kind) {
     case 'message':
       return <Markdown source={part.text} />
@@ -213,84 +198,6 @@ function PartView({ part, threadId }: { part: Part; threadId: string }) {
     case 'notice':
       return <p className={s[part.tone]}>{part.text}</p>
   }
-}
-
-/** What a step reported: the lead's summary, open under its work, with what it showed unless the task's closing card gathers it; or the review's verdict and findings. */
-function StepView({ id, result, of, gathered }: { id: string; result: StepResult; of: number; gathered: boolean }) {
-  const named = useModelNames()
-  // Implement is the first step, a review and settling it the second, and the pull request the last.
-  const n = result.step === 'implement' ? 1 : result.step === 'publish' ? of : 2
-  const model = result.agentId === null ? undefined : named(result.agentId)
-  if (result.step === 'publish') {
-    const change = result.change
-    return (
-      <Step
-        n={n}
-        of={of}
-        label={change === null ? text.pushed : text.step.publish}
-        state={StepState.Done}
-        defaultOpen
-        detail={
-          <>
-            <Markdown source={result.summary} />
-            {change !== null && (
-              <Issue
-                mark={productBrand(change.product)}
-                source={productName(change.product)}
-                id={`${change.short} ${change.prefix}${change.number}`}
-                title={change.title}
-                href={change.url}
-                meta={[change.repository, change.draft ? text.change.draft : text.change[change.state]].join(' · ')}
-              />
-            )}
-          </>
-        }
-      />
-    )
-  }
-  if (result.step !== 'review')
-    return (
-      <Step
-        n={n}
-        of={of}
-        label={text.step[result.step]}
-        state={StepState.Done}
-        {...(model === undefined ? {} : { model })}
-        defaultOpen
-        detail={
-          <>
-            <Markdown source={result.summary} />
-            {!gathered && <Evidence pieces={piecesOf(id, result.evidence)} unverified={result.unverified ?? []} headingLevel={4} />}
-          </>
-        }
-      />
-    )
-  // The lead settles findings on its own for now: what the review found is left to it.
-  const findings: ReadonlyArray<ReviewFinding> = result.findings.map((finding, index) => ({
-    id: `${id}-${index}`,
-    severity: SEVERITY[finding.severity],
-    at: finding.file === null ? '' : finding.line === null ? finding.file : `${finding.file}:${finding.line}`,
-    by: model === undefined ? [] : [model],
-    state: FindingState.Lead,
-    claim: finding.claim,
-  }))
-  return (
-    <>
-      <Review
-        n={n}
-        of={of}
-        reviewers={model === undefined ? [] : [{ model }]}
-        verdict={result.verdict === 'pass' ? Verdict.Pass : Verdict.Changes}
-        defaultFindings={findings}
-        {...(result.round > 0 ? { round: result.round + 1 } : {})}
-      />
-      {result.summary !== '' && (
-        <div className={s.said}>
-          <Markdown source={result.summary} />
-        </div>
-      )}
-    </>
-  )
 }
 
 /** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
@@ -448,7 +355,6 @@ export function ThreadBlocks({
   push,
   review,
   queued,
-  gathered = false,
   onPassOn,
   onAnswerQuestion,
   focusQuestion,
@@ -483,12 +389,7 @@ export function ThreadBlocks({
   review?: (review: ReviewDraftContent) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
-  /** What the lead's steps showed is in the task's closing card, after these, so its steps don't show it again. */
-  gathered?: boolean
 }) {
-  // A task that was reviewed has two steps, the review and settling it being the second; its pull request, once opened, is one more.
-  const done = new Set(blocks.flatMap((block) => (block.kind === 'step' ? [block.result.step] : [])))
-  const of = 1 + (done.has('review') || done.has('settle') ? 1 : 0) + (done.has('publish') ? 1 : 0)
   const named = useModelNames()
   // What each document was last changed by, so it is read again after an edit.
   const versionOf = documentVersions(
@@ -524,7 +425,8 @@ export function ThreadBlocks({
           </ThreadDivider>
         )
       case 'step':
-        return <StepView key={block.id} id={block.id} result={block.result} of={of} gathered={gathered} />
+        // A step's report is a task's, and its thread draws it in its rounds (TaskThread, ADR-042).
+        return null
       case 'card':
         return <Fragment key={block.id}>{card?.(block.card)}</Fragment>
       case 'question':
