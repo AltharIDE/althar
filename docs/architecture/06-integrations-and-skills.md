@@ -261,6 +261,13 @@ service's model.
   conflicts, Althar pushes the merge that resolves one, with at most one fix
   for what the full tests found, and a fix for checks that fail on it, and
   nothing with them (Resolving a conflict, below).
+- **A tag the lead makes, Althar pushes** (`push_tag`): to the remote that
+  repository's work goes to, with the person's own git, never forced, so a
+  tag the remote has already stays as it is. A tag often starts a release, so
+  it waits for the person as the lead's own `git push` of it would
+  (ADR-013), short of a project that allows everything or never allows it.
+  Answered within half a minute, the call says what happened; else the lead
+  is told once it is.
 - **Without a connection, the person pushes the task's branch with their own
   git** (ADR-016): to the remote that repository's work goes to (the one its
   default branch follows, else `origin`, else its only remote), under the
