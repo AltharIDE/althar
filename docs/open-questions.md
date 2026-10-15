@@ -27,13 +27,19 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
   `SECRET_BACKEND` can't route around it: libsecret checks for a sandbox
   first. Decided with the person, 15 October; whether a sign-in survives
   `flatpak kill dev.althar.app` on the person's Plasma is still theirs to test.
-- [ ] **The same for GNOME and other desktops in a Flatpak.** They still get
-  libsecret, and a new key at each start; a sign-in made in one run asks to be
-  made again in the next. Leanings: a libsecret built in the manifest that
-  stores where Chromium looks (the host's secret service, the transfer still
-  encrypted); Chromium's own secret-portal key provider, if Electron's
-  safeStorage comes to use it; or, as a proposal for the person only, a key
-  Althar derives from a passphrase of theirs (never weaker than ADR-011).
+- [x] **The same for GNOME and other desktops in a Flatpak.** Off KDE the
+  main process uses Electron's async `safeStorage` with Chromium's
+  `SecretPortalKeyProviderUseForEncryption` switch. It accepts only `v12`,
+  the Secret portal's stable secret scoped to Althar's Flatpak id; shared
+  Secret Service (`v11`) and fixed-key (`v10`) seals fail closed. On GNOME,
+  xdg-desktop-portal selects the GNOME Keyring Secret backend. A desktop
+  without the app-specific Secret portal cannot save sign-ins, even if it has
+  only the shared Secret Service; this keeps ADR-011's app-specific boundary.
+  The KDE/KWallet path from #201 is unchanged. The runtime still passes opaque
+  seals to and from the main process, and old non-portal seals may require one
+  sign-in again; no files are deleted. Decided 15 October 2026 in
+  [ADR-028](decisions/028-linux-windows-packages-and-the-keyring.md). A real
+  GNOME session still needs the by-hand restart test.
 
 ## Usage data, 12 October
 

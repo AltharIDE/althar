@@ -66,7 +66,11 @@
     `--talk-name=org.kde.kwalletd6` and `--talk-name=org.kde.kwalletd5`: on
     KDE the sealing key is kept in KWallet directly, since through libsecret
     in a sandbox it would be made anew at every start (ADR-028). It talks to
-    the wallet service only, and owns none of its names.
+    the wallet service only, and owns none of its names. On other desktops,
+    the main process seals sign-ins with the Secret portal's app-specific key;
+    no permission for `org.freedesktop.portal.Secret` is needed. The host
+    Secret Service permission remains for Chromium's Linux storage, but a
+    sign-in is kept only when Chromium reports the portal seal format.
   - **git has no ssh-agent socket.** Althar's own pushes use the code-host
     connections it keeps. The manifest does not expose the person's ssh
     agent to the sandbox.

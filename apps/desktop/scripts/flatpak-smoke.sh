@@ -4,9 +4,9 @@
 # sign-in and sessions), the device outside it (the person's own OpenCode and
 # Codex, through the permission the manifest asks for),
 # data that persists beside the profile (its home is fresh each run), and
-# permissions (no host filesystem or ssh-agent socket, but the tray watcher
-# and the keyring reachable, and KWallet on KDE). The window's own
-# behavior is
+# permissions (no host filesystem or ssh-agent socket; tray watcher and
+# keyring access, with KWallet on KDE and the Secret portal elsewhere). The
+# window's own behavior is
 # the same X11 smoke the other packages use: ALTHAR_BIN=/usr/bin/althar
 # ALTHAR_ARGS=--ozone-platform=x11 scripts/x11-smoke.sh. Needs the app
 # installed: scripts/flatpak.sh.
@@ -83,7 +83,12 @@ case "${XDG_CURRENT_DESKTOP:-}" in
     network=$(run "gdbus call $wallet.networkWallet")
     case "$network" in *\'?*\'*) ok "the wallet Chromium keeps the key in is named ($network)";; *) bad "KWallet names its network wallet";; esac
     ;;
-  *) echo "SKIP: not KDE, so no KWallet check" ;;
+  *)
+    # Off KDE sign-ins require the app-specific Secret portal key (keyring.ts).
+    # This checks that the interface is available, never retrieves the secret.
+    version=$(run "gdbus call --session --dest org.freedesktop.portal.Desktop --object-path /org/freedesktop/portal/desktop --method org.freedesktop.DBus.Properties.Get org.freedesktop.portal.Secret version")
+    case "$version" in *uint32\ [1-9]*) ok "the app-specific Secret portal answers from the sandbox ($version)";; *) bad "the app-specific Secret portal answers from the sandbox (it said: ${version:-nothing}; on GNOME, check that gnome-keyring's portal backend is installed and selected)";; esac
+    ;;
 esac
 
 run 'test -f /app/share/applications/dev.althar.app.desktop && grep -q "StartupWMClass=dev.althar.app" /app/share/applications/dev.althar.app.desktop' && ok "the desktop entry is there, with the right class" || bad "desktop entry"

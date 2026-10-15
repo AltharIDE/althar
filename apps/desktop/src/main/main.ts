@@ -47,7 +47,16 @@ import {
 } from 'electron'
 
 import { appMenu, windowOptions } from './windowOptions'
-import { keyringIsSafe, keyringUnavailable, passwordStore, sealedByKeyring, sealsWithPortal, withPortalFeature } from './keyring'
+import {
+  keyringIsSafe,
+  keyringUnavailable,
+  passwordStore,
+  portalKeyUnavailable,
+  portalSealUnavailable,
+  sealedByPortal,
+  sealsWithPortal,
+  withPortalFeature,
+} from './keyring'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -57,10 +66,11 @@ import { keyringIsSafe, keyringUnavailable, passwordStore, sealedByKeyring, seal
  * runtime to stop its sessions before the app goes. Folders reach the runtime
  * from here, never from the window, which gets a grant for each: one the
  * person picked or dropped, or one of the repositories it found where people
- * keep code (repositories.ts), for the first screen and a new project to offer. It seals and
- * opens the runtime's secrets, such as a code host's token, with Electron's
- * safeStorage, whose key the keychain keeps for this app alone: the runtime
- * keeps them sealed and never holds the key. It gives the Dock the icon the
+ * keep code (repositories.ts), for the first screen and a new project to
+ * offer. It seals and opens the runtime's secrets, such as a code host's
+ * token, with Electron's safeStorage; off KDE in a Flatpak it requires the
+ * app-specific Secret portal key. The runtime keeps secrets sealed and never
+ * holds the key. It gives the Dock the icon the
  * person chose, and puts Althar at the edge of the screen (edgeWindows.ts):
  * round the notch, or in the menu bar. It keeps the app's own preferences
  * (appPreferences.ts) and acts on them: the Mac kept awake while work runs
@@ -324,18 +334,19 @@ const seal = (child: UtilityProcess, message: RuntimeMessage) => {
 }
 
 /**
- * The same with the async encryptor, keyed by the Secret portal (or the host's secret service, where there is no portal). It
- * says it is available even with neither, sealing under Chromium's fixed key: what that seals is refused like a missing keyring.
+ * The same with the async encryptor, requiring the Secret portal's app-specific key. It says it is available even without a
+ * keyring, sealing under Chromium's fixed key; that and the shared Secret Service key are refused.
  */
 const sealWithPortal = async (child: UtilityProcess, sealing: boolean, requestId: string, value: string) => {
   try {
     if (!sealing) {
-      const { result } = await safeStorage.decryptStringAsync(Buffer.from(value, 'base64'))
+      const sealed = Buffer.from(value, 'base64')
+      if (!sealedByPortal(sealed)) return child.postMessage({ type: 'sealed', requestId, error: portalSealUnavailable, keyring: true })
+      const { result } = await safeStorage.decryptStringAsync(sealed)
       return child.postMessage({ type: 'sealed', requestId, value: result })
     }
     const sealed = await safeStorage.encryptStringAsync(value)
-    if (!sealedByKeyring(sealed))
-      return child.postMessage({ type: 'sealed', requestId, error: keyringUnavailable(process.platform), keyring: true })
+    if (!sealedByPortal(sealed)) return child.postMessage({ type: 'sealed', requestId, error: portalKeyUnavailable, keyring: true })
     child.postMessage({ type: 'sealed', requestId, value: sealed.toString('base64') })
   } catch (error) {
     child.postMessage({ type: 'sealed', requestId, error: error instanceof Error ? error.message : String(error) })

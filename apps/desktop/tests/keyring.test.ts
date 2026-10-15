@@ -4,8 +4,10 @@ import {
   keyringIsSafe,
   keyringUnavailable,
   passwordStore,
+  portalKeyUnavailable,
+  portalSealUnavailable,
   PORTAL_FEATURE,
-  sealedByKeyring,
+  sealedByPortal,
   sealsWithPortal,
   withPortalFeature,
 } from '../src/main/keyring'
@@ -31,6 +33,11 @@ describe('sealing secrets by keyring', () => {
     expect(keyringUnavailable('linux')).toContain('gnome-keyring')
     expect(keyringUnavailable('linux')).toContain('KWallet')
     expect(keyringUnavailable('darwin')).toBe('The keychain Althar seals sign-ins with isn’t available.')
+  })
+
+  it('gives a specific failure when the app-specific Secret portal key is missing', () => {
+    expect(portalKeyUnavailable).toContain('desktop Secret portal')
+    expect(portalSealUnavailable).toContain('Sign in again')
   })
 })
 
@@ -93,15 +100,15 @@ describe('sealing with the Secret portal’s key', () => {
     expect(withPortalFeature(`${PORTAL_FEATURE},Other`)).toBe(`${PORTAL_FEATURE},Other`)
   })
 
-  it('keeps only what a keyring’s key sealed, refusing Chromium’s fixed one', () => {
+  it('keeps and opens only seals from the app-specific Secret portal key', () => {
     const sealed = (tag: string) => new TextEncoder().encode(`${tag}\u0001\u0002ciphertext`)
-    expect(sealedByKeyring(sealed('v11'))).toBe(true)
-    expect(sealedByKeyring(sealed('v12'))).toBe(true)
-    // v10: Chromium's key, the same in every copy of it, which the encryptor falls back to without saying so.
-    expect(sealedByKeyring(sealed('v10'))).toBe(false)
+    expect(sealedByPortal(sealed('v12'))).toBe(true)
+    // v11 is the shared Secret Service key; v10 is Chromium's fixed key.
+    expect(sealedByPortal(sealed('v11'))).toBe(false)
+    expect(sealedByPortal(sealed('v10'))).toBe(false)
     // An allow-list: nothing, plain text, or a tag a later Chromium adds fails closed.
-    expect(sealedByKeyring(new Uint8Array())).toBe(false)
-    expect(sealedByKeyring(new TextEncoder().encode('ghp_plain'))).toBe(false)
-    expect(sealedByKeyring(sealed('v13'))).toBe(false)
+    expect(sealedByPortal(new Uint8Array())).toBe(false)
+    expect(sealedByPortal(new TextEncoder().encode('ghp_plain'))).toBe(false)
+    expect(sealedByPortal(sealed('v13'))).toBe(false)
   })
 })
