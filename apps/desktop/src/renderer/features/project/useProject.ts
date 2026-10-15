@@ -283,14 +283,14 @@ export const useProject = (projectId: string): ProjectModel => {
         body,
         'after_current',
         async () => {
-          // Queue the note before starting so the coordinator can read it with its brief on its first turn.
-          await send(body, 'after_current', images)
+          // The picked agent must be the one the coordinator starts on. A failed start must leave the note in the composer, not queue it and restore it for a duplicate send.
           if (threadId !== null && coordinator !== null && (coordinator.session === null || !coordinator.session.held) && choice !== null)
             await client.startSession(startOf(threadId, choice)).catch((failure: unknown) => {
               if (failure instanceof ApiError && failure.reason === 'SessionRunning') return
-              // The note is already queued: keep it visible and report why the coordinator did not start.
               fail(failure)
+              throw failure
             })
+          await send(body, 'after_current', images)
         },
         images,
       ),

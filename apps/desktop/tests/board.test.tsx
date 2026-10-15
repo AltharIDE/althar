@@ -487,7 +487,7 @@ describe('the board', () => {
     } else expect(startSession).not.toHaveBeenCalled()
   })
 
-  it('reports that Send back has no lead to start after queuing the note', async () => {
+  it('reports that Send back has no lead to start without queuing the note', async () => {
     const send = vi.fn(async () => {})
     const startSession = vi.fn(async () => 's1')
     const tasks = board().tasks.map((work) => (work.taskId === 't4' ? { ...work, lead: null } : work))
@@ -503,7 +503,7 @@ describe('the board', () => {
     await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
     await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
     expect(await screen.findByText('This task has no lead to start. Pick an agent for it first.')).toBeTruthy()
-    expect(send).toHaveBeenCalledWith({ threadId: 'th4', body: 'Please rename it.', disposition: 'after_current' })
+    expect(send).not.toHaveBeenCalled()
     expect(startSession).not.toHaveBeenCalled()
   })
 

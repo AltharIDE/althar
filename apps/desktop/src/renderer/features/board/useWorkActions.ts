@@ -83,19 +83,18 @@ export const useWorkActions = (): WorkActions => {
     sendBack: useCallback(
       (task, note) =>
         busy(setSending, task.taskId, async () => {
-          // The note is queued first, so a lead that starts reads it in its first turn rather than after one of its own.
           const head = await client.getThread(task.threadId, { limit: 0 })
-          await client.send({ threadId: task.threadId, body: note, disposition: 'after_current' })
+          const restarting = head.session === null || !head.session.held
+          const lead = task.lead
           // A thread the runtime no longer holds can't take it — its recorded session may be stale or dead — so the lead starts again on the agent that led it.
           // A held thread takes the note itself: running, after the current turn; between turns, now. With no lead to start, the person is told why.
-          if (head.session === null || !head.session.held) {
-            if (task.lead === null)
-              throw new ApiError({
-                reason: 'NoLead',
-                message: 'This task has no lead to start. Pick an agent for it first.',
-              })
-            await client.startSession({ threadId: task.threadId, agentId: task.lead })
-          }
+          if (restarting && lead === null)
+            throw new ApiError({
+              reason: 'NoLead',
+              message: 'This task has no lead to start. Pick an agent for it first.',
+            })
+          await client.send({ threadId: task.threadId, body: note, disposition: 'after_current' })
+          if (restarting && lead !== null) await client.startSession({ threadId: task.threadId, agentId: lead })
         }),
       [busy, client],
     ),

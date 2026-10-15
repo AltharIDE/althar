@@ -431,7 +431,7 @@ export function TaskView({
   const choice = session === null || !session.held ? chosen : (waiting ?? runningOn(session))
 
   // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.
-  const receiving = waiting?.agentId ?? session?.agentId ?? chosen?.agentId ?? null
+  const receiving = waiting?.agentId ?? (session?.held ? session.agentId : undefined) ?? chosen?.agentId ?? null
   const receiver = { name: agentName(receiving), takes: takesImages(models, receiving) }
   // With no lead working, what the person says starts the one picked, as its first turn; with another agent picked, that one takes over with it.
   const send = (body: string, now: boolean, outgoing?: Outgoing) => {
@@ -584,7 +584,7 @@ export function TaskView({
         queued={queuedOf(snapshot.items, queue)}
         onEditQueued={(id) => void edit(id)}
         onUnqueue={(id) => void model.takeBack(id)}
-        placeholder={busy ? text.placeholderBusy : text.placeholder(session?.agentName ?? agentName(chosen?.agentId ?? null))}
+        placeholder={busy ? text.placeholderBusy : text.placeholder(receiver.name)}
         meter={contextMeter(session, named)}
         // Another agent's model hands the task to that agent.
         picker={
