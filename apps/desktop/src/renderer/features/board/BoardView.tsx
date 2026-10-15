@@ -203,10 +203,13 @@ const findingsOf = (reviewing: ReviewBrief) => {
 /** The card's own props, without how it opens. */
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
 
+/** What a task that allows everything it asks says at its foot: on its card, and in line up next, where it will start so. */
+const unrestricted = (work: BoardTask): ReactNode => (work.allowEverything === true ? <Fact tone="warm">{text.unrestricted}</Fact> : null)
+
 /** A card whose task allows everything it asks says so at its foot, after what it says there already. */
 export const unrestrictedOf = (card: Card, work: BoardTask): Card => {
-  if (work.allowEverything !== true) return card
-  const fact = <Fact tone="warm">{text.unrestricted}</Fact>
+  const fact = unrestricted(work)
+  if (fact === null) return card
   return {
     ...card,
     foot:
@@ -423,6 +426,7 @@ export function BoardView({
                 reason={
                   startsAt === null ? text.held : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
                 }
+                foot={unrestricted(work)}
                 onOpen={() => onOpen(work.threadId)}
                 text={{ task: unnamed }}
               />

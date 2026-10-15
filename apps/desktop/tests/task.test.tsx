@@ -1141,6 +1141,27 @@ describe('a task', () => {
     expect(await shownFor(false, false)).toBe(false)
   })
 
+  it('says Unrestricted as its project’s switch turns on, and no longer as it turns off, with nothing else changing on it', async () => {
+    let project = false
+    const { client, emit } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, allowEverything: { task: false, project } } })),
+    })
+    withServices(<Task />, client)
+    await screen.findByRole('button', { name: 'More for this task' })
+    expect(screen.queryByText('Unrestricted')).toBeNull()
+    project = true
+    act(() => emit(changed('policy', 'pol2', null, 'p1')))
+    expect(await screen.findByText('Unrestricted')).toBeTruthy()
+    // Another project's rules read nothing here.
+    const reads = vi.mocked(client.getThread).mock.calls.length
+    act(() => emit(changed('policy', 'pol3', null, 'p2')))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(client.getThread).toHaveBeenCalledTimes(reads)
+    project = false
+    act(() => emit(changed('policy', 'pol4', null, 'p1')))
+    await waitFor(() => expect(screen.queryByText('Unrestricted')).toBeNull())
+  })
+
   it('says why a call the project always asks about has no always allow, and allows everything on the task from it', async () => {
     const call = {
       id: 'a1',

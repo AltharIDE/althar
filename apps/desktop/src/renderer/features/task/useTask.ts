@@ -281,7 +281,9 @@ export const useTask = (threadId: string): TaskModel => {
           ? current
           : { ...current, task: { ...current.task, launches: event.launches.filter((launch) => launch.taskId === current.task.id) } },
       )
-    if (event.threadId !== threadId) return
+    // Its project's rules, which belong to no thread: by their switch it may allow everything now, or no longer. Its head again.
+    const ofItsRules = event._tag === 'Changed' && event.aggregateType === 'policy' && event.projectId === snapshot?.project.id
+    if (event.threadId !== threadId && !ofItsRules) return
     // How full the lead's context is, as it says: kept on its session, which the composer shows.
     if (event._tag === 'Context')
       return void setSnapshot((current) =>

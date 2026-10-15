@@ -693,6 +693,9 @@ describe('every state the board shows', () => {
           task({ taskId: 'u1', threadId: 'thu1', title: 'Allowed at work', phase: 'running', allowEverything: true }),
           task({ taskId: 'u2', threadId: 'thu2', title: 'Handed back', phase: 'ready', handedBack: 'A conflict', allowEverything: true }),
           task({ taskId: 'u3', threadId: 'thu3', title: 'Asks as ever', phase: 'running' }),
+          // Up next, it will start allowing everything.
+          task({ taskId: 'u4', threadId: 'thu4', title: 'Held, allowed', phase: 'held', allowEverything: true }),
+          task({ taskId: 'u5', threadId: 'thu5', title: 'Held, asks', phase: 'held' }),
         ],
         calls: [],
       }),
@@ -703,6 +706,8 @@ describe('every state the board shows', () => {
     expect(within(cardOf('Handed back')).getByText('A conflict')).toBeTruthy()
     expect(within(cardOf('Handed back')).getByText('Unrestricted')).toBeTruthy()
     expect(within(cardOf('Asks as ever')).queryByText('Unrestricted')).toBeNull()
+    expect(within(cardOf('Held, allowed')).getByText('Unrestricted')).toBeTruthy()
+    expect(within(cardOf('Held, asks')).queryByText('Unrestricted')).toBeNull()
   })
 
   it('says how long work has run', () => {

@@ -20,7 +20,9 @@ import { task, runtime, turns, until } from './support'
  * ahead, and so does what the task asks next, while the project's other
  * tasks still ask; what Althar can't read is refused rather than let
  * through while the project never allows something; and turned off, the
- * task asks again. A call a kind always asks about says it is held.
+ * task asks again. A call a kind always asks about says it is held. A
+ * burst, several calls waiting at once, clears whole: a task's by its
+ * switch, and every task's in the project by the project's.
  */
 
 const withQueries = () => Queries.layer.pipe(Layer.provideMerge(runtime()))
@@ -75,6 +77,9 @@ const waitingCall = (threadId: string) =>
     if (call === undefined) return yield* Effect.die(new Error('no call'))
     return call
   })
+
+/** Waits for `count` calls to open on a thread at once. */
+const waitingCalls = (threadId: string, count: number) => until(calls(threadId), (open) => open.length >= count)
 
 /** What the agent said, in order, leaving out the fake agent's echo of its brief. */
 const said = (threadId: string) =>
@@ -148,6 +153,50 @@ describe('allow everything on a task (ADR-036)', () => {
       const again = yield* waitingCall(created.threadId)
       assert.strictEqual(again.command, 'echo third')
       assert.deepStrictEqual((yield* queries.thread(created.threadId)).task.allowEverything, { task: false, project: false })
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('clears a burst: what waits on a task goes ahead by its switch, and what waits anywhere in the project by the project’s', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const projects = yield* Projects
+      const policies = yield* Policies
+      const permissions = yield* Permissions
+      const instance = yield* Instance
+      const queries = yield* Queries
+      const { project, task: created } = yield* working('ask')
+      const other = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', { title: 'Second' }),
+        projectId: project.projectId,
+        title: 'Second',
+      })
+      yield* sessions.start({ threadId: other.threadId, agentId: 'codex' })
+      yield* until(turns(other.threadId), (rows) => rows.length >= 1 && rows.every(finished))
+
+      // Parallel tool calls, each a call of its own, waiting together.
+      yield* say(created.threadId, `${scenarios.runEach}echo one; echo two; echo three`)
+      yield* say(other.threadId, `${scenarios.runEach}echo four; echo five`)
+      yield* waitingCalls(created.threadId, 3)
+      yield* waitingCalls(other.threadId, 2)
+
+      // The task's switch clears its own stack, not the other task's.
+      yield* allow(created.taskId, true)
+      yield* ended(created.threadId, 1)
+      assert.deepStrictEqual(yield* said(created.threadId), ['chosen=allow_once,allow_once,allow_once'])
+      assert.deepStrictEqual(yield* calls(created.threadId), [])
+      assert.lengthOf(yield* calls(other.threadId), 2)
+
+      // The project's switch, as its rules screen sets it: the rules, then what waits decided again by them.
+      yield* policies.set(project.projectId as ProjectId, { allowEverything: true }, instance.personId)
+      yield* permissions.reconsider(project.projectId)
+      yield* ended(other.threadId, 1)
+      assert.deepStrictEqual(yield* said(other.threadId), ['chosen=allow_once,allow_once'])
+      assert.deepStrictEqual(yield* calls(other.threadId), [])
+      assert.deepStrictEqual((yield* queries.thread(other.threadId)).task.allowEverything, { task: false, project: true })
+      const board = yield* queries.board(project.projectId)
+      assert.isTrue(board.tasks.find((each) => each.taskId === other.taskId)?.allowEverything)
+      // Nothing waits on the person anywhere in the project.
+      assert.deepStrictEqual(board.calls, [])
     }).pipe(Effect.provide(withQueries())),
   )
 

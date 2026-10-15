@@ -42,7 +42,9 @@
     through Althar, whatever the switch says.
   - **It shows wherever the task does:** "Unrestricted" beside the task's
     menu in its header, with what it means on hover, and at the foot of its
-    board card until it settles.
+    board card until it settles, up next included. The project's switch
+    changing reads its board again and each of its tasks' heads, as no
+    task's own change says so.
   - **A card the project always asks about says why it has no "always
     allow"**, and offers the ways out: allowing everything on this task, or
     the rules. The runtime already kept this as `held` on the call; it is
