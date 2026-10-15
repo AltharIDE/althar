@@ -2427,6 +2427,8 @@ export class Runs extends Context.Service<
             }),
           )
           if (!taken) return yield* dropped
+          // A step done is a break in the lead's work: its next turn may start afresh (ADR-038).
+          yield* sessions.atBreak(access.threadId)
           if (quiet) {
             yield* rest(current.taskId)
             // A pull request that merged while it ran settles the task now.

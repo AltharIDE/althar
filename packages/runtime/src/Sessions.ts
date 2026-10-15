@@ -38,7 +38,7 @@ import { Artifacts } from './Artifacts'
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
-import { dueForHandover, handoverRecord, notesSection, roomFor } from './handover'
+import { CACHE_LIFE, dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
 import { notesOf } from './notes'
 import {
   AlreadyDelivered,
@@ -249,12 +249,16 @@ interface Running {
   /** When something it left running ended in between turns, if it hasn't spoken since, in milliseconds. */
   wakeAt: number | null
   /**
-   * A coordinator's handover to a fresh session (ADR-031): under way, it
-   * takes no more turns; left, it carries on as it is, its agent compacting
-   * by itself, as one that couldn't start or that its brief would fill
-   * leaves it.
+   * A coordinator's or a lead's handover to a fresh session (ADR-031,
+   * ADR-038): under way, it takes no more turns; left, it carries on as it
+   * is, its agent compacting by itself, as one that couldn't start or that
+   * its brief would fill leaves it.
    */
   handover: 'none' | 'under_way' | 'left'
+  /** When its last turn ended, in milliseconds; null before its first. A lead idle past its cache's life is at a break. */
+  turnEndedAt: number | null
+  /** Its last turn ended a step of its work, or made its task a change (`atBreak`): a break, where a lead may start afresh. */
+  atBreak: boolean
 }
 
 /** How often, at most, a thread's agent is looked at while a round waits for it to be done. */
@@ -273,6 +277,9 @@ const heardContext = (running: Running, event: SessionEvent) => {
 const accountOf = (input: { readonly accountId?: string }) => (input.accountId === undefined ? {} : { accountId: input.accountId })
 
 type StopRequest = { readonly state: 'completed' } | { readonly state: 'superseded'; readonly by: string }
+
+/** Why a session's brief is written: a start, another agent taking over, or the same one started afresh to keep its context small. */
+type Why = { readonly kind: 'start' } | { readonly kind: 'takeover'; readonly from: string | undefined } | { readonly kind: 'handover' }
 
 type Store =
   | Artifacts
@@ -507,6 +514,12 @@ export class Sessions extends Context.Service<
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) => Effect.Effect<boolean>,
     ): Effect.Effect<void>
+    /**
+     * Says the turn the thread's lead is in ends at a break in its work: it
+     * finished a step, or made its task a change. Its next turn may then
+     * start in a fresh session, briefed from the task (ADR-038).
+     */
+    atBreak(threadId: string): Effect.Effect<void>
     /**
      * Whether the thread's agent is still at work, though its turn has ended:
      * it left a command running, is in a call of its own, or spoke outside a
@@ -810,15 +823,33 @@ export class Sessions extends Context.Service<
           return { images, withheld }
         })
 
+      /**
+       * Whether a session is handed to a fresh one before its next turn: a
+       * coordinator whose context is filling up (ADR-031); a task's lead whose
+       * context is past its mark, or past a smaller one at a break in its work
+       * (a step done, the task made a change, or idle past its cache's life),
+       * unless something it left running still runs, which closing its
+       * session would stop (ADR-038).
+       */
+      const dueToHandOver = (running: Running) =>
+        Effect.gen(function* () {
+          const { thread } = running
+          if (thread.role === 'coordinator') return dueForHandover(running.context)
+          if (thread.role !== 'task' || thread.review !== null) return false
+          if ([...running.background.values()].some((left) => left.ended === null)) return false
+          const idle = running.turnEndedAt !== null && (yield* Clock.currentTimeMillis) - running.turnEndedAt >= CACHE_LIFE
+          return dueForLeadHandover(running.context, running.atBreak || idle)
+        })
+
       /** Delivers the queued input as one turn, and records it to its end. */
       const deliver = (running: Running) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { thread } = running
-          // A coordinator handing its conversation over takes no more turns. One whose context is filling up hands it over now,
-          // between turns, never in one: what waits goes to the fresh session (ADR-031).
+          // A coordinator or lead handing its work over takes no more turns. One whose context is filling up hands it over now,
+          // between turns, never in one: what waits goes to the fresh session (ADR-031, ADR-038).
           if (running.handover === 'under_way') return false
-          if (thread.role === 'coordinator' && running.handover === 'none' && dueForHandover(running.context)) {
+          if (running.handover === 'none' && (yield* dueToHandOver(running))) {
             running.handover = 'under_way'
             yield* Effect.forkIn(run(handOver(running)), sessionsScope)
             return false
@@ -954,6 +985,7 @@ export class Sessions extends Context.Service<
             )
           running.brief = undefined
           running.turnRunning = true
+          running.atBreak = false
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
           running.workedAt = null
@@ -1064,6 +1096,7 @@ export class Sessions extends Context.Service<
           // What the turn left open is kept as far as it came: the message being written, and any command's output.
           yield* items.end.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record the end of a message', cause)))
           running.turnRunning = false
+          running.turnEndedAt = yield* Clock.currentTimeMillis
 
           const failure = Exit.isFailure(streamed) ? Cause.findErrorOption(streamed.cause) : Option.none()
           const errorClass = errorClassOf(failure, Exit.isFailure(streamed)) ?? ended?.failure?.failure
@@ -1521,6 +1554,8 @@ export class Sessions extends Context.Service<
             workedAt: null,
             wakeAt: null,
             handover: 'none',
+            turnEndedAt: null,
+            atBreak: false,
           }
           threads.set(thread.threadId, running)
           yield* Effect.forkIn(run(deliveries(running)), scope)
@@ -1882,10 +1917,7 @@ export class Sessions extends Context.Service<
        * its worktree stands (the plan, and the change so far), and the thread;
        * for the coordinator, its role, the project, and the thread.
        */
-      const briefFor = (
-        thread: ThreadContext,
-        why: { readonly kind: 'start' } | { readonly kind: 'takeover'; readonly from: string | undefined },
-      ): Effect.Effect<string, SqlError.SqlError, Store> =>
+      const briefFor = (thread: ThreadContext, why: Why): Effect.Effect<string, SqlError.SqlError, Store> =>
         thread.role === 'coordinator'
           ? coordinatorBrief(thread)
           : thread.role === 'reviewer'
@@ -1932,10 +1964,7 @@ export class Sessions extends Context.Service<
           ].join('\n\n')
         })
 
-      const taskBrief = (
-        thread: TaskThread,
-        why: { readonly kind: 'start' } | { readonly kind: 'takeover'; readonly from: string | undefined },
-      ) =>
+      const taskBrief = (thread: TaskThread, why: Why) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           // The project's repositories the task doesn't change, which it may read where the person keeps them.
@@ -2027,7 +2056,9 @@ export class Sessions extends Context.Service<
               ? several
                 ? 'You are working on a task across several repositories, each in a git worktree of its own. Althar keeps its record and answers your permission requests.'
                 : 'You are working on a task in a git worktree of its own. Althar keeps its record and answers your permission requests.'
-              : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
+              : why.kind === 'handover'
+                ? `You are carrying on a task an earlier session of yours worked on, in the same ${several ? 'worktrees' : 'worktree'}: Althar started you afresh to keep your context small. Its record so far is below.`
+                : `You are taking over a task${why.from === undefined ? '' : ` from ${why.from}`}, in the same ${several ? 'worktrees' : 'worktree'}. Its record so far is below.`,
             `Task: ${thread.title}${thread.description === '' ? '' : `\n\n${thread.description}`}`,
             ...askedFor(thread),
             several
@@ -2222,8 +2253,9 @@ export class Sessions extends Context.Service<
         )
 
       /**
-       * Hands the coordinator's conversation to a fresh session once its
-       * context is filling up (ADR-031): the same agent, account, model and
+       * Hands a coordinator's conversation, or a task lead's work, to a fresh
+       * session once its context is filling up, or for a lead, at a break in
+       * its work (ADR-031, ADR-038): the same agent, account, model and
        * effort, briefed from Althar's records. It starts between turns: the
        * old session takes no more, and what the person says meanwhile waits
        * for the new one. The new session is started before the old one stops,
@@ -2237,16 +2269,22 @@ export class Sessions extends Context.Service<
             const sql = yield* SqlClient.SqlClient
             const { thread } = previous
             // Stopped or switched while it waited: nothing is left to hand over.
-            if (thread.role !== 'coordinator' || threads.get(thread.threadId) !== previous || previous.stopping) return
+            if (thread.role === 'reviewer' || threads.get(thread.threadId) !== previous || previous.stopping) return
             const [session] = yield* sql<{ model: string | null; effort: string | null }>`
               SELECT model, effort FROM provider_sessions WHERE id = ${previous.sessionId}`
             const model = session?.model ?? undefined
             const effort = session?.effort ?? undefined
             // Written first: the old session takes no more turns, so the record already holds everything it did.
-            const brief = yield* handoverBrief(thread)
-            // A brief that would fill a fresh session as far would only be due again: the old one carries on as it is.
-            if (!roomFor(brief.text, previous.context)) {
-              yield* Effect.logWarning('The coordinator is left to compact by itself: its brief would fill a fresh session')
+            const brief =
+              thread.role === 'coordinator'
+                ? yield* handoverBrief(thread)
+                : { text: yield* briefFor(thread, { kind: 'handover' }), open: null }
+            // A brief that would fill a fresh session as far would only be due again, and a lead's that saves little isn't
+            // worth its thread of thought: the old one carries on as it is.
+            if (!roomFor(brief.text, previous.context) || (thread.role === 'task' && !shrinks(brief.text, previous.context))) {
+              yield* Effect.logWarning(
+                `The ${thread.role === 'task' ? 'lead' : 'coordinator'} is left to compact by itself: its brief would fill a fresh session`,
+              )
               previous.handover = 'left'
               return yield* Queue.offer(previous.wake, undefined)
             }
@@ -2257,16 +2295,24 @@ export class Sessions extends Context.Service<
               source: 'runtime',
               severity: 'info',
               title:
-                brief.open === 0
-                  ? 'Started a fresh session.'
-                  : `Started a fresh session; picked up ${brief.open} open ${brief.open === 1 ? 'task' : 'tasks'}.`,
+                brief.open === null
+                  ? `Started ${previous.entry.definition.name} afresh, briefed from the task, to keep its context small.`
+                  : brief.open === 0
+                    ? 'Started a fresh session.'
+                    : `Started a fresh session; picked up ${brief.open} open ${brief.open === 1 ? 'task' : 'tasks'}.`,
             })
-            yield* activate(connected, { text: brief.text, closing: 'Carry the conversation on from where it stands.' })
+            yield* activate(connected, {
+              text: brief.text,
+              closing:
+                thread.role === 'coordinator'
+                  ? 'Carry the conversation on from where it stands.'
+                  : 'Carry on with the task from where it stands.',
+            })
           }),
         ).pipe(
           Effect.catchCause((cause) =>
             Effect.andThen(
-              Effect.logWarning('Could not hand the coordinator to a fresh session', cause),
+              Effect.logWarning('Could not hand a session to a fresh one', cause),
               // It carries on as it is, with what waited for it.
               Effect.suspend(() => {
                 if (threads.get(previous.thread.threadId) !== previous) return Effect.void
@@ -2381,6 +2427,11 @@ export class Sessions extends Context.Service<
         gateTurns: (next) =>
           Effect.sync(() => {
             gate = next
+          }),
+        atBreak: (threadId) =>
+          Effect.sync(() => {
+            const running = threads.get(threadId)
+            if (running !== undefined) running.atBreak = true
           }),
         onPersonsTurn: (next) =>
           Effect.sync(() => {
