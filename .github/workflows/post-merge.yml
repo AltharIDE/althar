@@ -1,0 +1,170 @@
+name: post-merge
+
+# Every suite, after merge: checks again (two pull requests can each pass and still clash), the coverage gates, the desktop app's end-to-end run and its packages. A pull request
+# runs only the fast part (checks and unit tests, in desktop.yml, harness.yml and ui.yml), so a change to main doesn't
+# hold every open pull request up for the long runs. Main may go red for a while; a release can't: release.yml cuts
+# only a commit this workflow passed on.
+#
+# Merges in quick succession share a run: one runs, the newest waits, and those between are skipped. When main goes
+# red, an issue titled "Main is red" says which run failed and on which commits; it is closed when main is green again.
+#
+# Run by hand on any branch or tag (`gh workflow run post-merge.yml --ref <branch>`) to try the heavy suites before
+# merging, or on a release tag whose commit was skipped.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: post-merge-${{ github.ref }}
+  # Never cancelled half way: a newer push waits, and replaces any older one still waiting.
+  cancel-in-progress: false
+
+jobs:
+  harness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          [
+            packages/connectors,
+            packages/contracts,
+            packages/domain,
+            packages/persistence-sqlite,
+            packages/provider-adapters,
+            packages/runtime,
+            apps/cli,
+          ]
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run check
+      - run: bun run test:coverage
+
+  ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: packages/ui
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run check
+      - run: bun run test:coverage
+
+  desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: bun run check
+      - run: bun run test:coverage
+      # The end-to-end tests run the built app, with the fake agent, on a virtual display, with a keyring:
+      # a runner's desktop isn't one Electron recognises, so it would fall back to plain text, which Althar
+      # refuses; the main process asks for libsecret (keyring.ts), and gnome-keyring answers.
+      - run: sudo apt-get update && sudo apt-get install -y gnome-keyring libsecret-1-0
+      - run: dbus-run-session -- bash -c 'printf "althar\n" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1; xvfb-run --auto-servernum bun run test:e2e'
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: desktop-e2e
+          path: apps/desktop/test-results
+          retention-days: 7
+
+  # The Linux packages as a build test.
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .node-version
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run package
+      - uses: actions/upload-artifact@v6
+        with:
+          name: desktop-packages
+          path: |
+            apps/desktop/out/dist/Althar-*.AppImage
+            apps/desktop/out/dist/althar_*.deb
+            apps/desktop/out/dist/althar-*.rpm
+          if-no-files-found: error
+
+  # Main's state, as one open issue: opened (or added to) when a run on main fails, closed when one passes.
+  report:
+    needs: [harness, ui, desktop, package]
+    if: ${{ always() && github.ref == 'refs/heads/main' && !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      FAILED: ${{ contains(needs.*.result, 'failure') }}
+      RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      BEFORE: ${{ github.event.before }}
+    steps:
+      - name: Open, add to or close "Main is red"
+        run: |
+          title="Main is red"
+          open="$(gh issue list --state open --search "in:title \"$title\"" --json number,title \
+            --jq "map(select(.title == \"$title\"))[0].number // empty")"
+          short="${GITHUB_SHA::8}"
+          if [ "$FAILED" = true ]; then
+            body="post-merge failed on $short: $RUN"
+            if [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+              body="$body"$'\n\n'"Merged since the push before: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${BEFORE::8}...$short"
+            fi
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --body "$body"
+            else
+              gh issue create --title "$title" --body "$body"$'\n\n'"Find the merge that broke it, fix it on a branch, or revert it. This closes itself when post-merge passes on main."
+            fi
+          elif [ -n "$open" ]; then
+            gh issue close "$open" --comment "post-merge passed on $short: $RUN"
+          fi
