@@ -1,8 +1,8 @@
 import { join } from 'node:path'
 
-import { BrowserWindow, nativeImage, type Rectangle, screen, Tray } from 'electron'
+import { BrowserWindow, Menu, nativeImage, nativeTheme, type Rectangle, screen, Tray } from 'electron'
 
-import { DEFAULT_EDGE, type EdgePlace, edgeIn, findNotch, type Notch, pointerOn, readEdge, sheetBounds, writeEdge } from './edge'
+import { DEFAULT_EDGE, type EdgePlace, edgeIn, findNotch, markFile, type Notch, pointerOn, readEdge, sheetBounds, trayItems, writeEdge } from './edge'
 
 /*
  * The edge of the screen, drawn (edge.ts holds the choice and finds the
@@ -29,6 +29,10 @@ export interface EdgeHost {
   readonly preload: string
   /** renderer/edge.html. */
   readonly page: string
+  /** Brings Althar's window forward: the tray's menu, off a Mac, opens it. */
+  readonly open: () => void
+  /** Quits Althar. */
+  readonly quit: () => void
   /** resources/tray, the menu bar's pictures. */
   readonly pictures: string
   /** The end-to-end tests' quiet run (main.ts): the island is drawn clear and never takes the pointer. */
@@ -198,11 +202,24 @@ export const startEdge = (host: EdgeHost): Edge => {
   /* ---- the menu bar ---- */
 
   const picture = (yours: boolean) => {
-    const image = nativeImage.createFromPath(join(host.pictures, yours ? 'markYoursTemplate.png' : 'markTemplate.png'))
-    // The menu bar draws a template in its own colour, light or dark, whatever is behind it.
-    image.setTemplateImage(true)
+    // A Windows taskbar follows the system's mode. A Linux panel's colour isn't the app theme's (Electron says light where the
+    // desktop gives no word, on a dark KDE panel too), and most are dark: there the mark is light.
+    const dark = process.platform === 'linux' || nativeTheme.shouldUseDarkColors
+    const image = nativeImage.createFromPath(join(host.pictures, markFile(process.platform, dark, yours)))
+    // The menu bar draws a template in its own colour, light or dark, whatever is behind it; elsewhere the file is the colour.
+    if (process.platform === 'darwin') image.setTemplateImage(true)
     return image
   }
+
+  /** The menu off a Mac, where the mark may not take a click (an AppIndicator ignores it) and may not show without a menu. */
+  const trayMenu = () =>
+    Menu.buildFromTemplate(
+      trayItems(waiting).map((item) =>
+        'separator' in item
+          ? { type: 'separator' as const }
+          : { label: item.label, click: () => (item.action === 'quit' ? host.quit() : host.open()) },
+      ),
+    )
 
   /** Beside the mark, on the screen it is on (`sheetBounds`). */
   const sheetPlace = (height: number) => {
@@ -250,6 +267,8 @@ export const startEdge = (host: EdgeHost): Edge => {
     tray = new Tray(picture(waiting > 0))
     tray.setToolTip('Althar')
     tray.on('click', toggleSheet)
+    // Off a Mac the sheet's click may never come (AppIndicator), so the menu carries what it would.
+    if (process.platform !== 'darwin') tray.setContextMenu(trayMenu())
     // Made now and kept hidden, so the first click opens it at once, already read.
     if (sheet === undefined || sheet.isDestroyed()) makeSheet()
   }
@@ -305,6 +324,11 @@ export const startEdge = (host: EdgeHost): Edge => {
   screen.on('display-removed', changed)
   screen.on('display-metrics-changed', changed)
 
+  // The system's mode changes under a Windows taskbar: the mark is drawn again in the other colour.
+  nativeTheme.on('updated', () => {
+    if (process.platform !== 'darwin' && tray !== undefined && !tray.isDestroyed()) tray.setImage(picture(waiting > 0))
+  })
+
   const first = readEdge(host.profile()).then((place) => {
     chosen = place
     return look()
@@ -323,7 +347,9 @@ export const startEdge = (host: EdgeHost): Edge => {
     },
     waiting: (count) => {
       waiting = count
-      if (tray !== undefined && !tray.isDestroyed()) tray.setImage(picture(count > 0))
+      if (tray === undefined || tray.isDestroyed()) return
+      tray.setImage(picture(count > 0))
+      if (process.platform !== 'darwin') tray.setContextMenu(trayMenu())
     },
     owns: (window) => window === island || window === sheet,
     drawn: (window, rect) => {

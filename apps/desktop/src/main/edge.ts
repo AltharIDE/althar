@@ -152,3 +152,19 @@ export const findNotch = (primaryHeight: number): Promise<Notch | null> =>
           resolve(error === null ? notchIn(said, primaryHeight) : null),
         )
       })
+
+/** The mark's picture in resources/tray: a template on a Mac, where the menu bar colours it; elsewhere light for a dark panel, dark for a light one. */
+export const markFile = (platform: NodeJS.Platform, dark: boolean, yours: boolean): string =>
+  `mark${yours ? 'Yours' : ''}${platform === 'darwin' ? 'Template' : dark ? 'Light' : 'Dark'}.png`
+
+/** What the tray's menu holds off a Mac, where the mark itself may not take a click: open, what waits, quit. */
+export type TrayItem = { readonly label: string; readonly action: 'open' | 'quit' | null } | { readonly separator: true }
+
+export const trayItems = (waiting: number): readonly TrayItem[] => [
+  { label: 'Open Althar', action: 'open' },
+  ...(waiting > 0
+    ? [{ label: waiting === 1 ? '1 call waiting on you' : `${waiting} calls waiting on you`, action: 'open' as const }]
+    : []),
+  { separator: true },
+  { label: 'Quit Althar', action: 'quit' },
+]

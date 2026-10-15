@@ -8,7 +8,7 @@ import { LOGO_BORE, LOGO_SECTION } from '@althar/ui'
 
 import { BORE, SECTION } from '../scripts/trayPictures'
 import { readAppIcon, writeAppIcon } from '../src/main/appIcon'
-import { edgeIn, notchIn, pointerOn, readEdge, sheetBounds, writeEdge } from '../src/main/edge'
+import { edgeIn, markFile, trayItems, notchIn, pointerOn, readEdge, sheetBounds, writeEdge } from '../src/main/edge'
 
 /*
  * Where Althar shows while the person is in another app: the notch AppKit
@@ -113,11 +113,26 @@ describe('the menu bar’s pictures', () => {
 
   it('are there, at both sizes, as template images', () => {
     const tray = join(import.meta.dirname, '..', 'resources', 'tray')
-    for (const name of ['markTemplate', 'markYoursTemplate'])
+    for (const name of ['markTemplate', 'markYoursTemplate', 'markLight', 'markYoursLight', 'markDark', 'markYoursDark'])
       for (const scale of ['', '@2x']) {
         const path = join(tray, `${name}${scale}.png`)
         expect(existsSync(path), path).toBe(true)
         expect(statSync(path).size).toBeGreaterThan(100)
       }
+  })
+})
+
+describe('the tray off a Mac', () => {
+  it('draws a light mark on a dark panel, a dark one on a light panel, and a template on a Mac', () => {
+    expect(markFile('linux', true, false)).toBe('markLight.png')
+    expect(markFile('win32', false, true)).toBe('markYoursDark.png')
+    expect(markFile('darwin', true, true)).toBe('markYoursTemplate.png')
+    expect(markFile('darwin', false, false)).toBe('markTemplate.png')
+  })
+
+  it('has a menu that opens, says what waits, and quits', () => {
+    expect(trayItems(0).map((item) => ('label' in item ? item.label : '-'))).toEqual(['Open Althar', '-', 'Quit Althar'])
+    expect(trayItems(1)[1]).toMatchObject({ label: '1 call waiting on you', action: 'open' })
+    expect(trayItems(3)[1]).toMatchObject({ label: '3 calls waiting on you' })
   })
 })
