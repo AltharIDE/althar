@@ -4,6 +4,7 @@ import { type Access, type AccessLine, line } from '../access'
 import { ConnectorFailed } from '../errors'
 import type {
   Account,
+  ChangeList,
   ChangeRequest,
   ChangeState,
   ChangeToReview,
@@ -12,6 +13,7 @@ import type {
   Comment,
   Container,
   Issue,
+  ListedChange,
   NewReview,
   Person,
   Product,
@@ -20,7 +22,7 @@ import type {
   Tracker,
   Verdict,
 } from '../model'
-import { leftAsItIs, noReviews, unstarted } from '../model'
+import { leftAsItIs, noListing, noReviews, unstarted } from '../model'
 
 /*
  * A code host and tracker that lives in memory, for tests and the desktop's
@@ -45,6 +47,12 @@ export interface FakeServiceOptions {
   readonly conflictsOf?: (number: number) => boolean | undefined
   /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
   readonly checksFor?: (number: number, sha: string) => ReadonlyArray<Pick<Check, 'name' | 'state'> & { readonly log?: string }> | undefined
+  /** Whether it lists changes: true unless said, as every host Althar knows does. */
+  readonly lists?: boolean
+  /** A scope the connection lacks, which listing changes needs: listing is refused for it, as a host refuses a token without it. */
+  readonly listLacks?: string
+  /** How many of the newest it reads before narrowing them, as a host that narrows a page at a time stops: all unless said. */
+  readonly listReads?: number
   /** Whether the host can run a check again; it can, unless a test says. A check run again is in `reruns`. */
   readonly reruns?: boolean
 }
@@ -120,6 +128,9 @@ export interface FakeControls {
     readonly additions?: number
     readonly deletions?: number
     readonly changedFiles?: number
+    readonly draft?: boolean
+    /** Whose review it asks for, by login. */
+    readonly reviewers?: ReadonlyArray<string>
   }): ChangeRequest
   /** Every review posted, in order, with the change it is on. */
   readonly reviewsPosted: ReadonlyArray<{ readonly number: number; readonly id: string; readonly review: NewReview }>
@@ -150,6 +161,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const forks = new Map<number, string>()
   /** Changes whose author isn't one of the repository's people, by number. */
   const outsiders = new Set<number>()
+  /** Whose review each change asks for, by number, by login. */
+  const asked = new Map<number, ReadonlyArray<string>>()
   /** Where each change's target branch is, by number, where a test says. */
   const bases = new Map<number, string>()
   const posted: Array<{ readonly number: number; readonly id: string; readonly review: NewReview }> = []
@@ -271,6 +284,61 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         const head = options.headOf?.(number) ?? null
         const conflicts = found.state === 'open' ? options.conflictsOf?.(number) : undefined
         return Effect.succeed({ ...found, ...(head === null ? {} : { headSha: head }), ...(conflicts === undefined ? {} : { conflicts }) })
+      }),
+    listChanges: (repository, query) =>
+      Effect.andThen(called('listChanges'), () => {
+        if (options.lists === false) return Effect.fail(noListing(product, service.words))
+        if (options.listLacks !== undefined)
+          return Effect.fail(
+            new ConnectorFailed({
+              product,
+              reason: 'forbidden',
+              status: 403,
+              message: 'Resource not accessible by token',
+              scope: options.listLacks,
+            }),
+          )
+        const words = (query.text ?? '')
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((word) => word !== '')
+        const newest = changes
+          .filter((change) => repositoryOf.get(change.number) === repository.id && (query.state === 'all' || change.state === query.state))
+          .toSorted((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : b.number - a.number))
+        const read = newest.slice(0, options.listReads ?? newest.length)
+        const found = read.filter(
+          (change) =>
+            (query.author === undefined || change.author?.login.toLowerCase() === query.author.toLowerCase()) &&
+            words.every((word) => change.title.toLowerCase().includes(word)) &&
+            (query.reviewRequested !== true || (asked.get(change.number) ?? []).includes(me.login)) &&
+            (query.draft === undefined || change.draft === query.draft),
+        )
+        const listed = found.slice(0, query.limit).map((change): ListedChange => {
+          // Each reviewer's latest verdict: a request for changes holds over an approval.
+          const latest = new Map((reviews.get(change.number) ?? []).map((review) => [review.author.login, review.verdict]))
+          const verdicts = [...latest.values()]
+          const ran = checks.get(change.number) ?? []
+          const fork = forks.get(change.number)
+          return {
+            ...change,
+            body: '',
+            forkOwner: fork === undefined || fork === '' ? null : (fork.split('/')[0] ?? null),
+            reviewDecision: verdicts.includes('changes_requested')
+              ? 'changes_requested'
+              : verdicts.includes('approved')
+                ? 'approved'
+                : null,
+            checks:
+              ran.length === 0
+                ? null
+                : ran.some((check) => check.state === 'failed')
+                  ? 'failed'
+                  : ran.some((check) => check.state === 'queued' || check.state === 'running')
+                    ? 'running'
+                    : 'passed',
+          }
+        })
+        return Effect.succeed({ changes: listed, more: found.length > listed.length || read.length < newest.length } satisfies ChangeList)
       }),
     markReady: (_repository, change) =>
       Effect.andThen(called('markReady'), () => {
@@ -586,7 +654,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         body: input.body ?? '',
         url: `${repository.webUrl}/pull/${number}`,
         state: input.state ?? 'open',
-        draft: false,
+        draft: input.draft ?? false,
         source: input.source ?? `${input.author}/change-${number}`,
         target: input.target ?? repository.defaultBranch,
         headSha: input.headSha ?? `head-${number}`,
@@ -601,6 +669,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       if (input.fork !== undefined) forks.set(number, input.fork.join('/'))
       if (input.member === false) outsiders.add(number)
       if (input.baseSha !== undefined) bases.set(number, input.baseSha)
+      if (input.reviewers !== undefined) asked.set(number, input.reviewers)
       return opened
     },
     get reviewsPosted() {

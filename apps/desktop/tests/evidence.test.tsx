@@ -45,6 +45,21 @@ function Task() {
 }
 
 describe('evidence, as the window draws it', () => {
+  it('says each kind of piece as the kit names it', () => {
+    const kinds = (['screenshot', 'recording', 'command', 'test_run', 'response', 'log', 'note'] as const).map(
+      (kind) => pieceOf(piece({ kind, ...(kind === 'note' ? {} : { text: 'printed' }) }), kind).kind,
+    )
+    expect(kinds).toEqual([
+      EvidenceKind.Screenshot,
+      EvidenceKind.Recording,
+      EvidenceKind.Command,
+      EvidenceKind.TestRun,
+      EvidenceKind.Response,
+      EvidenceKind.Log,
+      EvidenceKind.Note,
+    ])
+  })
+
   it('draws a screenshot by its digest, a run by what it printed, and a note as said', () => {
     expect(pieceOf(SHOT, 's')).toEqual({
       id: 's',
@@ -99,7 +114,7 @@ describe('evidence, as the window draws it', () => {
     )
   })
 
-  it('shows it under the lead’s step in the thread, and under what the task changed, its screenshot opening full size', async () => {
+  it('shows it under the lead’s report in the thread, and under what the task changed, its screenshot opening full size', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
         snapshot({
@@ -109,10 +124,10 @@ describe('evidence, as the window draws it', () => {
       ),
     })
     withServices(<Task />, client)
-    // In the thread, under the summary.
-    const run = await screen.findByRole('button', { name: 'What it printed: The kit’s tests' })
-    expect(run.textContent).toContain('exit 0')
-    expect(screen.getByRole('heading', { name: 'Unverified' })).toBeTruthy()
+    // In the thread, under what the lead reported: the screenshot large, what it checked, and what it couldn't.
+    expect(await screen.findByRole('button', { name: 'What it printed: The kit’s tests' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'View The Evidence section under the step full size' })).toBeTruthy()
+    expect(screen.getByText('Not checked')).toBeTruthy()
     expect(screen.getByText('Not tried in a real browser')).toBeTruthy()
     // Under what it changed, where the person decides on it.
     await userEvent.click(screen.getByRole('radio', { name: /Outputs/ }))
@@ -134,7 +149,7 @@ describe('evidence, as the window draws it', () => {
     expect(taskEvidence([review]).built).toBeNull()
   })
 
-  it('closes the thread with what the task built, then its proof, and tops the Outputs with them', async () => {
+  it('ends the thread with its lead’s report as its result, no card after it, and tops the Outputs with what it built', async () => {
     const built = 'Checkout retries once when the payment call fails.\n\n- Try a checkout with the network off.'
     const { client } = fakeClient({
       getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
@@ -157,22 +172,16 @@ describe('evidence, as the window draws it', () => {
     expect(headings.indexOf(heading)).toBe(0)
     expect(screen.getByText('Checkout retries once when the payment call fails.')).toBeTruthy()
     expect(screen.queryByText('A first go.')).toBeNull()
-    // The closing card, at the end of the thread.
+    // In the thread, each report is its lead speaking, what it showed under it, once; no card closes it.
     await userEvent.click(screen.getByRole('radio', { name: /Conversation/ }))
-    const card = await screen.findByRole('article', { name: 'What the task built' })
-    expect(within(card).getByText('Try a checkout with the network off.')).toBeTruthy()
-    expect(
-      within(card)
-        .getAllByRole('heading')
-        .map((one) => one.textContent),
-    ).toEqual(['What it built', 'Evidence', 'Unverified'])
-    // What the steps showed is gathered there, not shown again under them.
+    const result = await screen.findByText('Try a checkout with the network off.')
+    expect(screen.queryByRole('article', { name: 'What the task built' })).toBeNull()
     expect(screen.getAllByRole('button', { name: 'What it printed: The kit’s tests' })).toHaveLength(1)
-    expect(within(card).getByRole('button', { name: 'What it printed: The kit’s tests' })).toBeTruthy()
-    expect(screen.getByText('It holds.').compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // The reviewer has the last word, after the result it reviewed.
+    expect(result.compareDocumentPosition(screen.getByText('It holds.')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('keeps the closing card back while a step is under way, its evidence under its step', async () => {
+  it('shows what a report showed under it while a step is under way too, with no card for what the task built', async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
         snapshot({

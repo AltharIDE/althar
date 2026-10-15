@@ -1224,14 +1224,12 @@ describe("the coordinator's tools", () => {
         }),
         /^Planned bump-the-version\./,
       )
-      const [notice] = yield* sql<{ content: string }>`
+      // Its thread says what was passed on once a lead has it, not before (asks.test.ts).
+      const said = yield* sql<{ content: string }>`
         SELECT i.content FROM thread_items i JOIN threads t ON t.id = i.thread_id WHERE t.kind = 'task' AND i.kind = 'notice'`
-      assert.deepStrictEqual(JSON.parse(notice?.content ?? '{}'), {
-        source: 'runtime',
-        severity: 'info',
-        title: 'From the coordinator:',
-        description: 'Keep it short.',
-      })
+      assert.isEmpty(said)
+      const [waiting] = yield* sql<{ body: string; state: string }>`SELECT body, state FROM user_inputs WHERE body LIKE '%Keep it short.'`
+      assert.deepStrictEqual(waiting, { body: 'The coordinator passes this on:\n\nKeep it short.', state: 'queued' })
       // A lead has its own tools, not the coordinator's; with no step waiting, its summary is still kept.
       const lead: ToolAccess = { role: 'lead', projectId, threadId, sessionId: 'none', taskId: null }
       assert.strictEqual(yield* callTool(lead, 'draft_task', { title: 'x' }), 'Althar has no tool called draft_task.')
@@ -1279,9 +1277,13 @@ describe('a step whose agent stalls or goes round in circles', () => {
       const { projectId, task } = yield* planned('Quiet once', '[lead:hang-once] [lead:finish]', [{ key: 'implement', agentId: 'codex' }])
       const [card] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.strictEqual(card?.summary, 'Did the task.')
-      assert.include(
-        (yield* notices(task.threadId)).map((notice) => notice.title),
-        'Fake codex showed no sign of work for a minute while running `npm run dev`, so Althar stopped its turn and told it to carry on.',
+      // Althar's own housekeeping, kept with the lead's work: it asks nothing of the person.
+      assert.deepInclude(
+        (yield* notices(task.threadId)).map((notice) => [notice.title, notice.role]),
+        [
+          'Fake codex showed no sign of work for a minute while running `npm run dev`, so Althar stopped its turn and told it to carry on.',
+          'aside',
+        ],
       )
       const told = (yield* turns(task.threadId)).map((turn) => turn.prompt ?? '')
       assert.isTrue(
@@ -1336,9 +1338,9 @@ describe('a step whose agent stalls or goes round in circles', () => {
         [call.why, (call as unknown as { detail: string }).detail, (call as unknown as { tried: ReadonlyArray<string> }).tried],
         ['looping', 'npm test', ['redirected']],
       )
-      assert.include(
-        (yield* notices(task.threadId)).map((notice) => notice.title),
-        'Fake codex ran `npm test` 3 times in a row to the same end, so Althar stopped its turn and told it to try another way.',
+      assert.deepInclude(
+        (yield* notices(task.threadId)).map((notice) => [notice.title, notice.role]),
+        ['Fake codex ran `npm test` 3 times in a row to the same end, so Althar stopped its turn and told it to try another way.', 'aside'],
       )
       // Only its turn stops: it keeps what it knows for what the person says.
       yield* idleOn(task.threadId)

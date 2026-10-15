@@ -1,6 +1,8 @@
 import { useRef } from 'react'
 
-import { Menu, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
+import { Tooltip } from '../../primitives/HoverCard/HoverCard'
+import { Menu, MenuCheckboxItem, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator } from '../../primitives/Menu/Menu'
+import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
 import s from './TaskMenu.module.css'
 
@@ -20,6 +22,10 @@ import s from './TaskMenu.module.css'
  * is a choice in it too, while it is open: as its project says, or otherwise.
  * Where the task says otherwise than its project, a quiet word beside the
  * button says so; otherwise nothing shows of it until the menu opens.
+ *
+ * Allowing everything its agents ask is a switch in it while it is open.
+ * While everything on the task is allowed, by its own switch or its
+ * project's, a warm word beside the button says so, whatever else it says.
  */
 
 /** Whether a task's lead resolves conflicts on its own: as its project says, or, otherwise than it, unasked or when asked. */
@@ -31,9 +37,6 @@ export interface TaskMenuText {
   /** Opening the folder, in the editor named. */
   open: (editor: string) => string
   openAbout: string
-  /** Running what it built, with the command it runs. */
-  run: (command: string) => string
-  runAbout: string
   rename: string
   renameAbout: string
   startNow: string
@@ -60,6 +63,13 @@ export interface TaskMenuText {
   conflictsOffAbout: string
   /** Beside the button, where the task says otherwise than its project. */
   conflictsHint: (on: boolean) => string
+  /** Allowing everything its agents ask on the task: the switch, what it does, and what it says while its project allows everything. */
+  allowAll: string
+  allowAllAbout: string
+  allowAllProject: string
+  /** Beside the button while everything on the task is allowed: the word, and what it means, by its project's switch or its own. */
+  unrestricted: string
+  unrestrictedAbout: (byProject: boolean) => string
 }
 
 export const taskMenuText: TaskMenuText = {
@@ -67,8 +77,6 @@ export const taskMenuText: TaskMenuText = {
   label: 'This task',
   open: (editor) => `Open in ${editor}`,
   openAbout: 'The task’s folder, on its branch.',
-  run: (command) => `Run ${command}`,
-  runAbout: 'Althar runs what it built, in its worktree. It shows over the composer.',
   rename: 'Rename',
   renameAbout: 'Give it another title. Its branch and folder keep their names.',
   startNow: 'Start now',
@@ -93,6 +101,14 @@ export const taskMenuText: TaskMenuText = {
   conflictsOff: 'Off for this task',
   conflictsOffAbout: 'You ask the lead to fix a conflict when one comes up.',
   conflictsHint: (on) => `Auto-resolve conflicts: ${on ? 'on' : 'off'}`,
+  allowAll: 'Allow everything on this task',
+  allowAllAbout: 'Nothing its agents ask waits for you. Never still holds.',
+  allowAllProject: 'On for every task in this project, from its Rules.',
+  unrestricted: 'Unrestricted',
+  unrestrictedAbout: (byProject) =>
+    byProject
+      ? 'Its project allows everything: nothing its agents ask waits for you. Never still holds.'
+      : 'Everything is allowed on this task: nothing its agents ask waits for you. Never still holds.',
 }
 
 export interface TaskMenuProps {
@@ -102,8 +118,6 @@ export interface TaskMenuProps {
   onOpen?: () => void
   /** The editor it opens in, by name. */
   editor?: string
-  /** Runs what it built, with no agent: what the run command is, and running it. */
-  run?: { readonly command: string; readonly onRun: () => void }
   /** Starts its plan now, while it waits to start. */
   onStartNow?: () => void
   /** Marks its draft pull request ready for review. */
@@ -120,6 +134,12 @@ export interface TaskMenuProps {
    * its project says (`project`), and changing it. Given while it is open.
    */
   conflicts?: { readonly choice: TaskConflicts; readonly project: boolean; readonly onChange: (choice: TaskConflicts) => void }
+  /**
+   * Whether everything its agents ask is allowed, short of what its project
+   * never allows: by its own switch (`on`), changed here, or by its
+   * project's (`project`), which holds over it. Given while it is open.
+   */
+  allowEverything?: { readonly on: boolean; readonly project: boolean; readonly onChange: (on: boolean) => void }
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
@@ -130,7 +150,6 @@ export function TaskMenu({
   onRename,
   onOpen,
   editor,
-  run,
   onStartNow,
   onMarkReady,
   onSkipReview,
@@ -139,6 +158,7 @@ export function TaskMenu({
   onAbandon,
   onReopen,
   conflicts,
+  allowEverything,
   open,
   defaultOpen,
   onOpenChange,
@@ -148,8 +168,8 @@ export function TaskMenu({
   // Renaming puts the cursor in the title's field: the menu closing doesn't take focus back to its button.
   const renaming = useRef(false)
   const opener = onOpen !== undefined && editor !== undefined ? { onOpen, editor } : null
-  // Ways to look at what it made: in the editor, and running.
-  const opens = opener !== null || run !== undefined || onRename !== undefined
+  // Ways to look at what it made, in the editor, and to name it.
+  const opens = opener !== null || onRename !== undefined
   // Forward first, then what holds or brings it back, then what settles it, set apart.
   const course = [
     onStartNow && (
@@ -183,9 +203,11 @@ export function TaskMenu({
       </MenuItem>
     ),
   ].filter(Boolean)
-  if (!opens && course.length === 0 && !onAbandon && !conflicts) return null
+  if (!opens && course.length === 0 && !onAbandon && !conflicts && !allowEverything) return null
   // Said beside the button only where the task goes otherwise than its project.
   const differs = conflicts !== undefined && conflicts.choice !== 'project' && (conflicts.choice === 'on') !== conflicts.project
+  // Said beside it whenever everything on the task is allowed, by its own switch or its project's.
+  const unrestricted = allowEverything !== undefined && (allowEverything.on || allowEverything.project)
   const menu = (
     <Menu
       label={t.label}
@@ -218,11 +240,6 @@ export function TaskMenu({
           {t.open(opener.editor)}
         </MenuItem>
       )}
-      {run && (
-        <MenuItem icon="terminal" description={t.runAbout} onSelect={run.onRun}>
-          {t.run(run.command)}
-        </MenuItem>
-      )}
       {opens && course.length > 0 && <MenuSeparator />}
       {course}
       {conflicts && (
@@ -241,9 +258,23 @@ export function TaskMenu({
           </MenuRadioGroup>
         </>
       )}
-      {onAbandon && (
+      {allowEverything && (
         <>
           {(opens || course.length > 0 || conflicts) && <MenuSeparator />}
+          <MenuCheckboxItem
+            checked={allowEverything.on || allowEverything.project}
+            // Its project's switch holds over the task's: that one is turned off in the project's rules.
+            disabled={allowEverything.project}
+            description={allowEverything.project ? t.allowAllProject : t.allowAllAbout}
+            onCheckedChange={allowEverything.onChange}
+          >
+            {t.allowAll}
+          </MenuCheckboxItem>
+        </>
+      )}
+      {onAbandon && (
+        <>
+          {(opens || course.length > 0 || conflicts || allowEverything) && <MenuSeparator />}
           <MenuItem icon="close" tone="danger" description={t.abandonAbout} onSelect={onAbandon}>
             {t.abandon}
           </MenuItem>
@@ -251,10 +282,18 @@ export function TaskMenu({
       )}
     </Menu>
   )
-  if (!differs) return menu
+  if (!differs && !unrestricted) return menu
   return (
     <>
-      <span className={s.hint}>{t.conflictsHint(conflicts.choice === 'on')}</span>
+      {unrestricted && (
+        <Tooltip label={t.unrestrictedAbout(!allowEverything.on)} placement="below">
+          <span className={s.unrestricted}>
+            {t.unrestricted}
+            <VisuallyHidden>, {t.unrestrictedAbout(!allowEverything.on)}</VisuallyHidden>
+          </span>
+        </Tooltip>
+      )}
+      {differs && <span className={s.hint}>{t.conflictsHint(conflicts.choice === 'on')}</span>}
       {menu}
     </>
   )

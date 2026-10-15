@@ -9,7 +9,7 @@
   ],
   "type": "module",
   "scripts": {
-    "dev": "bun --filter @althar/pitch dev",
+    "dev": "bun --filter @althar/site dev",
     "site": "bun --filter @althar/site dev",
     "prototype": "vp dev --config packages/prototype-workbench/vite.config.ts",
     "prototype:shoot": "node packages/prototype-workbench/scripts/shoot.ts",
