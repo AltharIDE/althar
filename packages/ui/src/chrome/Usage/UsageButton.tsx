@@ -1,9 +1,4 @@
-import type { ComponentProps } from 'react'
-
-import { Icon } from '../../foundations/Icon/Icon'
-import { cx } from '../../lib/cx'
-import { Kbd } from '../../primitives/Kbd/Kbd'
-import s from './UsageButton.module.css'
+import { ChromeButton, type ChromeButtonProps } from '../ChromeButton/ChromeButton'
 
 /*
  * The way to the usage view, always in the window's bar. With warnings not
@@ -22,35 +17,22 @@ export const usageButtonText: UsageButtonText = {
   waiting: (n) => (n === 1 ? 'Usage, 1 warning not seen' : `Usage, ${n} warnings not seen`),
 }
 
-export interface UsageButtonProps extends Omit<ComponentProps<'button'>, 'children' | 'title'> {
+export interface UsageButtonProps extends Omit<ChromeButtonProps, 'icon' | 'label' | 'count'> {
   /** Warnings the person has not seen. */
   waiting?: number
-  /** The view it opens is open. */
-  expanded?: boolean
-  /** Its shortcut, shown after the label. */
-  kbd?: string
   text?: Partial<UsageButtonText>
 }
 
-export function UsageButton({ waiting = 0, expanded, kbd, text, className, type = 'button', ...rest }: UsageButtonProps) {
+export function UsageButton({ waiting = 0, text, ...rest }: UsageButtonProps) {
   const t = { ...usageButtonText, ...text }
   return (
-    <button
-      type={type}
-      className={cx(s.button, className)}
+    <ChromeButton
+      icon="load"
+      label={t.label}
+      count={waiting}
       aria-haspopup="dialog"
-      aria-expanded={expanded}
       aria-label={waiting > 0 ? t.waiting(waiting) : t.label}
       {...rest}
-    >
-      <Icon name="load" size={13} />
-      <span aria-hidden="true">{t.label}</span>
-      {waiting > 0 && (
-        <span className={s.count} aria-hidden="true">
-          {waiting}
-        </span>
-      )}
-      {kbd && <Kbd>{kbd}</Kbd>}
-    </button>
+    />
   )
 }

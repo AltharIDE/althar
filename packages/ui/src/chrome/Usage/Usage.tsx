@@ -66,6 +66,8 @@ export interface UsageText {
   /** Asks every account's source anew. */
   readAgain: string
   reading: string
+  /** Said before the first read comes. */
+  loading: string
   /** No agent has an account yet. */
   none: string
   /** An account paid by an API key. */
@@ -96,6 +98,8 @@ export const usageText: UsageText = {
   close: 'Close',
   readAgain: 'Read again',
   reading: 'Reading…',
+  /** Said before the first read comes. */
+  loading: 'Reading usage…',
   none: 'No agent accounts yet.',
   key: 'API key – no plan window',
   unknown: 'How this account is paid is not known.',
@@ -118,10 +122,12 @@ export const usageText: UsageText = {
 }
 
 export interface UsageProps {
-  /** Every agent with its accounts. */
-  groups: readonly UsageGroup[]
+  /** Every agent with its accounts; null before they are first read, which is not the same as none. */
+  groups: readonly UsageGroup[] | null
   /** Every account's source is being read again: Read again waits, and says so. */
   reading?: boolean
+  /** Why the last Read again failed, in words; shown above the accounts, which stay as they were. */
+  error?: string
   /** Read every account's source again. */
   onRefresh: () => void
   /** Escape, a press outside, or Close. */
@@ -181,7 +187,7 @@ function Account({ agent, account, t }: { agent: string; account: UsageAccountRo
   )
 }
 
-export function Usage({ groups, reading = false, onRefresh, onClose, text }: UsageProps) {
+export function Usage({ groups, reading = false, error, onRefresh, onClose, text }: UsageProps) {
   const t = { ...usageText, ...text }
   const ids = useId()
   // What had focus as it opened: there is no trigger of Radix's to give it back to.
@@ -216,8 +222,14 @@ export function Usage({ groups, reading = false, onRefresh, onClose, text }: Usa
             </Dialog.Close>
           </div>
           <div className={s.body} aria-busy={reading}>
-            {groups.length === 0 && <p className={s.none}>{t.none}</p>}
-            {groups.map((group) => (
+            {error !== undefined && (
+              <p className={s.error} role="alert">
+                {error}
+              </p>
+            )}
+            {groups === null && <p className={s.none}>{t.loading}</p>}
+            {groups?.length === 0 && <p className={s.none}>{t.none}</p>}
+            {groups?.map((group) => (
               <section key={group.id} className={s.group} aria-labelledby={`${ids}-${group.id}`}>
                 <h3 className={s.agent} id={`${ids}-${group.id}`}>
                   {group.name}

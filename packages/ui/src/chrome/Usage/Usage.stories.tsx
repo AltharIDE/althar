@@ -69,11 +69,28 @@ export const ApiKey: Story = {
 /** No agent has an account yet. */
 export const Empty: Story = { args: { groups: [] } }
 
+/** Before the first read: not "no accounts". */
+export const NotReadYet: Story = {
+  args: { groups: null },
+  play: async () => {
+    await expect(within(document.body).getByText('Reading usage…')).toBeVisible()
+    await expect(within(document.body).queryByText('No agent accounts yet.')).toBeNull()
+  },
+}
+
 /** Every source is being read again. */
 export const Reading: Story = {
   args: { groups: RUNNING_LOW, reading: true },
   play: async () => {
     await expect(within(document.body).getByRole('button', { name: 'Reading…' })).toBeVisible()
+  },
+}
+
+/** Reading again failed: why, above the accounts as they were. */
+export const ReadFailed: Story = {
+  args: { error: 'Althar’s runtime didn’t answer. If it keeps happening, restart Althar.' },
+  play: async () => {
+    await expect(within(document.body).getByRole('alert')).toHaveTextContent('runtime didn’t answer')
   },
 }
 

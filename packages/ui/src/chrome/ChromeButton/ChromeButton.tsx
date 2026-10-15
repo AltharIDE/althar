@@ -23,9 +23,11 @@ export interface ChromeButtonProps extends Omit<ComponentProps<'button'>, 'child
   compact?: boolean
   /** Its shortcut, shown after the label, or in the tooltip when compact. */
   kbd?: string
+  /** A small count after the label, such as what waits: it is for the eye, so the button's aria-label must say it too. */
+  count?: number
 }
 
-export function ChromeButton({ icon, label, expanded, compact, kbd, className, type = 'button', ...rest }: ChromeButtonProps) {
+export function ChromeButton({ icon, label, expanded, compact, kbd, count, className, type = 'button', ...rest }: ChromeButtonProps) {
   const button = (
     <button
       type={type}
@@ -37,6 +39,11 @@ export function ChromeButton({ icon, label, expanded, compact, kbd, className, t
       <Icon name={icon} size={13} />
       {!compact && <span>{label}</span>}
       {!compact && kbd && <Kbd>{kbd}</Kbd>}
+      {count !== undefined && count > 0 && (
+        <span className={s.count} aria-hidden="true">
+          {count}
+        </span>
+      )}
     </button>
   )
   if (!compact) return button
