@@ -107,6 +107,115 @@ describe('the thread recorder', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('keeps what a failed command printed with its status, before the agent says anything of it', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const writer = recorder(where)
+      yield* writer.record({
+        _tag: 'ToolCall',
+        toolCallId: 'test',
+        title: 'Isolation test',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { command: 'bun test isolation' },
+      })
+      yield* writer.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'test',
+        terminal: { output: 'fixture started\nAPI_KEY=sk-canary-12345678\n' },
+      })
+      yield* writer.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'test',
+        terminal: { output: 'AssertionError: expected account B, received account A\n' },
+      })
+      // Nothing written while it runs.
+      assert.notProperty(
+        (yield* items(where.threadId)).find((item) => item.content.title === 'Isolation test')?.content ?? {},
+        'diagnostic',
+      )
+      yield* writer.record({ _tag: 'ToolCallUpdate', toolCallId: 'test', status: 'failed', terminal: { exit: { code: 1, signal: null } } })
+      // No message after it, and no flush: what the store has now is what a restart finds.
+      const tool = (yield* items(where.threadId)).find((item) => item.content.title === 'Isolation test')
+      assert.strictEqual(tool?.content.status, 'failed')
+      assert.deepStrictEqual(tool?.content.diagnostic, {
+        text: 'fixture started\nAPI_KEY=[REDACTED]\nAssertionError: expected account B, received account A\nexit code: 1',
+        truncated: false,
+        redacted: true,
+      })
+      const sql = yield* SqlClient.SqlClient
+      const stored = yield* sql<{ content: string }>`SELECT content FROM thread_items WHERE thread_id = ${where.threadId}`
+      assert.isFalse(stored.some((row) => row.content.includes('sk-canary')))
+      assert.isTrue(
+        (yield* transcript(where.threadId, 10_000)).text.endsWith(
+          '[tool] Isolation test (failed)\n[it printed] fixture started\nAPI_KEY=[REDACTED]\nAssertionError: expected account B, received account A\nexit code: 1',
+        ),
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('keeps what a command printed when it arrives already failed, from what came back', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      yield* recorder(where).record({
+        _tag: 'ToolCall',
+        toolCallId: 'once',
+        title: 'One-shot isolation',
+        kind: 'execute',
+        status: 'failed',
+        rawInput: { command: 'bun test isolation' },
+        rawOutput: { stderr: 'AssertionError: expected account B, received account A', exitCode: 1, fileBody: 'never kept' },
+      })
+      const tool = (yield* items(where.threadId)).find((item) => item.content.title === 'One-shot isolation')
+      assert.deepStrictEqual(tool?.content.diagnostic, {
+        text: 'AssertionError: expected account B, received account A\nexit code: 1',
+        truncated: false,
+        redacted: false,
+      })
+      // What came back is still left out, and said to be.
+      assert.notProperty(tool?.content ?? {}, 'rawOutput')
+      assert.include(tool?.content.cut as ReadonlyArray<string>, 'output')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('keeps nothing of what a command printed when it succeeded, or when it read a file', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const writer = recorder(where)
+      const run = (toolCallId: string, command: string, status: 'completed' | 'failed') =>
+        Effect.gen(function* () {
+          yield* writer.record({
+            _tag: 'ToolCall',
+            toolCallId,
+            title: command,
+            kind: 'execute',
+            status: 'in_progress',
+            rawInput: { command },
+          })
+          yield* writer.record({ _tag: 'ToolCallUpdate', toolCallId, terminal: { output: 'SECRET=hunter2\n' } })
+          yield* writer.record({
+            _tag: 'ToolCallUpdate',
+            toolCallId,
+            status,
+            terminal: { exit: { code: status === 'failed' ? 1 : 0, signal: null } },
+          })
+        })
+      yield* run('ok', 'bun test', 'completed')
+      yield* run('read', 'cat .env.local', 'failed')
+      const tools = (yield* items(where.threadId)).filter((item) => item.kind === 'tool_call')
+      assert.deepStrictEqual(
+        tools.map((item) => [item.content.status, item.content.diagnostic]),
+        [
+          ['completed', undefined],
+          ['failed', undefined],
+        ],
+      )
+      assert.isTrue(
+        (yield* transcript(where.threadId, 10_000)).text.endsWith('[tool] bun test (completed)\n[tool] cat .env.local (failed)'),
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('writes the thread as text for a new agent, keeping the most recent part that fits', () =>
     Effect.gen(function* () {
       const where = yield* place

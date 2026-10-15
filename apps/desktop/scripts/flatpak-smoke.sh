@@ -1,9 +1,11 @@
 #!/bin/bash
 # The Flatpak smoke test: the checks that are its own environment's — git and
-# the window's entry inside the sandbox, the device outside it (the person's
-# own OpenCode and Codex, through the permission the manifest asks for),
+# the window's entry inside the sandbox, the bundled Claude Code CLI (its
+# sign-in and sessions), the device outside it (the person's own OpenCode and
+# Codex, through the permission the manifest asks for),
 # data that persists beside the profile (its home is fresh each run), and
-# permissions (no host filesystem or ssh-agent socket). The window's own
+# permissions (no host filesystem or ssh-agent socket, but the tray watcher
+# and the keyring reachable). The window's own
 # behavior is
 # the same X11 smoke the other packages use: ALTHAR_BIN=/usr/bin/althar
 # ALTHAR_ARGS=--ozone-platform=x11 scripts/x11-smoke.sh. Needs the app
@@ -27,6 +29,7 @@ echo "$perms" | grep -qE '(^|[=;])network(;|$)' && ok "network shared" || bad "n
 echo "$perms" | grep -qE '(^|[=;])ipc(;|$)' && ok "shared memory allowed (ipc)" || bad "shared memory (ipc)"
 echo "$perms" | grep -q 'wayland' && ok "wayland allowed" || bad "wayland allowed"
 echo "$perms" | grep -q 'org.freedesktop.secrets' && ok "the keyring is reachable (org.freedesktop.secrets)" || bad "keyring reachable"
+echo "$perms" | grep -q 'org.kde.StatusNotifierWatcher' && ok "the tray watcher is reachable (org.kde.StatusNotifierWatcher)" || bad "tray watcher reachable"
 echo "$perms" | grep -q 'org.freedesktop.Flatpak' && ok "the device is reachable (org.freedesktop.Flatpak)" || bad "device reachable"
 echo "$perms" | grep -q 'ssh-auth' && bad "ssh agent is not exposed" || ok "ssh agent is not exposed"
 echo "$perms" | grep -q 'filesystems=host' && bad "no host filesystem in permissions" || ok "no host filesystem in permissions"
@@ -50,6 +53,21 @@ if [ -n "$codex" ]; then
   case "$bridge" in *'"result"'*) ok "the Codex bridge answers over flatpak-spawn (ACP initialize)";; *) bad "the Codex bridge answers";; esac
 else
   echo "SKIP: no Codex on this device"
+fi
+
+# The bundled Claude Code CLI: flatpak-builder rewrites ELF files (stripping
+# and debug-info extraction), which drops the payload a Bun-compiled binary
+# keeps at the end of the file — it would run as plain bun, and sign-in and
+# sessions would fail. The manifest keeps that off (dev.althar.app.yml).
+claude_bin=$(run 'for cli in /app/main/resources/app/node_modules/@anthropic-ai/claude-agent-sdk-*/claude; do printf "%s" "$cli"; break; done')
+if [ -n "$claude_bin" ]; then
+  said=$(run "$claude_bin --version" | head -1)
+  case "$said" in *"Claude Code"*) ok "the bundled Claude Code CLI runs in the sandbox ($said)";; *) bad "the bundled Claude Code CLI runs (said: ${said:-nothing})";; esac
+  # What the sign-in line names for a bundled copy: the same CLI, through the app, from a host terminal.
+  host_said=$(flatpak run --command="$claude_bin" "$APP" --version 2>/dev/null | head -1)
+  case "$host_said" in *"Claude Code"*) ok "the bundled Claude Code CLI runs through the app from a host terminal ($host_said)";; *) bad "the bundled Claude Code CLI through the app";; esac
+else
+  bad "the bundled Claude Code CLI is installed"
 fi
 
 run 'test -f /app/share/applications/dev.althar.app.desktop && grep -q "StartupWMClass=dev.althar.app" /app/share/applications/dev.althar.app.desktop' && ok "the desktop entry is there, with the right class" || bad "desktop entry"

@@ -742,6 +742,8 @@ export class Coordinator extends Context.Service<
                 title,
               })
               const under = yield* runs.makeChange(taskId, review, end, instance.systemId)
+              // Made a change is a break in the lead's work: what it builds next may start afresh (ADR-038).
+              yield* sessions.atBreak(task.threadId)
               const branches = yield* sql<{ branch: string }>`
                 SELECT w.branch FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
                 WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.branched_at IS NOT NULL

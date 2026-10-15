@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
-import { backupsIn, connection, databaseIn, Folders, Nudges, Secrets, SecretsUnavailable, services } from '@althar/runtime'
+import { backupsIn, connection, databaseIn, Folders, Nudges, Secrets, SecretsUnavailable, services, UsageData } from '@althar/runtime'
 import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Queue, Stream } from 'effect'
 import { net } from 'electron'
 import { editorsHere, openInEditor } from './editors'
@@ -22,6 +22,8 @@ import { openInBrowser, openInTerminal } from './terminal'
  * the store (it couldn't be copied first, or a migration didn't finish), it
  * tells the main process what stopped it and where the copy is, serves
  * nothing, and waits to be shut down: a restart would only stop the same way.
+ * What usage data says happened goes to the main process too, which sends it
+ * only while the person allows it.
  */
 
 type Port = Parameters<typeof emitterPort>[0]
@@ -227,6 +229,9 @@ const program = Effect.gen(function* () {
   // What needs the person goes to the main process, which notifies them and keeps the Dock's count.
   yield* Effect.forkScoped(
     Stream.runForEach(Context.get(context, Nudges).events, (event) => Effect.sync(() => parent.postMessage({ type: 'nudge', event }))),
+  )
+  yield* Effect.forkScoped(
+    Stream.runForEach(Context.get(context, UsageData).events, (usage) => Effect.sync(() => parent.postMessage({ type: 'usage', usage }))),
   )
   const ports = yield* Queue.unbounded<Port>()
   accept = (port) => void Queue.offerUnsafe(ports, port)
