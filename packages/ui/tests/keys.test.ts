@@ -21,6 +21,7 @@ describe('keys', () => {
       expect(keys.chord(keys.keys.alt, 'Z')).toBe('⌥Z')
       expect(keys.primaryDown({ metaKey: true, ctrlKey: false })).toBe(true)
       expect(keys.primaryDown({ metaKey: false, ctrlKey: true })).toBe(false)
+      expect(keys.commandDown({ metaKey: false, ctrlKey: true })).toBe(true)
     }
   })
 

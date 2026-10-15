@@ -1,7 +1,7 @@
 import { Dialog, RadioGroup, Toggle } from 'radix-ui'
 import { useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
-import { modKey, primaryDown } from '../../foundations/keys'
+import { modKey, commandDown } from '../../foundations/keys'
 import { unreachable } from '../../foundations/vocabulary'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import type { Brand } from '../../foundations/brands/brands'
@@ -198,7 +198,7 @@ export function ModelBrowser({
         break
       }
       case 'p': {
-        if (!primaryDown(e) || !(focused instanceof HTMLElement)) break
+        if (!commandDown(e) || !(focused instanceof HTMLElement)) break
         const id = focused.closest<HTMLElement>('[data-id]')?.dataset.id
         if (id) {
           e.preventDefault()

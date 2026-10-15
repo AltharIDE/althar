@@ -9,7 +9,7 @@ import {
   NeedCard,
   NeedChange,
   NeedCommand,
-  primaryDown,
+  commandDown,
   ProjectInk,
   type ProjectRef,
   TaskStatus,
@@ -193,7 +193,7 @@ export function HomeView({
   // ⌘N (Ctrl+N off a Mac) opens a folder, and ⌘, opens and closes settings. ⌘ and a number belongs to the window's tabs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!primaryDown(event) || event.shiftKey || event.altKey) return
+      if (!commandDown(event) || event.shiftKey || event.altKey) return
       if (event.key === 'n') openFolder()
       else if (event.key === ',') setSettings((now) => !now)
       else return

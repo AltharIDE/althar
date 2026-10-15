@@ -26,6 +26,13 @@ export const chord = (...parts: ReadonlyArray<string>): string => parts.join(isM
 /** The primary modifier plus a key: ⌘N, Ctrl+N. */
 export const modKey = (key: string): string => chord(keys.mod, key)
 
-/** Whether the primary modifier is down: ⌘ on a Mac, Ctrl elsewhere (Super, the Windows key, is no modifier of ours). */
-export const primaryDown = (event: { readonly metaKey: boolean; readonly ctrlKey: boolean }): boolean =>
-  isMac ? event.metaKey : event.ctrlKey
+/** Whether the primary modifier is down, and not the other: ⌘ on a Mac, Ctrl elsewhere (Super, the Windows key, is no modifier of ours). */
+export const primaryDown = (event: Modifiers): boolean => (isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)
+
+/** Whether a shortcut's modifier is down: ⌘ or Ctrl on a Mac, as it has always been, Ctrl elsewhere. */
+export const commandDown = (event: Modifiers): boolean => (isMac ? event.metaKey || event.ctrlKey : event.ctrlKey)
+
+interface Modifiers {
+  readonly metaKey: boolean
+  readonly ctrlKey: boolean
+}

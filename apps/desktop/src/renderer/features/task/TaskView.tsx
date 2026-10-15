@@ -13,7 +13,7 @@ import {
   LinkButton,
   type ModelInfo,
   modKey,
-  primaryDown,
+  commandDown,
   TaskFace,
   TaskHeader,
   TaskMenu,
@@ -232,7 +232,7 @@ export function TaskView({
   const { show } = changes
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== 'd' || !primaryDown(event) || event.shiftKey || event.altKey) return
+      if (event.key.toLowerCase() !== 'd' || !commandDown(event) || event.shiftKey || event.altKey) return
       if (files.length === 0) return
       event.preventDefault()
       show()

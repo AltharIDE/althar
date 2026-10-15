@@ -1,6 +1,6 @@
 import { useId, useLayoutEffect, useRef, type FormEvent, type ReactNode, type RefObject } from 'react'
 
-import { keys, modKey, primaryDown } from '../../foundations/keys'
+import { keys, modKey, commandDown } from '../../foundations/keys'
 import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import { ActionButton } from '../../primitives/ActionButton/ActionButton'
@@ -225,7 +225,7 @@ export function Composer({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
             if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
-            if (primaryDown(e) && canSendNow) {
+            if (commandDown(e) && canSendNow) {
               e.preventDefault()
               sendNow()
               return
