@@ -38,10 +38,8 @@ import { callTool, fakeConnectors, HOST, hosted, items, repository, runtime, tur
  * settles the task.
  */
 
-const runtimeWith = (services: { readonly github?: FakeService; readonly linear?: FakeService }) =>
-  Queries.layer.pipe(
-    Layer.provideMerge(runtime(':memory:', {}, { connectors: fakeConnectors(services), listenEvery: Duration.millis(100) })),
-  )
+const runtimeWith = (services: { readonly github?: FakeService; readonly linear?: FakeService }, file = ':memory:') =>
+  Queries.layer.pipe(Layer.provideMerge(runtime(file, {}, { connectors: fakeConnectors(services), listenEvery: Duration.millis(100) })))
 
 const connect = (product: 'github' | 'linear', webUrl?: string) =>
   Effect.gen(function* () {
@@ -933,6 +931,36 @@ describe('an abandoned task’s pull request', () => {
       yield* changes.readSettled
       assert.strictEqual(github.calls.filter((call) => call === 'change').length, reads)
     }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('is read from its host at the next launch, its card saying how it stands there now', () => {
+    const { working, github } = fresh()
+    const database = join(mkdtempSync(join(tmpdir(), 'althar-settled-')), 'althar.sqlite')
+    return Effect.gen(function* () {
+      // Abandoned with its pull request left open, as an older Althar left it: not listened to, its card saying open.
+      const { projectId, taskId } = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const left = yield* opened(github, working)
+          yield* abandon(left.taskId)
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`UPDATE external_links SET listening = 0 WHERE task_id = ${left.taskId} AND kind = 'change'`
+          return left
+        }).pipe(Effect.provide(runtimeWith({ github }, database))),
+      )
+      // Closed on GitHub by hand while Althar wasn't running.
+      github.close(1)
+      const reads = github.calls.filter((call) => call === 'change').length
+      // Launched again, nothing asked of it: the board's settled row reads it from GitHub, once, and says it is closed.
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const queries = yield* Queries
+          const onBoard = Effect.map(queries.board(projectId), (board) => board.tasks.filter((task) => task.taskId === taskId))
+          const [card] = yield* until(onBoard, ([one]) => one?.change?.state === 'closed', Duration.seconds(20))
+          assert.strictEqual(card?.phase, 'settled')
+          assert.strictEqual(github.calls.filter((call) => call === 'change').length, reads + 1)
+        }).pipe(Effect.provide(runtimeWith({ github }, database))),
+      )
+    })
   })
 
   it.live('is closed on its host when the person says, its branch deleted where they ask', () => {
