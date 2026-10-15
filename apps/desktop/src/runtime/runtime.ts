@@ -10,6 +10,7 @@ import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Queue, Stream } f
 import { net } from 'electron'
 import { editorsHere, openInEditor } from './editors'
 import { type Device, deviceHere } from './onDevice'
+import { resultOf, type Sealed, sealedOf } from './sealing'
 import { openInBrowser, openInTerminal } from './terminal'
 
 /*
@@ -68,28 +69,13 @@ const githubApp =
   process.env.ALTHAR_GITHUB_APP === undefined || process.env.ALTHAR_GITHUB_APP === '' ? undefined : process.env.ALTHAR_GITHUB_APP
 
 /* Secrets the main process is sealing or opening, by request. */
-const sealing = new Map<
-  string,
-  (answer: { readonly value?: string; readonly error?: string; readonly keyring?: boolean; readonly unreadable?: boolean }) => void
->()
+const sealing = new Map<string, (answer: Sealed) => void>()
 
 /** Asks the main process to seal a secret, or open one; it alone holds the key. */
 const askMain = (type: 'seal' | 'open', value: string) =>
   Effect.callback<string, SecretsUnavailable>((resume) => {
     const requestId = randomUUID()
-    sealing.set(requestId, (answer) =>
-      resume(
-        answer.value === undefined
-          ? Effect.fail(
-              new SecretsUnavailable({
-                reason: answer.error ?? 'Althar couldn’t open its keychain.',
-                ...(answer.keyring === true ? { keyring: true } : {}),
-                ...(answer.unreadable === true ? { unreadable: true } : {}),
-              }),
-            )
-          : Effect.succeed(answer.value),
-      ),
-    )
+    sealing.set(requestId, (answer) => resume(resultOf(answer)))
     parent.postMessage({ type, requestId, value })
     return Effect.sync(() => void sealing.delete(requestId))
   }).pipe(
@@ -277,12 +263,7 @@ parent.on('message', (message) => {
   } | null
   const port = message.ports[0]
   if (data?.type === 'sealed' && data.requestId !== undefined) {
-    sealing.get(data.requestId)?.({
-      ...(data.value === undefined ? {} : { value: data.value }),
-      ...(data.error === undefined ? {} : { error: data.error }),
-      ...(data.keyring === true ? { keyring: true } : {}),
-      ...(data.unreadable === true ? { unreadable: true } : {}),
-    })
+    sealing.get(data.requestId)?.(sealedOf(data))
     sealing.delete(data.requestId)
   }
   if (data?.type === 'connect' && port !== undefined) accept(port)
