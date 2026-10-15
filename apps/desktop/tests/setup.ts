@@ -1,6 +1,8 @@
 import { cleanup } from '@testing-library/react'
 import { afterEach } from 'vitest'
 
+import { forgetChosenFaces } from '../src/renderer/features/task/chosenFaces'
+
 /*
  * jsdom lacks what the kit's components lean on in a browser; each stand-in
  * is the least that lets them run (as the kit's own test setup has them).
@@ -35,5 +37,6 @@ if (typeof window !== 'undefined') {
     cleanup()
     // What a view keeps in storage, like the person's pinned models, starts empty in each test.
     window.localStorage.clear()
+    forgetChosenFaces()
   })
 }

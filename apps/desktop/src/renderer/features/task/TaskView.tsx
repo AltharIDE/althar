@@ -69,6 +69,7 @@ import { conflictsOf, hasOutputs, Outputs } from './Outputs'
 import s from './Task.module.css'
 import { useChanges } from './useChanges'
 import type { TaskModel } from './useTask'
+import { chosenFaces } from './chosenFaces'
 
 /*
  * A task, with two faces under its header, as in the prototype: the
@@ -230,12 +231,6 @@ const typing = (event: KeyboardEvent) => {
     (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select, [role="textbox"]') !== null))
   )
 }
-
-/** The face the person picked for each task, kept while the app is open. */
-const chosenFaces = new Map<string, Face>()
-
-/** Forgets what was picked, for tests. */
-export const forgetChosenFaces = () => chosenFaces.clear()
 
 /**
  * The face a task opens on. A call waiting on the person is answered in the
