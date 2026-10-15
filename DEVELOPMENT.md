@@ -124,10 +124,12 @@ There are two ways to screenshot this repository's interface, both headless:
   `apps/desktop/e2e/evidence.spec.ts` does; `bun run test:e2e e2e/your.spec.ts`
   builds the app and runs it.
 
-Shoot at 1× (Playwright's default; `deviceScaleFactor: 1` where a script sets
-it), and only what changed where you can: a story's frame is already just the
-component, and in a spec `page.getByRole(…).screenshot()` takes one element
-rather than the window. An agent reads each shot it looks at into its
+Shoot at 1×, and only what changed where you can. The command above shoots a
+story at 1× already, and a story's frame is just the component. In a spec, the
+app's window on a Retina Mac shoots at 2× unless told otherwise: pass
+`scale: 'css'` to `page.screenshot` and to an element's `screenshot`, and take
+one element (`page.getByRole(…).screenshot({ scale: 'css' })`) rather than the
+window. An agent reads each shot it looks at into its
 context, where it stays: a Retina shot of the whole window costs it as much as
 a few thousand words, and one cropped at 1× a tenth of that. Look at each shot
 once.
