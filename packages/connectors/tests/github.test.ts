@@ -1,8 +1,9 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Duration, Effect } from 'effect'
+import { TestClock } from 'effect/testing'
 
-import { checkRunState, makeGitHub, tail } from '../src/github'
-import type { Issue, Repository } from '../src/model'
+import { checkRunState, LISTING_KEPT_MS, makeGitHub, searchOf, tail } from '../src/github'
+import { fromOutside, type Issue, type Repository } from '../src/model'
 import { type Route, stubFetch, variablesOf } from './stub'
 
 const API = 'https://api.github.com'
@@ -225,6 +226,23 @@ describe('GitHub as a code host', () => {
       assert.strictEqual(closed.state, 'closed')
       assert.isFalse(closed.draft)
       assert.isNull(closed.additions)
+    }),
+  )
+
+  it.effect('says when a pull request conflicts with its target, once GitHub has worked it out', () =>
+    Effect.gen(function* () {
+      const { host } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ mergeable: false, mergeable_state: 'dirty' }) }],
+        ['GET', `${REPO}/pulls/13`, { json: pull({ number: 13, mergeable: true, mergeable_state: 'blocked' }) }],
+        ['GET', `${REPO}/pulls/14`, { json: pull({ number: 14, mergeable: null, mergeable_state: 'unknown' }) }],
+        ['GET', `${REPO}/pulls/15`, { json: pull({ number: 15 }) }],
+      ])
+      assert.isTrue((yield* host.change(repository, 12)).conflicts)
+      // Blocked by a rule is not a conflict.
+      assert.isFalse((yield* host.change(repository, 13)).conflicts)
+      // Still working it out, or not said at all, as in a list: nothing is claimed.
+      assert.notProperty(yield* host.change(repository, 14), 'conflicts')
+      assert.notProperty(yield* host.change(repository, 15), 'conflicts')
     }),
   )
 
@@ -488,12 +506,295 @@ describe('GitHub as a code host', () => {
     }),
   )
 
+  it.effect('reads a pull request to review: whether its author is one of the repository’s people, and the fork it comes from', () =>
+    Effect.gen(function* () {
+      const base = { ref: 'main', sha: 'b45e', repo: { full_name: 'meridian/api' } }
+      const { host } = github([
+        // A collaborator's branch of the repository's own: from inside.
+        [
+          'GET',
+          `${REPO}/pulls/12`,
+          {
+            json: pull({
+              head: { ref: 'fix', sha: 'abc', repo: { full_name: 'Meridian/API' } },
+              base,
+              author_association: 'COLLABORATOR',
+              user: { id: 9, login: 'ana', type: 'User' },
+            }),
+          },
+        ],
+        // A first contribution, from a fork: outside twice over.
+        [
+          'GET',
+          `${REPO}/pulls/13`,
+          {
+            json: pull({
+              number: 13,
+              head: { ref: 'send-back', sha: 'd4c8ae4', repo: { full_name: 'ninemate/api' } },
+              base,
+              author_association: 'FIRST_TIME_CONTRIBUTOR',
+              user: { id: 10, login: 'ninemate', type: 'User' },
+            }),
+          },
+        ],
+        // A member's branch on a fork GitHub no longer has: a fork, with no path.
+        [
+          'GET',
+          `${REPO}/pulls/14`,
+          { json: pull({ number: 14, head: { ref: 'gone', sha: 'e1', repo: null }, base, author_association: 'MEMBER' }) },
+        ],
+        // An answer that says neither, as an older GitHub's might: from inside, by nobody named.
+        ['GET', `${REPO}/pulls/15`, { json: pull({ number: 15 }) }],
+      ])
+      const inside = yield* host.changeToReview(repository, 12)
+      assert.deepInclude(inside, { number: 12, member: true, fork: null, baseSha: 'b45e', headSha: 'abc', additions: 10, deletions: 2 })
+      assert.isFalse(fromOutside(inside))
+      const outside = yield* host.changeToReview(repository, 13)
+      assert.deepInclude(outside, { member: false, baseSha: 'b45e', headSha: 'd4c8ae4' })
+      assert.deepStrictEqual(outside.fork, ['ninemate', 'api'])
+      assert.strictEqual(outside.author?.login, 'ninemate')
+      assert.isTrue(fromOutside(outside))
+      const gone = yield* host.changeToReview(repository, 14)
+      assert.deepStrictEqual([gone.member, gone.fork], [true, []])
+      assert.isTrue(fromOutside(gone))
+      const unsaid = yield* host.changeToReview(repository, 15)
+      assert.deepStrictEqual([unsaid.member, unsaid.fork, unsaid.baseSha], [false, null, null])
+    }),
+  )
+
+  it.effect('posts a review with its verdict, its summary and its comments on lines, of the commit it read', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        [
+          'POST',
+          `${REPO}/pulls/13/reviews`,
+          { json: { id: 801, html_url: 'https://github.com/meridian/api/pull/13#pullrequestreview-801', state: 'CHANGES_REQUESTED' } },
+        ],
+        ['POST', `${REPO}/pulls/14/reviews`, { json: { id: 802 } }],
+        [
+          'POST',
+          `${REPO}/pulls/15/reviews`,
+          { status: 422, json: { message: 'Pull request review thread line must be part of the diff' } },
+        ],
+      ])
+      const posted = yield* host.postReview(repository, 13, {
+        event: 'request_changes',
+        body: 'Needs a test.',
+        commit: 'd4c8ae4',
+        comments: [{ path: 'src/limit.ts', line: 7, body: 'Refunds skip this.' }],
+      })
+      assert.deepStrictEqual(posted, { id: '801', url: 'https://github.com/meridian/api/pull/13#pullrequestreview-801' })
+      assert.deepStrictEqual(sent[0]?.body, {
+        commit_id: 'd4c8ae4',
+        body: 'Needs a test.',
+        event: 'REQUEST_CHANGES',
+        comments: [{ path: 'src/limit.ts', line: 7, side: 'RIGHT', body: 'Refunds skip this.' }],
+      })
+      // Of the head as GitHub has it, an approval with no comments; GitHub giving no link, none is made up.
+      assert.deepStrictEqual(yield* host.postReview(repository, 14, { event: 'approve', body: 'Good.', commit: null, comments: [] }), {
+        id: '802',
+        url: null,
+      })
+      assert.deepStrictEqual(sent[1]?.body, { body: 'Good.', event: 'APPROVE', comments: [] })
+      // A line the change doesn't touch is GitHub's to refuse, in its words.
+      const refused = yield* Effect.flip(
+        host.postReview(repository, 15, {
+          event: 'comment',
+          body: 'A thought.',
+          commit: null,
+          comments: [{ path: 'a', line: 1, body: 'b' }],
+        }),
+      )
+      assert.deepInclude(refused, { reason: 'rejected', message: 'Pull request review thread line must be part of the diff' })
+      assert.deepInclude(sent[2]?.body, { event: 'COMMENT' })
+    }),
+  )
+
   it.effect('pushes over HTTPS with the token, never the person’s own credentials', () =>
     Effect.gen(function* () {
       const { host } = github([])
       const target = yield* host.pushTarget(repository)
       assert.strictEqual(target.url, 'https://github.com/meridian/api.git')
       assert.strictEqual(target.header, `Authorization: Basic ${Buffer.from('x-access-token:ghu_t').toString('base64')}`)
+    }),
+  )
+})
+
+/*
+ * GitHub's answers to the list's search, as its GraphQL API gives them: one
+ * of Althar's own drafts with checks running, an outside contributor's from a
+ * fork with changes asked for, an app's, and a merged one. Written out by
+ * hand in the shape GitHub documents, not recorded from a live call.
+ */
+const listed = (overrides: Record<string, unknown> = {}) => ({
+  id: 'PR_kwDO12',
+  number: 12,
+  title: 'Rate-limit refunds',
+  url: 'https://github.com/meridian/api/pull/12',
+  state: 'OPEN',
+  isDraft: true,
+  headRefName: 'althar/mer-231',
+  baseRefName: 'main',
+  headRefOid: 'abc',
+  updatedAt: '2026-10-13T09:00:00Z',
+  isCrossRepository: false,
+  headRepositoryOwner: { login: 'meridian' },
+  author: { __typename: 'User', login: 'you', databaseId: 5, name: 'You' },
+  reviewDecision: null,
+  commits: { nodes: [{ commit: { statusCheckRollup: { state: 'PENDING' } } }] },
+  ...overrides,
+})
+
+const SEARCHED = {
+  data: {
+    search: {
+      issueCount: 41,
+      nodes: [
+        listed(),
+        listed({
+          id: 'PR_kwDO13',
+          number: 13,
+          title: 'Send back won’t restart a dead lead',
+          url: 'https://github.com/meridian/api/pull/13',
+          isDraft: false,
+          headRefName: 'send-back',
+          isCrossRepository: true,
+          headRepositoryOwner: { login: 'ninemate' },
+          author: { __typename: 'User', login: 'ninemate', databaseId: 10, name: null },
+          reviewDecision: 'CHANGES_REQUESTED',
+          commits: { nodes: [{ commit: { statusCheckRollup: { state: 'FAILURE' } } }] },
+        }),
+        listed({
+          id: 'PR_kwDO14',
+          number: 14,
+          title: 'Bump effect',
+          isDraft: false,
+          author: { __typename: 'Bot', login: 'dependabot', databaseId: 49699333 },
+          reviewDecision: 'APPROVED',
+          commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+        }),
+        listed({
+          id: 'PR_kwDO9',
+          number: 9,
+          state: 'MERGED',
+          isDraft: false,
+          reviewDecision: 'REVIEW_REQUIRED',
+          author: null,
+          commits: { nodes: [] },
+        }),
+        // An issue the search found: none of a pull request's fields, so it is left out.
+        {},
+      ],
+    },
+  },
+}
+
+describe('GitHub listing pull requests', () => {
+  it('asks its search for the repository’s pull requests, narrowed as asked, each word quoted', () => {
+    assert.strictEqual(searchOf(['meridian', 'api'], { state: 'open', limit: 30 }), 'repo:meridian/api is:pr is:open sort:updated-desc')
+    assert.strictEqual(
+      searchOf(['meridian', 'api'], {
+        state: 'closed',
+        author: '@ninemate',
+        text: 'send "back',
+        reviewRequested: true,
+        draft: false,
+        limit: 5,
+      }),
+      'repo:meridian/api is:pr is:closed is:unmerged author:ninemate review-requested:@me draft:false "send" "back" in:title sort:updated-desc',
+    )
+    assert.strictEqual(
+      searchOf(['meridian', 'api'], { state: 'merged', author: 'dependabot[bot]', limit: 5 }),
+      'repo:meridian/api is:pr is:merged author:app/dependabot sort:updated-desc',
+    )
+    // A qualifier in the words is only a word.
+    assert.strictEqual(
+      searchOf(['meridian', 'api'], { state: 'all', text: 'repo:other/x', limit: 5 }),
+      'repo:meridian/api is:pr "repo:other/x" in:title sort:updated-desc',
+    )
+    // No login could be that: nothing is asked.
+    assert.isUndefined(searchOf(['meridian', 'api'], { state: 'open', author: 'a b repo:x', limit: 5 }))
+  })
+
+  it.effect('lists them in one call, with their reviews, checks and forks, and says there are more', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([['POST', `${API}/graphql`, { json: SEARCHED }]])
+      const list = yield* host.listChanges(repository, { state: 'all', author: 'ninemate', limit: 4 })
+      assert.deepStrictEqual(variablesOf(sent[0]), { q: 'repo:meridian/api is:pr author:ninemate sort:updated-desc', n: 4 })
+      assert.isTrue(list.more)
+      assert.deepStrictEqual(
+        list.changes.map((change) => [
+          change.number,
+          change.state,
+          change.draft,
+          change.author?.login,
+          change.forkOwner,
+          change.reviewDecision,
+          change.checks,
+        ]),
+        [
+          [12, 'open', true, 'you', null, null, 'running'],
+          [13, 'open', false, 'ninemate', 'ninemate', 'changes_requested', 'failed'],
+          [14, 'open', false, 'dependabot[bot]', null, 'approved', null],
+          [9, 'merged', false, undefined, null, 'review_required', null],
+        ],
+      )
+      assert.deepInclude(list.changes[1], {
+        title: 'Send back won’t restart a dead lead',
+        url: 'https://github.com/meridian/api/pull/13',
+        source: 'send-back',
+        target: 'main',
+        body: '',
+        updatedAt: '2026-10-13T09:00:00Z',
+      })
+      assert.isTrue(list.changes[2]?.author?.bot)
+      // Asked for as many as it has, it says there are none more.
+      const all = github([['POST', `${API}/graphql`, { json: { data: { search: { issueCount: 1, nodes: [listed()] } } } }]])
+      assert.isFalse((yield* all.host.listChanges(repository, { state: 'open', limit: 500 })).more)
+      assert.deepInclude(variablesOf(all.sent[0]), { n: 100 })
+    }),
+  )
+
+  it.effect('answers the same search again within a minute from memory, and asks again after', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([['POST', `${API}/graphql`, { json: SEARCHED }]])
+      const asked = { state: 'open', author: 'ninemate', limit: 30 } as const
+      const first = yield* host.listChanges(repository, asked)
+      yield* TestClock.adjust(Duration.millis(LISTING_KEPT_MS - 1))
+      assert.deepStrictEqual(yield* host.listChanges(repository, asked), first)
+      assert.lengthOf(sent, 1)
+      // Narrowed otherwise, it is another search.
+      yield* host.listChanges(repository, { ...asked, draft: true })
+      assert.lengthOf(sent, 2)
+      yield* TestClock.adjust(Duration.millis(1))
+      yield* host.listChanges(repository, asked)
+      assert.lengthOf(sent, 3)
+    }),
+  )
+
+  it.effect('names the permission it lacks where GitHub refuses, and asks nothing for a login that can’t be one', () =>
+    Effect.gen(function* () {
+      const refusing = github([
+        [
+          'POST',
+          `${API}/graphql`,
+          {
+            json: {
+              data: null,
+              errors: [
+                { type: 'INSUFFICIENT_SCOPES', message: 'Your token has not been granted the required scopes to execute this query.' },
+              ],
+            },
+          },
+        ],
+      ])
+      const refused = yield* Effect.flip(refusing.host.listChanges(repository, { state: 'open', limit: 30 }))
+      assert.deepInclude(refused, { reason: 'forbidden', scope: 'repo (a fine-grained token’s Pull requests: Read)' })
+      const { host, sent } = github([])
+      assert.deepInclude(yield* Effect.flip(host.listChanges(repository, { state: 'open', author: 'x y', limit: 30 })), {
+        reason: 'rejected',
+      })
+      assert.lengthOf(sent, 0)
     }),
   )
 })
@@ -584,8 +885,86 @@ describe('GitHub as a tracker', () => {
       yield* host.comment(found, 'Picked up by Althar')
       assert.deepStrictEqual(sent[0]?.body, { body: 'Picked up by Althar' })
       yield* host.link(found, { url: 'https://x', title: 'x' })
+      // An issue has no In Progress of its own: it is left open, as it is.
+      assert.deepStrictEqual(yield* host.start(found), { moved: false, status: { name: 'Open', category: 'todo' } })
       assert.lengthOf(sent, 1)
       assert.isFalse(host.capabilities.links)
+      assert.isFalse(host.capabilities.starts)
+    }),
+  )
+  it.effect('lists the repositories it can file issues in, last pushed first, leaving out the archived and those without issues', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        [
+          'GET',
+          `${API}/user/repos?per_page=100&sort=pushed&page=1`,
+          {
+            json: [
+              { id: 7, full_name: 'meridian/api', has_issues: true, archived: false },
+              { id: 8, full_name: 'meridian/old', has_issues: true, archived: true },
+              { id: 9, full_name: 'meridian/docs', has_issues: false, archived: false },
+              { id: 10, full_name: 'you/dotfiles' },
+            ],
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* host.containers(), [
+        { id: 'meridian/api', key: 'meridian/api', name: 'meridian/api' },
+        { id: 'you/dotfiles', key: 'you/dotfiles', name: 'you/dotfiles' },
+      ])
+      assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('follows the repositories page after page until a page comes short, and stops at ten', () =>
+    Effect.gen(function* () {
+      const repositories = (page: number, count: number) =>
+        Array.from({ length: count }, (_, at) => ({ id: page * 100 + at, full_name: `meridian/repo-${page}-${at}` }))
+      const listed = `${API}/user/repos?per_page=100&sort=pushed&page=`
+      const { host, sent } = github([
+        ['GET', `${listed}1`, { json: repositories(1, 100) }],
+        ['GET', `${listed}2`, { json: repositories(2, 3) }],
+      ])
+      const found = yield* host.containers()
+      assert.lengthOf(found, 103)
+      assert.strictEqual(found.at(-1)?.id, 'meridian/repo-2-2')
+      assert.deepStrictEqual(
+        sent.map((request) => request.url),
+        [`${listed}1`, `${listed}2`],
+      )
+      // Every page full: ten are read, and no more.
+      const endless = github([['GET', /\/user\/repos\?per_page=100&sort=pushed&page=\d+$/, { json: repositories(0, 100) }]])
+      assert.lengthOf(yield* endless.host.containers(), 1000)
+      assert.lengthOf(endless.sent, 10)
+    }),
+  )
+
+  it.effect('files an issue in a repository, with its labels as they are, or none', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        ['POST', `${REPO}/issues`, { status: 201, json: issue({ assignees: [], labels: [{ name: 'payments' }] }) }],
+      ])
+      const filed = yield* host.create('meridian/api', {
+        title: 'Refunds ignore the rate limit',
+        body: 'They should not.',
+        labels: ['payments'],
+      })
+      assert.deepStrictEqual([filed.ref, filed.labels, filed.container], ['meridian/api#12', ['payments'], 'meridian/api'])
+      assert.deepStrictEqual(sent[0]?.body, { title: 'Refunds ignore the rate limit', body: 'They should not.', labels: ['payments'] })
+      yield* host.create('meridian/api', { title: 'Refunds ignore the rate limit', body: '', labels: [] })
+      assert.deepStrictEqual(sent[1]?.body, { title: 'Refunds ignore the rate limit', body: '' })
+    }),
+  )
+
+  it.effect('says what it was given isn’t a repository, without asking', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([])
+      for (const container of ['meridian', 'meridian/api/web', 'meridian/api#12', 'MER'])
+        assert.deepStrictEqual(
+          (yield* Effect.flip(host.create(container, { title: 't', body: '', labels: [] }))).message,
+          `Not a GitHub repository: ${container}`,
+        )
+      assert.lengthOf(sent, 0)
     }),
   )
 })

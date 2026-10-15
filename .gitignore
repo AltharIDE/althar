@@ -3,6 +3,7 @@ dist/
 coverage/
 playwright-report/
 test-results/
+.env
 .env.local
 .env.*.local
 *.log
@@ -16,3 +17,8 @@ storybook-static/
 
 # The packaged desktop app
 apps/desktop/out/
+apps/desktop/.flatpak-builder/
+
+# Local planning (OpenSpec) and agent tooling (.opencode): not part of the repository
+/openspec/
+/.opencode/

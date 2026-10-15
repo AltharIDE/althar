@@ -1,10 +1,9 @@
 import type { CodeHost } from '../../foundations/codeHost'
 import { Icon } from '../../foundations/Icon/Icon'
-import { BrandMark } from '../../foundations/Marks/Marks'
 import { cx } from '../../lib/cx'
-import { Delta } from '../../primitives/FileChanges/FileChanges'
 import b from '../Board/Board.module.css'
 import { CardTitle } from '../Board/CardTitle'
+import { BranchChip, PullChip } from '../BoardCard/Chips'
 import s from './AcceptCard.module.css'
 
 /*
@@ -60,12 +59,14 @@ export interface AcceptCardProps {
   checks?: number
   /** When it became ready: 9m ago. */
   at?: string
+  /** Why it needs you before it can be accepted, such as a conflict its lead couldn't resolve: a line under the title. */
+  note?: string
   current?: boolean
   onOpen?: () => void
   text?: Partial<AcceptCardText>
 }
 
-export function AcceptCard({ task, title, prs = [], host, branch, checks, at, current, onOpen, text }: AcceptCardProps) {
+export function AcceptCard({ task, title, prs = [], host, branch, checks, at, note, current, onOpen, text }: AcceptCardProps) {
   const t = { ...acceptCardText, ...text }
   return (
     <article className={cx(b.card, s.accept)} aria-current={current || undefined}>
@@ -77,20 +78,23 @@ export function AcceptCard({ task, title, prs = [], host, branch, checks, at, cu
       <CardTitle className={s.title} onOpen={onOpen}>
         {title}
       </CardTitle>
+      {note && <p className={s.note}>{note}</p>}
       <ul className={s.prs}>
         {prs.map((pr) => (
-          <li key={`${pr.repo}${pr.number}`} className={s.pr}>
-            {host?.brand && <BrandMark brand={host.brand} size={12} />}
-            <span className={s.repo}>{pr.repo}</span>
-            <span className={s.number}>{t.number(pr.number)}</span>
-            {pr.add !== undefined && pr.del !== undefined && <Delta add={pr.add} del={pr.del} className={s.delta} />}
+          <li key={`${pr.repo}${pr.number}`}>
+            <PullChip
+              {...(host === undefined ? {} : { host })}
+              repo={pr.repo}
+              number={pr.number}
+              // A host that doesn't count lines shows no size, rather than half of one.
+              {...(pr.add !== undefined && pr.del !== undefined ? { add: pr.add, del: pr.del } : {})}
+              text={{ number: t.number }}
+            />
           </li>
         ))}
         {branch && (
-          <li className={s.pr}>
-            <Icon name="branch" size={12} />
-            <span className={s.repo}>{branch.name}</span>
-            <Delta add={branch.add} del={branch.del} className={s.delta} />
+          <li>
+            <BranchChip name={branch.name} add={branch.add} del={branch.del} />
           </li>
         )}
       </ul>

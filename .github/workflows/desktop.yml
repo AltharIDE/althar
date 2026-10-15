@@ -1,11 +1,24 @@
 name: desktop
 
+# On a pull request, the fast part: checks and unit tests. The coverage gate, the end-to-end run and the packages run
+# after merge, in post-merge.yml.
 on:
-  push:
-    branches: [main]
-    paths: ['apps/desktop/**', 'packages/connectors/**', 'packages/contracts/**', 'packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/desktop.yml']
   pull_request:
-    paths: ['apps/desktop/**', 'packages/connectors/**', 'packages/contracts/**', 'packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/desktop.yml']
+    paths:
+      [
+        'apps/desktop/**',
+        'packages/connectors/**',
+        'packages/contracts/**',
+        'packages/domain/**',
+        'packages/persistence-sqlite/**',
+        'packages/provider-adapters/**',
+        'packages/runtime/**',
+        'packages/ui/**',
+        'package.json',
+        'bun.lock',
+        'vite.config.ts',
+        '.github/workflows/desktop.yml',
+      ]
 
 permissions:
   contents: read
@@ -17,7 +30,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: apps/desktop
@@ -34,12 +47,4 @@ jobs:
       # Ubuntu 24.04 keeps unprivileged user namespaces from apps, and Chromium's sandbox needs them.
       - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: bun run check
-      - run: bun run test:coverage
-      # The end-to-end tests run the built app, with the fake agent, on a virtual display.
-      - run: xvfb-run --auto-servernum bun run test:e2e
-      - uses: actions/upload-artifact@v6
-        if: failure()
-        with:
-          name: desktop-e2e
-          path: apps/desktop/test-results
-          retention-days: 7
+      - run: bun run test

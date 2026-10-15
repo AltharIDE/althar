@@ -30,5 +30,5 @@ export function openFont(file: string): Promise<Font> {
   return font
 }
 
-/** Inter, with its weight and optical size axes. The interface, the site and the pitch all set it. */
+/** Inter, with its weight and optical size axes. The interface and the site both set it. */
 export const inter = (): Promise<Font> => openFont(fontFile('@fontsource-variable/inter/files/inter-latin-opsz-normal.woff2'))

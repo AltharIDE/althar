@@ -285,6 +285,7 @@ describe('a GraphQL call', () => {
     [{ message: 'Authentication required', extensions: { code: 'AUTHENTICATION_ERROR' } }, 'unauthorized'],
     [{ message: 'Slow down', extensions: { code: 'RATELIMITED' } }, 'rate_limited'],
     [{ message: 'No', type: 'FORBIDDEN' }, 'forbidden'],
+    [{ message: 'Your token has not been granted the required scopes to execute this query.', type: 'INSUFFICIENT_SCOPES' }, 'forbidden'],
     [{ message: 'Gone', type: 'NOT_FOUND' }, 'not_found'],
     [{ message: 'Entity not found', extensions: { type: 'entity not found' } }, 'rejected'],
     [{ message: 'Bad input' }, 'rejected'],
@@ -292,6 +293,23 @@ describe('a GraphQL call', () => {
     Effect.gen(function* () {
       const { http } = graphql({ status: 400, json: { errors: [error] } })
       assert.strictEqual(failure(yield* Effect.exit(http.graphql(Schema.Unknown, 'https://api.test/graphql', 'query')))?.reason, reason)
+    }),
+  )
+
+  it.effect('classifies a service failing as it worked as unreachable, not refused: a 5xx, or an internal error', () =>
+    Effect.gen(function* () {
+      const reasonOf = (answer: Parameters<typeof graphql>[0]) =>
+        Effect.map(
+          Effect.exit(graphql(answer).http.graphql(Schema.Unknown, 'https://api.test/graphql', 'mutation')),
+          (exit) => failure(exit)?.reason,
+        )
+      assert.strictEqual(yield* reasonOf({ status: 500, json: { errors: [{ message: 'Internal error' }] } }), 'unreachable')
+      assert.strictEqual(
+        yield* reasonOf({ status: 200, json: { errors: [{ message: 'Oops', extensions: { code: 'INTERNAL_SERVER_ERROR' } }] } }),
+        'unreachable',
+      )
+      // A refusal in a 5xx is still the service failing: a mutation may have gone through.
+      assert.strictEqual(yield* reasonOf({ status: 503, json: { errors: [{ message: 'Bad input' }] } }), 'unreachable')
     }),
   )
 

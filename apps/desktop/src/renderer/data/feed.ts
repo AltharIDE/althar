@@ -104,14 +104,25 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
         .findAll({ queryKey: ['repositories'] })
         .map((query) => ({ key: query.queryKey, offScreen: false }))
     : []),
-  // Its rules, which an answer can change too (Allow always, Deny always), only while they show.
-  ...(event.projectId !== null && event.aggregateType === 'policy' ? [{ key: keys.rules(event.projectId), offScreen: false }] : []),
+  // Its rules, which an answer can change too (Allow always, Deny always), only while they show; and its board, whose tasks say Unrestricted by the rules' switch.
+  ...(event.projectId !== null && event.aggregateType === 'policy'
+    ? [
+        { key: keys.rules(event.projectId), offScreen: false },
+        { key: keys.board(event.projectId), offScreen: true },
+      ]
+    : []),
+  // Its notes, which the coordinator keeps as the person decides, only while they show.
+  ...(event.projectId !== null && event.aggregateType === 'project_note' ? [{ key: keys.notes(event.projectId), offScreen: false }] : []),
 ]
 
-/** The threads in the cache a change moves: its own, a coordinator's whose cards or head it changes, and, renamed, every one of its project's. */
+/**
+ * The threads in the cache a change moves: its own, a coordinator's whose
+ * cards or head it changes, and every one of its project's when it is
+ * renamed or its rules change, by whose switch a task allows everything.
+ */
 const threadReads = (cache: QueryClient, event: Changed): ReadonlyArray<QueryKey> => {
   const renamed =
-    event.aggregateType === 'project'
+    event.aggregateType === 'project' || event.aggregateType === 'policy'
       ? cache
           .getQueryCache()
           .findAll({ queryKey: ['thread'] })
@@ -179,7 +190,7 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
         due.set(hash, { key: read.key, offScreen: read.offScreen || (due.get(hash)?.offScreen ?? false) })
       }
       if (due.size > 0) timer ??= setTimeout(readDue, GATHER)
-      // A thread on screen reads its own changes item by item; a project's new name it reads again whole, at once.
+      // A thread on screen reads its own changes item by item, and its head as its project's rules change; a project's new name it reads again whole, at once.
       const renamed = event.aggregateType === 'project'
       for (const queryKey of threadReads(cache, event)) {
         if (cache.getQueryState(queryKey) === undefined) continue

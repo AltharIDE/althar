@@ -1,6 +1,7 @@
 import { type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 
 import { cx } from '../../../lib/cx'
+import { useRestAway } from './seen'
 import s from './Shot.module.css'
 
 /*
@@ -10,7 +11,8 @@ import s from './Shot.module.css'
  * crisp at any size. On a phone it can lay itself out narrower (`phoneW`),
  * or show a part of itself (`phone`: the region to keep, in the design's
  * px), scaled up until that part reads. It is a picture: nothing in it can
- * be pressed or focused, and it reads as its label.
+ * be pressed or focused, and it reads as its label. Out of sight, what
+ * loops in it rests.
  */
 
 export interface Region {
@@ -65,6 +67,7 @@ export function Shot({ w, h, phoneW, phone, crop, align = 'center', maxScale = 2
   const box = useRef<HTMLDivElement>(null)
   const stage = useRef<HTMLDivElement>(null)
   const [fit, setFit] = useState<{ scale: number; width: number; region: Region } | null>(null)
+  useRestAway(box)
 
   // Regions are written inline: follow what they say, not which object they are.
   const phoneKey = phone ? `${phone.x},${phone.y},${phone.w},${phone.h}` : ''

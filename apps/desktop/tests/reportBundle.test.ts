@@ -10,7 +10,6 @@ import { masker } from '../src/logs/mask'
 import { assemble, contextOf, type Gathered, lastErrors, preview, readable } from '../src/main/report/bundle'
 import { form, mailto, NotDelivered, post, reportAddress, save, zipName } from '../src/main/report/deliver'
 import { factsIn, remoteNames, type RuntimeFacts } from '../src/main/report/facts'
-import { installId, isInstallId } from '../src/main/report/install'
 import { zip } from '../src/main/report/zip'
 
 const facts: RuntimeFacts = {
@@ -236,23 +235,5 @@ describe('where a report goes', () => {
   it('zips what it is given', () => {
     const bytes = zip([{ name: 'a.txt', data: new TextEncoder().encode('hello') }])
     expect(bytes.readUInt16LE(bytes.length - 22 + 8)).toBe(1)
-  })
-})
-
-describe('the install id', () => {
-  it('is made once, kept in the profile, and the same after', async () => {
-    const profile = mkdtempSync(join(tmpdir(), 'althar-profile-'))
-    const [first, again] = await Promise.all([installId(profile), installId(profile)])
-    expect(isInstallId(first)).toBe(true)
-    expect(again).toBe(first)
-    expect(JSON.parse(readFileSync(join(profile, 'install.json'), 'utf8')).id).toBe(first)
-  })
-
-  it('is made again where the file doesn’t hold one', async () => {
-    const profile = mkdtempSync(join(tmpdir(), 'althar-profile-'))
-    writeFileSync(join(profile, 'install.json'), '{"id":"not-a-uuid"}')
-    const id = await installId(profile)
-    expect(isInstallId(id)).toBe(true)
-    expect(id).not.toBe('not-a-uuid')
   })
 })

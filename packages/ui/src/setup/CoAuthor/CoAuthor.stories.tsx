@@ -43,6 +43,7 @@ export const On: Story = {
     await expect(within(commit).getByText(CO_AUTHOR_TRAILER)).toBeInTheDocument()
     await expect(commit).toHaveTextContent('dana-k and Althar committed 12 minutes ago')
     await expect(c.getByText(/Pull requests end with/)).toBeInTheDocument()
+    await expect(c.getByRole('link', { name: 'Althar' })).toHaveAttribute('href', 'https://github.com/AltharIDE/althar')
   },
 }
 
@@ -61,6 +62,20 @@ export const TurningItOff: Story = {
     await expect(it).toHaveAttribute('aria-checked', 'true')
     await expect(c.queryByText(/no marketing budget/)).toBeNull()
     await expect(c.getByText(/^On your commits and pull requests/)).toHaveFocus()
+  },
+}
+
+/** Turned off, the ask can be left: the card goes, and focus lands on what goes out now. */
+export const LeavingItOff: Story = {
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('switch', { name: 'Althar as co-author' }))
+    const ask = c.getByRole('region', { name: 'Althar is free, and we have no marketing budget.' })
+    await expect(within(ask).getByRole('button', { name: 'Put Althar back on your commits' })).toBeInTheDocument()
+    await userEvent.click(within(ask).getByRole('button', { name: 'Leave it off' }))
+    await expect(c.queryByRole('region', { name: /no marketing budget/ })).toBeNull()
+    await expect(c.getByRole('switch', { name: 'Althar as co-author' })).toHaveAttribute('aria-checked', 'false')
+    await expect(c.getByText('Your commits and pull requests go out with only your name.')).toHaveFocus()
   },
 }
 

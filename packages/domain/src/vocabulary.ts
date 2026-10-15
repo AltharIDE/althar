@@ -89,6 +89,14 @@ export const ThreadItemKind = Schema.Literals([
   'question',
   /** A run of the project Althar started, in the thread it was asked for in. Althar posts it and keeps it current. */
   'run',
+  /** An issue the coordinator drafted, in its thread: the person files it, changes it or discards it there. Althar posts it. */
+  'issue_draft',
+  /** Althar setting up a task's worktree, in the task's thread, before its lead starts. Althar posts it and keeps it current. */
+  'setup',
+  /** The lead asking the person to push its new commits to the task's pull request. Althar posts it and keeps it current. */
+  'push_request',
+  /** A review the lead drafted of someone else's pull request, in the task's thread: the person posts it, changes it or discards it there. */
+  'review_draft',
 ])
 export type ThreadItemKind = typeof ThreadItemKind.Type
 
@@ -155,8 +163,8 @@ export type FindingState = typeof FindingState.Type
 export const SnapshotReason = Schema.Literals(['node_started', 'node_ended', 'switch', 'interrupt'])
 export type SnapshotReason = typeof SnapshotReason.Type
 
-/** Why a node attempt is held without needing a person. */
-export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable'])
+/** Why a node attempt is held without needing a person: `machine_busy` waits for a place among the agents this machine runs at once. */
+export const HoldReason = Schema.Literals(['usage_limit', 'agent_unavailable', 'machine_busy'])
 export type HoldReason = typeof HoldReason.Type
 
 export const AttentionKind = Schema.Literals([
@@ -202,13 +210,48 @@ export type ConnectionProduct = typeof ConnectionProduct.Type
 export const ConnectionAuth = Schema.Literals(['device_flow', 'pkce', 'token'])
 export type ConnectionAuth = typeof ConnectionAuth.Type
 
+/** The command-line tool whose sign-in a connection's token was copied from, or none, where it was signed in otherwise. */
+export const ConnectionCli = Schema.Literals(['gh', 'glab', 'none'])
+export type ConnectionCli = typeof ConnectionCli.Type
+
 /** Whether a connection works: ready, needing its person to sign in again, or removed. */
 export const ConnectionState = Schema.Literals(['ready', 'reauth_required', 'removed'])
 export type ConnectionState = typeof ConnectionState.Type
 
-/** What a task's external link points at: the issue it came from, or a change it opened. */
-export const ExternalKind = Schema.Literals(['issue', 'change'])
+/** What a task's external link points at: the issue it came from, a change it opened, or someone else's change it reviews. */
+export const ExternalKind = Schema.Literals(['issue', 'change', 'review'])
 export type ExternalKind = typeof ExternalKind.Type
+
+/**
+ * Where an issue the coordinator drafted stands: waiting on the person, being
+ * filed, filed, not filed for a reason the tracker gave, perhaps filed (its
+ * answer was lost, so the tracker is looked at before filing it again), or
+ * discarded.
+ */
+export const IssueDraftState = Schema.Literals(['pending', 'filing', 'filed', 'failed', 'uncertain', 'discarded'])
+export type IssueDraftState = typeof IssueDraftState.Type
+
+/**
+ * Where a review the lead drafted of someone else's pull request stands:
+ * waiting on the person, being posted, posted, not posted for a reason the
+ * host gave, perhaps posted (its answer was lost, so the pull request is
+ * looked at before posting it again), or discarded.
+ */
+export const ReviewDraftState = Schema.Literals(['pending', 'posting', 'posted', 'failed', 'uncertain', 'discarded'])
+export type ReviewDraftState = typeof ReviewDraftState.Type
+
+/** What a review says of a pull request as a whole: approve it, ask for changes, or only comment. */
+export const ReviewVerdict = Schema.Literals(['approve', 'changes', 'comment'])
+export type ReviewVerdict = typeof ReviewVerdict.Type
+
+/**
+ * Where a lead resolving a conflict on its own stands (docs/architecture/06):
+ * at it (or at fixing the checks that failed on it), pushed and waiting for
+ * the pull request's checks, done, or given back to the person, who settles
+ * it or asks again.
+ */
+export const ConflictResolutionState = Schema.Literals(['resolving', 'checking', 'resolved', 'failed'])
+export type ConflictResolutionState = typeof ConflictResolutionState.Type
 
 /** What an artifact is, which decides how long it is kept: a command's output is a log, a picture an agent hands back an image. */
 export const ArtifactKind = Schema.Literals([
@@ -256,5 +299,9 @@ export const AggregateType = Schema.Literals([
   'external_link',
   'policy',
   'agent_account',
+  'issue_draft',
+  'conflict_resolution',
+  'project_note',
+  'review_draft',
 ])
 export type AggregateType = typeof AggregateType.Type

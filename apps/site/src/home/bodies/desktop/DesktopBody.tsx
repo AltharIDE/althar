@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import { cx } from '../../../lib/cx'
 import { Get } from '../../../shared/Close'
+import { LightUnder } from '../../../shared/lightUnder'
 import { HomeWindow, IslandOpen } from '../kit/app'
 import { EdgeTour } from '../kit/EdgeTour'
 import { Desktop, MacWindow } from '../kit/Mac'
@@ -38,6 +39,8 @@ function Scene({
 }) {
   return (
     <section id={id} className={cx(s.scene, tone === 'ink' && s.ink)} aria-labelledby={`${id}-h`}>
+      {/* Dark under the nav: it turns to smoked glass with white words over it. */}
+      {tone === 'ink' && <LightUnder tone="ink" className={s.under} />}
       <div className={s.head}>
         <p className={t.kicker}>
           <i aria-hidden="true" />

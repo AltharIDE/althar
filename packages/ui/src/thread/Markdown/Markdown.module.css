@@ -68,10 +68,40 @@
 .md pre {
   padding: 10px 12px;
   border-radius: 8px;
-  background: var(--n-2);
+  /* a sheet of its own: on --n-2 it was the ground a task's thread sits on, and only its copy's empty band showed */
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
   font: 11.5px/1.6 var(--mono);
   color: var(--t-1);
   white-space: pre-wrap;
+}
+/* a block's copy waits in a band above its first line, in the top-right corner, until the block is hovered, focused or, on touch, always there; the band is reserved, so the code never moves and the copied label never lands on it */
+.block {
+  position: relative;
+}
+.block pre {
+  margin: 0;
+  padding-top: 36px;
+}
+.oneLine pre {
+  padding-top: 10px;
+  padding-right: 44px;
+}
+.copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.block:hover > .copy,
+.block:focus-within > .copy {
+  opacity: 1;
+}
+@media (hover: none) {
+  .copy {
+    opacity: 1;
+  }
 }
 .md blockquote {
   padding: 9px 12px;

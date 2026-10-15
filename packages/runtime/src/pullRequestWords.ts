@@ -67,18 +67,80 @@ export interface FindingLine {
   readonly response: string | null
 }
 
+/** A piece of evidence, as the description lists it: as the step result keeps it. */
+export interface EvidenceLine {
+  readonly kind: string
+  readonly caption: string
+  readonly picture: unknown
+  readonly command: string | null
+  readonly exit: number | null
+  readonly text: string | null
+}
+
+/** How many lines of what a command printed, or a text, the description quotes: its end. */
+export const EVIDENCE_LINES = 12
+
+const EVIDENCE_WORDS: Readonly<Record<string, string>> = {
+  screenshot: 'Screenshot',
+  recording: 'Recording',
+  command: 'Command',
+  test_run: 'Test run',
+  response: 'Response',
+  log: 'Log',
+  note: 'Note',
+}
+
+/** The end of a text, fenced and indented under its list item; a fence its text can't close. */
+const quotedEnd = (text: string) => {
+  const lines = text.replace(/\n+$/, '').split('\n')
+  const end = lines.slice(-EVIDENCE_LINES)
+  const fence = '~'.repeat(Math.max(4, ...end.map((line) => (/^\s*(~+)/.exec(line)?.[1]?.length ?? 0) + 1)))
+  return [`${lines.length > end.length ? '  …\n' : ''}  ${fence}`, ...end.map((line) => `  ${line}`), `  ${fence}`].join('\n')
+}
+
 /**
- * The pull request's description: the lead's summary, how review went, the
- * issue it is for, and who opened it, unless the person turned Althar's
- * credit off. Where the repository has a template,
- * it's written in that: the lead's own description where it keeps the
- * template, with every box unticked, else the template with the lead's
- * summary in its place for one, or under a heading of its own below.
+ * What the lead showed, as the description says it: each piece with its
+ * caption; a command with what it ran, its exit code and the end of what it
+ * printed. Pictures aren't hosted with the pull request, so a screenshot is
+ * named, and said to be in Althar. Then what it couldn't show.
+ */
+export const evidenceText = (evidence: ReadonlyArray<EvidenceLine>, unverified: ReadonlyArray<string>) => {
+  const parts: Array<string> = []
+  if (evidence.length > 0) {
+    const lines = evidence.map((piece) => {
+      const word = EVIDENCE_WORDS[piece.kind] ?? 'Evidence'
+      const ran =
+        piece.command === null ? '' : `: \`${piece.command.replace(/`/g, "'")}\`${piece.exit === null ? '' : `, exit ${piece.exit}`}`
+      const head = `- ${word}: ${piece.caption}${ran}`
+      if (piece.picture !== null && piece.picture !== undefined) return head
+      return piece.text === null || piece.text.trim() === '' ? head : `${head}\n${quotedEnd(piece.text)}`
+    })
+    const pictured = evidence.some((piece) => piece.picture !== null && piece.picture !== undefined)
+    parts.push(['### Evidence', lines.join('\n'), ...(pictured ? ['Screenshots are in Althar, on the task.'] : [])].join('\n\n'))
+  }
+  if (unverified.length > 0) parts.push(`### Unverified\n\n${unverified.map((line) => `- ${line}`).join('\n')}`)
+  return parts.join('\n\n')
+}
+
+/**
+ * The pull request's description: what the task built, as the lead last
+ * said it (else its last step's summary), what it showed of its change working, how review went, the issue it is for, and who opened
+ * it, unless the person turned Althar's credit off. Where the repository has
+ * a template, it's written in that: the lead's own description where it keeps the
+ * template, with every box unticked, under what the task built, which may be
+ * newer; else the template with that in its place for a summary, or under a
+ * heading of its own below.
  */
 export const bodyOf = (input: {
+  /** What the task built, as the lead last said it: the description leads with it, template or not. */
+  readonly built?: string | null
+  /** The lead's last step summary, where it never said what the task built. */
   readonly lead: string | null
   readonly review: { readonly rounds: number; readonly verdict: string | null } | null
   readonly findings: ReadonlyArray<FindingLine>
+  /** What the lead showed of its change working, and what it couldn't. */
+  readonly evidence?: ReadonlyArray<EvidenceLine>
+  readonly unverified?: ReadonlyArray<string>
   readonly issue: { readonly key: string; readonly url: string; readonly sameHost: boolean } | null
   /** The repository's template, and the description the lead wrote in it. */
   readonly template?: string | null
@@ -87,17 +149,22 @@ export const bodyOf = (input: {
   readonly credit?: boolean
 }) => {
   const parts: Array<string> = []
-  const lead = input.lead !== null && input.lead !== '' ? input.lead : null
+  const built = input.built !== undefined && input.built !== null && input.built !== '' ? input.built : null
+  const lead = built ?? (input.lead !== null && input.lead !== '' ? input.lead : null)
   const template = input.template ?? null
   const written = input.written ?? null
   if (template === null) {
     if (lead !== null) parts.push(lead)
-  } else if (written !== null && keepsTemplate(template, written)) parts.push(untick(written).trim())
-  else {
+  } else if (written !== null && keepsTemplate(template, written)) {
+    if (built !== null) parts.push(built)
+    parts.push(untick(written).trim())
+  } else {
     const placed = lead === null ? null : placeSummary(template, lead)
     parts.push(untick(placed ?? template).trim())
     if (placed === null && lead !== null) parts.push(`### Summary\n\n${lead}`)
   }
+  const shown = evidenceText(input.evidence ?? [], input.unverified ?? [])
+  if (shown !== '') parts.push(shown)
   if (input.review !== null && input.review.rounds > 0) {
     const rounds = input.review.rounds === 1 ? 'one round' : `${input.review.rounds} rounds`
     parts.push(`### Review\n\n${input.review.verdict === 'pass' ? `Passed after ${rounds} of review.` : `Reviewed in ${rounds}.`}`)
@@ -115,7 +182,7 @@ export const bodyOf = (input: {
   }
   if (input.issue !== null)
     parts.push(input.issue.sameHost ? `Issue: ${input.issue.key}` : `Issue: [${input.issue.key}](${input.issue.url})`)
-  if (input.credit !== false) parts.push('<sub>Opened by Althar.</sub>')
+  if (input.credit !== false) parts.push('<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>')
   return parts.join('\n\n')
 }
 
@@ -166,7 +233,19 @@ export const checksForLead = (sum: ChecksSum, name: string, logs: ReadonlyArray<
   [
     `Checks failed on ${name}: ${sum.failing.join(', ')}.`,
     ...logs,
-    'Fix what broke and commit it: the person looks at it and pushes it. Or, if it isn’t the task’s to fix, say why.',
+    'Fix what broke and commit it, then ask the person to push it with push_to_pull_request. Or, if it isn’t the task’s to fix, say why. read_check_log reads the whole of a check’s log, where its end doesn’t show the cause.',
+  ].join('\n\n')
+
+/**
+ * What the lead is told when the checks fail on a change the person hasn't
+ * seen yet (ADR-040): the checks are its to see through, its fix goes up as it
+ * pushes, and how many tries are left before the change is the person's.
+ */
+export const checksForLeadAlone = (sum: ChecksSum, name: string, logs: ReadonlyArray<string>, left: number) =>
+  [
+    `Checks failed on ${name}: ${sum.failing.join(', ')}.`,
+    ...logs,
+    `The person hasn't seen this change yet, so its checks are yours to see through: fix what broke and commit it, then call push_to_pull_request, which pushes it at once, and the checks run again. ${left <= 1 ? 'This is the last try before the change goes to the person.' : `You have ${left} tries before the change goes to the person.`} Or, if it isn't the task's to fix, say why. read_check_log reads the whole of a check's log, where its end doesn't show the cause.`,
   ].join('\n\n')
 
 /** What the lead is told of what it can't read: people outside the repository, whom the person passes on. */
@@ -202,4 +281,4 @@ export const filesLine = (paths: ReadonlyArray<string>, shown = 8) => {
 
 /** How the lead answers what people said. */
 export const answerHint =
-  'Answer on the pull request with reply_on_pull_request (in a thread, by its id), or change the code and commit it, for the person to look at and push. If it needs the person, say so.'
+  'Answer on the pull request with reply_on_pull_request (in a thread, by its id), or change the code, commit it, and ask the person to push it with push_to_pull_request. If it needs the person, say so.'

@@ -1,6 +1,7 @@
 import { createContext, type ReactNode, useContext, useEffect, useId, useRef } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
+import { commandGlance } from '../../lib/commandGlance'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Code } from '../../primitives/Code/Code'
@@ -8,6 +9,22 @@ import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { type ProjectRef, ProjectWord } from '../ProjectWord/ProjectWord'
 import s from './NeedLine.module.css'
+import { focusQuietly } from '../../lib/focusQuietly'
+
+/** The command a permission asks for, once and short: its first command or two, and what they leave out. */
+function Glance({ command }: { command: string }) {
+  const { lines, summary } = commandGlance(command)
+  return (
+    <div className={s.glance} title={command}>
+      {lines.map((line, i) => (
+        <p key={i} className={s.brief}>
+          <Code className={s.command}>{line}</Code>
+        </p>
+      ))}
+      {summary !== null && <p className={s.brief}>{summary}</p>}
+    </div>
+  )
+}
 
 /*
  * Something that waits on you, as one line of the home's list: what kind
@@ -102,7 +119,7 @@ export function NeedLine({
     // Just after the commit, as AskAnswered does, so focus never lands inside React's flush.
     let live = true
     queueMicrotask(() => {
-      if (live) line.current?.focus()
+      if (live) focusQuietly(line.current)
     })
     return () => {
       live = false
@@ -130,9 +147,7 @@ export function NeedLine({
             title
           )}
         </Heading>
-        {(command !== undefined || brief !== undefined) && (
-          <p className={s.brief}>{command !== undefined ? <Code className={s.command}>{command}</Code> : brief}</p>
-        )}
+        {command !== undefined ? <Glance command={command} /> : brief !== undefined && <p className={s.brief}>{brief}</p>}
       </div>
       <span className={s.whose}>
         {lines.whose && <ProjectWord project={project} />}

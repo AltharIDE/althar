@@ -196,6 +196,25 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.rules('p1'))?.isInvalidated).toBe(true)
   })
 
+  it('reads a project’s board again when its rules change, and marks its threads, by whose switch its tasks allow everything', async () => {
+    const { client, cache, emit, read } = opened()
+    await Promise.all([cache.fetchQuery(read.board('p1')), cache.fetchQuery(read.board('p2')), cache.fetchQuery(read.thread('th1'))])
+    // Off screen too: the board shows next as the rules left it.
+    emit(changed('policy', 'pol1', null, 'p1'))
+    await settle()
+    expect(vi.mocked(client.getBoard).mock.calls.filter(([id]) => id === 'p1')).toHaveLength(2)
+    expect(vi.mocked(client.getBoard).mock.calls.filter(([id]) => id === 'p2')).toHaveLength(1)
+    // Its threads are read on their next visit; a task on screen reads its own head.
+    expect(cache.getQueryState(keys.thread('th1'))?.isInvalidated).toBe(true)
+    expect(client.getThread).toHaveBeenCalledTimes(1)
+    // Another project's rules touch neither.
+    cache.setQueryData(keys.thread('th1'), cache.getQueryData(keys.thread('th1')))
+    emit(changed('policy', 'pol2', null, 'p2'))
+    await settle()
+    expect(cache.getQueryState(keys.thread('th1'))?.isInvalidated).toBe(false)
+    expect(vi.mocked(client.getBoard).mock.calls.filter(([id]) => id === 'p1')).toHaveLength(2)
+  })
+
   it('reads once more what was being read when a change touched it', async () => {
     const { client, cache, emit, read } = opened()
     const first = later<ProjectList>()
@@ -267,11 +286,22 @@ describe('the window’s reads', () => {
   it('starts over from the new page when an earlier one holds something that may have moved since', () => {
     const at = (item: ThreadSnapshot['items'][number], sequence: number) => ({ ...item, id: `i${sequence}`, sequence })
     const with_ = (first: ThreadSnapshot['items'][number]) => snapshot({ items: [at(first, 1), at(items.says('#2'), 2)], earlier: true })
-    // A tool call still running, a message still queued: the earlier page goes, to be read again.
-    for (const unsettled of [items.tool({ status: 'in_progress' }), items.you('Wait', { state: 'queued', interrupting: false })])
+    // A tool call still running, a message still queued, an issue or review draft not yet filed or posted: the earlier page goes, to be read again.
+    for (const unsettled of [
+      items.tool({ status: 'in_progress' }),
+      items.you('Wait', { state: 'queued', interrupting: false }),
+      items.draft({ state: 'failed', error: 'No.' }),
+      items.review(),
+    ])
       expect(sequences(continued(with_(unsettled), page([2, 3], true)))).toEqual([2, 3])
-    // Done and delivered: kept.
-    for (const done of [items.tool({ status: 'completed' }), items.you('Hi')])
+    // Done and delivered, filed, posted or discarded: kept.
+    for (const done of [
+      items.tool({ status: 'completed' }),
+      items.you('Hi'),
+      items.draft({ state: 'discarded' }),
+      items.review({ state: 'posted', verdict: 'comment', review: { url: 'https://github.com/x', at: '2026-09-29T11:00:00.000Z' } }),
+      items.review({ state: 'discarded' }),
+    ])
       expect(sequences(continued(with_(done), page([2, 3], false)))).toEqual([1, 2, 3])
     // What the new page holds is its own, settled or not.
     expect(

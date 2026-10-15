@@ -16,9 +16,11 @@ import { Room } from '@althar/ui'
 
 import { draftsOf } from '../src/renderer/features/newProject/draft'
 import { TabsFrame, useLastRoom, useNewTab, useVisit } from '../src/renderer/features/tabs/TabsFrame'
+import { glanceOf, memoryOf } from '../src/renderer/features/tabs/useLoad'
+import { brandOf } from '../src/renderer/shared/agents'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
 import type { Host } from '../src/renderer/data/services'
-import { changed, fakeClient, fakeHost, project } from './fixtures'
+import { changed, fakeClient, fakeHost, load, project } from './fixtures'
 import { withServices } from './render'
 
 const halyard: ProjectSummary = { ...project, id: 'p2', name: 'halyard', slug: 'halyard', running: 0, working: 0, waiting: 0, ready: 0 }
@@ -76,17 +78,18 @@ const rulesRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projec
 const threadRoute = createRoute({ getParentRoute: () => rootRoute, path: '/threads/$threadId', component: Thread })
 let making = () => ''
 const newRoute = createRoute({ getParentRoute: () => rootRoute, path: '/new', component: () => <NewScreen projectId={() => making()} /> })
+const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/settings/$section', component: Where })
 
 const windowAt = (path: string, projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera], host: Host = fakeHost()) => {
   const router = createRouter({
-    routeTree: rootRoute.addChildren([homeRoute, projectRoute, rulesRoute, threadRoute, newRoute]),
+    routeTree: rootRoute.addChildren([homeRoute, projectRoute, rulesRoute, threadRoute, newRoute, settingsRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   const { client, emit } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects })) })
   making = () => draftsOf(client).get()?.id ?? ''
   withServices(<RouterProvider router={router} />, client, host)
   const go = (to: string) => act(() => router.history.push(to))
-  return { client, emit, go, router }
+  return { client, emit, go, router, host }
 }
 
 const nav = () => within(screen.getByRole('navigation', { name: 'Projects' }))
@@ -301,6 +304,184 @@ describe('the window’s tabs', () => {
   })
 })
 
+describe('Althar’s settings, in the window', () => {
+  const gear = () => screen.getByRole('button', { name: /^Althar settings/ })
+  const quick = () => screen.findByRole('dialog', { name: 'Quick settings' })
+  const noQuick = () => waitFor(() => expect(screen.queryByRole('dialog', { name: 'Quick settings' })).toBeNull())
+  const comma = (shiftKey = false) => fireEvent.keyDown(window, { key: shiftKey ? '<' : ',', code: 'Comma', metaKey: true, shiftKey })
+  const kept = () => keptFrom(window.localStorage.getItem('althar.tabs'))
+
+  it('open their quick settings on every screen, and a tab of their own beside the home’s, kept on its section', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['p1', 'p2'], places: {} }))
+    windowAt('/projects/p2')
+    await waitFor(() => expect(tab('halyard').getAttribute('aria-current')).toBe('page'))
+    // No tab for them until they are open.
+    expect(nav().queryByRole('button', { name: /^Settings/ })).toBeNull()
+
+    // From a project's screen, the gear's quick settings; All settings goes to their tab, at its first section.
+    await userEvent.click(gear())
+    await userEvent.click(within(await quick()).getByRole('button', { name: /^All settings/ }))
+    await waitFor(() => expect(where()).toBe('/settings/agents'))
+    await noQuick()
+    expect(names().map((name) => name.split(',')[0])).toEqual(['Home', 'Settings', 'meridian', 'halyard'])
+    expect(tab('Settings').getAttribute('aria-current')).toBe('page')
+    expect(tab('halyard').getAttribute('aria-current')).toBeNull()
+
+    // ⌘, on their own tab too; a card's name goes to the section it is in.
+    comma()
+    await userEvent.click(within(await quick()).getByRole('button', { name: /^Keep awake/ }))
+    await waitFor(() => expect(where()).toBe('/settings/this-mac'))
+
+    // To a project and back: the tab is where it was.
+    await userEvent.click(tab('meridian'))
+    expect(where()).toBe('/projects/p1')
+    expect(tab('Settings').getAttribute('aria-current')).toBeNull()
+    await userEvent.click(tab('Settings'))
+    expect(where()).toBe('/settings/this-mac')
+    // ⌘⇧, from anywhere goes there too.
+    await userEvent.click(tab('Home'))
+    comma(true)
+    await waitFor(() => expect(where()).toBe('/settings/this-mac'))
+    // Control-Tab steps through it too, between the home's and the projects'.
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true })
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(where()).toBe('/settings/this-mac'))
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(where()).toBe('/'))
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true })
+    await waitFor(() => expect(where()).toBe('/settings/this-mac'))
+    // Kept for the next launch, with its section.
+    expect(kept()).toMatchObject({ open: ['p1', 'p2'], settings: 'this-mac' })
+
+    // ⌘, opens and closes the quick settings.
+    comma()
+    expect(await quick()).toBeTruthy()
+    comma()
+    await noQuick()
+
+    // Closed: the tab after it has the window, and its section is forgotten.
+    await userEvent.click(nav().getByRole('button', { name: 'Close Settings' }))
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    expect(nav().queryByRole('button', { name: /^Settings/ })).toBeNull()
+    expect(kept()?.settings).toBeUndefined()
+  })
+
+  it('open again on the section they were on, after a launch, and close to the home where there is no project tab', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: [], places: {}, settings: 'reviews' }))
+    windowAt('/', [halyard])
+    await userEvent.click(await waitFor(() => tab('Settings')))
+    expect(where()).toBe('/settings/reviews')
+    await userEvent.click(nav().getByRole('button', { name: 'Close Settings' }))
+    await waitFor(() => expect(where()).toBe('/'))
+  })
+
+  it('wait for the bar, which comes with the first project', async () => {
+    windowAt('/', [])
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole('button', { name: /^Althar settings/ })).toBeNull()
+    comma()
+    comma(true)
+    expect(screen.queryByRole('dialog', { name: 'Quick settings' })).toBeNull()
+    expect(where()).toBe('/')
+  })
+})
+
+describe('how hard the Mac works, in the bar', () => {
+  const meter = () => screen.findByRole('button', { name: 'CPU 42%, MEM 39%' })
+  const peek = async () => {
+    await userEvent.click(await meter())
+    return within(await screen.findByRole('dialog', { name: 'This Mac’s load' }))
+  }
+
+  it('shows on every screen, and a piece of work’s row opens it: a task’s thread, its project’s conversation, its front', async () => {
+    const { client, router } = windowAt('/projects/p2')
+    await userEvent.click((await peek()).getByRole('button', { name: /^Add a retry/ }))
+    await waitFor(() => expect(where()).toBe('/threads/th1'))
+    expect(client.getLoad).toHaveBeenCalled()
+
+    await userEvent.click((await peek()).getByRole('button', { name: /^Coordinator\s*meridian · Codex · 1 process/ }))
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    expect(router.state.location.search).toEqual({ room: Room.Talk })
+
+    await act(() => router.navigate({ to: '/projects/$projectId', params: { projectId: 'p2' } }))
+    await userEvent.click((await peek()).getByRole('button', { name: /^Default branch\s*meridian · 3 processes/ }))
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    expect(router.state.location.search).toEqual({})
+  })
+
+  it('goes from the bar when turned off in its peek, and isn’t read again', async () => {
+    const host = fakeHost()
+    const { client } = windowAt('/', [project], host)
+    await userEvent.click((await peek()).getByRole('switch', { name: 'Show in the bar' }))
+    expect(host.setPreference).toHaveBeenCalledWith('showLoad', false)
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^CPU/ })).toBeNull())
+    const reads = vi.mocked(client.getLoad).mock.calls.length
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(client.getLoad).toHaveBeenCalledTimes(reads)
+  })
+
+  it('isn’t read before there is a project, when the first screen has the window and no bar', async () => {
+    const { client } = windowAt('/', [])
+    await waitFor(() => expect(client.listProjects).toHaveBeenCalled())
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(client.getLoad).not.toHaveBeenCalled()
+  })
+
+  it('is never read while it is off', async () => {
+    const host = fakeHost()
+    await host.setPreference('showLoad', false)
+    const { client } = windowAt('/', [project], host)
+    await screen.findByRole('navigation', { name: 'Projects' })
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(client.getLoad).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /^CPU/ })).toBeNull()
+  })
+
+  it('draws the runtime’s reading: memory as macOS counts it, Althar’s part of each, and its work by name', () => {
+    expect([memoryOf(32 * 1024 ** 3), memoryOf(19.54 * 1024 ** 3), memoryOf(300 * 1024 ** 2), memoryOf(10)]).toEqual([
+      '32 GB',
+      '19.5 GB',
+      '300 MB',
+      '1 MB',
+    ])
+    const glance = glanceOf(load)
+    expect(glance).toMatchObject({ cpu: 0.42, memory: 12.5 / 32, memoryUsed: '12.5 GB', memoryTotal: '32 GB', pressure: 'normal' })
+    expect(glance.work).toBeCloseTo(0.33)
+    expect(glance.workMemory).toBeCloseTo((1.5 * 1024 + 520) / (32 * 1024))
+    expect(glance.rows?.map((row) => [row.id, row.title, row.agent, row.mark, row.memory])).toEqual([
+      ['task t1', 'Add a retry', 'Claude Code', brandOf('claude-code'), '1.5 GB'],
+      ['coordinator p1', 'Coordinator', 'Codex', brandOf('codex'), '300 MB'],
+      ['run p1', 'Default branch', undefined, undefined, '220 MB'],
+    ])
+    // Where Althar's processes can't be read, its part is unknown, not none; and a computer that says no memory has none in use.
+    const unknown = glanceOf({ ...load, shares: null, pressure: null, memoryTotal: 0 })
+    expect(unknown).toMatchObject({ work: null, workMemory: null, rows: null, pressure: null, memory: 0 })
+    expect(glanceOf({ ...load, pressure: 'critical' }).pressure).toBe('critical')
+    expect(glanceOf({ ...load, pressure: 'warning' }).pressure).toBe('warning')
+  })
+})
+
+describe('the window’s own buttons in the strip', () => {
+  it('draws them off a Mac, and asks the main process for what they say', async () => {
+    const host = fakeHost({ platform: 'linux' })
+    windowAt('/', [project], host)
+    await waitFor(() => expect(tab('Home')).toBeTruthy())
+    await userEvent.click(screen.getByRole('button', { name: 'Minimize the window' }))
+    expect(host.window).toHaveBeenCalledWith('minimize')
+    await userEvent.click(screen.getByRole('button', { name: 'Maximize the window' }))
+    expect(host.window).toHaveBeenCalledWith('toggle-maximize')
+    await userEvent.click(screen.getByRole('button', { name: 'Close the window' }))
+    expect(host.window).toHaveBeenCalledWith('close')
+  })
+
+  it('leaves them to the system on macOS', async () => {
+    windowAt('/')
+    await waitFor(() => expect(tab('Home')).toBeTruthy())
+    expect(screen.queryByRole('button', { name: 'Close the window' })).toBeNull()
+  })
+})
+
 describe('working out the tabs', () => {
   it('reads where the window is from its address', () => {
     expect(whereOf('/')).toEqual({ kind: 'home' })
@@ -348,5 +529,12 @@ describe('working out the tabs', () => {
       places: {},
       rooms: { p1: 'board' },
     })
+  })
+
+  it('reads the settings’ tab from its address, a section it doesn’t have as their first, and keeps one it knows', () => {
+    expect(whereOf('/settings/this-mac')).toEqual({ kind: 'settings', section: 'this-mac' })
+    expect(whereOf('/settings/mac')).toEqual({ kind: 'settings', section: 'agents' })
+    expect(keptFrom(JSON.stringify({ open: [], settings: 'notifications' }))).toEqual({ open: [], places: {}, settings: 'notifications' })
+    expect(keptFrom(JSON.stringify({ open: [], settings: 'mac' }))).toEqual({ open: [], places: {} })
   })
 })

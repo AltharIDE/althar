@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, test } from '@playwright/test'
+import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
 import { launch, openFirstProject } from './support'
@@ -12,9 +12,11 @@ import { launch, openFirstProject } from './support'
 /*
  * Logs on disk and Report a problem (DEV-61), as the person meets them: the
  * app writes its logs as it runs, a page's uncaught error among them; Help
- * → Report a problem opens the dialog over the project, with a picture of
- * the window and everything that goes listed; sent, a stand-in for the
- * reports Worker gets the report, the screenshot and the masked logs.
+ * → Report a problem on a Mac, or the quick settings' foot elsewhere, where
+ * the app's menu has no bar, opens the dialog over the project, with a
+ * picture of the window and everything that goes listed; sent, a stand-in
+ * for the reports Worker gets the report, the screenshot and the masked
+ * logs. Opened again from the quick settings' foot, it has the email kept.
  */
 
 interface Received {
@@ -55,6 +57,12 @@ const fakeWorker = async () => {
   return { url: `http://127.0.0.1:${port}`, received, close: () => server.close() }
 }
 
+/** Report a problem from the quick settings' foot, on every system. */
+const fromQuickSettings = async (page: Page) => {
+  await page.getByRole('button', { name: /^Althar settings/ }).click()
+  await page.getByRole('dialog', { name: 'Quick settings' }).getByRole('button', { name: 'Report a problem' }).click()
+}
+
 test('keeps logs, and reports a problem from the menu with the window, what goes listed, and the logs masked', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const repo = repository(home)
@@ -72,8 +80,10 @@ test('keeps logs, and reports a problem from the menu with the window, what goes
     await page.evaluate(() => setTimeout(() => Promise.reject(new Error('An error the window left'))))
     await expect.poll(() => readFileSync(join(logs, 'main.log'), 'utf8')).toContain('An error the window left')
 
-    // Help → Report a problem.
-    await electronApp.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('report')?.click())
+    // Help → Report a problem on a Mac; elsewhere the menu has no bar, and the quick settings' foot has it.
+    if (process.platform === 'darwin')
+      await electronApp.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('report')?.click())
+    else await fromQuickSettings(page)
     const dialog = page.getByRole('dialog', { name: 'Report a problem' })
     await expect(dialog).toBeVisible()
     await expect(dialog.getByRole('img', { name: 'Screenshot of this window' })).toBeVisible()
@@ -113,8 +123,8 @@ test('keeps logs, and reports a problem from the menu with the window, what goes
     expect(got?.logs).toContain('message="Runtime ready"')
     expect(got?.logs).not.toContain(homedir())
     expect(got?.logs).not.toMatch(/\bmeridian\b/)
-    // The email is kept for the next report.
-    await electronApp.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('report')?.click())
+    // The email is kept for the next report, asked for from the quick settings' foot.
+    await fromQuickSettings(page)
     await expect(page.getByRole('textbox', { name: 'Email, if you’d like a reply' })).toHaveValue('dana@example.com')
   } finally {
     await electronApp.close()

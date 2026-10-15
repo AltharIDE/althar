@@ -5,8 +5,10 @@
  * key holds reads as where it starts. Settings reads and changes them
  * through the main process, which is where they take effect: keeping the
  * Mac awake while work runs, which notifications show, the Dock's count and
- * a sound. Which editor files open in is the window's to use. Nothing here
- * touches Node, so the window may read the defaults and keys too.
+ * a sound, and whether anonymous usage data is sent. Which editor files
+ * open in, and whether the bar shows how hard the computer works, are the
+ * window's to use. Nothing here touches Node, so the window may read the
+ * defaults and keys too.
  */
 
 interface Kind<T> {
@@ -45,6 +47,12 @@ export const PREFERENCES = {
   badge: onOff(true),
   /** The sound each notification plays, one of the Mac's alert sounds; none, silent. */
   sound,
+  /** The sound there was before Settings' Sound card silenced them, which turning it on again puts back; none before it ever did. */
+  lastSound: sound,
+  /** How hard the computer works, and Althar's work's part, in the window's bar; read only while it shows. */
+  showLoad: onOff(true),
+  /** Anonymous usage data: the steps people take, never what they write (usageData.ts). */
+  usageData: onOff(true),
 } as const
 
 type Kinds = typeof PREFERENCES
@@ -64,3 +72,7 @@ export const holds = <K extends PreferenceKey>(key: K, value: unknown): value is
 /** The preferences in what a file held: each key's own value where it is one that key can hold, else where it starts. */
 export const preferencesIn = (kept: Readonly<Record<string, unknown>>): AppPreferences =>
   Object.fromEntries(PREFERENCE_KEYS.map((key) => [key, holds(key, kept[key]) ? kept[key] : PREFERENCES[key].starts])) as AppPreferences
+
+/** Whether the person asked every tool on this computer to send nothing, as consoledonottrack.com has it: usage data is off, whatever its switch says. */
+export const doNotTrack = (env: Readonly<Record<string, string | undefined>>): boolean =>
+  ['1', 'true', 'yes'].includes((env.DO_NOT_TRACK ?? '').trim().toLowerCase())

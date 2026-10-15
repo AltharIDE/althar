@@ -1,10 +1,18 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { BoardTask, ConnectionList, ProductOption, ProjectRepository } from '@althar/contracts'
 import { Brand } from '@althar/ui'
 
 import { lanesOf } from '../src/renderer/features/board/lanes'
-import { connectedAs, hostMarksOf, lastSettledOf, partsOf, rulesLineOf, trackerOf } from '../src/renderer/features/project/front'
+import {
+  connectedAs,
+  hostMarksOf,
+  lastSettledOf,
+  partsOf,
+  rulesLineOf,
+  trackersOf,
+  trackerUrlOf,
+} from '../src/renderer/features/project/front'
 import { card, change, connectionList, githubConnection, projectRules } from './fixtures'
 
 /*
@@ -26,7 +34,7 @@ const task = (overrides: Partial<BoardTask> = {}): BoardTask => ({
   ...overrides,
 })
 
-const settled = (...tasks: BoardTask[]) => lanesOf({ cursor: 1, tasks, calls: [] })
+const settled = (...tasks: BoardTask[]) => lanesOf({ cursor: 1, tasks, calls: [], settledTotal: tasks.length })
 
 const github = { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } as const
 
@@ -78,43 +86,81 @@ describe('a project’s front page', () => {
     ).toBe('Newer, done 30m ago')
   })
 
-  it('says what it is made of: each repository with its host’s mark, then the tracker its tasks name', () => {
-    expect(
-      partsOf({
-        repositories: [
-          { id: 'api', name: 'meridian-api', host: on('github', 'meridian/api', 'ready') },
-          { id: 'ops', name: 'meridian-ops', host: null },
-        ],
-        names: [],
-        host: github,
-        tracker: { product: 'linear', at: 'linear.app', key: 'MER' },
-      }),
-    ).toEqual([
-      { id: 'api', name: 'meridian-api', brand: Brand.GitHub },
+  it('says what it is made of: each repository with its host’s mark, then the trackers its tasks name, each opening where it lives', () => {
+    const open = vi.fn()
+    const parts = partsOf({
+      repositories: [
+        { id: 'api', name: 'meridian-api', host: on('github', 'meridian/api', 'ready') },
+        { id: 'web', name: 'meridian-web', host: on('github', 'meridian/web', null) },
+        { id: 'ops', name: 'meridian-ops', host: null },
+      ],
+      names: [],
+      host: github,
+      trackers: [{ product: 'linear', at: 'linear.app', key: 'MER', url: 'https://linear.app/acme/team/MER' }],
+      open,
+    })
+    expect(parts.map(({ id, name, brand, openLabel }) => ({ id, name, brand, openLabel }))).toEqual([
+      { id: 'api', name: 'meridian-api', brand: Brand.GitHub, openLabel: 'Open on GitHub' },
+      // Not connected there: it opens all the same, from its remote.
+      { id: 'web', name: 'meridian-web', brand: Brand.GitHub, openLabel: 'Open on GitHub' },
       { id: 'ops', name: 'meridian-ops' },
-      { id: 'tracker:MER', name: 'MER issues', brand: Brand.Linear },
+      { id: 'tracker:linear:linear.app:MER', name: 'MER issues', brand: Brand.Linear, openLabel: 'Open on Linear' },
     ])
+    parts[1]?.onOpen?.()
+    parts[3]?.onOpen?.()
+    expect(open.mock.calls).toEqual([['https://github.com/meridian/web'], ['https://linear.app/acme/team/MER']])
+    expect(parts[2]?.onOpen).toBeUndefined()
+  })
+
+  it('shows three trackers by name and counts the rest', () => {
+    const tracker = (key: string) => ({ product: 'linear' as const, at: 'linear.app', key, url: null })
+    const parts = partsOf({
+      repositories: [],
+      names: [],
+      host: null,
+      trackers: ['A', 'B', 'C', 'D', 'E'].map(tracker),
+      open: vi.fn(),
+    })
+    expect(parts.map((part) => part.name)).toEqual(['A issues', 'B issues', 'C issues', '+2 more'])
+    // Without an address to build on, they are words.
+    expect(parts.some((part) => part.onOpen !== undefined)).toBe(false)
   })
 
   it('says its repositories by name, on the project’s host, until they are read', () => {
-    expect(partsOf({ repositories: null, names: ['api', 'web'], host: github, tracker: null })).toEqual([
+    const open = vi.fn()
+    expect(partsOf({ repositories: null, names: ['api', 'web'], host: github, trackers: [], open })).toEqual([
       { id: 'api', name: 'api', brand: Brand.GitHub },
       { id: 'web', name: 'web', brand: Brand.GitHub },
     ])
-    expect(partsOf({ repositories: null, names: ['api'], host: null, tracker: null })).toEqual([{ id: 'api', name: 'api' }])
+    expect(partsOf({ repositories: null, names: ['api'], host: null, trackers: [], open })).toEqual([{ id: 'api', name: 'api' }])
   })
 
-  it('names the tracker by the key most of its tasks’ issues share, and none for a host’s own issues', () => {
-    const issue = (key: string, product: 'linear' | 'github' = 'linear') => ({ product, key, title: key, url: `https://x/${key}` })
-    expect(trackerOf([], connectionList)).toBeNull()
-    expect(trackerOf([task({ issue: issue('#12', 'github') }), task({ issue: issue('MER-1', 'github') })], connectionList)).toBeNull()
+  it('names each tracker key its tasks’ issues share, the most used first, and none for a host’s own issues', () => {
+    const issue = (key: string, product: 'linear' | 'github' = 'linear') => ({
+      product,
+      key,
+      title: key,
+      url: `https://x/acme/issue/${key}`,
+    })
+    expect(trackersOf([], connectionList)).toEqual([])
+    expect(trackersOf([task({ issue: issue('#12', 'github') }), task({ issue: issue('MER-1', 'github') })], connectionList)).toEqual([])
     expect(
-      trackerOf(
+      trackersOf(
         [task({ issue: issue('OPS-1') }), task({ issue: issue('MER-231') }), task({ issue: issue('MER-240') }), task()],
         connectionList,
       ),
-    ).toEqual({ product: 'linear', at: 'x', key: 'MER' })
-    expect(trackerOf([task({ issue: issue('MER-1') })], null)).toBeNull()
+    ).toEqual([
+      { product: 'linear', at: 'x', key: 'MER', url: 'https://x/acme/team/MER' },
+      { product: 'linear', at: 'x', key: 'OPS', url: 'https://x/acme/team/OPS' },
+    ])
+    expect(trackersOf([task({ issue: issue('MER-1') })], null)).toEqual([])
+  })
+
+  it('works out a key’s space from the link of one of its issues', () => {
+    expect(trackerUrlOf('linear', 'MER', 'https://linear.app/acme/issue/MER-231/refund-keys')).toBe('https://linear.app/acme/team/MER')
+    expect(trackerUrlOf('jira_cloud', 'PAY', 'https://acme.atlassian.net/browse/PAY-9')).toBe('https://acme.atlassian.net/browse/PAY')
+    expect(trackerUrlOf('linear', 'MER', 'not an address')).toBeNull()
+    expect(trackerUrlOf('linear', 'MER', 'javascript:alert(1)')).toBeNull()
   })
 
   it('marks each host its repositories are on once, faint while Althar isn’t connected there', () => {
@@ -179,7 +225,7 @@ describe('a project’s front page', () => {
     expect(
       rulesLineOf({
         ...projectRules,
-        permissions: 'allow',
+        allowEverything: true,
         alwaysAsk: ['deploy'],
         commands: [{ pattern: 'npm publish', decision: 'ask' }],
       }),

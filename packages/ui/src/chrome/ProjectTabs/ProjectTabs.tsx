@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
+import { Icon } from '../../foundations/Icon/Icon'
 import { Logo } from '../../foundations/Logo/Logo'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
 import type { ProjectInk } from '../../foundations/ProjectMark/drawing'
@@ -9,6 +10,7 @@ import { IconButton } from '../../primitives/IconButton/IconButton'
 import { Menu, MenuGroup, MenuItem, MenuSeparator } from '../../primitives/Menu/Menu'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
+import { WindowButtons } from '../WindowButtons/WindowButtons'
 import s from './ProjectTabs.module.css'
 
 /*
@@ -24,8 +26,12 @@ import s from './ProjectTabs.module.css'
  * project to open, it opens the new one at once. However many are open,
  * the home's tab stays put; the others give way together, down to their
  * marks, and past that they scroll, by wheel too, fading at the side where
- * more are, with a menu of them all. On macOS the system draws the traffic
- * lights over its start, so it keeps their space.
+ * more are, with a menu of them all. While Althar's settings are open they
+ * have a tab too, beside the home's, as the app's and no project's: a gear
+ * and their name, closed by its ×. On macOS the system draws the traffic
+ * lights over its start, so it keeps their space; where the system draws
+ * none, the same three dots are the window's own buttons (close, minimize,
+ * maximize), and the app behind them does what they ask.
  */
 
 /** A project as its tab shows it. */
@@ -41,9 +47,20 @@ export interface ProjectTab {
   yours: number
 }
 
+/** Althar's settings, while they have a tab of their own. */
+export interface SettingsTab {
+  /** It has the window: no other tab does. */
+  current: boolean
+  onSelect: () => void
+  onClose: () => void
+}
+
 export interface ProjectTabsText {
   label: string
   home: string
+  /** The settings' tab, and closing it. */
+  settings: string
+  closeSettings: string
   close: (name: string) => string
   /** Read after a tab's count. */
   yours: (n: number) => string
@@ -54,11 +71,18 @@ export interface ProjectTabsText {
   newProjectKbd: string
   /** The menu of every open project, when more are open than fit. */
   all: string
+  /** The window's own buttons, where the system draws none. */
+  closeWindow: string
+  minimizeWindow: string
+  maximizeWindow: string
+  restoreWindow: string
 }
 
 export const projectTabsText: ProjectTabsText = {
   label: 'Projects',
   home: 'Home',
+  settings: 'Settings',
+  closeSettings: 'Close Settings',
   close: (name) => `Close ${name}`,
   yours: (n) => (n === 1 ? '1 call waits on you' : `${n} calls wait on you`),
   running: 'work running',
@@ -67,13 +91,17 @@ export const projectTabsText: ProjectTabsText = {
   newProject: 'New project',
   newProjectKbd: '⌘N',
   all: 'All open projects',
+  closeWindow: 'Close the window',
+  minimizeWindow: 'Minimize the window',
+  maximizeWindow: 'Maximize the window',
+  restoreWindow: 'Restore the window',
 }
 
 export type ProjectTabsProps = RootProps<
   'header',
   {
     tabs: readonly ProjectTab[]
-    /** The tab that has the window: a project's id, or null for the home. */
+    /** The tab that has the window: a project's id, or null for the home. The settings' own tab, where it has the window, says so itself. */
     current: string | null
     /** A tab was pressed: a project's id, or null for the home. */
     onSelect: (id: string | null) => void
@@ -82,14 +110,23 @@ export type ProjectTabsProps = RootProps<
     yours?: number
     /** The projects without a tab, which the + offers. */
     others?: readonly ProjectTab[]
+    /** Althar's settings, beside the home's tab, while they are open. */
+    settings?: SettingsTab
     /** Gives one of the others a tab. Without it, the + offers none of them. */
     onOpen?: (id: string) => void
     /** Starts a new project, in a tab of its own. Without it or any others to open, there is no +. */
     onNewProject?: () => void
     /** At the far end: what the screen under the tabs puts in the bar. */
     end?: ReactNode
-    /** space: leave room for the system's lights. drawn: draw stand-ins. none: no room. */
+    /** space: leave room for the system's lights. drawn: draw the window's own buttons. none: no room. */
     lights?: 'space' | 'drawn' | 'none'
+    /** The window's own buttons, where the system draws none (lights='drawn'). */
+    onCloseWindow?: () => void
+    onMinimize?: () => void
+    /** Maximizes, or restores what it maximized. */
+    onToggleMaximize?: () => void
+    /** The window is maximized: the third button restores it. */
+    maximized?: boolean
     text?: Partial<ProjectTabsText>
   }
 >
@@ -107,20 +144,28 @@ function Yours({ n, text }: { n: number; text: ProjectTabsText }) {
 
 export function ProjectTabs({
   tabs,
-  current,
+  current: route,
   onSelect,
   onClose,
   yours = 0,
   others = [],
+  settings,
   onOpen,
   onNewProject,
   end,
   lights = 'space',
+  onCloseWindow,
+  onMinimize,
+  onToggleMaximize,
+  maximized = false,
   className,
   text,
   ...rest
 }: ProjectTabsProps) {
   const t = { ...projectTabsText, ...text }
+  // While the settings' tab has the window, neither the home's nor a project's does.
+  const onSettings = settings?.current === true
+  const current = onSettings ? undefined : route
   const offered = onOpen ? others : []
   const list = useRef<HTMLUListElement>(null)
   // Where the projects' tabs scroll to, when more are open than fit: more before, more after.
@@ -158,12 +203,22 @@ export function ProjectTabs({
   }, [current, tabs.length])
   return (
     <header className={cx(s.strip, className)} data-drag="" {...rest}>
-      {lights !== 'none' && (
-        <span className={cx(s.lights, lights === 'drawn' && s.drawn)} aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
+      {lights === 'drawn' ? (
+        <WindowButtons
+          onClose={onCloseWindow}
+          onMinimize={onMinimize}
+          onToggleMaximize={onToggleMaximize}
+          maximized={maximized}
+          text={{ close: t.closeWindow, minimize: t.minimizeWindow, maximize: t.maximizeWindow, restore: t.restoreWindow }}
+        />
+      ) : (
+        lights !== 'none' && (
+          <span className={s.lights} aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        )
       )}
       <nav className={s.nav} aria-label={t.label}>
         <ul className={s.pinned}>
@@ -174,6 +229,15 @@ export function ProjectTabs({
               <Yours n={yours} text={t} />
             </button>
           </li>
+          {settings !== undefined && (
+            <li className={cx(s.tab, s.project, onSettings && s.current)}>
+              <button type="button" className={s.select} aria-current={onSettings ? 'page' : undefined} onClick={settings.onSelect}>
+                <Icon name="gear" size={15} className={s.logo} />
+                <span className={s.name}>{t.settings}</span>
+              </button>
+              <IconButton icon="close" label={t.closeSettings} size="small" className={s.close} onClick={settings.onClose} />
+            </li>
+          )}
         </ul>
         <ul className={cx(s.tabs, more.before && s.moreBefore, more.after && s.moreAfter)} ref={list}>
           {tabs.map((tab) => (

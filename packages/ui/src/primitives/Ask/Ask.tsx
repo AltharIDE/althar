@@ -5,6 +5,7 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { LinkButton } from '../LinkButton/LinkButton'
 import s from './Ask.module.css'
+import { focusQuietly } from '../../lib/focusQuietly'
 
 /*
  * Something that waits on a person: a permission or a graph change beyond
@@ -93,7 +94,7 @@ export function AskAnswered({
     // suspension that isn't one.
     let live = true
     queueMicrotask(() => {
-      if (live) line.current?.focus()
+      if (live) focusQuietly(line.current)
     })
     return () => {
       live = false

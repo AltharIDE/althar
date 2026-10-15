@@ -31,6 +31,7 @@ import {
   githubGuide,
   items,
   NOW,
+  runnables,
   snapshot,
 } from './fixtures'
 import { withServices } from './render'
@@ -629,17 +630,62 @@ describe('the thread, reaching outside', () => {
     expect(await screen.findByText('Rate-limit refunds')).toBeTruthy()
     expect(screen.getByText('Rate-limit charges')).toBeTruthy()
     expect(screen.getByText('meridian/api · Merged')).toBeTruthy()
+    // Althar's words for the pull request it opened, and the pull request under them.
     expect(screen.getByText('Opened draft pull request #12.')).toBeTruthy()
     expect(screen.getByText('meridian/api · Draft')).toBeTruthy()
-    // Implement, then the pull request: two steps, numbered as such.
-    expect(screen.getByRole('img', { name: 'Step 1 of 2' })).toBeTruthy()
-    expect(screen.getByRole('img', { name: 'Step 2 of 2' })).toBeTruthy()
     expect(screen.getByText('commented on PR #12 · src/limit.ts:14')).toBeTruthy()
     expect(screen.getByText('Seconds or a date?')).toBeTruthy()
     expect(screen.getByText('asked for changes on PR #12')).toBeTruthy()
     expect(screen.getByText('1 of 2 checks failed on PR #12')).toBeTruthy()
     expect(screen.getByText('Failed: test')).toBeTruthy()
     expect(screen.getByText('Merged PR #12')).toBeTruthy()
+  })
+
+  it('reads a pasted link as its key, with its card in the message it came in', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
+        snapshot({
+          items: [
+            items.you('Do https://linear.app/m/issue/MER-231, like https://github.com/m/a/pull/1206. Not https://example.com/x.', null, [
+              {
+                kind: 'issue',
+                product: 'linear',
+                key: 'MER-231',
+                title: 'Rate-limit refunds',
+                url: 'https://linear.app/m/issue/MER-231/rate-limit-refunds',
+                pasted: 'https://linear.app/m/issue/MER-231',
+                status: { name: 'Todo', category: 'todo' },
+                priority: null,
+                container: null,
+              },
+              {
+                kind: 'change',
+                product: 'github',
+                key: 'PR #1206',
+                title: 'Rate-limit charges',
+                url: 'https://github.com/m/a/pull/1206',
+                pasted: 'https://github.com/m/a/pull/1206',
+                state: 'merged',
+                repository: 'meridian/api',
+              },
+            ]),
+            items.you('Nothing linked here.'),
+          ],
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    const [linked, plain] = await screen.findAllByRole('article', { name: 'You' })
+    const message = within(linked as HTMLElement)
+    // The words say each link's key where it was pasted; an address that didn't unfurl stays as written.
+    expect(message.getByText(/^Do /).textContent).toBe('Do MER-231, like #1206. Not https://example.com/x.')
+    // Each card is in the message, under its words, and opens the link.
+    expect(message.getByRole('link', { name: /Rate-limit refunds/ }).getAttribute('href')).toBe(
+      'https://linear.app/m/issue/MER-231/rate-limit-refunds',
+    )
+    expect(message.getByRole('link', { name: /Rate-limit charges/ }).getAttribute('href')).toBe('https://github.com/m/a/pull/1206')
+    expect(within(plain as HTMLElement).getByText('Nothing linked here.')).toBeTruthy()
+    expect(within(plain as HTMLElement).queryByRole('link')).toBeNull()
   })
 
   it('says when someone outside the repository wasn’t passed to the lead, and passes it on when asked', async () => {
@@ -678,24 +724,24 @@ function Task() {
 }
 
 describe('running what a task built, with no agent', () => {
-  it('runs it from the task’s menu, shows it over the composer beside what its lead left running, and stops each its own way', async () => {
+  it('runs it from the task’s bar, shows it over the composer beside what its lead left running, and stops each its own way', async () => {
     const thread = snapshot()
     const serving = { id: 'bg-1', command: 'bun dev', url: 'http://localhost:5173/', startedAt: '2026-10-10T09:00:00.000Z', ended: null }
     const { client, emit } = fakeClient({
       getThread: vi.fn(async () => ({
         ...thread,
-        task: { ...thread.task, runCommand: 'bun run dev' },
+        task: { ...thread.task, runnables },
         session: thread.session === null ? null : { ...thread.session, background: [serving] },
       })),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
-    await userEvent.click(await screen.findByRole('menuitem', { name: /Run bun run dev/ }))
-    expect(client.runProject).toHaveBeenCalledWith('p1', 't1', 'th1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Run bun run dev' }))
+    expect(client.runProject).toHaveBeenCalledWith('p1', 't1', 'th1', 'rnbl_dev')
     // The run comes back on the watch: one for another task, or another project, says nothing here.
     const launch = {
       id: 'proc_1',
       taskId: 't1',
+      runnableId: 'rnbl_dev',
       where: 'Fix the login timeout',
       command: 'bun run dev',
       url: 'http://localhost:4173/',
@@ -750,11 +796,100 @@ describe('running what a task built, with no agent', () => {
     opened.mockRestore()
   })
 
+  it('shows Althar setting up the worktree before the lead starts: as it installs, once it has, and what it printed if it failed', async () => {
+    const thread = snapshot()
+    const setup = items.setup()
+    let current = { ...thread, items: [...thread.items, setup] }
+    const { client, emit } = fakeClient({
+      getThread: vi.fn(async () => current),
+      getThreadItem: vi.fn(async () => current.items.at(-1) as ThreadItem),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Installing dependencies in meridian…')).toBeTruthy()
+    type Setup = Extract<ThreadItem, { kind: 'setup' }>['content']
+    const ended = (over: Partial<NonNullable<Setup['ended']>>, more: Partial<Setup> = {}) =>
+      ({
+        ...setup,
+        content: {
+          ...(setup.content as Setup),
+          ...more,
+          ended: { at: NOW, code: 0, timedOut: false, stopped: false, last: null, ...over },
+        },
+      }) as ThreadItem
+    // Installed, it is Althar's housekeeping: it goes with the lead's work, and the line across the thread goes.
+    current = { ...thread, items: [...thread.items, ended({})] }
+    act(() => emit(changed('thread_item', setup.id)))
+    await waitFor(() => expect(screen.queryByText('Installing dependencies in meridian…')).toBeNull())
+    expect(screen.queryByText('bun install --frozen-lockfile')).toBeNull()
+    // Failed, the end of what it printed stands under it, with how it ended; the lead hears of it.
+    current = { ...thread, items: [...thread.items, ended({ code: 1, last: 'resolving\nerror: lockfile had changes' })] }
+    act(() => emit(changed('thread_item', setup.id)))
+    expect(await screen.findByText('Couldn’t install dependencies in meridian. The lead is told.')).toBeTruthy()
+    expect(screen.getByText('error: lockfile had changes')).toBeTruthy()
+    expect(screen.getByText('exit 1')).toBeTruthy()
+    // A setup kept for the repository, out of time: it says so.
+    current = {
+      ...thread,
+      items: [...thread.items, ended({ code: null, timedOut: true, last: 'waiting' }, { kept: true, command: 'make deps' })],
+    }
+    act(() => emit(changed('thread_item', setup.id)))
+    expect(await screen.findByText('Couldn’t set up meridian. The lead is told.')).toBeTruthy()
+    expect(screen.getByText('It took too long, and was stopped.')).toBeTruthy()
+    // Cut short as Althar quit, it says it runs again.
+    current = { ...thread, items: [...thread.items, ended({ code: null, stopped: true })] }
+    act(() => emit(changed('thread_item', setup.id)))
+    expect(await screen.findByText('Setting up meridian stopped as Althar quit. It runs again before the lead starts.')).toBeTruthy()
+  })
+
   it('offers no run where nothing says how it runs', async () => {
     const { client } = fakeClient()
     withServices(<Task />, client)
     await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
     expect(screen.queryByRole('menuitem', { name: /^Run / })).toBeNull()
+  })
+})
+
+describe('what keeps the places a task waits for', () => {
+  it('names the task whose server keeps a place, over the composer of the task that waits, and stops it from there', async () => {
+    const server = { id: 'bg-1', command: 'bun dev', url: 'http://localhost:5173/', startedAt: '2026-10-10T09:00:00.000Z', ended: null }
+    const thread = snapshot()
+    const holders = [
+      { taskId: 't2', title: 'Prototype the board', threadId: 'th2', kept: true, running: [server] },
+      { taskId: 't3', title: 'Fix the login', threadId: 'th3', kept: false, running: [] },
+    ]
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({ ...thread, task: { ...thread.task, queued: { busy: 2, atOnce: 2, holders } } })),
+    })
+    withServices(<Task />, client)
+    const pill = await screen.findByRole('button', { name: /^Keeping a place/ })
+    expect(pill.textContent).toContain('bun dev')
+    await userEvent.click(pill)
+    const list = within(await screen.findByRole('dialog', { name: 'Keeping a place' }))
+    // Which task it is from; a task at work in its turn is not a server to stop.
+    expect(list.getByText(/Prototype the board/)).toBeTruthy()
+    expect(list.queryByText(/Fix the login/)).toBeNull()
+    // Every task that holds a place is named beside the wait, the server's by what it left running.
+    expect(screen.getByText('Held by Prototype the board (a server it left running), Fix the login')).toBeTruthy()
+    await userEvent.click(list.getByRole('button', { name: 'Stop bun dev' }))
+    expect(client.stopBackground).toHaveBeenCalledWith('th2', 'bg-1')
+  })
+})
+
+describe('a waiting task’s open view', () => {
+  it('reads who holds the places again when its task changes: a server that went idle leaves the list, a task that took its place joins it', async () => {
+    const server = { id: 'bg-1', command: 'bun dev', url: null, startedAt: '2026-10-10T09:00:00.000Z', ended: null }
+    const thread = snapshot()
+    let holders = [{ taskId: 't2', title: 'Prototype the board', threadId: 'th2', kept: true, running: [server] }]
+    const { client, emit } = fakeClient({
+      getThread: vi.fn(async () => ({ ...thread, task: { ...thread.task, queued: { busy: 1, atOnce: 1, holders } } })),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText('Held by Prototype the board (a server it left running)')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /^Keeping a place/ })).toBeTruthy()
+    holders = [{ taskId: 't3', title: 'Fix the login', threadId: 'th3', kept: false, running: [] }]
+    act(() => emit(changed('task', 't1')))
+    expect(await screen.findByText('Held by Fix the login')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Keeping a place/ })).toBeNull()
   })
 })
 
@@ -888,6 +1023,125 @@ describe('a task’s pull request', () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456', 'https://github.com/meridian/api/pull/12'))
   })
 
+  it('says plainly a branch rewritten since it was pushed, replaces its commits only once confirmed, or asks the lead to merge', async () => {
+    const url = 'https://github.com/meridian/api/pull/12'
+    const { client } = fakeClient({
+      mergeNote: vi.fn(async () => 'Your branch was rewritten after it was pushed. Merge, never rebase.'),
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: {
+            ...snapshot().task,
+            phase: 'ready',
+            changes: [change({ localHead: 'def456', diverged: { kind: 'rewritten', local: 5, onPullRequest: 4 } })],
+            commits: 5,
+          },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(
+      await screen.findByText('This branch was rewritten since it was pushed: 5 new commits replace 4 on the pull request.'),
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Push/ })).toBeNull()
+    // Replacing names what goes, and pushes only on the second press, from the head it saw.
+    await userEvent.click(screen.getByRole('button', { name: 'Replace the pull request’s commits' }))
+    expect(client.replacePullRequest).not.toHaveBeenCalled()
+    expect(screen.getByText(/^Replace the 4 commits on PR #12 with the 5 commits here\?/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Replace them' }))
+    await waitFor(() => expect(client.replacePullRequest).toHaveBeenCalledWith('t1', 'def456', 'abc123', url))
+    // Or the lead merges instead: Althar fetches what was pushed, and the note goes to it.
+    await userEvent.click(screen.getByRole('button', { name: 'Ask the lead to merge instead' }))
+    await waitFor(() => expect(client.mergeNote).toHaveBeenCalledWith('t1', url))
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith(
+        expect.objectContaining({ body: 'Your branch was rewritten after it was pushed. Merge, never rebase.' }),
+      ),
+    )
+  })
+
+  it('says a push refused for commits pushed from elsewhere in a sentence, and offers to bring them in', async () => {
+    const url = 'https://github.com/meridian/api/pull/12'
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        snapshot({ task: { ...snapshot().task, phase: 'ready', changes: [change({ unpushed: 1, localHead: 'def456' })], commits: 4 } }),
+      ),
+    })
+    vi.mocked(client.push).mockRejectedValueOnce(
+      new ApiError({
+        reason: 'PushRefused',
+        message: 'PR #12 has commits that aren’t here yet, so it didn’t take the push. Bring them in, then push again.',
+        why: 'behind',
+      }),
+    )
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Push 1 commit' }))
+    expect(
+      await screen.findByText(
+        'The pull request has commits pushed from elsewhere that aren’t on this branch, so it won’t take a plain push.',
+      ),
+    ).toBeTruthy()
+    expect(screen.queryByText(/fast-forwards/)).toBeNull()
+    expect(screen.queryByText(/didn’t take the push/)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Replace/ })).toBeNull()
+    // What fails after is said on the card, not hidden behind the refusal.
+    vi.mocked(client.mergeNote).mockRejectedValueOnce(new ApiError({ reason: 'ConnectorFailed', message: 'GitHub no longer takes it.' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Bring in the pull request’s commits' }))
+    expect(await within(screen.getByRole('article', { name: 'Add a retry' })).findByText('GitHub no longer takes it.')).toBeTruthy()
+    expect(client.send).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: 'Bring in the pull request’s commits' }))
+    await waitFor(() => expect(client.mergeNote).toHaveBeenCalledWith('t1', url))
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith(expect.objectContaining({ body: 'Merge them.' })))
+    expect(await screen.findByRole('button', { name: 'Push 1 commit' })).toBeTruthy()
+  })
+
+  it('asks, in the thread, for a push the lead asked for: what would go up, pushed up to the head it shows', async () => {
+    const thread = snapshot()
+    const asked = items.push()
+    let current = { ...thread, items: [...thread.items, asked] }
+    const push = vi.fn(async () => {})
+    const { client, emit } = fakeClient({
+      push,
+      getThread: vi.fn(async () => current),
+      getThreadItem: vi.fn(async () => current.items.at(-1) as ThreadItem),
+    })
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => null)
+    withServices(<Task />, client)
+    const card = within(await screen.findByRole('article', { name: 'Push to PR #12' }))
+    expect(card.getByText('Read Retry-After as seconds')).toBeTruthy()
+    expect(card.getByText('Name the retry option')).toBeTruthy()
+    await userEvent.click(card.getByRole('button', { name: 'Open PR #12' }))
+    expect(opened).toHaveBeenCalledWith('https://github.com/meridian/api/pull/12', '_blank')
+    await userEvent.click(card.getByRole('button', { name: 'Push 2 commits to PR #12' }))
+    await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def4567890', 'https://github.com/meridian/api/pull/12'))
+    // The branch changed since: the runtime shows what is on it now, and Push pushes that.
+    const moved = {
+      ...asked,
+      content: { ...asked.content, moved: true, head: 'fed7654321', commits: [{ sha: 'fed7654', subject: 'Name it again' }], count: 1 },
+    } as ThreadItem
+    current = { ...current, items: [...thread.items, moved] }
+    act(() => emit(changed('thread_item', asked.id)))
+    expect(await screen.findByText('The branch changed since this was asked. This is what is on it now.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'Push 1 commit to PR #12' }))
+    await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'fed7654321', 'https://github.com/meridian/api/pull/12'))
+    // Changed so that it can't go up: why, and what would let it, with nothing to press.
+    current = {
+      ...current,
+      items: [...thread.items, { ...moved, content: { ...moved.content, commits: [], count: 0, blocked: 'rewritten' } } as ThreadItem],
+    }
+    act(() => emit(changed('thread_item', asked.id)))
+    expect(await screen.findByText(/no longer has what PR #12 already has/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Push \d/ })).toBeNull()
+    // Pushed, it stays as a record, with nothing to press.
+    current = {
+      ...current,
+      items: [...thread.items, { ...moved, content: { ...asked.content, state: 'pushed', settledAt: NOW } } as ThreadItem],
+    }
+    act(() => emit(changed('thread_item', asked.id)))
+    await waitFor(() => expect(screen.getByRole('article', { name: 'Push to PR #12' }).textContent).toContain('Pushed'))
+    expect(screen.queryByRole('button', { name: /^Push \d/ })).toBeNull()
+    opened.mockRestore()
+  })
+
   it('shows what it changed, file by file, from its header, its outputs, or ⌘D', async () => {
     const file = (path: string, more: Partial<ThreadSnapshot['task']['files'][number]> = {}) => ({
       path,
@@ -1008,7 +1262,7 @@ describe('a task’s pull request', () => {
     expect(answer).toHaveBeenCalledWith({ attentionId: 'a-not_connected', answer: { kind: 'retry', agentId: 'althar' } })
     expect(stuckWords.publishing(call('failed_to_start').stuck)).toBe("Althar couldn't open the pull request. The host said no.")
     expect(stuckWords.publishing({ ...call('failed_to_start').stuck, why: 'restarted', detail: null })).toBe(
-      'Althar restarted while it was opening the pull request.',
+      'Althar stopped again soon after it went back to opening the pull request.',
     )
     expect(stuckWords.publishing({ ...call('failed_to_start').stuck, detail: null })).toBe("Althar couldn't open the pull request.")
   })
@@ -1212,6 +1466,75 @@ describe('a project, reaching outside', () => {
     await waitFor(() => expect(push).toHaveBeenCalledWith('t1', 'def456', 'https://github.com/meridian/web/pull/4'))
   })
 
+  it('shows only the button pressed as working, the others waiting beside it', async () => {
+    let done = () => {}
+    const push = vi.fn(() => new Promise<void>((resolve) => (done = resolve)))
+    const { client } = fakeClient({
+      push,
+      getThread: vi.fn(async () =>
+        snapshot({ task: { ...snapshot().task, changes: [change({ draft: true, unpushed: 1, localHead: 'def456' })] } }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    const ready = await screen.findByRole('button', { name: 'Mark ready for review' })
+    expect(ready.getAttribute('aria-busy')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Push 1 commit' }))
+    await waitFor(() => expect(push).toHaveBeenCalled())
+    // The push is working; marking ready waits for it, as the runtime serialises them, but doesn't look like it is working.
+    expect(screen.getByRole('button', { name: 'Push 1 commit' }).getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByRole('button', { name: 'Mark ready for review' }).getAttribute('aria-busy')).toBeNull()
+    expect((screen.getByRole('button', { name: 'Mark ready for review' }) as HTMLButtonElement).disabled).toBe(true)
+    done()
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Mark ready for review' }) as HTMLButtonElement).disabled).toBe(false))
+    expect(screen.getByRole('button', { name: 'Push 1 commit' }).getAttribute('aria-busy')).toBeNull()
+  })
+
+  it('holds Accept while a push is on its way, without showing it as working', async () => {
+    let done = () => {}
+    const push = vi.fn(() => new Promise<void>((resolve) => (done = resolve)))
+    const { client } = fakeClient({
+      push,
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: { ...snapshot().task, phase: 'ready', changes: [change({ draft: false, unpushed: 1, localHead: 'def456' })], commits: 4 },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Push 1 commit' }))
+    await waitFor(() => expect(push).toHaveBeenCalled())
+    const accept = screen.getByRole('button', { name: 'Accept and merge' }) as HTMLButtonElement
+    expect(accept.disabled).toBe(true)
+    expect(accept.getAttribute('aria-busy')).toBeNull()
+    done()
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Accept and merge' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+
+  it('holds the push of what merged here while a pull request’s push is on its way', async () => {
+    let done = () => {}
+    const push = vi.fn(() => new Promise<void>((resolve) => (done = resolve)))
+    const merged = [{ repository: 'web', name: 'web', branch: 'main', remote: 'origin/main', ahead: 2 }]
+    const { client } = fakeClient({
+      push,
+      getThread: vi.fn(async () =>
+        snapshot({
+          task: { ...snapshot().task, phase: 'ready', changes: [change({ unpushed: 1, localHead: 'def456' })], merged, commits: 4 },
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Push 1 commit/ }))
+    await waitFor(() => expect(push).toHaveBeenCalled())
+    const here = screen.getByRole('button', { name: 'Push main to origin' }) as HTMLButtonElement
+    expect(here.disabled).toBe(true)
+    expect(here.getAttribute('aria-busy')).toBeNull()
+    done()
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Push main to origin' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+
   it('shows a task’s issue and pull request on its card, and its ending on its plan, which can change', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
@@ -1355,7 +1678,7 @@ describe('what reaching outside says, in every case', () => {
     expect(screen.getByText('Failed: test, lint')).toBeTruthy()
     expect(screen.getByText('Closed MR !4')).toBeTruthy()
     expect(screen.getByText('Ready for review: PR #12')).toBeTruthy()
-    expect(screen.getByText('Push')).toBeTruthy()
+    expect(screen.getByText('Pushed althar/x.')).toBeTruthy()
     expect(screen.getByText('meridian/api · Open')).toBeTruthy()
     expect(screen.getByText('Refunds ignore the limit')).toBeTruthy()
   })

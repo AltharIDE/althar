@@ -10,7 +10,6 @@ import { readPreferences, writePreference } from '../preferences'
 import { assemble, type Gathered, type Opened, type Picture, preview, type ReportChoices, type ReportContext, type Sent } from './bundle'
 import { mailto, NotDelivered, post, reportAddress, save } from './deliver'
 import { factsIn, type RuntimeFacts } from './facts'
-import { installId } from './install'
 import { mainFacts } from './mainFacts'
 
 /*
@@ -41,6 +40,8 @@ const WAIT_RUNTIME = 8_000
 
 export interface ReportsOptions {
   readonly profile: () => string
+  /** This install's id, usage data's own (usageData.ts's `installOf`), so there is one id per install. */
+  readonly installId: () => Promise<string>
   /** The folder the logs are in. */
   readonly logs: string
   /** Asks the runtime for its facts about the thread, if any (runtime/facts.ts); what it answers, unchecked. */
@@ -146,7 +147,7 @@ export const startReports = (options: ReportsOptions) => {
   const open = new Map<string, Promise<Gathered>>()
 
   const gather = async (context: ReportContext, screenshot: Picture | null): Promise<Gathered> => {
-    const [id, asked] = await Promise.all([installId(options.profile()), factsFrom(() => options.askRuntime(context.threadId))])
+    const [id, asked] = await Promise.all([options.installId(), factsFrom(() => options.askRuntime(context.threadId))])
     // Without the runtime, as before it is up or when it can't open the store, the main process says what it can itself.
     const runtime = asked ?? (await mainFacts(options.profile()).catch(() => null))
     let user: string | undefined

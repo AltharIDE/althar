@@ -1,11 +1,21 @@
-import { Effect, Schema } from 'effect'
+import { Clock, Effect, Schema } from 'effect'
 
 import { type Access, type AccessLine, type AccessNeed, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
-import type { ConnectorFailed } from './errors'
-import { makeHttp } from './http'
+import { ConnectorFailed } from './errors'
+import { makeHttp, paged } from './http'
 import { AdfNode, adfOf, markdownOfAdf, markdownOfWiki, wikiOf } from './jiraText'
-import type { Account, Issue, Person, Priority, StatusCategory, Tracker } from './model'
+import {
+  type Account,
+  type Container,
+  type Issue,
+  leftAsItIs,
+  type Person,
+  type Priority,
+  type StatusCategory,
+  type Tracker,
+  unstarted,
+} from './model'
 import { type Answer, answered, failedOf, probe, readAs, refusalOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
@@ -130,6 +140,35 @@ const accountOf = (user: User): Account =>
     ? { id: user.accountId, login: user.emailAddress ?? user.displayName ?? user.accountId, name: user.displayName ?? null }
     : { id: user.key ?? user.name, login: user.name, name: user.displayName ?? null }
 
+const Project = Schema.Struct({ id: Schema.String, key: Schema.String, name: Schema.String })
+
+/** A project's issue types, as each edition lists them: Cloud's under `issueTypes`, Data Center's under `values`, a page at a time. */
+const IssueType = Schema.Struct({ id: Schema.String, name: Schema.String, subtask: Schema.optional(Schema.Boolean) })
+const IssueTypes = Schema.Struct({ issueTypes: Schema.optional(Schema.Array(IssueType)), values: Schema.optional(Schema.Array(IssueType)) })
+
+/** The transitions an issue's workflow offers it now, each into a status and its category. */
+const Transitions = Schema.Struct({
+  transitions: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      isAvailable: Schema.optional(Schema.Boolean),
+      to: Schema.Struct({ name: Schema.String, statusCategory: Schema.optional(Schema.Struct({ key: Schema.String })) }),
+    }),
+  ),
+})
+
+/** The type an issue Althar files is: a Task where the project has one, or else its first that isn't a sub-task, which needs a parent. */
+const issueTypeOf = (types: typeof IssueTypes.Type) => {
+  const all = types.issueTypes ?? types.values ?? []
+  return all.find((type) => type.subtask !== true && /^task$/i.test(type.name)) ?? all.find((type) => type.subtask !== true)
+}
+
+/** A label as Jira can hold it: one word, so its spaces become hyphens. */
+export const jiraLabelOf = (label: string): string => label.trim().replace(/\s+/g, '-')
+
+/** How many projects a page of Cloud's project search holds: its most. */
+const PROJECTS_PAGE = 100
+
 /** A JQL string, quoted. */
 const quoted = (text: string) => `"${text.replace(/["\\]/g, '\\$&')}"`
 
@@ -213,16 +252,18 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
     accountOf,
   )
 
+  // A key as typed (proj-123) is the key: Jira's keys are upper case.
+  const issue = (ref: string) =>
+    Effect.map(
+      call((root) => http.json(IssueAnswer, 'GET', `${root}${issuePath(ref.trim().toUpperCase())}?fields=${FIELDS}`)),
+      issueOf,
+    )
+
   return {
     product,
-    capabilities: { links: true },
+    capabilities: { links: true, starts: true },
     account,
-    // A key as typed (proj-123) is the key: Jira's keys are upper case.
-    issue: (ref) =>
-      Effect.map(
-        call((root) => http.json(IssueAnswer, 'GET', `${root}${issuePath(ref.trim().toUpperCase())}?fields=${FIELDS}`)),
-        issueOf,
-      ),
+    issue,
     mine: (options = {}) => {
       const jql = [
         'assignee = currentUser() AND statusCategory != Done',
@@ -252,6 +293,95 @@ const makeJira = (product: Edition, options: AdapterOptions): Tracker => {
           }),
         ),
       ),
+    // By the first transition the workflow offers it into a status of In Progress's category, as Jira lists them.
+    start: (issue) =>
+      Effect.gen(function* () {
+        if (!unstarted(issue.status.category)) return leftAsItIs(issue)
+        const { transitions } = yield* call((root) => http.json(Transitions, 'GET', `${root}${issuePath(issue.ref)}/transitions`))
+        const into = transitions.find((each) => each.isAvailable !== false && each.to.statusCategory?.key === 'indeterminate')
+        if (into === undefined)
+          return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Its workflow has no way into In Progress from here' })
+        yield* call((root) =>
+          http.json(Schema.Unknown, 'POST', `${root}${issuePath(issue.ref)}/transitions`, { transition: { id: into.id } }),
+        )
+        return { moved: true, status: { name: into.to.name, category: 'started' } }
+      }),
+    // A project, by its key, is where a Jira issue is filed: on Cloud, those with the latest issue first, a page at a time; Data Center lists them all at once.
+    containers: () =>
+      Effect.map(
+        cloud
+          ? paged(0, (startAt) =>
+              Effect.map(
+                call((root) =>
+                  http.json(
+                    Schema.Struct({ values: Schema.Array(Project), isLast: Schema.optional(Schema.Boolean) }),
+                    'GET',
+                    `${root}/project/search?maxResults=${PROJECTS_PAGE}&orderBy=-lastIssueUpdatedTime&startAt=${startAt}`,
+                  ),
+                ),
+                ({ values, isLast }) => ({
+                  items: values,
+                  next: isLast === true || values.length < PROJECTS_PAGE ? undefined : startAt + values.length,
+                }),
+              ),
+            )
+          : call((root) => http.json(Schema.Array(Project), 'GET', `${root}/project`)),
+        (projects) => projects.map((project): Container => ({ id: project.key, key: project.key, name: project.name })),
+      ),
+    create: (project, draft) =>
+      Effect.gen(function* () {
+        const type = issueTypeOf(
+          yield* call((root) => http.json(IssueTypes, 'GET', `${root}/issue/createmeta/${encodeURIComponent(project)}/issuetypes`)),
+        )
+        if (type === undefined)
+          return yield* new ConnectorFailed({
+            product,
+            reason: 'rejected',
+            message: `The project ${project} has no type of issue Althar can file: sub-tasks need a parent`,
+          })
+        const labels = [...new Set(draft.labels.map(jiraLabelOf).filter((label) => label !== ''))]
+        const fields = {
+          project: { key: project },
+          issuetype: { id: type.id },
+          summary: draft.title,
+          ...(draft.body === '' ? {} : { description: cloud ? adfOf(draft.body) : wikiOf(draft.body) }),
+        }
+        // What was filed, with the labels it was filed with.
+        const file = (sent: ReadonlyArray<string>) =>
+          Effect.map(
+            call((root) =>
+              http.json(Schema.Struct({ id: Schema.String, key: Schema.String }), 'POST', `${root}/issue`, {
+                fields: sent.length > 0 ? { ...fields, labels: sent } : fields,
+              }),
+            ),
+            (filed) => ({ ...filed, labels: sent }),
+          )
+        // Jira makes any label it is given, but a project whose screen has no labels refuses them: the issue is filed without.
+        const filed = yield* file(labels).pipe(
+          Effect.catchIf(
+            (error) => labels.length > 0 && error.reason === 'rejected' && /\blabels\b/i.test(error.message),
+            () => file([]),
+          ),
+        )
+        // Filed: a failed read of it now is no reason to file it again, so it is what was sent.
+        const now = yield* Clock.currentTimeMillis
+        return yield* issue(filed.key).pipe(
+          Effect.orElseSucceed((): Issue => ({
+            id: filed.id,
+            ref: filed.key,
+            key: filed.key,
+            title: draft.title,
+            body: draft.body,
+            url: `${site}/browse/${filed.key}`,
+            status: { name: 'To Do', category: 'todo' },
+            priority: null,
+            assignees: [],
+            labels: filed.labels,
+            container: project,
+            updatedAt: new Date(now).toISOString(),
+          })),
+        )
+      }),
   }
 }
 

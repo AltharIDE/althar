@@ -9,9 +9,14 @@ import type {
   ConnectionSummary,
   CoordinatorSnapshot,
   HomeSnapshot,
+  Load,
+  Picture,
+  ProjectNote,
   ProjectRulesView,
   ProjectRepository,
   ProjectSummary,
+  RepositoryScript,
+  Runnable,
   Status,
   TaskSummary,
   ThreadItem,
@@ -45,16 +50,19 @@ export const projectRules: ProjectRulesView = {
   projectId: 'p1',
   revision: 1,
   permissions: 'rules',
+  allowEverything: false,
   alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
   never: [],
   alwaysAllow: [],
   commands: [],
   end: null,
+  resolveConflicts: false,
   usageLimit: 'move',
   rotateAccounts: false,
   onlyAccounts: null,
   branchPattern: null,
   titlePattern: null,
+  moveIssues: true,
   conventions: [{ repository: 'api', branch: null, title: null, template: null }],
 }
 
@@ -115,7 +123,7 @@ const offering =
     effort: 'medium',
   })
 
-/** What the agents offer: Claude Code's own default first, Codex's models by id, OpenCode still being asked. */
+/** What the agents offer: Claude Code's own default first, Codex's models by id, OpenCode still being asked. Claude Code takes images; Codex here doesn't; OpenCode hasn't said. */
 export const models: ReadonlyArray<AgentModels> = [
   {
     agentId: 'claude-code',
@@ -129,6 +137,7 @@ export const models: ReadonlyArray<AgentModels> = [
     defaults: [],
     blocked: [],
     probing: false,
+    images: true,
   },
   {
     agentId: 'codex',
@@ -141,8 +150,9 @@ export const models: ReadonlyArray<AgentModels> = [
     defaults: [],
     blocked: [],
     probing: false,
+    images: false,
   },
-  { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], blocked: [], probing: true },
+  { agentId: 'opencode', models: [], model: null, effort: null, defaults: [], blocked: [], probing: true, images: null },
 ]
 
 /** A project's repositories as this Mac has them: one plain and one a fork, on GitHub as you, and one on GitLab, not connected. */
@@ -203,6 +213,32 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
   },
 ]
 
+/** What meridian runs: its repository's own way, worked out from it, and Storybook, which the person added. */
+export const runnables: ReadonlyArray<Runnable> = [
+  { id: 'rnbl_dev', name: null, command: 'bun run dev', repository: 'meridian-api', own: true, from: 'repository' },
+  {
+    id: 'rnbl_storybook',
+    name: 'Storybook',
+    command: 'bun --filter @meridian/ui storybook',
+    repository: 'meridian-api',
+    own: false,
+    from: 'person',
+  },
+]
+
+/** meridian's package.json scripts, the root's and a workspace's. */
+export const scripts: ReadonlyArray<RepositoryScript> = [
+  { repository: 'meridian-api', package: 'meridian', name: 'dev', body: 'vite', command: 'bun run dev' },
+  { repository: 'meridian-api', package: 'meridian', name: 'test:watch', body: 'vitest', command: 'bun run test:watch' },
+  {
+    repository: 'meridian-api',
+    package: '@meridian/ui',
+    name: 'storybook',
+    body: 'storybook dev',
+    command: 'bun --filter @meridian/ui storybook',
+  },
+]
+
 export const project: ProjectSummary = {
   id: 'p1',
   name: 'meridian',
@@ -235,6 +271,59 @@ export const task: TaskSummary = {
   createdAt: NOW,
 }
 
+const GiB = 1024 ** 3
+const MiB = 1024 ** 2
+
+/** This Mac a moment ago, 32 GB of it: the task's lead running its suite, meridian's coordinator, and its default branch running. */
+export const load: Load = {
+  cpu: 0.42,
+  memoryUsed: 12.5 * GiB,
+  memoryTotal: 32 * GiB,
+  pressure: 'normal',
+  shares: [
+    {
+      kind: 'task',
+      projectId: 'p1',
+      project: 'meridian',
+      taskId: 't1',
+      threadId: 'th1',
+      title: 'Add a retry',
+      agent: { id: 'claude-code', name: 'Claude Code' },
+      cpu: 0.3,
+      memory: 1.5 * GiB,
+      processes: 12,
+    },
+    {
+      kind: 'coordinator',
+      projectId: 'p1',
+      project: 'meridian',
+      taskId: null,
+      threadId: null,
+      title: null,
+      agent: { id: 'codex', name: 'Codex' },
+      cpu: 0.02,
+      memory: 300 * MiB,
+      processes: 1,
+    },
+    {
+      kind: 'run',
+      projectId: 'p1',
+      project: 'meridian',
+      taskId: null,
+      threadId: null,
+      title: null,
+      agent: null,
+      cpu: 0.01,
+      memory: 220 * MiB,
+      processes: 3,
+    },
+  ],
+  history: [
+    { cpu: 0.2, work: 0.1 },
+    { cpu: 0.42, work: 0.33 },
+  ],
+}
+
 let sequence = 0
 const next = () => {
   sequence += 1
@@ -247,11 +336,12 @@ export const items = {
     text: string,
     input: Extract<ThreadItem, { kind: 'user_message' }>['input'] = { state: 'delivered', interrupting: false },
     links: ReadonlyArray<Unfurl> = [],
+    pictures: ReadonlyArray<Picture> = [],
   ): ThreadItem => ({
     ...next(),
     agentId: null,
     kind: 'user_message',
-    content: { text, links },
+    content: { text, links, pictures },
     input,
   }),
   says: (text: string, agentId = 'claude-code', id?: string): ThreadItem => ({
@@ -316,6 +406,9 @@ export const items = {
       summary: 'Added the retry.',
       verdict: null,
       findings: [],
+      built: null,
+      evidence: [],
+      unverified: null,
       agentId: null,
       change: null,
       ...content,
@@ -378,6 +471,54 @@ export const items = {
     content,
   }),
   /** A run of the project Althar started, up at its address unless told otherwise. */
+  draft: (content: Partial<Extract<ThreadItem, { kind: 'issue_draft' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'issue_draft',
+    content: {
+      draftId: 'idr_1',
+      product: 'linear',
+      tracker: 'Linear',
+      container: 'Meridian',
+      title: 'Refunds skip the rate limiter',
+      body: 'Charges go through it; **refunds** don’t.',
+      labels: ['payments'],
+      state: 'pending',
+      error: null,
+      issue: null,
+      ...content,
+    },
+  }),
+  /** A review the lead drafted of ninemate's pull request, from a fork, waiting on the person. */
+  review: (content: Partial<Extract<ThreadItem, { kind: 'review_draft' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'review_draft',
+    content: {
+      draftId: 'rdr_1',
+      product: 'github',
+      repository: 'meridian/api',
+      number: 1212,
+      url: 'https://github.com/meridian/api/pull/1212',
+      title: 'Honour Retry-After on refund webhooks',
+      author: 'ninemate',
+      outside: true,
+      fork: true,
+      drafter: 'Claude Code',
+      account: 'ada',
+      suggested: 'approve',
+      verdict: null,
+      summary: 'The fix is **right**, but it needs a test.',
+      comments: [
+        { id: 'c1', path: 'src/retry.ts', line: 41, body: 'Nothing covers the cap.', severity: 'blocking', kept: true },
+        { id: 'c2', path: 'src/retry.ts', line: 57, body: 'Nit: seconds.', severity: 'nit', kept: true },
+      ],
+      state: 'pending',
+      error: null,
+      review: null,
+      ...content,
+    },
+  }),
   run: (content: Partial<Extract<ThreadItem, { kind: 'run' }>['content']> = {}): ThreadItem => ({
     ...next(),
     agentId: null,
@@ -390,6 +531,41 @@ export const items = {
       url: 'http://localhost:4173/',
       startedAt: NOW,
       ended: null,
+      ...content,
+    },
+  }),
+  /** Althar setting up the task's worktree, installing the dependencies its lockfile names, still running unless told otherwise. */
+  setup: (content: Partial<Extract<ThreadItem, { kind: 'setup' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'setup',
+    content: {
+      repository: 'meridian',
+      command: 'bun install --frozen-lockfile',
+      kept: false,
+      startedAt: NOW,
+      ended: null,
+      ...content,
+    },
+  }),
+  push: (content: Partial<Extract<ThreadItem, { kind: 'push_request' }>['content']> = {}): ThreadItem => ({
+    ...next(),
+    agentId: null,
+    kind: 'push_request',
+    content: {
+      url: 'https://github.com/meridian/api/pull/12',
+      where: 'PR #12',
+      product: 'github',
+      head: 'def4567890',
+      commits: [
+        { sha: 'abc1234', subject: 'Read Retry-After as seconds' },
+        { sha: 'def4567', subject: 'Name the retry option' },
+      ],
+      count: 2,
+      moved: false,
+      blocked: null,
+      state: 'open',
+      settledAt: null,
       ...content,
     },
   }),
@@ -416,6 +592,7 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   title: 'Add a retry',
   slug: 'add-a-retry',
   phase: 'planned',
+  kind: 'change',
   plan: {
     id: 'pln1',
     steps: [
@@ -432,9 +609,11 @@ export const card = (overrides: Partial<TaskCardContent> = {}): TaskCardContent 
   summary: null,
   lead: 'claude-code',
   leadModel: null,
+  leadEffort: null,
   branch: 'althar/add-a-retry',
   startedAt: null,
   waits: null,
+  queued: null,
   ...overrides,
 })
 
@@ -448,7 +627,7 @@ export const coordinatorSnapshot = (overrides: Partial<CoordinatorSnapshot> = {}
   items: [],
   earlier: false,
   host: null,
-  runCommand: null,
+  runnables: [],
   launches: [],
   ...overrides,
 })
@@ -485,6 +664,7 @@ export const change = (overrides: Partial<ChangeSummary> = {}): ChangeSummary =>
   listening: true,
   localHead: null,
   unpushed: 0,
+  diverged: null,
   ...overrides,
 })
 
@@ -505,6 +685,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     baseRef: 'main',
     phase: 'running',
     waits: null,
+    queued: null,
     steps: [],
     lead: null,
     step: null,
@@ -519,8 +700,10 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     merged: [],
     actions: ['stop', 'abandon'],
     planId: null,
-    runCommand: null,
+    runnables: [],
     launches: [],
+    resolveConflicts: { task: null, project: false },
+    allowEverything: { task: false, project: false },
   },
   session: {
     id: 's1',
@@ -538,6 +721,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
   attention: [],
   items: [],
   earlier: false,
+  reports: [],
   ...overrides,
 })
 
@@ -632,6 +816,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     openProject: vi.fn(async () => project),
     readFolder: vi.fn(async () => ({ kind: 'repository' as const, name: 'meridian', repositories: [], project: null })),
     listTasks: vi.fn(async () => ({ cursor: 4, tasks: [task] })),
+    searchTasks: vi.fn(async () => ({ tasks: [] })),
     createTask: vi.fn(async () => task),
     getThread: vi.fn(async () => snapshot()),
     getThreadItem: vi.fn(async (_threadId: string, itemId: string) => ({ ...items.says('Read again'), id: itemId })),
@@ -642,11 +827,15 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       bytes: 42,
       lines: 3,
     })),
-    getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [] })),
+    getBoard: vi.fn(async () => ({ cursor: 1, tasks: [], calls: [], settledTotal: 0 })),
+    getOlderSettled: vi.fn(async () => []),
     getHome: vi.fn(async () => home()),
     leftHome: vi.fn(async () => {}),
+    seeTask: vi.fn(async () => {}),
     merge: vi.fn(async () => {}),
     push: vi.fn(async () => {}),
+    replacePullRequest: vi.fn(async () => {}),
+    mergeNote: vi.fn(async () => 'Merge them.'),
     mergeHere: vi.fn(async () => {}),
     pushHere: vi.fn(async () => {}),
     pushBranch: vi.fn(async () => {}),
@@ -654,6 +843,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       { id: 'zed', name: 'Zed' },
       { id: 'finder', name: 'Finder' },
     ]),
+    getLoad: vi.fn(async () => load),
     openInEditor: vi.fn(async () => true),
     installAgent: vi.fn(async () => {}),
     getFileDiff: vi.fn(async (_taskId: string, path: string) => ({
@@ -674,13 +864,21 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setModelBlocked: vi.fn(async () => {}),
     getSettings: vi.fn(async () => ({
       coAuthor: { on: true, line: 'Co-authored-by: Althar <337922799+AltharAi@users.noreply.github.com>' },
+      agentsAtOnce: { count: 4, own: null, machine: { count: 4, cores: 10, memory: 16 } },
+      postTeamReviews: false,
     })),
     setCoAuthor: vi.fn(async () => {}),
+    setPostTeamReviews: vi.fn(async () => {}),
+    setAgentsAtOnce: vi.fn(async () => {}),
     interrupt: vi.fn(async () => {}),
+    compact: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
+    setTaskResolveConflicts: vi.fn(async () => {}),
+    setTaskAllowEverything: vi.fn(async () => {}),
     resumeTask: vi.fn(async () => {}),
     abandonTask: vi.fn(async () => {}),
     reopenTask: vi.fn(async () => {}),
+    renameTask: vi.fn(async () => {}),
     send: vi.fn(async () => {}),
     takeBack: vi.fn(async () => {}),
     answer: vi.fn(async () => {}),
@@ -690,6 +888,12 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     startPlan: vi.fn(async () => {}),
     holdPlan: vi.fn(async () => {}),
     changePlan: vi.fn(async () => {}),
+    changeIssueDraft: vi.fn(async () => {}),
+    fileIssueDraft: vi.fn(async () => {}),
+    discardIssueDraft: vi.fn(async () => {}),
+    changeReviewDraft: vi.fn(async () => {}),
+    postReviewDraft: vi.fn(async () => {}),
+    discardReviewDraft: vi.fn(async () => {}),
     answerStuck: vi.fn(async () => {}),
     listConnections: vi.fn(async () => connectionList),
     startSignIn: vi.fn(async () => ({
@@ -715,6 +919,8 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     leaveOutRepository: vi.fn(async () => {}),
     setRepository: vi.fn(async () => {}),
     getProjectRules: vi.fn(async (projectId: string) => ({ ...projectRules, projectId })),
+    getProjectNotes: vi.fn(async (): Promise<ReadonlyArray<ProjectNote>> => []),
+    dropProjectNote: vi.fn(async () => {}),
     getVocabulary: vi.fn(async () => ['RefundLedger', 'useEffect']),
     setProjectRules: vi.fn(async ({ projectId, ...change }: ProjectRulesChange) => ({ ...projectRules, ...change, projectId })),
     addAccount: vi.fn(async (input: { readonly agentId: string; readonly name: string; readonly grant?: string }) => ({
@@ -734,13 +940,15 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     listIssues: vi.fn(async () => ({ issues: [] })),
     markReady: vi.fn(async () => {}),
     openChange: vi.fn(async () => {}),
+    skipReview: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
     stopListening: vi.fn(async () => {}),
     stopBackground: vi.fn(async () => {}),
     clearBackground: vi.fn(async () => {}),
-    runProject: vi.fn(async (_projectId: string, taskId: string | null, _threadId: string | null) => ({
+    runProject: vi.fn(async (_projectId: string, taskId: string | null, _threadId: string | null, runnableId?: string) => ({
       id: 'proc_run',
       taskId,
+      runnableId: runnableId ?? 'rnbl_dev',
       where: taskId === null ? 'main' : 'the task',
       command: 'bun run dev',
       url: null,
@@ -749,6 +957,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     stopLaunch: vi.fn(async () => {}),
     clearLaunch: vi.fn(async () => {}),
+    keepRunnable: vi.fn(async () => ({ id: 'rnbl_kept' })),
+    dropRunnable: vi.fn(async () => {}),
+    orderRunnables: vi.fn(async () => {}),
+    getRepositoryScripts: vi.fn(async () => scripts),
     watch: (listener, since, onWatching) => {
       watching.push(since)
       listeners.add(listener)
@@ -790,6 +1002,9 @@ const keptPreferences = (): Pick<Host, 'preferences' | 'setPreference'> => {
 export const fakeHost = (overrides: Partial<Host> = {}): Host => ({
   ...keptPreferences(),
   platform: 'darwin',
+  window: vi.fn(),
+  maximized: vi.fn(async () => false),
+  onMaximized: vi.fn(() => () => {}),
   sounds: vi.fn(async () => ['Basso', 'Glass', 'Ping', 'Purr']),
   editorPicture: vi.fn(async (id: string) => `data:image/png;base64,${id}`),
   playSound: vi.fn(async () => {}),

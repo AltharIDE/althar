@@ -49,6 +49,20 @@ export const LongWords: Story = {
     },
   },
 }
+/** Open, its lead resolves conflicts as its project says, which the choice says too. */
+export const Conflicts: Story = { args: { conflicts: { choice: 'project', project: false, onChange: fn() }, defaultOpen: true } }
+/** Where it goes otherwise than its project, a quiet word beside the button says so. */
+export const ConflictsOtherwise: Story = { args: { conflicts: { choice: 'on', project: false, onChange: fn() } } }
+/** The same choice as its project's, said for the task alone, shows nothing beside the button. */
+export const ConflictsAsTheProject: Story = { args: { conflicts: { choice: 'on', project: true, onChange: fn() } } }
+/** Open, everything its agents ask can be allowed with one switch. */
+export const AllowEverything: Story = { args: { allowEverything: { on: false, project: false, onChange: fn() }, defaultOpen: true } }
+/** Everything on it allowed: Unrestricted beside the button, before whatever else is said there. */
+export const Unrestricted: Story = {
+  args: { allowEverything: { on: true, project: false, onChange: fn() }, conflicts: { choice: 'on', project: false, onChange: fn() } },
+}
+/** Its project allows everything: the task's switch shows on, and is turned off in the project's rules. */
+export const UnrestrictedByProject: Story = { args: { allowEverything: { on: false, project: true, onChange: fn() }, defaultOpen: true } }
 /** With nothing it can do, there is no menu at all. */
 export const NothingToDo: Story = { args: { onOpen: undefined, onStop: undefined, onAbandon: undefined } }
 
@@ -66,18 +80,6 @@ export const OpeningTheFolder: Story = {
     await expect(args.onOpen).toHaveBeenCalledOnce()
   },
 }
-
-/** What it built runs, with no agent, beside opening it: the command it runs says what. */
-export const Running: Story = {
-  args: { onStop: undefined, onAbandon: undefined, editor: 'Zed' },
-  render: (args) => <TaskMenu {...args} run={{ command: 'bun run dev', onRun: runIt }} />,
-  play: async ({ canvasElement }) => {
-    const page = await opened(canvasElement)
-    await userEvent.click(await page.findByRole('menuitem', { name: /Run bun run dev/ }))
-    await expect(runIt).toHaveBeenCalledOnce()
-  },
-}
-const runIt = fn()
 
 export const Stopping: Story = {
   play: async ({ args, canvasElement }) => {
@@ -113,6 +115,31 @@ export const MarkingReady: Story = {
     const page = await opened(canvasElement)
     await userEvent.click(await page.findByRole('menuitem', { name: /Mark ready for review/ }))
     await expect(args.onMarkReady).toHaveBeenCalledOnce()
+  },
+}
+
+const changing = fn()
+/** Choosing how its conflicts go says which; the word beside the button shows only where it isn't the project's. */
+export const ChangingConflicts: Story = {
+  args: { conflicts: { choice: 'project', project: true, onChange: changing } },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).queryByText('Auto-resolve conflicts: off')).toBeNull()
+    const page = await opened(canvasElement)
+    await expect(await page.findByRole('menuitemradio', { name: /Use the project setting/ })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(await page.findByRole('menuitemradio', { name: /Off for this task/ }))
+    await expect(changing).toHaveBeenCalledWith('off')
+  },
+}
+
+const allowing = fn()
+/** Allowing everything on it is a switch; until it's on, nothing beside the button says so. */
+export const AllowingEverything: Story = {
+  args: { allowEverything: { on: false, project: false, onChange: allowing } },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).queryByText('Unrestricted')).toBeNull()
+    const page = await opened(canvasElement)
+    await userEvent.click(await page.findByRole('menuitemcheckbox', { name: /Allow everything on this task/ }))
+    await expect(allowing).toHaveBeenCalledWith(true)
   },
 }
 

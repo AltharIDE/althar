@@ -1,20 +1,25 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
+import { doNotTrack } from '../main/appPreferences'
+import type { WindowAction } from '../renderer/data/services'
+
 /*
  * The window's bridge to the main process, and nothing more: the port to the
  * runtime, handed on to the page, folders the person chose, by the picker or
  * a drop or among the repositories main found, each as a grant, the thread a notification they clicked opens,
- * the icon they gave the app, the app's own preferences, and where Althar
- * shows at the edge of the screen. The edge's own pages say through it where they draw, and what to
+ * the icon they gave the app, the app's own preferences, where Althar
+ * shows at the edge of the screen, which platform the window runs on, and the window's own buttons
+ * (close, minimize, maximize). The edge's own pages say through it where they draw, and what to
  * open in the window, and hear whether the pointer is on the island. And
  * dictation: where the speech model and the microphone stand, the model's
  * download, and what was said, sent to be written down. A token on the
  * clipboard, while connecting a service asks for one. An update ready to
  * install, and restarting into it. An update that couldn't move the
  * store, with where its copy is as the person knows the place, which main
- * shows in the file manager when asked. And reporting a problem, and the
- * page's own errors, for the log. The page never sees or sends a
- * path. It gets no Node, no file system, no shell.
+ * shows in the file manager when asked. Whether DO_NOT_TRACK is set, which
+ * keeps usage data off. And reporting a problem, and the page's own errors,
+ * for the log. The page never sees or sends a path. It gets no Node, no
+ * file system, no shell.
  */
 
 ipcRenderer.on('althar:port', (event) => {
@@ -33,6 +38,11 @@ const reportAsked = (about: unknown) => {
   for (const listener of reporting) listener(about)
 }
 ipcRenderer.on('althar:report', () => reportAsked({ kind: 'asked', from: 'menu' }))
+/* Whether the window is maximized, on the window's own buttons' account. */
+const maximized = new Set<(maximized: boolean) => void>()
+ipcRenderer.on('althar:maximized', (_event, on: unknown) => {
+  if (typeof on === 'boolean') for (const listener of maximized) listener(on)
+})
 
 /* A thread a notification the person clicked opens: held until the page listens, as a window that just opened doesn't yet. */
 let pending: string | undefined
@@ -67,8 +77,16 @@ ipcRenderer.on('althar:update', (_event, glance: unknown) => {
 })
 
 contextBridge.exposeInMainWorld('althar', {
-  // Which system it is, for the words the window uses: this Mac, this PC, this computer.
+  // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
+  // Usage data stays off while it is set, whatever its switch says; the switch shows so.
+  doNotTrack: doNotTrack(process.env),
+  window: (action: WindowAction): void => ipcRenderer.send('althar:window', action),
+  maximized: (): Promise<boolean> => ipcRenderer.invoke('althar:maximized'),
+  onMaximized: (listener: (maximized: boolean) => void): (() => void) => {
+    maximized.add(listener)
+    return () => void maximized.delete(listener)
+  },
   pickFolder: (purpose: 'project' | 'account' = 'project'): Promise<string | null> => ipcRenderer.invoke('althar:pick-folder', purpose),
   pickFolders: (): Promise<ReadonlyArray<string>> => ipcRenderer.invoke('althar:pick-folders'),
   // Only a file the person dropped has a path; one the page made has none.

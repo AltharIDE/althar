@@ -6,7 +6,8 @@ import s from './AbandonTask.module.css'
 /*
  * Abandoning a task, said in full before it happens: what stops, that its
  * worktree and branch stay where they are, untouched, and that it can be
- * reopened on them. A pull request it opened stays open on its host. It is
+ * reopened on them (a plain task, on its worktree alone: it has no branch
+ * yet). A pull request it opened stays open on its host. It is
  * the one step; nothing happens until it is pressed, and Cancel, first, has
  * focus as it opens.
  */
@@ -25,6 +26,10 @@ export interface AbandonTaskText {
   /** Its pull request, by name, and the host it stays open on. */
   change: (name: string, host: string) => string
   reopen: string
+  /** For a task with a worktree and no branch yet, a plain one. */
+  reopenWorktree: string
+  /** For a task with neither yet. */
+  reopenLater: string
   abandon: string
   cancel: string
 }
@@ -39,6 +44,8 @@ export const abandonTaskText: AbandonTaskText = {
   branch: (name) => `Its branch ${name} stays. Nothing is pushed or deleted.`,
   change: (name, host) => `${name} stays open on ${host}.`,
   reopen: 'You can reopen it later, on the same worktree and branch.',
+  reopenWorktree: 'You can reopen it later, on the same worktree.',
+  reopenLater: 'You can reopen it later.',
   abandon: 'Abandon task',
   cancel: 'Cancel',
 }
@@ -98,7 +105,7 @@ export function AbandonTask({ activity, worktree, branch, change, onAbandon, onC
         <li>{worktree === null ? t.noWorktree : t.worktree(worktree)}</li>
         {branch !== null && <li>{t.branch(branch)}</li>}
         {change !== undefined && <li>{t.change(change.name, change.host)}</li>}
-        <li>{t.reopen}</li>
+        <li>{branch !== null ? t.reopen : worktree !== null ? t.reopenWorktree : t.reopenLater}</li>
       </ul>
       {error !== undefined && (
         <p className={s.error} role="alert">

@@ -46,7 +46,7 @@ export type YouProps = RootProps<
     onOpenAttachment?: (a: MessageAttachment) => void
     /** Where it stands with the agent. Delivered by default. */
     delivery?: Delivery
-    /** A link you pasted, unfurled under the message. */
+    /** The links you pasted, unfurled in the bubble under what you said, so they read as part of the message. */
     unfurl?: ReactNode
     text?: Partial<YouText>
   }
@@ -75,10 +75,14 @@ function Status({ delivery, at, t }: { delivery: Delivery; at?: string; t: YouTe
   }
 }
 
-/** What you said: a short bubble on the right. */
+/** The images among a message's attachments, as the lightbox moves through them. */
+const imagesIn = (set: readonly MessageAttachment[]): ImageRef[] => set.flatMap((one) => (one.kind === AttachmentKind.Image ? [one] : []))
+
+/** What you said: a short bubble on the right, with the links you pasted unfurled in it, and above it what you sent with it. */
 export function You({ children, at, attach, onOpenAttachment, delivery = Delivery.Delivered, unfurl, text, className, ...rest }: YouProps) {
   const t = { ...youText, ...text }
   const queued = delivery === Delivery.Queued
+  const said = children !== '' && children != null
   return (
     <article
       data-rhythm={Rhythm.You}
@@ -89,12 +93,17 @@ export function You({ children, at, attach, onOpenAttachment, delivery = Deliver
       {attach && attach.length > 0 && (
         <div className={s.attach}>
           {attach.map((a) => (
-            <AttachmentChip key={a.id} a={a} onOpen={onOpenAttachment} t={t} />
+            <AttachmentChip key={a.id} a={a} set={attach} onOpen={onOpenAttachment} t={t} />
           ))}
         </div>
       )}
-      <p className={s.body}>{children}</p>
-      {unfurl && <div className={s.unfurl}>{unfurl}</div>}
+      {/* images sent with nothing written have no bubble of words */}
+      {(said || unfurl) && (
+        <div className={s.body}>
+          {said && <p className={s.said}>{children}</p>}
+          {unfurl && <div className={s.unfurl}>{unfurl}</div>}
+        </div>
+      )}
       <span className={s.at}>
         <Status delivery={delivery} at={at} t={t} />
       </span>
@@ -102,14 +111,25 @@ export function You({ children, at, attach, onOpenAttachment, delivery = Deliver
   )
 }
 
-/* An image opens with the shell's openImage; a file opens wherever the consumer sends it. Without either, the chip is still. */
-function AttachmentChip({ a, onOpen, t }: { a: MessageAttachment; onOpen?: (a: MessageAttachment) => void; t: YouText }) {
+/* An image opens with the shell's openImage, with the message's other images a key away; a file opens wherever the consumer sends it. Without either, the chip is still. */
+function AttachmentChip({
+  a,
+  set,
+  onOpen,
+  t,
+}: {
+  a: MessageAttachment
+  set: readonly MessageAttachment[]
+  onOpen?: (a: MessageAttachment) => void
+  t: YouText
+}) {
   const { openImage } = useThreadShell()
   switch (a.kind) {
     case AttachmentKind.Image: {
+      const shown = a.thumb ?? a.src
       const body = (
         <>
-          <span className={s.imageArea}>{a.src ? <img src={a.src} alt="" className={s.thumb} /> : <Icon name="image" size={16} />}</span>
+          <span className={s.imageArea}>{shown ? <img src={shown} alt="" className={s.thumb} /> : <Icon name="image" size={16} />}</span>
           <span className={s.name}>{a.name}</span>
         </>
       )
@@ -120,7 +140,7 @@ function AttachmentChip({ a, onOpen, t }: { a: MessageAttachment; onOpen?: (a: M
           </span>
         )
       return (
-        <button type="button" className={cx(s.chip, s.image)} aria-label={t.view(a.name)} onClick={() => openImage(a)}>
+        <button type="button" className={cx(s.chip, s.image)} aria-label={t.view(a.name)} onClick={() => openImage(a, imagesIn(set))}>
           {body}
         </button>
       )

@@ -162,6 +162,12 @@ export interface TaskLaunchProps {
   startsAt?: number
   /** Held: the clock stops until you start it. */
   held?: boolean
+  /**
+   * Started, it waits for a free agent (ADR-032): what it waits for, said
+   * where the clock was. Its steps can still be changed; there is nothing to
+   * start or hold.
+   */
+  queued?: string
   defaultHeld?: boolean
   onHeldChange?: (held: boolean) => void
   /** No row for what happens when the work is done, where tasks end on their branch. */
@@ -189,6 +195,7 @@ export function TaskLaunch({
   wait = 30,
   startsAt,
   held: heldProp,
+  queued,
   defaultHeld = false,
   onHeldChange,
   hideEnd = false,
@@ -213,11 +220,11 @@ export function TaskLaunch({
 
   const seen = useOnScreen(ref, { threshold: 0.9, enabled: !started })
   useEffect(() => {
-    if (startsAt !== undefined || !seen || held || started) return
+    if (queued !== undefined || startsAt !== undefined || !seen || held || started) return
     /* the last second starts it, so the clock never shows zero */
     const id = window.setTimeout(() => (left <= 1 ? startWhenDue() : setShownFor(left - 1)), 1000)
     return () => window.clearTimeout(id)
-  }, [startsAt, seen, left, held, started])
+  }, [queued, startsAt, seen, left, held, started])
   useEffect(() => {
     if (startsAt === undefined || held || started || now >= startsAt) return
     /* the kept time: it ticks each second until then; whatever keeps it starts the plan */
@@ -306,23 +313,32 @@ export function TaskLaunch({
           </li>
         )}
       </ol>
-      <div className={s.foot}>
-        <span className={s.estimate}>
-          {estimate}
-          {waiting.length > 0 && limited && <> · {t.alsoWaits(waiting.map((st) => st.label).join(', '), limited.until)}</>}
-        </span>
-        {!held && <Ring left={share} />}
-        {/* the countdown is not read out each second; that it starts on its own is said once, when it is first seen */}
-        <span className={s.when}>{when}</span>
-        <span aria-live="polite">{announced && !held && !started && <VisuallyHidden>{t.announce(wait)}</VisuallyHidden>}</span>
-        {!held && (
-          <Button variant="quiet" onClick={() => setHeld(true)}>
-            {t.hold}
-          </Button>
-        )}
-        <Button onClick={start}>{held ? t.start : t.startNow}</Button>
-        {!held && <i className={s.bar} style={cssVars({ '--left': share })} aria-hidden="true" />}
-      </div>
+      {queued !== undefined ? (
+        <div className={s.foot}>
+          <span className={s.estimate}>{estimate}</span>
+          <span className={s.when} role="status">
+            {queued}
+          </span>
+        </div>
+      ) : (
+        <div className={s.foot}>
+          <span className={s.estimate}>
+            {estimate}
+            {waiting.length > 0 && limited && <> · {t.alsoWaits(waiting.map((st) => st.label).join(', '), limited.until)}</>}
+          </span>
+          {!held && <Ring left={share} />}
+          {/* the countdown is not read out each second; that it starts on its own is said once, when it is first seen */}
+          <span className={s.when}>{when}</span>
+          <span aria-live="polite">{announced && !held && !started && <VisuallyHidden>{t.announce(wait)}</VisuallyHidden>}</span>
+          {!held && (
+            <Button variant="quiet" onClick={() => setHeld(true)}>
+              {t.hold}
+            </Button>
+          )}
+          <Button onClick={start}>{held ? t.start : t.startNow}</Button>
+          {!held && <i className={s.bar} style={cssVars({ '--left': share })} aria-hidden="true" />}
+        </div>
+      )}
     </div>
   )
 }

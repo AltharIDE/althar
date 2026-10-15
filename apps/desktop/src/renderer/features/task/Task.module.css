@@ -21,7 +21,7 @@
   flex: 1;
   min-height: 0;
   padding-top: 40px;
-  overflow: hidden;
+  overflow: clip;
 }
 
 .composer {
@@ -40,6 +40,13 @@
   margin: 0;
   color: var(--t-2);
   font-size: 12.5px;
+}
+
+/* What a review's lead can reach, a sentence under the header. */
+.reach {
+  flex: none;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--line);
 }
 
 /* The issue a task came from, heading its thread. */

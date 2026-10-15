@@ -16,6 +16,16 @@ import { codexWithoutOwnTools, openCodeWithoutOwnTools, type StartingAt } from '
 export type AgentId = 'claude-code' | 'codex' | 'opencode'
 
 /**
+ * A launch that happens out on the device rather than here: the person's own
+ * command installed outside a sandbox that cannot see it (a Flatpak's home).
+ * The executor hands it the working directory and the environment it
+ * assembled, and runs what comes back (`Installs.ts`'s `onDevice`).
+ */
+export interface OutOnDevice {
+  (at: { readonly cwd?: string; readonly env: Readonly<Record<string, string | undefined>> }): LaunchSpec
+}
+
+/**
  * How to start a process: a command, its arguments, extra environment, and
  * which of Althar's own environment variables it may inherit beyond the
  * common allowlist (see `process.ts`).
@@ -25,6 +35,11 @@ export interface LaunchSpec {
   readonly args: ReadonlyArray<string>
   readonly env?: Readonly<Record<string, string>>
   readonly inheritEnv?: ReadonlyArray<string>
+  /**
+   * Where this command is not here but out on the device (a Flatpak): how the
+   * executor runs it there instead, with the cwd and environment it assembled.
+   */
+  readonly onDevice?: OutOnDevice
 }
 
 /**
@@ -46,7 +61,7 @@ export interface AgentDefinition {
   readonly name: string
   /** Bundled adapters ship with Althar at pinned versions; user-installed agents are found on the machine. */
   readonly source: 'bundled' | 'user_installed'
-  /** The command that starts it. `node` is the Node binary bundled adapters run on: Electron's own, in the app. */
+  /** The command that starts it. `node` is the Node binary bundled adapters run on: the one the app ships, or Electron's own in dev (`adapterNode`). */
   readonly launch: (node: string) => LaunchSpec
   /**
    * The modes Althar starts sessions in (ADR-007): one where the agent asks
@@ -121,9 +136,30 @@ export interface AgentDefinition {
   /**
    * What goes in `_meta` on `session/new`, to keep the agent asking whatever
    * its settings say (ADR-007): for a lead, or for a role that only reads
-   * (the coordinator, a reviewer), whose writes are refused outright.
+   * (the coordinator, a reviewer, the lead of a review), whose writes are
+   * refused outright. `untrusted`, for the lead of a review of someone else's
+   * pull request, loads none of the repository's settings or hooks, nor the
+   * person's own allow rules; `offline`, for one from outside the project,
+   * takes away what the agent reaches the web with where its settings can:
+   * each agent's entry says what that holds it to.
    */
-  readonly sessionMeta?: (role?: 'lead' | 'reader') => Readonly<Record<string, unknown>>
+  readonly sessionMeta?: (role?: 'lead' | 'reader', options?: SessionOptions) => Readonly<Record<string, unknown>>
+  /**
+   * How it is held as the lead of a review of someone else's pull request
+   * (docs/architecture/06), beyond its reader mode and `sessionMeta`.
+   * `env`, what its environment adds over `withoutOwnTools`' (which it is
+   * given) so that nothing of the repository's own config, hooks or plugins
+   * loads. `outside`, whether that holds it to only reading a pull request
+   * from outside the project: every command it runs asks first and meets
+   * Althar's reader rules, none running because its sandbox would contain
+   * it, and nothing of its own reaches the network. Without `outside`, no
+   * review of someone else's pull request is started on it, a team's
+   * included: it could run the pull request's code.
+   */
+  readonly reviewing?: {
+    readonly outside: boolean
+    readonly env?: (own: Readonly<Record<string, string>>) => Readonly<Record<string, string>>
+  }
   /**
    * Verified session settings that remove the agent's built-in tools, disable
    * user hooks and exclude its own MCP servers. Without this capability the
@@ -139,6 +175,17 @@ export interface AgentDefinition {
   readonly withoutOwnTools?: (at: StartingAt) => Readonly<Record<string, string>>
   /** What it does differently, for the support matrix. */
   readonly knownGaps: ReadonlyArray<string>
+}
+
+/**
+ * How a session is started beyond its role: `untrusted`, it leads a review of
+ * someone else's pull request, whose repository's settings and hooks are the
+ * pull request's to write; `offline`, it has no network where the agent lets
+ * Althar take it away.
+ */
+export interface SessionOptions {
+  readonly offline?: boolean
+  readonly untrusted?: boolean
 }
 
 export interface AgentCli {
@@ -209,10 +256,34 @@ const only =
 const require = createRequire(import.meta.url)
 const bundled = (packageName: string, entry: string) => join(dirname(require.resolve(`${packageName}/package.json`)), entry)
 
-/** The Codex binary codex-acp drives, so its sign-in status is the one that counts. */
-const bundledCodex = () => {
-  const fromAdapter = createRequire(require.resolve('@agentclientprotocol/codex-acp/package.json'))
-  return join(dirname(fromAdapter.resolve('@openai/codex/package.json')), 'bin/codex.js')
+/** Codex's builds, by Node's `platform-arch`: the Rust target each is, as `@openai/codex`'s `bin/codex.js` names them. */
+const CODEX_TARGETS: Readonly<Record<string, string>> = {
+  'darwin-arm64': 'aarch64-apple-darwin',
+  'darwin-x64': 'x86_64-apple-darwin',
+  'linux-arm64': 'aarch64-unknown-linux-musl',
+  'linux-x64': 'x86_64-unknown-linux-musl',
+  'win32-arm64': 'aarch64-pc-windows-msvc',
+  'win32-x64': 'x86_64-pc-windows-msvc',
+}
+
+/**
+ * Codex's own program as the adapter's `@openai/codex` ships it, for this
+ * platform and processor, for its sign-in, status and version where the
+ * person has no Codex. Not `bin/codex.js`, which finds it for a terminal:
+ * that needs a `node` on the PATH, which an app opened from the Finder
+ * doesn't have. Null where there is no build.
+ */
+export const bundledCodex = (platform: string = process.platform, arch: string = process.arch): string | null => {
+  const target = CODEX_TARGETS[`${platform}-${arch}`]
+  if (target === undefined) return null
+  try {
+    const fromAdapter = createRequire(require.resolve('@agentclientprotocol/codex-acp/package.json'))
+    const fromCodex = createRequire(fromAdapter.resolve('@openai/codex/package.json'))
+    const vendor = join(dirname(fromCodex.resolve(`@openai/codex-${platform}-${arch}/package.json`)), 'vendor')
+    return join(vendor, target, 'bin', platform === 'win32' ? 'codex.exe' : 'codex')
+  } catch {
+    return null
+  }
 }
 
 /** How an agent's sign-in is paid for: a plan (Claude's, ChatGPT's), or per use, on a key. */
@@ -260,6 +331,53 @@ const openCodeBase = {
 const openCodeConfig = JSON.stringify(openCodeBase)
 
 /**
+ * OpenCode as the lead of a review of someone else's pull request, as
+ * OpenCode 1.18.31 reads it (its config loader, seen 14 October 2026):
+ * `OPENCODE_DISABLE_PROJECT_CONFIG` skips the repository's `opencode.json`
+ * and its `.opencode` folders, whose plugins and tools are code it would run
+ * as it starts; `lsp: false` starts no language server, some of which run a
+ * project's build scripts to read it (none starts unless a config turns it
+ * on, but the person's may); and its web search asks too, which Althar's
+ * reader rules refuse, since nothing says what it reaches. Its permissions
+ * keep the person's MCP servers off as `withoutOwnTools` left them.
+ */
+const openCodeReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<string, string>> => {
+  const reviewAsks = { ...asks, websearch: 'ask' }
+  const config = JSON.parse(own.OPENCODE_CONFIG_CONTENT ?? openCodeConfig) as Readonly<Record<string, unknown>>
+  return {
+    OPENCODE_DISABLE_PROJECT_CONFIG: '1',
+    OPENCODE_CONFIG_CONTENT: JSON.stringify({
+      ...config,
+      permission: reviewAsks,
+      agent: { build: { permission: reviewAsks }, plan: { permission: reviewAsks } },
+      lsp: false,
+    }),
+  }
+}
+
+/**
+ * Codex as the lead of a review of someone else's pull request, through the
+ * config codex-acp merges into every session it starts (`CODEX_CONFIG`, read
+ * as dotted keys, beside the person's MCP servers switched off): its own web
+ * search off (`web_search = "disabled"`, as Codex 0.159 names it), and hooks
+ * off (`features.hooks`), since codex-acp trusts every session's folder, so a
+ * repository's `.codex` config would otherwise apply. It isn't held to
+ * reading: codex-acp 2.1.1 starts every turn with its mode's approval policy
+ * (`on-request` for `read-only`), and no session option changes it, so
+ * Codex runs a command its read-only sandbox contains without asking, and
+ * Althar's reader rules never see it. It could run the pull request's
+ * scripts there, with no network and no writes. So it reviews a team's pull
+ * request held this far, and none from outside.
+ */
+const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<string, string>> => ({
+  CODEX_CONFIG: JSON.stringify({
+    ...(own.CODEX_CONFIG === undefined ? {} : (JSON.parse(own.CODEX_CONFIG) as Readonly<Record<string, unknown>>)),
+    web_search: 'disabled',
+    'features.hooks': false,
+  }),
+})
+
+/**
  * Claude Code reads the user's settings and the repository's committed
  * `.claude/settings.json`, and an allow rule in either approves an action
  * before Althar sees it. Ask rules win over allow rules, and over a hook
@@ -270,7 +388,13 @@ const openCodeConfig = JSON.stringify(openCodeBase)
  * a command that stays inside runs without asking, and one that has to leave
  * (the network, a write elsewhere) asks, and reaches Althar. In a git
  * worktree the sandbox lets git write to the main repository's `.git`, except
- * its hooks and config. Where the sandbox can't start, commands run without
+ * its hooks and config. A lead may also bind and listen on localhost
+ * (`network.allowLocalBinding`), so a test run can start a server and a
+ * prototype can serve a showcase page without leaving the sandbox. On macOS
+ * Claude documents that this setting is broader than listening: commands may
+ * also connect to any localhost port, including services outside the sandbox,
+ * and listen on non-loopback addresses. The domain allowlist and writable
+ * paths are unchanged. Where the sandbox can't start, commands run without
  * it and every one asks.
  *
  * Only the MCP servers Althar gives a session are loaded, not the user's
@@ -284,7 +408,13 @@ const claudeAsks = {
       // An object: the adapter reads a string as a path to a settings file.
       settings: {
         permissions: { ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
-        sandbox: { enabled: true, autoAllowBashIfSandboxed: true, allowUnsandboxedCommands: true, failIfUnavailable: false },
+        sandbox: {
+          enabled: true,
+          autoAllowBashIfSandboxed: true,
+          allowUnsandboxedCommands: true,
+          failIfUnavailable: false,
+          network: { allowLocalBinding: true },
+        },
       },
     },
   },
@@ -294,20 +424,39 @@ const claudeAsks = {
  * Claude Code for a role that only reads: its edit tools denied, which also
  * denies its sandbox's writes, and every shell command asking, so each one
  * reaches Althar's reader rules rather than running because the sandbox
- * would contain it. What it reads is a throwaway copy all the same.
+ * would contain it. What it reads is a throwaway copy all the same. In a
+ * Flatpak its sandbox cannot start (no nested user namespaces there), so,
+ * as for the ask mode, commands run without it and every one reaches Althar's
+ * reader rules. Those rules refuse direct `flatpak-spawn` commands; the
+ * manifest's permission remains broad and is not a boundary against a
+ * compromised app or agent.
+ *
+ * Untrusted, as the lead of a review of someone else's pull request, it
+ * loads no settings file (`settingSources: []`, which claude-agent-acp 0.88.0
+ * passes over its own default of user, project and local): not the
+ * repository's `.claude/settings.json`, which the pull request writes and
+ * whose hooks would run its code and whose allow rules would approve its
+ * commands before Althar sees them, nor the person's own, whose allow rules
+ * would too. Hooks are off besides (`disableAllHooks`), as for the
+ * permission judge. Its rules and sandbox below are the programmatic
+ * settings, which load whatever the sources.
  */
-const claudeReads = {
+const claudeReads = (flatpak: boolean, offline: boolean, untrusted: boolean) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
+      ...(untrusted ? { settingSources: [] } : {}),
       settings: {
-        permissions: { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'], ask: ['Bash', 'WebFetch'] },
-        sandbox: { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false, failIfUnavailable: false },
+        permissions: offline
+          ? { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch', 'WebSearch'], ask: ['Bash'] }
+          : { deny: ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'], ask: ['Bash', 'WebFetch'] },
+        sandbox: { enabled: true, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: flatpak, failIfUnavailable: false },
+        ...(untrusted ? { disableAllHooks: true } : {}),
       },
     },
   },
-}
+})
 
 // claude-agent-acp 0.88.0 forwards this explicit tools array to the SDK.
 // Removing the tool set also removes Read/Grep/Glob, which never ask in plan mode.
@@ -355,11 +504,30 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     /* Its sign-in, status and version run `claude`: the person's own, else the copy its sessions run on, which ships with Althar. */
     cli: { name: 'claude', bundled: () => bundledClaude() },
     permissions: { rejectAndContinue: ['reject'], rejectAndStop: [], allowScopes: { 'allow-once': 'once', 'exit-plan-default': 'once' } },
-    sessionMeta: (role = 'lead') => (role === 'reader' ? claudeReads : claudeAsks),
+    /*
+     * Offline, a reader has WebFetch and WebSearch denied, so Claude Code
+     * reaches no page itself; every shell command still asks, and meets
+     * Althar's reader rules, which list no command that reaches the network
+     * and refuse every fetch for that session. Its sandbox, where it starts,
+     * lets a command reach only the domains its settings allow (none here)
+     * and asks for any other, which Althar refuses too: so Claude Code's
+     * documentation describes it, not yet checked against a real session. In
+     * a Flatpak, where the sandbox can't start, the rules are what holds it.
+     */
+    sessionMeta: (role = 'lead', options = {}) =>
+      role === 'reader'
+        ? claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true)
+        : claudeAsks,
+    /*
+     * As a review's lead it is held by its session's settings alone (claudeReads, untrusted): every command asks and meets
+     * Althar's reader rules, no settings file or hook of the repository's or the person's loads, and offline its web tools are
+     * denied. So it may read a pull request from outside.
+     */
+    reviewing: { outside: true },
     permissionJudge: { sessionMeta: claudeJudges },
     knownGaps: [
       'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Althar always sets the mode.',
-      "Hooks in the repository's or the user's settings run as code on the Mac whenever Claude uses a tool; they cannot approve past the ask rules.",
+      "Hooks in the repository's or the user's settings run as code on the Mac whenever Claude uses a tool; they cannot approve past the ask rules. A review's lead loads no settings and runs no hooks.",
       "Its sandbox denies writes to a repository's tracked `.claude/` files, so git can fail to check those out inside it.",
       // Not checked against a real session yet: what its sandbox does when the start folder holds worktrees rather than being one.
       "In a task of several repositories it starts in the folder that holds the worktrees, which isn't one, so its sandbox may not let git write the repositories' `.git`; a commit then runs outside the sandbox and asks, and Althar's rules answer it.",
@@ -370,35 +538,55 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     id: 'codex',
     name: 'Codex',
     source: 'bundled',
-    launch: (node) => ({ command: node, args: [bundled('@agentclientprotocol/codex-acp', 'dist/index.js')], inheritEnv: ['CODEX_HOME'] }),
+    /*
+     * `CODEX_HOME` is the account's home, always. `CODEX_PATH` names the Codex
+     * its adapter drives — the person's own, out on the device, where the
+     * sandbox cannot reach it — and the bus address carries it to
+     * `flatpak-spawn`; both only in a Flatpak, so a person's own `CODEX_PATH`
+     * never changes which Codex runs elsewhere.
+     */
+    launch: (node) => ({
+      command: node,
+      args: [bundled('@agentclientprotocol/codex-acp', 'dist/index.js')],
+      inheritEnv: ['CODEX_HOME', ...(process.env.FLATPAK_ID === undefined ? [] : ['CODEX_PATH', 'DBUS_SESSION_BUS_ADDRESS'])],
+    }),
     /*
      * Not `agent`, codex-acp's default: that mode sends every request to go
      * beyond the sandbox to an automatic reviewer, so none reach Althar.
      * In `workspace-write` the person, through Althar, is the reviewer.
      */
+    /*
+     * Its read-only sandbox has no network (`networkAccess: false` in
+     * codex-acp 2.1.1): what would reach it asks, and an offline reader's
+     * ask meets Althar's rules, which refuse it. But in that mode it asks
+     * only to go beyond the sandbox: a command the sandbox contains runs
+     * without asking (codexReviewing says why no session option changes
+     * that), so it never leads a review of a pull request from outside.
+     */
     modes: { ask: 'workspace-write', readOnly: 'read-only', reader: 'read-only' },
     options: { mode: 'mode', model: 'model', effort: 'reasoning_effort' },
     signIn: {
-      status: (node) => ({ command: node, args: [bundledCodex(), 'login', 'status'] }),
+      status: () => ({ command: 'codex', args: ['login', 'status'] }),
       read: (output, exitCode) => (/not logged in/i.test(output) ? false : /logged in/i.test(output) && exitCode === 0 ? true : undefined),
       /* "Logged in using ChatGPT" is the person's plan; "using an API key" is paid per use. */
       paidBy: (output) => (/using chatgpt/i.test(output) ? 'plan' : /api key/i.test(output) ? 'key' : undefined),
       login: 'codex login',
-      // The bundled Codex, as its status check runs.
+      // The same Codex CLI the ACP adapter uses, where that CLI is available.
       inApp: {
         kind: 'codex-app-server',
         ways: ['browser', 'device'],
-        run: (node) => ({ command: node, args: [bundledCodex(), 'app-server'] }),
+        run: () => ({ command: 'codex', args: ['app-server'] }),
       },
-      logout: { run: (node) => ({ command: node, args: [bundledCodex(), 'logout'] }), line: 'codex logout' },
+      logout: { run: () => ({ command: 'codex', args: ['logout'] }), line: 'codex logout' },
     },
     home: {
       variable: 'CODEX_HOME',
       usual: (env, homeDir) => env.CODEX_HOME || join(homeDir, '.codex'),
       shared: only(['config.toml', 'AGENTS.md', 'skills', 'prompts', 'rules']),
     },
-    version: (node) => ({ command: node, args: [bundledCodex(), '--version'] }),
+    version: () => ({ command: 'codex', args: ['--version'] }),
     withoutOwnTools: codexWithoutOwnTools,
+    reviewing: { outside: false, env: codexReviewing },
     /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
      * on; `cancel` stops the turn and is the only rejection offered for a file
@@ -410,10 +598,16 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       allowScopes: { allow_once: 'once', allow_permissions_turn: 'turn', allow_permissions_turn_strict_auto_review: 'turn' },
     },
     knownGaps: [
-      'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network.',
-      "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply.",
+      'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network. As a reader too, so it never leads a review of a pull request from outside.',
+      "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
       'Usage limits are held by the adapter but only shown as /status text; only errors show them over ACP.',
     ],
+    cli: {
+      name: 'codex',
+      // In a Flatpak sessions use the host's Codex bridge too; reporting the
+      // bundled CLI here would show an unrelated sign-in state.
+      ...(process.env.FLATPAK_ID === undefined ? { bundled: () => bundledCodex() } : {}),
+    },
   },
   opencode: {
     id: 'opencode',
@@ -425,6 +619,14 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       env: { OPENCODE_CONFIG_CONTENT: openCodeConfig },
       inheritEnv: ['OPENCODE_CONFIG_DIR'],
     }),
+    /*
+     * It has no sandbox: a reader, offline or not, is held by Althar's
+     * rules alone. Every command asks (`bash: 'ask'`), and its web fetches
+     * do (`webfetch: 'ask'`), so an offline reader's are refused there. As a
+     * review's lead it loads nothing of the repository's own config, plugins
+     * or language servers, and its web search asks too (openCodeReviewing),
+     * so it may read a pull request from outside.
+     */
     modes: { ask: 'build', readOnly: 'plan', reader: 'build' },
     /*
      * Its efforts are a model's variants, so each model has its own, and
@@ -458,6 +660,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     /* Seen on 29 September 2026: `once`, `always` and `reject`, for commands and edits alike. */
     version: () => ({ command: 'opencode', args: ['--version'] }),
     withoutOwnTools: openCodeWithoutOwnTools(openCodeBase),
+    reviewing: { outside: true, env: openCodeReviewing },
     /* MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256. Seen 9 October 2026, v1.18.35. */
     cli: {
       name: 'opencode',

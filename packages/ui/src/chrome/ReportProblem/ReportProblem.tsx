@@ -3,7 +3,7 @@ import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState 
 import { cx } from '../../lib/cx'
 import { Button } from '../../primitives/Button/Button'
 import { Dialog } from '../../primitives/Dialog/Dialog'
-import { Field, FieldError, TextArea } from '../../primitives/Field/Field'
+import { Field, FieldArea, FieldError } from '../../primitives/Field/Field'
 import { Disclosure, DisclosureTrigger, Fold, useOpen } from '../../primitives/Fold/Fold'
 import { KeyValues } from '../../primitives/KeyValues/KeyValues'
 import { LinkButton } from '../../primitives/LinkButton/LinkButton'
@@ -249,7 +249,7 @@ export function ReportProblem({
           <label htmlFor={ids.what} className={s.label}>
             {t.what}
           </label>
-          <TextArea
+          <FieldArea
             ref={form}
             id={ids.what}
             rows={4}

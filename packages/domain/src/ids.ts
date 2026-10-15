@@ -19,6 +19,8 @@ export const Ids = {
   repositoryBinding: kind('repo', 'RepositoryBindingId'),
   repositoryLocation: kind('loc', 'RepositoryLocationId'),
   projectFolder: kind('pfo', 'ProjectFolderId'),
+  projectNote: kind('note', 'ProjectNoteId'),
+  runnable: kind('rnbl', 'RunnableId'),
   task: kind('task', 'TaskId'),
   taskRequirement: kind('req', 'TaskRequirementId'),
   taskPlan: kind('plan', 'TaskPlanId'),
@@ -56,6 +58,9 @@ export const Ids = {
   command: kind('cmd', 'CommandId'),
   connection: kind('conn', 'ConnectionId'),
   externalLink: kind('xlink', 'ExternalLinkId'),
+  issueDraft: kind('idr', 'IssueDraftId'),
+  conflictResolution: kind('cres', 'ConflictResolutionId'),
+  reviewDraft: kind('rdr', 'ReviewDraftId'),
 } as const
 
 export type IdKind = keyof typeof Ids
@@ -144,6 +149,12 @@ export const ConnectionId = Ids.connection.schema
 export type ConnectionId = typeof ConnectionId.Type
 export const ExternalLinkId = Ids.externalLink.schema
 export type ExternalLinkId = typeof ExternalLinkId.Type
+export const IssueDraftId = Ids.issueDraft.schema
+export type IssueDraftId = typeof IssueDraftId.Type
+export const ConflictResolutionId = Ids.conflictResolution.schema
+export type ConflictResolutionId = typeof ConflictResolutionId.Type
+export const ReviewDraftId = Ids.reviewDraft.schema
+export type ReviewDraftId = typeof ReviewDraftId.Type
 
 interface IdDefinition<S> {
   readonly prefix: string

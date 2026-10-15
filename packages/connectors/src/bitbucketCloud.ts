@@ -8,17 +8,21 @@ import { makeHttp } from './http'
 import type {
   Account,
   Activity,
+  ChangeList,
+  ChangeQuery,
   ChangeRequest,
   Check,
   CheckState,
   CodeHost,
   Comment,
+  ListedChange,
   MergeMethod,
   Person,
   Repository,
   Review,
   Verdict,
 } from './model'
+import { lacking, noReviews } from './model'
 import {
   type Answer,
   answered,
@@ -87,6 +91,10 @@ const PullAnswer = Schema.Struct({
   destination: Schema.Struct({ branch: Schema.Struct({ name: Schema.String }) }),
   author: Schema.optional(Schema.NullOr(User)),
   reviewers: Schema.optional(Schema.Array(User)),
+  // Who took part, and how each left it: given in a list only when asked for.
+  participants: Schema.optional(
+    Schema.Array(Schema.Struct({ approved: Schema.optional(Schema.Boolean), state: Schema.optional(Schema.NullOr(Schema.String)) })),
+  ),
   close_source_branch: Schema.optional(Schema.Boolean),
   links: Schema.Struct({ html: Schema.Struct({ href: Schema.String }) }),
   updated_on: Schema.String,
@@ -246,6 +254,34 @@ const changeOf = (repository: Repository, pull: PullAnswer, size: Size | null = 
   updatedAt: iso(pull.updated_on),
 })
 
+/** Bitbucket's states for each a list can ask for: a declined pull request, or one superseded by another, is closed. */
+const LISTED_STATES = {
+  open: ['OPEN'],
+  closed: ['DECLINED', 'SUPERSEDED'],
+  merged: ['MERGED'],
+  all: ['OPEN', 'MERGED', 'DECLINED', 'SUPERSEDED'],
+} as const
+
+/** How many pull requests a page of Bitbucket's list holds, at most. */
+const LISTED_PAGE = 50
+
+/** A pull request as a list gives it: where its participants left it, and no word of its checks, which a list doesn't say. */
+const listedOf = (repository: Repository, pull: PullAnswer): ListedChange => {
+  const said = pull.participants ?? []
+  return {
+    ...changeOf(repository, pull),
+    // Never read from a list: what it says is read with the pull request.
+    body: '',
+    forkOwner: null,
+    reviewDecision: said.some((one) => one.state === 'changes_requested')
+      ? 'changes_requested'
+      : said.some((one) => one.approved === true || one.state === 'approved')
+        ? 'approved'
+        : null,
+    checks: null,
+  }
+}
+
 /** Where a commit status points at a Pipelines run of this repository: its build number. */
 const pipelineOf = (repository: Repository, url: string | null | undefined) => {
   const home = repository.webUrl.replace(/\/+$/, '').toLowerCase()
@@ -296,6 +332,25 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
       ),
       (pulls) => (pulls.values[0] === undefined ? null : changeOf(repository, pulls.values[0])),
     )
+
+  /** A repository's pull requests, newest change first, narrowed in Bitbucket's query language. */
+  const listChanges = (repository: Repository, query: ChangeQuery) =>
+    Effect.gen(function* () {
+      const limit = Math.min(Math.max(query.limit, 1), LISTED_PAGE)
+      const author = query.author?.trim().replace(/^@/, '')
+      const words = query.text?.trim()
+      const asked = [
+        author === undefined || author === '' ? null : `author.nickname = ${quoted(author)}`,
+        words === undefined || words === '' ? null : `title ~ ${quoted(words)}`,
+        query.reviewRequested === true ? `reviewers.uuid = ${quoted((yield* account).id)}` : null,
+        query.draft === undefined ? null : `draft = ${query.draft}`,
+      ].filter((part) => part !== null)
+      const params = new URLSearchParams({ pagelen: String(limit), sort: '-updated_on', fields: '+values.participants' })
+      for (const state of LISTED_STATES[query.state]) params.append('state', state)
+      if (asked.length > 0) params.set('q', asked.join(' AND '))
+      const pulls = yield* http.cached(Page(PullAnswer), `${repo(repository.path)}/pullrequests?${params.toString()}`)
+      return { changes: pulls.values.map((pull) => listedOf(repository, pull)), more: pulls.next != null } satisfies ChangeList
+    }).pipe(Effect.mapError(lacking('read:pullrequest:bitbucket')))
 
   /** Said once: membership couldn't be read, as without the token's `read:workspace` it can't. */
   let membershipUnread = false
@@ -370,7 +425,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: false },
     account,
     repository: (path) =>
       Effect.gen(function* () {
@@ -426,6 +481,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
             ),
           )
       }),
+    listChanges,
     change: (repository, number) =>
       Effect.gen(function* () {
         const answer = yield* http.cached(PullAnswer, pull(repository, number))
@@ -491,7 +547,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
           }
         }),
       ),
-    checkLog: (repository, check) => {
+    checkLog: (repository, check, whole = false) => {
       const match = /^pipeline:(\d+)$/.exec(check.id)
       if (match === null) return Effect.succeed(null)
       const run = `${repo(repository.path)}/pipelines/${match[1]}`
@@ -500,7 +556,8 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         const failed = steps.values.find((step) => step.state?.result?.name === 'FAILED' || step.state?.result?.name === 'ERROR')
         if (failed === undefined) return null
         // A finished step's log has moved to storage elsewhere; Bitbucket redirects there.
-        return tail(yield* http.text(`${run}/steps/${encodeURIComponent(failed.uuid)}/log`))
+        const log = yield* http.text(`${run}/steps/${encodeURIComponent(failed.uuid)}/log`)
+        return whole ? log : tail(log)
       }).pipe(
         Effect.catchIf(
           (error) => error.reason === 'not_found' || error.reason === 'forbidden',
@@ -508,6 +565,8 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         ),
       )
     },
+    // A pipeline runs again only whole, as a new one: not a check of its own.
+    rerun: () => Effect.succeed(false),
     activity: (repository, number, cursor) =>
       Effect.gen(function* () {
         // Read whole, to find each reply's thread; by ETag, so a quiet pull request costs little.
@@ -557,6 +616,9 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         // Althar's own reply: whether it counts as a member's doesn't matter, it is known by its receipt.
         (comment) => commentOf(comment, reply.threadId ?? String(comment.id), true),
       ),
+    // Reviews of a change Althar didn't open are GitHub's alone, for now.
+    changeToReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
+    postReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
     pushTarget: (repository) =>
       Effect.map(options.credential, (credential) => ({
         url: `${web}/${repository.path.join('/')}.git`,

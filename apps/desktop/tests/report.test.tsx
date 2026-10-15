@@ -55,6 +55,7 @@ describe('where a report is asked from', () => {
     expect(placeOf('#/threads/thr_1')).toEqual({ screen: 'task', projectId: null, threadId: 'thr_1' })
     expect(placeOf('#/projects/proj_1')).toEqual({ screen: 'project', projectId: 'proj_1', threadId: null })
     expect(placeOf('#/projects/proj_1/rules')).toEqual({ screen: 'rules', projectId: 'proj_1', threadId: null })
+    expect(placeOf('#/settings/about')).toEqual({ screen: 'settings', projectId: null, threadId: null })
     expect(placeOf('#/')).toEqual({ screen: 'home', projectId: null, threadId: null })
     expect(placeOf('')).toEqual({ screen: 'home', projectId: null, threadId: null })
   })
@@ -67,7 +68,9 @@ describe('where a report is asked from', () => {
       threadId: 'thr_1',
       about: null,
     })
-    expect(contextOf({ kind: 'asked', from: 'settings' }, '#/threads/thr_1').screen).toBe('settings')
+    // From the quick settings, over a task, it is the task; from the Settings tab, Settings.
+    expect(contextOf({ kind: 'asked', from: 'settings' }, '#/threads/thr_1').screen).toBe('task')
+    expect(contextOf({ kind: 'asked', from: 'settings' }, '#/settings/about').screen).toBe('settings')
     expect(
       contextOf({ kind: 'failed', taskId: 'task_1', projectId: 'proj_1', threadId: 'thr_1', what: 'the stuck Implement step' }, '#/'),
     ).toEqual({ screen: 'task', projectId: 'proj_1', taskId: 'task_1', threadId: 'thr_1', about: 'the stuck Implement step' })

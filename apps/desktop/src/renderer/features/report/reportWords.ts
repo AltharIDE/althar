@@ -69,6 +69,7 @@ export const placeOf = (hash: string): Pick<ReportContext, 'screen' | 'projectId
   if (thread !== null) return { screen: 'task', projectId: null, threadId: decodeURIComponent(thread[1] ?? '') }
   const project = /^\/projects\/([^/]+)(?:\/(rules|repositories))?/.exec(path)
   if (project !== null) return { screen: project[2] ?? 'project', projectId: decodeURIComponent(project[1] ?? ''), threadId: null }
+  if (/^\/settings(?:\/|$)/.test(path)) return { screen: 'settings', projectId: null, threadId: null }
   return { screen: 'home', projectId: null, threadId: null }
 }
 
@@ -80,9 +81,8 @@ export const contextOf = (about: ProblemAbout, hash: string): ReportContext => {
     case 'failed':
       return { screen: 'task', projectId: about.projectId, taskId: about.taskId, threadId: about.threadId, about: about.what }
     case 'asked':
-      return about.from === 'settings'
-        ? { screen: 'settings', projectId: null, taskId: null, threadId: null, about: null }
-        : { ...placeOf(hash), taskId: null, about: null }
+      // The menu and the quick settings float over any screen, so it is where the window is: the Settings tab, a project, a task.
+      return { ...placeOf(hash), taskId: null, about: null }
   }
 }
 

@@ -6,3 +6,5 @@ declare const __ALTHAR_REPORT_URL__: string
 
 /** Where a report goes by mail when there is no Worker (ALTHAR_REPORT_EMAIL at build time). */
 declare const __ALTHAR_REPORT_EMAIL__: string
+/** PostHog's project key and host for anonymous usage data, given to a packaged build alone; empty in every other build, which sends nothing. */
+declare const __ALTHAR_USAGE__: { readonly key: string; readonly host: string }

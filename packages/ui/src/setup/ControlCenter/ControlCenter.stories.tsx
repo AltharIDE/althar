@@ -251,6 +251,7 @@ function Settings({
           <ControlFoot>
             <AppVersion version="0.1.0" notes="https://github.com/AltharIDE/althar/releases/tag/v0.1.0" />
             <LinkButton onClick={fn()}>Report a problem</LinkButton>
+            <ControlLink title="Usage data" picture={<Icon name="load" size={13} />} onClick={fn()} />
             <ControlLink title="Co-author" picture={<CoAuthorFace size={16} />} off={!credit} onClick={() => setOpen('coauthor')} />
           </ControlFoot>
         </>
@@ -611,15 +612,17 @@ export const AllStates: Story = {
           ),
         },
         {
-          state: 'the foot, co-author on and off',
+          state: 'the foot, usage data and co-author on and off',
           node: frame(
             <>
               <ControlFoot>
                 <span>Althar 0.1.0</span>
+                <ControlLink title="Usage data" picture={<Icon name="load" size={13} />} onClick={fn()} />
                 <ControlLink title="Co-author" picture={<CoAuthorFace size={16} />} onClick={fn()} />
               </ControlFoot>
               <ControlFoot>
                 <span>Althar 0.1.0</span>
+                <ControlLink title="Usage data" picture={<Icon name="load" size={13} />} off onClick={fn()} />
                 <ControlLink title="Co-author" picture={<CoAuthorFace size={16} />} off onClick={fn()} />
               </ControlFoot>
             </>,

@@ -6,7 +6,7 @@ import type { ProjectInk } from '../../foundations/ProjectMark/drawing'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
-import { Button } from '../../primitives/Button/Button'
+import { Tooltip } from '../../primitives/HoverCard/HoverCard'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { type WorkNeed, WorkStatus } from '../WorkStatus/WorkStatus'
 import s from './ProjectFront.module.css'
@@ -18,21 +18,18 @@ import s from './ProjectFront.module.css'
  * (a way into the first of it, and pointed at, what each is), how much is in
  * progress, and what settled last; what it is made of is its repositories,
  * each with its host's mark, and the tracker its tasks name. Only what there
- * is to say shows. Running its default branch, where its repository says
- * how, and its settings are at the end.
+ * is to say shows. What it runs (a RunButton) and its settings are at the
+ * end.
  */
 
 export interface ProjectFrontText {
   inProgress: (n: number) => string
-  /** Running the default branch, with the command it runs. */
-  run: (command: string) => string
   /** The list of what the project is made of, for its landmark. */
   madeOf: string
 }
 
 export const projectFrontText: ProjectFrontText = {
   inProgress: (n) => `${n} in progress`,
-  run: (command) => `Run ${command}`,
   madeOf: 'Made of',
 }
 
@@ -42,6 +39,10 @@ export interface ProjectPart {
   name: string
   /** Its host's or tracker's mark; without one, an empty place where it would be. */
   brand?: Brand
+  /** Opens it where it lives (its repository on its host, its tracker's space); without it, it is words. */
+  onOpen?: () => void
+  /** What opening it says, on hover: Open on GitHub. */
+  openLabel?: string
 }
 
 export type ProjectFrontProps = RootProps<
@@ -63,8 +64,8 @@ export type ProjectFrontProps = RootProps<
     last?: string
     /** What the project is made of, its repositories first. */
     parts?: ReadonlyArray<ProjectPart>
-    /** Runs its default branch, with no agent: what the run command is, and running it. */
-    run?: { readonly command: string; readonly onRun: () => void }
+    /** What it runs, with no agent, at the end before its settings: a RunButton. */
+    run?: ReactNode
     /** The way to the project's settings, at the end: a ControlCenter with its button. */
     settings?: ReactNode
     headingLevel?: HeadingLevel
@@ -133,23 +134,36 @@ export function ProjectFront({
           <ul className={s.parts} aria-label={t.madeOf}>
             {parts.map((part) => (
               <li key={part.id} className={s.part}>
-                {part.brand === undefined ? <span className={s.noMark} aria-hidden="true" /> : <BrandMark brand={part.brand} size={11} />}
-                {part.name}
+                {part.onOpen === undefined ? (
+                  <PartLabel part={part} />
+                ) : (
+                  <Tooltip label={part.openLabel ?? part.name} placement="below">
+                    <button type="button" className={s.open} onClick={part.onOpen}>
+                      <PartLabel part={part} />
+                    </button>
+                  </Tooltip>
+                )}
               </li>
             ))}
           </ul>
         )}
       </div>
-      {(run !== undefined || settings != null) && (
+      {(run != null || settings != null) && (
         <div className={s.end}>
-          {run !== undefined && (
-            <Button size="small" variant="quiet" icon="terminal" onClick={run.onRun}>
-              {t.run(run.command)}
-            </Button>
-          )}
+          {run}
           {settings}
         </div>
       )}
     </header>
+  )
+}
+
+/** A part's mark, or the empty place for one, and its name. */
+function PartLabel({ part }: { part: ProjectPart }) {
+  return (
+    <>
+      {part.brand === undefined ? <span className={s.noMark} aria-hidden="true" /> : <BrandMark brand={part.brand} size={11} />}
+      {part.name}
+    </>
   )
 }

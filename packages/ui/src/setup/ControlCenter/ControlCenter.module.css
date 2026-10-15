@@ -485,6 +485,10 @@ button.toggleWords {
     background var(--fast) var(--ease),
     color var(--fast) var(--ease);
 }
+/* Links side by side keep together at the end. */
+.link + .link {
+  margin-left: 2px;
+}
 .link:hover {
   background: var(--sunk);
   color: var(--t-1);

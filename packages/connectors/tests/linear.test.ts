@@ -183,6 +183,89 @@ describe('Linear', () => {
     }),
   )
 
+  describe('moving an issue to In Progress', () => {
+    const todo = {
+      id: 'uuid-231',
+      ref: 'MER-231',
+      key: 'MER-231',
+      title: 't',
+      body: '',
+      url: '',
+      status: { name: 'Todo', category: 'todo' as const },
+      priority: null,
+      assignees: [],
+      labels: [],
+      container: null,
+      updatedAt: '',
+    }
+    const states = [
+      { id: 's-review', name: 'In Review', type: 'started', position: 3 },
+      { id: 's-todo', name: 'Todo', type: 'unstarted', position: 1 },
+      { id: 's-progress', name: 'In Progress', type: 'started', position: 2 },
+      { id: 's-done', name: 'Done', type: 'completed', position: 4 },
+    ]
+    const board = (nodes: ReadonlyArray<unknown>, updated: unknown = { issueUpdate: { success: true } }): Route => [
+      'POST',
+      URL,
+      (request) => ({
+        json: {
+          data: String((request.body as { query: string }).query).includes('issueUpdate')
+            ? updated
+            : { issue: { team: { states: { nodes } } } },
+        },
+      }),
+    ]
+
+    it.effect('moves it into its team’s first started state on the board, not one further along', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = linear([board(states)])
+        assert.deepStrictEqual(yield* tracker.start(todo), { moved: true, status: { name: 'In Progress', category: 'started' } })
+        assert.deepStrictEqual(sent.map(variablesOf), [{ id: 'uuid-231' }, { id: 'uuid-231', stateId: 's-progress' }])
+        assert.isTrue(tracker.capabilities.starts)
+      }),
+    )
+
+    it.effect('moves one from triage or the backlog too', () =>
+      Effect.gen(function* () {
+        for (const category of ['triage', 'backlog'] as const) {
+          const { tracker } = linear([board(states)])
+          assert.isTrue((yield* tracker.start({ ...todo, status: { name: category, category } })).moved)
+        }
+      }),
+    )
+
+    it.effect('leaves one started, done or cancelled as it is, asking Linear nothing', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = linear([board(states)])
+        for (const status of [
+          { name: 'In Review', category: 'started' as const },
+          { name: 'Done', category: 'done' as const },
+          { name: 'Canceled', category: 'cancelled' as const },
+        ]) {
+          assert.deepStrictEqual(yield* tracker.start({ ...todo, status }), { moved: false, status })
+        }
+        assert.lengthOf(sent, 0)
+      }),
+    )
+
+    it.effect('fails when its team has no started state, or Linear doesn’t move it, or refuses', () =>
+      Effect.gen(function* () {
+        const none = linear([board(states.filter((state) => state.type !== 'started'))])
+        const stateless = yield* Effect.flip(none.tracker.start(todo))
+        assert.deepStrictEqual([stateless.reason, stateless.message], ['rejected', 'Its team has no started state'])
+        assert.lengthOf(none.sent, 1)
+        const unmoved = yield* Effect.flip(linear([board(states, { issueUpdate: { success: false } })]).tracker.start(todo))
+        assert.strictEqual(unmoved.reason, 'rejected')
+        const refused = yield* Effect.flip(
+          linear([
+            ['POST', URL, { status: 400, json: { errors: [{ message: 'You don’t have access', extensions: { code: 'FORBIDDEN' } }] } }],
+          ]).tracker.start(todo),
+        )
+        assert.deepStrictEqual([refused.reason, refused.message], ['forbidden', 'You don’t have access'])
+      }),
+    )
+  })
+
   it.effect('says when the key is no longer good', () =>
     Effect.gen(function* () {
       const { tracker } = linear([
@@ -196,6 +279,191 @@ describe('Linear', () => {
         ],
       ])
       assert.strictEqual((yield* Effect.flip(tracker.issue('MER-1'))).reason, 'unauthorized')
+    }),
+  )
+  it.effect('lists the teams an issue can be filed in', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = linear([
+        [
+          'POST',
+          URL,
+          {
+            json: {
+              data: {
+                teams: {
+                  nodes: [
+                    { id: 'team-mer', key: 'MER', name: 'Meridian' },
+                    { id: 'team-pay', key: 'PAY', name: 'Payments' },
+                  ],
+                  pageInfo: { hasNextPage: false, endCursor: 'cursor-pay' },
+                },
+              },
+            },
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* tracker.containers(), [
+        { id: 'team-mer', key: 'MER', name: 'Meridian' },
+        { id: 'team-pay', key: 'PAY', name: 'Payments' },
+      ])
+      assert.include(JSON.stringify(sent[0]?.body), 'teams(first: 100, after: $after)')
+      assert.deepStrictEqual(variablesOf(sent[0]), { after: null })
+      assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('follows the teams page after page, by the cursor after each, while Linear says there are more', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = linear([
+        [
+          'POST',
+          URL,
+          (request) => ({
+            json: {
+              data: {
+                teams:
+                  (variablesOf(request) as { after: string | null }).after === null
+                    ? {
+                        nodes: [{ id: 'team-mer', key: 'MER', name: 'Meridian' }],
+                        pageInfo: { hasNextPage: true, endCursor: 'cursor-mer' },
+                      }
+                    : { nodes: [{ id: 'team-pay', key: 'PAY', name: 'Payments' }], pageInfo: { hasNextPage: false, endCursor: null } },
+              },
+            },
+          }),
+        ],
+      ])
+      assert.deepStrictEqual(
+        (yield* tracker.containers()).map((team) => team.key),
+        ['MER', 'PAY'],
+      )
+      assert.deepStrictEqual(sent.map(variablesOf), [{ after: null }, { after: 'cursor-mer' }])
+    }),
+  )
+
+  it.effect('files an issue in a team, with the labels it has by those names, in any case', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = linear([
+        [
+          'POST',
+          URL,
+          (request) => ({
+            json: {
+              data: String((request.body as { query: string }).query).includes('issueLabels')
+                ? {
+                    issueLabels: {
+                      nodes: [
+                        { id: 'label-payments', name: 'Payments', isGroup: false },
+                        { id: 'label-payments-again', name: 'payments' },
+                        { id: 'label-area', name: 'Area', isGroup: true },
+                        { id: 'label-bug', name: 'Bug' },
+                      ],
+                      pageInfo: { hasNextPage: false },
+                    },
+                  }
+                : { issueCreate: { success: true, issue: issue({ assignee: null, labels: { nodes: [{ name: 'Payments' }] } }) } },
+            },
+          }),
+        ],
+      ])
+      const filed = yield* tracker.create('team-mer', {
+        title: 'Rate-limit refunds like charges',
+        body: 'Refunds skip the limiter.',
+        labels: ['payments', 'area', 'Nonesuch', 'PAYMENTS'],
+      })
+      assert.deepStrictEqual([filed.key, filed.labels, filed.assignees], ['MER-231', ['Payments'], []])
+      assert.deepStrictEqual(variablesOf(sent[0]), { teamId: 'team-mer', after: null })
+      // A name with no label, or only a group's, is left off; a name asked twice is one label.
+      assert.deepStrictEqual(variablesOf(sent[1]), {
+        input: {
+          teamId: 'team-mer',
+          title: 'Rate-limit refunds like charges',
+          description: 'Refunds skip the limiter.',
+          labelIds: ['label-payments'],
+        },
+      })
+    }),
+  )
+
+  it.effect('files an issue without asking for labels when it has none, and says when Linear doesn’t file it', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = linear([['POST', URL, { json: { data: { issueCreate: { success: false, issue: null } } } }]])
+      const refused = yield* Effect.flip(tracker.create('team-mer', { title: 'A title', body: '', labels: [] }))
+      assert.deepStrictEqual([refused.reason, refused.message], ['rejected', 'Linear did not file the issue'])
+      assert.lengthOf(sent, 1)
+      // Filed by Linear's word, without saying which: unreadable, never refused; and an internal error mid-mutation is no refusal either.
+      const unsaid = linear([['POST', URL, { json: { data: { issueCreate: { success: true, issue: null } } } }]])
+      const lost = yield* Effect.flip(unsaid.tracker.create('team-mer', { title: 'A title', body: '', labels: [] }))
+      assert.deepStrictEqual([lost.reason, lost.message], ['invalid_response', 'Linear filed the issue without saying which'])
+      const omitted = linear([['POST', URL, { json: { data: { issueCreate: { success: true } } } }]])
+      assert.strictEqual(
+        (yield* Effect.flip(omitted.tracker.create('team-mer', { title: 'A title', body: '', labels: [] }))).reason,
+        'invalid_response',
+      )
+      const internal = linear([['POST', URL, { status: 500, json: { errors: [{ message: 'Internal error' }] } }]])
+      assert.strictEqual(
+        (yield* Effect.flip(internal.tracker.create('team-mer', { title: 'A title', body: '', labels: [] }))).reason,
+        'unreachable',
+      )
+      assert.deepStrictEqual(variablesOf(sent[0]), { input: { teamId: 'team-mer', title: 'A title', description: '' } })
+      // Labels asked for that the team has none of: the issue is filed with none.
+      const bare = linear([
+        [
+          'POST',
+          URL,
+          (request) => ({
+            json: {
+              data: String((request.body as { query: string }).query).includes('issueLabels')
+                ? { issueLabels: { nodes: [], pageInfo: { hasNextPage: false } } }
+                : { issueCreate: { success: true, issue: issue() } },
+            },
+          }),
+        ],
+      ])
+      yield* bare.tracker.create('team-mer', { title: 'A title', body: '', labels: ['nonesuch'] })
+      assert.deepStrictEqual(variablesOf(bare.sent[1]), { input: { teamId: 'team-mer', title: 'A title', description: '' } })
+    }),
+  )
+
+  it.effect('reads a team’s labels page after page before it files, and files nothing when they can’t be read', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = linear([
+        [
+          'POST',
+          URL,
+          (request) => {
+            const query = String((request.body as { query: string }).query)
+            const after = (variablesOf(request) as { after?: string | null }).after
+            return {
+              json: {
+                data: !query.includes('issueLabels')
+                  ? { issueCreate: { success: true, issue: issue() } }
+                  : after === null
+                    ? {
+                        issueLabels: {
+                          nodes: [{ id: 'label-bug', name: 'Bug' }],
+                          pageInfo: { hasNextPage: true, endCursor: 'cursor-bug' },
+                        },
+                      }
+                    : {
+                        issueLabels: {
+                          nodes: [{ id: 'label-payments', name: 'Payments' }],
+                          pageInfo: { hasNextPage: false, endCursor: null },
+                        },
+                      },
+              },
+            }
+          },
+        ],
+      ])
+      yield* tracker.create('team-mer', { title: 'A title', body: '', labels: ['payments'] })
+      assert.deepStrictEqual(variablesOf(sent[1]), { teamId: 'team-mer', after: 'cursor-bug' })
+      assert.deepStrictEqual(variablesOf(sent[2]), {
+        input: { teamId: 'team-mer', title: 'A title', description: '', labelIds: ['label-payments'] },
+      })
+      const failing = linear([['POST', URL, { status: 500, json: { errors: [{ message: 'Internal error' }] } }]])
+      yield* Effect.flip(failing.tracker.create('team-mer', { title: 'A title', body: '', labels: ['payments'] }))
+      assert.lengthOf(failing.sent, 1)
     }),
   )
 })

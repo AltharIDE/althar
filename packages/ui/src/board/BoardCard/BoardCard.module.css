@@ -1,0 +1,44 @@
+/* The board's card (Board.module.css), as every card has it; what needs you sits on paper, as a change to accept does. */
+.card {
+  min-width: 0;
+}
+.you {
+  composes: accept from '../AcceptCard/AcceptCard.module.css';
+}
+.title {
+  composes: title from '../AcceptCard/AcceptCard.module.css';
+}
+
+/* where it stands, in a word: cobalt while it runs, violet when it needs you, ink when it is still */
+.word {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.running .word {
+  color: var(--live);
+}
+.you .word {
+  color: var(--signal);
+}
+.kind {
+  color: var(--t-3);
+}
+
+.why {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--t-2);
+  text-wrap: pretty;
+}
+.track {
+  margin: 2px 0;
+}
+.object {
+  min-width: 0;
+  margin-top: 4px;
+}

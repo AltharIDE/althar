@@ -2,7 +2,7 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect } from 'effect'
 
 import type { Credential } from '../src/credential'
-import { categoryOf, levelOf, makeJiraCloud, makeJiraDataCenter, siteOf } from '../src/jira'
+import { categoryOf, jiraLabelOf, levelOf, makeJiraCloud, makeJiraDataCenter, siteOf } from '../src/jira'
 import type { Issue } from '../src/model'
 import { products } from '../src/products'
 import { type Route, stubFetch } from './stub'
@@ -435,6 +435,84 @@ describe('Jira Cloud', () => {
     }),
   )
 
+  describe('moving an issue to In Progress', () => {
+    const todo = issue({ status: { name: 'To Do', category: 'todo' } })
+    const transition = (id: string, name: string, category: string, more: Record<string, unknown> = {}) => ({
+      id,
+      name,
+      to: { self: `${CLOUD}/status/${id}`, name, id, statusCategory: { id: 2, key: category, name: category } },
+      hasScreen: false,
+      ...more,
+    })
+    const transitions = [
+      transition('11', 'Backlog', 'new'),
+      transition('21', 'In Progress', 'indeterminate', { isAvailable: false }),
+      transition('31', 'In Development', 'indeterminate', { isAvailable: true }),
+      transition('41', 'In Review', 'indeterminate'),
+      transition('51', 'Done', 'done'),
+    ]
+
+    it.effect('takes the first transition the workflow offers it now into In Progress’s category', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = cloud([
+          ['GET', `${CLOUD}/issue/HHH-20844/transitions`, { json: { expand: 'transitions', transitions } }],
+          ['POST', `${CLOUD}/issue/HHH-20844/transitions`, { status: 204 }],
+        ])
+        assert.deepStrictEqual(yield* tracker.start(todo), { moved: true, status: { name: 'In Development', category: 'started' } })
+        assert.deepStrictEqual(sent[1]?.body, { transition: { id: '31' } })
+        assert.isTrue(tracker.capabilities.starts)
+      }),
+    )
+
+    it.effect('moves one on Data Center the same way', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = dataCenter([
+          ['GET', `${DC}/issue/KAFKA-21043/transitions`, { json: { transitions: [transition('4', 'Start Progress', 'indeterminate')] } }],
+          ['POST', `${DC}/issue/KAFKA-21043/transitions`, { status: 204 }],
+        ])
+        const found = issue({ id: '13665242', ref: 'KAFKA-21043', key: 'KAFKA-21043', status: { name: 'Open', category: 'todo' } })
+        assert.isTrue((yield* tracker.start(found)).moved)
+        assert.deepStrictEqual(sent[1]?.body, { transition: { id: '4' } })
+      }),
+    )
+
+    it.effect('leaves one started, done or cancelled as it is, asking Jira nothing', () =>
+      Effect.gen(function* () {
+        const { tracker, sent } = cloud([])
+        for (const status of [
+          { name: 'Waiting for review', category: 'started' as const },
+          { name: 'Closed', category: 'done' as const },
+          { name: 'Rejected', category: 'cancelled' as const },
+        ]) {
+          assert.deepStrictEqual(yield* tracker.start(issue({ status })), { moved: false, status })
+        }
+        assert.lengthOf(sent, 0)
+      }),
+    )
+
+    it.effect('fails when the workflow has no way into In Progress from here, or Jira refuses the transition', () =>
+      Effect.gen(function* () {
+        const stuck = cloud([
+          ['GET', `${CLOUD}/issue/HHH-20844/transitions`, { json: { transitions: [transitions[0], transitions[1], transitions[4]] } }],
+        ])
+        const nowhere = yield* Effect.flip(stuck.tracker.start(todo))
+        assert.deepStrictEqual([nowhere.reason, nowhere.message], ['rejected', 'Its workflow has no way into In Progress from here'])
+        assert.lengthOf(stuck.sent, 1)
+        const refused = yield* Effect.flip(
+          cloud([
+            ['GET', `${CLOUD}/issue/HHH-20844/transitions`, { json: { transitions } }],
+            [
+              'POST',
+              `${CLOUD}/issue/HHH-20844/transitions`,
+              { status: 403, json: { errorMessages: ['You do not have permission to transition this issue.'], errors: {} } },
+            ],
+          ]).tracker.start(todo),
+        )
+        assert.deepStrictEqual([refused.reason, refused.message], ['forbidden', 'You do not have permission to transition this issue.'])
+      }),
+    )
+  })
+
   it.effect('says when the token is no longer good, or the issue isn’t there, in Jira’s words', () =>
     Effect.gen(function* () {
       const { tracker, sent } = cloud([
@@ -541,6 +619,231 @@ describe('Jira Cloud', () => {
       yield* Effect.flip(tracker.account)
       // Not kept: the site is asked first again.
       assert.strictEqual(sent[3]?.url, `${CLOUD}/myself`)
+    }),
+  )
+  it.effect('lists the projects an issue can be filed in, the latest issue’s first', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([
+        [
+          'GET',
+          `${CLOUD}/project/search?maxResults=100&orderBy=-lastIssueUpdatedTime&startAt=0`,
+          {
+            json: {
+              self: `${CLOUD}/project/search?maxResults=100`,
+              maxResults: 100,
+              startAt: 0,
+              total: 2,
+              isLast: true,
+              values: [
+                { self: `${CLOUD}/project/10031`, id: '10031', key: 'HHH', name: 'Hibernate ORM', projectTypeKey: 'software' },
+                { self: `${CLOUD}/project/10060`, id: '10060', key: 'HSEARCH', name: 'Hibernate Search', projectTypeKey: 'software' },
+              ],
+            },
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* tracker.containers(), [
+        { id: 'HHH', key: 'HHH', name: 'Hibernate ORM' },
+        { id: 'HSEARCH', key: 'HSEARCH', name: 'Hibernate Search' },
+      ])
+      assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('follows the projects page after page, until a page says it is the last or comes short', () =>
+    Effect.gen(function* () {
+      const projects = (from: number, count: number) =>
+        Array.from({ length: count }, (_, at) => ({ id: `${from + at}`, key: `P${from + at}`, name: `Project ${from + at}` }))
+      const search = `${CLOUD}/project/search?maxResults=100&orderBy=-lastIssueUpdatedTime&startAt=`
+      const { tracker, sent } = cloud([
+        ['GET', `${search}0`, { json: { startAt: 0, maxResults: 100, isLast: false, values: projects(0, 100) } }],
+        ['GET', `${search}100`, { json: { startAt: 100, maxResults: 100, isLast: true, values: projects(100, 2) } }],
+      ])
+      const found = yield* tracker.containers()
+      assert.lengthOf(found, 102)
+      assert.deepStrictEqual(found.at(-1), { id: 'P101', key: 'P101', name: 'Project 101' })
+      assert.deepStrictEqual(
+        sent.map((request) => request.url),
+        [`${search}0`, `${search}100`],
+      )
+      // A short page is the last, whatever it says.
+      const short = cloud([['GET', `${search}0`, { json: { values: projects(0, 99) } }]])
+      assert.lengthOf(yield* short.tracker.containers(), 99)
+      assert.lengthOf(short.sent, 1)
+    }),
+  )
+
+  it.effect('files an issue once Jira takes it, though reading it back fails, as it was sent', () =>
+    Effect.gen(function* () {
+      for (const failed of [
+        { status: 500, json: { errorMessages: ['Internal server error'] } },
+        { status: 429, json: { errorMessages: ['Rate limit exceeded'] } },
+      ]) {
+        const { tracker, sent } = cloud([
+          ['GET', `${CLOUD}/issue/createmeta/HHH/issuetypes`, { json: { issueTypes: [{ id: '10003', name: 'Task' }] } }],
+          ['POST', `${CLOUD}/issue`, { status: 201, json: { id: '115161', key: 'HHH-20844', self: `${CLOUD}/issue/115161` } }],
+          ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, failed],
+        ])
+        const filed = yield* tracker.create('HHH', { title: 'A summary', body: 'Fails on **bootstrap**.', labels: ['needs test'] })
+        assert.deepStrictEqual(
+          { ...filed, updatedAt: '' },
+          {
+            id: '115161',
+            ref: 'HHH-20844',
+            key: 'HHH-20844',
+            title: 'A summary',
+            body: 'Fails on **bootstrap**.',
+            url: `${SITE}/browse/HHH-20844`,
+            status: { name: 'To Do', category: 'todo' },
+            priority: null,
+            assignees: [],
+            labels: ['needs-test'],
+            container: 'HHH',
+            updatedAt: '',
+          },
+        )
+        assert.isFalse(Number.isNaN(Date.parse(filed.updatedAt)))
+        assert.lengthOf(sent, 3)
+      }
+      // Filed without its labels, it says none.
+      const { tracker } = cloud([
+        ['GET', `${CLOUD}/issue/createmeta/HHH/issuetypes`, { json: { issueTypes: [{ id: '10003', name: 'Task' }] } }],
+        [
+          'POST',
+          `${CLOUD}/issue`,
+          (request) =>
+            (request.body as { fields: Record<string, unknown> }).fields.labels === undefined
+              ? { status: 201, json: { id: '115161', key: 'HHH-20844' } }
+              : { status: 400, json: { errorMessages: [], errors: { labels: "Field 'labels' cannot be set." } } },
+        ],
+        ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { status: 200, text: 'not JSON' }],
+      ])
+      const bare = yield* tracker.create('HHH', { title: 'A summary', body: '', labels: ['triage'] })
+      assert.deepStrictEqual([bare.key, bare.labels], ['HHH-20844', []])
+    }),
+  )
+
+  it.effect('fails to file an issue when the project’s types can’t be read, before anything is filed', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([
+        ['GET', `${CLOUD}/issue/createmeta/HHH/issuetypes`, { status: 429, json: { errorMessages: ['Rate limit exceeded'] } }],
+        ['POST', `${CLOUD}/issue`, { status: 201, json: { id: '115161', key: 'HHH-20844' } }],
+      ])
+      const failed = yield* Effect.flip(tracker.create('HHH', { title: 'A summary', body: '', labels: [] }))
+      assert.strictEqual(failed.reason, 'rate_limited')
+      assert.isFalse(sent.some((request) => request.method === 'POST'))
+    }),
+  )
+
+  it.effect('files a Task in a project, its body in ADF and its labels without spaces, and reads it back', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([
+        [
+          'GET',
+          `${CLOUD}/issue/createmeta/HHH/issuetypes`,
+          {
+            json: {
+              maxResults: 50,
+              startAt: 0,
+              total: 3,
+              issueTypes: [
+                { id: '10002', name: 'Sub-task', subtask: true },
+                { id: '10001', name: 'Bug', subtask: false },
+                { id: '10003', name: 'Task', subtask: false },
+              ],
+            },
+          },
+        ],
+        ['POST', `${CLOUD}/issue`, { status: 201, json: { id: '115161', key: 'HHH-20844', self: `${CLOUD}/issue/115161` } }],
+        ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue({ labels: ['needs-test'] }) }],
+      ])
+      const filed = yield* tracker.create('HHH', {
+        title: 'A summary',
+        body: 'Fails on **bootstrap**.',
+        labels: ['needs test', 'Bug  fix', ' '],
+      })
+      assert.deepStrictEqual([filed.key, filed.labels], ['HHH-20844', ['needs-test']])
+      assert.deepStrictEqual(
+        sent.map((request) => `${request.method} ${request.url}`),
+        [`GET ${CLOUD}/issue/createmeta/HHH/issuetypes`, `POST ${CLOUD}/issue`, `GET ${CLOUD}/issue/HHH-20844?${FIELDS}`],
+      )
+      assert.deepStrictEqual(sent[1]?.body, {
+        fields: {
+          project: { key: 'HHH' },
+          issuetype: { id: '10003' },
+          summary: 'A summary',
+          description: {
+            type: 'doc',
+            version: 1,
+            content: [
+              {
+                type: 'paragraph',
+                content: [
+                  { type: 'text', text: 'Fails on ' },
+                  { type: 'text', text: 'bootstrap', marks: [{ type: 'strong' }] },
+                  { type: 'text', text: '.' },
+                ],
+              },
+            ],
+          },
+          labels: ['needs-test', 'Bug-fix'],
+        },
+      })
+      assert.deepStrictEqual(['a b', '  c\td  e ', 'one'].map(jiraLabelOf), ['a-b', 'c-d-e', 'one'])
+    }),
+  )
+
+  it.effect('files an issue without its labels where the project’s screen takes none', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([
+        ['GET', `${CLOUD}/issue/createmeta/HHH/issuetypes`, { json: { issueTypes: [{ id: '10001', name: 'Bug' }] } }],
+        [
+          'POST',
+          `${CLOUD}/issue`,
+          (request) =>
+            (request.body as { fields: Record<string, unknown> }).fields.labels === undefined
+              ? { status: 201, json: { id: '115161', key: 'HHH-20844' } }
+              : {
+                  status: 400,
+                  json: {
+                    errorMessages: [],
+                    errors: { labels: "Field 'labels' cannot be set. It is not on the appropriate screen, or unknown." },
+                  },
+                },
+        ],
+        ['GET', `${CLOUD}/issue/HHH-20844?${FIELDS}`, { json: cloudIssue() }],
+      ])
+      yield* tracker.create('HHH', { title: 'A summary', body: '', labels: ['triage'] })
+      // The first type that isn't a sub-task, where there is no Task; no description for an empty body.
+      assert.deepStrictEqual(sent[1]?.body, {
+        fields: { project: { key: 'HHH' }, issuetype: { id: '10001' }, summary: 'A summary', labels: ['triage'] },
+      })
+      assert.deepStrictEqual(sent[2]?.body, { fields: { project: { key: 'HHH' }, issuetype: { id: '10001' }, summary: 'A summary' } })
+      assert.lengthOf(sent, 4)
+    }),
+  )
+
+  it.effect('says when a project has no type of issue it can file, or refuses one for another reason', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = cloud([
+        ['GET', `${CLOUD}/issue/createmeta/SUBS/issuetypes`, { json: { issueTypes: [{ id: '10002', name: 'Sub-task', subtask: true }] } }],
+        ['GET', `${CLOUD}/issue/createmeta/HHH/issuetypes`, { json: { issueTypes: [{ id: '10003', name: 'Task' }] } }],
+        [
+          'POST',
+          `${CLOUD}/issue`,
+          { status: 400, json: { errorMessages: [], errors: { summary: 'You must specify a summary of the issue.' } } },
+        ],
+      ])
+      const none = yield* Effect.flip(tracker.create('SUBS', { title: 'A summary', body: '', labels: [] }))
+      assert.deepStrictEqual(
+        [none.reason, none.message],
+        ['rejected', 'The project SUBS has no type of issue Althar can file: sub-tasks need a parent'],
+      )
+      assert.lengthOf(sent, 1)
+      const refused = yield* Effect.flip(tracker.create('HHH', { title: '', body: '', labels: ['triage'] }))
+      assert.deepStrictEqual([refused.reason, refused.message], ['rejected', 'You must specify a summary of the issue.'])
+      // Refused for its summary, not its labels: not filed again.
+      assert.lengthOf(sent, 3)
     }),
   )
 })
@@ -720,6 +1023,41 @@ describe('Jira Data Center', () => {
       const missing = yield* Effect.flip(tracker.issue('KAFKA-99999999'))
       assert.deepStrictEqual([missing.reason, missing.message], ['not_found', 'Issue Does Not Exist'])
       assert.lengthOf(sent, 2)
+    }),
+  )
+  it.effect('lists the projects an issue can be filed in, and files one in wiki markup', () =>
+    Effect.gen(function* () {
+      const { tracker, sent } = dataCenter([
+        [
+          'GET',
+          `${DC}/project`,
+          { json: [{ self: `${DC}/project/12311720`, id: '12311720', key: 'KAFKA', name: 'Kafka', projectTypeKey: 'software' }] },
+        ],
+        [
+          'GET',
+          `${DC}/issue/createmeta/KAFKA/issuetypes`,
+          {
+            json: {
+              maxResults: 50,
+              startAt: 0,
+              total: 2,
+              isLast: true,
+              values: [
+                { self: `${DC}/issuetype/7`, id: '7', name: 'Sub-task', subtask: true },
+                { self: `${DC}/issuetype/3`, id: '3', name: 'task', subtask: false },
+              ],
+            },
+          },
+        ],
+        ['POST', `${DC}/issue`, { status: 201, json: { id: '13665242', key: 'KAFKA-21043', self: `${DC}/issue/13665242` } }],
+        ['GET', `${DC}/issue/KAFKA-21043?${FIELDS}`, { json: dcIssue() }],
+      ])
+      assert.deepStrictEqual(yield* tracker.containers(), [{ id: 'KAFKA', key: 'KAFKA', name: 'Kafka' }])
+      const filed = yield* tracker.create('KAFKA', { title: 'A summary', body: 'Caches `LoginManager`.', labels: [] })
+      assert.strictEqual(filed.key, 'KAFKA-21043')
+      assert.deepStrictEqual(sent[2]?.body, {
+        fields: { project: { key: 'KAFKA' }, issuetype: { id: '3' }, summary: 'A summary', description: 'Caches {{LoginManager}}.' },
+      })
     }),
   )
 })

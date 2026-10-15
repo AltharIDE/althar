@@ -260,8 +260,9 @@ type AgentDefinition = {
 
 - Adapters Althar ships, `claude-agent-acp` and `codex-acp`, are bundled at
   pinned versions. Nothing is fetched with `npx` or a similar tool at run
-  time. Adapters written for Node run on Electron's own Node
-  ([02](02-desktop-runtime.md)).
+  time. Adapters written for Node run on a Node the packaged app ships, and
+  on Electron's own Node in development ([02](02-desktop-runtime.md),
+  ADR-033).
 - Agents the user installs, such as OpenCode, are found by probe, and their
   version is checked against the support matrix.
 - Adding an ACP agent means adding an entry and passing the contract suite.
@@ -297,7 +298,8 @@ A brief contains, as the role needs:
 - the task, its plan, and where the graph stands;
 - the workspace: base, branch, and the diff so far;
 - the conversation record: the user's messages verbatim, earlier agents'
-  turns, decisions, what was tried and failed, and open items;
+  turns, decisions, what was tried and failed (for a command that failed, a
+  bounded excerpt of what it printed), and open items;
 - step results and artifacts the role needs;
 - for a later review round, the earlier rounds' findings and how each was
   settled, with the lead's response and any person's decision
@@ -774,13 +776,27 @@ What keeps each agent asking, whatever its own settings say:
 command carries only its text, and no rule can tell what a script will write.
 So where an agent has a sandbox, it keeps commands inside the worktree:
 
-- Codex's, in `workspace-write`, with the network off.
+- Codex's, in `workspace-write`, with the network off. Its only network
+  setting (`network_access`) is all or nothing, with no localhost-only form, so
+  it stays off.
 - Claude Code's, switched on for every session. A command that stays inside
   runs without asking. One that needs the network asks per host. A write
   outside is blocked, and Claude reports it instead of retrying outside the
-  sandbox unless asked to.
+  sandbox unless asked to. A lead's sandbox also lets commands bind and
+  listen on localhost (`sandbox.network.allowLocalBinding`), so tests that
+  start a server, and a prototype's throwaway showcase server that the person
+  opens from the Running pill, don't have to leave it. The setting is broader
+  than listening (macOS, per Claude's sandbox docs): sandboxed commands can
+  also connect to any localhost port, including an unauthenticated local
+  service outside the sandbox such as a debugger or proxy, and can listen on
+  non-loopback addresses that other machines may reach. We accept that for
+  leads. It adds no hosts to the network allowlist and no writable paths, and
+  readers don't get it.
 - OpenCode has none yet. Wrapping it in the same sandbox-runtime Claude uses
   is next.
+
+Installing a worktree's dependencies would have to leave it, and needn't:
+Althar does it before the lead starts ([below](#setting-up-a-worktree)).
 
 A command that has to leave its sandbox reaches Althar as a request, and
 the rules read it as a shell would, into commands and words. They ask about:
@@ -813,6 +829,51 @@ Known gaps:
 - If ask rules ever stop winning, the fallback is to leave the project and
   local setting sources out of Claude sessions. In the Agent SDK that also
   stops the repository's `CLAUDE.md` loading.
+
+### Setting up a worktree
+
+A lead starts in a fresh worktree with nothing installed, and its sandbox
+refuses an install: the package manager writes to its cache and temporary
+folders outside the worktree (Bun's `~/.bun`, npm's `~/.npm`). The lead
+would then ask to install outside the sandbox, a permission request for
+something no one doubts. So Althar sets the worktree up itself, as Superset,
+Conductor and Codex do, and the lead's sandbox stays as strict as it is
+([ADR-023](../decisions/023-althar-runs-the-project.md)):
+
+- **What runs** is the setup kept for the repository (`set_run_command`'s
+  `setup`, the same one a run of the project starts with), else the install
+  its lockfile names: `bun install --frozen-lockfile`, `pnpm install
+  --frozen-lockfile`, `yarn install --frozen-lockfile`, `npm ci`. It never
+  changes the lockfile. Its packages are its package.json's own, or, at the
+  root of a monorepo, its workspaces' (or those a `pnpm-workspace.yaml`
+  names). A repository with no packages has nothing run. Before a run, the
+  install is skipped where `node_modules` is there; in a worktree it runs
+  whatever `node_modules` holds, since an install Althar quitting cut short
+  leaves one, and whether the worktree is set up is kept on its workspace.
+- **When:** as the task's worktrees are made (a draft's too, so it is ready
+  by the time its plan starts), and again for a worktree a reopened task
+  puts back, as soon as it is back. How it went is kept on the workspace, so
+  a lead that starts again, or a task that resumes, doesn't set it up again,
+  and one Althar quit during is set up again before its lead's first turn.
+- **Where and how:** in the worktree (the folder in it the project is
+  about, where there is one), in the person's login shell, interactive, so
+  it finds their tools as their terminal would. It is Althar's own process
+  (purpose `setup`), in a process group of its own, with nothing to read
+  from the person, for ten minutes at most, and stops if Althar quits.
+- **The lead waits for it, but not on it:** its agent starts as before, and
+  its first turn, with what the person said meanwhile, waits until each of
+  its worktrees is set up; stopping the lead meanwhile stops it at once, and
+  the setup goes on. The brief says what ran, and for one that failed, how
+  it ended and the end of what it printed, so the lead can deal with it.
+  A setup that fails never holds the task up.
+- **The thread shows it,** as Althar's own line: "Installing dependencies
+  in meridian…", then "Installed dependencies in meridian"; failed, the end
+  of what it printed stands under the line, with its exit code.
+
+It runs repository code on the Mac outside any sandbox (the project's own
+install scripts, and those of its dependencies where the package manager
+runs them): the trusted-host execution of
+[07](07-persistence-security-and-cloud.md), as a run of the project is.
 
 ## Questions to the person
 

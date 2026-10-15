@@ -22,6 +22,7 @@ export const runningOf = (
   background.map((command) => ({
     id: command.id,
     command: command.command,
+    ...(command.label === undefined || command.label === command.command ? {} : { label: command.label }),
     ...(where && command.where !== undefined ? { where: command.where } : {}),
     ...(command.url === null ? {} : { url: addressOf(command.url) }),
     ...(command.ended === null

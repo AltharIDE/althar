@@ -4,7 +4,7 @@ import { Cause, Context, Duration, Effect, Layer, Option, PubSub, Ref, Stream } 
 import { SqlClient } from 'effect/sql'
 
 import { Agents } from './Config'
-import { field, parse, stuckOf, text } from './Queries'
+import { field, parse, Queries, stuckOf, text } from './Queries'
 import { programOf } from './rules'
 import { Sessions } from './Sessions'
 
@@ -16,7 +16,8 @@ import { Sessions } from './Sessions'
  * things wait, for the app's badge. Never for progress. With them, whether
  * any work runs, so the app can keep the Mac awake while it does. Read from
  * the store whenever a change that can bear on it is recorded; what already
- * waited when Althar started isn't nudged again.
+ * waited when Althar started isn't nudged again. A plain task that finished
+ * is neither nudged nor counted: it waits on its board to be seen.
  */
 
 /** How long changes are gathered, so a burst is read once. */
@@ -85,6 +86,9 @@ export const readyWords = (summary: string): string => {
   return said === '' ? 'Ready to look at' : `Ready: ${said}`
 }
 
+/** A review drafted, in the words a nudge says it: whose pull request waits for the person to post its review. */
+export const draftedWords = (number: number, author: string): string => `Review drafted: #${number} by ${author}`
+
 export class Nudges extends Context.Service<
   Nudges,
   {
@@ -92,13 +96,14 @@ export class Nudges extends Context.Service<
     readonly events: Stream.Stream<NudgeEvent>
   }
 >()('@althar/runtime/Nudges') {
-  static readonly layer: Layer.Layer<Nudges, never, SqlClient.SqlClient | Ledger | Sessions | Agents> = Layer.effect(
+  static readonly layer: Layer.Layer<Nudges, never, SqlClient.SqlClient | Ledger | Sessions | Agents | Queries> = Layer.effect(
     Nudges,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
       const ledger = yield* Ledger
       const sessions = yield* Sessions
       const agents = yield* Agents
+      const queries = yield* Queries
       const published = yield* PubSub.unbounded<NudgeEvent>()
       const waiting = yield* Ref.make(0)
       const working = yield* Ref.make(false)
@@ -147,7 +152,10 @@ export class Nudges extends Context.Service<
             AND NOT EXISTS (SELECT 1 FROM provider_sessions s JOIN threads h ON h.id = s.thread_id
               WHERE h.task_id = k.id AND s.state = 'starting')
           ORDER BY k.created_at, k.id`
+        // A plain task that finished waits on its board to be seen, and asks nothing of the person (DEV-96).
+        const finished = ready.length === 0 ? new Set<string>() : yield* queries.finished
         for (const task of ready) {
+          if (finished.has(task.taskId)) continue
           const turning = (threadId: string | null) =>
             threadId === null
               ? Effect.succeed(false)
@@ -163,6 +171,31 @@ export class Nudges extends Context.Service<
             title: task.title,
             body: readyWords(text(parse(task.latest), 'summary')),
             threadId: task.threadId,
+          })
+        }
+        // A review drafted, waiting for the person to post it (DEV-96): a review has no run, so it is read from its draft.
+        const drafted = yield* sql<{ taskId: string; threadId: string; title: string; number: number; author: string }>`
+          SELECT k.id AS task_id, t.id AS thread_id, k.title, d.number, d.author
+          FROM review_drafts d
+          JOIN tasks k ON k.id = d.task_id
+          JOIN threads t ON t.task_id = k.id AND t.kind = 'task'
+          JOIN projects p ON p.id = k.project_id AND p.archived_at IS NULL
+          WHERE d.state = 'pending' AND k.state = 'open'
+            AND NOT EXISTS (SELECT 1 FROM attention_requests x WHERE x.task_id = k.id AND x.state = 'open')
+          ORDER BY d.created_at, d.rowid`
+        for (const review of drafted) {
+          const turning = yield* Effect.map(
+            sessions.running(review.threadId),
+            Option.exists((session) => session.turnRunning),
+          )
+          if (turning) continue
+          found.set(`ready:${review.taskId}`, {
+            _tag: 'Nudge',
+            kind: 'ready',
+            key: `ready:${review.taskId}`,
+            title: review.title,
+            body: draftedWords(review.number, review.author),
+            threadId: review.threadId,
           })
         }
         return found

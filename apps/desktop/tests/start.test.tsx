@@ -11,7 +11,8 @@ import { accountEntry } from '../src/renderer/features/accounts/AgentAccounts'
 import { useAccountSignIn } from '../src/renderer/features/accounts/useAccountSignIn'
 import { HomeView } from '../src/renderer/features/home/HomeView'
 import { useHome } from '../src/renderer/features/home/useHome'
-import { SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
+import type { Section } from '../src/renderer/features/settings/sections'
+import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
@@ -34,10 +35,10 @@ function Start({ onProject }: { onProject: (id: string) => void }) {
   )
 }
 
-/* Settings, open on the agents. */
+/* The Settings tab, on the agents. */
 function Settings() {
-  const [open, setOpen] = useState(true)
-  return <SettingsPanel start={useStart()} open={open} onOpenChange={setOpen} />
+  const [section, setSection] = useState<Section>('agents')
+  return <SettingsPage start={useStart()} section={section} onSection={setSection} />
 }
 
 /** Codex, with the accounts given, as the runtime reads it: each read can be changed by the test. Here it signs in only in Terminal, unless given its ways. */
@@ -54,12 +55,8 @@ const withWays = (ways: AgentStatus['ways'], ...accounts: AgentStatus['accounts'
   }
 }
 
-/** The Codex accounts in the open panel. */
-const codexAccounts = async () => {
-  const panel = await screen.findByRole('dialog', { name: 'Settings' })
-  await userEvent.click(await within(panel).findByRole('button', { name: /^Agents/ }))
-  return within(panel).getByRole('list', { name: 'Codex accounts' })
-}
+/** The Codex accounts, on the Settings tab's agents. */
+const codexAccounts = () => screen.findByRole('list', { name: 'Codex accounts' })
 
 const work = { ...usual('acc_work', 'signed_in'), name: 'work', home: '/Users/me/work' }
 
@@ -100,7 +97,7 @@ describe('accounts in settings', () => {
       await waitFor(() => expect(client.addAccount).toHaveBeenCalledWith({ agentId: 'codex', name: 'Account 3' }))
       await waitFor(() => expect(client.signInAccount).toHaveBeenCalledWith('acc_added'))
       expect(await within(accounts).findByText('Finish signing in in Terminal')).toBeTruthy()
-      // While it signs in, a press outside leaves the panel open, and the list starts no other.
+      // While it signs in, the list starts no other.
       expect(screen.getByRole('button', { name: 'Add an account' }).hasAttribute('disabled')).toBe(true)
 
       // Back from Terminal, not signed in yet.
@@ -124,20 +121,6 @@ describe('accounts in settings', () => {
     },
     LONG_FLOW,
   )
-
-  it('reports a problem from its foot: the panel closes and the dialog is asked for, where the app can report', async () => {
-    const { client } = fakeClient({ status: codexWith(usual('acc_usual', 'signed_in')).status })
-    const reportProblem = vi.fn()
-    const view = withServices(<Settings />, client, fakeHost({ reportProblem }))
-    const panel = await screen.findByRole('dialog', { name: 'Settings' })
-    await userEvent.click(within(panel).getByRole('button', { name: 'Report a problem' }))
-    expect(reportProblem).toHaveBeenCalledWith({ kind: 'asked', from: 'settings' })
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull())
-    view.unmount()
-    // Where it can't, there is no link.
-    withServices(<Settings />, client)
-    expect(within(await screen.findByRole('dialog', { name: 'Settings' })).queryByRole('button', { name: 'Report a problem' })).toBeNull()
-  })
 
   it('signs in a new account the agent can’t tell is signed in, rather than taking it as signed in', async () => {
     const codex = codexWith(usual('acc_usual', 'signed_in'))
@@ -308,14 +291,12 @@ describe('accounts in settings', () => {
     await within(accounts).findByText('Finish signing in in Terminal')
     await userEvent.click(within(accounts).getByRole('button', { name: 'Cancel signing in' }))
     await waitFor(() => expect(client.removeAccount).toHaveBeenCalledWith('acc_added'))
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy()
 
-    // Escape in the sign-in leaves it, not the panel; nothing was made yet, so nothing is removed.
+    // Escape in the sign-in leaves it; nothing was made yet, so nothing is removed.
     await userEvent.click(screen.getByRole('button', { name: 'Add an account' }))
     await userEvent.keyboard('{Escape}')
     await waitFor(() => expect(within(accounts).queryByText('New account')).toBeNull())
     expect(client.removeAccount).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeTruthy()
   })
 
   it('opens Terminal again, and goes back to the ways in, removing the account made, signed out or not', async () => {

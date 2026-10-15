@@ -21,17 +21,16 @@ export function Field({ size = 'default', invalid = false, className, type = 'te
   )
 }
 
-export interface TextAreaProps extends ComponentProps<'textarea'> {
+export interface FieldAreaProps extends ComponentProps<'textarea'> {
   /** What is in it will not do. Point aria-describedby at the words that say why. */
   invalid?: boolean
 }
 
 /**
- * Several lines of text to type, as a Field is one: what happened, a longer
- * note. It grows from `rows` as the person drags its corner. It needs a name,
- * as a Field does.
+ * Several lines of text to type: a description, a body. A Field that runs
+ * down the page, and can be pulled longer. It needs a name, as a Field does.
  */
-export function TextArea({ invalid = false, className, rows = 4, ...rest }: TextAreaProps) {
+export function FieldArea({ invalid = false, rows = 5, className, ...rest }: FieldAreaProps) {
   return (
     <textarea rows={rows} aria-invalid={invalid || undefined} className={cx(s.field, s.area, invalid && s.invalid, className)} {...rest} />
   )

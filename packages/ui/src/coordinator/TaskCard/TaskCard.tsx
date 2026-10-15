@@ -36,6 +36,7 @@ export const taskCardText: TaskCardText = {
     [TaskStatus.Yours]: 'Waiting on you',
     [TaskStatus.Done]: 'Done',
     [TaskStatus.Paused]: 'Paused',
+    [TaskStatus.Queued]: 'Waiting',
     [TaskStatus.Stopped]: 'Stopped by you',
   },
   task: (task, started) => `Task ${task} · ${started}`,
@@ -60,6 +61,8 @@ export interface TaskCardProps {
   /** When it started: 2m ago. */
   started: string
   lead: ModelInfo
+  /** How hard its lead thinks, in the picker's words (High); left out where it isn't known. */
+  effort?: string
   /** A question, not a change: its lead is who answered it. */
   question?: boolean
   branch?: string
@@ -87,6 +90,7 @@ export function TaskCard({
   now,
   started,
   lead,
+  effort,
   question,
   branch,
   from,
@@ -126,6 +130,7 @@ export function TaskCard({
       <div className={s.foot}>
         <span className={s.lead}>
           {question ? t.answeredBy : t.lead} <Model model={lead} short className={s.leadModel} />
+          {effort !== undefined && <span className={s.effort}>{effort}</span>}
         </span>
         {branch && (
           <>

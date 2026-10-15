@@ -4,8 +4,8 @@ import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
   Arrived,
   CodeBlock,
-  FindingState,
   Issue,
+  IssueRef,
   LinkButton,
   Markdown,
   Plan,
@@ -13,16 +13,11 @@ import {
   Question,
   type QuestionAnswer,
   Reasoning,
-  Review,
-  type ReviewFinding,
-  Severity,
-  Step,
-  StepState,
+  Terminal,
   ThreadDivider,
   Tool,
   ToolState,
   Turn,
-  Verdict,
   WorkedFor,
   You,
 } from '@althar/ui'
@@ -30,11 +25,25 @@ import {
 import { CommandOutput } from './CommandOutput'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
+import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
+import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
 import { answersOf, partsOf, pickedOf, questionText } from './questions'
-import type { ArrivalContent, Block, Part, QuestionContent, RunContent, StepResult, TaskCardContent } from './thread'
+import type {
+  ArrivalContent,
+  Block,
+  IssueDraftContent,
+  ReviewDraftContent,
+  Part,
+  PushRequestContent,
+  QuestionContent,
+  RunContent,
+  SetupContent,
+  StepResult,
+  TaskCardContent,
+} from './thread'
 import s from './ThreadBlocks.module.css'
 
 /*
@@ -76,6 +85,15 @@ export const text = {
   failing: (names: ReadonlyArray<string>) => `Failed: ${names.join(', ')}`,
   outsider: (from: string) => `Not passed to the lead: ${from} can’t write to the repository.`,
   passOn: 'Pass it on',
+  /** Althar setting up a repository's worktree: installing the dependencies its lockfile names, or the setup kept for it. */
+  setup: {
+    running: (setup: SetupContent) => (setup.kept ? `Setting up ${setup.repository}…` : `Installing dependencies in ${setup.repository}…`),
+    done: (setup: SetupContent) => (setup.kept ? `Set up ${setup.repository}` : `Installed dependencies in ${setup.repository}`),
+    failed: (setup: SetupContent) =>
+      `${setup.kept ? `Couldn’t set up ${setup.repository}` : `Couldn’t install dependencies in ${setup.repository}`}. The lead is told.`,
+    stopped: (setup: SetupContent) => `Setting up ${setup.repository} stopped as Althar quit. It runs again before the lead starts.`,
+    timedOut: 'It took too long, and was stopped.',
+  },
   /** What passing it on says to the lead, in the person's name. */
   passed: (said: string, text: string) =>
     `${said}:\n\n${text
@@ -85,11 +103,35 @@ export const text = {
       .join('\n')}`,
 }
 
-const SEVERITY: Readonly<Record<StepResult['findings'][number]['severity'], Severity>> = {
-  blocking: Severity.High,
-  major: Severity.High,
-  minor: Severity.Medium,
-  nit: Severity.Low,
+/**
+ * Althar setting up the task's worktree before its lead starts (ADR-023): a
+ * line across the thread while it runs, and once it went through. Failed,
+ * the end of what it printed shows under it, as a command's output does.
+ */
+function SetupView({ setup }: { setup: SetupContent }) {
+  const { ended } = setup
+  const failed = ended !== null && !ended.stopped && ended.code !== 0
+  const line =
+    ended === null
+      ? text.setup.running(setup)
+      : ended.stopped
+        ? text.setup.stopped(setup)
+        : failed
+          ? text.setup.failed(setup)
+          : text.setup.done(setup)
+  return (
+    <>
+      <ThreadDivider icon="terminal">{line}</ThreadDivider>
+      {failed && (
+        <Terminal
+          command={setup.command}
+          lines={ended.last?.split('\n') ?? []}
+          {...(ended.code === null ? {} : { exit: ended.code })}
+          {...(ended.timedOut ? { failure: text.setup.timedOut } : {})}
+        />
+      )}
+    </>
+  )
 }
 
 /**
@@ -102,7 +144,7 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
   const [open, setOpen] = useState(part.state === ToolState.Running && part.ran !== null)
   /* once opened, what it printed stays, so it doesn't vanish as the call folds */
   const [seen, setSeen] = useState(open)
-  const long = part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND)
+  const long = part.command !== null && (part.command.includes('\n') || part.command.length > LONG_COMMAND || part.label !== undefined)
   const body =
     part.ran !== null ? (
       seen ? (
@@ -138,7 +180,8 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
   )
 }
 
-function PartView({ part, threadId }: { part: Part; threadId: string }) {
+/** A part of a turn as the thread draws it: what it said, a thought, a tool call, its plan, a notice. */
+export function PartView({ part, threadId }: { part: Part; threadId: string }) {
   switch (part.kind) {
     case 'message':
       return <Markdown source={part.text} />
@@ -157,76 +200,14 @@ function PartView({ part, threadId }: { part: Part; threadId: string }) {
   }
 }
 
-/** What a step reported: the lead's summary, open under its work, or the review's verdict and findings. */
-function StepView({ id, result, of }: { id: string; result: StepResult; of: number }) {
-  const named = useModelNames()
-  // Implement is the first step, a review and settling it the second, and the pull request the last.
-  const n = result.step === 'implement' ? 1 : result.step === 'publish' ? of : 2
-  const model = result.agentId === null ? undefined : named(result.agentId)
-  if (result.step === 'publish') {
-    const change = result.change
-    return (
-      <Step
-        n={n}
-        of={of}
-        label={change === null ? text.pushed : text.step.publish}
-        state={StepState.Done}
-        defaultOpen
-        detail={
-          <>
-            <Markdown source={result.summary} />
-            {change !== null && (
-              <Issue
-                mark={productBrand(change.product)}
-                source={productName(change.product)}
-                id={`${change.short} ${change.prefix}${change.number}`}
-                title={change.title}
-                href={change.url}
-                meta={[change.repository, change.draft ? text.change.draft : text.change[change.state]].join(' · ')}
-              />
-            )}
-          </>
-        }
-      />
-    )
-  }
-  if (result.step !== 'review')
-    return (
-      <Step
-        n={n}
-        of={of}
-        label={text.step[result.step]}
-        state={StepState.Done}
-        {...(model === undefined ? {} : { model })}
-        defaultOpen
-        detail={<Markdown source={result.summary} />}
-      />
-    )
-  // The lead settles findings on its own for now: what the review found is left to it.
-  const findings: ReadonlyArray<ReviewFinding> = result.findings.map((finding, index) => ({
-    id: `${id}-${index}`,
-    severity: SEVERITY[finding.severity],
-    at: finding.file === null ? '' : finding.line === null ? finding.file : `${finding.file}:${finding.line}`,
-    by: model === undefined ? [] : [model],
-    state: FindingState.Lead,
-    claim: finding.claim,
-  }))
-  return (
-    <>
-      <Review
-        n={n}
-        of={of}
-        reviewers={model === undefined ? [] : [{ model }]}
-        verdict={result.verdict === 'pass' ? Verdict.Pass : Verdict.Changes}
-        defaultFindings={findings}
-        {...(result.round > 0 ? { round: result.round + 1 } : {})}
-      />
-      {result.summary !== '' && (
-        <div className={s.said}>
-          <Markdown source={result.summary} />
-        </div>
-      )}
-    </>
+/** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
+function Said({ text, links }: { text: string; links: ReadonlyArray<Unfurl> }) {
+  return pastedIn(text, links).map((piece, at) =>
+    typeof piece === 'string' ? (
+      <Fragment key={at}>{piece}</Fragment>
+    ) : (
+      <IssueRef key={at} mark={productBrand(piece.product)} id={keyOf(piece)} linear={piece.product === 'linear'} />
+    ),
   )
 }
 
@@ -370,6 +351,9 @@ export function ThreadBlocks({
   session,
   card,
   run,
+  draft,
+  push,
+  review,
   queued,
   onPassOn,
   onAnswerQuestion,
@@ -397,12 +381,15 @@ export function ThreadBlocks({
   card?: (card: TaskCardContent) => ReactNode
   /** Draws a run's card, in the thread it was asked for in. */
   run?: (run: RunContent) => ReactNode
+  /** Draws an issue the coordinator drafted, in its thread. */
+  draft?: (draft: IssueDraftContent) => ReactNode
+  /** Draws a push the lead asked for, in a task's thread, with when it was asked or settled. */
+  push?: (request: PushRequestContent, at: string) => ReactNode
+  /** Draws a review the lead drafted of someone else's pull request, in a review task's thread. */
+  review?: (review: ReviewDraftContent) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
 }) {
-  // A task that was reviewed has two steps, the review and settling it being the second; its pull request, once opened, is one more.
-  const done = new Set(blocks.flatMap((block) => (block.kind === 'step' ? [block.result.step] : [])))
-  const of = 1 + (done.has('review') || done.has('settle') ? 1 : 0) + (done.has('publish') ? 1 : 0)
   const named = useModelNames()
   // What each document was last changed by, so it is read again after an edit.
   const versionOf = documentVersions(
@@ -416,18 +403,18 @@ export function ThreadBlocks({
     switch (block.kind) {
       case 'you':
         return (
-          <Fragment key={block.id}>
-            <You at={block.at} delivery={block.delivery} {...(queued === undefined ? {} : { text: { queued } })}>
-              {block.text}
-            </You>
-            {block.links.length > 0 && (
-              <div className={s.links}>
-                {block.links.map((link) => (
-                  <LinkView key={link.url} link={link} />
-                ))}
-              </div>
-            )}
-          </Fragment>
+          <You
+            key={block.id}
+            at={block.at}
+            delivery={block.delivery}
+            {...(queued === undefined ? {} : { text: { queued } })}
+            // The images sent with it, each opening full size with the others.
+            {...(block.pictures.length === 0 ? {} : { attach: sentAttachments(block.pictures) })}
+            // The links in it that unfurled, in the bubble under the words, so they read as part of what the person said.
+            {...(block.links.length === 0 ? {} : { unfurl: block.links.map((link) => <LinkView key={link.url} link={link} />) })}
+          >
+            {block.links.length === 0 || block.text === '' ? block.text : <Said text={block.text} links={block.links} />}
+          </You>
         )
       case 'arrival':
         return <ArrivalView key={block.id} arrival={block.arrival} at={block.at} {...(onPassOn === undefined ? {} : { onPassOn })} />
@@ -438,7 +425,8 @@ export function ThreadBlocks({
           </ThreadDivider>
         )
       case 'step':
-        return <StepView key={block.id} id={block.id} result={block.result} of={of} />
+        // A step's report is a task's, and its thread draws it in its rounds (TaskThread, ADR-042).
+        return null
       case 'card':
         return <Fragment key={block.id}>{card?.(block.card)}</Fragment>
       case 'question':
@@ -452,6 +440,14 @@ export function ThreadBlocks({
         )
       case 'run':
         return <Fragment key={block.id}>{run?.(block.run)}</Fragment>
+      case 'draft':
+        return <Fragment key={block.id}>{draft?.(block.draft)}</Fragment>
+      case 'setup':
+        return <SetupView key={block.id} setup={block.setup} />
+      case 'push':
+        return <Fragment key={block.id}>{push?.(block.request, block.at)}</Fragment>
+      case 'review':
+        return <Fragment key={block.id}>{review?.(block.review)}</Fragment>
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')

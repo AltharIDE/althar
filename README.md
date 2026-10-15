@@ -1,11 +1,11 @@
 <img src="brand/export/banner/readme-header.png" width="100%" alt="Althar. The project should persist. The agents should not have to." />
 
-<h1 align="center">Every coding agent. One crew. No babysitting.</h1>
+<h1 align="center">Every coding agent. One crew. Become your 10x self.</h1>
 
 <p align="center">
   Althar runs Claude Code, Codex and OpenCode as one team, on the plans you already pay for.<br />
   A coordinator plans the work, one agent builds it, another reviews it, and when one runs out the next takes over.<br />
-  <b>You come back to pull requests, not prompts.</b>
+  <b>Never has software engineering felt so good.</b>
 </p>
 
 <p align="center">
@@ -226,7 +226,7 @@ Everything runs on your machine. The project's tasks, threads and history are ke
 ## Get started
 
 > [!NOTE]
-> **Early.** Althar runs on macOS, Windows and Linux, and is tested most on macOS. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues), or, in the app, Help → Report a problem, which sends what happened with the app's logs, paths and repository names hidden.
+> **Early.** Althar runs on macOS, Windows and Linux, and is tested most on macOS. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues), or, in the app, Report a problem (in Help on a Mac, or at the foot of the quick settings), which sends what happened with the app's logs, paths and repository names hidden.
 
 Sign in each agent you want to use with its own tool first:
 

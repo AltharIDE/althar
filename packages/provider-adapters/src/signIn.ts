@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 
 import { Effect } from 'effect'
 
-import { asNode } from './process'
+import { adapterNode, asNode } from './process'
 import type { AgentDefinition, PaidBy } from './registry'
 
 export type SignInStatus = 'signed_in' | 'signed_out' | 'unknown'
@@ -21,33 +21,31 @@ export interface SignInCheck {
  */
 export const signInCheck = (
   agent: AgentDefinition,
-  node: string = process.execPath,
+  node: string = adapterNode(),
   /** An account's home, as the agent's environment points at it (ADR-012); none for its usual folder. */
   home: Readonly<Record<string, string>> = {},
 ): Effect.Effect<SignInCheck> =>
   Effect.callback<SignInCheck>((resume) => {
     const spec = agent.signIn.status(node)
-    execFile(
-      spec.command,
-      [...spec.args],
-      { timeout: 15_000, env: { ...process.env, ...asNode(spec), ...spec.env, ...home } },
-      (error, stdout, stderr) => {
-        if (error !== null && typeof error.code !== 'number') return resume(Effect.succeed({ status: 'unknown', paidBy: 'unknown' }))
-        const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : null
-        const output = `${stdout}\n${stderr}`
-        const signedIn = agent.signIn.read(output, exitCode)
-        resume(
-          Effect.succeed({
-            status: signedIn === undefined ? 'unknown' : signedIn ? 'signed_in' : 'signed_out',
-            paidBy: agent.signIn.paidBy?.(output) ?? 'unknown',
-          }),
-        )
-      },
-    )
+    const env = { ...process.env, ...asNode(spec), ...spec.env, ...home }
+    // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled.
+    const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
+    execFile(launched.command, [...launched.args], { timeout: 15_000, env }, (error, stdout, stderr) => {
+      if (error !== null && typeof error.code !== 'number') return resume(Effect.succeed({ status: 'unknown', paidBy: 'unknown' }))
+      const exitCode = error === null ? 0 : typeof error.code === 'number' ? error.code : null
+      const output = `${stdout}\n${stderr}`
+      const signedIn = agent.signIn.read(output, exitCode)
+      resume(
+        Effect.succeed({
+          status: signedIn === undefined ? 'unknown' : signedIn ? 'signed_in' : 'signed_out',
+          paidBy: agent.signIn.paidBy?.(output) ?? 'unknown',
+        }),
+      )
+    })
   })
 
 /** Whether the user is signed in to an agent (see `signInCheck`). */
-export const signInStatus = (agent: AgentDefinition, node: string = process.execPath): Effect.Effect<SignInStatus> =>
+export const signInStatus = (agent: AgentDefinition, node: string = adapterNode()): Effect.Effect<SignInStatus> =>
   Effect.map(signInCheck(agent, node), (check) => check.status)
 
 /**
@@ -57,15 +55,15 @@ export const signInStatus = (agent: AgentDefinition, node: string = process.exec
  */
 export const signOut = (
   agent: AgentDefinition,
-  node: string = process.execPath,
+  node: string = adapterNode(),
   home: Readonly<Record<string, string>> = {},
 ): Effect.Effect<boolean> => {
   const logout = agent.signIn.logout
   if (logout === undefined) return Effect.succeed(true)
   return Effect.callback<boolean>((resume) => {
     const spec = logout.run(node)
-    execFile(spec.command, [...spec.args], { timeout: 15_000, env: { ...process.env, ...asNode(spec), ...spec.env, ...home } }, (error) =>
-      resume(Effect.succeed(error === null)),
-    )
+    const env = { ...process.env, ...asNode(spec), ...spec.env, ...home }
+    const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
+    execFile(launched.command, [...launched.args], { timeout: 15_000, env }, (error) => resume(Effect.succeed(error === null)))
   })
 }

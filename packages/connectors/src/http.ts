@@ -42,6 +42,35 @@ export interface Http {
   ): Effect.Effect<A, ConnectorFailed>
 }
 
+/**
+ * How many pages of a listing are followed, at most: ten of a hundred, a
+ * thousand places to file an issue, is more than anyone picks from, and
+ * keeps an account that sees a whole company's from asking without end.
+ */
+export const PAGES_FOLLOWED = 10
+
+/** One page of a listing: what it holds, and where the next starts, if there is one. */
+export interface Page<A, At> {
+  readonly items: ReadonlyArray<A>
+  readonly next: At | undefined
+}
+
+/** A listing, page after page from `first`, for at most `PAGES_FOLLOWED` pages. */
+export const paged = <A, At>(
+  first: At,
+  page: (at: At) => Effect.Effect<Page<A, At>, ConnectorFailed>,
+): Effect.Effect<ReadonlyArray<A>, ConnectorFailed> =>
+  Effect.gen(function* () {
+    const all: Array<A> = []
+    let at: At | undefined = first
+    for (let read = 0; read < PAGES_FOLLOWED && at !== undefined; read++) {
+      const { items, next }: Page<A, At> = yield* page(at)
+      all.push(...items)
+      at = next
+    }
+    return all
+  })
+
 /** How much of a service's own words a failure keeps. */
 const MESSAGE_KEPT = 300
 
@@ -153,17 +182,21 @@ const GraphqlError = Schema.Struct({
 })
 
 /** Classifies a GraphQL `errors` entry: GitHub names a `type`, Linear an extension code. */
-const graphqlFailure = (product: Product, error: typeof GraphqlError.Type): ConnectorFailed => {
+const graphqlFailure = (product: Product, error: typeof GraphqlError.Type, status: number): ConnectorFailed => {
   const code = (error.type ?? error.extensions?.code ?? error.extensions?.type ?? '').toUpperCase()
-  const reason = /AUTHENTICATION|UNAUTHENTICATED/.test(code)
-    ? 'unauthorized'
-    : /RATE_?LIMIT/.test(code)
-      ? 'rate_limited'
-      : /FORBIDDEN/.test(code)
-        ? 'forbidden'
-        : /NOT_FOUND|ENTITY_NOT_FOUND/.test(code)
-          ? 'not_found'
-          : 'rejected'
+  // The service failing as it worked on it (a 5xx, an internal error) is no refusal: a mutation may have gone through.
+  const reason =
+    status >= 500 || /INTERNAL/.test(code)
+      ? 'unreachable'
+      : /AUTHENTICATION|UNAUTHENTICATED/.test(code)
+        ? 'unauthorized'
+        : /RATE_?LIMIT/.test(code)
+          ? 'rate_limited'
+          : /FORBIDDEN|INSUFFICIENT_SCOPES/.test(code)
+            ? 'forbidden'
+            : /NOT_FOUND|ENTITY_NOT_FOUND/.test(code)
+              ? 'not_found'
+              : 'rejected'
   return new ConnectorFailed({ product, reason, message: error.message.slice(0, MESSAGE_KEPT) })
 }
 
@@ -256,7 +289,7 @@ export const makeHttp = (options: HttpOptions): Http => {
           answer.body,
         ).pipe(Effect.catch(() => Effect.flatMap(success(answer), () => Effect.fail(invalid('The answer was not GraphQL')))))
         const first = envelope.errors?.[0]
-        if (first !== undefined) return yield* Effect.fail(graphqlFailure(product, first))
+        if (first !== undefined) return yield* Effect.fail(graphqlFailure(product, first, answer.status))
         yield* success(answer)
         return yield* Schema.decodeUnknownEffect(schema)(envelope.data ?? null).pipe(Effect.mapError((error) => invalid(error.message)))
       }),

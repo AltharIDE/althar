@@ -116,6 +116,20 @@ describe('GitLab as a code host', () => {
     }),
   )
 
+  it.effect('refuses to review a merge request it didn’t open, in GitLab’s words, without asking GitLab', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([])
+      assert.isFalse(host.capabilities.reviews)
+      assert.deepInclude(yield* Effect.flip(host.changeToReview(repository, 12)), {
+        reason: 'rejected',
+        message: 'Althar can’t review a merge request on this host yet.',
+      })
+      const posted = yield* Effect.flip(host.postReview(repository, 12, { event: 'comment', body: 'b', commit: null, comments: [] }))
+      assert.strictEqual(posted.reason, 'rejected')
+      assert.lengthOf(sent, 0)
+    }),
+  )
+
   it.effect('reads a project in nested groups, whether the account may push, and how it merges', () =>
     Effect.gen(function* () {
       const { host, sent } = gitlab([
@@ -239,6 +253,7 @@ describe('GitLab as a code host', () => {
         deletions: null,
         changedFiles: null,
         updatedAt: '2026-10-07T16:41:00.548Z',
+        conflicts: false,
       })
       assert.deepStrictEqual(sent[0]?.body, {
         source_branch: 'althar/mer-231',
@@ -280,6 +295,26 @@ describe('GitLab as a code host', () => {
       const error = yield* Effect.flip(host.openChange(repository, { title: 't', body: '', source: 'x', target: 'main', draft: false }))
       assert.deepStrictEqual([error.reason, error.status], ['rejected', 409])
       assert.isNull(yield* host.findChange(repository, 'x'))
+    }),
+  )
+
+  it.effect('says when a merge request conflicts with its target, once GitLab has worked it out', () =>
+    Effect.gen(function* () {
+      const answers = [
+        request({ detailed_merge_status: 'conflict', has_conflicts: true }),
+        request({ detailed_merge_status: 'mergeable', has_conflicts: false }),
+        // Blocked for another reason, it still says whether it conflicts.
+        request({ detailed_merge_status: 'not_approved', has_conflicts: true }),
+        // Still checking: what it said before the target moved isn't taken.
+        request({ detailed_merge_status: 'checking', has_conflicts: false }),
+        request({ detailed_merge_status: undefined, has_conflicts: undefined }),
+      ]
+      const { host } = gitlab([['GET', `${PROJECT}/merge_requests/12`, () => ({ json: answers.shift() })]])
+      assert.isTrue((yield* host.change(repository, 12)).conflicts)
+      assert.isFalse((yield* host.change(repository, 12)).conflicts)
+      assert.isTrue((yield* host.change(repository, 12)).conflicts)
+      assert.notProperty(yield* host.change(repository, 12), 'conflicts')
+      assert.notProperty(yield* host.change(repository, 12), 'conflicts')
     }),
   )
 
@@ -820,9 +855,153 @@ describe('GitLab as a tracker', () => {
       yield* host.comment(found, 'Picked up')
       assert.deepStrictEqual(sent[0]?.body, { body: 'Picked up' })
       yield* host.link(found, { url: 'https://gitlab.com/meridian/payments/api/-/merge_requests/12', title: 'MR !12' })
+      // An issue has no In Progress of its own: it is left open, as it is.
+      assert.deepStrictEqual(yield* host.start(found), { moved: false, status: { name: 'Open', category: 'todo' } })
       assert.strictEqual(sent.length, 1)
       assert.isFalse(host.capabilities.links)
+      assert.isFalse(host.capabilities.starts)
       assert.strictEqual((yield* Effect.flip(host.comment({ ...found, ref: 'MER-1' }, 'x'))).reason, 'not_found')
+    }),
+  )
+  it.effect('lists the projects it can file issues in, last active first, leaving out those without issues', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        [
+          'GET',
+          `${API}/projects?membership=true&min_access_level=10&archived=false&with_issues_enabled=true&order_by=last_activity_at&per_page=100&simple=true&page=1`,
+          {
+            json: [
+              {
+                id: 34675721,
+                name: 'api',
+                path_with_namespace: 'meridian/payments/api',
+                web_url: 'https://gitlab.com/meridian/payments/api',
+              },
+              { id: 34675722, path_with_namespace: 'meridian/wiki', issues_enabled: false },
+              { id: 34675723, path_with_namespace: 'you/notes', issues_enabled: true },
+            ],
+          },
+        ],
+      ])
+      assert.deepStrictEqual(yield* host.containers(), [
+        { id: 'meridian/payments/api', key: 'meridian/payments/api', name: 'meridian/payments/api' },
+        { id: 'you/notes', key: 'you/notes', name: 'you/notes' },
+      ])
+      assert.lengthOf(sent, 1)
+    }),
+  )
+
+  it.effect('follows the projects page after page until a page comes short', () =>
+    Effect.gen(function* () {
+      const projects = (page: number, count: number) =>
+        Array.from({ length: count }, (_, at) => ({ id: page * 100 + at, path_with_namespace: `meridian/project-${page}-${at}` }))
+      const listed = `${API}/projects?membership=true&min_access_level=10&archived=false&with_issues_enabled=true&order_by=last_activity_at&per_page=100&simple=true&page=`
+      const { host, sent } = gitlab([
+        ['GET', `${listed}1`, { json: projects(1, 100) }],
+        ['GET', `${listed}2`, { json: projects(2, 1) }],
+      ])
+      const found = yield* host.containers()
+      assert.lengthOf(found, 101)
+      assert.strictEqual(found.at(-1)?.id, 'meridian/project-2-0')
+      assert.deepStrictEqual(
+        sent.map((request) => request.url),
+        [`${listed}1`, `${listed}2`],
+      )
+    }),
+  )
+
+  it.effect('files an issue in a project, its labels as one list, or none', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        ['POST', `${API}/projects/meridian%2Fpayments%2Fapi/issues`, { status: 201, json: issue({ assignees: [] }) }],
+      ])
+      const filed = yield* host.create('meridian/payments/api', {
+        title: 'Rate-limit refunds like charges',
+        body: 'Refunds skip the limiter.',
+        labels: ['payments', 'type::bug'],
+      })
+      assert.deepStrictEqual([filed.ref, filed.labels, filed.assignees], ['meridian/payments/api#231', ['payments', 'type::bug'], []])
+      assert.deepStrictEqual(sent[0]?.body, {
+        title: 'Rate-limit refunds like charges',
+        description: 'Refunds skip the limiter.',
+        labels: 'payments,type::bug',
+      })
+      yield* host.create('meridian/payments/api', { title: 'Rate-limit refunds like charges', body: '', labels: [] })
+      assert.deepStrictEqual(sent[1]?.body, { title: 'Rate-limit refunds like charges', description: '' })
+    }),
+  )
+
+  it.effect('says what it was given isn’t a project, without asking, and when GitLab doesn’t find one', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        ['POST', `${API}/projects/meridian%2Fgone/issues`, { status: 404, json: { message: '404 Project Not Found' } }],
+      ])
+      for (const container of ['meridian', '', 'meridian/api#12', 'meridian//api'])
+        assert.deepStrictEqual(
+          (yield* Effect.flip(host.create(container, { title: 't', body: '', labels: [] }))).message,
+          `Not a GitLab project: ${container}`,
+        )
+      assert.lengthOf(sent, 0)
+      const gone = yield* Effect.flip(host.create('meridian/gone', { title: 't', body: '', labels: [] }))
+      assert.deepStrictEqual([gone.reason, gone.message], ['not_found', '404 Project Not Found'])
+    }),
+  )
+})
+
+describe('GitLab listing merge requests', () => {
+  it.effect('asks for them newest change first, narrowed as asked, one more than the limit, and reads what holds each up', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        ['GET', `${API}/user`, { json: user(5, 'you') }],
+        [
+          'GET',
+          /\/merge_requests\?/,
+          {
+            json: [
+              request({ detailed_merge_status: 'requested_changes' }),
+              request({ iid: 13, title: 'Send back', draft: false, work_in_progress: false, detailed_merge_status: 'not_approved' }),
+              request({ iid: 14, detailed_merge_status: 'ci_still_running' }),
+            ],
+          },
+        ],
+      ])
+      const list = yield* host.listChanges(repository, {
+        state: 'merged',
+        author: 'ninemate',
+        text: 'rate limit',
+        reviewRequested: true,
+        draft: true,
+        limit: 2,
+      })
+      const asked = new URL(sent.find((one) => one.url.includes('/merge_requests'))?.url ?? '')
+      assert.strictEqual(asked.pathname, '/api/v4/projects/34675721/merge_requests')
+      assert.deepStrictEqual(Object.fromEntries(asked.searchParams), {
+        state: 'merged',
+        order_by: 'updated_at',
+        sort: 'desc',
+        per_page: '3',
+        author_username: 'ninemate',
+        search: 'rate limit',
+        in: 'title',
+        reviewer_username: 'you',
+        wip: 'yes',
+      })
+      assert.isTrue(list.more)
+      assert.deepStrictEqual(
+        list.changes.map((change) => [change.number, change.title, change.draft, change.body, change.reviewDecision, change.checks]),
+        [
+          [12, 'Rate-limit refunds', true, '', 'changes_requested', null],
+          [13, 'Send back', false, '', 'review_required', null],
+        ],
+      )
+    }),
+  )
+
+  it.effect('names the scope it lacks where GitLab refuses', () =>
+    Effect.gen(function* () {
+      const { host } = gitlab([['GET', /\/merge_requests\?/, { status: 403, json: { error: 'insufficient_scope' } }]])
+      const refused = yield* Effect.flip(host.listChanges(repository, { state: 'open', limit: 30 }))
+      assert.deepInclude(refused, { reason: 'forbidden', scope: 'read_api' })
     }),
   )
 })

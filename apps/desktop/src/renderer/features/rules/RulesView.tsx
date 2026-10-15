@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 
 import { type AgentStatus, type CommandRule, fillPattern, type ProjectRulesView } from '@althar/contracts'
 import { BackCrumb, CommandMatch, LimitPolicy, PermissionPolicy, RuleKind, RulePlace, TaskEnd, unreachable } from '@althar/ui'
-import { type CommandPlace, ProjectRules, type RuleCommand } from '@althar/ui/screens'
+import { type CommandPlace, ProjectRules, type RestMode, type RuleCommand } from '@althar/ui/screens'
 
 import { PartPending, pendingText } from '../../shared/Pending'
 import s from './Rules.module.css'
@@ -62,7 +62,7 @@ const KINDS = [
   RuleKind.Outside,
 ] as const
 
-const modeOf = (permissions: ProjectRulesView['permissions']): PermissionPolicy => {
+const modeOf = (permissions: ProjectRulesView['permissions']): RestMode => {
   switch (permissions) {
     case 'rules':
       return PermissionPolicy.Rules
@@ -70,11 +70,9 @@ const modeOf = (permissions: ProjectRulesView['permissions']): PermissionPolicy 
       return PermissionPolicy.Coordinator
     case 'ask':
       return PermissionPolicy.Ask
-    case 'allow':
-      return PermissionPolicy.AllowAll
   }
 }
-const permissionsOf = (mode: PermissionPolicy): ProjectRulesView['permissions'] => {
+const permissionsOf = (mode: RestMode): ProjectRulesView['permissions'] => {
   switch (mode) {
     case PermissionPolicy.Rules:
       return 'rules'
@@ -82,8 +80,6 @@ const permissionsOf = (mode: PermissionPolicy): ProjectRulesView['permissions'] 
       return 'coordinator'
     case PermissionPolicy.Ask:
       return 'ask'
-    case PermissionPolicy.AllowAll:
-      return 'allow'
     default:
       return unreachable(mode)
   }
@@ -283,6 +279,8 @@ export function RulesView({ model, onBack }: { model: RulesModel; onBack: () => 
               project={project}
               mode={modeOf(rules.permissions)}
               onModeChange={(mode) => model.change({ permissions: permissionsOf(mode) })}
+              allowAll={rules.allowEverything}
+              onAllowAllChange={(allowEverything) => model.change({ allowEverything })}
               kinds={Object.fromEntries(KINDS.map((kind) => [kind, placeOf(rules, kind)])) as Record<RuleKind, RulePlace>}
               onKindChange={(kind, place) => model.change((now) => listsWith(now, kind, place))}
               commands={commandsOf(rules)}
