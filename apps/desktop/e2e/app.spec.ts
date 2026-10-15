@@ -57,7 +57,7 @@ test('makes the first project of a repository it found, starts a task, and talks
     await page.keyboard.press('o')
     await expect(page.getByRole('heading', { name: 'Nothing changed', level: 2 })).toBeVisible()
     await page.keyboard.press('c')
-    // The lead is briefed first, and reports its step: what it built is its result, its work one line above it (ADR-041).
+    // The lead is briefed first, and reports its step: what it built is its result, its work one line above it (ADR-042).
     await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
 
     await say(page, 'hello')

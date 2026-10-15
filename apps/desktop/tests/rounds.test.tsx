@@ -11,7 +11,7 @@ import { fakeClient, items, snapshot } from './fixtures'
 import { withServices } from './render'
 
 /*
- * A task's thread in rounds (ADR-041): each ask, then its lead's
+ * A task's thread in rounds (ADR-042): each ask, then its lead's
  * acknowledgement, its work in one line, and its result with what its report
  * showed; what the coordinator passed on, on the person's side; Althar's
  * housekeeping with the work, and its news a line of its own.

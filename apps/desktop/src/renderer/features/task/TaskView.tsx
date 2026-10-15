@@ -392,7 +392,7 @@ export function TaskView({
             pictures: [],
           },
         ]),
-    // The thread in rounds: each ask, its lead's acknowledgement, its work in one line, and its result, which ends it (ADR-041).
+    // The thread in rounds: each ask, its lead's acknowledgement, its work in one line, and its result, which ends it (ADR-042).
     ...roundsOf(
       { items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree, queue, outputs: model.outputs },
       model.streaming,

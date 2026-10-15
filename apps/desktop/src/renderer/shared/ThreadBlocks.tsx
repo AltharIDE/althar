@@ -418,7 +418,7 @@ export function ThreadBlocks({
           </ThreadDivider>
         )
       case 'step':
-        // A step's report is a task's, and its thread draws it in its rounds (TaskThread, ADR-041).
+        // A step's report is a task's, and its thread draws it in its rounds (TaskThread, ADR-042).
         return null
       case 'card':
         return <Fragment key={block.id}>{card?.(block.card)}</Fragment>

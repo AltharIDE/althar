@@ -50,7 +50,7 @@ test('shows what the task built and what the lead showed of it: atop its outputs
     await expect(dialog).toHaveCount(0)
 
     // In the conversation, the lead's report is what it said last: what it built, its screenshot large, what it checked
-    // and what it couldn't; no card closes the thread (ADR-041).
+    // and what it couldn't; no card closes the thread (ADR-042).
     await toConversation(page)
     const round = page.getByRole('article').filter({ hasText: 'Checkout retries once when the payment call fails' }).last()
     await expect(round.getByRole('button', { name: /View The retry button after a failed checkout full size/ })).toBeVisible()

@@ -93,7 +93,7 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
     await page.screenshot({ path: 'test-results/handed-output.png', fullPage: true })
 
     // Copy, on what it said: the window may write to the clipboard, and only that. Copy takes what the lead said last in its
-    // round, as it wrote it (ADR-041).
+    // round, as it wrote it (ADR-042).
     const turn = page.getByRole('article').filter({ hasText: 'Here is what I found.' }).last()
     await turn.hover()
     await turn.getByRole('button', { name: 'Copy' }).last().click()

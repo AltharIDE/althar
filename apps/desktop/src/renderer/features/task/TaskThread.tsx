@@ -30,7 +30,7 @@ import { PartView, text as threadText, ThreadBlocks } from '../../shared/ThreadB
 import s from './TaskThread.module.css'
 
 /*
- * A task's thread in rounds (shared/rounds.ts, ADR-041), as the kit draws
+ * A task's thread in rounds (shared/rounds.ts, ADR-042), as the kit draws
  * them: each ask, then its lead's acknowledgement, the line of its work and
  * its result, with what its report showed; what the coordinator passed on,
  * on the person's side; a reviewer in its own voice; what Althar says. What

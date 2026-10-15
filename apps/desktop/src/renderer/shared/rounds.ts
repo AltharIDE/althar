@@ -7,7 +7,7 @@ import { text as threadText } from './ThreadBlocks'
 import { took } from './time'
 
 /*
- * A task's thread in rounds (ADR-041). A round starts with an ask: what the
+ * A task's thread in rounds (ADR-042). A round starts with an ask: what the
  * person said, what the coordinator passed on, a review's findings, Althar
  * asking the lead to settle a conflict. The lead answers in at most three
  * parts: what it said first, when it said it soon and before changing

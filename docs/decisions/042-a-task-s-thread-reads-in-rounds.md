@@ -1,4 +1,4 @@
-# ADR-041: A task's thread reads in rounds: an ask, then what its lead says first, its work in a line, and what it says last
+# ADR-042: A task's thread reads in rounds: an ask, then what its lead says first, its work in a line, and what it says last
 
 - **Status:** Accepted
 - **Date:** 2026-10-15

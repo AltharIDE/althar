@@ -48,4 +48,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [038](038-a-lead-starts-afresh-at-a-break.md) | A task's lead starts afresh before its context grows large, and at a break in its work |
 | [039](039-the-person-compacts-an-agent-s-context.md) | The person can have an agent compact its context, at once, with the agent's own command |
 | [040](040-a-change-reaches-the-person-green.md) | Until the person has looked, a change's checks are Althar's to see through |
-| [041](041-a-task-s-thread-reads-in-rounds.md) | A task's thread reads in rounds: an ask, then what its lead says first, its work in a line, and what it says last |
+| [042](042-a-task-s-thread-reads-in-rounds.md) | A task's thread reads in rounds: an ask, then what its lead says first, its work in a line, and what it says last |
