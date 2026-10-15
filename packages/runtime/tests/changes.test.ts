@@ -1663,6 +1663,31 @@ describe('a change whose checks Althar sees through', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('brings a change in a repository that has never had checks to the person at once', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      // A minute for checks to appear, as the app gives: none ever have here, so it isn't kept waiting.
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      assert.isNull(ready?.step)
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(
+              ':memory:',
+              {},
+              { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100), checksAppear: Duration.minutes(1) },
+            ),
+          ),
+        ),
+      ),
+    )
+  })
+
   it.live('has its lead fix failing checks alone, and pushes the fix without asking the person', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({

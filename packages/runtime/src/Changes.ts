@@ -1949,13 +1949,18 @@ export class Changes extends Context.Service<
        * lead, started again where it must be, and the lead's fix goes up
        * without asking, for `FIX_ROUNDS` fixes. Checks a
        * pull request hasn't shown yet, within `checksAppear` of the work
-       * coming back, count as running: a host registers them after a push.
+       * coming back, count as running where the repository's pull requests
+       * have had checks before: a host registers them after a push.
        */
       const handsOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const rows = yield* sql<{ outcome: string | null; endedAt: string; failed: number }>`
+          const rows = yield* sql<{ outcome: string | null; endedAt: string; failed: number; hasChecks: number }>`
             SELECT json_extract(l.snapshot, '$.checks.outcome') AS outcome, r.ended_at,
+              -- Whether the repository's pull requests have had checks before: one with none never will, and isn't kept waiting.
+              EXISTS (SELECT 1 FROM external_links e JOIN observations c ON c.subject_type = 'external_link' AND c.subject_id = e.id
+                AND c.kind = 'checks' WHERE e.project_id = l.project_id AND e.kind = 'change' AND e.id != l.id
+                AND json_extract(e.snapshot, '$.repository') = json_extract(l.snapshot, '$.repository')) AS has_checks,
               (SELECT count(*) FROM observations o WHERE o.subject_type = 'external_link' AND o.subject_id = l.id
                 AND o.kind = 'checks' AND json_extract(o.payload, '$.outcome') = 'failed' AND o.observed_at >= r.ended_at) AS failed
             FROM tasks k JOIN runs r ON r.id = (SELECT id FROM runs WHERE task_id = k.id AND plan_id IS NOT NULL ORDER BY created_at DESC LIMIT 1)
@@ -1974,7 +1979,7 @@ export class Changes extends Context.Service<
           const running = rows.some(
             (row) =>
               row.outcome === 'running' ||
-              ((row.outcome === null || row.outcome === 'none') && now - Date.parse(row.endedAt) < checksAppear),
+              ((row.outcome === null || row.outcome === 'none') && row.hasChecks === 1 && now - Date.parse(row.endedAt) < checksAppear),
           )
           return { failed, running, given: failed > FIX_ROUNDS } satisfies Hands
         })
