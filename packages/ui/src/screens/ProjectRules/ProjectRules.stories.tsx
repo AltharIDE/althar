@@ -18,6 +18,7 @@ import { type CommandPlace, ProjectRules, type ProjectRulesProps, type RuleComma
 /** The screen with its values kept as they are changed, as the app keeps them; each change also goes to its spy. */
 function Live(args: ProjectRulesProps) {
   const [mode, setMode] = useState(args.mode)
+  const [allowAll, setAllowAll] = useState(args.allowAll)
   const [kinds, setKinds] = useState(args.kinds)
   const [commands, setCommands] = useState(args.commands)
   const [end, setEnd] = useState(args.end)
@@ -29,6 +30,11 @@ function Live(args: ProjectRulesProps) {
     <ProjectRules
       {...args}
       mode={mode}
+      allowAll={allowAll}
+      onAllowAllChange={(on) => {
+        setAllowAll(on)
+        args.onAllowAllChange(on)
+      }}
       onModeChange={(next) => {
         setMode(next)
         args.onModeChange(next)
@@ -83,6 +89,8 @@ const meta = {
     project: 'Meridian',
     mode: PermissionPolicy.Coordinator,
     onModeChange: fn(),
+    allowAll: false,
+    onAllowAllChange: fn(),
     kinds: MERIDIAN_KINDS,
     onKindChange: fn(),
     commands: MERIDIAN_COMMANDS,
@@ -221,17 +229,31 @@ export const MovingABuiltIn: Story = {
   },
 }
 
-/** What happens to the rest, changed in place; Allow everything leaves the asks and the go-aheads saying they are off. */
-export const AllowingEverything: Story = {
+/** What happens to the rest, changed in place: three ways, as allowing everything is the switch over them. */
+export const ChoosingTheRest: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
     const page = within(document.body)
     await userEvent.click(c.getByRole('button', { name: 'the coordinator decides' }))
-    await userEvent.click(await page.findByRole('menuitemradio', { name: 'Allow everything' }))
-    await expect(args.onModeChange).toHaveBeenCalledWith(PermissionPolicy.AllowAll)
-    await expect(c.getAllByText('Off while everything is allowed.')).toHaveLength(2)
+    await expect(await page.findAllByRole('menuitemradio')).toHaveLength(3)
+    await userEvent.click(page.getByRole('menuitemradio', { name: 'Ask me' }))
+    await expect(args.onModeChange).toHaveBeenCalledWith(PermissionPolicy.Ask)
   },
 }
+
+/** The switch over the sentences: on, what asks, goes ahead and the rest say they are off; Never doesn't, and still changes. */
+export const AllowingEverything: Story = {
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('switch', { name: 'Allow everything' }))
+    await expect(args.onAllowAllChange).toHaveBeenCalledWith(true)
+    await expect(c.getAllByText('Off while everything is allowed.')).toHaveLength(3)
+    await expect(within(c.getByRole('listitem', { name: 'Never' })).queryByText('Off while everything is allowed.')).toBeNull()
+  },
+}
+
+/** Everything allowed, as the page opens with it on. */
+export const EverythingAllowed: Story = { args: { allowAll: true } }
 
 /** A new project's rules: every kind asks, nothing is named, and what no rule keeps is allowed. */
 export const NewProject: Story = {

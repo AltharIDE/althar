@@ -79,6 +79,8 @@ export interface TaskModel {
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
+  /** Has the agent on the task compact its context, after what it was told before. */
+  readonly compact: () => Promise<void>
   /** Puts the lead on another model or effort, or hands the task to another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
   /** Hands the task to another agent with what the person says, and any images: the new lead's first turn, after its brief. */
@@ -93,6 +95,8 @@ export interface TaskModel {
   readonly setResolveConflicts: (on: boolean | null) => Promise<void>
   /** Leaves out the commits after its last pull request that are in none yet: it settles without them, and they stay on its branch. */
   readonly leaveOut: () => Promise<void>
+  /** Allows everything its agents ask, short of what its project never allows, or takes it back: what waits goes ahead. */
+  readonly setAllowEverything: (on: boolean) => Promise<void>
   /** Settles it without its change; its worktree and branch stay. Whether it was abandoned. */
   readonly abandon: () => Promise<boolean>
   /** Opens it again, once abandoned, on its worktree and branch. */
@@ -281,7 +285,9 @@ export const useTask = (threadId: string): TaskModel => {
           ? current
           : { ...current, task: { ...current.task, launches: event.launches.filter((launch) => launch.taskId === current.task.id) } },
       )
-    if (event.threadId !== threadId) return
+    // Its project's rules, which belong to no thread: by their switch it may allow everything now, or no longer. Its head again.
+    const ofItsRules = event._tag === 'Changed' && event.aggregateType === 'policy' && event.projectId === snapshot?.project.id
+    if (event.threadId !== threadId && !ofItsRules) return
     // How full the lead's context is, as it says: kept on its session, which the composer shows.
     if (event._tag === 'Context')
       return void setSnapshot((current) =>
@@ -446,6 +452,7 @@ export const useTask = (threadId: string): TaskModel => {
       }
     },
     interrupt: () => act(() => client.interrupt(threadId)),
+    compact: () => act(() => client.compact(threadId)),
     choose: (choice) =>
       act(async () => {
         const session = snapshot?.session
@@ -457,6 +464,7 @@ export const useTask = (threadId: string): TaskModel => {
     skipReview: () => onTask((taskId) => client.skipReview(taskId)),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
     setResolveConflicts: (on) => onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on })),
+    setAllowEverything: (on) => onTask((taskId) => client.setTaskAllowEverything({ taskId, allowEverything: on })),
     abandon: async () => {
       let abandoned = false
       await onTask(async (taskId) => {

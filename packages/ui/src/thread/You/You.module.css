@@ -5,7 +5,6 @@
 }
 .body {
   max-width: min(78%, 540px);
-  margin: 0;
   padding: 10px 15px 9px;
   border-radius: 16px 16px 5px 16px;
   background: var(--you-bubble);
@@ -13,6 +12,9 @@
   font-size: var(--prose-size);
   line-height: 1.5;
   color: var(--t-1);
+}
+.said {
+  margin: 0;
   white-space: pre-wrap;
 }
 .queued .body {
@@ -28,9 +30,17 @@
   font-size: 11px;
   color: var(--t-3);
 }
+/* The links pasted, one under another, a little wider than the words and in the type .ch-root gives a card anywhere else. */
 .unfurl {
-  max-width: min(78%, 540px);
-  margin-top: 6px;
+  display: grid;
+  gap: 6px;
+  margin: -3px -7px;
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.said + .unfurl {
+  margin-top: 10px;
 }
 
 .attach {

@@ -298,7 +298,8 @@ A brief contains, as the role needs:
 - the task, its plan, and where the graph stands;
 - the workspace: base, branch, and the diff so far;
 - the conversation record: the user's messages verbatim, earlier agents'
-  turns, decisions, what was tried and failed, and open items;
+  turns, decisions, what was tried and failed (for a command that failed, a
+  bounded excerpt of what it printed), and open items;
 - step results and artifacts the role needs;
 - for a later review round, the earlier rounds' findings and how each was
   settled, with the lead's response and any person's decision

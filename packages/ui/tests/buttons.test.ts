@@ -27,6 +27,8 @@ const PLAIN: Readonly<Record<string, string>> = {
   /* opens and closes what is below it */
   'thread/Reasoning/Reasoning.tsx': 'the row that folds the reasoning',
   'thread/WorkedFor/WorkedFor.tsx': 'the row that folds the work',
+  'thread/WorkLine/WorkLine.tsx': 'the line that folds a round’s work; what it looked at, as thumbnails',
+  'thread/Checked/Checked.tsx': 'the row of a check, which folds what it printed',
   'thread/Tool/Tool.tsx': 'the rows that fold a call or a run of them, and the path as a link',
   'thread/Permission/Permission.tsx': 'the allowed line, which folds',
   'thread/Document/Document.tsx': 'the fold at the foot of a document',
@@ -45,6 +47,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'chrome/LoadMeter/LoadMeter.tsx': 'the meters, drawn in steps as the ring is drawn',
   'composer/Composer/Composer.tsx': 'the dictation button, drawn as your voice',
   'thread/Shots/Shots.tsx': 'a screenshot’s thumbnail',
+  'thread/Gallery/Gallery.tsx': 'a screenshot, large, which opens full size',
   'thread/Inline/Inline.tsx': 'a reference or citation inside prose',
   'thread/You/You.tsx': 'an attachment’s chip',
   'thread/Steer/Steer.tsx': 'a step’s name inside a sentence',

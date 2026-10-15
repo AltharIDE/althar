@@ -147,10 +147,14 @@ export interface Client {
   /** Whether a review of the person's team's pull request posts itself once drafted; an outside one always waits. */
   readonly setPostTeamReviews: (on: boolean) => Promise<void>
   readonly interrupt: (threadId: string) => Promise<void>
+  /** Asks the thread's agent to compact its context, after what it was told before. */
+  readonly compact: (threadId: string) => Promise<void>
   /** Stops a task: every agent on it, and the step it was on waits until it is resumed. */
   readonly stopTask: (taskId: string) => Promise<void>
   /** Whether a task's lead resolves conflicts on its own otherwise than its project says; null goes back to the project. */
   readonly setTaskResolveConflicts: (input: { readonly taskId: string; readonly resolveConflicts: boolean | null }) => Promise<void>
+  /** Allows everything its agents ask on one task, short of what its project never allows, or takes it back. */
+  readonly setTaskAllowEverything: (input: { readonly taskId: string; readonly allowEverything: boolean }) => Promise<void>
   /** Carries a stopped task on from the step it was on: with its last lead, or the agent picked. */
   readonly resumeTask: (input: {
     readonly taskId: string
@@ -464,8 +468,10 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setPostTeamReviews: (on) => command((commandId) => api.SetPostTeamReviews({ commandId, on })),
     setAgentsAtOnce: (count) => command((commandId) => api.SetAgentsAtOnce({ commandId, count })),
     interrupt: (threadId) => command((commandId) => api.Interrupt({ commandId, threadId })),
+    compact: (threadId) => command((commandId) => api.CompactContext({ commandId, threadId })),
     stopTask: (taskId) => command((commandId) => api.StopTask({ commandId, taskId })),
     setTaskResolveConflicts: (input) => command((commandId) => api.SetTaskResolveConflicts({ commandId, ...input })),
+    setTaskAllowEverything: (input) => command((commandId) => api.SetTaskAllowEverything({ commandId, ...input })),
     resumeTask: (input) => command((commandId) => api.ResumeTask({ commandId, ...input })),
     leaveOutCommits: (taskId) => command((commandId) => api.LeaveOutCommits({ commandId, taskId })),
     abandonTask: (taskId) => command((commandId) => api.AbandonTask({ commandId, taskId })),
