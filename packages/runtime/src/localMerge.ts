@@ -1,6 +1,5 @@
 import { Effect } from 'effect'
 
-import { GitFailed } from './errors'
 import { commitOf, git, gitExactly, gitOutcome, trackedStatus } from './git'
 
 /*
@@ -39,47 +38,17 @@ export type MergePlan =
   /** It can't: there's no such branch here. */
   | { readonly kind: 'missing' }
 
-/** What a worktree's record in `git worktree list --porcelain` may say, after its path. */
-const attributes = ['HEAD', 'branch', 'detached', 'bare', 'locked', 'prunable']
-
 /**
- * The worktree that has `branch` checked out in `git worktree list
- * --porcelain` output, split by `separator`, or null. As lines, a path with a
- * newline in it reads as a line no record has: undefined, since no record
- * can then be trusted to be where it seems.
+ * The working tree of `root`'s repository that has `branch` checked out, if
+ * any. Asked of the branch alone, so nothing is parsed out of a listing where
+ * a path could pass for something else: git 2.23 has it, where `worktree
+ * list -z` needs 2.36, older than some installs' system git.
  */
-export const worktreeIn = (listing: string, separator: '\0' | '\n', branch: string) => {
-  const lines = listing.split(separator)
-  if (
-    separator === '\n' &&
-    lines.some((line) => line !== '' && !line.startsWith('worktree ') && !attributes.includes(line.split(' ')[0] ?? ''))
-  )
-    return undefined
-  let path: string | null = null
-  for (const line of lines) {
-    if (line.startsWith('worktree ')) path = line.slice('worktree '.length)
-    else if (line === `branch refs/heads/${branch}`) return path
-    else if (line === '') path = null
-  }
-  return null
-}
-
-/** The working tree of `root`'s repository that has `branch` checked out, if any. */
-export const checkedOut = (root: string, branch: string): Effect.Effect<string | null, GitFailed> => {
-  const args = ['worktree', 'list', '--porcelain']
-  // -z keeps any path whole, but needs git 2.36; some installs run an older system git, so lines where it refuses.
-  return gitExactly(root, ...args, '-z').pipe(
-    Effect.map((listing) => worktreeIn(listing, '\0', branch)),
-    Effect.catch(() => Effect.map(gitExactly(root, ...args), (listing) => worktreeIn(listing, '\n', branch))),
-    Effect.flatMap((path) =>
-      path === undefined
-        ? Effect.fail(
-            new GitFailed({ args, cwd: root, stderr: 'A worktree’s path has a newline in it, so which one has the branch can’t be told.' }),
-          )
-        : Effect.succeed(path),
-    ),
-  )
-}
+export const checkedOut = (root: string, branch: string) =>
+  Effect.map(gitExactly(root, 'for-each-ref', '--format=%(worktreepath)', `refs/heads/${branch}`), (said) => {
+    const path = said.endsWith('\n') ? said.slice(0, -1) : said
+    return path === '' ? null : path
+  })
 
 const checkCheckout = (checkout: string) =>
   trackedStatus(checkout).pipe(

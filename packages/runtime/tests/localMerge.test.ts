@@ -10,7 +10,7 @@ import { SqlClient } from 'effect/sql'
 import { Changes } from '../src/Changes'
 import { coAuthorLine } from '../src/credit'
 import { NotFound } from '../src/errors'
-import { applyMerges, checkedOut, planMerge, worktreeIn } from '../src/localMerge'
+import { applyMerges, checkedOut, planMerge } from '../src/localMerge'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
@@ -404,19 +404,21 @@ describe('merging a task here', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('finds the worktree that has a branch whatever its path, and never guesses where lines can’t tell', () =>
+  it.live('finds the worktree that has a branch whatever its path', () =>
     Effect.gen(function* () {
       const root = repository()
-      git(root, 'branch', 'side')
-      // A path git allows, with an empty line inside it when listed as lines.
-      const odd = join(realpathSync(mkdtempSync(join(tmpdir(), 'althar-odd-'))), 'two\n\nlines')
-      git(root, 'worktree', 'add', '-q', odd, 'side')
-      assert.strictEqual(yield* checkedOut(root, 'side'), odd)
+      const head = git(root, 'rev-parse', 'HEAD')
+      // Paths git allows that, listed as lines, would read as an empty line, or as an empty line and a record of their own.
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-odd-')))
+      const odd = ['two\n\nlines', `ends\n\nHEAD ${head}`, 'ends in a newline\n']
+      for (const [at, name] of odd.entries()) {
+        git(root, 'branch', `side-${at}`)
+        git(root, 'worktree', 'add', '-q', join(folder, name), `side-${at}`)
+      }
+      for (const [at, name] of odd.entries()) assert.strictEqual(yield* checkedOut(root, `side-${at}`), join(folder, name))
       assert.strictEqual(yield* checkedOut(root, 'main'), realpathSync(root))
-      // Where git can't list them with -z, the same listing as lines says nothing of which has the branch.
-      const lines = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: root }).toString()
-      assert.isUndefined(worktreeIn(lines, '\n', 'side'))
-      assert.isUndefined(worktreeIn(lines, '\n', 'main'))
+      git(root, 'branch', 'free')
+      assert.isNull(yield* checkedOut(root, 'free'))
     }).pipe(Effect.provide(runtime())),
   )
 
