@@ -5,11 +5,14 @@ import { ConnectorFailed } from '../errors'
 import type {
   Account,
   ChangeRequest,
+  ChangeState,
+  ChangeToReview,
   Check,
   CodeHost,
   Comment,
   Container,
   Issue,
+  NewReview,
   Person,
   Product,
   Repository,
@@ -17,6 +20,7 @@ import type {
   Tracker,
   Verdict,
 } from '../model'
+import { leftAsItIs, noReviews, unstarted } from '../model'
 
 /*
  * A code host and tracker that lives in memory, for tests and the desktop's
@@ -37,6 +41,12 @@ export interface FakeServiceOptions {
   readonly pushUrl?: (path: ReadonlyArray<string>) => string
   /** The commit a change's branch is at on the host, as the host reads it now; without it, a name of the fake's own. */
   readonly headOf?: (number: number) => string | null
+  /** Whether a change conflicts with its target, as the host works it out now; without it, the host doesn't say. */
+  readonly conflictsOf?: (number: number) => boolean | undefined
+  /** The checks a change's commit has, by the commit, as a host runs them on each; without it, or where it says nothing, those `setChecks` gave. */
+  readonly checksFor?: (number: number, sha: string) => ReadonlyArray<Pick<Check, 'name' | 'state'> & { readonly log?: string }> | undefined
+  /** Whether the host can run a check again; it can, unless a test says. A check run again is in `reruns`. */
+  readonly reruns?: boolean
 }
 
 /** The fake's controls: what a test does as other people on the service, and what it checks afterwards. */
@@ -48,6 +58,8 @@ export interface FakeControls {
     readonly title: string
     readonly body?: string
     readonly assigned?: boolean
+    /** Where its work stands: To do unless said. */
+    readonly status?: Issue['status']
   }): Issue
   /**
    * A place issues can be filed, such as a Linear team (`{ id: 'team-1', key:
@@ -78,6 +90,8 @@ export interface FakeControls {
   failNext(method: string, reason: ConnectorFailed['reason'], retryAt?: string, status?: number): void
   /** Every change opened, with every comment on it, Althar's included. */
   readonly changes: ReadonlyArray<ChangeRequest>
+  /** The ids of the checks Althar ran again, in order. */
+  readonly reruns: ReadonlyArray<string>
   /** Every issue `create` filed, in order, as it was filed: labels and all, since the fake takes any label. */
   readonly created: ReadonlyArray<Issue>
   commentsOn(number: number): ReadonlyArray<Comment>
@@ -85,6 +99,30 @@ export interface FakeControls {
   linksOn(ref: string): ReadonlyArray<{ readonly url: string; readonly title: string }>
   /** The fork a change came from, by its path; null for one from the repository's own branch. */
   forkOf(number: number): string | null
+  /**
+   * Someone opens a change on one of the fake's repositories, as Althar
+   * reviews one it didn't open: its author one of the repository's people
+   * unless `member` says not, from a fork where `fork` names one (an empty
+   * path for a fork that is gone).
+   */
+  addPullRequest(input: {
+    readonly path: ReadonlyArray<string>
+    readonly title: string
+    readonly author: string
+    readonly body?: string
+    readonly member?: boolean
+    readonly fork?: ReadonlyArray<string>
+    readonly source?: string
+    readonly target?: string
+    readonly headSha?: string
+    readonly baseSha?: string
+    readonly state?: ChangeState
+    readonly additions?: number
+    readonly deletions?: number
+    readonly changedFiles?: number
+  }): ChangeRequest
+  /** Every review posted, in order, with the change it is on. */
+  readonly reviewsPosted: ReadonlyArray<{ readonly number: number; readonly id: string; readonly review: NewReview }>
   /** Method names, in the order they were called. */
   readonly calls: ReadonlyArray<string>
 }
@@ -110,10 +148,17 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const repositoryOf = new Map<number, string>()
   /** The fork each change came from, by number, by its path. */
   const forks = new Map<number, string>()
+  /** Changes whose author isn't one of the repository's people, by number. */
+  const outsiders = new Set<number>()
+  /** Where each change's target branch is, by number, where a test says. */
+  const bases = new Map<number, string>()
+  const posted: Array<{ readonly number: number; readonly id: string; readonly review: NewReview }> = []
   const comments = new Map<number, Array<Comment>>()
   const reviews = new Map<number, Array<Review>>()
   const checks = new Map<number, Array<Check>>()
   const logs = new Map<string, string | null>()
+  const reran: Array<string> = []
+  const starting = new Set<string>()
   const issues = new Map<string, Issue>()
   const assigned = new Set<string>()
   const issueComments = new Map<string, Array<string>>()
@@ -167,7 +212,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const service: FakeService = {
     product,
     words: product === 'gitlab' ? { noun: 'merge request', short: 'MR', prefix: '!' } : { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, links: true },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: product === 'github', links: true, starts: true },
     account: Effect.andThen(called('account'), Effect.succeed(account)),
     repository: (path) =>
       Effect.andThen(called('repository'), () => {
@@ -224,7 +269,8 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         const found = changes.find((change) => change.number === number)
         if (found === undefined) return Effect.fail(missing(`change ${number}`))
         const head = options.headOf?.(number) ?? null
-        return Effect.succeed(head === null ? found : { ...found, headSha: head })
+        const conflicts = found.state === 'open' ? options.conflictsOf?.(number) : undefined
+        return Effect.succeed({ ...found, ...(head === null ? {} : { headSha: head }), ...(conflicts === undefined ? {} : { conflicts }) })
       }),
     markReady: (_repository, change) =>
       Effect.andThen(called('markReady'), () => {
@@ -253,11 +299,35 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         const change =
           changes.find((candidate) => candidate.headSha === sha || options.headOf?.(candidate.number) === sha) ??
           changes.find((candidate) => `head-${candidate.number}` === sha)
-        return Effect.succeed(change === undefined ? [] : (checks.get(change.number) ?? []))
+        const ran = change === undefined ? undefined : options.checksFor?.(change.number, sha)
+        if (change === undefined || ran === undefined)
+          return Effect.succeed(
+            change === undefined
+              ? []
+              : (checks.get(change.number) ?? []).map((check) =>
+                  starting.delete(check.id) ? { ...check, state: 'running' as const } : check,
+                ),
+          )
+        return Effect.succeed(
+          ran.map((check, index): Check => {
+            const id = `check-${change.number}-${sha}-${index}`
+            logs.set(id, check.log ?? null)
+            // Run again, a check shows as running for a reading, as a host's does once it has started it again.
+            const again = starting.delete(id)
+            return { id, name: check.name, state: again ? 'running' : check.state, url: null, summary: null }
+          }),
+        )
       }),
     checkLog: (_repository, check) =>
       Effect.andThen(called('checkLog'), () => {
         return Effect.succeed(logs.get(check.id) ?? null)
+      }),
+    rerun: (_repository, check) =>
+      Effect.andThen(called('rerun'), () => {
+        if (options.reruns === false) return Effect.succeed(false)
+        reran.push(check.id)
+        starting.add(check.id)
+        return Effect.succeed(true)
       }),
     activity: (_repository, number, cursor) =>
       Effect.andThen(called('activity'), () => {
@@ -283,6 +353,31 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         }
         comments.set(number, [...(comments.get(number) ?? []), comment])
         return Effect.succeed(comment)
+      }),
+    changeToReview: (_repository, number) =>
+      Effect.andThen(called('changeToReview'), () => {
+        if (!service.capabilities.reviews) return Effect.fail(noReviews(product, service.words))
+        const found = changes.find((change) => change.number === number)
+        if (found === undefined) return Effect.fail(missing(`change ${number}`))
+        const fork = forks.get(number)
+        return Effect.succeed({
+          ...found,
+          member: !outsiders.has(number),
+          fork: fork === undefined ? null : fork === '' ? [] : fork.split('/'),
+          baseSha: bases.get(number) ?? null,
+        } satisfies ChangeToReview)
+      }),
+    postReview: (_repository, number, review) =>
+      Effect.andThen(called('postReview'), () => {
+        if (!service.capabilities.reviews) return Effect.fail(noReviews(product, service.words))
+        const found = changes.find((change) => change.number === number)
+        if (found === undefined) return Effect.fail(missing(`change ${number}`))
+        // As GitHub: a change merged or closed takes no review; nor a comment on a line it doesn't have.
+        if (found.state !== 'open')
+          return Effect.fail(new ConnectorFailed({ product, reason: 'rejected', status: 422, message: 'Pull request is closed' }))
+        const id = nextId()
+        posted.push({ number, id, review })
+        return Effect.succeed({ id, url: `${found.url}#pullrequestreview-${id}` })
       }),
     pushTarget: (repository) =>
       Effect.andThen(called('pushTarget'), () =>
@@ -315,6 +410,15 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       Effect.andThen(called('link'), () => {
         links.set(issue.ref, [...(links.get(issue.ref) ?? []), link])
         return Effect.void
+      }),
+    // Into In Progress from where the tracker has it, as Linear's adapter moves one.
+    start: (issue) =>
+      Effect.andThen(called('start'), () => {
+        const found = issues.get(issue.ref) ?? issue
+        if (!unstarted(found.status.category)) return Effect.succeed(leftAsItIs(found))
+        const status: Issue['status'] = { name: 'In Progress', category: 'started' }
+        issues.set(found.ref, { ...found, status, updatedAt: now() })
+        return Effect.succeed({ moved: true, status })
       }),
     containers: () => Effect.andThen(called('containers'), () => Effect.succeed(filable())),
     create: (id, draft) =>
@@ -393,7 +497,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         url: input.ref.includes('#')
           ? `https://github.com/${input.ref.replace('#', '/issues/')}`
           : `https://linear.app/fake/issue/${input.ref}/${input.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
-        status: { name: 'Todo', category: 'todo' },
+        status: input.status ?? { name: 'Todo', category: 'todo' },
         priority: input.ref.includes('#') ? null : { level: 'high', name: 'High' },
         assignees: input.assigned === false ? [] : [me],
         labels: [],
@@ -458,6 +562,9 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
         ...(retryAt === undefined ? {} : { retryAt }),
         ...(status === undefined ? {} : { status }),
       }),
+    get reruns() {
+      return reran
+    },
     get changes() {
       return [...changes]
     },
@@ -468,6 +575,37 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     issueComments: (ref) => issueComments.get(ref) ?? [],
     linksOn: (ref) => links.get(ref) ?? [],
     forkOf: (number) => forks.get(number) ?? null,
+    addPullRequest: (input) => {
+      const repository = repositories.get(input.path.join('/').toLowerCase())
+      if (repository === undefined) throw new Error(`No repository ${input.path.join('/')}`)
+      const number = changes.length + 1
+      const opened: ChangeRequest = {
+        id: `change-${number}`,
+        number,
+        title: input.title,
+        body: input.body ?? '',
+        url: `${repository.webUrl}/pull/${number}`,
+        state: input.state ?? 'open',
+        draft: false,
+        source: input.source ?? `${input.author}/change-${number}`,
+        target: input.target ?? repository.defaultBranch,
+        headSha: input.headSha ?? `head-${number}`,
+        author: person(input.author),
+        additions: input.additions ?? 58,
+        deletions: input.deletions ?? 20,
+        changedFiles: input.changedFiles ?? 4,
+        updatedAt: now(),
+      }
+      changes.push(opened)
+      repositoryOf.set(number, repository.id)
+      if (input.fork !== undefined) forks.set(number, input.fork.join('/'))
+      if (input.member === false) outsiders.add(number)
+      if (input.baseSha !== undefined) bases.set(number, input.baseSha)
+      return opened
+    },
+    get reviewsPosted() {
+      return [...posted]
+    },
     calls,
   }
   return service

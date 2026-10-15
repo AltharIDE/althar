@@ -290,6 +290,23 @@ The runtime:
 Queries return projections shaped for screens. They do not expose SQL tables or
 mutable domain objects directly. Every unbounded result is paginated.
 
+Finding a task (`SearchTasks`, and the coordinator's `find_tasks`) reads a
+full-text index kept in the store (SQLite's FTS5, ADR-035): one row of text a
+task, holding its title; what the person asked of it, as they asked it and in
+their later messages to its lead; its lead's step summaries and what it said
+it built; its pull requests' numbers, its issue's key and its branches; and
+the files its agents changed, as their tool calls name them. The runtime
+writes a task's row in the transaction that changes one of those (`Search.ts`:
+the task made or renamed, a message from the person, a step's report, a pull
+request, issue or new branch linked), so the files stand as of the lead's
+last report; tasks made before the index get their rows in the background as
+the runtime starts. Nothing reads git or a worktree to search. Each word
+typed finds the words it begins, every word must be found, and results come
+best first by bm25 (the title counting most), the most recently changed
+first among those within a tenth of each other; in one project, or every one
+not removed. Where a found task stands is read as its card's phase is, from
+the store and the agents at work.
+
 ### Change notifications
 
 Notifications tell the UI that a projection changed. They carry a resumable
@@ -341,9 +358,10 @@ an agent, Git, or a test runner. Standard input/output (`stdio`) are byte
 streams through which the runtime may send requests and receive structured
 events. Agents speak ACP over `stdio`.
 
-Bundled ACP adapters written for Node run on Electron's own Node (the Electron
-binary started with `ELECTRON_RUN_AS_NODE`), so Althar doesn't depend on a
-Node installed on the machine.
+Bundled ACP adapters written for Node run on a Node the packaged app ships
+(ADR-033), so Althar doesn't depend on a Node installed on the machine, and
+its own binary never runs as Node: its `runAsNode` fuse is off. In
+development they run on Electron's binary as Node (`ELECTRON_RUN_AS_NODE`).
 
 Starting a process is easy. Owning its complete lifecycle is the hard part.
 

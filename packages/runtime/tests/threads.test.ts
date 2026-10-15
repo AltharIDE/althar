@@ -4,7 +4,7 @@ import type { ProjectId } from '@althar/domain'
 import type { SessionEvent } from '@althar/provider-adapters'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect, Exit, Layer, Stream } from 'effect'
+import { Effect, Exit, Fiber, Layer, Scope, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Agents, WebCrypto } from '../src/Config'
@@ -13,7 +13,8 @@ import { currentBranch, defaultBranch, remoteUrls } from '../src/git'
 import { change } from '../src/records'
 import { Live } from '../src/Live'
 import { Sessions } from '../src/Sessions'
-import { addItem, recorder, transcript } from '../src/threads'
+import { Ledger } from '@althar/persistence-sqlite'
+import { addItem, betweenTurns, recorder, transcript } from '../src/threads'
 import { items, repository, runtime, task, turns, until } from './support'
 
 /** A thread with a session on it, for the recorder to write into. */
@@ -106,6 +107,115 @@ describe('the thread recorder', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('keeps what a failed command printed with its status, before the agent says anything of it', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const writer = recorder(where)
+      yield* writer.record({
+        _tag: 'ToolCall',
+        toolCallId: 'test',
+        title: 'Isolation test',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { command: 'bun test isolation' },
+      })
+      yield* writer.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'test',
+        terminal: { output: 'fixture started\nAPI_KEY=sk-canary-12345678\n' },
+      })
+      yield* writer.record({
+        _tag: 'ToolCallUpdate',
+        toolCallId: 'test',
+        terminal: { output: 'AssertionError: expected account B, received account A\n' },
+      })
+      // Nothing written while it runs.
+      assert.notProperty(
+        (yield* items(where.threadId)).find((item) => item.content.title === 'Isolation test')?.content ?? {},
+        'diagnostic',
+      )
+      yield* writer.record({ _tag: 'ToolCallUpdate', toolCallId: 'test', status: 'failed', terminal: { exit: { code: 1, signal: null } } })
+      // No message after it, and no flush: what the store has now is what a restart finds.
+      const tool = (yield* items(where.threadId)).find((item) => item.content.title === 'Isolation test')
+      assert.strictEqual(tool?.content.status, 'failed')
+      assert.deepStrictEqual(tool?.content.diagnostic, {
+        text: 'fixture started\nAPI_KEY=[REDACTED]\nAssertionError: expected account B, received account A\nexit code: 1',
+        truncated: false,
+        redacted: true,
+      })
+      const sql = yield* SqlClient.SqlClient
+      const stored = yield* sql<{ content: string }>`SELECT content FROM thread_items WHERE thread_id = ${where.threadId}`
+      assert.isFalse(stored.some((row) => row.content.includes('sk-canary')))
+      assert.isTrue(
+        (yield* transcript(where.threadId, 10_000)).text.endsWith(
+          '[tool] Isolation test (failed)\n[it printed] fixture started\nAPI_KEY=[REDACTED]\nAssertionError: expected account B, received account A\nexit code: 1',
+        ),
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('keeps what a command printed when it arrives already failed, from what came back', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      yield* recorder(where).record({
+        _tag: 'ToolCall',
+        toolCallId: 'once',
+        title: 'One-shot isolation',
+        kind: 'execute',
+        status: 'failed',
+        rawInput: { command: 'bun test isolation' },
+        rawOutput: { stderr: 'AssertionError: expected account B, received account A', exitCode: 1, fileBody: 'never kept' },
+      })
+      const tool = (yield* items(where.threadId)).find((item) => item.content.title === 'One-shot isolation')
+      assert.deepStrictEqual(tool?.content.diagnostic, {
+        text: 'AssertionError: expected account B, received account A\nexit code: 1',
+        truncated: false,
+        redacted: false,
+      })
+      // What came back is still left out, and said to be.
+      assert.notProperty(tool?.content ?? {}, 'rawOutput')
+      assert.include(tool?.content.cut as ReadonlyArray<string>, 'output')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('keeps nothing of what a command printed when it succeeded, or when it read a file', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const writer = recorder(where)
+      const run = (toolCallId: string, command: string, status: 'completed' | 'failed') =>
+        Effect.gen(function* () {
+          yield* writer.record({
+            _tag: 'ToolCall',
+            toolCallId,
+            title: command,
+            kind: 'execute',
+            status: 'in_progress',
+            rawInput: { command },
+          })
+          yield* writer.record({ _tag: 'ToolCallUpdate', toolCallId, terminal: { output: 'SECRET=hunter2\n' } })
+          yield* writer.record({
+            _tag: 'ToolCallUpdate',
+            toolCallId,
+            status,
+            terminal: { exit: { code: status === 'failed' ? 1 : 0, signal: null } },
+          })
+        })
+      yield* run('ok', 'bun test', 'completed')
+      yield* run('read', 'cat .env.local', 'failed')
+      const tools = (yield* items(where.threadId)).filter((item) => item.kind === 'tool_call')
+      assert.deepStrictEqual(
+        tools.map((item) => [item.content.status, item.content.diagnostic]),
+        [
+          ['completed', undefined],
+          ['failed', undefined],
+        ],
+      )
+      assert.isTrue(
+        (yield* transcript(where.threadId, 10_000)).text.endsWith('[tool] bun test (completed)\n[tool] cat .env.local (failed)'),
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('writes the thread as text for a new agent, keeping the most recent part that fits', () =>
     Effect.gen(function* () {
       const where = yield* place
@@ -120,7 +230,9 @@ describe('the thread recorder', () => {
       assert.isTrue(whole.text.startsWith('[codex] echo: You are working on a task'))
       assert.isTrue(whole.text.endsWith('\n[codex] first\n[tool] Read README (completed)\n[note] Plain: with detail'))
       const tail = yield* transcript(where.threadId, 30)
-      assert.deepStrictEqual(tail, { text: '[note] Plain: with detail', omitted: 3 })
+      assert.strictEqual(tail.text, '[note] Plain: with detail')
+      // What came before is counted in parts: the brief's echo, longer than the budget, is several.
+      assert.isAbove(tail.omitted, 3)
       // Steps' results and task cards are written in a line each; a card for a task that's gone, not at all.
       const { projectId } = where
       const [task] = yield* (yield* SqlClient.SqlClient)<{ id: string }>`SELECT task_id AS id FROM threads WHERE id = ${where.threadId}`
@@ -133,6 +245,56 @@ describe('the thread recorder', () => {
           '\n[review, pass] Holds.\n[task] retry-checkout: Retry checkout\n[agent] from nobody',
         ),
       )
+      // A push the lead asked for says how it stands, so the next lead doesn't ask again for what went.
+      const push = (count: number, state: string) =>
+        addItem({ projectId, threadId: where.threadId }, 'push_request', { where: 'PR #12', count, state })
+      yield* push(1, 'pushed')
+      yield* push(2, 'replaced')
+      yield* push(3, 'closed')
+      yield* push(4, 'open')
+      assert.isTrue(
+        (yield* transcript(where.threadId, 10_000)).text.endsWith(
+          [
+            '[the lead asked the person to push] 1 commit to PR #12: pushed',
+            '[the lead asked the person to push] 2 commits to PR #12: asked again later',
+            '[the lead asked the person to push] 3 commits to PR #12: not pushed: the pull request closed',
+            '[the lead asked the person to push] 4 commits to PR #12: not pushed yet',
+          ].join('\n'),
+        ),
+      )
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('reads further back, only some kinds, at most so many lines, and names the agent as asked', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const writer = recorder(where)
+      for (const text of ['one', 'two', 'three']) {
+        yield* addItem(where, 'notice', { title: `noted ${text}` })
+        yield* writer.record({ _tag: 'AgentMessage', text: `said ${text}` })
+        yield* writer.record({ _tag: 'ToolCall', toolCallId: text, title: `Read ${text}`, kind: 'read', status: 'completed' })
+      }
+      yield* writer.flush
+      // The latest part, then the part before it, by the number the first read gave.
+      const latest = yield* transcript(where.threadId, 60)
+      assert.strictEqual(latest.text, '[codex] said three\n[tool] Read three (completed)')
+      const earlier = yield* transcript(where.threadId, 60, { before: latest.omitted })
+      assert.strictEqual(earlier.text, '[tool] Read two (completed)\n[note] noted three')
+      assert.strictEqual(earlier.omitted, latest.omitted - 2)
+      // Only some kinds, the last few lines, with the agent named as it is to whoever reads it.
+      const said = yield* transcript(where.threadId, 10_000, { kinds: ['notice', 'agent_message'], last: 3, agent: 'you' })
+      assert.deepStrictEqual(said, { text: '[you] said two\n[note] noted three\n[you] said three', omitted: 4 })
+      // A line longer than the whole budget comes in parts, each read in turn, so all of it can be read back.
+      const long = `${'a'.repeat(50)} DECISION ${'b'.repeat(50)}`
+      yield* addItem(where, 'notice', { title: long })
+      const pages: Array<string> = []
+      let before: number | undefined
+      while (pages.length < 4) {
+        const page = yield* transcript(where.threadId, 40, before === undefined ? {} : { before })
+        pages.unshift(page.text)
+        before = page.omitted
+      }
+      assert.isTrue(pages.every((page) => page.length <= 40))
+      assert.strictEqual(pages.map((page) => page.replace(/^\[…\] /, '').replace(/ \[…\]$/, '')).join(''), `[note] ${long}`)
     }).pipe(Effect.provide(runtime())),
   )
 })
@@ -150,6 +312,139 @@ describe('long messages', () => {
       yield* writer.flush
       const [done] = (yield* items(where.threadId)).slice(where.before)
       assert.isTrue(String(done?.content.text).endsWith('x end'))
+    }).pipe(Effect.provide(runtime())),
+  )
+})
+
+describe('what an agent says between turns', () => {
+  const chunks = (tag: 'AgentMessage' | 'AgentThought', words: ReadonlyArray<string>, messageId?: string): ReadonlyArray<SessionEvent> =>
+    words.map((text) => ({ _tag: tag, text, ...(messageId === undefined || tag === 'AgentThought' ? {} : { messageId }) }) as SessionEvent)
+
+  const texts = (threadId: string, before: number) =>
+    items(threadId).pipe(Effect.map((all) => all.slice(before).map((item) => [item.kind, item.content.text ?? item.content.title])))
+
+  const tool: SessionEvent = { _tag: 'ToolCall', toolCallId: 'check', title: 'Run the check', kind: 'execute', status: 'in_progress' }
+
+  for (const [tag, kind] of [
+    ['AgentMessage', 'agent_message'],
+    ['AgentThought', 'agent_thought'],
+  ] as const) {
+    for (const ids of [false, true]) {
+      it.live(`keeps a ${kind} whole around a tool call, ${ids ? 'with' : 'without'} message ids`, () =>
+        Effect.gen(function* () {
+          const where = yield* place
+          const scope = yield* Scope.make()
+          const { record } = yield* betweenTurns(recorder(where), scope)
+          const run = [
+            ...chunks(tag, ['The log', " isn't", ' where I', ' expected.'], ids ? 'm1' : undefined),
+            tool,
+            ...chunks(tag, ['Coverage ', 'clears ', '90%.'], ids ? 'm2' : undefined),
+          ]
+          for (const event of run) yield* record(event)
+          yield* until(texts(where.threadId, where.before), (rows) => rows.length === 3 && rows[2]?.[1] === 'Coverage clears 90%.')
+          assert.deepStrictEqual(yield* texts(where.threadId, where.before), [
+            [kind, "The log isn't where I expected."],
+            ['tool_call', 'Run the check'],
+            [kind, 'Coverage clears 90%.'],
+          ])
+          yield* Scope.close(scope, Exit.void)
+        }).pipe(Effect.provide(runtime())),
+      )
+    }
+  }
+
+  it.live('tells two messages apart by their ids, with nothing between them', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const scope = yield* Scope.make()
+      const { record } = yield* betweenTurns(recorder(where), scope)
+      for (const event of [...chunks('AgentMessage', ['One ', 'two.'], 'a'), ...chunks('AgentMessage', ['Three ', 'four.'], 'b')])
+        yield* record(event)
+      yield* until(texts(where.threadId, where.before), (rows) => rows.length === 2 && rows[1]?.[1] === 'Three four.')
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [
+        ['agent_message', 'One two.'],
+        ['agent_message', 'Three four.'],
+      ])
+      yield* Scope.close(scope, Exit.void)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('closes a message once the agent goes quiet, and the next one is a new item', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const scope = yield* Scope.make()
+      const { record } = yield* betweenTurns(recorder(where), scope, '50 millis')
+      for (const event of chunks('AgentMessage', ['First ', 'part.'])) yield* record(event)
+      yield* Effect.sleep('300 millis')
+      for (const event of chunks('AgentMessage', ['Second.'])) yield* record(event)
+      yield* until(texts(where.threadId, where.before), (rows) => rows.length === 2)
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [
+        ['agent_message', 'First part.'],
+        ['agent_message', 'Second.'],
+      ])
+      yield* Scope.close(scope, Exit.void)
+    }).pipe(Effect.provide(runtime())),
+  )
+  it.live('keeps what was said when the scope ends before the agent goes quiet', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const scope = yield* Scope.make()
+      const { record } = yield* betweenTurns(recorder(where), scope)
+      for (const event of chunks('AgentMessage', ['Cut ', 'off ', 'soon.'])) yield* record(event)
+      yield* Scope.close(scope, Exit.void)
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [['agent_message', 'Cut off soon.']])
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  /** A ledger that takes its time to notify, so a write is under way, inside its transaction, while the test acts. */
+  const slowLedger = Effect.gen(function* () {
+    const real = yield* Ledger
+    return Ledger.of({ ...real, notify: (change) => Effect.andThen(Effect.sleep('300 millis'), real.notify(change)) })
+  })
+
+  it.live('keeps what was said when the scope ends while the quiet close is writing it', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const slow = yield* slowLedger
+      const scope = yield* Scope.make()
+      const { record } = yield* betweenTurns(recorder(where), scope, '50 millis')
+      const [last, ...before] = chunks('AgentMessage', ['Cut ', 'off ', 'mid-write.']).toReversed()
+      for (const event of before.toReversed()) yield* record(event)
+      // The timer is forked with the slow ledger, so what it writes at the end of the quiet is still under way when the scope ends.
+      if (last !== undefined) yield* Effect.provideService(record(last), Ledger, slow)
+      yield* Effect.sleep('150 millis')
+      yield* Scope.close(scope, Exit.void)
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [['agent_message', 'Cut off mid-write.']])
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('writes a message again when a write of it was cut short', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const slow = yield* slowLedger
+      const items = recorder(where)
+      for (const event of chunks('AgentMessage', ['Whole ', 'text.'])) yield* items.record(event)
+      const writing = yield* Effect.forkChild(Effect.provideService(items.flush, Ledger, slow))
+      yield* Effect.sleep('100 millis')
+      yield* Fiber.interrupt(writing)
+      yield* items.flush
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [['agent_message', 'Whole text.']])
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('closes a message when the stream is handed on, so what comes next is a new item', () =>
+    Effect.gen(function* () {
+      const where = yield* place
+      const scope = yield* Scope.make()
+      const { record, close } = yield* betweenTurns(recorder(where), scope)
+      for (const event of chunks('AgentMessage', ['Before ', 'the turn.'])) yield* record(event)
+      yield* close
+      for (const event of chunks('AgentMessage', ['After ', 'it.'])) yield* record(event)
+      yield* Scope.close(scope, Exit.void)
+      assert.deepStrictEqual(yield* texts(where.threadId, where.before), [
+        ['agent_message', 'Before the turn.'],
+        ['agent_message', 'After it.'],
+      ])
     }).pipe(Effect.provide(runtime())),
   )
 })

@@ -22,6 +22,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
+import { leftAsItIs, noReviews } from './model'
 import { answered, failedOf, probe, type Reached, reachLine, readAs, refusalOf, seenOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
@@ -81,6 +82,7 @@ const MergeAnswer = Schema.Struct({
   // A string, and "1000+" past a thousand files; said only when one merge request is read.
   changes_count: Schema.optional(Schema.NullOr(Schema.String)),
   detailed_merge_status: Schema.optional(Schema.String),
+  has_conflicts: Schema.optional(Schema.Boolean),
   head_pipeline: Schema.optional(Schema.NullOr(Pipeline)),
   updated_at: Schema.String,
 })
@@ -182,6 +184,9 @@ const filesOf = (count: string | null | undefined): number | null => {
   return Number.isNaN(files) ? null : files
 }
 
+/** The merge statuses GitLab gives while it is still working out whether a merge request can merge. */
+const CHECKING = new Set(['checking', 'unchecked', 'preparing', 'approvals_syncing'])
+
 const changeOf = (request: MergeAnswer): ChangeRequest => ({
   id: String(request.id),
   number: request.iid,
@@ -201,6 +206,12 @@ const changeOf = (request: MergeAnswer): ChangeRequest => ({
   deletions: null,
   changedFiles: filesOf(request.changes_count),
   updatedAt: request.updated_at,
+  // What its merge status says, once GitLab has worked it out; until then, `has_conflicts` may be from before the target moved.
+  ...(request.detailed_merge_status === 'conflict'
+    ? { conflicts: true }
+    : request.detailed_merge_status === undefined || CHECKING.has(request.detailed_merge_status)
+      ? {}
+      : { conflicts: request.has_conflicts === true }),
 })
 
 /**
@@ -406,7 +417,7 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
   return {
     product,
     words: { noun: 'merge request', short: 'MR', prefix: '!' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, links: false },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: false, links: false, starts: false },
     account,
     repository: (path) =>
       Effect.map(http.json(ProjectAnswer, 'GET', project(path)), (answer) => ({
@@ -524,16 +535,22 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           })),
         ]
       }),
-    checkLog: (repository, check) => {
+    checkLog: (repository, check, whole = false) => {
       const match = /^job:(\d+):(\d+)$/.exec(check.id)
       if (match === null) return Effect.succeed(null)
       return http.text(`${api}/projects/${match[1]}/jobs/${match[2]}/trace`).pipe(
-        Effect.map(tail),
+        Effect.map((log) => (whole ? log : tail(log))),
         Effect.catchIf(
           (error) => error.reason === 'not_found' || error.reason === 'forbidden',
           () => Effect.succeed(null),
         ),
       )
+    },
+    rerun: (_repository, check) => {
+      // A pipeline's job runs again as a new job, on the same commit.
+      const match = /^job:(\d+):(\d+)$/.exec(check.id)
+      if (match === null) return Effect.succeed(false)
+      return http.json(Schema.Unknown, 'POST', `${api}/projects/${match[1]}/jobs/${match[2]}/retry`).pipe(Effect.as(true))
     },
     activity: (repository, number, cursor) =>
       Effect.gen(function* () {
@@ -585,6 +602,9 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
         // Althar's own reply: whether it counts as a member's doesn't matter, it is known by its receipt.
         (note) => commentOf(repository, number, note, reply.threadId, true),
       ),
+    // Reviews of a change Althar didn't open are GitHub's alone, for now.
+    changeToReview: () => Effect.fail(noReviews(product, { noun: 'merge request', short: 'MR', prefix: '!' })),
+    postReview: () => Effect.fail(noReviews(product, { noun: 'merge request', short: 'MR', prefix: '!' })),
     pushTarget: (repository) =>
       Effect.map(options.credential, (credential) => ({
         url: `${web}/${repository.path.join('/')}.git`,
@@ -614,6 +634,8 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
       }),
     // GitLab's issues link only to issues: the merge request's "Closes #12" links the two.
     link: () => Effect.void,
+    // An issue is open or closed: a board's In progress is a label each project names as it likes, so a started one is left as it is.
+    start: (issue) => Effect.succeed(leftAsItIs(issue)),
     // The projects the account is a member of, Guest or above (a Guest may open issues), not archived, with issues on; last active first.
     containers: () =>
       Effect.map(

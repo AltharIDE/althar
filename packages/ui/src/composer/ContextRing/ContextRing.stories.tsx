@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { CODEX } from '../../fixtures/models'
 import { States, statesParameters } from '../../storybook/States'
@@ -20,11 +20,13 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+/** The keyboard opens the detail as a press does: focus moves into it. */
 export const Default: Story = {
   play: async ({ canvasElement }) => {
     await userEvent.tab()
     await expect(within(canvasElement).getByRole('button', { name: 'Context 31% used' })).toHaveFocus()
-    await waitFor(() => expect(within(document.body).getByRole('tooltip')).toBeInTheDocument())
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(within(document.body).getByRole('dialog', { name: 'Context' })).toBeInTheDocument())
   },
 }
 export const Open: Story = { args: { defaultOpen: true } }
@@ -34,6 +36,26 @@ export const NearlyFull: Story = {
 }
 /** Without a model, the numbers stand alone. */
 export const NoModel: Story = { args: { model: undefined, used: 40, defaultOpen: true } }
+
+/** Pointed at, the detail opens with Compact under the numbers, which has the agent sum up what it holds; focus stays where it was. */
+export const WithCompact: Story = {
+  args: { used: 372, onCompact: fn() },
+  play: async ({ args, canvasElement }) => {
+    const ring = within(canvasElement).getByRole('button', { name: 'Context 93% used' })
+    await userEvent.hover(ring)
+    const panel = await within(document.body).findByRole('dialog', { name: 'Context' })
+    await expect(ring).not.toHaveFocus()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Compact' }))
+    await expect(args.onCompact).toHaveBeenCalledOnce()
+  },
+}
+/** Asked for and not yet done: Compact is off, and says so. */
+export const Compacting: Story = {
+  args: { used: 372, onCompact: fn(), compacting: true, defaultOpen: true },
+  play: async () => {
+    await expect(within(document.body).getByRole('button', { name: 'Compacting…' })).toBeDisabled()
+  },
+}
 
 export const AllStates: Story = {
   parameters: statesParameters,

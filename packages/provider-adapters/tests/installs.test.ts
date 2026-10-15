@@ -1,7 +1,9 @@
+import { existsSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
 
 import { locate, namesOf, programName, quoted, usingLocated, usualDirs } from '../src/installs'
-import { agents, bundledClaude, isMusl, type LaunchSpec, type OutOnDevice } from '../src/registry'
+import { agents, bundledClaude, bundledCodex, isMusl, type LaunchSpec, type OutOnDevice } from '../src/registry'
 
 /* Finding an agent's command, on a Mac, Windows or Linux: the person's own first, then Althar's copies. */
 
@@ -150,9 +152,31 @@ describe('finding an agent’s command', () => {
     expect(pointed.signIn.login).toBe('/app/claude auth login')
   })
 
+  it('names a copy inside the app’s sandbox through the app, so the person’s own terminal can run the sign-in', () => {
+    // The bundled copy lives under /app, which exists only inside a Flatpak: a host terminal reaches it through the app.
+    const bundled = usingLocated(agents['claude-code'], () => ({ command: '/app/claude', whose: 'bundled' }), 'dev.althar.app')
+    expect(bundled.signIn.login).toBe('flatpak run --command=/app/claude dev.althar.app auth login')
+    // The person's own copy, and one Althar downloaded under the profile, are paths their terminal already reaches.
+    const theirs = usingLocated(agents['claude-code'], () => ({ command: '/usr/bin/claude', whose: 'theirs' }), 'dev.althar.app')
+    expect(theirs.signIn.login).toBe('/usr/bin/claude auth login')
+    const downloaded = usingLocated(
+      agents['claude-code'],
+      () => ({ command: '/home/me/.var/app/dev.althar.app/data/althar/agents/claude-code/current/claude', whose: 'althar' }),
+      'dev.althar.app',
+    )
+    expect(downloaded.signIn.login).toBe('/home/me/.var/app/dev.althar.app/data/althar/agents/claude-code/current/claude auth login')
+  })
+
   it('finds the Claude Code the Agent SDK ships for this computer, and none for one it has no build for', () => {
     expect(bundledClaude()).toMatch(/claude-agent-sdk-[a-z0-9-]+\/claude(\.exe)?$/)
     expect(bundledClaude('plan9', 'mips')).toBeNull()
     expect(isMusl('darwin')).toBe(false)
+  })
+
+  it('finds the Codex its adapter ships as its own program, which needs no Node on the PATH', () => {
+    const codex = bundledCodex()
+    expect(codex).toMatch(/\/vendor\/[a-z0-9_-]+\/bin\/codex(\.exe)?$/)
+    expect(existsSync(codex ?? '')).toBe(true)
+    expect(bundledCodex('plan9', 'mips')).toBeNull()
   })
 })

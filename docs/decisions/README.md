@@ -37,3 +37,15 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [027](027-what-the-flatpak-reaches.md) | What the Flatpak reaches, and what it does not |
 | [028](028-linux-windows-packages-and-the-keyring.md) | Linux windows, packages and the keyring |
 | [029](029-the-load-read-when-asked.md) | How hard the computer works is read by the runtime, only while a window shows it |
+| [030](030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md) | Where the project says so, the lead resolves a conflict unasked, and Althar pushes the merge |
+| [031](031-coordinator-handed-over-before-it-fills.md) | Althar hands the coordinator to a fresh session before its context fills, and keeps the project's notes |
+| [032](032-agents-at-once-on-this-machine.md) | A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn |
+| [033](033-adapters-on-a-node-of-their-own.md) | The agent adapters run on a Node the app ships, and Althar's binary never runs as Node |
+| [034](034-a-task-goes-back-to-work-and-ships-again.md) | A task goes back to work whenever its lead does, and ships again in a pull request of its own |
+| [035](035-a-task-s-kind-is-read-from-what-it-has.md) | A task's kind is read from what it has, and its card has nothing to press |
+| [036](036-usage-data-from-the-main-process.md) | Anonymous usage data goes from the main process, named events only |
+| [037](037-what-the-person-does-goes-first.md) | What the person does goes first, a task keeps its place between its steps, and new work waits |
+| [038](038-a-lead-starts-afresh-at-a-break.md) | A task's lead starts afresh before its context grows large, and at a break in its work |
+| [039](039-the-person-compacts-an-agent-s-context.md) | The person can have an agent compact its context, at once, with the agent's own command |
+| [040](040-a-change-reaches-the-person-green.md) | Until the person has looked, a change's checks are Althar's to see through |
+| [041](041-what-failed-said-in-full.md) | What failed is said in full: a check run again once, its whole log on request, and the checks Althar can't see |

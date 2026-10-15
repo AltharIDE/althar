@@ -4,6 +4,7 @@ import { Layer } from 'effect'
 import { Accounts } from './Accounts'
 import { Artifacts } from './Artifacts'
 import { AccountSignIns } from './AccountSignIns'
+import { Busy } from './Busy'
 import { Changes } from './Changes'
 import { Agents, Connectors, RuntimeConfig, type RuntimeOptions, WebCrypto } from './Config'
 import { Connections } from './Connections'
@@ -21,10 +22,13 @@ import { Policies } from './Policies'
 import { Projects } from './Projects'
 import { Coordinator } from './Coordinator'
 import { Plans } from './Plans'
+import { Reviews } from './Reviews'
 import { Runs } from './Runs'
+import { fillIndex } from './Search'
 import { Tasks } from './Tasks'
 import { Secrets } from './Secrets'
 import { Sessions } from './Sessions'
+import { Setups } from './Setups'
 import { Limits } from './Limits'
 import { ModelFacts } from './ModelFacts'
 import { Models } from './Models'
@@ -81,19 +85,22 @@ export const layer = (options: RuntimeLayerOptions) => {
     ),
   )
   const judging = PermissionJudge.layer.pipe(Layer.provideMerge(able))
+  // A task's worktrees are set up as they are made, and its lead's first turn waits for them.
   const core = Layer.mergeAll(Projects.layer, Sessions.layer, Launches.layer).pipe(
-    Layer.provideMerge(Layer.mergeAll(Permissions.layer, Questions.layer).pipe(Layer.provideMerge(judging))),
+    Layer.provideMerge(Layer.mergeAll(Permissions.layer, Questions.layer, Setups.layer).pipe(Layer.provideMerge(judging))),
   )
-  // A task's pull request and issue, and the issues the coordinator drafts, through the person's connections to code hosts and trackers.
-  const linked = Layer.mergeAll(Changes.layer, Issues.layer, IssueDrafts.layer).pipe(
-    Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(core))),
+  // How many tasks are at work at once on this machine, and what waits for a place among them.
+  const busy = Busy.layer.pipe(Layer.provideMerge(core))
+  // A task's pull request and issue, the issues the coordinator drafts and the reviews leads draft, through the person's connections to code hosts and trackers.
+  const linked = Layer.mergeAll(Changes.layer, Issues.layer, IssueDrafts.layer, Reviews.layer).pipe(
+    Layer.provideMerge(Connections.layer.pipe(Layer.provideMerge(busy))),
   )
   // Runs drive a task's steps; plans start runs when their time comes; the person steers a task's course; the coordinator plans tasks and passes messages on.
   const work = Tasks.layer.pipe(Layer.provideMerge(Plans.layer.pipe(Layer.provideMerge(Runs.layer.pipe(Layer.provideMerge(linked))))))
   // Signing accounts in inside Althar, with each agent's own login (ADR-012).
   const signing = AccountSignIns.layer.pipe(Layer.provideMerge(work))
-  // How hard this computer works, and each piece of work's part, while a window shows it.
-  return Layer.mergeAll(Coordinator.layer, MachineLoad.layer).pipe(Layer.provideMerge(signing))
+  // How hard this computer works, and each piece of work's part, while a window shows it. Tasks made before search, indexed.
+  return Layer.mergeAll(Coordinator.layer, MachineLoad.layer, fillIndex).pipe(Layer.provideMerge(signing))
 }
 
 export { envelope } from './envelope'

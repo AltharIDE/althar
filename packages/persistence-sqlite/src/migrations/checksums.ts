@@ -26,4 +26,13 @@ export const checksums: Readonly<Record<string, string>> = {
   '0020_issue_drafts': '060cf883456f697c925ccc0befd5c87d1ce01901c5a2a4f87c65975aa6a1bd98',
   '0021_input_images': '048b5727048aae868c44a6f3a7640775f2311fd3852bdfd81e414aa857b4a82b',
   '0022_connection_cli': 'a2e1df1a078b718b1c1c24bf23f3e93ad97407339a670cd2a70cdf80477f26ae',
+  '0023_worktree_setup': 'ef93df218253666f4a3b019511eb45a1caa64d8fb213e841738e7b47014d7eca',
+  '0024_conflict_resolutions': '750de1a3f6049f24a5b71a23d5f29fede532aeb5f3baec767484a3b7645925d5',
+  '0025_push_requests': '043e2c48c3fa275cc8b62b52219e44347ae8a1e6098dd01c42d12b35edb7ca2e',
+  '0026_project_notes': '194f17139bc027eb2a4433ee8249a3b464c8e1d3c22a97bceea3797b95e668c8',
+  '0027_agents_at_once': '19be6d16c97bcfc46c09c029cc423d89a4ceee687a36bca612edfd26d4d17eb0',
+  '0028_task_seen': '3298117c6682066725cc471f1dcae3c26baf74bd6af623e42f74295a2109257a',
+  '0029_review_drafts': '8c081396ca8e55ae5fa75d2fc4921b6d05b13ca4bdb3ca0cee4cd428d132868f',
+  '0030_task_search': '115fda4ca39ce227de0b386dfc3f5f832ff8f0255ffad879079ca2b5457728f2',
+  '0031_branch_on_first_write': '6f74ce130bd700d9f703fa1b3d0e98532d37b9557e91b8ebe1b2d6a017540c87',
 }

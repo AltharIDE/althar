@@ -50,7 +50,13 @@
   grid-area: 1 / 1;
 }
 
+/* Not stretched to the row: the words arriving can be taller than the text, and a stretched field measures itself as tall as they are, then keeps that height once they are gone. */
+.field > textarea {
+  align-self: start;
+}
+
 .interim {
+  position: relative;
   max-height: 200px;
   overflow: hidden;
   padding: 1px 4px 0 1px;
@@ -70,6 +76,8 @@
 .composer textarea.under {
   color: transparent;
   caret-color: var(--t-1);
+  /* the overlay scrolls while words arrive; the field stays still under it, so the two stay letter for letter */
+  overflow: hidden;
 }
 
 /* what you sent while it worked, above the field, in order */

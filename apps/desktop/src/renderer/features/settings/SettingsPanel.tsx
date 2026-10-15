@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 
-import type { AgentStatus, ConnectionList } from '@althar/contracts'
+import { type AgentStatus, type ConnectionList, MOST_AT_ONCE } from '@althar/contracts'
 import {
   type AgentGlance,
+  AgentsAtOnce,
   type AgentTab,
   AgentInstall,
   AgentTabList,
@@ -42,6 +43,7 @@ import {
   SettingSwitch,
   Switch,
   UpdateReady,
+  UsageData,
 } from '@althar/ui'
 
 import altharFace from '../../../../resources/faces/althar-ai.svg'
@@ -57,6 +59,7 @@ import { type UpdateModel, useUpdate } from '../../shared/useUpdate'
 import { type EdgeGlance, EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { type PreferencesModel, usePreferences } from '../../shared/usePreferences'
 import { productBrand, productName } from '../../shared/products'
+import { useServices } from '../../data/services'
 import { clock } from '../../shared/time'
 import { AgentAccounts } from '../accounts/AgentAccounts'
 import { type AccountSignInModel, useAccountSignIn } from '../accounts/useAccountSignIn'
@@ -71,20 +74,24 @@ import s from './Settings.module.css'
 import { type AppIconModel, useAppIcon } from './useAppIcon'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { type CoAuthorModel, useCoAuthor } from './useCoAuthor'
+import { type AgentsAtOnceModel, useAgentsAtOnce } from './useAgentsAtOnce'
+import { type PostTeamReviewsModel, usePostTeamReviews } from './usePostTeamReviews'
 
 /*
  * Settings, as a panel from the home's bar, over the home: the kit's Control
  * Center, each part as large as it matters. Round switches across the top,
  * for keeping the Mac awake while work runs and for notifications, each
- * opening out to the rest of its settings: on battery too and the editor
- * files open in, and which notifications, the Dock's count and a sound.
+ * opening out to the rest of its settings: on battery too, how many agents
+ * work at once on this Mac and why, and the editor files open in; and which
+ * notifications, the Dock's count and a sound.
  * Under them the agents, large, each with a word on where it stands; the
  * code hosts and trackers, tall, by their marks, with what needs the person;
  * and, small, where Althar shows while you're in another app, on every
  * system, and the app's icon where there is a Dock. Althar as co-author is
  * the least of them: a quiet link in the foot, beside which Althar this is,
- * with its release notes, and a newer one ready to install. Any opens
- * out in place, as wide as it needs, and steps back to where it was.
+ * with its release notes, a newer one ready to install, and usage data,
+ * with what it sends and never sends. Any opens out in place, as wide as it
+ * needs, and steps back to where it was.
  * Connecting a code host or tracker narrows the panel to a sign-in card, a
  * step at a time, and comes back to the list connected. It is calm: nothing
  * in it says what is running.
@@ -131,6 +138,16 @@ export const text = {
   withSound: 'With sound',
   awakeTitle: `Keep ${device.this} awake while work runs`,
   awakeNote: `Work stops when ${device.the} sleeps. The display can still sleep.`,
+  atOnceNote: (n: number, { count, memory, cores }: { count: number; memory: number; cores: number }) => {
+    if (n === count) return `${n}: ${device.this} has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`
+    if (n === 1) return `1: one at a time. The calmest ${device.this} can be.`
+    if (n < count) return `${n}: fewer than ${device.this} could carry.`
+    if (n <= count + 2) return `${n}: a little more than ${device.this}’s ${memory} GB suggests. Tests may slow down.`
+    return `${n}: well past what ${device.this}’s ${memory} GB suggests. Expect it to run hot.`
+  },
+  atOnceMark: ({ count }: { count: number }) => `${count} · ${device.this}`,
+  postTeamTitle: 'Post reviews of my team’s pull requests without asking',
+  postTeamNote: 'As soon as a review’s lead drafts one. A review of a pull request from outside the team always waits for you to post it.',
   loadTitle: `Show how hard ${device.this} works`,
   loadNote: 'CPU and memory in the bar, and how much of each Althar’s work uses.',
   badge: `Count them on ${device.count ?? 'the icon'}`,
@@ -142,6 +159,7 @@ export const text = {
   examples: 'With nothing under way yet, here is how a busy moment would look.',
   notifyNote: 'Only while Althar isn’t in front. Never for progress.',
   preferenceFailed: 'That couldn’t be kept. Try again.',
+  usage: 'Usage data',
 }
 
 /** The notification switches as the kit shows them, from the preferences as kept. */
@@ -203,7 +221,7 @@ export const hostsLineOf = (list: ConnectionList): { readonly line: string; read
   return list.connections.length === 0 ? null : { line: text.connected(list.connections.length) }
 }
 
-type Showing = 'all' | 'agents' | 'connections' | 'connect' | 'coauthor' | 'icon' | 'edge' | 'mac' | 'notify'
+type Showing = 'all' | 'agents' | 'connections' | 'connect' | 'coauthor' | 'icon' | 'edge' | 'mac' | 'notify' | 'usage'
 
 /** How wide the panel is for what is open in it: the agents, the code hosts, co-author and the edge need the room; a walk in is a card. 440 at rest. */
 const WIDTHS: Partial<Record<Showing, number>> = { agents: 720, connections: 800, connect: 480, coauthor: 600, edge: 600 }
@@ -227,7 +245,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
       appIcon={useAppIcon()}
       edge={useEdgePlace(props.open)}
       coAuthor={useCoAuthor()}
+      atOnce={useAgentsAtOnce()}
+      postTeamReviews={usePostTeamReviews()}
       preferences={usePreferences()}
+      doNotTrack={useServices().host.doNotTrack === true}
       editors={useEditorList()}
       pictures={useEditorPictures()}
       sounds={useSounds()}
@@ -243,7 +264,10 @@ export function SettingsView({
   appIcon,
   edge,
   coAuthor,
+  atOnce,
+  postTeamReviews = null,
   preferences: kept,
+  doNotTrack = false,
   editors,
   pictures,
   sounds,
@@ -258,7 +282,13 @@ export function SettingsView({
   edge: EdgePlaceModel
   /** Null until the settings are read. */
   coAuthor: CoAuthorModel | null
+  /** How many agents work at once on this Mac, and why; null until the settings are read. */
+  atOnce: AgentsAtOnceModel | null
+  /** Whether a review of the team's pull request posts itself once drafted; null until the settings are read. */
+  postTeamReviews?: PostTeamReviewsModel | null
   preferences: PreferencesModel
+  /** DO_NOT_TRACK is set where Althar started: usage data is off, whatever its switch says. */
+  doNotTrack?: boolean
   editors: ReadonlyArray<{ readonly id: string; readonly name: string }>
   /** Each editor's icon by its id, as they come. */
   pictures: Readonly<Record<string, string>>
@@ -420,6 +450,12 @@ export function SettingsView({
               <AppVersion version={start.status.appVersion} notes={notesOf(start.status.appVersion)} text={{ name: text.version }} />
             )}
             {update !== undefined && update.ready !== null && <UpdateReady {...update.ready} />}
+            <ControlLink
+              title={text.usage}
+              picture={<Icon name="load" size={13} />}
+              off={!preferences.usageData || doNotTrack}
+              onClick={() => setShowing('usage')}
+            />
             {coAuthor !== null && (
               <ControlLink
                 title={text.coAuthor}
@@ -568,6 +604,25 @@ export function SettingsView({
                 onBatteryChange={(on) => set('awakeOnBattery', on)}
                 text={{ title: text.awakeTitle, note: text.awakeNote }}
               />
+              {atOnce !== null && (
+                <AgentsAtOnce
+                  count={atOnce.atOnce.count}
+                  own={atOnce.atOnce.own !== null}
+                  machine={atOnce.atOnce.machine}
+                  most={MOST_AT_ONCE}
+                  onChange={atOnce.set}
+                  text={{ note: text.atOnceNote, mark: text.atOnceMark }}
+                />
+              )}
+              {postTeamReviews !== null && (
+                <SettingSwitch
+                  title={text.postTeamTitle}
+                  note={text.postTeamNote}
+                  glyph={<Icon name="pr" size={15} />}
+                  checked={postTeamReviews.on}
+                  onChange={postTeamReviews.set}
+                />
+              )}
               <SettingSwitch
                 title={text.loadTitle}
                 note={text.loadNote}
@@ -588,6 +643,11 @@ export function SettingsView({
               )}
             </SettingList>
             {failed}
+            {(atOnce?.failed === true || postTeamReviews?.failed === true) && (
+              <p role="alert" className={s.failed}>
+                {text.preferenceFailed}
+              </p>
+            )}
           </ControlSheet>
         </ControlDetail>
       )}
@@ -613,6 +673,16 @@ export function SettingsView({
                   text={{ note: text.soundNote }}
                 />
               )}
+            </SettingList>
+            {failed}
+          </ControlSheet>
+        </ControlDetail>
+      )}
+      {showing === 'usage' && (
+        <ControlDetail title={text.usage} onBack={all}>
+          <ControlSheet>
+            <SettingList>
+              <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={doNotTrack} />
             </SettingList>
             {failed}
           </ControlSheet>

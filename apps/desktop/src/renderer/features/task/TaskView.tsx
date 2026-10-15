@@ -19,8 +19,11 @@ import {
   Running,
   TaskFace,
   TaskHeader,
+  ReachLine,
+  type TaskConflicts,
   TaskMenu,
   TaskStatus,
+  Finished,
   Thread,
   ThreadDivider,
   ThreadShellProvider,
@@ -29,9 +32,10 @@ import {
   TitleBar,
 } from '@althar/ui'
 
-import { waitsWords } from '../../shared/agents'
+import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
+import { Holders } from '../../shared/Holders'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
@@ -45,14 +49,18 @@ import { stepNames, stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
+import { taskEvidence } from '../../shared/evidence'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, takesImages, useImages } from '../../shared/useImages'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
+import { PushRequestOf } from '../../shared/PushRequestOf'
 import { behindText, listeningOf, useHeard } from './behind'
 import { PermissionCalls } from './PermissionCall'
+import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
+import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { StuckCall } from './StuckCall'
 import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
@@ -81,6 +89,8 @@ type Face = 'talk' | 'out'
 
 export const text = {
   thread: 'Thread',
+  /** The sentence under a review's header: what its lead can reach. */
+  reach: 'What this review’s lead can reach',
   noLead: 'No lead yet',
   lead: 'Lead',
   placeholderBusy: 'Add to the queue, or interrupt the lead',
@@ -94,13 +104,15 @@ export const text = {
   resolve: (conflicts: ReadonlyArray<{ readonly name: string | null; readonly branch: string; readonly files: string }>) => {
     const [only] = conflicts
     if (conflicts.length === 1 && only !== undefined && only.name === null)
-      return `${only.branch} has moved on, and merging this task's branch into it conflicts in ${only.files}. Bring the branch up to date: merge ${only.branch} into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Then say it's ready to merge again.`
+      return `${only.branch} has moved on, and merging this task's branch into it conflicts in ${only.files}. Bring the branch up to date: merge ${only.branch} into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Merge, don't rebase: a branch that was pushed can't be rewritten. Then say it's ready to merge again.`
     const where = conflicts.map((one) => `in ${one.name ?? 'the repository'}, ${one.branch} conflicts in ${one.files}`).join('; ')
-    return `The default branches have moved on, and merging this task's branches into them conflicts: ${where}. Bring each branch up to date: merge its default branch into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Then say it's ready to merge again.`
+    return `The default branches have moved on, and merging this task's branches into them conflicts: ${where}. Bring each branch up to date: merge its default branch into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Merge, don't rebase: a branch that was pushed can't be rewritten. Then say it's ready to merge again.`
   },
   working: 'Working',
   needsYou: 'Needs you',
   ready: 'Ready for you',
+  /** A review of someone else's pull request, drafted: the person's to post. */
+  drafted: 'Review drafted',
   done: 'Done',
   abandoned: 'Abandoned',
   idle: 'Idle',
@@ -128,6 +140,7 @@ export const text = {
 /**
  * Where a task stands, for its header: the step it is on, by what it does
  * there; a step held for a usage limit says whom it waits for, and until when;
+ * one waiting for a free agent, that every agent this computer runs at once is busy;
  * ready, it waits on the person to accept it.
  */
 export const statusOf = (
@@ -135,10 +148,17 @@ export const statusOf = (
   agentName: (id: string) => string = (id) => id,
 ): { readonly status: TaskStatus; readonly state: string } => {
   if (snapshot.attention.length > 0) return { status: TaskStatus.Yours, state: text.needsYou }
-  const { waits, phase, step } = snapshot.task
+  const { waits, queued, phase, step } = snapshot.task
   if (waits !== null) return { status: TaskStatus.Paused, state: waitsWords(agentName(waits.agentId), clock(waits.until)) }
-  const doing = step === null ? undefined : stepText.now[step]
+  if (queued !== null) return { status: TaskStatus.Queued, state: queuedWords(queued) }
+  // A round of work after its plan is its lead following up, as the person asked (ADR-034).
+  const doing =
+    step === null ? undefined : step === 'implement' && snapshot.task.followUp === true ? stepText.followingUp : stepText.now[step]
   if (snapshot.session?.turnRunning === true) return { status: TaskStatus.Running, state: doing ?? text.working }
+  // Ready, but its lead couldn't resolve a conflict with its default branch: it needs the person before it can be accepted.
+  if (phase === 'ready' && snapshot.task.handedBack != null) return { status: TaskStatus.Yours, state: text.needsYou }
+  // A review drafted is the person's to post (DEV-96).
+  if (phase === 'ready' && snapshot.task.review != null) return { status: TaskStatus.Yours, state: text.drafted }
   // A run that passed review is ready, whatever its lead is doing now: accepting it is the person's.
   if (phase === 'ready') return { status: TaskStatus.Yours, state: text.ready }
   // Abandoned, it says so in place of where it stood, as stopped does.
@@ -182,6 +202,7 @@ export const sinceOf = (snapshot: ThreadSnapshot, now: string): string | null =>
     return settledAt === null
       ? null
       : (snapshot.task.state === 'abandoned' ? text.since.abandoned : text.since.done)(ago(settledAt, new Date(now)))
+  if (phase === 'ready' && snapshot.task.handedBack != null) return null
   if (phase === 'ready') {
     const reported = snapshot.items.findLast((item) => item.kind === 'step_result')
     return reported === undefined ? null : text.since.ready(ago(reported.createdAt, new Date(now)))
@@ -192,7 +213,10 @@ export const sinceOf = (snapshot: ThreadSnapshot, now: string): string | null =>
   }
   if (step === null || stepAt === null) return null
   // By the step's name, as its track says it: settling a review is part of the review.
-  const [name] = stepNames([{ key: step === 'implement' ? 'implement' : 'review', agentId: '', model: null, skipped: false }])
+  const [name] = stepNames(
+    [{ key: step === 'implement' ? 'implement' : 'review', agentId: '', model: null, skipped: false }],
+    snapshot.task.followUp === true,
+  )
   return name === undefined ? null : text.since.step(name.toLowerCase(), running(stepAt, now))
 }
 
@@ -208,6 +232,12 @@ const typing = (event: KeyboardEvent) => {
 }
 
 const noLead: ModelInfo = { id: 'none', name: text.noLead, short: text.noLead, runtime: '', efforts: [] }
+
+/** The task's own say on its lead resolving conflicts, as its menu offers it: none goes by the project. */
+const conflictsChoice = (own: boolean | null): TaskConflicts => (own === null ? 'project' : own ? 'on' : 'off')
+
+/** How long a title may be, as the runtime keeps it. */
+const TITLE_LENGTH = 60
 
 /** The line of a file's first change, where its diff is read: for an editor to open at. */
 const firstChange = (view: FileView): number | undefined => {
@@ -232,6 +262,8 @@ export function TaskView({
   // Images to send with what the person says, and which agents take them.
   const images = useImages()
   const models = useModels()
+  // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
+  const postsTeamReviews = usePostTeamReviews()?.on === true
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while a lead is on the task: it takes over with what the person says next.
   const [handover, setHandover] = useState<Choice | null>(null)
@@ -239,6 +271,8 @@ export function TaskView({
   const [connecting, setConnecting] = useState(false)
   // Abandoning it asks first, saying what happens to its worktree and branch.
   const [abandoning, setAbandoning] = useState(false)
+  // Whether its title is a field, from its menu's Rename or from pressing the title.
+  const [renaming, setRenaming] = useState(false)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
   const [face, setFace] = useState<Face | null>(null)
   // Ready, or merged here with its remote still to have it, it opens on what it made: there is something there to do.
@@ -355,7 +389,8 @@ export function TaskView({
             text: snapshot.task.request,
             at: snapshot.task.startedAt === null ? '' : ago(snapshot.task.startedAt),
             delivery: Delivery.Delivered,
-            links: [],
+            // A review's thread opens with the pull request it reviews, under what the person asked.
+            links: snapshot.task.review == null ? [] : [reviewedUnfurl(snapshot.task.review)],
             pictures: [],
           },
         ]),
@@ -366,6 +401,9 @@ export function TaskView({
       now,
     ),
   ]
+  // What the task built, as its lead last said it, closes its thread once no step is under way, with what its steps showed gathered under it.
+  const finished = taskEvidence(snapshot.items, snapshot.reports)
+  const closing = finished.built !== null && !busy && snapshot.task.step === null && snapshot.task.phase !== 'waiting'
   // What each document was last changed by, so one open beside the thread follows its edits.
   const versionOf = documentVersions(
     blocks.flatMap((block) => (block.kind === 'turn' ? block.parts : [])),
@@ -459,10 +497,12 @@ export function TaskView({
         />
       )}
       <TaskMenu
+        onRename={() => setRenaming(true)}
         // What it built runs with no agent, where its repository says how.
         {...(snapshot.task.runCommand === null ? {} : { run: { command: snapshot.task.runCommand, onRun: () => void model.runProject() } })}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
+        {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
         {...(can('stop') ? { onStop: () => void model.stop() } : {})}
         {...(can('resume') ? { onResume: () => void model.resume() } : {})}
         {...(can('abandon')
@@ -474,8 +514,18 @@ export function TaskView({
             }
           : {})}
         {...(can('reopen') ? { onReopen: () => void model.reopen() } : {})}
-        // Its folder opens in the editor files open in, once it has a worktree.
-        {...(snapshot.task.branch === null || editor === undefined
+        // Whether its lead resolves a conflict unasked, until it settles: as its project says, or otherwise.
+        {...(snapshot.task.phase !== 'settled'
+          ? {
+              conflicts: {
+                choice: conflictsChoice(snapshot.task.resolveConflicts.task),
+                project: snapshot.task.resolveConflicts.project,
+                onChange: (choice: TaskConflicts) => void model.setResolveConflicts(choice === 'project' ? null : choice === 'on'),
+              },
+            }
+          : {})}
+        // Its folder opens in the editor files open in, once it has a worktree: a plain task's has no branch, but is there.
+        {...(snapshot.task.worktree === null || editor === undefined
           ? {}
           : { onOpen: () => editors.open(editor.id), editor: editor.name, text: { open: openInText.in } })}
       />
@@ -490,6 +540,7 @@ export function TaskView({
         </p>
       )}
       {session === null && model.agentsKnown && model.agents.length === 0 && <p className={s.handover}>{text.needsAgent}</p>}
+      <Holders holders={snapshot.task.queued?.holders} onStop={(holder, id) => void model.stopHolding(holder, id)} />
       {waiting !== null && (
         <p className={s.handover}>
           {text.handingOver(named(waiting.agentId, waiting.model).name, lead.name)}{' '}
@@ -531,7 +582,7 @@ export function TaskView({
         onEditQueued={(id) => void edit(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         placeholder={busy ? text.placeholderBusy : text.placeholder(session?.agentName ?? agentName(chosen?.agentId ?? null))}
-        meter={contextMeter(session, named)}
+        meter={contextMeter(session, named, model.compact)}
         // Another agent's model hands the task to that agent.
         picker={
           model.agents.length > 0 &&
@@ -564,7 +615,12 @@ export function TaskView({
             {...(snapshot.task.branch === null ? {} : { branch: snapshot.task.branch })}
             {...(since === null ? {} : { since })}
             {...(elapsed === null ? {} : { elapsed })}
-            steps={trackFor(snapshot.task.steps, snapshot.task.step, snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled')}
+            steps={trackFor(
+              snapshot.task.steps,
+              snapshot.task.step,
+              snapshot.task.phase === 'ready' || snapshot.task.phase === 'settled',
+              snapshot.task.followUp === true,
+            )}
             faces={(['talk', 'out'] as const).map((value) => ({ value, label: text.faces[value], kbd: text.facesKbd[value] }))}
             face={shown}
             onFace={setFace}
@@ -572,36 +628,61 @@ export function TaskView({
           />
         }
       >
-        <BackCrumb to={snapshot.project.name} kbd="esc" title={snapshot.task.title} titleLevel={1} onBack={onBack} />
+        <BackCrumb
+          to={snapshot.project.name}
+          kbd="esc"
+          title={snapshot.task.title}
+          titleLevel={1}
+          maxLength={TITLE_LENGTH}
+          editing={renaming}
+          onEditingChange={setRenaming}
+          onRename={(title) => void model.rename(title)}
+          onBack={onBack}
+        />
       </TitleBar>
+      {/* What a review's lead can reach, in a sentence under the header. */}
+      {snapshot.task.review != null && (
+        <ReachLine className={s.reach} phrases={reachOf(snapshot.task.review, postsTeamReviews)} aria-label={text.reach} />
+      )}
       {shown === 'out' && !hasOutputs(snapshot) ? (
         <NoOutputsView snapshot={snapshot} lead={lead.name} />
       ) : shown === 'out' ? (
         <div className={connecting ? s.withPanel : s.outputsFace}>
-          <Outputs
-            snapshot={snapshot}
-            lead={lead}
-            pending={model.pending}
-            doing={model.doing}
-            error={model.error}
-            onAccept={(changes) => void model.accept(changes)}
-            onMergeHere={() => void model.mergeHere()}
-            onOpenChange={() => void model.openChange()}
-            onPush={(head, url) => void model.push(head, url)}
-            onMarkReady={(url) => void model.markReady(url)}
-            // Sending it back is a note to its lead, which starts it again if it stopped.
-            onSendBack={(note) => send(note, false)}
-            onOpenFile={changes.show}
-            conflict={model.conflict}
-            onPushHere={() => void model.pushHere()}
-            onPushBranch={() => void model.pushBranch()}
-            onConnect={() => setConnecting(true)}
-            // So is a conflict to settle, in words the lead acts on.
-            onResolve={() => {
-              model.dismissConflict()
-              void send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
-            }}
-          />
+          {/* Its evidence's screenshots open in the lightbox, as the thread's pictures do. */}
+          <ThreadShellProvider value={host.shell}>
+            <Outputs
+              snapshot={snapshot}
+              lead={lead}
+              pending={model.pending}
+              doing={model.doing}
+              error={model.error}
+              onAccept={(changes) => void model.accept(changes)}
+              onMergeHere={() => void model.mergeHere()}
+              onOpenChange={() => void model.openChange()}
+              onPush={(head, url) => void model.push(head, url)}
+              refused={model.refused}
+              onReplace={(head, replaces, url) => void model.replace(head, replaces, url)}
+              // Bringing a pull request's commits in is the lead's: Althar fetches them, and the note says how to merge them.
+              onBringIn={(url) =>
+                void model.mergeNote(url).then((note) => {
+                  if (note !== null) void send(note, false)
+                })
+              }
+              onMarkReady={(url) => void model.markReady(url)}
+              // Sending it back is a note to its lead, which starts it again if it stopped.
+              onSendBack={(note) => send(note, false)}
+              onOpenFile={changes.show}
+              conflict={model.conflict}
+              onPushHere={() => void model.pushHere()}
+              onPushBranch={() => void model.pushBranch()}
+              onConnect={() => setConnecting(true)}
+              // So is a conflict to settle, in words the lead acts on.
+              onResolve={() => {
+                model.dismissConflict()
+                void send(text.resolve(conflictsOf(model.conflict ?? '', snapshot.task.here)), false)
+              }}
+            />
+          </ThreadShellProvider>
           {connecting && snapshot.host !== null && (
             <ConnectPanel service={serviceOfProduct(snapshot.host.product)} onClose={() => setConnecting(false)} />
           )}
@@ -657,6 +738,7 @@ export function TaskView({
                 threadId={snapshot.threadId}
                 worktree={snapshot.task.worktree}
                 {...(openFile === undefined ? {} : { openFile })}
+                gathered={closing}
                 session={session}
                 project={snapshot.project.name}
                 onPassOn={(words) => void model.send(words)}
@@ -665,7 +747,31 @@ export function TaskView({
                 run={(run) => (
                   <RunOf run={run} now={now} onStop={(id) => void model.stopLaunch(id)} onRunAgain={() => void model.runProject()} />
                 )}
+                // A review the lead drafted is posted from its card, only when the person says.
+                review={(draft) => (
+                  <ReviewCard
+                    draft={draft}
+                    actions={{
+                      onChange: model.changeReview,
+                      onPost: (draftId) => void model.postReview(draftId),
+                      onDiscard: (draftId) => void model.discardReview(draftId),
+                    }}
+                  />
+                )}
+                // A push the lead asked for is pushed as the outputs push: up to the head it shows.
+                push={(request, at) => (
+                  <PushRequestOf
+                    request={request}
+                    at={at}
+                    {...(lead.name === '' ? {} : { by: lead.name })}
+                    pushing={model.pending}
+                    onPush={(head, url) => void model.push(head, url)}
+                  />
+                )}
               />
+              {closing && finished.built !== null && (
+                <Finished built={finished.built} pieces={finished.pieces} unverified={finished.unverified} />
+              )}
             </ThreadShellProvider>
             {snapshot.attention.map((request) =>
               request.kind === 'stuck' && request.stuck !== null ? (

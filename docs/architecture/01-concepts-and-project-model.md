@@ -263,8 +263,26 @@ It never:
 - rewrites remotes;
 - initializes Git without a separate explicit action.
 
-A project can declare a setup command, run in each new worktree, and untracked
-files to copy into it, such as `.env`.
+Each new worktree is set up before its lead starts, by Althar itself and
+outside any agent's sandbox: the setup kept for its repository, else the
+install its lockfile names, which never changes the lockfile
+([ADR-023](../decisions/023-althar-runs-the-project.md),
+[03](03-agent-runtime-and-auth.md#setting-up-a-worktree)). Untracked files to
+copy into it, such as `.env`, are not declared yet.
+
+A planned task's worktree is on its own branch from the start. A plain task's,
+one the coordinator starts with no plan (a question, a quick look, a
+prototype), has no branch: it is detached at the commit the task starts from,
+set up the same way, with a scratch folder (`.althar/scratch`) that ignores
+everything in it for what its lead throws away. Its branch's name is planned
+as any task's, and Althar makes the branch where the lead first changes the
+repository, with that work on it, as its turn ends or as it reports
+(`workspaces.branched_at`;
+[ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)), so
+nothing is lost. The lead stays in the same folder and session, the branch
+stays on this Mac, and the task stays plain until the person asks its lead to
+make it a change (`make_it_a_change`), which makes its branch then where it
+has none.
 
 Working on a plain branch in the user's own checkout may come later, as an
 explicit per-project choice. It relaxes the rules above and must say so where
@@ -291,7 +309,8 @@ drafts it, and New task has the person tick them; with one, it is that one.
 Its lead may still read the others where they are.
 
 The task's worktrees sit side by side in its folder, each on the task's
-branch, and its lead starts there: in the one worktree, or the folder in it
+branch (a plain task's, on none until its lead first writes, when each gets
+it), and its lead starts there: in the one worktree, or the folder in it
 the project is about, where there is one; in the task's folder, where there
 are several. Writing outside all of them asks. Each repository is published
 on its own: a pull request where its host is connected, its branch where

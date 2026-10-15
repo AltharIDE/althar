@@ -34,7 +34,7 @@ const task = (overrides: Partial<BoardTask> = {}): BoardTask => ({
   ...overrides,
 })
 
-const settled = (...tasks: BoardTask[]) => lanesOf({ cursor: 1, tasks, calls: [] })
+const settled = (...tasks: BoardTask[]) => lanesOf({ cursor: 1, tasks, calls: [], settledTotal: tasks.length })
 
 const github = { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } as const
 

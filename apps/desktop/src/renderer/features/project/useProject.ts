@@ -62,6 +62,8 @@ export interface ProjectModel {
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
+  /** Has the coordinator compact its context, after what it was told before. */
+  readonly compact: () => Promise<void>
   /** Runs the project with no agent: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
   readonly runProject: (taskId?: string | null) => Promise<void>
   readonly stopLaunch: (id: string) => Promise<void>
@@ -75,6 +77,8 @@ export interface ProjectModel {
   readonly answerQuestion: (attentionId: string, answers: Readonly<Record<string, FieldAnswer>>) => Promise<string | null>
   readonly startPlan: (planId: string) => Promise<void>
   readonly holdPlan: (planId: string) => Promise<void>
+  /** Stops a command a task's lead left running, which keeps a place the waiting plans wait for. */
+  readonly stopBackground: (threadId: string, id: string) => Promise<void>
   readonly changePlan: (planId: string, steps: ReadonlyArray<PlanStep>, end?: TaskEnd | null) => Promise<void>
   readonly fileIssueDraft: (draftId: string) => Promise<void>
   readonly changeIssueDraft: (
@@ -312,6 +316,7 @@ export const useProject = (projectId: string): ProjectModel => {
       }
     },
     interrupt: () => act(async () => (threadId === null ? undefined : client.interrupt(threadId))),
+    compact: () => act(async () => (threadId === null ? undefined : client.compact(threadId))),
     runProject: (taskId = null) => act(() => client.runProject(projectId, taskId, threadId)),
     stopLaunch: (id) => act(() => client.stopLaunch(id)),
     clearLaunch: (id) => act(() => client.clearLaunch(id)),
@@ -342,6 +347,7 @@ export const useProject = (projectId: string): ProjectModel => {
       ),
     startPlan: (planId) => act(() => client.startPlan(planId)),
     holdPlan: (planId) => act(() => client.holdPlan(planId)),
+    stopBackground: (threadId, id) => act(() => client.stopBackground(threadId, id)),
     changePlan: (planId, steps, end) => act(() => client.changePlan(planId, steps, end)),
     fileIssueDraft: (draftId) => act(() => client.fileIssueDraft(draftId)),
     changeIssueDraft: (draftId, edit) => act(() => client.changeIssueDraft(draftId, edit)),

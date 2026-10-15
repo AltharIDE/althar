@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { LoadMeter, ProjectTabs, TitleBar, type Room, UpdateReady } from '@althar/ui'
 
 import { useServices } from '../../data/services'
+import { FinderView } from '../finder/FinderView'
 import { useWindowChrome } from '../../shared/useWindowChrome'
 import { useUpdate } from '../../shared/useUpdate'
 import { tabsStoreOf } from './store'
@@ -17,7 +18,8 @@ import { useTabs } from './useTabs'
  * project's. ⌘1 goes to the home, ⌘2 to ⌘8 to the projects in order, ⌘9 to
  * the last, and Control-Tab to the next tab (with Shift, the one before),
  * as in a browser. ⌘N starts a new project in a tab of its own, as the +
- * does. The tabs are the window's one bar: a screen puts its own controls at
+ * does. ⌘K finds a task: in the project whose tab has the window, or, on the
+ * home, in every project. The tabs are the window's one bar: a screen puts its own controls at
  * the bar's end with BarEnd, and its way back, where it has one, at the top
  * of its page. Before it, on every screen, how hard the computer works, in
  * two short meters the person may turn off (`useLoad`), and a newer Althar
@@ -85,7 +87,7 @@ function TabsBar({ tabs, endRef }: { tabs: ReturnType<typeof useTabs>; endRef: (
   const { host } = useServices()
   const chrome = useWindowChrome()
   const update = useUpdate()
-  const load = useLoad()
+  const load = useLoad(tabs.tabs.length > 0 || tabs.others.length > 0)
   const { select, current } = tabs
   return (
     <ProjectTabs
@@ -138,7 +140,10 @@ function BareTitleBar({ className }: { className?: string }) {
 
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
+  const { host } = useServices()
   const [end, setEnd] = useState<HTMLElement | null>(null)
+  // Finding a task, in the project with the window or on the home in every one; from a composer too.
+  const [finding, setFinding] = useState(false)
   const { select, current, newProject, none } = tabs
   const open = tabs.tabs.map((tab) => tab.id)
   const order = open.join(' ')
@@ -146,6 +151,13 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   useEffect(() => {
     const ids = order === '' ? [] : order.split(' ')
     const onKey = (event: KeyboardEvent) => {
+      // ⌘K, Control-K off a Mac: once there is a project, a task to find.
+      const command = host.platform === 'darwin' ? event.metaKey : event.ctrlKey
+      if (command && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k' && !none) {
+        event.preventDefault()
+        setFinding(true)
+        return
+      }
       // Before there is a project, the first screen has ⌘N for a folder of its own.
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n' && !none) {
         event.preventDefault()
@@ -166,7 +178,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [order, current, select, newProject, none])
+  }, [order, current, select, newProject, none, host.platform])
   return (
     <VisitContext.Provider value={tabs.visit}>
       <NewTabContext.Provider value={newTab}>
@@ -176,6 +188,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
               {!tabs.none && <TabsBar tabs={tabs} endRef={setEnd} />}
               <div className={s.screen}>{children}</div>
             </div>
+            {finding && <FinderView projectId={current} onClose={() => setFinding(false)} />}
           </TabBarContext.Provider>
         </EndContext.Provider>
       </NewTabContext.Provider>

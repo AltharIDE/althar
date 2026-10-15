@@ -4,7 +4,23 @@ import { assert, describe, it } from '@effect/vitest'
 import { Effect, Layer, Schema, Stream } from 'effect'
 import { RpcClient, RpcServer } from 'effect/rpc'
 
-import { Api, ApiError, CommandId, Load, NewProjectId, PAGE, Product, type SentImage, SentImages, ThreadItem, WatchEvent } from '../src/Api'
+import {
+  AgentsAtOnce,
+  Api,
+  ApiError,
+  AtOnceCount,
+  CommandId,
+  FOUND_MOST,
+  Load,
+  NewProjectId,
+  PAGE,
+  Product,
+  type SentImage,
+  SentImages,
+  TaskCard,
+  ThreadItem,
+  WatchEvent,
+} from '../src/Api'
 import { MESSAGE_IMAGES } from '../src/pictures'
 import { clientProtocol, emitterPort, serverProtocol } from '../src/transport'
 
@@ -12,6 +28,20 @@ const at = '2026-09-29T12:00:00.000Z'
 const commandId = `cmd_${'a'.repeat(32)}`
 
 describe('the API', () => {
+  it('takes from one to sixteen agents at once, whole, and says why the default is what it is', () => {
+    const count = Schema.decodeUnknownSync(AtOnceCount)
+    assert.strictEqual(count(1), 1)
+    assert.strictEqual(count(16), 16)
+    for (const wrong of [0, 17, 2.5, '4', null]) assert.throws(() => count(wrong), undefined, undefined, String(wrong))
+    const settings = Schema.decodeUnknownSync(AgentsAtOnce)
+    assert.deepStrictEqual(settings({ count: 2, own: 2, machine: { count: 4, cores: 10, memory: 16 } }).machine, {
+      count: 4,
+      cores: 10,
+      memory: 16,
+    })
+    assert.throws(() => settings({ count: 4, own: 0, machine: { count: 4, cores: 10, memory: 16 } }))
+  })
+
   it('knows each kind of thread item by its content, and nothing else', () => {
     const decode = Schema.decodeUnknownSync(ThreadItem)
     const base = { id: 'i1', sequence: 1, agentId: 'codex', createdAt: at }
@@ -104,11 +134,39 @@ describe('the API', () => {
         summary: 'One thing to fix.',
         verdict: 'changes_requested',
         findings: [{ severity: 'major', file: 'src/a.ts', line: 3, claim: 'The retry never stops.' }],
+        built: null,
+        evidence: [],
+        unverified: [],
         agentId: 'codex',
         change: null,
       },
     })
     assert.strictEqual(review.kind === 'step_result' && review.content.findings.length, 1)
+    // The lead's, with what it showed: a test run, and what it couldn't show.
+    const implement = decode({
+      ...base,
+      kind: 'step_result',
+      content: {
+        step: 'implement',
+        round: 0,
+        summary: 'Added the retry.',
+        verdict: null,
+        findings: [],
+        built: 'A retry button on a failed checkout.',
+        evidence: [{ kind: 'test_run', caption: 'The tests', picture: null, command: 'bun test', exit: 0, text: '1 passed', dropped: 0 }],
+        unverified: ['Not tried in Safari'],
+        agentId: null,
+        change: null,
+      },
+    })
+    assert.strictEqual(implement.kind === 'step_result' && implement.content.evidence[0]?.exit, 0)
+    assert.throws(() =>
+      decode({
+        ...base,
+        kind: 'step_result',
+        content: { ...(implement.content as object), evidence: [{ kind: 'video', caption: 'x' }] },
+      }),
+    )
     // Something heard from outside: a comment on the task's pull request, with where it is.
     const heard = decode({
       ...base,
@@ -163,6 +221,7 @@ describe('the API', () => {
         title: 'Add a retry',
         slug: 'add-a-retry',
         phase: 'planned',
+        kind: 'change',
         plan: {
           id: 'plan_1',
           steps: [
@@ -179,13 +238,78 @@ describe('the API', () => {
         summary: null,
         lead: null,
         leadModel: null,
+        leadEffort: null,
         branch: null,
         startedAt: null,
         waits: null,
+        queued: null,
       },
     })
     assert.strictEqual(task.kind === 'task' && task.content.plan?.steps.length, 2)
     assert.throws(() => decode({ ...base, kind: 'task', content: { taskId: 't1' } }))
+  })
+
+  it('says what a task makes on its card: a plain task with what it handed back, a review with the pull request it reads', () => {
+    const card = Schema.decodeUnknownSync(TaskCard)
+    const plain = {
+      taskId: 't2',
+      threadId: 'th2',
+      title: 'Which partners still call v1?',
+      slug: 'which-partners-still-call-v1',
+      phase: 'ready',
+      kind: 'plain',
+      plan: null,
+      issue: null,
+      change: null,
+      step: null,
+      summary: 'Two do.',
+      lead: 'claude-code',
+      leadModel: null,
+      leadEffort: null,
+      branch: null,
+      startedAt: at,
+      waits: null,
+      queued: null,
+    }
+    const picture = { digest: 'a'.repeat(64), mediaType: 'image/png', bytes: 10, width: 4, height: 3, name: 'home.png', unkept: null }
+    const handed = card({
+      ...plain,
+      handed: {
+        pictures: [picture],
+        files: [
+          { path: 'notes/partners.md', add: 12 },
+          { path: '/tmp/x.csv', add: null },
+        ],
+      },
+    })
+    assert.deepStrictEqual(
+      handed.handed?.files.map((file) => file.add),
+      [12, null],
+    )
+    // Older runtimes said nothing of either.
+    assert.strictEqual(card(plain).handed, undefined)
+    // A file says the lines it added, or that git can't say.
+    assert.throws(() => card({ ...plain, handed: { pictures: [], files: [{ path: 'a.md' }] } }))
+    assert.throws(() => card({ ...plain, kind: 'question' }))
+    assert.throws(() => card({ ...plain, kind: undefined }))
+    const brief = {
+      product: 'github',
+      repository: 'meridian/api',
+      number: 1199,
+      url: 'https://github.com/meridian/api/pull/1199',
+      title: 'Send back won’t restart a dead lead session',
+      author: 'ninemate',
+      outside: true,
+      additions: 58,
+      deletions: 20,
+      findings: 3,
+      blocking: 1,
+      verdict: 'changes',
+      posted: null,
+    }
+    assert.strictEqual(card({ ...plain, kind: 'review', reviewing: brief }).reviewing?.author, 'ninemate')
+    assert.strictEqual(card({ ...plain, kind: 'review', reviewing: { ...brief, verdict: null, additions: null } }).reviewing?.verdict, null)
+    assert.throws(() => card({ ...plain, kind: 'review', reviewing: { ...brief, verdict: 'request_changes' } }))
   })
 
   it('takes a command id only in its own shape, and a change with its cursor', () => {
@@ -250,14 +374,38 @@ describe('the API', () => {
               OpenProject: ({ grant }) => Effect.fail(new ApiError({ reason: 'NotFound', message: `No folder was chosen as ${grant}.` })),
               ReadFolder: () => Effect.die('unused'),
               ListTasks: () => Effect.succeed({ cursor: 0, tasks: [] }),
+              SearchTasks: ({ text, projectId }) =>
+                Effect.succeed({
+                  tasks: [
+                    {
+                      taskId: 'task_1',
+                      threadId: 'th1',
+                      projectId: projectId ?? 'p1',
+                      title: 'Retry the checkout',
+                      slug: 'retry-the-checkout',
+                      phase: 'ready' as const,
+                      state: 'open',
+                      pullRequest: '#143',
+                      changedAt: '2026-10-14T09:00:00.000Z',
+                      matched: [
+                        { text: '…the card ', hit: false },
+                        { text, hit: true },
+                      ],
+                    },
+                  ],
+                }),
               CreateTask: () => Effect.die('unused'),
               GetThread: () => Effect.die('unused'),
               GetFileDiff: () => Effect.die('unused'),
               GetBoard: () => Effect.die('unused'),
+              GetOlderSettled: () => Effect.die('unused'),
               GetHome: () => Effect.die('unused'),
               LeftHome: () => Effect.die('unused'),
+              SeeTask: () => Effect.die('unused'),
               Merge: () => Effect.die('unused'),
               Push: () => Effect.die('unused'),
+              ReplacePullRequest: () => Effect.die('unused'),
+              MergeNote: () => Effect.die('unused'),
               MergeHere: () => Effect.die('unused'),
               PushHere: () => Effect.die('unused'),
               PushBranch: () => Effect.die('unused'),
@@ -279,6 +427,8 @@ describe('the API', () => {
               SetModelBlocked: () => Effect.die('unused'),
               GetSettings: () => Effect.die('unused'),
               SetCoAuthor: () => Effect.die('unused'),
+              SetPostTeamReviews: () => Effect.die('unused'),
+              SetAgentsAtOnce: () => Effect.die('unused'),
               StartAccountSignIn: () => Effect.die('unused'),
               GetAccountSignIn: () => Effect.die('unused'),
               PasteAccountSignInCode: () => Effect.die('unused'),
@@ -294,15 +444,21 @@ describe('the API', () => {
               ChangeIssueDraft: () => Effect.void,
               FileIssueDraft: () => Effect.void,
               DiscardIssueDraft: () => Effect.void,
+              ChangeReviewDraft: () => Effect.void,
+              PostReviewDraft: () => Effect.void,
+              DiscardReviewDraft: () => Effect.void,
               AnswerStuck: () => Effect.void,
               StartSession: ({ commandId: id }) => Effect.succeed(id),
               SwitchAgent: () => Effect.die('unused'),
               SetModel: () => Effect.void,
               Interrupt: () => Effect.void,
+              CompactContext: () => Effect.void,
               StopSession: () => Effect.void,
               StopTask: () => Effect.void,
+              SetTaskResolveConflicts: () => Effect.void,
               ResumeTask: () => Effect.void,
               AbandonTask: () => Effect.void,
+              RenameTask: () => Effect.void,
               ReopenTask: () => Effect.void,
               // What was sent, said back in the error, so the test reads what crossed the port.
               Send: ({ body, images }) =>
@@ -336,6 +492,8 @@ describe('the API', () => {
               MarkReady: () => Effect.void,
               SetUsageLimit: () => Effect.void,
               GetProjectRules: () => Effect.die('unused'),
+              GetProjectNotes: () => Effect.succeed([]),
+              DropProjectNote: () => Effect.void,
               GetVocabulary: () => Effect.die('unused'),
               RenameProject: () => Effect.die('unused'),
               SetProjectInk: () => Effect.die('unused'),
@@ -353,6 +511,7 @@ describe('the API', () => {
               FindAccounts: () => Effect.succeed({ found: [] }),
               SignInAccount: () => Effect.succeed({ line: 'codex login', opened: false }),
               OpenChange: () => Effect.void,
+              SkipReview: () => Effect.void,
               RefreshTask: () => Effect.void,
               StopListening: () => Effect.void,
               StopBackground: () => Effect.void,
@@ -388,6 +547,11 @@ describe('the API', () => {
         assert.throws(() => Schema.decodeUnknownSync(Product)('gitea'))
         // Where Althar's processes can't be read, its work's part is unknown, not none.
         assert.strictEqual((yield* client.GetLoad({})).shares, null)
+        // A search crosses with what matched; one asking for too many, or for pages of text, never leaves.
+        const [found] = (yield* client.SearchTasks({ text: 'retr', projectId: 'p2' })).tasks
+        assert.deepStrictEqual([found?.projectId, found?.matched?.[1]], ['p2', { text: 'retr', hit: true }])
+        assert.isTrue((yield* Effect.exit(client.SearchTasks({ text: 'retr', limit: FOUND_MOST + 1 })))._tag === 'Failure')
+        assert.isTrue((yield* Effect.exit(client.SearchTasks({ text: 'x'.repeat(501) })))._tag === 'Failure')
         const refused = yield* Effect.flip(client.OpenProject({ commandId, grant: 'g1' }))
         assert.strictEqual(refused.message, 'No folder was chosen as g1.')
         assert.deepStrictEqual(

@@ -11,6 +11,7 @@ import {
   commandOf,
   decide,
   decideReader,
+  OFFLINE,
   essentials,
   matchesPattern,
   MVP_RULES,
@@ -183,6 +184,26 @@ describe('reading commands', () => {
     assert.isTrue(parseCommandLine('sh -c "echo $(whoami)"').opaque)
     assert.isTrue(parseCommandLine('eval "$CMD"').opaque)
     assert.deepStrictEqual(parseCommandLine("echo 'unclosed").commands, [['echo', 'unclosed']])
+  })
+
+  it('reads a comment and a C-quoted word as the shell does, so neither hides a command after it', () => {
+    // A comment runs nothing to its line's end; the next line runs, whatever quote the comment opened.
+    assert.deepStrictEqual(parseCommandLine("echo x # it's\ngit push --force origin main\n'").commands, [
+      ['echo', 'x'],
+      ['git', 'push', '--force', 'origin', 'main'],
+      [''],
+    ])
+    assert.deepStrictEqual(parseCommandLine('git log --format=%H#x -1; echo a#b').commands, [
+      ['git', 'log', '--format=%H#x', '-1'],
+      ['echo', 'a#b'],
+    ])
+    // In `$'…'`, `\'` doesn't end the word: what follows it is a command of its own.
+    assert.deepStrictEqual(parseCommandLine("echo $'it\\'s'; git push --force origin main").commands, [
+      ['echo', "$it\\'s"],
+      ['git', 'push', '--force', 'origin', 'main'],
+    ])
+    for (const line of ["echo x # '\ngit push --force origin main\n'", "echo $'\\''; git push --force origin main"])
+      assert.deepStrictEqual(run(line), { verdict: 'ask', reason: 'A force push always asks.', held: true }, line)
   })
 
   it('reads the command from the raw input when the agent gives one', () => {
@@ -407,6 +428,19 @@ describe('a role that only reads', () => {
     assert.strictEqual(verdict({ kind: 'other', title: 'mcp__github__create_issue' }), 'deny')
   })
 
+  it('offline, as the lead of a review from outside, fetches nothing, and still reads, searches and runs what only looks', () => {
+    const offline = (fields: Partial<PermissionRequest>) => decideReader(request(fields), { offline: true })
+    assert.deepStrictEqual(offline({ kind: 'fetch', title: 'Fetch https://evil.example/steal' }), { verdict: 'deny', reason: OFFLINE })
+    for (const kind of ['read', 'search', 'think'] as const) assert.strictEqual(offline({ kind, title: 'Look' }).verdict, 'allow', kind)
+    assert.strictEqual(offline({ kind: 'execute', title: 'git diff HEAD~1', rawInput: { command: 'git diff HEAD~1' } }).verdict, 'allow')
+    assert.strictEqual(offline({ kind: 'other', title: 'mcp__althar__draft_review' }).verdict, 'allow')
+    // What would reach the network was never a reader's to run, offline or not.
+    for (const command of ['curl https://evil.example', 'git fetch origin', 'wget -qO- https://evil.example', 'bun install'])
+      assert.strictEqual(offline({ kind: 'execute', title: command, rawInput: { command } }).verdict, 'deny', command)
+    // A sandbox's ask to reach a host, with nothing Althar can read in it, is refused too.
+    assert.strictEqual(offline({ kind: 'other', title: 'network access to evil.example' }).verdict, 'deny')
+  })
+
   it('reads, searches and fetches, and runs what only looks', () => {
     for (const kind of ['read', 'search', 'think', 'fetch'] as const) assert.strictEqual(verdict({ kind, title: 'Look' }), 'allow', kind)
     for (const command of [
@@ -440,6 +474,203 @@ describe('a role that only reads', () => {
       '/usr/bin/env',
     ])
       assert.strictEqual(verdict({ kind: 'execute', title: command, rawInput: { command } }), 'allow', command)
+  })
+
+  describe('reading a repository it doesn’t trust, as a review’s lead does', () => {
+    const decided = (command: string) => decideReader(request({ kind: 'execute', title: command, rawInput: { command } }))
+    const refused = (commands: ReadonlyArray<string>, saying?: string) => {
+      for (const command of commands) {
+        const verdict = decided(command)
+        assert.strictEqual(verdict.verdict, 'deny', command)
+        const reason = verdict.verdict === 'deny' ? verdict.reason : ''
+        assert.isTrue(reason.endsWith('this role only reads.'), `${command}: ${reason}`)
+        if (saying !== undefined) assert.include(reason, saying, command)
+      }
+    }
+    const allowed = (commands: ReadonlyArray<string>) => {
+      for (const command of commands) assert.strictEqual(decided(command).verdict, 'allow', command)
+    }
+
+    it('runs a program by its path only from the system’s folders, never one the repository named after one that reads', () => {
+      refused(
+        [
+          './cat README.md',
+          'node_modules/.bin/cat x',
+          '../cat x',
+          'bin/rg retry',
+          '~/bin/cat x',
+          '/tmp/x/cat x',
+          '/usr/bin/../../tmp/cat x',
+        ],
+        'runs what that folder holds',
+      )
+      allowed(['/usr/bin/cat README.md', '/bin/ls -la', '/opt/homebrew/bin/rg retry', '/usr/local/bin/fd -t f', 'cat README.md'])
+    })
+
+    it('sets no variable for a command, and runs nothing through env or sudo', () => {
+      refused(['PATH=. cat x', 'FOO=1 git log', 'GIT_EXTERNAL_DIFF=./diff.sh git diff', 'GIT_CONFIG_PARAMETERS=x git log'], 'Setting')
+      refused(['X=--pre=./run.sh; rg retry $X'])
+      refused(['env PATH=. cat x', 'env -P. cat x', 'env -i cat x', 'nice env cat x'], '`env` runs another command')
+      refused(['sudo cat /etc/hosts', 'sudo -u root cat x'], '`sudo`')
+      // Wrappers that only time or slow a command change nothing it runs; `env` alone prints the environment.
+      allowed(['time git log -1', 'nice -n 5 git log -1', 'timeout 5 git log -1', 'command -v rg', 'env'])
+    })
+
+    it('never takes an interpreter or a package’s script for a read, whatever it is given', () => {
+      refused([
+        'sh run.sh',
+        'bash ./scripts/check',
+        'zsh x',
+        'python setup.py',
+        'python3 -c "print(1)"',
+        '/usr/bin/python3 x.py',
+        'node index.js',
+        'ruby x.rb',
+        'perl -e 1',
+        'npx vitest',
+        'bunx vitest',
+        'npm test',
+        'npm run lint',
+        'bun test',
+        'bun run build',
+        'pnpm install',
+        'yarn',
+        'make',
+        'cargo test',
+        'go test ./...',
+        'deno run x.ts',
+        './configure',
+      ])
+    })
+
+    it('reads every command of a line alike, whatever joins them, and a shell’s script as commands of its own', () => {
+      refused([
+        'cat x | ./run.sh',
+        'cat x && ./cat y',
+        'cat x; PATH=. cat y',
+        'cat x || node y',
+        'cat x & ./run.sh',
+        'cat x\n./run.sh',
+        '(./run.sh)',
+        '{ ./run.sh; }',
+        "bash -c 'cat x; ./run.sh'",
+        'sh -c "FOO=1 git log"',
+        'sh -c \'sh -c "./cat x"\'',
+        "bash -lc 'cat x' > out.txt",
+      ])
+      // A process substitution runs a command of its own.
+      refused(['cat <(./run.sh)', 'diff <(node a.js) b.txt', 'tee >(./run.sh) < x'], 'process substitution')
+      // A shell started plainly, as Codex starts one, may run what only looks; one that reads a file of its own first may not.
+      allowed(["bash -lc 'git log -1'", "sh -c 'cat README.md | head -5'", "bash -c 'rg retry' 2>/dev/null"])
+      refused(["bash -ic 'cat x'", "bash --rcfile ./rc -c 'cat x'", "bash -O extglob -c 'cat x'"], 'read or run more than its script')
+      refused(["./bash -c 'cat x'"], 'runs what that folder holds')
+    })
+
+    it('lets no file name the shell expands become a flag of a program whose flags it reads closely', () => {
+      // A file named `--pre=./run.sh` among them would have rg run it.
+      refused(
+        [
+          'rg retry *',
+          'rg retry src/*',
+          'sort *.txt',
+          'sed -n 1p *.md',
+          'git diff HEAD src/*',
+          'fd {a,b}',
+          "rg $'--pre=./run.sh' x",
+          'rg x $X',
+        ],
+        'The shell would expand',
+      )
+      // Quoted, after `--`, or for a program with no flag that runs anything, it is only a name.
+      allowed([
+        'rg retry -- src/*',
+        "rg 'a*b' src",
+        'rg "a[bc]" src',
+        'cat *.md',
+        'ls src/*',
+        "git log -- '*.ts'",
+        'git stash show stash@{0}',
+      ])
+    })
+
+    it('reads no repository by --git-dir or --work-tree, whose config could name a program for git to run', () => {
+      refused(['git --git-dir=fixtures/repo.git log', 'git --git-dir fixtures/repo.git log', 'git --work-tree=. --git-dir=x status'])
+      allowed(['git -C src log -1'])
+    })
+
+    it('runs no shell command that sets a variable, a function or an alias, or how the shell finds a command', () => {
+      // Each would have a plain `cat` after it run the repository's own.
+      refused(['printf -v PATH .; cat README.md', 'printf -vPATH .; cat x', "printf $'-v' PATH .; cat x"])
+      refused(
+        [
+          'read PATH < paths.txt; cat x',
+          'declare PATH=.; cat x',
+          'typeset PATH=.',
+          'local PATH=.',
+          'export PATH=.',
+          'readonly X',
+          'set -a',
+          'unset PATH',
+          'alias cat=./cat',
+          'hash -p ./cat cat',
+          'enable -f ./x.so x',
+          'builtin printf -v PATH .',
+          'trap ./run.sh EXIT',
+          'shopt -s expand_aliases',
+          'setopt aliases',
+          'mapfile -t PATH < x',
+          'readarray PATH < x',
+          'let PATH=1',
+          'getopts a PATH',
+          'function cat { ./run.sh; }',
+          'command export PATH=.',
+          'time unset PATH',
+        ],
+        'how the shell finds a command',
+      )
+      refused(['exec cat x', 'exec -a x cat y'], '`exec`')
+      // A function named for a program that reads, defined in any of a shell's ways; a subshell; zsh's qualifier on a pattern.
+      refused(
+        ['cat () ( ./run.sh ); cat x', 'cat ()(./run.sh); cat x', 'cat() { ./run.sh; }', "ls *(e:'./run.sh':)", 'ls =(./run.sh)'],
+        'Parentheses',
+      )
+      // An expansion that assigns or works out arithmetic, in bash's ways or zsh's, quoted or not.
+      refused(
+        [
+          'echo ${BASH_CMDS[cat]:=./cat}; cat x',
+          'echo "${PATH:=.}"',
+          'echo ${X::=y}',
+          'echo $[PATH=1]; cat x',
+          'echo ${a[PATH=1]}',
+          'echo $path[PATH=1]; cat x',
+          'echo "${(e)X}"',
+          'echo ${X:PATH=1}',
+        ],
+        'set a variable or work out arithmetic',
+      )
+      // zsh works out what `printf` takes as a number, and what `test -v` and `-t` take, as arithmetic, which can run a command.
+      refused(["printf %d 'a[$(./run.sh)]'", "printf '%*s' 'PATH=1' x", "printf '%(%s)T' 1"], 'only print text')
+      refused(["test -v 'a[$(./run.sh)]'", "[ -t 'a[$(./run.sh)]' ]", 'test -R x', '[ -n x -a -v y ]'], 'works out its operand')
+      // What only prints, tests a file or names a variable plainly stays a read; parentheses quoted or escaped are text.
+      allowed([
+        "printf '%s\\n' hi",
+        "printf '%-10s|%5.2s|%%|%b|%q|%c\\n' a b c d e",
+        "printf -- '-v %s' x",
+        'printf -',
+        'printf',
+        'test -f package.json && cat package.json',
+        '[ -d src ]',
+        'echo $HOME ${HOME}',
+        "rg 'retry(' src",
+        'rg "a(b|c)" src',
+        'find . \\( -name a -o -name b \\)',
+        'cat README.md # the start',
+        'command -v rg',
+      ])
+      // A comment opens no quote: the line after it is read as a command of its own.
+      refused(["echo x # '\n./run.sh\n'"], 'runs what that folder holds')
+      refused(["echo $'\\''; ( ./run.sh )"], 'Parentheses')
+    })
   })
 
   it('does not let a reader call Flatpak’s broad host bridge directly', () => {

@@ -8,6 +8,7 @@ import type {
   Account,
   Activity,
   ChangeRequest,
+  ChangeToReview,
   Check,
   CheckState,
   CodeHost,
@@ -17,9 +18,11 @@ import type {
   Person,
   Repository,
   Review,
+  ReviewEvent,
   Tracker,
   Verdict,
 } from './model'
+import { leftAsItIs } from './model'
 import {
   type Answer,
   answered,
@@ -74,12 +77,25 @@ const PullAnswer = Schema.Struct({
   state: Schema.String,
   draft: Schema.optional(Schema.Boolean),
   merged_at: Schema.optional(Schema.NullOr(Schema.String)),
-  head: Schema.Struct({ ref: Schema.String, sha: Schema.String }),
-  base: Schema.Struct({ ref: Schema.String }),
+  // The repository each side is on: a fork's, for a branch from one; null where the fork is gone.
+  head: Schema.Struct({
+    ref: Schema.String,
+    sha: Schema.String,
+    repo: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
+  }),
+  base: Schema.Struct({
+    ref: Schema.String,
+    sha: Schema.optional(Schema.String),
+    repo: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
+  }),
   user: Schema.optional(Schema.NullOr(User)),
+  author_association: Schema.optional(Schema.String),
   additions: Schema.optional(Schema.Number),
   deletions: Schema.optional(Schema.Number),
   changed_files: Schema.optional(Schema.Number),
+  // Worked out in the background: null until GitHub has, and said only when one pull request is read.
+  mergeable: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  mergeable_state: Schema.optional(Schema.NullOr(Schema.String)),
   updated_at: Schema.String,
 })
 type PullAnswer = typeof PullAnswer.Type
@@ -177,7 +193,34 @@ const changeOf = (pull: PullAnswer): ChangeRequest => ({
   deletions: pull.deletions ?? null,
   changedFiles: pull.changed_files ?? null,
   updatedAt: pull.updated_at,
+  // Not mergeable, or `dirty`, is GitHub's way of saying the merge conflicts.
+  ...(pull.mergeable === false || pull.mergeable_state === 'dirty'
+    ? { conflicts: true }
+    : pull.mergeable === true
+      ? { conflicts: false }
+      : {}),
 })
+
+/**
+ * A pull request to review, whoever opened it: whether GitHub names its
+ * author one of the repository's people, and the fork its branch is on (one
+ * GitHub no longer has is a fork all the same, with no path).
+ */
+const toReviewOf = (pull: PullAnswer): ChangeToReview => {
+  const head = pull.head.repo
+  const base = pull.base.repo?.full_name.toLowerCase()
+  return {
+    ...changeOf(pull),
+    member: memberOf(pull.author_association),
+    fork: head === undefined || head?.full_name.toLowerCase() === base ? null : head === null ? [] : head.full_name.split('/'),
+    baseSha: pull.base.sha ?? null,
+  }
+}
+
+/** What GitHub calls each verdict a review can post. */
+const EVENTS: Readonly<Record<ReviewEvent, string>> = { approve: 'APPROVE', request_changes: 'REQUEST_CHANGES', comment: 'COMMENT' }
+
+const PostedAnswer = Schema.Struct({ id: Schema.Number, html_url: Schema.optional(Schema.NullOr(Schema.String)) })
 
 /** A check run's state from its status and conclusion. */
 export const checkRunState = (status: string, conclusion: string | null | undefined): CheckState => {
@@ -305,7 +348,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, links: false },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: true, links: false, starts: false },
     account,
     repository: (path) =>
       Effect.map(http.json(RepositoryAnswer, 'GET', repo(path)), (answer) => ({
@@ -385,17 +428,23 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         }))
         return [...fromRuns, ...fromStatuses]
       }),
-    checkLog: (repository, check) => {
+    checkLog: (repository, check, whole = false) => {
       // Only GitHub Actions keeps logs Althar can read: a check run's id is its job's.
       const match = /^run:(\d+):github-actions$/.exec(check.id)
       if (match === null) return Effect.succeed(null)
       return http.text(`${repo(repository)}/actions/jobs/${match[1]}/logs`).pipe(
-        Effect.map(tail),
+        Effect.map((log) => (whole ? log : tail(log))),
         Effect.catchIf(
           (error) => error.reason === 'not_found' || error.reason === 'forbidden',
           () => Effect.succeed(null),
         ),
       )
+    },
+    rerun: (repository, check) => {
+      // Only a GitHub Actions job runs again from here: its check run's id is the job's.
+      const match = /^run:(\d+):github-actions$/.exec(check.id)
+      if (match === null) return Effect.succeed(false)
+      return http.json(Schema.Unknown, 'POST', `${repo(repository)}/actions/jobs/${match[1]}/rerun`).pipe(Effect.as(true))
     },
     activity: (repository, number, cursor) =>
       Effect.gen(function* () {
@@ -442,6 +491,18 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
             }),
             (comment) => commentOf(comment, true),
           ),
+    changeToReview: (repository, number) => Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${number}`), toReviewOf),
+    postReview: (repository, number, review) =>
+      Effect.map(
+        http.json(PostedAnswer, 'POST', `${repo(repository)}/pulls/${number}/reviews`, {
+          ...(review.commit === null ? {} : { commit_id: review.commit }),
+          body: review.body,
+          event: EVENTS[review.event],
+          // On the change as it now reads: the right side of its diff.
+          comments: review.comments.map((comment) => ({ path: comment.path, line: comment.line, side: 'RIGHT', body: comment.body })),
+        }),
+        (posted) => ({ id: String(posted.id), url: posted.html_url ?? null }),
+      ),
     pushTarget: (repository) =>
       Effect.map(options.credential, (credential) => ({
         url: `${options.webUrl.replace(/\/+$/, '')}/${repository.path.join('/')}.git`,
@@ -479,6 +540,8 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       }),
     // GitHub's issues have no links: the pull request's mention of the issue links the two.
     link: () => Effect.void,
+    // An issue is open or closed: a project board's Status is that board's own, so a started one is left as it is.
+    start: (issue) => Effect.succeed(leftAsItIs(issue)),
     // The repositories the account is on, last pushed to first; one archived, or with its issues turned off, takes none.
     containers: () =>
       Effect.map(
