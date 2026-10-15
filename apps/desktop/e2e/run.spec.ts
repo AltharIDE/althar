@@ -14,7 +14,8 @@ import { launch, openFirstProject } from './support'
  * in the coordinator's thread says where it answers, the pill over the
  * composer has it with where it runs, and the card stops it and runs it
  * again. Then more to run (ADR-043): Storybook, picked from its package.json,
- * runs beside it from the Run button's list, and becomes the default.
+ * runs beside it from the Run button's list, and, dragged to the top of the
+ * whole list, becomes the default.
  */
 
 /** A dev server on a free port that says where it answers, as Vite does. */
@@ -102,11 +103,18 @@ test('runs the default branch from the project’s front, leaves its card in the
     await page.screenshot({ path: 'test-results/run-many.png', animations: 'disabled' })
     await page.keyboard.press('Escape')
 
-    // The whole list: Storybook made the default, the Run button runs it at a press.
+    // The whole list: Storybook dragged by its grip to the top, the default now; the Run button runs it at a press.
     await page.getByRole('button', { name: 'Everything to run' }).click()
     await page.getByRole('menuitem', { name: 'Edit the list…' }).click()
     const whole = page.getByRole('dialog', { name: 'What meridian runs' })
-    await whole.getByRole('button', { name: 'Make default' }).click()
+    const grip = await whole.getByRole('button', { name: 'Drag to move Storybook' }).boundingBox()
+    const top = await whole.getByRole('listitem').first().boundingBox()
+    if (grip === null || top === null) throw new Error('The list is not laid out.')
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(grip.x + grip.width / 2, top.y + top.height / 2, { steps: 12 })
+    await page.screenshot({ path: 'test-results/run-list-dragging.png', animations: 'disabled' })
+    await page.mouse.up()
     const first = whole.getByRole('listitem').first()
     await expect(first).toContainText('Storybook')
     await expect(first.getByText('Default', { exact: true })).toBeVisible()

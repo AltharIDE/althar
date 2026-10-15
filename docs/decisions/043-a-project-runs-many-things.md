@@ -28,7 +28,8 @@
     the list stays open, so several start at once. Then **Add something to
     run…** (typing its command, picking from the repository's package.json
     scripts, workspaces' too, or asking the coordinator to work it out) and
-    **Edit the list…** (reorder, make one the default, edit, remove). With
+    **Edit the list…** (drag into order by a row's grip or its words, or move
+    the grip with the arrow keys; make one the default, edit, remove). With
     nothing known to run, the button offers the three ways.
   - **Several run at once, one of each in a place:** a task's worktree, or the
     default branch's copy. Runs of the default branch share their repository's

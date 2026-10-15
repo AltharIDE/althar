@@ -178,15 +178,7 @@ export function Runs({
             command: one.command,
             about: `${one.repository} · ${runButtonText.from[one.from]}`,
           }))}
-          onMove={(id, by) => {
-            const at = ids.indexOf(id)
-            const next = [...ids]
-            const other = next[at + by]
-            if (at < 0 || other === undefined) return
-            next[at + by] = id
-            next[at] = other
-            void model.order(next)
-          }}
+          onOrder={(next) => void model.order(next)}
           onDefault={(id) => void model.order([id, ...ids.filter((one) => one !== id)])}
           onEdit={(id) => show({ kind: 'edit', id })}
           onRemove={(id) => void model.drop(id)}

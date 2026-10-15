@@ -165,7 +165,10 @@ describe('what the project runs, from its front', () => {
     const list = within(await screen.findByRole('dialog', { name: 'What meridian runs' }))
     await userEvent.click(list.getByRole('button', { name: 'Make default' }))
     expect(client.orderRunnables).toHaveBeenCalledWith('p1', ['rnbl_storybook', 'rnbl_dev'])
-    await userEvent.click(list.getByRole('button', { name: 'Move bun run dev down' }))
+    // A grip moves its row with the arrow keys, as dragging it does.
+    list.getByRole('button', { name: 'Drag to move bun run dev' }).focus()
+    await userEvent.keyboard('{ArrowDown}')
+    expect(client.orderRunnables).toHaveBeenCalledTimes(2)
     expect(client.orderRunnables).toHaveBeenLastCalledWith('p1', ['rnbl_storybook', 'rnbl_dev'])
     await userEvent.click(list.getByRole('button', { name: 'Remove Storybook' }))
     expect(client.dropRunnable).toHaveBeenCalledWith('p1', 'rnbl_storybook')

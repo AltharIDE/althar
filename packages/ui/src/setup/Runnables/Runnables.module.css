@@ -52,6 +52,39 @@
   gap: 6px;
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
+  /* Picked up by its words as by its grip. */
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.grip {
+  margin-inline-start: -6px;
+  cursor: grab;
+}
+
+/* While one is dragged, the rest make way for it. */
+.sorting,
+.sorting .item,
+.sorting .grip {
+  cursor: grabbing;
+}
+
+.sorting > .item {
+  transition: transform var(--base) var(--ease);
+}
+
+/* The one dragged, raised off the dialog, follows the pointer at once. */
+.sorting > .lifted {
+  position: relative;
+  z-index: 1;
+  border-bottom-color: transparent;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 6px var(--paper),
+    var(--lift-pop);
+  transition: none;
 }
 
 .words {

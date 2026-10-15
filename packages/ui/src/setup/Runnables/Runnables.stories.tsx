@@ -26,7 +26,7 @@ const meta = {
   args: {
     project: 'althar',
     runnables: LISTED,
-    onMove: fn(),
+    onOrder: fn(),
     onDefault: fn(),
     onEdit: fn(),
     onRemove: fn(),
@@ -38,13 +38,17 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** The whole list, the first its default: reorder, make another the default, edit, remove. */
+/** The whole list, the first its default: drag into order (or move with a grip's arrow keys), make another the default, edit, remove. */
 export const List: Story = {
   play: async ({ args }) => {
     const page = within(document.body)
-    await userEvent.click(await page.findByRole('button', { name: 'Move Storybook up' }))
-    await expect(args.onMove).toHaveBeenCalledWith('storybook', -1)
-    await expect(page.getByRole('button', { name: 'Move Pitch site up' })).toBeDisabled()
+    const grip = await page.findByRole('button', { name: 'Drag to move Storybook' })
+    grip.focus()
+    await userEvent.keyboard('{ArrowUp}')
+    await expect(args.onOrder).toHaveBeenCalledWith(['storybook', 'pitch', 'desktop', 'probe'])
+    // It shows where it was put, the default now, and its grip keeps the focus.
+    await expect(page.getAllByRole('listitem')[0]).toHaveTextContent(/^Storybook.*Default$/)
+    await expect(grip).toHaveFocus()
     await userEvent.click(page.getAllByRole('button', { name: 'Make default' })[1]!)
     await expect(args.onDefault).toHaveBeenCalledWith('desktop')
     await userEvent.click(page.getByRole('button', { name: 'Remove bun --filter @althar/runtime probe:tools' }))
