@@ -110,6 +110,16 @@ const permission = {
   projectId: 'p1',
 } as unknown as HomeCall
 
+// The same task waits on a second call, later: it is one thing to answer, with the oldest first.
+const second = {
+  ...permission,
+  id: 'a2',
+  title: 'Run npm install',
+  command: 'npm install',
+  createdAt: '2026-10-14T09:45:00.000Z',
+} as unknown as HomeCall
+const calls: ReadonlyArray<HomeCall> = [second, permission]
+
 const waiting = task({ taskId: 'wait', threadId: 'thwait', title: 'Waits on a call', phase: 'waiting' })
 const tasks: ReadonlyArray<HomeTask> = [...cases.map((one) => one.task), waiting]
 const wanted = [...cases.filter((one) => one.needs).map((one) => one.task.title), 'Run npm publish'].toSorted()
@@ -127,7 +137,6 @@ const onBoard = (lane: string) =>
 
 describe('what needs the person', () => {
   it('is the same on the board and on the home, for each case', async () => {
-    const calls: ReadonlyArray<HomeCall> = [permission]
     const lanes = lanesOf({ cursor: 1, tasks: tasks as ReadonlyArray<BoardTask>, calls, settledTotal: 0 })
 
     withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
@@ -139,7 +148,7 @@ describe('what needs the person', () => {
     expect(onBoard('Settled')).toEqual(['Prototype the usage limits', 'Which partners call v1?'])
     cleanup()
 
-    const { client } = fakeClient({ getHome: vi.fn(async () => home({ tasks: [...tasks], calls: [permission], projects: [project] })) })
+    const { client } = fakeClient({ getHome: vi.fn(async () => home({ tasks: [...tasks], calls: [...calls], projects: [project] })) })
     withServices(<Home />, client)
     const needs = await screen.findByRole('region', { name: /needs? you/ })
     const lines = within(needs)

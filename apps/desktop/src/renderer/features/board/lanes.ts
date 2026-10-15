@@ -1,6 +1,6 @@
 import type { BoardCall, BoardSnapshot, BoardTask } from '@althar/contracts'
 
-import { isFinished, readyOf } from '../../shared/calls'
+import { isFinished, readyOf, standingCalls } from '../../shared/calls'
 
 /*
  * Which lane of the board each task and call goes in. Up next: a plan
@@ -37,14 +37,16 @@ export interface Lanes {
 
 export const lanesOf = (board: BoardSnapshot): Lanes => {
   const of = (...phases: ReadonlyArray<BoardTask['phase']>) => board.tasks.filter((task) => phases.includes(task.phase))
-  const waiting = of('waiting').map((task) => ({ task, call: board.calls.find((call) => call.taskId === task.taskId) ?? null }))
+  // A waiting task's calls are one, its oldest (`standingCalls`, as the home counts them too).
+  const standing = standingCalls(board.tasks, board.calls)
+  const waiting = of('waiting').map((task) => ({ task, call: standing.find((call) => call.taskId === task.taskId) ?? null }))
   const folded = new Set(waiting.map(({ task }) => task.taskId))
   return {
     // Next to start first: the one whose countdown ends soonest, then the held, oldest first.
     next: of('planned', 'held').toSorted((a, b) => (a.plan?.startsAt ?? '￿').localeCompare(b.plan?.startsAt ?? '￿')),
     running: of('running', 'stopped'),
     waiting,
-    calls: board.calls.filter((call) => call.taskId === null || !folded.has(call.taskId)),
+    calls: standing.filter((call) => call.taskId === null || !folded.has(call.taskId)),
     ready: readyOf(of('ready')),
     finished: of('ready').filter(isFinished),
     settled: of('settled').toSorted((a, b) => (b.settledAt ?? '').localeCompare(a.settledAt ?? '')),

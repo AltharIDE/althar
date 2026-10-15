@@ -84,3 +84,24 @@ export const needsYou = <T extends { readonly kind: string; readonly phase: stri
 /** The tasks among these that wait on the person as work ready for them. */
 export const readyOf = <T extends { readonly kind: string; readonly phase: string }>(tasks: ReadonlyArray<T>): ReadonlyArray<T> =>
   tasks.filter(needsYou)
+
+/**
+ * The calls that stand for what waits on the person: a task that waits on
+ * several shows its oldest, once (answering it brings the next), and the
+ * calls no waiting task holds each stand alone. The one rule for how calls
+ * are counted, on the board's Needs you, the home, the edge and each
+ * project's line, so a task with two calls is one thing everywhere.
+ */
+export const standingCalls = <C extends { readonly taskId: string | null; readonly createdAt: string }>(
+  tasks: ReadonlyArray<{ readonly taskId: string; readonly phase: string }>,
+  calls: ReadonlyArray<C>,
+): ReadonlyArray<C> => {
+  const waiting = new Set(tasks.filter((task) => task.phase === 'waiting').map((task) => task.taskId))
+  const oldest = new Map<string, C>()
+  for (const call of calls) {
+    if (call.taskId === null || !waiting.has(call.taskId)) continue
+    const held = oldest.get(call.taskId)
+    if (held === undefined || call.createdAt < held.createdAt) oldest.set(call.taskId, call)
+  }
+  return calls.filter((call) => call.taskId === null || !waiting.has(call.taskId) || oldest.get(call.taskId) === call)
+}

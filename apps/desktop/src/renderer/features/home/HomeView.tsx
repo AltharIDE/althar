@@ -5,7 +5,7 @@ import { type IconName, PermissionAnswers, ProjectInk, type ProjectRef, TaskStat
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
 import { queuedOfWords } from '../../shared/agents'
-import { readyOf } from '../../shared/calls'
+import { readyOf, standingCalls } from '../../shared/calls'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import { ago, clock, useNow } from '../../shared/time'
 import { BarEnd, useNewTab } from '../tabs/TabsFrame'
@@ -129,14 +129,16 @@ export function HomeView({
   // In progress is every task not ready to accept; only those with an agent on them, or held for a reset, are running.
   // The tasks that wait on the person as the board's Needs you has them (`needsYou`): a plain task that finished is on its board only.
   const ready = readyOf(tasks)
-  const calls = (home?.calls ?? []).filter((call) => !answered.some((one) => one.call.id === call.id))
+  // A task that waits on several calls is one thing to answer, as on its board (`standingCalls`).
+  const standing = standingCalls(tasks, home?.calls ?? [])
+  const calls = standing.filter((call) => !answered.some((one) => one.call.id === call.id))
   // What has a card above isn't listed again under it.
   const carded = new Set(calls.map((call) => call.threadId))
   const working = tasks.filter((task) => task.phase !== 'ready' && !carded.has(task.threadId))
   const waiting = calls.length + ready.length
 
   const needs = needsOf({
-    calls: home?.calls ?? [],
+    calls: standing,
     answered,
     ready,
     refs,
