@@ -33,7 +33,9 @@ import { statements as taskSeen } from './0028_task_seen'
 import { statements as reviewDrafts } from './0029_review_drafts'
 import { statements as taskSearch } from './0030_task_search'
 import { statements as branchOnFirstWrite } from './0031_branch_on_first_write'
-import { statements as planUsage } from './0032_plan_usage'
+import { statements as taskAllowEverything } from './0032_task_allow_everything'
+import { statements as runnables } from './0033_runnables'
+import { statements as planUsage } from './0034_plan_usage'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -84,7 +86,9 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0029_review_drafts', statements: reviewDrafts },
   { key: '0030_task_search', statements: taskSearch },
   { key: '0031_branch_on_first_write', statements: branchOnFirstWrite },
-  { key: '0032_plan_usage', statements: planUsage },
+  { key: '0032_task_allow_everything', statements: taskAllowEverything },
+  { key: '0033_runnables', statements: runnables },
+  { key: '0034_plan_usage', statements: planUsage },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

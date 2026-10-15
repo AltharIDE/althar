@@ -64,8 +64,8 @@ export interface ProjectModel {
   readonly interrupt: () => Promise<void>
   /** Has the coordinator compact its context, after what it was told before. */
   readonly compact: () => Promise<void>
-  /** Runs the project with no agent: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
-  readonly runProject: (taskId?: string | null) => Promise<void>
+  /** Runs one of the project's runnables with no agent, its default without one: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
+  readonly runProject: (taskId?: string | null, runnableId?: string | null) => Promise<void>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   /** Moves the running coordinator to another agent. */
@@ -317,7 +317,8 @@ export const useProject = (projectId: string): ProjectModel => {
     },
     interrupt: () => act(async () => (threadId === null ? undefined : client.interrupt(threadId))),
     compact: () => act(async () => (threadId === null ? undefined : client.compact(threadId))),
-    runProject: (taskId = null) => act(() => client.runProject(projectId, taskId, threadId)),
+    runProject: (taskId = null, runnableId = null) =>
+      act(() => client.runProject(projectId, taskId, threadId, ...(runnableId === null ? [] : [runnableId]))),
     stopLaunch: (id) => act(() => client.stopLaunch(id)),
     clearLaunch: (id) => act(() => client.clearLaunch(id)),
     choose: (choice) =>

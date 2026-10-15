@@ -1,9 +1,0 @@
-node_modules/
-dist/
-coverage/
-playwright-report/
-test-results/
-.env.local
-.env.*.local
-*.log
-.DS_Store

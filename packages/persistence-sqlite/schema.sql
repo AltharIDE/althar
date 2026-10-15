@@ -194,7 +194,7 @@ CREATE TABLE tasks (
   created_by_actor_id TEXT NOT NULL REFERENCES actors (id),
   created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
   settled_at TEXT CHECK (settled_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
-  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)), seen_at TEXT CHECK (seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1), request TEXT, resolve_conflicts INTEGER CHECK (resolve_conflicts IN (0, 1)), seen_at TEXT CHECK (seen_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'), allow_everything INTEGER NOT NULL DEFAULT 0 CHECK (allow_everything IN (0, 1)),
   UNIQUE (project_id, slug),
   UNIQUE (id, project_id)
 ) STRICT;
@@ -1156,6 +1156,23 @@ CREATE TRIGGER task_search_changed AFTER UPDATE ON task_search_rows BEGIN
   INSERT INTO task_search (task_search, rowid, title, asked, summaries, refs, files) VALUES ('delete', old.id, old.title, old.asked, old.summaries, old.refs, old.files);
   INSERT INTO task_search (rowid, title, asked, summaries, refs, files) VALUES (new.id, new.title, new.asked, new.summaries, new.refs, new.files);
 END;
+
+CREATE TABLE runnables (
+  id TEXT PRIMARY KEY NOT NULL CHECK (substr(id, 1, 5) = 'rnbl_' AND length(id) = 37 AND substr(id, 6) NOT GLOB '*[^0-9a-f]*'),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  binding_id TEXT NOT NULL,
+  name TEXT CHECK (name IS NULL OR length(trim(name)) > 0),
+  command TEXT CHECK (command IS NULL OR length(trim(command)) > 0),
+  position INTEGER NOT NULL CHECK (position >= 0),
+  kept_by_actor_id TEXT REFERENCES actors (id),
+  created_at TEXT NOT NULL CHECK (created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  dropped_by_actor_id TEXT REFERENCES actors (id),
+  dropped_at TEXT CHECK (dropped_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
+  FOREIGN KEY (binding_id, project_id) REFERENCES repository_bindings (id, project_id)
+) STRICT;
+
+CREATE INDEX runnables_kept ON runnables (project_id, position) WHERE dropped_at IS NULL;
 
 CREATE TABLE plan_usage_readings (
   account_id TEXT NOT NULL REFERENCES agent_accounts (id),

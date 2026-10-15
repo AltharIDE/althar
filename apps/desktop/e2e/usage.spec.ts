@@ -86,18 +86,15 @@ test('sends usage data while its switch is on, named events only, and nothing on
     mkdirSync('test-results', { recursive: true })
     writeFileSync('test-results/usage-events.json', `${JSON.stringify(fake.events, null, 2)}\n`)
 
-    // Off in Settings: nothing more leaves, whatever happens.
-    await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
-    // Home listens for ⌘, once it is on screen.
-    await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeAttached()
-    await page.keyboard.press('Meta+,')
-    const settings = page.getByRole('dialog', { name: 'Settings' })
-    await settings.getByRole('button', { name: 'Usage data' }).click()
-    await settings.getByRole('switch', { name: 'Usage data' }).click()
-    await expect(settings.getByRole('switch', { name: 'Usage data' })).toHaveAttribute('aria-checked', 'false')
+    // Off in Settings, under About Althar: nothing more leaves, whatever happens. ⌘⇧, goes there once the bar is there.
+    await expect(page.getByRole('button', { name: /^Althar settings/ })).toBeVisible()
+    await page.keyboard.press('ControlOrMeta+Shift+Comma')
+    await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'About Althar' }).click()
+    const usage = page.getByRole('main').getByRole('switch', { name: 'Usage data' })
+    await usage.click()
+    await expect(usage).toHaveAttribute('aria-checked', 'false')
     await page.screenshot({ path: 'test-results/settings-usage-data.png', animations: 'disabled' })
-    await page.keyboard.press('Escape')
-    await page.keyboard.press('Escape')
+    await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: 'Close Settings' }).click()
     const before = fake.requests.length
     await page
       .getByRole('navigation', { name: 'Projects' })

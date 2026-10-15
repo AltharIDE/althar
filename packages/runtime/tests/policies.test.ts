@@ -4,7 +4,7 @@ import { Effect } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
-import { Policies, type ProjectRules, ruleSetOf, withRemembered } from '../src/Policies'
+import { allowsEverything, modeOf, Policies, type ProjectRules, ruleSetOf, withRemembered } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { RULES } from '../src/rules'
@@ -39,6 +39,45 @@ describe('a project’s rules, as kept', () => {
       },
     )
   })
+
+  it('allow everything over the mode (ADR-043): by the switch, or as an earlier revision said it, the first mode under it', () => {
+    const base: ProjectRules = { source: 'person', permissions: 'coordinator', alwaysAsk: ['deploy'] }
+    assert.strictEqual(ruleSetOf(base).mode, 'coordinator')
+    assert.strictEqual(ruleSetOf({ ...base, allowEverything: true }).mode, 'allow')
+    assert.isTrue(allowsEverything({ ...base, allowEverything: true }))
+    assert.strictEqual(modeOf({ ...base, allowEverything: true }), 'coordinator')
+    // An earlier revision's allow mode reads as the switch, over the first mode.
+    const earlier: ProjectRules = { ...base, permissions: 'allow' }
+    assert.strictEqual(ruleSetOf(earlier).mode, 'allow')
+    assert.isTrue(allowsEverything(earlier))
+    assert.strictEqual(modeOf(earlier), 'rules')
+    assert.strictEqual(modeOf({ source: 'mvp', alwaysAsk: [] }), 'rules')
+  })
+
+  it.effect('turn allow everything on and off over the mode, which holds again once it is off', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const policies = yield* Policies
+      const instance = yield* Instance
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const projectId = project.projectId as ProjectId
+      yield* policies.set(projectId, { permissions: 'ask' }, instance.personId)
+      yield* policies.set(projectId, { allowEverything: true }, instance.personId)
+      const on = (yield* policies.current(projectId)).rules
+      assert.strictEqual(ruleSetOf(on).mode, 'allow')
+      assert.strictEqual(modeOf(on), 'ask')
+      yield* policies.set(projectId, { allowEverything: false }, instance.personId)
+      assert.strictEqual(ruleSetOf((yield* policies.current(projectId)).rules).mode, 'ask')
+      // An earlier revision's allow mode: turned off, the first mode holds, and the mode no longer says allow.
+      yield* policies.set(projectId, { permissions: 'allow' }, instance.personId)
+      assert.isTrue(allowsEverything((yield* policies.current(projectId)).rules))
+      yield* policies.set(projectId, { allowEverything: false }, instance.personId)
+      const off = (yield* policies.current(projectId)).rules
+      assert.isFalse(allowsEverything(off))
+      assert.isUndefined(off.permissions)
+      assert.strictEqual(ruleSetOf(off).mode, 'rules')
+    }).pipe(Effect.provide(runtime())),
+  )
 
   it.effect('make a project’s first revision once, however many read it at the same moment', () =>
     Effect.gen(function* () {

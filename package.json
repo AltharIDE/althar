@@ -9,7 +9,7 @@
   ],
   "type": "module",
   "scripts": {
-    "dev": "bun --filter @althar/pitch dev",
+    "dev": "bun --filter @althar/site dev",
     "site": "bun --filter @althar/site dev",
     "build": "bun --filter '*' build",
     "check": "bun --filter '*' check",

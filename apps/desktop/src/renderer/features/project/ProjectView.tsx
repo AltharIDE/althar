@@ -20,6 +20,7 @@ import {
 import { contextMeter } from '../../shared/ContextMeter'
 import { useModels } from '../../data/models'
 import { useDictation } from '../../shared/dictation/useDictation'
+import { draftKey, useDraft } from '../../shared/drafts'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
@@ -27,6 +28,7 @@ import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
+import { Runs } from '../runs/Runs'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
@@ -175,10 +177,13 @@ export function ProjectView({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
-  const [draft, setDraft] = useState('')
-  const voice = useDictation(setDraft, { projectId: model.project?.id ?? model.coordinator?.project.id ?? null })
+  // What the person writes to the coordinator, kept by the project while they are elsewhere, as are its images and what they dictate.
+  const about = model.project?.id ?? model.coordinator?.project.id ?? null
+  const draftOf = draftKey.coordinator(about ?? '')
+  const [draft, setDraft] = useDraft(draftOf)
+  const voice = useDictation(draftOf, { projectId: about })
   // Images to send with what the person says, and which agents take them.
-  const images = useImages()
+  const images = useImages(draftOf)
   const models = useModels()
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
@@ -360,8 +365,23 @@ export function ProjectView({
         trackers,
         open: (url) => window.open(url, '_blank'),
       })}
-      // The default branch runs with no agent, where its repository says how.
-      {...(coordinator?.runCommand == null ? {} : { run: { command: coordinator.runCommand, onRun: () => void model.runProject() } })}
+      // What the project runs, with no agent, on its default branch (ADR-044).
+      {...(coordinator === null
+        ? {}
+        : {
+            run: (
+              <Runs
+                projectId={projectId}
+                project={kept?.name ?? name}
+                taskId={null}
+                runnables={coordinator.runnables}
+                launches={coordinator.launches}
+                now={now}
+                onRun={(id) => void model.runProject(null, id)}
+                onStop={(id) => void model.stopLaunch(id)}
+              />
+            ),
+          })}
       {...(settings === undefined
         ? {}
         : {
@@ -432,7 +452,7 @@ export function ProjectView({
                           run={run}
                           now={now}
                           onStop={(id) => void model.stopLaunch(id)}
-                          onRunAgain={(taskId) => void model.runProject(taskId)}
+                          onRunAgain={(taskId, runnableId) => void model.runProject(taskId, runnableId)}
                         />
                       )}
                       queued={text.queued}

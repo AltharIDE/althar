@@ -24,6 +24,8 @@ import {
   RuleWord,
 } from '../../setup/Charter/Charter'
 import { NamingRule, type NamingRuleProps, type RepositoryTemplate, TemplateSources } from '../../setup/Conventions/Conventions'
+import { ControlSheet } from '../../setup/ControlCenter/ControlCenter'
+import { SettingList, SettingSwitch } from '../../setup/Preferences/Preferences'
 import s from './ProjectRules.module.css'
 
 /*
@@ -34,10 +36,17 @@ import s from './ProjectRules.module.css'
  * Each kind of request Althar knows sits in one sentence, as an underlined
  * word that moves it to another; each command is code, taken out or added
  * where its sentence ends. Everything changes in place.
+ *
+ * Over the sentences, one switch allows everything: what asks, what goes
+ * ahead and the rest say they are off while it is on, and are kept for
+ * when it's off again. Never still holds.
  */
 
 /** Where a command rule can sit: never with the rest, which is for what no rule names. */
 export type CommandPlace = RulePlace.Never | RulePlace.Ask | RulePlace.Allow
+
+/** What the rest can get: allowing everything is the switch over every sentence, not one of them. */
+export type RestMode = Exclude<PermissionPolicy, PermissionPolicy.AllowAll>
 
 /** A command the project names, in the sentence for its place. */
 export interface RuleCommand {
@@ -96,15 +105,17 @@ export interface ProjectRulesText {
   never: { does: (subject: string) => string; andRuns: string; runs: (subject: string) => string; none: string }
   ask: { before: (subject: string) => string; andRunning: string; running: (subject: string) => string; none: string }
   allow: { with: (subject: string) => string; none: string }
-  /** Under what always asks and what goes ahead while everything is allowed. */
+  /** Under what always asks, what goes ahead and the rest while everything is allowed. */
   off: string
+  /** The switch over the sentences: its name, and what it does. */
+  allowAll: { title: string; note: (project: string) => string }
   /** The + at a sentence's end. */
   add: Record<CommandPlace, string>
   /** The field a command is typed in. */
   field: string
   /** Enter on an empty field. */
   typeFirst: string
-  rest: { like: string; alone: string; colon: string; label: string; mode: Record<PermissionPolicy, Worded & { after: string }> }
+  rest: { like: string; alone: string; colon: string; label: string; mode: Record<RestMode, Worded & { after: string }> }
   finished: {
     opens: string
     pushes: string
@@ -219,6 +230,11 @@ export const projectRulesText: ProjectRulesText = {
     none: 'Nothing goes ahead by a rule yet: a permission answered with “always allow” adds one here.',
   },
   off: 'Off while everything is allowed.',
+  allowAll: {
+    title: 'Allow everything',
+    note: (project) =>
+      `Nothing in ${project} waits for you, and the rules below are kept for when it’s off. Never still holds: while it lists anything, a command Althar can’t read is refused too.`,
+  },
   add: {
     [RulePlace.Never]: 'Add a command to Never',
     [RulePlace.Ask]: 'Add a command to Ask me',
@@ -249,12 +265,6 @@ export const projectRulesText: ProjectRulesText = {
         title: 'Ask me',
         note: 'Reads and the task’s own files still go ahead. OpenCode has no sandbox, so each of its commands waits',
         after: 'Reads and the task’s own files still go ahead.',
-      },
-      [PermissionPolicy.AllowAll]: {
-        word: 'allow everything',
-        title: 'Allow everything',
-        note: 'What asks and goes ahead above is off; only Never still holds',
-        after: 'Only Never still holds, and while it names anything, what Althar can’t read is refused.',
       },
     },
   },
@@ -335,7 +345,8 @@ const KINDS = [
   RuleKind.Outside,
 ] as const
 const PLACES = [RulePlace.Never, RulePlace.Ask, RulePlace.Allow, RulePlace.Rest] as const
-const MODES = [PermissionPolicy.Rules, PermissionPolicy.Coordinator, PermissionPolicy.Ask, PermissionPolicy.AllowAll] as const
+/** What the rest can be; allowing everything is the switch over every sentence. */
+const MODES = [PermissionPolicy.Rules, PermissionPolicy.Coordinator, PermissionPolicy.Ask] as const
 const ENDS = [TaskEnd.DraftPr, TaskEnd.ReadyPr, TaskEnd.PushOnly] as const
 const LIMITS = [LimitPolicy.Move, LimitPolicy.Wait, LimitPolicy.Ask] as const
 
@@ -345,9 +356,12 @@ export type ProjectRulesProps = RootProps<
     project: string
     /** The title's rank; each sentence's margin word is one below. */
     headingLevel?: HeadingLevel
-    /** What happens to what no rule keeps. */
-    mode: PermissionPolicy
-    onModeChange: (mode: PermissionPolicy) => void
+    /** What happens to what no rule keeps, while everything isn't allowed. */
+    mode: RestMode
+    onModeChange: (mode: RestMode) => void
+    /** Everything is allowed: the switch over the sentences, which quietens what asks, goes ahead and the rest. Only Never holds. */
+    allowAll: boolean
+    onAllowAllChange: (on: boolean) => void
     /** Where each kind of request sits: in one sentence only. */
     kinds: Readonly<Record<RuleKind, RulePlace>>
     onKindChange: (kind: RuleKind, place: RulePlace) => void
@@ -461,6 +475,8 @@ export function ProjectRules({
   headingLevel = 1,
   mode,
   onModeChange,
+  allowAll,
+  onAllowAllChange,
   kinds,
   onKindChange,
   commands,
@@ -484,7 +500,6 @@ export function ProjectRules({
 }: ProjectRulesProps) {
   const t = { ...projectRulesText, ...text }
   const sub: HeadingLevel = headingLevel >= 6 ? 6 : ((headingLevel + 1) as HeadingLevel)
-  const allowAll = mode === PermissionPolicy.AllowAll
   const modeWords = t.rest.mode[mode]
 
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -668,6 +683,12 @@ export function ProjectRules({
         <CharterKey text={t.key} className={s.key} />
       </header>
 
+      <ControlSheet className={s.allowAll}>
+        <SettingList>
+          <SettingSwitch title={t.allowAll.title} note={t.allowAll.note(project)} checked={allowAll} onChange={onAllowAllChange} />
+        </SettingList>
+      </ControlSheet>
+
       <Charter>
         <Clause label={t.label.always} headingLevel={sub} fixed>
           {t.fixed}
@@ -751,7 +772,7 @@ export function ProjectRules({
           )}
         </Clause>
 
-        <Clause label={t.label.rest} headingLevel={sub}>
+        <Clause label={t.label.rest} headingLevel={sub} {...(allowAll ? { off: t.off } : {})}>
           {restKinds.length > 0 ? (
             <>
               {t.rest.like}

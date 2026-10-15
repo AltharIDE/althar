@@ -24,9 +24,6 @@ const COPIES = [
   'packages/ui/src/foundations/Logo/Logo.tsx',
   'packages/ui/.storybook/theme.ts',
   'packages/ui/.storybook/public/favicon.svg',
-  'apps/pitch/src/components/Logo.tsx',
-  'apps/pitch/public/favicon.svg',
-  'apps/pitch/scripts/og.html',
   'apps/site/public/favicon.svg',
 ]
 

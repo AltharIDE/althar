@@ -7,7 +7,7 @@ import { isoSeconds, record, Unrecognized, type UsageWindow, windowKind } from '
 
 /*
  * Where each (agent, provider) pair's plan usage comes from
- * (docs/plans/plan-usage.md, ADR-043). Usage is required for every
+ * (docs/plans/plan-usage.md, ADR-045). Usage is required for every
  * subscription, so a pair that can be a plan declares at least one source, and
  * how it is told from a key; a test fails for one that does not. The sources
  * are tried best first: ACP, an adapter's extension, the agent's own channel,
@@ -21,7 +21,7 @@ export type PlainSource =
   | { readonly kind: 'agent'; readonly channel: 'codex-app-server' | 'claude-agent-sdk'; readonly built: boolean }
 
 /**
- * A provider's usage URL, called with an account's token under ADR-043. Only
+ * A provider's usage URL, called with an account's token under ADR-045. Only
  * `https`, `GET`, one host and one path. `confirmed` is false until a spike
  * has seen the real answer and the provider's terms have been read: the reader
  * refuses an unconfirmed source.
@@ -35,7 +35,7 @@ export interface EndpointSource {
   /** Headers besides the token's, fixed by the registry. */
   readonly headers?: Readonly<Record<string, string>>
   readonly confirmed: boolean
-  /** The agent's major version this is read for; none means any. OpenCode 2.x keeps credentials in a database ADR-043 does not allow reading. */
+  /** The agent's major version this is read for; none means any. OpenCode 2.x keeps credentials in a database ADR-045 does not allow reading. */
   readonly agentMajor?: number
   readonly parse: (answer: unknown, now: Date) => ReadonlyArray<UsageWindow>
 }
@@ -120,7 +120,7 @@ export const usagePairs: ReadonlyArray<UsagePair> = deepFreeze([
     provider: 'anthropic',
     pays: 'plan',
     classification: 'status',
-    // No endpoint: Anthropic's terms bar it (ADR-043). Both are planned (stage 2).
+    // No endpoint: Anthropic's terms bar it (ADR-045). Both are planned (stage 2).
     sources: [
       { kind: 'acp_extension', via: '_meta["_claude/rateLimit"]', built: false },
       { kind: 'agent', channel: 'claude-agent-sdk', built: false },
@@ -164,7 +164,7 @@ export const endpointSources = (): ReadonlyArray<EndpointSource> =>
   usagePairs.flatMap((pair) => pair.sources.filter((source): source is EndpointSource => source.kind === 'endpoint'))
 
 /**
- * The hosts and paths a usage read may call, and no others (ADR-043). An
+ * The hosts and paths a usage read may call, and no others (ADR-045). An
  * Anthropic host is never on it: Anthropic's terms bar the endpoint for
  * Claude, and only its written clearance with an amendment to the ADR lets one in.
  */
@@ -189,7 +189,7 @@ export const endpointProblem = (
   if (url.username !== '' || url.password !== '' || url.port !== '' || url.search !== '' || url.hash !== '')
     return 'its URL carries more than a host and a path'
   if (source.method !== 'GET') return 'it is not a GET'
-  if (ANTHROPIC.test(url.hostname)) return 'it is an Anthropic host, which ADR-043 keeps out'
+  if (ANTHROPIC.test(url.hostname)) return 'it is an Anthropic host, which ADR-045 keeps out'
   if (!allowed.some((entry) => entry.host === url.hostname && entry.path === url.pathname))
     return 'its host and path are not on the allowlist'
   return null
@@ -257,7 +257,7 @@ export type CredentialsRead =
 
 /**
  * Runs the agent's own listing of sign-ins in an account's home and reads it.
- * It lists; it opens no credential file (ADR-043). A command that fails, or
+ * It lists; it opens no credential file (ADR-045). A command that fails, or
  * prints another shape, is a fault to show.
  */
 export const readOpenCodeCredentials = (

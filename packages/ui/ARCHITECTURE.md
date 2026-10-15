@@ -3,7 +3,7 @@
 This package holds Althar's interface components: the primitives (buttons, menus, popovers), the thread (messages, tool calls, steps, permissions), the composer, the coordinator's cards, the board, the dock beside it, the home's stream, a task's outputs, and the window's chrome. The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target. This document adds what is specific to UI components. Where the code does not yet meet it, see **Gaps** at the end.
 
 - **Owner:** Repository maintainers
-- **Consumers:** the Althar desktop shell. The pitch app may adopt components later.
+- **Consumers:** the Althar desktop shell. The public site may adopt components later.
 - **Dependency direction:** apps depend on this package; it depends on no app. Inside the package, see **Layers**.
 
 ## Layers

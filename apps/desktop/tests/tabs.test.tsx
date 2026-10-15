@@ -78,10 +78,11 @@ const rulesRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projec
 const threadRoute = createRoute({ getParentRoute: () => rootRoute, path: '/threads/$threadId', component: Thread })
 let making = () => ''
 const newRoute = createRoute({ getParentRoute: () => rootRoute, path: '/new', component: () => <NewScreen projectId={() => making()} /> })
+const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/settings/$section', component: Where })
 
 const windowAt = (path: string, projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera], host: Host = fakeHost()) => {
   const router = createRouter({
-    routeTree: rootRoute.addChildren([homeRoute, projectRoute, rulesRoute, threadRoute, newRoute]),
+    routeTree: rootRoute.addChildren([homeRoute, projectRoute, rulesRoute, threadRoute, newRoute, settingsRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   const { client, emit } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects })) })
@@ -303,6 +304,89 @@ describe('the window’s tabs', () => {
   })
 })
 
+describe('Althar’s settings, in the window', () => {
+  const gear = () => screen.getByRole('button', { name: /^Althar settings/ })
+  const quick = () => screen.findByRole('dialog', { name: 'Quick settings' })
+  const noQuick = () => waitFor(() => expect(screen.queryByRole('dialog', { name: 'Quick settings' })).toBeNull())
+  const comma = (shiftKey = false) => fireEvent.keyDown(window, { key: shiftKey ? '<' : ',', code: 'Comma', metaKey: true, shiftKey })
+  const kept = () => keptFrom(window.localStorage.getItem('althar.tabs'))
+
+  it('open their quick settings on every screen, and a tab of their own beside the home’s, kept on its section', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['p1', 'p2'], places: {} }))
+    windowAt('/projects/p2')
+    await waitFor(() => expect(tab('halyard').getAttribute('aria-current')).toBe('page'))
+    // No tab for them until they are open.
+    expect(nav().queryByRole('button', { name: /^Settings/ })).toBeNull()
+
+    // From a project's screen, the gear's quick settings; All settings goes to their tab, at its first section.
+    await userEvent.click(gear())
+    await userEvent.click(within(await quick()).getByRole('button', { name: /^All settings/ }))
+    await waitFor(() => expect(where()).toBe('/settings/agents'))
+    await noQuick()
+    expect(names().map((name) => name.split(',')[0])).toEqual(['Home', 'Settings', 'meridian', 'halyard'])
+    expect(tab('Settings').getAttribute('aria-current')).toBe('page')
+    expect(tab('halyard').getAttribute('aria-current')).toBeNull()
+
+    // ⌘, on their own tab too; a card's name goes to the section it is in.
+    comma()
+    await userEvent.click(within(await quick()).getByRole('button', { name: /^Keep awake/ }))
+    await waitFor(() => expect(where()).toBe('/settings/this-mac'))
+
+    // To a project and back: the tab is where it was.
+    await userEvent.click(tab('meridian'))
+    expect(where()).toBe('/projects/p1')
+    expect(tab('Settings').getAttribute('aria-current')).toBeNull()
+    await userEvent.click(tab('Settings'))
+    expect(where()).toBe('/settings/this-mac')
+    // ⌘⇧, from anywhere goes there too.
+    await userEvent.click(tab('Home'))
+    comma(true)
+    await waitFor(() => expect(where()).toBe('/settings/this-mac'))
+    // Control-Tab steps through it too, between the home's and the projects'.
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true })
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(where()).toBe('/settings/this-mac'))
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(where()).toBe('/'))
+    fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true })
+    await waitFor(() => expect(where()).toBe('/settings/this-mac'))
+    // Kept for the next launch, with its section.
+    expect(kept()).toMatchObject({ open: ['p1', 'p2'], settings: 'this-mac' })
+
+    // ⌘, opens and closes the quick settings.
+    comma()
+    expect(await quick()).toBeTruthy()
+    comma()
+    await noQuick()
+
+    // Closed: the tab after it has the window, and its section is forgotten.
+    await userEvent.click(nav().getByRole('button', { name: 'Close Settings' }))
+    await waitFor(() => expect(where()).toBe('/projects/p1'))
+    expect(nav().queryByRole('button', { name: /^Settings/ })).toBeNull()
+    expect(kept()?.settings).toBeUndefined()
+  })
+
+  it('open again on the section they were on, after a launch, and close to the home where there is no project tab', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: [], places: {}, settings: 'reviews' }))
+    windowAt('/', [halyard])
+    await userEvent.click(await waitFor(() => tab('Settings')))
+    expect(where()).toBe('/settings/reviews')
+    await userEvent.click(nav().getByRole('button', { name: 'Close Settings' }))
+    await waitFor(() => expect(where()).toBe('/'))
+  })
+
+  it('wait for the bar, which comes with the first project', async () => {
+    windowAt('/', [])
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(screen.queryByRole('button', { name: /^Althar settings/ })).toBeNull()
+    comma()
+    comma(true)
+    expect(screen.queryByRole('dialog', { name: 'Quick settings' })).toBeNull()
+    expect(where()).toBe('/')
+  })
+})
+
 describe('how hard the Mac works, in the bar', () => {
   const meter = () => screen.findByRole('button', { name: 'CPU 42%, MEM 39%' })
   const peek = async () => {
@@ -445,5 +529,12 @@ describe('working out the tabs', () => {
       places: {},
       rooms: { p1: 'board' },
     })
+  })
+
+  it('reads the settings’ tab from its address, a section it doesn’t have as their first, and keeps one it knows', () => {
+    expect(whereOf('/settings/this-mac')).toEqual({ kind: 'settings', section: 'this-mac' })
+    expect(whereOf('/settings/mac')).toEqual({ kind: 'settings', section: 'agents' })
+    expect(keptFrom(JSON.stringify({ open: [], settings: 'notifications' }))).toEqual({ open: [], places: {}, settings: 'notifications' })
+    expect(keptFrom(JSON.stringify({ open: [], settings: 'mac' }))).toEqual({ open: [], places: {} })
   })
 })

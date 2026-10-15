@@ -22,7 +22,7 @@ import {
 } from '../src/usageSources'
 
 /*
- * The contract of the usage read (ADR-043): every subscription has a source and a
+ * The contract of the usage read (ADR-045): every subscription has a source and a
  * way to be told from a key, every endpoint is on the allowlist, and the
  * reader does only what the ADR lets it, against a fake home, token and server.
  */
