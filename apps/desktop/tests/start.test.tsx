@@ -745,19 +745,6 @@ describe('the start', () => {
     expect(client.readFolder).not.toHaveBeenCalled()
   })
 
-  it('shows usage data under the repositories, on, with what it sends, before anything is sent, and turns it off', async () => {
-    const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
-    const host = fakeHost()
-    withServices(<Start onProject={vi.fn()} />, client, host)
-    const privacy = await screen.findByRole('region', { name: 'Privacy' })
-    const usage = within(privacy).getByRole('switch', { name: 'Usage data' })
-    await waitFor(() => expect(usage.getAttribute('aria-checked')).toBe('true'))
-    expect(document.getElementById(usage.getAttribute('aria-describedby') ?? '')?.textContent).toMatch(/^Anonymous: .*Never your code/)
-    await userEvent.click(usage)
-    expect(host.setPreference).toHaveBeenCalledWith('usageData', false)
-    await waitFor(() => expect(usage.getAttribute('aria-checked')).toBe('false'))
-  })
-
   it('says how each agent is signed in', () => {
     expect(agents.map((agent) => runtimeEntry(agent)).map((entry) => [entry.state, 'account' in entry])).toEqual([
       [RuntimeState.Ready, false],

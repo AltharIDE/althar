@@ -251,7 +251,6 @@ export function SettingsPanel(props: SettingsPanelProps) {
       postTeamReviews={usePostTeamReviews()}
       preferences={usePreferences()}
       doNotTrack={useServices().host.doNotTrack === true}
-      onUsageShown={useServices().host.usageShown}
       editors={useEditorList()}
       pictures={useEditorPictures()}
       sounds={useSounds()}
@@ -271,7 +270,6 @@ export function SettingsView({
   postTeamReviews = null,
   preferences: kept,
   doNotTrack = false,
-  onUsageShown,
   editors,
   pictures,
   sounds,
@@ -293,8 +291,6 @@ export function SettingsView({
   preferences: PreferencesModel
   /** DO_NOT_TRACK is set where Althar started: usage data is off, whatever its switch says. */
   doNotTrack?: boolean
-  /** Usage data's switch is on screen, opened here. */
-  onUsageShown?: (() => void) | undefined
   editors: ReadonlyArray<{ readonly id: string; readonly name: string }>
   /** Each editor's icon by its id, as they come. */
   pictures: Readonly<Record<string, string>>
@@ -357,11 +353,6 @@ export function SettingsView({
   useEffect(() => {
     if (open) void recheck()
   }, [open, recheck])
-
-  // Opened here, usage data's switch has been shown, as the first screen shows it.
-  useEffect(() => {
-    if (showing === 'usage') onUsageShown?.()
-  }, [showing, onUsageShown])
 
   const hosts = list === null ? null : hostsLineOf(list)
   // The person, on the commit co-author is shown on, as GitHub names them.

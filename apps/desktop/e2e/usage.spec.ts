@@ -58,13 +58,9 @@ test('sends usage data while its switch is on, named events only, and nothing on
   const { electronApp, page } = await launch(home, { ALTHAR_FAKE_POSTHOG: fake.url })
   const names = () => fake.events.map((event) => event.event)
   try {
-    // Althar opened; the switch is on the first screen, on, with what it sends.
+    // Althar opened, sent at once: on by default, and the first screen doesn't ask.
     await expect.poll(names).toContain('app_opened')
-    const usage = page.getByRole('region', { name: 'Privacy' }).getByRole('switch', { name: 'Usage data' })
-    await expect(usage).toHaveAttribute('aria-checked', 'true')
-    // Once the launch has played over it.
-    await page.waitForTimeout(2500)
-    await page.screenshot({ path: 'test-results/start-usage-data.png' })
+    await expect(page.getByRole('switch', { name: 'Usage data' })).toHaveCount(0)
 
     // The first project, of the repository found, and a task started on it.
     await page

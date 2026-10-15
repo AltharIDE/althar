@@ -15,14 +15,14 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
   posthog-node: named events and properties only, never a name, a path or
   anything written; the window has no SDK
   ([ADR-036](decisions/036-usage-data-from-the-main-process.md)).
-- [x] **On or off at first.** On, with the switch and its line on the first
-  screen and in Settings; `DO_NOT_TRACK` keeps it off (ADR-036).
+- [x] **On or off at first.** On, with the switch in Settings only, not on
+  the first screen; `DO_NOT_TRACK` keeps it off (settled with the person,
+  15 October; ADR-036).
 - [x] **US or EU.** US (`us.i.posthog.com`), where the project already is;
   the ticket had leaned to the EU cloud (settled with the person, 12
   October; ADR-036).
-- [x] **Installs from before.** None: no one has Althar with a project yet,
-  so every install sees the switch on the first screen before anything is
-  sent (settled with the person, 12 October).
+- [ ] **Consent in the EU.** A random install id kept on the device may
+  need an explicit yes under ePrivacy; look again before the public launch.
 - [ ] **The dashboard.** The funnel from Althar opened to a task settled, and
   day-1 and day-7 retention, are made in PostHog, with discarding client IP
   addresses turned on in the project's settings.
