@@ -9,6 +9,13 @@ export interface Selected {
   readonly needs?: ReadonlyArray<string>
 }
 
+/**
+ * How a run's directory is laid out. `plain`: `<agent>/<id>/…`. `claude-plugin`: a local plugin Claude Code loads
+ * for the session alone (`plugins: [{ type: 'local', path }]`), `<agent>/plugin/skills/<id>/…` with a manifest
+ * that names no hooks, commands, agents or servers, so nothing is written to the person's Claude home or a repository.
+ */
+export type Layout = 'plain' | 'claude-plugin'
+
 export interface Projected {
   readonly directory: string
   readonly projected: ReadonlyArray<string>
@@ -34,12 +41,15 @@ export const projectRun = async (input: {
   readonly selected: ReadonlyArray<Selected>
   readonly capabilities: ReadonlyArray<string>
   readonly keepOutOf: ReadonlyArray<string>
+  readonly layout?: Layout
 }): Promise<Projected> => {
-  const { root, runId, agent, selected, capabilities, keepOutOf } = input
+  const { root, runId, agent, selected, capabilities, keepOutOf, layout = 'plain' } = input
   if (!/^[\w.-]+$/.test(runId) || !/^[\w.-]+$/.test(agent) || runId === '.' || runId === '..') throw new Error('unsafe run or agent name')
-  const directory = join(root, 'runs', runId, agent)
+  const base = join(root, 'runs', runId, agent)
+  const directory = layout === 'claude-plugin' ? join(base, 'plugin') : base
+  const skillsAt = layout === 'claude-plugin' ? join(directory, 'skills') : directory
   for (const repository of keepOutOf) {
-    if (inside(directory, repository)) throw new Error(`${directory} is inside the repository ${repository}`)
+    if (inside(base, repository)) throw new Error(`${base} is inside the repository ${repository}`)
   }
   const seen = new Set<string>()
   for (const { id, treeHash } of selected) {
@@ -49,8 +59,17 @@ export const projectRun = async (input: {
   }
   const projected: string[] = []
   const omitted: Array<{ id: string; missing: string[] }> = []
-  await rm(directory, { recursive: true, force: true })
-  await mkdir(directory, { recursive: true })
+  await rm(base, { recursive: true, force: true })
+  await mkdir(skillsAt, { recursive: true })
+  if (layout === 'claude-plugin') {
+    const manifest = join(directory, '.claude-plugin', 'plugin.json')
+    await mkdir(dirname(manifest), { recursive: true })
+    await writeFile(
+      manifest,
+      `${JSON.stringify({ name: 'althar', description: 'Skills Althar selected for this run', version: '0.0.0' }, null, 2)}\n`,
+      { mode: 0o444 },
+    )
+  }
   for (const skill of selected) {
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(skill.id)) throw new Error(`unsafe skill id: ${skill.id}`)
     const missing = (skill.needs ?? []).filter((need) => !capabilities.includes(need))
@@ -59,7 +78,7 @@ export const projectRun = async (input: {
       continue
     }
     for (const [path, bytes] of await readObject(root, skill.treeHash)) {
-      const target = join(directory, skill.id, path)
+      const target = join(skillsAt, skill.id, path)
       await mkdir(dirname(target), { recursive: true })
       await writeFile(target, bytes, { mode: 0o444 })
     }

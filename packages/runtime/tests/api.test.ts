@@ -815,6 +815,25 @@ describe('this computer’s load, through the API', () => {
 })
 
 describe('project rules, through the API', () => {
+  it.live('turns each repository-files setting on alone, and keeps the others off', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const one = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          repositoryFiles: { writeSkills: true, writeOpenSpec: false, pushProtected: false },
+        })
+        assert.deepStrictEqual(one.repositoryFiles, { writeSkills: true, writeOpenSpec: false, pushProtected: false })
+        // An unrelated change leaves them as they are.
+        const other = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, moveIssues: false })
+        assert.deepStrictEqual(other.repositoryFiles, { writeSkills: true, writeOpenSpec: false, pushProtected: false })
+        assert.deepStrictEqual((yield* client.GetProjectRules({ projectId: project.id })).repositoryFiles, other.repositoryFiles)
+      }),
+    ),
+  )
+
   it.live('reads a project’s rules, and changes them in part as the person', () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -837,6 +856,8 @@ describe('project rules, through the API', () => {
           branchPattern: null,
           titlePattern: null,
           moveIssues: true,
+          // Skill and OpenSpec files stay out of the repositories, and off the remote, until the person says.
+          repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: false },
         })
         // A repository that says nothing of its pull requests: Althar's own names, and no template.
         assert.deepStrictEqual(

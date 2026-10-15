@@ -564,6 +564,48 @@ checks and the harness permission rules remain the enforcement.
      update `apps/desktop/README.md` for the settings UI, and the privacy
      notes for the update check.
 
+## Implementation status
+
+**Landed (Claude Code, 2026-10-15), on the branch, not pushed:**
+
+- `packages/skills` (`@althar/skills`): validation, the content-addressed store,
+  `installs.json` (an unreviewed install cannot be active), the catalog format,
+  a local-directory catalog loader that stands in for the real source, the
+  per-run projection, and the path-based guard.
+- **Delivery to Claude Code.** The registry's `claude-code` entry takes a
+  `skillsPlugin` session option and passes it as the SDK's
+  `plugins: [{ type: 'local', path }]`. The path is a plugin Althar builds
+  under `<skills root>/runs/<session>/claude-code/plugin/` (a bare manifest and
+  `skills/<id>/`), removed when the session's scope closes. This differs from
+  the "isolated home" wording of section 2 on purpose: Claude Code's sign-in is
+  tied to the account home's path (the registry notes a macOS Keychain item
+  named after it), so a per-run `CLAUDE_CONFIG_DIR` would break sign-in, and
+  writing into the shared account home would leak one run's selection into
+  the next. A session-scoped plugin touches neither the account home, the
+  person's own `~/.claude`, nor any repository.
+- **Who gets it.** Only a task's lead on Claude Code, and only where the runtime
+  was given a skills store. Readers, reviewers, a review's lead (untrusted) and
+  other agents get none. A failure to set skills up costs the session its
+  skills, not its start.
+- **Per-project settings.** `repositoryFiles` on the project's rules (a new
+  revision per change, like the others): `writeSkills`, `writeOpenSpec`,
+  `pushProtected`, each off unless set. The API reads and sets them. Nothing
+  yet reads `writeSkills` or `writeOpenSpec`, because nothing in this slice
+  writes skills or OpenSpec into a repository.
+- **Push guard.** Every push Althar makes for a task (publish, push the
+  branch, push to a pull request, replace after a rewrite, push after a local
+  merge) first lists what the commits since the task's base changed (git `-z`,
+  no renames, no quoting) and refuses with `PushRefused` (`protected`) any path
+  under a protected root unless `pushProtected` is on. It is path-based and
+  ignores who wrote the file, and a protected file the repository already had
+  and the task did not touch does not block.
+
+**Not yet:** the commit-time check; the Repository files section in the
+project's settings window; Codex and OpenCode delivery (OpenCode 1.x only;
+2.x is to be refused, per the OpenCode 2 plan, which is not in this tree); the
+`althar-skills` catalog and any GitHub fetch (the fixture catalog is a local
+directory); review cards, updates and rollback; OpenSpec.
+
 ## Open decisions and risks
 
 - The exact skills picked from agent-skills and superpowers are undecided

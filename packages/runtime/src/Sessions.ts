@@ -36,6 +36,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
 import { Artifacts } from './Artifacts'
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
+import { claudeRunSkills } from './Skills'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
 import { CACHE_LIFE, dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
@@ -583,6 +584,7 @@ export class Sessions extends Context.Service<
       const limits = yield* Limits
       const toolServer = yield* ToolServer
       const setups = yield* Setups
+      const skillsConfig = (yield* RuntimeConfig).skills
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
       const quietFor = (yield* RuntimeConfig).idle?.quiet ?? QUIET_FOR
       const wakeFor = (yield* RuntimeConfig).idle?.wake ?? WAKE_FOR
@@ -1554,6 +1556,18 @@ export class Sessions extends Context.Service<
                         ),
                     }),
               })
+              // Skills Althar selected, for a Claude Code lead only (never a reader, a reviewer or a review's lead), as a plugin in
+              // Althar's own folder for this session: nothing goes in the repository or the person's Claude folder. A failure here
+              // costs the session its skills, not its start.
+              const skills =
+                !reads && definition.id === 'claude-code' && skillsConfig !== undefined
+                  ? yield* Effect.tryPromise(() => claudeRunSkills(skillsConfig, sessionId, foldersOf(thread))).pipe(
+                      Effect.tap((run) => Effect.addFinalizer(() => Effect.promise(run.release).pipe(Effect.ignore))),
+                      Effect.catch((cause) =>
+                        Effect.logWarning('Could not set up skills for the session', cause).pipe(Effect.as(undefined)),
+                      ),
+                    )
+                  : undefined
               const agent = yield* connection.newSession({
                 cwd: cwdOf(thread),
                 // The coordinator, a reviewer and a review's lead only read: in the agent's read-only mode where that still lets it call
@@ -1566,7 +1580,12 @@ export class Sessions extends Context.Service<
                   : {
                       meta: definition.sessionMeta(
                         reads ? 'reader' : 'lead',
-                        untrusted ? { untrusted, ...(offline ? { offline } : {}) } : undefined,
+                        untrusted || skills !== undefined
+                          ? {
+                              ...(untrusted ? { untrusted, ...(offline ? { offline } : {}) } : {}),
+                              ...(skills === undefined ? {} : { skillsPlugin: skills.plugin }),
+                            }
+                          : undefined,
                       ),
                     }),
               })

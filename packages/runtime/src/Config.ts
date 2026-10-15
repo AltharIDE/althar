@@ -12,6 +12,7 @@ import { CliUnanswered, UnknownAgent } from './errors'
 import { Installs, type OnDevice } from './Installs'
 import type { LoadOptions } from './MachineLoad'
 import type { ModelFactsOptions } from './ModelFacts'
+import type { SkillsConfig } from './Skills'
 
 export interface RuntimeOptions {
   /** Where task worktrees go: `<root>/<project>/<task>/<repository>` (ADR-006). */
@@ -24,6 +25,11 @@ export interface RuntimeOptions {
    * nothing is kept, and the thread says so.
    */
   readonly artifactsRoot?: string
+  /**
+   * The shared skills store and the local catalog that seeds it. Claude Code leads are given the active skills as a
+   * plugin for their session alone. Without it, no run has Althar-selected skills.
+   */
+  readonly skills?: SkillsConfig
   /** Where agents Althar downloads at the person's asking are kept (`Installs.ts`): `<root>/<agent>`. Without it, it downloads none. */
   readonly agentsRoot?: string
   /**

@@ -346,6 +346,17 @@ export const RepositoryConventions = Schema.Struct({
 export type RepositoryConventions = typeof RepositoryConventions.Type
 
 /** A project's rules, as its rules screen shows them. */
+/** Skill and OpenSpec files in a project's repositories: three separate permissions, each off until the person turns it on. */
+export const RepositoryFilesSetting = Schema.Struct({
+  /** Althar may write its managed skills into the repository's native skill folders when a task asks it to. */
+  writeSkills: Schema.Boolean,
+  /** OpenSpec artifacts may live in, and be versioned with, the repository. */
+  writeOpenSpec: Schema.Boolean,
+  /** Changes under the protected skill folders and `openspec/` may be pushed; never follows from either write setting. */
+  pushProtected: Schema.Boolean,
+})
+export type RepositoryFilesSetting = typeof RepositoryFilesSetting.Type
+
 export const ProjectRulesView = Schema.Struct({
   projectId: Schema.String,
   /** Which revision of the rules these are: a change that replaces a list names it, so one made meanwhile isn't lost. */
@@ -372,6 +383,8 @@ export const ProjectRulesView = Schema.Struct({
   titlePattern: Schema.NullOr(Schema.String),
   /** Whether a task's issue is moved to its tracker's In Progress as the task starts. */
   moveIssues: Schema.Boolean,
+  /** Whether skill and OpenSpec files may be written to, committed in, or pushed from the project's repositories; each off unless turned on. */
+  repositoryFiles: RepositoryFilesSetting,
   /** What each of the project's repositories says, in the project's order. */
   conventions: Schema.Array(RepositoryConventions),
 })
@@ -2424,6 +2437,7 @@ export const Api = RpcGroup.make(
       branchPattern: Schema.optional(Schema.NullOr(Schema.String)),
       titlePattern: Schema.optional(Schema.NullOr(Schema.String)),
       moveIssues: Schema.optional(Schema.Boolean),
+      repositoryFiles: Schema.optional(RepositoryFilesSetting),
       /** The revision the change was made against: refused (`RulesChanged`) where the rules have moved on since. */
       expectedRevision: Schema.optional(Schema.Number),
     },

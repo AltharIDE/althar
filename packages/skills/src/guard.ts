@@ -75,3 +75,6 @@ export const blockedBeforePush = (paths: ReadonlyArray<string>, settings: Reposi
     return kind === null ? [] : [{ path, kind, reason: 'push-off' as const }]
   })
 }
+
+/** The paths in `git diff --name-only -z --no-renames` output: NUL-separated and unquoted, a rename as its old and new paths. */
+export const parseNulPaths = (output: string): string[] => output.split('\0').filter((path) => path !== '')

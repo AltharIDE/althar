@@ -234,6 +234,8 @@ export const runtime = (
     readonly idle?: IdleOptions
     /** The device outside a sandbox, as for a Flatpak. */
     readonly onDevice?: RuntimeOptions['onDevice']
+    /** The skills store and local catalog; no run has Althar-selected skills without it. */
+    readonly skills?: RuntimeOptions['skills']
     /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
     readonly busy?: BusyOptions
   } = {},
@@ -263,6 +265,7 @@ export const runtime = (
     ...(more.load === undefined ? {} : { load: more.load }),
     ...(more.idle === undefined ? {} : { idle: more.idle }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
+    ...(more.skills === undefined ? {} : { skills: more.skills }),
     busy: { machine: ROOMY, ...more.busy },
   })
 

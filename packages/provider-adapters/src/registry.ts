@@ -186,6 +186,12 @@ export interface AgentDefinition {
 export interface SessionOptions {
   readonly offline?: boolean
   readonly untrusted?: boolean
+  /**
+   * A folder of skills Althar chose for this run, laid out as a Claude Code local plugin (`@althar/skills`'
+   * `claude-plugin` layout) and loaded for the session alone. Only a lead's session is given one; the
+   * person's own Claude folder and the repository are never written to.
+   */
+  readonly skillsPlugin?: string
 }
 
 export interface AgentCli {
@@ -400,11 +406,12 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * Only the MCP servers Althar gives a session are loaded, not the user's
  * or the repository's own, whose tools the ask list doesn't cover.
  */
-const claudeAsks = {
+const claudeAsks = (skillsPlugin?: string) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
+      ...(skillsPlugin === undefined ? {} : { plugins: [{ type: 'local', path: skillsPlugin }] }),
       // An object: the adapter reads a string as a path to a settings file.
       settings: {
         permissions: { ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
@@ -418,7 +425,7 @@ const claudeAsks = {
       },
     },
   },
-}
+})
 
 /**
  * Claude Code for a role that only reads: its edit tools denied, which also
@@ -517,7 +524,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     sessionMeta: (role = 'lead', options = {}) =>
       role === 'reader'
         ? claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true)
-        : claudeAsks,
+        : claudeAsks(options.skillsPlugin),
     /*
      * As a review's lead it is held by its session's settings alone (claudeReads, untrusted): every command asks and meets
      * Althar's reader rules, no settings file or hook of the repository's or the person's loads, and offline its web tools are

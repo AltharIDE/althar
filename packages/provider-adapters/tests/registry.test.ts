@@ -33,6 +33,18 @@ describe('the agent registry', () => {
     })
   })
 
+  it('loads Althar-chosen skills into a Claude Code lead as a local plugin for the session, and nowhere else', () => {
+    type Meta = { claudeCode: { options: { plugins?: Array<{ type: string; path: string }>; allowDangerouslySkipPermissions: boolean } } }
+    const without = agents['claude-code'].sessionMeta?.('lead', {}) as Meta
+    assert.isUndefined(without.claudeCode.options.plugins)
+    const lead = agents['claude-code'].sessionMeta?.('lead', { skillsPlugin: '/data/skills/runs/r1/claude-code/plugin' }) as Meta
+    assert.deepStrictEqual(lead.claudeCode.options.plugins, [{ type: 'local', path: '/data/skills/runs/r1/claude-code/plugin' }])
+    assert.isFalse(lead.claudeCode.options.allowDangerouslySkipPermissions)
+    // A reader (and so a review's lead) is given none, even if one is passed.
+    const reader = agents['claude-code'].sessionMeta?.('reader', { skillsPlugin: '/x', untrusted: true }) as Meta
+    assert.isUndefined(reader.claudeCode.options.plugins)
+  })
+
   it('makes Claude Code ask, and keeps bypass mode out of reach', () => {
     const meta = agents['claude-code'].sessionMeta?.() as {
       claudeCode: { options: { allowDangerouslySkipPermissions: boolean; settings: { permissions: { ask: Array<string> } } } }

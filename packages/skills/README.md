@@ -1,6 +1,6 @@
 # @althar/skills
 
-Agent Skills for every harness ([plan](../../docs/plans/skills-across-harnesses.md)): what a skill must be to be installed, the shared store, the default catalog's format, a per-run projection, and the repository boundary. This is the first slice of the plan's stages 2 and 5; nothing in the runtime or the adapters uses it yet.
+Agent Skills for every harness ([plan](../../docs/plans/skills-across-harnesses.md)): what a skill must be to be installed, the shared store, the default catalog's format, a per-run projection, and the repository boundary. The runtime hands a Claude Code lead the active skills as a session-scoped plugin and checks every push with the guard; Codex and OpenCode are not wired yet (see the plan's status section).
 
 ## Use it
 
@@ -27,5 +27,5 @@ blockedBeforeCommit(changedPaths, DEFAULT_REPOSITORY_FILES) // skill and OpenSpe
 | --- | --- |
 | `bun run check` | Format, type-aware lint and type checks |
 | `bun run test` | The tests, against real temporary directories |
-| `bun run test:coverage` | The same, with the coverage gate: 90% of lines and branches (needs Node; Bun has no `node:inspector`) |
+| `bun run test:coverage` | The same, with the coverage gate: 90% of lines and branches (needs Node on PATH; Bun has no `node:inspector`) |
 | `bun run verify` | Check and coverage, as CI runs them |

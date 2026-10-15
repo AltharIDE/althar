@@ -3,7 +3,7 @@
 The shared skills of [docs/plans/skills-across-harnesses.md](../../docs/plans/skills-across-harnesses.md). The repository's [ARCHITECTURE.md](../../ARCHITECTURE.md) sets the general engineering target.
 
 - **Owner:** Repository maintainers
-- **Consumers:** none yet. The runtime will hold the store and bindings; the adapters will point each agent at a projection.
+- **Consumers:** the runtime (`Skills.ts`, `repositoryGuard.ts`), which seeds the store, projects a run's skills for Claude Code and guards pushes. The other adapters are not wired yet.
 - **Dependency direction:** depends on `js-yaml` and `zod` alone. It fetches nothing from the network and runs nothing from a skill; fetching GitHub content and the review UI are the runtime's.
 
 ## What it holds
@@ -17,4 +17,5 @@ The shared skills of [docs/plans/skills-across-harnesses.md](../../docs/plans/sk
 | `catalog.ts` | The default catalog's format: pins by commit SHA, tree hashes, licence, needs |
 | `store.ts` | The content-addressed object store and `installs.json` |
 | `projection.ts` | A run's read-only copy of the chosen skills, kept outside every project |
+| `local.ts` | A catalog on disk (`catalog.json`, `skills/<id>/`), checked and installed as the default set; stands in for the real source |
 | `guard.ts` | The repository boundary: protected paths and the per-project settings, all off by default |
