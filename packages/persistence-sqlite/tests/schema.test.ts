@@ -274,7 +274,7 @@ describe('schema', () => {
   it.effect('gives each repository bound before runnables its own way to run, in the order they were bound', () =>
     withFile((filename) =>
       Effect.gen(function* () {
-        const before = migrations.findIndex((migration) => migration.key === '0032_runnables')
+        const before = migrations.findIndex((migration) => migration.key === '0033_runnables')
         const made = Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { projectId, createdAt } = yield* seed

@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { Wait, unreachable } from '../../foundations/vocabulary'
 import { cx } from '../../lib/cx'
@@ -46,12 +48,14 @@ export interface NextRowProps {
   /** What it waits for, in a line: Starts when 419 merges. */
   reason: string
   current?: boolean
+  /** One fact, at its foot, as on a card: Unrestricted, for a task that will start allowing everything. */
+  foot?: ReactNode
   onOpen?: () => void
   text?: Partial<NextRowText>
 }
 
 /** One row of the queue up next. Put it in a BoardList. */
-export function NextRow({ place, task, kind, title, wait, reason, current, onOpen, text }: NextRowProps) {
+export function NextRow({ place, task, kind, title, wait, reason, current, foot, onOpen, text }: NextRowProps) {
   const t = { ...nextRowText, ...text }
   return (
     <article className={cx(b.row, s.next)} aria-current={current || undefined}>
@@ -67,6 +71,7 @@ export function NextRow({ place, task, kind, title, wait, reason, current, onOpe
         <Icon name={glyph(wait)} size={11} />
         {reason}
       </span>
+      {foot !== undefined && foot !== null && <div className={b.foot}>{foot}</div>}
     </article>
   )
 }

@@ -12,9 +12,11 @@ import {
   CallCard,
   CommandChip,
   Fact,
+  FactLine,
   FileChips,
   Findings,
   NextRow,
+  NextStep,
   Outcome,
   PullChip,
   SettledRow,
@@ -32,6 +34,7 @@ import { busyWords, waitsWords } from '../../shared/agents'
 import { callKindOf, kindWords, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
+import { factsOf, nextWords, standingOf } from '../../shared/standing'
 import { afterSteps, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -67,6 +70,8 @@ export const text = {
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   stopped: 'No agent is working on it',
+  /** At a card's foot while everything its task asks is allowed, by its own switch or its project's. */
+  unrestricted: 'Unrestricted',
   /** A plain task at work: no steps worth showing, and nothing of its own yet. */
   working: 'Working',
   /** A plain task that finished, waiting to be seen. */
@@ -76,9 +81,9 @@ export const text = {
   reviewDrafted: 'Review drafted',
   /** A conflict its lead couldn't resolve, or the checks on the merge it couldn't fix: the person's now. */
   mergeConflict: 'Merge conflict',
+  /** A running change's checks; a ready one's say what stands (shared/standing). */
   checks: {
     passed: (n: number) => (n === 1 ? '1 check passed' : `All ${n} checks passed`),
-    none: 'No checks ran',
     soFar: (passed: number, total: number) => `${passed} of ${total} checks passed`,
     failed: (n: number) => (n === 1 ? '1 check failed' : `${n} checks failed`),
   },
@@ -164,9 +169,9 @@ const theirs = (reviewing: ReviewBrief) => (
   />
 )
 
-/** How its checks stand, in one fact: all passed, some failed, or how many so far. None where it has none to say. */
-const checksFact = (checks: ChangeSummary['checks'], ready: boolean): ReactNode => {
-  if (checks === null || checks.total === 0) return ready ? <Fact>{text.checks.none}</Fact> : null
+/** How a running change's checks stand, in one fact: all passed, some failed, or how many so far. None where it has none to say. */
+const checksFact = (checks: ChangeSummary['checks']): ReactNode => {
+  if (checks === null || checks.total === 0) return null
   if (checks.failed > 0)
     return (
       <Fact icon="close" tone="danger">
@@ -203,6 +208,27 @@ const findingsOf = (reviewing: ReviewBrief) => {
 
 /** The card's own props, without how it opens. */
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
+
+/** What a task that allows everything it asks says at its foot: on its card, and in line up next, where it will start so. */
+const unrestricted = (work: BoardTask): ReactNode => (work.allowEverything === true ? <Fact tone="warm">{text.unrestricted}</Fact> : null)
+
+/** A card whose task allows everything it asks says so at its foot, after what it says there already. */
+export const unrestrictedOf = (card: Card, work: BoardTask): Card => {
+  const fact = unrestricted(work)
+  if (fact === null) return card
+  return {
+    ...card,
+    foot:
+      card.foot == null ? (
+        fact
+      ) : (
+        <>
+          {card.foot}
+          {fact}
+        </>
+      ),
+  }
+}
 
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string): Card => {
@@ -253,7 +279,7 @@ export const runningCardOf = (work: BoardTask, now: string, name: (id: string | 
         ...(beforeWork
           ? {}
           : change !== null && change.state === 'open'
-            ? { object: pullChip(change), foot: checksFact(change.checks, false) }
+            ? { object: pullChip(change), foot: checksFact(change.checks) }
             : work.branch !== null && !empty(work.changed)
               ? {
                   object: (
@@ -364,14 +390,37 @@ export const readyCardOf = (work: BoardTask): Card => {
                 </Fact>
               ),
             }
-          : change === null
+          : // One merged or closed has nothing in its way, and nothing to do to it.
+            change === null || change.state !== 'open'
             ? {}
-            : { foot: checksFact(change.checks, true) }),
+            : { foot: readyFoot(change) }),
       }
     }
     default:
       return unreachable(work.kind)
   }
+}
+
+/**
+ * A ready pull request's foot: what stands between it and merging, as one
+ * line, the most pressing first in its colour (only it with its glyph), or
+ * how its checks went where nothing does; then the one next thing to do,
+ * which its task does.
+ */
+const readyFoot = (change: ChangeSummary): ReactNode => {
+  const standing = standingOf(change)
+  return (
+    <>
+      <FactLine>
+        {factsOf(change, standing).map((one, i) => (
+          <Fact key={one.words} {...(i === 0 && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
+            {one.words}
+          </Fact>
+        ))}
+      </FactLine>
+      {standing.next !== null && <NextStep>{nextWords(standing.next)}</NextStep>}
+    </>
+  )
 }
 
 export function BoardView({
@@ -415,6 +464,7 @@ export function BoardView({
                 reason={
                   startsAt === null ? text.held : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
                 }
+                foot={unrestricted(work)}
                 onOpen={() => onOpen(work.threadId)}
                 text={{ task: unnamed }}
               />
@@ -425,7 +475,7 @@ export function BoardView({
 
       <BoardColumn lane={BoardLane.Running} count={lanes.running.length}>
         {lanes.running.map((work) => (
-          <BoardCard key={work.taskId} {...runningCardOf(work, now, name)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard key={work.taskId} {...unrestrictedOf(runningCardOf(work, now, name), work)} onOpen={() => onOpen(work.threadId)} />
         ))}
       </BoardColumn>
 
@@ -434,7 +484,7 @@ export function BoardView({
           ask.waiting !== null ? (
             <BoardCard
               key={ask.waiting.task.taskId}
-              {...waitingCardOf(ask.waiting, name)}
+              {...unrestrictedOf(waitingCardOf(ask.waiting, name), ask.waiting.task)}
               onOpen={() => onOpen(ask.waiting.task.threadId)}
             />
           ) : (
@@ -442,7 +492,7 @@ export function BoardView({
           ),
         )}
         {lanes.ready.map((work) => (
-          <BoardCard key={work.taskId} {...readyCardOf(work)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard key={work.taskId} {...unrestrictedOf(readyCardOf(work), work)} onOpen={() => onOpen(work.threadId)} />
         ))}
       </BoardColumn>
 

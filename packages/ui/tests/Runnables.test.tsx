@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type ListedRunnable, Runnables } from '../src/setup/Runnables/Runnables'
 
 /*
- * The whole list of what a project runs, put in order by dragging (ADR-043):
+ * The whole list of what a project runs, put in order by dragging (ADR-044):
  * a row picked up by its grip follows the pointer, those it passes make way,
  * and it lands where it is dropped.
  */

@@ -826,6 +826,7 @@ describe('project rules, through the API', () => {
           projectId: project.id,
           revision: 1,
           permissions: 'rules',
+          allowEverything: false,
           alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
           never: [],
           alwaysAllow: [],
@@ -885,8 +886,22 @@ describe('project rules, through the API', () => {
           [null, null, true, ['force-push'], true],
         )
         assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
+        // Allow everything is a switch over the mode (ADR-043): the mode is kept under it, and holds again once it is off.
+        const allowing = yield* client.SetProjectRules({
+          commandId: commandId(),
+          projectId: project.id,
+          permissions: 'coordinator',
+          allowEverything: true,
+        })
+        assert.deepStrictEqual([allowing.permissions, allowing.allowEverything], ['coordinator', true])
+        const off = yield* client.SetProjectRules({ commandId: commandId(), projectId: project.id, allowEverything: false })
+        assert.deepStrictEqual([off.permissions, off.allowEverything], ['coordinator', false])
         const missing = yield* Effect.flip(client.GetProjectRules({ projectId: 'proj_missing' }))
         assert.strictEqual(missing.reason, 'NotFound')
+        const noTask = yield* Effect.flip(
+          client.SetTaskAllowEverything({ commandId: commandId(), taskId: 'task_missing', allowEverything: true }),
+        )
+        assert.strictEqual(noTask.reason, 'NotFound')
       }),
     ),
   )

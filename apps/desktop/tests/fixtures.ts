@@ -50,6 +50,7 @@ export const projectRules: ProjectRulesView = {
   projectId: 'p1',
   revision: 1,
   permissions: 'rules',
+  allowEverything: false,
   alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
   never: [],
   alwaysAllow: [],
@@ -702,6 +703,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     runnables: [],
     launches: [],
     resolveConflicts: { task: null, project: false },
+    allowEverything: { task: false, project: false },
   },
   session: {
     id: 's1',
@@ -872,6 +874,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     compact: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
     setTaskResolveConflicts: vi.fn(async () => {}),
+    setTaskAllowEverything: vi.fn(async () => {}),
     resumeTask: vi.fn(async () => {}),
     abandonTask: vi.fn(async () => {}),
     reopenTask: vi.fn(async () => {}),

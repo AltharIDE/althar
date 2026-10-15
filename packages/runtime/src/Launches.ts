@@ -28,7 +28,7 @@ import { type Tool, type ToolAccess, ToolRefused, ToolServer } from './ToolServe
  * agent's is. What it prints is read for where it answers, as what an agent
  * leaves running is. Runs are kept in memory: none outlives Althar.
  *
- * A project runs many things (ADR-043): its runnables, a list in the person's
+ * A project runs many things (ADR-044): its runnables, a list in the person's
  * order, the first its default, each in one of its repositories. One with no
  * command of its own is its repository's own way to run, as above; the rest
  * say theirs, and are made ready with their repository's setup. Several run

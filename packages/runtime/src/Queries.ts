@@ -72,6 +72,11 @@ const LIVE = ['starting', 'active', 'waiting_approval', 'cancelling']
 /** A task's branch as its screens show it, from its first worktree `w`: none for a plain task's that has no branch yet (DEV-96). */
 const SHOWN_BRANCH = 'CASE WHEN w.branched_at IS NULL THEN NULL ELSE w.branch END AS branch'
 
+/** Whether a project's rules allow everything now (ADR-043): by the switch, or as an earlier revision said it, as a mode. 1 or 0. */
+const PROJECT_ALLOWS = (projectId: string) =>
+  `(SELECT json_extract(r.rules, '$.allowEverything') IS 1 OR json_extract(r.rules, '$.permissions') IS 'allow'
+    FROM policies r WHERE r.project_id = ${projectId} ORDER BY r.revision DESC LIMIT 1)`
+
 /** How many tasks, or cards, a screen reads at once: each may start git. */
 const AT_ONCE = 8
 
@@ -256,6 +261,8 @@ const callOf = (request: {
     reason: text(payload, 'reason'),
     command,
     ...(command === null ? {} : { label: shortCommand(command) }),
+    // A permission the rules keep for the person whatever they let through: no "always allow" can answer it.
+    ...(request.kind === 'permission' && field(payload, 'held') === true ? { held: true } : {}),
     stuck: request.kind === 'stuck' ? stuckOf(payload) : null,
     ...(request.kind === 'question'
       ? { question: askedOf(payload, { agentId: request.askerAgentId ?? null, model: request.askerModel ?? null }) }
@@ -280,6 +287,9 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
   if (n === null || productIs === undefined || (state !== 'open' && state !== 'merged' && state !== 'closed')) return null
   const outcome = text(checks, 'outcome')
   const failing = field(checks, 'failing')
+  // Where the host said whether it conflicts, and which branch it merges into: absent from a snapshot kept before them.
+  const conflicts = field(value, 'conflicts')
+  const target = text(value, 'target')
   return {
     product: productIs,
     number: n,
@@ -307,6 +317,8 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
             failing: Array.isArray(failing) ? failing.filter((name) => typeof name === 'string') : [],
             list: Option.getOrElse(decodeChecks(field(checks, 'list') ?? []), () => []),
           },
+    ...(target === '' ? {} : { target }),
+    ...(typeof conflicts === 'boolean' ? { conflicts } : {}),
     head: text(value, 'headSha') || null,
     listening,
     localHead: null,
@@ -1624,7 +1636,22 @@ export class Queries extends Context.Service<
                   del: said.files.reduce((sum, file) => sum + file.del, 0),
                 }
               : null
-          const read = { ...card, state: row.state, createdAt: row.createdAt, settledAt: row.settledAt, changed, here: said?.here ?? [] }
+          // Not settled, whether nothing it asks waits for the person: by its own switch, or its project's (ADR-043).
+          const sql = yield* SqlClient.SqlClient
+          const [allows] =
+            card.phase === 'settled'
+              ? []
+              : yield* sql<{ allows: number | null }>`
+                  SELECT k.allow_everything = 1 OR ${sql.unsafe(PROJECT_ALLOWS('k.project_id'))} AS allows FROM tasks k WHERE k.id = ${row.id}`
+          const read = {
+            ...card,
+            state: row.state,
+            createdAt: row.createdAt,
+            settledAt: row.settledAt,
+            changed,
+            here: said?.here ?? [],
+            ...(allows?.allows === 1 ? { allowEverything: true } : {}),
+          }
           if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, read)
           // Back at work, what was kept of it as it settled goes: settled again, at the same time, it may say more.
           else for (const key of settledCards.keys()) if (key.startsWith(`${row.id}:`)) settledCards.delete(key)
@@ -1895,10 +1922,13 @@ export class Queries extends Context.Service<
             settledAt: string | null
             resolveConflicts: number | null
             projectResolves: number | null
+            allowEverything: number
+            projectAllows: number | null
           }>`
             SELECT t.id AS thread_id, p.id AS project_id, p.name AS project_name, k.id AS task_id, k.title, k.description, k.request, k.slug, k.state,
               k.settled_at, ${sql.unsafe(SHOWN_BRANCH)}, w.path AS worktree, w.base_ref, w.base_commit, k.resolve_conflicts,
-              (SELECT json_extract(r.rules, '$.resolveConflicts') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS project_resolves
+              (SELECT json_extract(r.rules, '$.resolveConflicts') FROM policies r WHERE r.project_id = p.id ORDER BY r.revision DESC LIMIT 1) AS project_resolves,
+              k.allow_everything, ${sql.unsafe(PROJECT_ALLOWS('p.id'))} AS project_allows
             FROM threads t JOIN tasks k ON k.id = t.task_id JOIN projects p ON p.id = t.project_id
             LEFT JOIN workspaces w ON w.id = (SELECT f.id FROM workspaces f JOIN repository_bindings fb ON fb.id = f.binding_id WHERE f.task_id = k.id AND f.device_id = ${instance.deviceId} ORDER BY fb.created_at, fb.rowid LIMIT 1)
             WHERE t.id = ${threadId} AND t.kind = 'task'`
@@ -1925,7 +1955,9 @@ export class Queries extends Context.Service<
             WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC LIMIT 1)
               AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1`
           // Where it stands, from its card, which shows its links too: the header reads those with git, below.
-          const card = yield* cardFor(head.taskId, { issue: null, changes: [] })
+          // Its links are read first and given to it: its kind, and where it opens, depend on its pull requests.
+          const links = yield* linksOf(head.taskId)
+          const card = yield* cardFor(head.taskId, links)
           const session = yield* sessionOf(threadId)
           // Who leads it when no lead runs: the last on its thread, else its plan's.
           const [last] = yield* sql<{ agentId: string; model: string | null; account: string | null }>`
@@ -1939,9 +1971,9 @@ export class Queries extends Context.Service<
             SELECT count(*) AS left FROM runs r, json_each(r.parameters, '$.steps') s
             WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1)
               AND r.state = 'running' AND json_extract(s.value, '$.key') = 'review' AND NOT json_extract(s.value, '$.skipped')`
-          // Its links, whose open pull requests say what isn't pushed, what git says of its worktrees, and its host, read at the same time.
-          const [links, said, host] = yield* Effect.all(
-            [linksOf(head.taskId), gitOf(head.taskId, { changed: true, here: true, fresh: page.fresh === true }), hostOf(head.projectId)],
+          // What git says of its worktrees, and its host, read at the same time.
+          const [said, host] = yield* Effect.all(
+            [gitOf(head.taskId, { changed: true, here: true, fresh: page.fresh === true }), hostOf(head.projectId)],
             {
               concurrency: 'unbounded',
             },
@@ -1962,6 +1994,7 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               baseRef: head.baseRef,
               phase: card?.phase ?? null,
+              kind: card?.kind,
               handedBack: card?.handedBack ?? null,
               waits: card?.waits ?? null,
               queued: card?.queued ?? null,
@@ -1987,6 +2020,7 @@ export class Queries extends Context.Service<
                 task: head.resolveConflicts === null ? null : head.resolveConflicts === 1,
                 project: head.projectResolves === 1,
               },
+              allowEverything: { task: head.allowEverything === 1, project: head.projectAllows === 1 },
               review: yield* reviewBriefOf(head.taskId),
             },
             session,

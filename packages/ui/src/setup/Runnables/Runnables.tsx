@@ -15,7 +15,7 @@ import { Spinner } from '../../primitives/Spinner/Spinner'
 import s from './Runnables.module.css'
 
 /*
- * What a project runs, kept by the person (ADR-043): adding something more to
+ * What a project runs, kept by the person (ADR-044): adding something more to
  * run, three ways (typing its command, picking from the repository's
  * package.json scripts, or asking the coordinator to work it out); changing
  * one; and the whole list, in the person's order, the first its default, to

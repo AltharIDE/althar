@@ -8,7 +8,7 @@ import { TaskStatus } from '@althar/ui'
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
 import { lookedOf, noOutputsOf, readsOf } from '../src/renderer/features/task/NoOutputsView'
 import { conflictsOf } from '../src/renderer/features/task/Outputs'
-import { elapsedOf, sinceOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
+import { elapsedOf, openingFace, sinceOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { numberOf, reachOf, reviewedUnfurl } from '../src/renderer/features/task/ReviewCard'
 import { agents, change, changed, fakeClient, items, models, snapshot, status, streamed, usual } from './fixtures'
@@ -1118,6 +1118,68 @@ describe('a task', () => {
     expect(await shownFor(true, false)).toEqual([true, false])
     expect(await shownFor(false, true)).toEqual([false, true])
     expect(await shownFor(true, true)).toEqual([false, false])
+  })
+
+  it('allows everything on it from its menu, and says Unrestricted beside the menu while it does, by its own switch or its project’s', async () => {
+    const { client, view } = await taskMenu({})
+    expect(screen.queryByText('Unrestricted')).toBeNull()
+    await userEvent.click(screen.getByRole('menuitemcheckbox', { name: /Allow everything on this task/ }))
+    await waitFor(() => expect(client.setTaskAllowEverything).toHaveBeenCalledWith({ taskId: 't1', allowEverything: true }))
+    view.unmount()
+    const shownFor = async (own: boolean, project: boolean) => {
+      const { client } = fakeClient({
+        getThread: vi.fn(async () => thread({ task: { ...thread().task, allowEverything: { task: own, project } } })),
+      })
+      const shown = withServices(<Task />, client)
+      await screen.findByRole('button', { name: 'More for this task' })
+      const said = screen.queryByText('Unrestricted') !== null
+      shown.unmount()
+      return said
+    }
+    expect(await shownFor(true, false)).toBe(true)
+    expect(await shownFor(false, true)).toBe(true)
+    expect(await shownFor(false, false)).toBe(false)
+  })
+
+  it('says Unrestricted as its project’s switch turns on, and no longer as it turns off, with nothing else changing on it', async () => {
+    let project = false
+    const { client, emit } = fakeClient({
+      getThread: vi.fn(async () => thread({ task: { ...thread().task, allowEverything: { task: false, project } } })),
+    })
+    withServices(<Task />, client)
+    await screen.findByRole('button', { name: 'More for this task' })
+    expect(screen.queryByText('Unrestricted')).toBeNull()
+    project = true
+    act(() => emit(changed('policy', 'pol2', null, 'p1')))
+    expect(await screen.findByText('Unrestricted')).toBeTruthy()
+    // Another project's rules read nothing here.
+    const reads = vi.mocked(client.getThread).mock.calls.length
+    act(() => emit(changed('policy', 'pol3', null, 'p2')))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(client.getThread).toHaveBeenCalledTimes(reads)
+    project = false
+    act(() => emit(changed('policy', 'pol4', null, 'p1')))
+    await waitFor(() => expect(screen.queryByText('Unrestricted')).toBeNull())
+  })
+
+  it('says why a call the project always asks about has no always allow, and allows everything on the task from it', async () => {
+    const call = {
+      id: 'a1',
+      kind: 'permission' as const,
+      stuck: null,
+      title: 'Run make deploy',
+      reason: 'Deploying or publishing always asks.',
+      command: 'make deploy',
+      held: true,
+      createdAt: '2026-09-29T12:00:00.000Z',
+    }
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ attention: [call, { ...call, id: 'a2', held: false, command: 'git push' }] })),
+    })
+    withServices(<Task />, client)
+    await screen.findByText(/always asks you about this, so there’s no “always allow”/)
+    await userEvent.click(screen.getByRole('button', { name: 'Allow everything on this task' }))
+    await waitFor(() => expect(client.setTaskAllowEverything).toHaveBeenCalledWith({ taskId: 't1', allowEverything: true }))
   })
 
   it('offers its folder for a plain task with no branch, and none where it has no worktree', async () => {
@@ -2254,5 +2316,82 @@ describe('a task’s outputs before it has made anything', () => {
     // Edited in place, it is written, not read.
     expect(readsOf("sed -i '' 's#http://localhost#http://127.0.0.1#' check.mjs")).toEqual([])
     expect(readsOf('git status --short; npm run build; grep -rn "x" src | head -40; cat src/*.ts; cat $f')).toEqual([])
+  })
+})
+
+describe('the face a task opens on', () => {
+  const file: ChangedFile = { path: 'src/a.ts', from: null, status: 'modified', add: 1, del: 0, binary: false, uncommitted: false }
+  const base = snapshot()
+  const of = (task: Partial<ThreadSnapshot['task']>, attention: ThreadSnapshot['attention'] = []) =>
+    openingFace({ ...base, attention, task: { ...base.task, ...task } })
+  const asks: ThreadSnapshot['attention'] = [
+    {
+      id: 'q1',
+      kind: 'question',
+      stuck: null,
+      title: 'Which?',
+      reason: '',
+      command: null,
+      question: { message: 'Which?', fields: [] },
+      createdAt: '2026-10-10T12:00:00.000Z',
+    },
+  ]
+
+  it('opens a change that is ready on its outputs', () => {
+    expect(of({ kind: 'change', phase: 'ready', files: [file], commits: 1 })).toBe('out')
+    expect(of({ phase: 'ready', files: [file] })).toBe('out')
+  })
+
+  it('opens a quick task with no branch on its conversation', () => {
+    expect(of({ kind: 'plain', phase: 'ready', branch: null, files: [file] })).toBe('talk')
+  })
+
+  it('opens a prototype, a quick task that wrote files, on its conversation', () => {
+    expect(of({ kind: 'plain', phase: 'ready', branch: 'althar/proto', commits: 2, files: [file] })).toBe('talk')
+  })
+
+  it('opens a review of someone else’s pull request on its conversation, where its draft is', () => {
+    expect(of({ kind: 'review', phase: 'ready' })).toBe('talk')
+  })
+
+  it('opens a task with a question waiting on its conversation, whatever its kind', () => {
+    expect(of({ kind: 'change', phase: 'ready', files: [file] }, asks)).toBe('talk')
+    expect(of({ kind: 'plain', phase: 'waiting' }, asks)).toBe('talk')
+  })
+
+  it('opens a quick task that became a change on its outputs from then on', () => {
+    expect(of({ kind: 'plain', phase: 'ready', files: [file], commits: 1 })).toBe('talk')
+    expect(of({ kind: 'change', phase: 'ready', files: [file], commits: 1 })).toBe('out')
+  })
+
+  it('shows the conversation, not the outputs, for a prototype that is ready', async () => {
+    const ready = snapshot({ task: { ...base.task, kind: 'plain', phase: 'ready', files: [file] } })
+    const { client } = fakeClient({ getThread: vi.fn(async () => ready) })
+    withServices(<Task />, client)
+    expect((await screen.findByRole('radio', { name: /Conversation/ })).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('keeps the view the person picked when they open the task again', async () => {
+    const ready = snapshot({ task: { ...base.task, kind: 'plain', phase: 'ready', files: [file] } })
+    const { client } = fakeClient({ getThread: vi.fn(async () => ready) })
+    const first = withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    expect(screen.getByRole('radio', { name: /Outputs/ }).getAttribute('aria-checked')).toBe('true')
+    first.unmount()
+    withServices(<Task />, client)
+    expect((await screen.findByRole('radio', { name: /Outputs/ })).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('opens on the conversation when a call waits, though Outputs was picked before', async () => {
+    const ready = snapshot({ task: { ...base.task, kind: 'plain', phase: 'ready', files: [file] } })
+    const asking = snapshot({ task: { ...ready.task, phase: 'waiting' }, attention: asks })
+    let current = ready
+    const { client } = fakeClient({ getThread: vi.fn(async () => current) })
+    const first = withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    first.unmount()
+    current = asking
+    withServices(<Task />, client)
+    expect((await screen.findByRole('radio', { name: /Conversation/ })).getAttribute('aria-checked')).toBe('true')
   })
 })

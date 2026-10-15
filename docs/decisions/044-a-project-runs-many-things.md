@@ -1,4 +1,4 @@
-# ADR-043: A project runs many things, from a list with a default
+# ADR-044: A project runs many things, from a list with a default
 
 - **Status:** Accepted
 - **Date:** 2026-10-15
@@ -42,7 +42,7 @@
     coordinator and leads alike; a null command drops one. `run_project`
     runs one by name, its default without. The coordinator is asked, in the
     project's conversation, when the person picks "Ask the coordinator".
-  - **Kept in the store** (`runnables`, migration 0032): dropping one keeps its
+  - **Kept in the store** (`runnables`, migration 0033): dropping one keeps its
     row, as a note's does. A change to the list changes the project, so every
     screen that shows what it runs reads it again.
 - **Alternatives considered:**

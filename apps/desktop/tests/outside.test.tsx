@@ -641,6 +641,53 @@ describe('the thread, reaching outside', () => {
     expect(screen.getByText('Merged PR #12')).toBeTruthy()
   })
 
+  it('reads a pasted link as its key, with its card in the message it came in', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
+        snapshot({
+          items: [
+            items.you('Do https://linear.app/m/issue/MER-231, like https://github.com/m/a/pull/1206. Not https://example.com/x.', null, [
+              {
+                kind: 'issue',
+                product: 'linear',
+                key: 'MER-231',
+                title: 'Rate-limit refunds',
+                url: 'https://linear.app/m/issue/MER-231/rate-limit-refunds',
+                pasted: 'https://linear.app/m/issue/MER-231',
+                status: { name: 'Todo', category: 'todo' },
+                priority: null,
+                container: null,
+              },
+              {
+                kind: 'change',
+                product: 'github',
+                key: 'PR #1206',
+                title: 'Rate-limit charges',
+                url: 'https://github.com/m/a/pull/1206',
+                pasted: 'https://github.com/m/a/pull/1206',
+                state: 'merged',
+                repository: 'meridian/api',
+              },
+            ]),
+            items.you('Nothing linked here.'),
+          ],
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    const [linked, plain] = await screen.findAllByRole('article', { name: 'You' })
+    const message = within(linked as HTMLElement)
+    // The words say each link's key where it was pasted; an address that didn't unfurl stays as written.
+    expect(message.getByText(/^Do /).textContent).toBe('Do MER-231, like #1206. Not https://example.com/x.')
+    // Each card is in the message, under its words, and opens the link.
+    expect(message.getByRole('link', { name: /Rate-limit refunds/ }).getAttribute('href')).toBe(
+      'https://linear.app/m/issue/MER-231/rate-limit-refunds',
+    )
+    expect(message.getByRole('link', { name: /Rate-limit charges/ }).getAttribute('href')).toBe('https://github.com/m/a/pull/1206')
+    expect(within(plain as HTMLElement).getByText('Nothing linked here.')).toBeTruthy()
+    expect(within(plain as HTMLElement).queryByRole('link')).toBeNull()
+  })
+
   it('says when someone outside the repository wasn’t passed to the lead, and passes it on when asked', async () => {
     const send = vi.fn(async () => {})
     const { client } = fakeClient({

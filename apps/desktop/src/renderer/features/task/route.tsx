@@ -21,7 +21,9 @@ function TaskScreen({ threadId }: { threadId: string }) {
   // Back to the project, which opens on the view it was last on.
   const back = () =>
     void (project === undefined ? navigate({ to: '/' }) : navigate({ to: '/projects/$projectId', params: { projectId: project.id } }))
-  return <TaskView model={model} onBack={back} />
+  const rules =
+    project === undefined ? {} : { onRules: () => void navigate({ to: '/projects/$projectId/rules', params: { projectId: project.id } }) }
+  return <TaskView model={model} onBack={back} {...rules} />
 }
 
 function Task() {

@@ -6,7 +6,7 @@ import { reads } from '../../data/reads'
 import { useServices } from '../../data/services'
 
 /*
- * What a project runs, as one screen keeps it (ADR-043): keeping one,
+ * What a project runs, as one screen keeps it (ADR-044): keeping one,
  * changing, dropping and ordering them, the repository's scripts to pick
  * from, and asking the coordinator to work out what is worth running. Each
  * says what went wrong if it did; the screens read what the project runs

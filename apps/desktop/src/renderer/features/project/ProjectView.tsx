@@ -364,7 +364,7 @@ export function ProjectView({
         trackers,
         open: (url) => window.open(url, '_blank'),
       })}
-      // What the project runs, with no agent, on its default branch (ADR-043).
+      // What the project runs, with no agent, on its default branch (ADR-044).
       {...(coordinator === null
         ? {}
         : {

@@ -15,7 +15,7 @@ import { basename, join, relative } from 'node:path'
  * its lead starts.
  *
  * Its package.json files' scripts, the root's and each workspace's, are what
- * the person picks something more to run from (ADR-043), each as the command
+ * the person picks something more to run from (ADR-044), each as the command
  * that runs it from the repository's root.
  */
 

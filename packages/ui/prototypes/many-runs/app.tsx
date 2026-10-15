@@ -161,7 +161,7 @@ const threadItems = [
   items.tool({ title: 'Edit apps/site/src/Download.tsx' }),
 ]
 
-/** What the project runs, as the runtime hands it on (ADR-043): in its order, the first its default. */
+/** What the project runs, as the runtime hands it on (ADR-044): in its order, the first its default. */
 const runnablesOf = () => {
   const { runnables, defaultId } = proto.get()
   const first = runnables.find((one) => one.id === defaultId)

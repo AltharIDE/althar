@@ -351,10 +351,12 @@ export const ProjectRulesView = Schema.Struct({
   /** Which revision of the rules these are: a change that replaces a list names it, so one made meanwhile isn't lost. */
   revision: Schema.Number,
   /**
-   * What no rule keeps: allowed (`rules`), judged by the coordinator (`coordinator`), or asked about (`ask`);
-   * or everything allowed (`allow`), what always asks with it, short of `never`.
+   * What no rule keeps: allowed (`rules`), judged by the coordinator (`coordinator`), or asked about (`ask`).
+   * While everything is allowed, what comes back once it isn't.
    */
-  permissions: Schema.Literals(['rules', 'coordinator', 'ask', 'allow']),
+  permissions: Schema.Literals(['rules', 'coordinator', 'ask']),
+  /** Everything is allowed: nothing waits for the person, what always asks included; only `never` still holds. */
+  allowEverything: Schema.Boolean,
   alwaysAsk: Schema.Array(RuleKind),
   never: Schema.Array(RuleKind),
   /** The kinds let through without asking, short of what always asks or is never allowed (ADR-018). */
@@ -655,6 +657,14 @@ export const ChangeSummary = Schema.Struct({
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),
   checks: Schema.NullOr(ChecksSummary),
+  /** The branch it merges into, as last seen: main. Absent where Althar saw it before it kept this. */
+  target: Schema.optional(Schema.String),
+  /**
+   * Whether its host says it conflicts with that branch, as last seen, so it
+   * can't merge until its branch is brought up to date. Null or absent where
+   * the host hasn't worked it out, or doesn't say.
+   */
+  conflicts: Schema.optional(Schema.NullOr(Schema.Boolean)),
   /** The commit at its head, as last seen: what accepting it merges, and nothing newer. */
   head: Schema.NullOr(Schema.String),
   /** Althar asks its host for news while the task is open. */
@@ -684,6 +694,9 @@ export type ChangeSummary = typeof ChangeSummary.Type
 export const TaskEnd = Schema.Literals(['draft', 'ready', 'none'])
 export type TaskEnd = typeof TaskEnd.Type
 
+/** The address as the message has it, which can differ from the one the tracker or host gives (`url`); none on a link unfurled before it was kept. */
+const Pasted = Schema.optional(Schema.String)
+
 /** A link the person pasted, unfurled: an issue, or a pull request. */
 export const Unfurl = Schema.Union([
   Schema.Struct({
@@ -692,6 +705,7 @@ export const Unfurl = Schema.Union([
     key: Schema.String,
     title: Schema.String,
     url: Schema.String,
+    pasted: Pasted,
     status: IssueStatus,
     priority: Schema.NullOr(Schema.Struct({ level: Schema.String, name: Schema.String })),
     container: Schema.NullOr(Schema.String),
@@ -702,6 +716,7 @@ export const Unfurl = Schema.Union([
     key: Schema.String,
     title: Schema.String,
     url: Schema.String,
+    pasted: Pasted,
     state: Schema.Literals(['draft', 'open', 'merged', 'closed']),
     repository: Schema.String,
   }),
@@ -1221,7 +1236,7 @@ export const RunItem = Schema.Struct({
     launchId: Schema.String,
     /** What it runs: the task's, or null for a copy of the default branch. */
     taskId: Schema.NullOr(Schema.String),
-    /** Which of the project's runnables it runs (ADR-043), for running it again; absent on a card from before there were several. */
+    /** Which of the project's runnables it runs (ADR-044), for running it again; absent on a card from before there were several. */
     runnableId: Schema.optional(Schema.NullOr(Schema.String)),
     /** Where it runs, in words: the task's title, or the default branch. */
     where: Schema.String,
@@ -1443,7 +1458,7 @@ export type ContextUse = typeof ContextUse.Type
 export const Launch = Schema.Struct({
   ...BackgroundCommand.fields,
   taskId: Schema.NullOr(Schema.String),
-  /** Which of the project's runnables it runs (ADR-043). */
+  /** Which of the project's runnables it runs (ADR-044). */
   runnableId: Schema.NullOr(Schema.String),
   /** Where it runs, in words: the task's title, or the default branch. */
   where: Schema.String,
@@ -1451,7 +1466,7 @@ export const Launch = Schema.Struct({
 export type Launch = typeof Launch.Type
 
 /**
- * Something a project runs, with no agent (ADR-043): one of a list in the
+ * Something a project runs, with no agent (ADR-044): one of a list in the
  * person's order, the first its default, each in one of its repositories.
  * Its command is what it runs where it is shown: in a task's worktree on the
  * task, in the default branch's copy on the project. One that is its
@@ -1571,6 +1586,8 @@ export const AttentionRequest = Schema.Struct({
   command: Schema.NullOr(Schema.String),
   /** The command as it reads at a glance (see BackgroundCommand); absent where it is not shortened or there is no command. */
   label: Schema.optional(Schema.String),
+  /** For a permission: a kind or a command the project always asks about keeps it, so no "always allow" can answer it. */
+  held: Schema.optional(Schema.Boolean),
   /** For a step that needs the person: which, and why. */
   stuck: Schema.NullOr(StuckStep),
   /** For an agent's question: what it asks, field by field; it is answered in the thread, where it was asked. */
@@ -1710,6 +1727,8 @@ export const ThreadSnapshot = Schema.Struct({
     baseRef: Schema.NullOr(Schema.String),
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
+    /** What it makes, read from what it has now, as its card says: where it opens, an outputs view for a change only. */
+    kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
@@ -1749,7 +1768,7 @@ export const ThreadSnapshot = Schema.Struct({
     actions: Schema.Array(TaskAction),
     /** Its plan still waiting to start, by id, for starting it now; null once started, or where it has none. */
     planId: Schema.NullOr(Schema.String),
-    /** What it can run in its worktree, in the project's order, the first its default (ADR-043); empty where nothing says how. */
+    /** What it can run in its worktree, in the project's order, the first its default (ADR-044); empty where nothing says how. */
     runnables: Schema.Array(Runnable),
     /** What Althar runs of it, in its worktree. */
     launches: Schema.Array(Launch),
@@ -1759,6 +1778,12 @@ export const ThreadSnapshot = Schema.Struct({
      * its project's rules do, which `project` is.
      */
     resolveConflicts: Schema.Struct({ task: Schema.NullOr(Schema.Boolean), project: Schema.Boolean }),
+    /**
+     * Whether everything its agents ask is allowed, short of what its project
+     * never allows: turned on for the task (`task`), or by its project's
+     * rules for every task (`project`).
+     */
+    allowEverything: Schema.Struct({ task: Schema.Boolean, project: Schema.Boolean }),
     /** Someone else's pull request it reviews, where it is a review: its thread opens with it, and its view says what the lead can reach. */
     review: Schema.optional(Schema.NullOr(ReviewBrief)),
   }),
@@ -1783,6 +1808,8 @@ export const BoardTask = Schema.Struct({
   changed: Schema.NullOr(Schema.Struct({ files: Schema.Number, add: Schema.Number, del: Schema.Number })),
   /** A ready task's repositories with no pull request, not merged yet, which merge here. */
   here: Schema.Array(TaskRepositoryHere),
+  /** Not settled, everything its agents ask is allowed, by the task's own switch or its project's (ADR-043). Not without it. */
+  allowEverything: Schema.optional(Schema.Boolean),
 })
 export type BoardTask = typeof BoardTask.Type
 
@@ -1902,7 +1929,7 @@ export const CoordinatorSnapshot = Schema.Struct({
   earlier: Schema.Boolean,
   /** Where the project's repository is hosted, when its remote says, and whether Althar is connected to it there. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
-  /** What the project runs, in its order, the first its default (ADR-043), as run in the default branch's copy; empty where nothing says how. */
+  /** What the project runs, in its order, the first its default (ADR-044), as run in the default branch's copy; empty where nothing says how. */
   runnables: Schema.Array(Runnable),
   /** What Althar runs of the project's default branch. */
   launches: Schema.Array(Launch),
@@ -2304,6 +2331,8 @@ export const Api = RpcGroup.make(
    * conflict.
    */
   command('SetTaskResolveConflicts', { taskId: Schema.String, resolveConflicts: Schema.NullOr(Schema.Boolean) }, Schema.Void),
+  /** Allows everything its agents ask on one task, short of what its project never allows; turned on, what waits on the person is decided again. */
+  command('SetTaskAllowEverything', { taskId: Schema.String, allowEverything: Schema.Boolean }, Schema.Void),
   /**
    * Carries a stopped task on from the step it was on: with its last lead,
    * or the agent and model given. What the person said before it waits in
@@ -2458,7 +2487,9 @@ export const Api = RpcGroup.make(
     'SetProjectRules',
     {
       projectId: Schema.String,
-      permissions: Schema.optional(Schema.Literals(['rules', 'coordinator', 'ask', 'allow'])),
+      permissions: Schema.optional(Schema.Literals(['rules', 'coordinator', 'ask'])),
+      /** Turned on, what waits on the person in the project's tasks is decided again, and goes ahead, short of `never`. */
+      allowEverything: Schema.optional(Schema.Boolean),
       alwaysAsk: Schema.optional(Schema.Array(RuleKind)),
       never: Schema.optional(Schema.Array(RuleKind)),
       alwaysAllow: Schema.optional(Schema.Array(RuleKind)),
@@ -2582,7 +2613,7 @@ export const Api = RpcGroup.make(
     Launch,
   ),
   /**
-   * Keeps something for the project to run (ADR-043): a new one, at the end
+   * Keeps something for the project to run (ADR-044): a new one, at the end
    * of the list, or, by id, a change to one. A null command is the
    * repository's own way to run. In a project of several repositories, say
    * which; the first otherwise.
