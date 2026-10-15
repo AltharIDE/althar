@@ -12,21 +12,15 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
 ## The Flatpak's keyring, 15 October
 
 - [ ] **Where the sealing key lives in the Flatpak, so it survives a restart.**
-  Found with the person's own Flatpak on KDE (Electron 44, `gnome-libsecret`).
-  Inside the sandbox libsecret keeps its keyring in a file of the app's own
-  (`~/.var/app/dev.althar.app/data/keyrings/default.keyring`, opened with a
-  secret the desktop portal keeps in the host's wallet), but Chromium looks the
-  key up where the host's secret service is, finds none, and logs "OSCrypt
-  generated a new password" at every start, replacing the one it made before.
-  A sign-in sealed in one run is then unreadable in the next
-  (`safeStorage.decryptString` fails), so every connection has to be signed in
-  again after each launch. Althar now says so ("sign in again", the connection
-  goes to `reauth_required`) rather than "unreachable", but the key still
-  changes. Leanings, none tried in the Flatpak: on KDE, `--password-store=kwallet6`
-  with `--talk-name=org.kde.kwalletd6` in the manifest (the wallet is the host's, so
-  the key stays); Chromium looking up through libsecret's own backend, as it
-  stores; or Althar keeping the key itself. Not settled until a whole task has
-  survived a restart under GNOME and KDE (ADR-028).
+  Found with the person's own Flatpak on KDE (Electron 44, `gnome-libsecret`):
+  inside the sandbox libsecret keeps its keyring in a file of the app's own,
+  but Chromium looks the key up in the host's secret service, finds none, and
+  logs "OSCrypt generated a new password" at every start. A sign-in sealed in
+  one run is then unreadable in the next (`safeStorage.decryptString` fails).
+  Althar now says so ("sign in again", the connection goes to
+  `reauth_required`) rather than "unreachable", but the key itself is decided
+  elsewhere: KDE (KWallet) on PR #201, GNOME on PR #207. Settled when a whole
+  task has survived a restart under both (ADR-028).
 
 ## Usage data, 12 October
 

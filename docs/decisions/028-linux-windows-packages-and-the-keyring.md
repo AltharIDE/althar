@@ -42,8 +42,8 @@
     keychain can no longer open (`decryptString` throws) is not the keychain
     being away: main marks it `unreadable`, the runtime doesn't ask again, and
     the connection says it needs signing in again, like one its service refused.
-    In the Flatpak that is what every restart does today (open questions, "The
-    Flatpak's keyring").
+    In a Flatpak whose sealing key changes at every start that is what a
+    restart does (open questions, "The Flatpak's keyring").
   - **The Flatpak is experimental.** It carries the app and the toolchain for
     its own work with network, display, GPU, the keyring and the device's own
     tools through the broad `flatpak-spawn` permission (ADR-027); its worktrees live
