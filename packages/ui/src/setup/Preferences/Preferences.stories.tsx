@@ -7,6 +7,7 @@ import { EdgeSpot } from '../../foundations/vocabulary'
 import { States } from '../../storybook/States'
 import { EdgeMini } from '../EdgeMini/EdgeMini'
 import {
+  AgentsAtOnce,
   EdgeHere,
   EdgePlaces,
   EdgeScene,
@@ -16,6 +17,7 @@ import {
   type NotifyChoices,
   OpenFilesIn,
   SettingList,
+  UsageData,
 } from './Preferences'
 
 const EDITORS = [
@@ -30,11 +32,16 @@ const SOUNDS = ['Basso', 'Blow', 'Glass', 'Ping', 'Pop', 'Purr', 'Tink']
 
 const ALL_ON: NotifyChoices = { calls: true, ready: true, stopped: true, badge: true }
 
+/* A 16 GB Mac with 10 cores, which runs four at once by default. */
+const MACHINE = { count: 4, memory: 16, cores: 10 }
+
 /* What the stories' play functions look for, as a consumer would hear it. */
+const onAtOnce = fn()
 const onAwake = fn()
 const onNotify = fn()
 const onPlay = fn()
 const onPlace = fn()
+const onUsage = fn()
 
 /* Stand-ins for what the app puts in the screen: the home layer's Island and EdgeSheet can't be drawn from here. */
 const island = (
@@ -75,6 +82,21 @@ const menuMark = (
   </>
 )
 
+/* How many agents at once, as a consumer keeps it: the person's number, or none for the default. */
+function AtOnce() {
+  const [own, setOwn] = useState<number | null>(null)
+  return (
+    <AgentsAtOnce
+      count={own ?? MACHINE.count}
+      machine={MACHINE}
+      onChange={(count) => {
+        setOwn(count)
+        onAtOnce(count)
+      }}
+    />
+  )
+}
+
 /* The sections as a consumer keeps them: each change shows at once and goes out. */
 function General() {
   const [awake, setAwake] = useState(true)
@@ -91,6 +113,7 @@ function General() {
         onBattery={battery}
         onBatteryChange={setBattery}
       />
+      <AtOnce />
       <OpenFilesIn editors={EDITORS} value={editor} onChange={setEditor} />
     </SettingList>
   )
@@ -109,6 +132,21 @@ function Notifications() {
         }}
       />
       <NotificationSound sounds={SOUNDS} value={sound} onChange={setSound} onPlay={onPlay} />
+    </SettingList>
+  )
+}
+
+function Usage() {
+  const [on, setOn] = useState(true)
+  return (
+    <SettingList>
+      <UsageData
+        on={on}
+        onChange={(next) => {
+          setOn(next)
+          onUsage(next)
+        }}
+      />
     </SettingList>
   )
 }
@@ -166,6 +204,55 @@ export const GeneralSettings: Story = {
     await expect(within(editors).getByRole('radio', { name: 'Cursor' })).toBeChecked()
     await userEvent.click(within(editors).getByRole('radio', { name: 'Zed' }))
     await expect(within(editors).getByRole('radio', { name: 'Zed' })).toBeChecked()
+  },
+}
+
+/** Anonymous usage data, on as it starts, with the line on what it sends and never sends; turned off at once. */
+export const UsageDataSwitch: Story = {
+  render: () => <Usage />,
+  play: async ({ canvasElement }) => {
+    const usage = within(canvasElement).getByRole('switch', { name: 'Usage data' })
+    await expect(usage).toBeChecked()
+    await expect(usage).toHaveAccessibleDescription(
+      'Anonymous: steps such as a project made or a task settled. Never your code, what is written, or any name.',
+    )
+    await userEvent.click(usage)
+    await expect(onUsage).toHaveBeenCalledWith(false)
+    await expect(usage).not.toBeChecked()
+  },
+}
+
+/** How many agents work at once, and why: the default from this Mac's memory and cores, a number of the person's own, and back to the default. */
+export const AgentsAtOnceSetting: Story = {
+  render: () => (
+    <SettingList>
+      <AtOnce />
+    </SettingList>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const count = c.getByRole('slider', { name: 'Agents at once' })
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
+    await expect(c.getByText('4: this Mac has 16 GB and 10 cores. More tasks than that wait their turn.')).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Use the default' })).toBeNull()
+    count.focus()
+    await userEvent.keyboard('{ArrowRight}{ArrowRight}')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(6)
+    await expect(count).toHaveAttribute('aria-valuenow', '6')
+    await expect(c.getByText(/^6: a little more than this Mac’s 16 GB suggests\./)).toBeInTheDocument()
+    await userEvent.keyboard('{End}')
+    await expect(c.getByText(/^16: well past what this Mac’s 16 GB suggests\./)).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Use the default' }))
+    await expect(onAtOnce).toHaveBeenLastCalledWith(null)
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
+    // Back on the default by the keys: the default again, not a number of the person's own.
+    count.focus()
+    await userEvent.keyboard('{ArrowLeft}')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(3)
+    await expect(count).toHaveAttribute('aria-valuenow', '3')
+    await userEvent.keyboard('{ArrowRight}')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(null)
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
   },
 }
 
@@ -260,6 +347,18 @@ export const AllStates: Story = {
           ),
         },
         {
+          state: 'agents at once: the default, fewer, well past it, a small Mac past its one, and a big Mac under its sixteen',
+          node: (
+            <SettingList>
+              <AgentsAtOnce count={4} machine={MACHINE} onChange={fn()} />
+              <AgentsAtOnce count={2} machine={MACHINE} onChange={fn()} />
+              <AgentsAtOnce count={11} machine={MACHINE} onChange={fn()} />
+              <AgentsAtOnce count={2} machine={{ count: 1, memory: 8, cores: 8 }} onChange={fn()} />
+              <AgentsAtOnce count={12} machine={{ count: 16, memory: 128, cores: 16 }} onChange={fn()} />
+            </SettingList>
+          ),
+        },
+        {
           state: 'editors, one without its icon',
           node: (
             <SettingList>
@@ -298,6 +397,22 @@ export const AllStates: Story = {
                 onPlay={fn()}
                 text={{ note: 'The system’s own sound, with each notification, or none.' }}
               />
+            </SettingList>
+          ),
+        },
+        {
+          state: 'usage data on',
+          node: (
+            <SettingList>
+              <UsageData on onChange={fn()} />
+            </SettingList>
+          ),
+        },
+        {
+          state: 'usage data with DO_NOT_TRACK set',
+          node: (
+            <SettingList>
+              <UsageData on onChange={fn()} doNotTrack />
             </SettingList>
           ),
         },

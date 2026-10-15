@@ -146,6 +146,84 @@ export const Crowded: Story = {
   decorators: [(Story) => <div style={{ width: 640 }}>{Story()}</div>],
 }
 
+/* A part that opens where it lives, as the app makes one. */
+const opens = (id: string, name: string, brand: Brand, label: string, onOpen = fn()): ProjectPart => ({
+  id,
+  name,
+  brand,
+  openLabel: label,
+  onOpen,
+})
+
+/** Pointing at a part that opens: it darkens, and says where it goes. */
+const pointAt =
+  (name: string): Story['play'] =>
+  async ({ canvasElement }) => {
+    const button = within(canvasElement).getByRole('button', { name })
+    await userEvent.hover(button)
+    await screen.findByRole('tooltip')
+  }
+
+const openRepo = fn()
+/** A repository and its Linear team, each opening on its own. */
+export const OpensRepoAndLinear: Story = {
+  args: {
+    parts: [
+      opens('api', 'meridian-api', Brand.GitHub, 'Open on GitHub', openRepo),
+      opens('mer', 'MER issues', Brand.Linear, 'Open on Linear'),
+    ],
+  },
+  play: async (context) => {
+    await userEvent.click(within(context.canvasElement).getByRole('button', { name: 'meridian-api' }))
+    await expect(openRepo).toHaveBeenCalledOnce()
+    await pointAt('MER issues')?.(context)
+  },
+}
+
+/** Several GitHub repositories: each opens its own. */
+export const SeveralRepos: Story = {
+  args: {
+    parts: ['meridian-api', 'meridian-web', 'meridian-infra'].map((name) => opens(name, name, Brand.GitHub, 'Open on GitHub')),
+  },
+  play: pointAt('meridian-web'),
+}
+
+/** Several Linear teams (up to three, then “+N more”, which is words): each opens its own space. */
+export const SeveralLinearKeys: Story = {
+  args: {
+    parts: [
+      opens('api', 'meridian-api', Brand.GitHub, 'Open on GitHub'),
+      opens('mer', 'MER issues', Brand.Linear, 'Open on Linear'),
+      opens('pay', 'PAY issues', Brand.Linear, 'Open on Linear'),
+      opens('ops', 'OPS issues', Brand.Linear, 'Open on Linear'),
+      { id: 'more', name: '+2 more' },
+    ],
+  },
+  play: pointAt('PAY issues'),
+}
+
+/** GitHub, Linear and Jira together. */
+export const GitHubLinearJira: Story = {
+  args: {
+    parts: [
+      opens('api', 'meridian-api', Brand.GitHub, 'Open on GitHub'),
+      opens('web', 'meridian-web', Brand.GitHub, 'Open on GitHub'),
+      opens('mer', 'MER issues', Brand.Linear, 'Open on Linear'),
+      opens('pay', 'PAY issues', Brand.Jira, 'Open on Jira'),
+    ],
+  },
+  play: pointAt('PAY issues'),
+}
+
+/** A repository with no known address stays words, beside one that opens. */
+export const RepoWithNoUrl: Story = {
+  args: { parts: [opens('api', 'meridian-api', Brand.GitHub, 'Open on GitHub'), { id: 'local', name: 'meridian-scratch' }] },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).queryByRole('button', { name: 'meridian-scratch' })).toBeNull()
+    await expect(within(canvasElement).getByText('meridian-scratch')).toBeInTheDocument()
+  },
+}
+
 /** In each ink, the wash follows the mark. */
 export const AllStates: Story = {
   render: (args) => (

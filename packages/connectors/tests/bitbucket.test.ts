@@ -99,6 +99,18 @@ describe('Bitbucket Cloud as a code host', () => {
     }),
   )
 
+  it.effect('refuses to review a pull request it didn’t open, without asking Bitbucket', () =>
+    Effect.gen(function* () {
+      const { host, sent } = cloud([])
+      assert.isFalse(host.capabilities.reviews)
+      const read = yield* Effect.flip(host.changeToReview(ace, 552))
+      assert.deepInclude(read, { reason: 'rejected', message: 'Althar can’t review a pull request on this host yet.' })
+      const posted = yield* Effect.flip(host.postReview(ace, 552, { event: 'comment', body: 'b', commit: null, comments: [] }))
+      assert.strictEqual(posted.reason, 'rejected')
+      assert.lengthOf(sent, 0)
+    }),
+  )
+
   it.effect('reads a repository: its main branch, whether the account may push, and how it merges', () =>
     Effect.gen(function* () {
       const repository = {
@@ -943,7 +955,7 @@ describe('Bitbucket Data Center as a code host', () => {
       const { host, sent } = center([whoami('jcitizen', '101'), ['GET', `${DC}/users?filter=jcitizen&limit=100`, { json: page([jane]) }]])
       assert.deepStrictEqual(yield* host.account, { id: '101', login: 'jcitizen', name: 'Jane Citizen' })
       assert.strictEqual(sent[0]?.headers.authorization, 'Bearer BBDC-t')
-      assert.deepStrictEqual(host.capabilities, { drafts: true, checkLogs: false, threads: true })
+      assert.deepStrictEqual(host.capabilities, { drafts: true, checkLogs: false, threads: true, reviews: false })
       // A project's token signs in as a service account, which the users aren't listed with.
       const project = center([whoami('bot-prj-1', '7'), ['GET', /\/users\?filter=/, { json: page([]) }]])
       assert.deepStrictEqual(yield* project.host.account, { id: '7', login: 'bot-prj-1', name: null })
@@ -951,6 +963,19 @@ describe('Bitbucket Data Center as a code host', () => {
       assert.deepStrictEqual(yield* unlisted.host.account, { id: 'bot-prj-1', login: 'bot-prj-1', name: null })
       // Signed in as no one, the token is no good.
       assert.strictEqual((yield* Effect.flip(center([whoami(null)]).host.account)).reason, 'unauthorized')
+    }),
+  )
+
+  it.effect('refuses to review a pull request it didn’t open, without asking Data Center', () =>
+    Effect.gen(function* () {
+      const { host, sent } = center([])
+      const repository = { id: '1', path: ['PRJ', 'my-repo'], defaultBranch: 'main', webUrl: '', canPush: true, merges: [] }
+      assert.strictEqual((yield* Effect.flip(host.changeToReview(repository, 1))).reason, 'rejected')
+      assert.strictEqual(
+        (yield* Effect.flip(host.postReview(repository, 1, { event: 'approve', body: 'b', commit: null, comments: [] }))).reason,
+        'rejected',
+      )
+      assert.lengthOf(sent, 0)
     }),
   )
 
@@ -1168,6 +1193,27 @@ describe('Bitbucket Data Center as a code host', () => {
       const merged = yield* host.change(prj, 1)
       assert.deepInclude(merged, { state: 'merged', draft: false, author: null, url: `${prj.webUrl}/pull-requests/1` })
       assert.deepInclude(yield* host.change(prj, 2), { state: 'closed', body: '' })
+    }),
+  )
+
+  it.effect('says when a pull request conflicts with its target, from the merge result Data Center keeps current', () =>
+    Effect.gen(function* () {
+      const result = (outcome: string, current?: boolean) => ({
+        properties: { mergeResult: { outcome, ...(current === undefined ? {} : { current }) } },
+      })
+      const { host } = center([
+        ['GET', `${MY}/pull-requests/1`, { json: pr({ id: 1, ...result('CONFLICTED', true) }) }],
+        ['GET', `${MY}/pull-requests/2`, { json: pr({ id: 2, ...result('CLEAN', true) }) }],
+        ['GET', `${MY}/pull-requests/3`, { json: pr({ id: 3, ...result('CONFLICTED', false) }) }],
+        ['GET', `${MY}/pull-requests/4`, { json: pr({ id: 4, ...result('UNKNOWN') }) }],
+        ['GET', PULL, { json: pr() }],
+      ])
+      assert.isTrue((yield* host.change(prj, 1)).conflicts)
+      assert.isFalse((yield* host.change(prj, 2)).conflicts)
+      // From before a branch moved, or not worked out: nothing is claimed.
+      assert.notProperty(yield* host.change(prj, 3), 'conflicts')
+      assert.notProperty(yield* host.change(prj, 4), 'conflicts')
+      assert.notProperty(yield* host.change(prj, 101), 'conflicts')
     }),
   )
 

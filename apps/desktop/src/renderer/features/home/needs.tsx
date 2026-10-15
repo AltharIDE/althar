@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import type { HomeCall, HomeTask } from '@althar/contracts'
 import { Button, type EdgeWork, NeedLine, type ProjectRef } from '@althar/ui'
 
-import { callKindOf, kindWords, whereOf } from '../../shared/calls'
+import { callKindOf, isFinished, kindWords, readyKindOf, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
 import { text as stuckText } from '../task/StuckCall'
@@ -45,6 +45,9 @@ export const needText = {
     passed: 'checks passed',
     none: 'no checks',
   },
+  /** A review drafted, in a line: whose pull request, and what the draft found. */
+  by: (author: string) => `by ${author}`,
+  findings: (n: number) => (n === 0 ? 'no findings' : n === 1 ? '1 finding' : `${n} findings`),
 }
 
 /** Something that waits on the person, said once for every place that lists it. */
@@ -100,6 +103,14 @@ const withAnswered = (calls: ReadonlyArray<HomeCall>, answered: ReadonlyArray<An
 
 /** What a ready task's line says to accept it by: its change, where and how its checks went and how big, or what is on its branch. */
 export const briefOf = (task: HomeTask): string => {
+  // A review drafted: their pull request, whose, and what the draft found.
+  const reviewing = task.reviewing
+  if (reviewing != null)
+    return [
+      `${reviewing.repository.slice(reviewing.repository.lastIndexOf('/') + 1)} #${reviewing.number}`,
+      needText.by(reviewing.author),
+      needText.findings(reviewing.findings),
+    ].join(' · ')
   const change = task.change
   if (change === null)
     return task.changed === null ? needText.onBranch : needText.branchSize(task.changed.files, task.changed.add, task.changed.del)
@@ -196,9 +207,19 @@ export const needsOf = ({
   }),
   ...ready.flatMap((task): ReadonlyArray<Need> => {
     const project = refs.get(task.projectId)
-    return project === undefined
+    // A plain task that finished waits on its board, not here.
+    return project === undefined || isFinished(task)
       ? []
-      : [{ id: task.taskId, threadId: task.threadId, kind: kindWords.ready, project, title: task.title, brief: briefOf(task) }]
+      : [
+          {
+            id: task.taskId,
+            threadId: task.threadId,
+            kind: readyKindOf(task),
+            project,
+            title: task.title,
+            brief: task.handedBack ?? briefOf(task),
+          },
+        ]
   }),
 ]
 
@@ -248,7 +269,11 @@ export function needLineOf(
       actions={
         permission === undefined ? (
           <Button size="small" {...(need.kind === kindWords.question ? { variant: 'signal' as const } : {})} onClick={open}>
-            {need.kind === kindWords.ready ? needText.review : need.kind === kindWords.question ? needText.answer : needText.look}
+            {need.kind === kindWords.ready || need.kind === kindWords.drafted
+              ? needText.review
+              : need.kind === kindWords.question
+                ? needText.answer
+                : needText.look}
           </Button>
         ) : answers !== undefined ? (
           answers(permission, need.project)

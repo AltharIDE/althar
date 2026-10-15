@@ -4,6 +4,8 @@ import type { HomeCall, HomeEvent, HomeTask, ProjectSummary } from '@althar/cont
 import { type IconName, PermissionAnswers, ProjectInk, type ProjectRef, TaskStatus } from '@althar/ui'
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
+import { queuedOfWords } from '../../shared/agents'
+import { isFinished } from '../../shared/calls'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import { ago, clock, useNow } from '../../shared/time'
 import { BarEnd, useNewTab } from '../tabs/TabsFrame'
@@ -23,9 +25,11 @@ import { useModelNames } from '../../shared/modelNames'
  * with its mark. The window's bar has only settings, as a panel from its
  * gear: how much needs you is the stream's first word, and which agents are
  * signed in is for settings, not the home. A task that waits on you is in
- * what needs you, not again in what is in progress. There is no composer:
- * coordinators belong to projects. A new project starts in a tab of its own,
- * from the projects' +, or with folders dropped on the home.
+ * what needs you, not again in what is in progress; one that waits for a
+ * free agent stands still in its project's row, which says what it waits
+ * for. There is no composer: coordinators belong to projects. A new project
+ * starts in a tab of its own, from the projects' +, or with folders dropped
+ * on the home.
  */
 
 export const text = {
@@ -123,7 +127,8 @@ export function HomeView({
   const refs = new Map(projects.map((project) => [project.id, refOf(project)]))
   const tasks = home?.tasks ?? []
   // In progress is every task not ready to accept; only those with an agent on them, or held for a reset, are running.
-  const ready = tasks.filter((task) => task.phase === 'ready')
+  // A plain task that finished waits on its board, not here (the runtime leaves it out too).
+  const ready = tasks.filter((task) => task.phase === 'ready' && !isFinished(task))
   const calls = (home?.calls ?? []).filter((call) => !answered.some((one) => one.call.id === call.id))
   // What has a card above isn't listed again under it.
   const carded = new Set(calls.map((call) => call.threadId))
@@ -178,10 +183,12 @@ export function HomeView({
 
   const runs: ReadonlyArray<HomeRun> = working.flatMap((task) => {
     const project = refs.get(task.projectId)
-    // Held for a reset, it stands still though its phase is running.
-    const status = task.waits !== null ? TaskStatus.Paused : statusOf(task.phase)
+    // Waiting for a free agent, or held for a reset, it stands still though its phase is running.
+    const status = task.queued !== null ? TaskStatus.Queued : task.waits !== null ? TaskStatus.Paused : statusOf(task.phase)
     return project === undefined ? [] : [{ id: task.taskId, project, title: task.title, status }]
   })
+  // What waiting tasks wait for is this computer's, the same for each: its project says it, with how many wait there.
+  const queued = working.find((task) => task.queued !== null)?.queued ?? null
 
   const lines: ReadonlyArray<HomeLine> = (home?.events ?? []).flatMap((event) => {
     const line = lineOf(event, refs, new Date(now))
@@ -189,7 +196,7 @@ export function HomeView({
   })
 
   const list: ReadonlyArray<HomeProject> = projects.map((project) => {
-    const ready = tasks.filter((task) => task.projectId === project.id && task.phase === 'ready').length
+    const ready = tasks.filter((task) => task.projectId === project.id && task.phase === 'ready' && !isFinished(task)).length
     return {
       id: project.id,
       project: refOf(project),
@@ -229,6 +236,7 @@ export function HomeView({
             since={lines}
             looked={home === null ? '' : home.looked === null ? text.firstLook : ago(home.looked, new Date(now))}
             projects={list}
+            {...(queued === null ? {} : { text: { projects: { queued: (n: number) => queuedOfWords(n, queued) } } })}
             onOpenEvent={(id) => {
               const event = home?.events.find((one) => one.id === id)
               if (event === undefined || event.kind === 'answered') return

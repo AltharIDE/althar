@@ -4,10 +4,13 @@ import { expect, userEvent, waitFor, within } from 'storybook/test'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Delta } from '../../primitives/FileChanges/FileChanges'
 import { Tool, ToolGroup } from '../Tool/Tool'
+import { Prose, Turn } from '../Turn/Turn'
+import { Step } from '../Step/Step'
+import { OPUS } from '../../fixtures/models'
 import { WorkedFor } from './WorkedFor'
 import { routerFile } from '../../fixtures/meridian'
 import { useThreadShell } from '../Shell/Shell'
-import { ToolKind } from '../../foundations/vocabulary'
+import { StepState, ToolKind } from '../../foundations/vocabulary'
 import { States, statesParameters } from '../../storybook/States'
 
 /* The edit's path opens the file beside the thread. */
@@ -68,6 +71,27 @@ export const Working: Story = {
     await expect(row).toHaveAttribute('aria-busy', 'true')
     await expect(c.getByText('Reading src/refunds/router.ts')).toBeInTheDocument()
   },
+}
+/**
+ * A lead that carries on after a step's result, woken by a command it left
+ * running, is a turn of its own: it folds its work under its own time, and
+ * what it said last shows whole. The turn is as `blocksOf` makes it from that
+ * run of items (see the desktop's thread tests).
+ */
+export const SelfStarted: Story = {
+  render: (args) => (
+    <>
+      <WorkedFor {...args} took="9m 12s" summary="4 files edited · 6 commands" />
+      <Step n={3} of={4} label="Publish" model={OPUS} state={StepState.Done} outcome="Pull request opened" took="9m" />
+      <WorkedFor {...args} took="3m 40s" summary="2 commands" />
+      <Turn model={OPUS} at="4m ago" bare>
+        <Prose>
+          The log isn’t where I expected; it was under the build output, which shows whether branch coverage clears 90%. It does: the verify
+          finished at 92% and the pull request is ready.
+        </Prose>
+      </Turn>
+    </>
+  ),
 }
 export const WithoutSummary: Story = { args: { summary: undefined } }
 

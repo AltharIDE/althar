@@ -322,7 +322,9 @@ describe('issue drafts', () => {
       const instance = yield* Instance
       yield* callTool(access, 'draft_issue', { title: 'Retry webhooks' })
       const [card] = yield* cardsOf(projectId)
+      // Refused, and refused again on Althar's second look: the sign-in is no good.
       linear.failNext('create', 'unauthorized')
+      linear.failNext('account', 'unauthorized')
       yield* drafts.file(card?.draftId ?? '', instance.personId)
       assert.match((yield* cardsOf(projectId))[0]?.error ?? '', /^Linear didn’t take Althar’s sign-in\. Sign in again in Settings/)
       // Until it is signed in again, Althar doesn't ask.

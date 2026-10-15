@@ -185,6 +185,20 @@ refcount alone is too fragile after crashes, restore, or partial migration.
 Provider transcripts, tool output, patches, screenshots, logs, and generated
 files may contain secrets. Default retention must differ by artifact class.
 
+A command that fails keeps a bounded excerpt of what it printed on its thread
+item, written as it ends failed and before anything the agent says next, so a
+process that exits before the agent explains the failure doesn't take the
+evidence with it, and the agent that takes over reads it in its brief. Only
+what the command printed, the output fields of what came back, the tool's
+error and the exit code are eligible: never a whole object, a read or edit
+tool's result, or a command that reads files or the environment. What looks
+like a credential (keys, tokens, bearer and basic credentials, private keys,
+passwords in URLs) is taken out before the excerpt is cut to its first and
+last few thousand characters. This is best-effort filtering, not a guarantee
+that no secret remains, and the excerpt is what the tool reported, not why it
+failed. The whole output stays in the artifact store, marked as possibly
+holding secrets.
+
 ## Backup, export, and restore
 
 A backup is not successful until restoration is tested.
@@ -240,7 +254,11 @@ provider or arbitrary build process without an OS/container isolation layer.
 
 Git hooks are disabled for Althar-owned automated operations unless a
 specific workflow grants them. Repository-local binaries and configuration are
-not trusted as runtime dependencies.
+not trusted as runtime dependencies. Two of Althar's own workflows do run
+repository code, outside any agent's sandbox: running the project when the
+person asks, and setting up each new task's worktree before its lead starts,
+which installs what its lockfile names, install scripts included
+([ADR-023](../decisions/023-althar-runs-the-project.md)).
 
 ### Provider, connector, MCP, and skill boundaries
 

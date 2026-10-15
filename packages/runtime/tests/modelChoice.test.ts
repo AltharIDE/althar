@@ -3,24 +3,29 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Coordinator } from '../src/Coordinator'
+import { Instance } from '../src/Instance'
 import { factFor, factsIn } from '../src/ModelFacts'
 import { Models } from '../src/Models'
-import { setModelBlocked } from '../src/preferences'
+import { Plans } from '../src/Plans'
+import { setDefaultEffort, setModelBlocked } from '../src/preferences'
 import { Projects } from '../src/Projects'
+import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import type { ToolAccess } from '../src/ToolServer'
+import { describeModels, type Route, routeTo } from '../src/usableModels'
 import { callTool, repository, runtime, until } from './support'
 
 /*
  * The coordinator picks models, not agents (ADR-015): what is known of each
  * model, from OpenRouter's public list, read from the profile's copy and
  * fetched again without anything waiting on it; the models it can use, each
- * once, however many agents offer it; and a plan that names models, which
- * Althar takes the best way there is.
+ * once, however many agents offer it, with the efforts each takes; and a plan
+ * that names models, and how hard each thinks, which Althar takes the best
+ * way there is.
  */
 
 /** OpenRouter's list, as it gives it: a model with Artificial Analysis's scores, its batch variant, and a reseller's copy without. */
@@ -83,6 +88,69 @@ describe('what is known of models', () => {
       factFor(facts, { id: 'opencode', name: 'OpenCode' }, { id: 'opencode/glm-5.3-free', name: 'GLM-5.3 Free' })?.slug,
       'z-ai/glm-5.3',
     )
+  })
+})
+
+describe('the models as the coordinator reads them', () => {
+  const route = (over: Partial<Route> = {}): Route => ({
+    agentId: 'codex',
+    agentName: 'Codex',
+    model: 'gpt-x',
+    plan: false,
+    efforts: [],
+    effort: null,
+    defaultEffort: null,
+    ...over,
+  })
+
+  it('says each one’s efforts as the tools take them, the one it starts at and the person’s default, as far as they are known', () => {
+    const said = describeModels([
+      {
+        name: 'GPT-X',
+        maker: 'OpenAI',
+        fact: { slug: 'openai/gpt-x', intelligence: null, coding: 70, agentic: null, price: { input: 1.25, output: 10 }, context: null },
+        // What it starts at isn't known, and the person's default is one it doesn't offer.
+        routes: [
+          route({
+            efforts: [
+              { id: 'low', name: 'Low' },
+              { id: 'xhigh', name: 'Extra high' },
+            ],
+            defaultEffort: 'max',
+          }),
+        ],
+      },
+      {
+        name: 'Mystery',
+        maker: null,
+        fact: null,
+        routes: [route({ model: 'mystery', plan: true, efforts: [{ id: 'high', name: 'High' }], effort: 'high', defaultEffort: 'high' })],
+      },
+      { name: 'Nobody', maker: null, fact: null, routes: [] },
+    ])
+    assert.include(
+      said,
+      '\nOpenAI\n- GPT-X: intelligence unknown, coding 70, agentic unknown; per use, $1.25 in and $10.00 out per million tokens; effort low, xhigh\n',
+    )
+    assert.include(said, "\nOthers\n- Mystery: no scores known; on a plan; effort high (its own: high; the person's default: high)\n")
+    assert.match(said, /\n- Nobody: no scores known; per use; no effort to set$/)
+  })
+
+  it('takes a model the way the agent named goes, else the best way, and nothing where it has none', () => {
+    const usable = [
+      {
+        name: 'Large',
+        maker: null,
+        fact: null,
+        routes: [route({ agentId: 'claude-code', model: 'large', plan: true }), route({ model: 'large' })],
+      },
+      { name: 'Gone', maker: null, fact: null, routes: [] },
+    ]
+    assert.strictEqual(routeTo(usable, ' LARGE ')?.agentId, 'claude-code')
+    assert.strictEqual(routeTo(usable, 'large', 'codex')?.agentId, 'codex')
+    assert.strictEqual(routeTo(usable, 'Large', 'opencode')?.agentId, 'claude-code')
+    assert.isNull(routeTo(usable, 'gone'))
+    assert.isNull(routeTo(usable, 'small'))
   })
 })
 
@@ -167,6 +235,33 @@ describe('the models the coordinator can use', () => {
     }).pipe(Effect.provide(runtime(':memory:', {}, { modelFacts: { url: 'https://openrouter.test/models', cache, fetch: list.fetch } })))
   })
 
+  it.live('says the efforts each model takes the way it goes, the one it starts at, and the person’s default where they set one', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened
+      yield* known
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      const said = yield* callTool(access, 'list_models', {})
+      assert.include(
+        said,
+        "an effort it lists. Without an effort, a step starts at the person's default for its model, or else at the model's own.",
+      )
+      // Claude Code's: each model's levels, and the one it starts at.
+      assert.include(said, '- Claude Large: no scores known; on a plan; effort low, medium, high (its own: medium)\n')
+      // Codex's, as OpenCode offers them: a model's own levels, and none at all for the small one.
+      assert.include(said, '- Huge: no scores known; on a plan; effort high, max, default (its own: high)\n')
+      assert.match(said, /- Small: no scores known; on a plan; no effort to set(\n|$)/)
+      // The person's default, where it is one the model offers.
+      yield* setDefaultEffort('claude-code', 'large', 'high')
+      yield* setDefaultEffort('claude-code', 'small', 'max')
+      const now = yield* callTool(access, 'list_models', {})
+      assert.include(
+        now,
+        "- Claude Large: no scores known; on a plan; effort low, medium, high (its own: medium; the person's default: high)\n",
+      )
+      assert.include(now, '- Claude Small: no scores known; on a plan; effort low, medium, high (its own: medium)\n')
+    }).pipe(Effect.provide(runtime(':memory:', {}, { signedOut: ['opencode'], each: { codex: { variants: true } } }))),
+  )
+
   it.live('says when no model can be used', () =>
     Effect.gen(function* () {
       const { projectId, threadId } = yield* opened
@@ -193,19 +288,36 @@ describe('the models the coordinator can use', () => {
   )
 })
 
+/** The steps of a task's plan, as kept. */
+const stepsOf = (slug: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{
+      parameters: string
+    }>`SELECT p.parameters FROM task_plans p JOIN tasks k ON k.id = p.task_id WHERE k.slug = ${slug}`
+    return (
+      JSON.parse(rows[0]?.parameters ?? '{}') as {
+        steps: Array<{ key: string; agentId: string; model: string | null; effort?: string | null; skipped: boolean }>
+      }
+    ).steps
+  })
+
+/** The task cards in the project's coordinator thread, as the window reads them. */
+const cardsOf = (projectId: string) =>
+  Effect.gen(function* () {
+    const snapshot = yield* Effect.orDie((yield* Queries).coordinator(projectId))
+    return snapshot.items.flatMap((item) => (item.kind === 'task' ? [item.content] : []))
+  })
+
+/** A task's latest card, by its slug. */
+const cardOf = (projectId: string, slug: string) => Effect.map(cardsOf(projectId), (cards) => cards.findLast((card) => card.slug === slug))
+
 describe('a plan that names models', () => {
   it.live('takes each model the best way there is, refuses one that can’t be used, and still takes an agent', () =>
     Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient
       const { projectId, threadId } = yield* opened
       yield* known
       const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
-      const stepsOf = (slug: string) =>
-        Effect.map(
-          sql<{ parameters: string }>`SELECT p.parameters FROM task_plans p JOIN tasks k ON k.id = p.task_id WHERE k.slug = ${slug}`,
-          (rows) =>
-            (JSON.parse(rows[0]?.parameters ?? '{}') as { steps: Array<{ key: string; agentId: string; model: string | null }> }).steps,
-        )
       yield* callTool(access, 'draft_task', { title: 'Add a retry' })
       // Large, offered by every agent: on a plan before a key, so Claude Code's or OpenCode's, not Codex's.
       assert.match(
@@ -249,6 +361,161 @@ describe('a plan that names models', () => {
         yield* callTool(access, 'propose_plan', { task: 'tidy-more', lead: { agent: 'codex', model: 'small' } }),
         /^The person switched small off\./,
       )
+      // Named by agent alone, on its own default model, whose efforts aren't known: an effort is refused, and none plans as before.
+      yield* callTool(access, 'draft_task', { title: 'Tidy last' })
+      assert.strictEqual(
+        yield* callTool(access, 'propose_plan', { task: 'tidy-last', lead: { agent: 'codex', effort: 'high' } }),
+        "Fake codex's default model has no effort to set. Leave effort out.",
+      )
+      // Named by agent and an id the agent doesn't offer: none known there either.
+      assert.strictEqual(
+        yield* callTool(access, 'propose_plan', { task: 'tidy-last', lead: { agent: 'codex', model: 'mystery-9', effort: 'high' } }),
+        'mystery-9 has no effort to set. Leave effort out.',
+      )
+      assert.match(yield* callTool(access, 'propose_plan', { task: 'tidy-last', lead: { agent: 'codex', model: 'mystery-9' } }), /^Planned/)
     }).pipe(Effect.provide(runtime(':memory:', {}, { perUse: ['codex'] }))),
+  )
+
+  it.live(
+    'takes an effort the model offers the way it goes, shows it on the card, keeps it through the person’s changes, and starts the lead at it',
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const plans = yield* Plans
+        const instance = yield* Instance
+        const { projectId, threadId } = yield* opened
+        yield* known
+        const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+        yield* callTool(access, 'draft_task', { title: 'Rework the cache' })
+        // One the model doesn't offer is refused, with the ones it does, and nothing is planned.
+        assert.strictEqual(
+          yield* callTool(access, 'propose_plan', { task: 'rework-the-cache', lead: { model: 'large', effort: 'extreme' } }),
+          'large has no effort extreme. Name one of its efforts, as list_models writes them: low, medium, high; or leave effort out.',
+        )
+        // Codex's small model, as OpenCode offers it, has none to set.
+        assert.strictEqual(
+          yield* callTool(access, 'propose_plan', {
+            task: 'rework-the-cache',
+            lead: { model: 'large' },
+            review: { model: 'Small', agent: 'codex', effort: 'low' },
+          }),
+          'Small has no effort to set. Leave effort out.',
+        )
+        assert.isEmpty(yield* sql`SELECT id FROM task_plans`)
+        // One it offers, by its id or by its name, is kept as its id.
+        assert.match(
+          yield* callTool(access, 'propose_plan', {
+            task: 'rework-the-cache',
+            lead: { model: 'large', effort: 'high', reason: 'Open-ended.' },
+            review: { model: 'Huge', effort: 'Max' },
+          }),
+          /^Planned rework-the-cache\./,
+        )
+        assert.deepStrictEqual(
+          (yield* stepsOf('rework-the-cache')).map((step) => [step.key, step.agentId, step.model, step.effort]),
+          [
+            ['implement', 'claude-code', 'large', 'high'],
+            ['review', 'codex', 'huge', 'max'],
+          ],
+        )
+        // Its card shows each step's effort, as one the person chose; skipping the review there keeps them.
+        const [card] = yield* cardsOf(projectId)
+        assert.deepStrictEqual(card?.plan?.steps, [
+          { key: 'implement', agentId: 'claude-code', model: 'large', effort: 'high', skipped: false },
+          { key: 'review', agentId: 'codex', model: 'huge', effort: 'max', skipped: false },
+        ])
+        // Its lead's, beside its model, the plan's until a lead has started.
+        assert.deepStrictEqual([card?.lead, card?.leadModel, card?.leadEffort], ['claude-code', 'large', 'high'])
+        const planId = card?.plan?.id ?? ''
+        yield* plans.change(
+          planId,
+          (card?.plan?.steps ?? []).map((step) => ({ ...step, skipped: step.key === 'review' })),
+          instance.personId,
+        )
+        assert.deepStrictEqual(
+          (yield* stepsOf('rework-the-cache')).map((step) => [step.key, step.effort, step.skipped]),
+          [
+            ['implement', 'high', false],
+            ['review', 'max', true],
+          ],
+        )
+        // Started, its lead is at that effort.
+        yield* plans.start(planId, instance.personId)
+        const [lead] = yield* until(
+          sql<{ effort: string | null }>`
+          SELECT s.effort FROM provider_sessions s JOIN threads t ON t.id = s.thread_id JOIN tasks k ON k.id = t.task_id
+          WHERE k.slug = 'rework-the-cache' AND t.kind = 'task' AND s.state <> 'starting'`,
+          (rows) => rows.length === 1,
+        )
+        assert.strictEqual(lead?.effort, 'high')
+        // Running, its card says what its lead is on.
+        assert.strictEqual((yield* cardOf(projectId, 'rework-the-cache'))?.leadEffort, 'high')
+
+        // Left out, the step names none: it starts at the person's default for the model, or the model's own, as before.
+        yield* callTool(access, 'draft_task', { title: 'Fix a typo' })
+        assert.match(
+          yield* callTool(access, 'propose_plan', { task: 'fix-a-typo', lead: { model: 'Claude Small' }, review: null }),
+          /^Planned/,
+        )
+        assert.deepStrictEqual(
+          (yield* stepsOf('fix-a-typo')).map((step) => [step.key, step.model, step.effort]),
+          [['implement', 'small', undefined]],
+        )
+      }).pipe(
+        Effect.provide(
+          Queries.layer.pipe(
+            Layer.provideMerge(
+              runtime(':memory:', {}, { signedOut: ['opencode'], each: { codex: { variants: true } }, countdown: Duration.minutes(5) }),
+            ),
+          ),
+        ),
+      ),
+  )
+
+  it.live(
+    'starts a mini task’s lead at the effort named, refuses one its model doesn’t offer, and without one starts it at the person’s default',
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const { projectId, threadId } = yield* opened
+        yield* known
+        const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+        const leadOf = (slug: string) =>
+          until(
+            sql<{ model: string | null; effort: string | null }>`
+            SELECT s.model, s.effort FROM provider_sessions s JOIN threads t ON t.id = s.thread_id JOIN tasks k ON k.id = t.task_id
+            WHERE k.slug = ${slug} AND t.kind = 'task' AND s.state <> 'starting'`,
+            (rows) => rows.length === 1,
+          )
+        // One its model doesn't offer drafts nothing.
+        assert.strictEqual(
+          yield* callTool(access, 'start_task', { title: 'Try the cache', lead: { model: 'Claude Large', effort: 'max' } }),
+          'Claude Large has no effort max. Name one of its efforts, as list_models writes them: low, medium, high; or leave effort out.',
+        )
+        assert.isEmpty(yield* sql`SELECT id FROM tasks`)
+        // Named, it starts there.
+        assert.match(
+          yield* callTool(access, 'start_task', { title: 'Try the cache', lead: { model: 'Claude Large', effort: 'high' } }),
+          /^Started try-the-cache/,
+        )
+        assert.deepStrictEqual(
+          (yield* leadOf('try-the-cache')).map((lead) => [lead.model, lead.effort]),
+          [['large', 'high']],
+        )
+        // With no plan to show it, its card says it.
+        const tried = yield* cardOf(projectId, 'try-the-cache')
+        assert.deepStrictEqual([tried?.leadModel, tried?.leadEffort], ['large', 'high'])
+        // Left out, it starts at the person's default for the model, as before.
+        yield* setDefaultEffort('claude-code', 'small', 'low')
+        assert.match(
+          yield* callTool(access, 'start_task', { title: 'Try the queue', lead: { model: 'Claude Small' } }),
+          /^Started try-the-queue/,
+        )
+        assert.deepStrictEqual(
+          (yield* leadOf('try-the-queue')).map((lead) => [lead.model, lead.effort]),
+          [['small', 'low']],
+        )
+        assert.strictEqual((yield* cardOf(projectId, 'try-the-queue'))?.leadEffort, 'low')
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { signedOut: ['opencode'] }))))),
   )
 })

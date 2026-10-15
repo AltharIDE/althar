@@ -125,6 +125,14 @@ export interface AgentInfo {
   readonly steering: boolean
   readonly mcp: { readonly http: boolean; readonly sse: boolean }
   readonly authMethods: ReadonlyArray<string>
+  /** It takes images in a prompt (ACP's `promptCapabilities.image`); without it, a prompt is text only. */
+  readonly images: boolean
+}
+
+/** An image sent in a prompt, after its text: its bytes in base64, and what they are. */
+export interface PromptImage {
+  readonly data: string
+  readonly mimeType: string
 }
 
 /** An MCP server a session may use. Althar gives every session its own tools this way. */
@@ -162,9 +170,17 @@ export interface AgentSession {
    * Sends a prompt and streams the turn, ending with `TurnEnded`. One turn
    * runs at a time: a prompt while one is running fails with
    * `TurnInProgress`. A turn reads to its own end even if the stream is
-   * stopped early, so nothing it says reaches a later turn.
+   * stopped early, so nothing it says reaches a later turn. Images go after
+   * the text, in their order, only to an agent that takes them
+   * (`AgentInfo.images`): the caller says what became of any it can't.
+   * `started` runs once the prompt is sent and the turn can be interrupted,
+   * so what it sets off may stop the turn at once.
    */
-  prompt(text: string): Stream.Stream<SessionEvent, Failure | TurnInProgress>
+  prompt(
+    text: string,
+    images?: ReadonlyArray<PromptImage>,
+    started?: Effect.Effect<void>,
+  ): Stream.Stream<SessionEvent, Failure | TurnInProgress>
   /** Updates that arrive between turns, such as the agent changing its own mode. */
   readonly events: Stream.Stream<SessionEvent>
   /** Asks the agent to stop the current turn; the turn then ends with `cancelled`. */
@@ -549,6 +565,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       steering,
       mcp: { http: capabilities.mcpCapabilities?.http === true, sse: capabilities.mcpCapabilities?.sse === true },
       authMethods: (init.authMethods ?? []).map((method) => method.id),
+      images: capabilities.promptCapabilities?.image === true,
     }
 
     /** Asks the agent to stop a command a session left running; whether it did. */
@@ -699,9 +716,16 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           })
 
         /** Sends a prompt; how it ends arrives in the inbox, after every update it produced. */
-        const send = (text: string) =>
+        const send = (text: string, images: ReadonlyArray<PromptImage> = []) =>
           Effect.sync(() => {
-            connection.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: 'text', text }] }).then(
+            const prompt: Array<acp.ContentBlock> = [
+              { type: 'text', text },
+              // An agent that doesn't say it takes images is never sent one: ACP's baseline is text.
+              ...(info.images
+                ? images.map((image): acp.ContentBlock => ({ type: 'image', data: image.data, mimeType: image.mimeType }))
+                : []),
+            ]
+            connection.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt }).then(
               (response) => receive(sessionId, { _tag: 'Stopped', response }),
               (cause: unknown) => receive(sessionId, { _tag: 'PromptFailed', cause }),
             )
@@ -763,7 +787,11 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           ),
         )
 
-        const prompt = (text: string): Stream.Stream<SessionEvent, Failure | TurnInProgress> =>
+        const prompt = (
+          text: string,
+          images?: ReadonlyArray<PromptImage>,
+          started: Effect.Effect<void> = Effect.void,
+        ): Stream.Stream<SessionEvent, Failure | TurnInProgress> =>
           Stream.unwrap(
             Effect.gen(function* () {
               const turn: Turn = {
@@ -780,7 +808,8 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               if (!idle) return yield* new TurnInProgress({ sessionId })
               // A new turn: what it says before a question is of this turn only.
               said.delete(sessionId)
-              yield* send(text)
+              yield* send(text, images)
+              yield* started
               return Stream.fromQueue(turn.queue)
             }),
           )

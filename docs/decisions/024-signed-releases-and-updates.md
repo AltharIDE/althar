@@ -33,7 +33,8 @@
     since Claude Code's binary writes out native addons of its own and loads
     them, signed by Anthropic and not Althar; and `device.audio-input`, for
     Chromium's audio process and Codex's voice. Nothing allows DYLD
-    variables, debugging, or Apple events.
+    variables, debugging, or Apple events. Since ADR-033, each executable
+    is signed with its own entitlements, and the two files are gone.
   - **Notarized with notarytool, credentials from the environment.** An App
     Store Connect API key (`APPLE_API_KEY`, `APPLE_API_KEY_ID`,
     `APPLE_API_ISSUER`) or a notarytool keychain profile
@@ -102,7 +103,8 @@
   - One entitlements file per binary, through a signing function of our
     own: Electron's helpers would go without `disable-library-validation`.
     electron-builder has no per-file setting; worth doing when the adapters
-    stop running on Electron's binary (the runAsNode question).
+    stop running on Electron's binary (the runAsNode question). Done in
+    ADR-033.
   - electron-builder's own notarize step: the same notarytool underneath,
     but a rejected submission's log isn't kept.
   - Restarting on its own once work stops, or prompting in a dialog: either
@@ -123,10 +125,12 @@
     and a smoke run.
 - **Trade-off:**
   - `disable-library-validation` and `allow-unsigned-executable-memory`
-    reach Electron's helpers too, since one file serves them all.
+    reach Electron's helpers too, since one file serves them all. Since
+    ADR-033, each executable has its own.
   - Electron's RunAsNode fuse stays on: the runtime starts the adapters on
     Althar's own binaries as Node (in a packaged app, on Althar Helper),
-    with these entitlements. Settled separately, before launch.
+    with these entitlements. Since ADR-033 the adapters run on a Node the
+    app ships, and the fuse is off.
   - The Developer ID's private key and Apple's API key sit in GitHub, behind
     the environment's reviewers. Revoking either means a new secret.
   - A Mac that releases needs the private key in its keychain, which asks

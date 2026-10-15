@@ -10,3 +10,10 @@
   color: var(--danger);
   font-size: 13px;
 }
+
+/* A change ready with one repository's pull request open and another's commits in none: both, one under the other. */
+.chips {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

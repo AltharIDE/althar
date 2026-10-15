@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -14,7 +14,9 @@ import { stopBackgroundMethod, type StopBackgroundResponse } from '../background
  * A scripted ACP agent for tests, so the adapter's contract runs in CI without
  * signing in to anything. It speaks real ACP through the same SDK the agents
  * use. The prompt's text picks a scenario. It starts every session in a bypass
- * mode, so tests show the adapter always moves a session out of it.
+ * mode, so tests show the adapter always moves a session out of it. It takes
+ * images in a prompt unless told not to, and says first what images it was
+ * sent: `saw images: image/png 68 B, …`.
  */
 
 export const scenarios = {
@@ -26,6 +28,8 @@ export const scenarios = {
   tool: 'tool',
   /** Like `tool`, but it offers only allow-always and reject-once. */
   toolAlwaysOnly: 'tool-always-only',
+  /** A web fetch that asks permission, then says what it was answered. */
+  fetch: 'fetch',
   /** A tool call that says what it is, then asks permission with nothing but its id, as Codex does for an MCP tool. */
   bareAsk: 'bare-ask',
   /** A plan, context usage, a notice, and the agent changing its own option. */
@@ -68,6 +72,8 @@ export const scenarios = {
   leaveMode: 'leave-mode',
   /** Ends the turn, then sends an update between turns. */
   afterTurn: 'after-turn',
+  /** Ends the turn, then says a message in two chunks on its own, as an agent woken by a command that finished does. */
+  wakesItself: 'wakes-itself',
   /** Reports the session's mode and model. */
   settings: 'settings',
   /** The process exits mid-turn. Only when the agent runs as a process. */
@@ -123,6 +129,9 @@ export const HANDED_DOCUMENT = {
 }
 
 export const USAGE_LIMIT_MESSAGE = 'Claude AI usage limit reached|1759075200'
+
+/** How many tokens its context holds, as it says when a prompt ends `[context:…]`. */
+export const CONTEXT_SIZE = 200_000
 
 /** The `_meta` Claude Code's adapter sends with a structured failure. */
 const failureMeta = (failure: {
@@ -201,6 +210,8 @@ export interface FakeAgentOptions {
   readonly staysOn?: ReadonlyArray<string>
   /** How long it takes to make a session, in milliseconds: for what happens while an agent starts. */
   readonly slowStart?: number
+  /** Whether it says it takes images in a prompt, as Claude Code, Codex and OpenCode do. True unless false. */
+  readonly images?: boolean
 }
 
 interface SessionState {
@@ -393,26 +404,67 @@ const playStall = async (
  * Calls Althar's tools over the MCP server a session was given. The fake
  * plays a role when its prompt carries a marker, as a task's description or
  * the person's message can: `[coordinator:plan]` drafts and plans a task,
- * passing on the `[lead:…]` and `[review:…]` markers it was given, and
- * `[coordinator:start]` starts one at once, without a plan;
+ * passing on the `[lead:…]` and `[review:…]` markers it was given
+ * (`[coordinator:plan-effort]` puts its lead on the large model at high
+ * effort), and `[coordinator:start]` starts one at once, without a plan;
+ * `[coordinator:review]` starts a review of the pull request whose link the
+ * person gave, whose lead, `[lead:review]`, drafts asking for changes with a
+ * comment on each of its first two changed lines, or, `[lead:review-approve]`, approves it;
  * `[lead:finish]` finishes the step, and so does being told to carry on with
- * it after; `[review:pass]` and `[review:findings]`
+ * it after; asked to, `[lead:make-change]` makes its quick task a change
+ * first, reviewed by Codex and ending in a draft pull request, or with no
+ * review (`[lead:make-change-alone]`), and without `[lead:finish]` ends its
+ * turn there; `[review:pass]` and `[review:findings]`
  * report a review. Settling findings, it writes a file and commits it, so
  * the change changes, and finishes; a later review round passes. The session remembers its
  * markers: `[review:always]` finds something every round, and
  * `[lead:set-aside]` settles without changing anything. `[lead:wait]` works
  * until it is stopped, and so does `[review:wait]` reviewing, or `[review:wait-later]` from its second round;
- * `[lead:settle-quietly]` settles without reporting.
+ * `[lead:settle-quietly]` settles without reporting. `[lead:slowly]` takes some
+ * seconds over what it was asked before it plays its part.
  * `[lead:edit]` commits a change when it finishes, as a lead is asked to;
  * `[lead:scratch]` leaves a scratch file lying about too, and deletes it when
- * Althar says it isn't committed. Asked for its pull request's description
+ * Althar says it isn't committed; `[lead:evidence]` saves a screenshot in
+ * the worktree, uncommitted, and finishes with it, a test run and something
+ * it couldn't try, and settling, a new run and nothing left untried.
+ * Finishing, it says what the task built, and says it again settling a
+ * review that changed the work (with `[lead:built-unsaid]`, only once told
+ * to); set aside, it leaves what it said standing;
+ * `[review:evidence]` reads each evidence file its brief names, and says so
+ * in its summary. Asked for its pull request's description
  * in the repository's template, it fills it in, ticking a box it shouldn't.
  * Told what people said on its pull
  * request, `[lead:answer]`
  * replies there; told its checks failed, `[lead:fix]` commits a fix and
- * publishes it. Asked to plan a change with a link in it, the coordinator
- * drafts the task from that issue.
+ * says again what the task built, `[lead:fix-more]` commits other work after it,
+ * `[lead:fix-late]` leaves the full tests running and commits it once they
+ * end, and `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
+ * `[lead:push]` commits what it has and asks the person to push it. Asked to bring its branch up to date, `[lead:resolve]`
+ * merges what it was told to, keeps both sides of each conflict and commits
+ * the merge; `[lead:resolve-more]` does too, then commits other work on top
+ * of it in two commits; `[lead:resolve-fix]` commits one fix on top of the
+ * merge; `[lead:resolve-fails]` can't, and says so; `[lead:resolve-wait]`
+ * works at it until it is interrupted or stopped, and `[lead:resolve-hold]`
+ * does so once it has committed the merge. `[lead:resolve-forgets]` settles
+ * the merge but ends its turn without committing it, and commits it when
+ * told that is all that is left. `[lead:resolve-tests]` settles it, leaves
+ * the full tests running in the background and ends its turn with the merge
+ * uncommitted; when they end it is woken, as Claude Code wakes an agent, and
+ * commits the merge outside a turn; `[lead:resolve-tests-fix]` then commits
+ * a fix the tests found too, and `[lead:resolve-tests-hang]` has tests that
+ * never end. `[lead:resolve-tests-codex]` has Codex say the tests are running
+ * just after its turn, `[lead:resolve-tests-slow]` is slow to be woken by
+ * them (`[lead:resolve-tests-again]` leaves more running once woken, `[lead:resolve-tests-output]` too, after they print once more), and `[lead:resolve-tests-url]` has tests that print a local address. Asked to plan a
+ * change with a link in it, the coordinator drafts the task from that issue.
  */
+/** What the fake says its task built when it finishes, and again once settling a review changed it. */
+export const BUILT = 'Checkout retries once when the payment call fails, in `src/checkout.ts`. Try a checkout with the network off.'
+export const BUILT_SETTLED =
+  'Checkout retries once when the payment call fails, in `src/checkout.ts`, and the README heading names it. Try a checkout with the network off.'
+/** What it says the task built once it fixed a failed check, after its plan was done. */
+export const BUILT_FIXED =
+  'Checkout retries once when the payment call fails, in `src/checkout.ts`, and its check passes again. Push the fix.'
+
 /** Writes a line to a file in the worktree and commits it, as a lead commits as it goes. */
 const commitIn = (cwd: string, file: string, message: string) => {
   appendFileSync(join(cwd, file), `${file.replace(/\.txt$/, '')}\n`)
@@ -422,9 +474,153 @@ const commitIn = (cwd: string, file: string, message: string) => {
   git('commit', '-q', '-m', message)
 }
 
-const playRole = async (session: SessionState, text: string, serve: (exits: boolean) => Promise<void>): Promise<string | undefined> => {
+/** Merges a branch into the worktree's, keeping both sides of each conflict, and commits the merge. */
+const resolveIn = (cwd: string, ref: string) => {
+  const git = (...args: Array<string>) =>
+    execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd, stdio: 'pipe' }).toString()
+  try {
+    git('merge', '-q', '--no-edit', ref)
+  } catch {
+    for (const file of git('diff', '--name-only', '--diff-filter=U')
+      .split('\n')
+      .filter((line) => line !== '')) {
+      const lines = readFileSync(join(cwd, file), 'utf8').split('\n')
+      writeFileSync(join(cwd, file), lines.filter((line) => !/^(<<<<<<<|=======|>>>>>>>)( |$)/.test(line)).join('\n'))
+    }
+    git('add', '-A')
+    git('commit', '-q', '--no-edit')
+  }
+}
+
+/** Merges a branch into the worktree's and settles each conflict as `resolveIn` does, but leaves the merge uncommitted: staged, with the merge under way. */
+const settleIn = (cwd: string, ref: string) => {
+  const git = (...args: Array<string>) =>
+    execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', ...args], { cwd, stdio: 'pipe' }).toString()
+  try {
+    git('merge', '-q', '--no-edit', '--no-commit', '--no-ff', ref)
+  } catch {
+    for (const file of git('diff', '--name-only', '--diff-filter=U')
+      .split('\n')
+      .filter((line) => line !== '')) {
+      const lines = readFileSync(join(cwd, file), 'utf8').split('\n')
+      writeFileSync(join(cwd, file), lines.filter((line) => !/^(<<<<<<<|=======|>>>>>>>)( |$)/.test(line)).join('\n'))
+    }
+  }
+  git('add', '-A')
+}
+
+/** Commits the merge settled under way. */
+const commitMergeIn = (cwd: string) =>
+  execFileSync('git', ['-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '--no-edit'], { cwd, stdio: 'pipe' })
+
+/**
+ * Leaves the full tests running in the background, as Claude Code reports a
+ * command it sends there. After `lasts` milliseconds they end (never, with
+ * no `lasts`), and Claude Code wakes the agent as it does: outside any
+ * prompt it speaks and makes a call, `then` done in it, and speaks again.
+ * `reportsAfter` says it that many milliseconds after the turn, as Codex
+ * does; `wakesAfter` has the agent slow to speak once they end, and `prints`
+ * is what they print as they run.
+ */
+const leaveTests = async (
+  sessionId: string,
+  session: SessionState,
+  client: acp.AgentContext,
+  plan: {
+    readonly lasts?: number
+    readonly commits?: () => void
+    readonly reportsAfter?: number
+    readonly wakesAfter?: number
+    readonly prints?: string
+    readonly printsAfterEnd?: boolean
+    readonly again?: boolean
+  },
+) => {
+  const notify = (update: Record<string, unknown>) =>
+    client.notify(acp.methods.client.session.update, { sessionId, update: update as unknown as acp.SessionUpdate })
+  session.served += 1
+  const id = `tests-${session.served}`
+  const toolCallId = `tests-call-${session.served}`
+  await notify({
+    sessionUpdate: 'tool_call',
+    toolCallId,
+    title: 'bun run test',
+    kind: 'execute',
+    status: 'in_progress',
+    rawInput: { command: 'bun run test' },
+  })
+  const folder = join(tmpdir(), 'althar-fake-agent')
+  mkdirSync(folder, { recursive: true })
+  const outputPath = join(folder, `${sessionId}-${id}.output`)
+  writeFileSync(outputPath, `running the full tests\n${plan.prints ?? ''}`)
+  const report = async () => {
+    session.background.set(id, { toolCallId, outputPath })
+    await notify({
+      sessionUpdate: 'async_task_spawned',
+      asyncTaskId: id,
+      name: 'Run the full tests',
+      description: 'Run the full tests',
+      taskType: 'shell',
+      showInTranscript: false,
+      canStop: true,
+      toolCallId,
+    })
+    await notify({ sessionUpdate: 'async_task_progress', asyncTaskId: id, outputFilePath: outputPath })
+    await notify({ sessionUpdate: 'tool_call_update', toolCallId, status: 'completed' })
+    if (plan.lasts === undefined) return
+    const timer = setTimeout(() => {
+      // Stopped meanwhile, they have ended already.
+      if (!session.background.delete(id)) return
+      appendFileSync(outputPath, 'all passed\n[exited with code 0]\n')
+      void (async () => {
+        await notify({ sessionUpdate: 'async_task_state_update', asyncTaskId: id, state: 'completed' })
+        // What it printed last, on its own call, as Codex streams it: not the agent speaking.
+        if (plan.printsAfterEnd === true)
+          await notify({ sessionUpdate: 'tool_call_update', toolCallId, _meta: { terminal_output_delta: { data: 'all passed\n' } } })
+        if (plan.commits === undefined) return
+        if (plan.wakesAfter !== undefined) await pause(plan.wakesAfter)
+        // Woken, it leaves more tests running, outside any turn Althar sent.
+        if (plan.again === true) {
+          await leaveTests(sessionId, session, client, { lasts: 100 })
+          await pause(300)
+        }
+        const call = `${toolCallId}-woken`
+        await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'The tests finished. ' } })
+        await notify({
+          sessionUpdate: 'tool_call',
+          toolCallId: call,
+          title: 'git commit',
+          kind: 'execute',
+          status: 'in_progress',
+          rawInput: { command: 'git commit' },
+        })
+        plan.commits()
+        await notify({ sessionUpdate: 'tool_call_update', toolCallId: call, status: 'completed' })
+        await notify({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Committed.' } })
+      })()
+    }, plan.lasts)
+    timer.unref()
+  }
+  if (plan.reportsAfter === undefined) await report()
+  else setTimeout(() => void report(), plan.reportsAfter).unref()
+}
+
+const playRole = async (
+  session: SessionState,
+  text: string,
+  serve: (exits: boolean) => Promise<void>,
+  tests: (plan: {
+    readonly lasts?: number
+    readonly commits?: () => void
+    readonly reportsAfter?: number
+    readonly wakesAfter?: number
+    readonly prints?: string
+    readonly printsAfterEnd?: boolean
+    readonly again?: boolean
+  }) => Promise<void> = () => Promise.resolve(),
+): Promise<string | undefined> => {
   for (const marker of text.match(/\[(coordinator|lead|review):[a-z-]+\]/g) ?? []) session.markers.add(marker)
-  const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ')
+  const asked = session.markers.size > 0 || text.includes('Settle each') || text.startsWith('Round ') || text.startsWith('More to review')
   if (session.tools === undefined || !asked) return undefined
   const client = new Client({ name: 'fake-agent', version: '1.0.0' })
   const transport = new StreamableHTTPClientTransport(new URL(session.tools.url), { requestInit: { headers: session.tools.headers } })
@@ -452,21 +648,76 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
             { severity: 'nit', file: 'README.md', claim: 'A typo.' },
           ],
         })
+      // Asked to look at the lead's evidence, it reads each file its brief names, and says what it found.
+      const looked = session.markers.has('[review:evidence]')
+        ? ` Read: ${[...text.matchAll(/^- [^\n]*: (\/[^\n]+)$/gm)]
+            .map(([, path = '']) => `${path.split('/').at(-1) ?? ''} (${statSync(path).size} bytes)`)
+            .join(', ')}.`
+        : ''
       if (text.includes('[review:findings]') && !text.startsWith('Round '))
         return await call('report_review', {
           verdict: 'changes_requested',
-          summary: 'The heading needs fixing.',
+          summary: `The heading needs fixing.${looked}`,
           findings: [{ severity: 'major', file: 'README.md', line: 1, claim: 'The heading is wrong.' }],
         })
-      if (text.includes('[review:') || text.startsWith('Round '))
-        return await call('report_review', { verdict: 'pass', summary: 'The change holds.' })
+      // A round of work after the plan is reviewed for what changed since, as a later round is.
+      if (text.includes('[review:') || text.startsWith('Round ') || text.startsWith('More to review'))
+        return await call('report_review', { verdict: 'pass', summary: `The change holds.${looked}` })
       return undefined
     }
+    // A review's lead, `[lead:review]`, reads the change from where its brief says and drafts: changes asked for, a blocking
+    // comment on its first changed line and a minor one on its second; `[lead:review-approve]` approves it, with nothing to say.
+    if (available.has('draft_review') && (session.markers.has('[lead:review]') || session.markers.has('[lead:review-approve]'))) {
+      if (session.markers.has('[lead:review-approve]'))
+        return await call('draft_review', { verdict: 'approve', summary: 'It does what it says.', comments: [] })
+      const base = /`git diff ([0-9a-f]{7,64})`/.exec(text)?.[1] ?? 'HEAD~1'
+      const diff = execFileSync('git', ['diff', '--unified=0', '--no-color', base, 'HEAD'], { cwd: session.cwd }).toString()
+      const lines: Array<{ path: string; line: number }> = []
+      let path = ''
+      for (const row of diff.split('\n')) {
+        if (row.startsWith('+++ b/')) path = row.slice('+++ b/'.length)
+        const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(row)?.[1]
+        if (hunk !== undefined && path !== '') lines.push({ path, line: Number(hunk) })
+      }
+      const [first, second] = lines
+      return await call('draft_review', {
+        verdict: 'changes',
+        summary: 'The fix is right, but it needs a test.',
+        comments: [
+          ...(first === undefined ? [] : [{ ...first, body: 'Nothing covers this.', severity: 'blocking' }]),
+          ...(second === undefined ? [] : [{ ...second, body: 'Could be named better.', severity: 'minor' }]),
+        ],
+      })
+    }
     if (available.has('finish_step')) {
+      // A lead that takes a while over what it was asked, `[lead:slowly]`: long enough to be seen at work.
+      if (text.includes('[lead:slowly]')) for (let waited = 0; !session.cancelled && waited < 6_000; waited += 10) await pause(10)
       // A lead that leaves a dev server running, once, then carries on as its other markers say.
       if (text.includes('[lead:serve') && !session.played.has('[lead:serve]')) {
         session.played.add('[lead:serve]')
         await serve(text.includes('[lead:serve-exits]'))
+      }
+      // What a plain task's lead does in the turn it is asked, where the words it was given say so: writes a file in the
+      // repository and leaves it uncommitted (`[lead:write]`), commits one on whatever its worktree is on (`[lead:commit]`),
+      // or keeps a sketch in its scratch folder, which git ignores (`[lead:sketch]`). Without `[lead:finish]`, its turn ends there.
+      const writes = text.includes('[lead:write]')
+      const commits = text.includes('[lead:commit]')
+      const sketches = text.includes('[lead:sketch]')
+      if (writes) appendFileSync(join(session.cwd, 'draft.md'), 'A first draft.\n')
+      if (commits) commitIn(session.cwd, 'change.txt', 'Change it')
+      if (sketches) {
+        mkdirSync(join(session.cwd, '.althar', 'scratch'), { recursive: true })
+        writeFileSync(join(session.cwd, '.althar', 'scratch', 'sketch.html'), '<p>A sketch.</p>\n')
+      }
+      if ((writes || commits || sketches) && !text.includes('[lead:finish]')) return 'Did it, without reporting.'
+      // Asked in these words to make its quick task a real change, it does, and carries on as its other markers say.
+      if (text.includes('[lead:make-change') && available.has('make_it_a_change')) {
+        const made = await call('make_it_a_change', {
+          title: 'Make the sketch real',
+          review: text.includes('[lead:make-change-alone]') ? null : { agent: 'codex' },
+          output: 'draft',
+        })
+        if (!text.includes('[lead:finish]')) return made
       }
       if (text.includes('Settle each')) {
         if (session.markers.has('[lead:settle-quietly]')) return 'Settled, without saying so.'
@@ -476,27 +727,70 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         const findings = (text.match(/find_[0-9a-f]{32}/g) ?? []).map((id) =>
           aside ? { id, outcome: 'set_aside', reason: 'It reads as intended.' } : { id, outcome: 'fixed' },
         )
-        return await call('finish_step', { summary: 'Fixed the heading.', findings })
+        // Showing its work, it hands a new run, not its screenshot again, and has now tried what it couldn't.
+        const shown = session.markers.has('[lead:evidence]')
+          ? {
+              evidence: [
+                { kind: 'test_run', caption: 'The heading test', command: 'bun test heading', exit_code: 0, output: '1 passed\n' },
+              ],
+              unverified: [],
+            }
+          : {}
+        // What the task built, said again where settling changed it; or, unsaid, once Althar asks for it.
+        const built = aside ? {} : { built: BUILT_SETTLED }
+        if (session.markers.has('[lead:built-unsaid]') && !aside) {
+          const answer = await call('finish_step', { summary: 'Fixed the heading.', findings, ...shown })
+          if (!answer.startsWith('Settling changed the work')) return answer
+        }
+        return await call('finish_step', { summary: 'Fixed the heading.', findings, ...built, ...shown })
       }
       // Told to carry on, as a lead that took a step over is, it finishes as it was told to at first.
       // Told to carry on, or to try another way, as Althar tells one that stalled or went round in circles.
       const toldToGoOn = /^(Carry on with the task|Your last turn|You ran )/.test(text)
       // Asked for its pull request's description in the repository's template, it writes under the first heading, and ticks a box it shouldn't.
+      // Asked to show its work, it saves a screenshot in its worktree, uncommitted, and hands it with a test run and what it couldn't try.
+      const evidence = (): Record<string, unknown> => {
+        if (!session.markers.has('[lead:evidence]')) return {}
+        mkdirSync(join(session.cwd, 'evidence'), { recursive: true })
+        writeFileSync(join(session.cwd, 'evidence', 'retry.png'), Buffer.from(SCREENSHOT_PNG, 'base64'))
+        return {
+          evidence: [
+            { kind: 'screenshot', caption: 'The retry button after a failed checkout', path: 'evidence/retry.png' },
+            {
+              kind: 'test_run',
+              caption: 'The checkout tests',
+              command: 'bun test checkout',
+              exit_code: 0,
+              output: 'checkout.test.ts\n  ✓ retries once\n\n1 passed\n',
+            },
+          ],
+          unverified: ['Not tried against the real payment provider: no sandbox account'],
+        }
+      }
       const finish = async () => {
-        const answer = await call('finish_step', { summary: 'Did the task.' })
+        // A lead that says only what it did, `[lead:terse]`: nothing of what the task built.
+        const built = session.markers.has('[lead:terse]') ? {} : { built: BUILT }
+        const answer = await call('finish_step', { summary: 'Did the task.', ...built, ...evidence() })
         const template = /~~~~~markdown\n([\s\S]*?)\n~~~~~/.exec(answer)?.[1]
         if (template === undefined) return answer
         const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
-        return await call('finish_step', { summary: 'Did the task.', descriptions: [{ text }] })
+        return await call('finish_step', { summary: 'Did the task.', built: BUILT, descriptions: [{ text }] })
       }
-      if (text.includes('[lead:finish]') || (toldToGoOn && session.markers.has('[lead:finish]'))) {
+      // Asked to resolve a conflict, as a fresh session is with its brief after a restart, it does that rather than finish.
+      const resolving = /Bring the branch up to date: merge \S+ into it/.test(text)
+      if (!resolving && (text.includes('[lead:finish]') || (toldToGoOn && session.markers.has('[lead:finish]')))) {
         if (session.markers.has('[lead:edit]')) commitIn(session.cwd, 'change.txt', 'Change it')
         if (!session.markers.has('[lead:scratch]')) return await finish()
         appendFileSync(join(session.cwd, 'scratch.log'), 'trying things\n')
-        const answer = await call('finish_step', { summary: 'Did the task.' })
+        const answer = await call('finish_step', { summary: 'Did the task.', built: BUILT })
         if (!/These aren.t committed/.test(answer)) return answer
         rmSync(join(session.cwd, 'scratch.log'))
         return await finish()
+      }
+      // Asked to push, it commits and asks the person to, as a lead does: it never pushes itself.
+      if (available.has('push_to_pull_request') && session.markers.has('[lead:push]') && /\bpush pls\b/i.test(text)) {
+        commitIn(session.cwd, 'pushed.txt', 'Tidy up before pushing')
+        return await call('push_to_pull_request', {})
       }
       // What people said on the task's pull request, and its checks.
       if (available.has('reply_on_pull_request') && session.markers.has('[lead:answer]') && / commented on /.test(text)) {
@@ -506,10 +800,94 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
           ...(thread === undefined ? {} : { thread_id: thread }),
         })
       }
+      // Asked to resolve a conflict with the branch its own goes into: merged and settled, or not.
+      const merging = /Bring the branch up to date: merge (\S+) into it/.exec(text)?.[1]
+      if (merging !== undefined && session.markers.has('[lead:resolve-fails]'))
+        return "Couldn't settle the conflict: both sides change the same lines."
+      if (merging !== undefined && session.markers.has('[lead:resolve-wait]')) {
+        for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        return 'Stopped before settling it.'
+      }
+      const more = session.markers.has('[lead:resolve-more]')
+      const fix = session.markers.has('[lead:resolve-fix]')
+      const hold = session.markers.has('[lead:resolve-hold]')
+      if (merging !== undefined && (session.markers.has('[lead:resolve]') || more || fix || hold)) {
+        resolveIn(session.cwd, merging)
+        if (hold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        if (fix) {
+          commitIn(session.cwd, 'tests.txt', 'Fix what the tests found')
+          return 'Merged it, settled the conflict, committed the merge, and fixed what the tests found.'
+        }
+        if (!more) return 'Merged it, settled the conflict, and committed the merge.'
+        commitIn(session.cwd, 'more.txt', 'Tidy up while here')
+        commitIn(session.cwd, 'more-still.txt', 'Tidy up some more')
+        return 'Merged it, settled the conflict, committed the merge, and tidied up while here.'
+      }
+      // Settled, but not committed: forgotten at first, committed once told that is all that is left.
+      const commitIt = /resolved but not committed: commit/.test(text)
+      if (session.markers.has('[lead:resolve-forgets]')) {
+        if (merging !== undefined) {
+          settleIn(session.cwd, merging)
+          return 'Merged it and settled the conflict.'
+        }
+        if (commitIt) {
+          commitMergeIn(session.cwd)
+          return 'Committed the merge.'
+        }
+      }
+      // Settled, with the full tests left running: the merge is committed once they end, by the agent they wake.
+      if (session.markers.has('[lead:resolve-tests-hang]')) {
+        if (merging !== undefined) {
+          settleIn(session.cwd, merging)
+          await tests({})
+          return "Merged it and settled the conflict. I'll wait for the tests."
+        }
+        if (commitIt) return 'Still waiting for the tests.'
+      }
+      const woken =
+        session.markers.has('[lead:resolve-tests]') ||
+        session.markers.has('[lead:resolve-tests-fix]') ||
+        session.markers.has('[lead:resolve-tests-codex]') ||
+        session.markers.has('[lead:resolve-tests-slow]') ||
+        session.markers.has('[lead:resolve-tests-url]') ||
+        session.markers.has('[lead:resolve-tests-output]') ||
+        session.markers.has('[lead:resolve-tests-again]')
+      if (merging !== undefined && woken) {
+        settleIn(session.cwd, merging)
+        const fixes = session.markers.has('[lead:resolve-tests-fix]')
+        const cwd = session.cwd
+        await tests({
+          lasts: 400,
+          ...(session.markers.has('[lead:resolve-tests-codex]') ? { reportsAfter: 300 } : {}),
+          ...(session.markers.has('[lead:resolve-tests-slow]') ? { lasts: 1500, wakesAfter: 1200 } : {}),
+          ...(session.markers.has('[lead:resolve-tests-again]') ? { again: true } : {}),
+          ...(session.markers.has('[lead:resolve-tests-output]') ? { lasts: 1500, wakesAfter: 1200, printsAfterEnd: true } : {}),
+          ...(session.markers.has('[lead:resolve-tests-url]')
+            ? { lasts: 3000, prints: 'serving the browser tests at http://localhost:4173/\n' }
+            : {}),
+          commits: () => {
+            commitMergeIn(cwd)
+            if (fixes) commitIn(cwd, 'tests.txt', 'Fix what the tests found')
+          },
+        })
+        return "Merged it and settled the conflict. I'll wait for the notification that the tests are done."
+      }
       // Fixed and committed, for the person to push.
-      if (session.markers.has('[lead:fix]') && text.startsWith('Checks failed')) {
+      const fixMore = session.markers.has('[lead:fix-more]')
+      const fixHold = session.markers.has('[lead:fix-hold]')
+      // Leaves the full tests running before it commits the fix, which it does once they end, woken outside a turn.
+      if (session.markers.has('[lead:fix-late]') && text.startsWith('Checks failed')) {
+        const cwd = session.cwd
+        await tests({ lasts: 400, commits: () => commitIn(cwd, 'fixed.txt', 'Fix the failing check') })
+        return "I'll wait for the tests, then commit the fix."
+      }
+      if ((session.markers.has('[lead:fix]') || fixMore || fixHold) && text.startsWith('Checks failed')) {
         commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
-        return 'Fixed the failing check, and committed it.'
+        await call('finish_step', { summary: 'Fixed the failing check, and committed it.', built: BUILT_FIXED })
+        if (fixHold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        if (!fixMore) return 'Fixed the failing check, and committed it.'
+        commitIn(session.cwd, 'more.txt', 'Tidy up while here')
+        return 'Fixed the failing check, committed it, and tidied up while here.'
       }
       // Works until it is stopped: for a lead that goes in the middle of its step.
       if (text.includes('[lead:wait]')) {
@@ -517,6 +895,12 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
         return 'Stopped working.'
       }
       return undefined
+    }
+    // Asked to review a pull request by its link, it starts a review, on its fake Claude Code.
+    if (available.has('review_pull_request') && text.includes('[coordinator:review]')) {
+      const asked = text.slice(0, text.indexOf('[coordinator:review]')).split('\n').at(-1) ?? ''
+      const link = /https?:\/\/\S+/.exec(asked)?.[0] ?? /#\d+/.exec(asked)?.[0] ?? ''
+      return await call('review_pull_request', { pull_request: link, lead: { agent: 'claude-code', reason: 'Careful.' } })
     }
     // Asked for something small, it starts it at once, passing its lead the markers it was given.
     if (available.has('start_task') && text.includes('[coordinator:start]')) {
@@ -540,15 +924,24 @@ const playRole = async (session: SessionState, text: string, serve: (exits: bool
           .split(/[.!?]/)[0]
           ?.trim() || 'Add a retry'
       const link = /https?:\/\/\S+/.exec(asked)?.[0]
-      const drafted = await call('draft_task', {
+      const draft = {
         title,
         description: `Retry the checkout call. ${markers.join(' ')}`,
         ...(link === undefined ? {} : { issue: link }),
-      })
+      }
+      // In a project of several repositories, asked which it changes, it names every one it is told of.
+      const first = await call('draft_task', draft)
+      const which = /as repositories: (.+)\.$/.exec(first)?.[1]
+      const drafted = which === undefined ? first : await call('draft_task', { ...draft, repositories: which.split(', ') })
       const slug = /Drafted ([^\s,.]+)/.exec(drafted)?.[1] ?? ''
       return await call('propose_plan', {
         task: slug,
-        lead: { agent: 'claude-code', reason: 'It knows the code.' },
+        lead: {
+          agent: 'claude-code',
+          // `[coordinator:plan-effort]`: on its large model, thinking hard.
+          ...(text.includes('[coordinator:plan-effort]') ? { model: 'large', effort: 'high' } : {}),
+          reason: 'It knows the code.',
+        },
         review: text.includes('[coordinator:plan-no-review]') ? null : { agent: 'codex' },
       })
     }
@@ -652,7 +1045,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         ? { protocolVersion: acp.PROTOCOL_VERSION }
         : {
             protocolVersion: acp.PROTOCOL_VERSION,
-            agentCapabilities: { loadSession: false, mcpCapabilities: { http: true, sse: false }, sessionCapabilities: { close: {} } },
+            agentCapabilities: {
+              loadSession: false,
+              mcpCapabilities: { http: true, sse: false },
+              sessionCapabilities: { close: {} },
+              promptCapabilities: { image: options.images !== false },
+            },
             authMethods: [],
             agentInfo: { name: 'fake-agent', version: '0.0.0' },
             _meta: { steering: { supported: true } },
@@ -750,7 +1148,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
     .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
       const session = sessionOf(params.sessionId)
       session.cancelled = false
-      const text = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
+      const prompted = params.prompt.map((block) => (block.type === 'text' ? block.text : '')).join('')
+      // A prompt that ends `[context:85]` says its context is that full, in percent, before anything else; the rest plays as it
+      // would. `[context-later:85]` says so a moment after, once its turn has ended, as an agent may; `[context:85/4000]`, of a
+      // context that holds 4,000 tokens rather than CONTEXT_SIZE.
+      const filled = /\s*\[context(-later)?:(\d+)(?:\/(\d+))?\]$/.exec(prompted)
+      const text = filled === null ? prompted : prompted.slice(0, filled.index)
       const out = options.outOfUsage
       if (out !== undefined && (out.until === undefined || Date.now() < out.until))
         throw new acp.RequestError(
@@ -761,6 +1164,17 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
+      if (filled !== null) {
+        const size = filled[3] === undefined ? CONTEXT_SIZE : Number(filled[3])
+        const usage = { sessionUpdate: 'usage_update' as const, used: Math.round((size * Number(filled[2])) / 100), size }
+        if (filled[1] === undefined) await update(usage)
+        else setTimeout(() => void update(usage), 300)
+      }
+
+      // What images it was sent, in order, by what they are and how many bytes: said before anything else it does.
+      const images = params.prompt.flatMap((block) => (block.type === 'image' ? [block] : []))
+      if (images.length > 0)
+        await say(`saw images: ${images.map((image) => `${image.mimeType} ${Buffer.from(image.data, 'base64').length} B`).join(', ')}\n\n`)
 
       /** Asks permission; cancelling the turn withdraws the request. */
       const ask = async (toolCall: acp.ToolCallUpdate, offered: Array<acp.PermissionOption>) => {
@@ -886,7 +1300,12 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const told = /The person answered[^\n]*\n([\s\S]*)$/.exec(text)
       if (told?.[1] !== undefined) {
         await say(`told=${told[1].trim().split('\n').join(' | ')}`)
-        const after = await playRole(session, text, (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }))
+        const after = await playRole(
+          session,
+          text,
+          (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+          (plan) => leaveTests(params.sessionId, session, client, plan),
+        )
         if (after !== undefined) await say(after)
         return ended()
       }
@@ -901,8 +1320,17 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       // A lead that stalls or loops, where a marker says so.
       const stalled = await playStall(session, text, update)
       if (stalled !== undefined) return stalled
-      // With Althar's tools, a marker in the prompt says which role to play.
-      const played = await playRole(session, text, (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }))
+      // With Althar's tools, a marker in the prompt says which role to play; but what the person names as a scenario is played
+      // as one, whatever its session's markers say, as a lead keeps its session after its step (ADR-034).
+      const named = (Object.values(scenarios) as ReadonlyArray<string>).includes(text)
+      const played = named
+        ? undefined
+        : await playRole(
+            session,
+            text,
+            (exits) => leaveRunning(params.sessionId, session, client, 'claude', { exits }),
+            (plan) => leaveTests(params.sessionId, session, client, plan),
+          )
       // Stopped while it played its part, the turn was cancelled, as an agent says.
       if (played !== undefined && session.cancelled) return { stopReason: 'cancelled' }
       if (played !== undefined) {
@@ -1022,6 +1450,10 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say('Done')
           setTimeout(() => void update({ sessionUpdate: 'available_commands_update', availableCommands: [] }), 20)
           return ended()
+        case scenarios.wakesItself:
+          await say('Done')
+          setTimeout(() => void say('Verify ').then(() => say('finished.')), 20)
+          return ended()
         case scenarios.hello:
           await say('Hel')
           await say('lo')
@@ -1051,6 +1483,18 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
             status: allowed ? 'completed' : 'failed',
             rawOutput: { chosen },
           })
+          await say(`chosen=${chosen}`)
+          return ended()
+        }
+        case scenarios.fetch: {
+          const toolCall = {
+            toolCallId: 'call-fetch',
+            title: 'Fetch https://example.test/steal',
+            kind: 'fetch' as const,
+            rawInput: { url: 'https://example.test/steal' },
+          }
+          await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
+          const chosen = await ask(toolCall, permissionOptions(false))
           await say(`chosen=${chosen}`)
           return ended()
         }

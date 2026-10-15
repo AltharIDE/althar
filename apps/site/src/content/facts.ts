@@ -21,7 +21,10 @@ export const LINKS = {
   acp: 'https://agentclientprotocol.com',
 } as const
 
-/** How to install it. Not published yet: the release, the cask and the clone URL are placeholders until it ships. */
+/** GitHub's API for the latest published release: its files are what the download links give (src/lib/download.ts). Unauthenticated, 60 calls an hour per address. */
+export const LATEST_RELEASE = 'https://api.github.com/repos/AltharIDE/althar/releases/latest'
+
+/** How to install it. The releases are published; the cask and the clone URL are placeholders until they ship. */
 export const INSTALL = {
   brew: 'brew install --cask althar',
   clone: 'git clone github.com/AltharIDE/althar',

@@ -3,21 +3,19 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+/** Who a test's commits are by, for git where none is set up, as on CI. */
+export const author = {
+  GIT_AUTHOR_NAME: 'Test',
+  GIT_AUTHOR_EMAIL: 'test@althar.test',
+  GIT_COMMITTER_NAME: 'Test',
+  GIT_COMMITTER_EMAIL: 'test@althar.test',
+}
+
 /** A git repository called `meridian`, or as named, with one commit on `main`, in a folder of its own. */
 export const repository = (under = mkdtempSync(join(tmpdir(), 'althar-desktop-')), name = 'meridian') => {
   const path = join(under, name)
   mkdirSync(path)
-  const git = (...args: Array<string>) =>
-    execFileSync('git', args, {
-      cwd: path,
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: 'Test',
-        GIT_AUTHOR_EMAIL: 'test@althar.test',
-        GIT_COMMITTER_NAME: 'Test',
-        GIT_COMMITTER_EMAIL: 'test@althar.test',
-      },
-    })
+  const git = (...args: Array<string>) => execFileSync('git', args, { cwd: path, env: { ...process.env, ...author } })
   git('init', '-q', '-b', 'main')
   writeFileSync(join(path, 'README.md'), `# ${name}\n`)
   git('add', '.')

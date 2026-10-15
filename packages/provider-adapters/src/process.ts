@@ -39,7 +39,20 @@ export const childEnvironment = (
   return { ...env, ...asNode(spec, underElectron), ...spec.env }
 }
 
-/** Under Electron, `node` is Electron's own binary, which runs as plain Node only when told to. */
+/**
+ * The Node the bundled adapters run on (ADR-033). The packaged app ships a
+ * Node of its own and names it in ALTHAR_NODE, since Althar's binary doesn't
+ * run as Node there (its `runAsNode` fuse is off). Without one, in dev and
+ * the tests, it is the binary this runs on: Electron's, run as Node (`asNode`),
+ * or the tests' own Node.
+ */
+export const adapterNode = (env: Readonly<Record<string, string | undefined>> = process.env): string =>
+  env.ALTHAR_NODE !== undefined && env.ALTHAR_NODE !== '' ? env.ALTHAR_NODE : process.execPath
+
+/**
+ * Under Electron, `node` is Electron's own binary, which runs as plain Node only when told to: in dev, where
+ * the `runAsNode` fuse is on. The packaged app's adapters run on the Node it ships, and need nothing.
+ */
 export const asNode = (spec: LaunchSpec, underElectron = process.versions.electron !== undefined): Record<string, string> =>
   underElectron && spec.command === process.execPath ? { ELECTRON_RUN_AS_NODE: '1' } : {}
 
@@ -158,29 +171,36 @@ export const spawnOwned = (
     Effect.gen(function* () {
       const exited = yield* Deferred.make<ProcessExit>()
       const stopped = yield* Deferred.make<StopReport>()
-      const env = childEnvironment(spec)
+      const inherited = childEnvironment(spec)
+      // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled; what it runs may inherit more of Althar's environment, as reaching the device needs.
+      const launched = spec.onDevice === undefined ? spec : spec.onDevice({ cwd, env: inherited })
+      const env = launched === spec ? inherited : childEnvironment(launched)
       const child = yield* Effect.try({
-        try: () => spawn(spec.command, [...spec.args], { cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'], env }),
-        catch: (cause) => new AgentStartFailed({ command: spec.command, reason: String(cause) }),
+        try: () => spawn(launched.command, [...launched.args], { cwd, detached: true, stdio: ['pipe', 'pipe', 'pipe'], env }),
+        catch: (cause) => new AgentStartFailed({ command: launched.command, reason: String(cause) }),
       })
       let stderr = ''
       child.stderr.on('data', (chunk: Buffer) => {
         stderr = (stderr + chunk.toString()).slice(-STDERR_KEPT)
       })
+      // Taken hold of at once: a process that exits while its start is still being read would otherwise have what it
+      // printed thrown away, as Node discards the output of a child that exited with no one reading it.
+      let sequence = 0
+      const next = () => ++sequence
+      const stdin = tapped(Writable.toWeb(child.stdin), 'to_agent', options.capture, next)
+      const stdout = tapped(Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>, 'from_agent', options.capture, next)
       child.once('exit', (code, signal) => Deferred.doneUnsafe(exited, Effect.succeed({ code, signal })))
       const pid = yield* Effect.callback<number, AgentStartFailed>((resume) => {
         child.once('spawn', () => resume(Effect.succeed(child.pid ?? 0)))
-        child.once('error', (error) => resume(Effect.fail(new AgentStartFailed({ command: spec.command, reason: error.message }))))
+        child.once('error', (error) => resume(Effect.fail(new AgentStartFailed({ command: launched.command, reason: error.message }))))
       })
       const osStartedAt = yield* osStartTime(pid)
-      let sequence = 0
-      const next = () => ++sequence
       return {
         pid,
         ...(osStartedAt === undefined ? {} : { osStartedAt }),
         environmentDigest: environmentDigest(env),
-        stdin: tapped(Writable.toWeb(child.stdin), 'to_agent', options.capture, next),
-        stdout: tapped(Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>, 'from_agent', options.capture, next),
+        stdin,
+        stdout,
         exited,
         stopped,
         stderrTail: () => stderr,

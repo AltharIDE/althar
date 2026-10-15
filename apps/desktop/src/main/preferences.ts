@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { type AppPreferences, holds, type PreferenceKey, preferencesIn } from './appPreferences'
@@ -8,20 +8,31 @@ import { type AppPreferences, holds, type PreferenceKey, preferencesIn } from '.
  * as desktop.json, so a test's profile keeps its own: the app's icon,
  * where Althar shows while you work in another app, and the app's own
  * preferences (appPreferences.ts). Each is a key of its own; writing one
- * keeps the rest, one write at a time.
+ * keeps the rest, one write at a time, and whole: a new file takes the old
+ * one's place, so a write cut short never leaves half of one.
  */
 
 const fileIn = (profile: string) => join(profile, 'desktop.json')
 
-/** What the file holds, or nothing where there is none or it isn't an object. */
-export const readPreferences = async (profile: string): Promise<Record<string, unknown>> => {
+/** What the file holds, nothing where there is none, and whether it is there but couldn't be read as an object. */
+const readFileIn = async (profile: string): Promise<{ readonly kept: Record<string, unknown>; readonly damaged: boolean }> => {
+  let text: string
   try {
-    const read: unknown = JSON.parse(await readFile(fileIn(profile), 'utf8'))
-    return typeof read === 'object' && read !== null && !Array.isArray(read) ? (read as Record<string, unknown>) : {}
+    text = await readFile(fileIn(profile), 'utf8')
+  } catch (error) {
+    return { kept: {}, damaged: (error as NodeJS.ErrnoException).code !== 'ENOENT' }
+  }
+  try {
+    const read: unknown = JSON.parse(text)
+    const object = typeof read === 'object' && read !== null && !Array.isArray(read)
+    return { kept: object ? (read as Record<string, unknown>) : {}, damaged: !object }
   } catch {
-    return {}
+    return { kept: {}, damaged: true }
   }
 }
+
+/** What the file holds, or nothing where there is none or it isn't an object. */
+export const readPreferences = async (profile: string): Promise<Record<string, unknown>> => (await readFileIn(profile)).kept
 
 /* Writes in the order they were asked for, so two at once can't each keep the other's old value. */
 let writing: Promise<unknown> = Promise.resolve()
@@ -31,14 +42,26 @@ export const writePreference = (profile: string, key: string, value: unknown): P
   const write = writing.then(async () => {
     const kept = await readPreferences(profile)
     await mkdir(profile, { recursive: true })
-    await writeFile(fileIn(profile), `${JSON.stringify({ ...kept, [key]: value }, null, 2)}\n`)
+    const next = `${fileIn(profile)}.${process.pid}.next`
+    await writeFile(next, `${JSON.stringify({ ...kept, [key]: value }, null, 2)}\n`)
+    await rename(next, fileIn(profile))
   })
   writing = write.catch(() => undefined)
   return write
 }
 
-/** The app's own preferences (appPreferences.ts), each as kept or where it starts. */
-export const readAppPreferences = async (profile: string): Promise<AppPreferences> => preferencesIn(await readPreferences(profile))
+/**
+ * The app's own preferences (appPreferences.ts), each as kept or where it
+ * starts. A file that is there but can't be read keeps usage data off, and
+ * is written again so: the person may have turned it off, and nothing else
+ * in it can be read back.
+ */
+export const readAppPreferences = async (profile: string): Promise<AppPreferences> => {
+  const { kept, damaged } = await readFileIn(profile)
+  if (!damaged) return preferencesIn(kept)
+  await writePreference(profile, 'usageData', false).catch(() => undefined)
+  return { ...preferencesIn(kept), usageData: false }
+}
 
 /** Keeps one of the app's preferences, refusing a value its key can't hold. */
 export const writeAppPreference = async <K extends PreferenceKey>(profile: string, key: K, value: unknown): Promise<AppPreferences[K]> => {

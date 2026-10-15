@@ -3,9 +3,10 @@ import { type RefObject, useEffect, useState } from 'react'
 
 import { LINKS } from '../../content/facts'
 import { cx } from '../../lib/cx'
+import { useDownload } from '../../lib/download'
 import s from './parts.module.css'
 
-/** The footer's links, in two short groups. */
+/** The footer's links, in two short groups. The download becomes the reader's own installer once known (Links). */
 export const GROUPS = [
   {
     name: 'Althar',
@@ -39,6 +40,7 @@ export function Signature({ className }: { className?: string }) {
 
 /** The links, in their groups. */
 export function Links({ className }: { className?: string }) {
+  const download = useDownload()
   return (
     <nav className={cx(s.links, className)} aria-label="Footer">
       {GROUPS.map((group) => (
@@ -47,7 +49,7 @@ export function Links({ className }: { className?: string }) {
           <ul>
             {group.links.map((link) => (
               <li key={link.name}>
-                <a href={link.href}>{link.name}</a>
+                {link.href === LINKS.releases ? <a href={download.href}>{download.label}</a> : <a href={link.href}>{link.name}</a>}
               </li>
             ))}
           </ul>

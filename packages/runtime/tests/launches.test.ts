@@ -278,7 +278,7 @@ describe('running the project', () => {
       // One that ends at once, printing nothing: the coordinator hears so, and Stop only takes it off the list.
       assert.match(
         yield* callTool(lead, 'set_run_command', { command: 'node -e "process.exit(2)"', setup: 'true' }),
-        /^Kept: .* runs with `node -e "process\.exit\(2\)"`, after `true`\.$/,
+        /^Kept: .* runs with `node -e "process\.exit\(2\)"`, after `true`, which sets up each new task's worktree too\.$/,
       )
       assert.match(
         yield* callTool(coordinator, 'run_project', { repository: name }),

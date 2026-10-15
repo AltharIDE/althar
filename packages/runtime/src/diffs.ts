@@ -111,7 +111,23 @@ const linesIn = (text: string) => (text === '' ? 0 : text.split('\n').length - (
  * where its worktree started, when that can't be told, as offline.
  */
 export const baseOf = (worktree: string, baseRef: string | null, started: string): Effect.Effect<string> =>
-  baseRef === null ? Effect.succeed(started) : git(worktree, 'merge-base', baseRef, 'HEAD').pipe(Effect.orElseSucceed(() => started))
+  baseRef === null
+    ? Effect.succeed(started)
+    : git(worktree, 'merge-base', baseRef, 'HEAD').pipe(
+        // Where it started after they meet, as a branch for a task's next pull request does (ADR-034), from there.
+        Effect.flatMap((met) =>
+          met === started
+            ? Effect.succeed(met)
+            : Effect.all([
+                git(worktree, 'merge-base', '--is-ancestor', met, started),
+                git(worktree, 'merge-base', '--is-ancestor', started, 'HEAD'),
+              ]).pipe(
+                Effect.as(started),
+                Effect.orElseSucceed(() => met),
+              ),
+        ),
+        Effect.orElseSucceed(() => started),
+      )
 
 /** The files git tracks that a task changed since `base`, committed or not: without reading any of them. Its three diffs run at once. */
 const trackedFiles = (worktree: string, base: string) =>

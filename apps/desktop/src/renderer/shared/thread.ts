@@ -60,6 +60,9 @@ export type ArrivalContent = Extract<ThreadItem, { kind: 'arrival' }>['content']
 export type QuestionContent = Extract<ThreadItem, { kind: 'question' }>['content']
 export type RunContent = Extract<ThreadItem, { kind: 'run' }>['content']
 export type IssueDraftContent = Extract<ThreadItem, { kind: 'issue_draft' }>['content']
+export type SetupContent = Extract<ThreadItem, { kind: 'setup' }>['content']
+export type PushRequestContent = Extract<ThreadItem, { kind: 'push_request' }>['content']
+export type ReviewDraftContent = Extract<ThreadItem, { kind: 'review_draft' }>['content']
 
 export type Block =
   | {
@@ -70,6 +73,8 @@ export type Block =
       readonly delivery: Delivery
       /** The links in it Althar could unfurl: issues and pull requests. */
       readonly links: ReadonlyArray<Unfurl>
+      /** The images the person sent with it. */
+      readonly pictures: ReadonlyArray<Picture>
     }
   | {
       readonly kind: 'turn'
@@ -102,6 +107,12 @@ export type Block =
   | { readonly kind: 'run'; readonly id: string; readonly run: RunContent }
   /** An issue the coordinator drafted, filed only when the person says. */
   | { readonly kind: 'draft'; readonly id: string; readonly draft: IssueDraftContent }
+  /** Althar setting up the task's worktree, before its lead starts (ADR-023). */
+  | { readonly kind: 'setup'; readonly id: string; readonly setup: SetupContent }
+  /** The lead asking the person to push its new commits to the task's pull request: when it asked, or when it settled. */
+  | { readonly kind: 'push'; readonly id: string; readonly at: string; readonly request: PushRequestContent }
+  /** A review the lead drafted of someone else's pull request, posted only when the person says. */
+  | { readonly kind: 'review'; readonly id: string; readonly review: ReviewDraftContent }
 
 /** ACP's tool kinds, as the kit's. */
 /** The notice earlier versions left in a thread when Althar restarted under its lead. */
@@ -378,7 +389,15 @@ export const blocksOf = (
         if (item.input?.state === 'withdrawn' || (queue && item.input?.state === 'queued' && !item.input.interrupting)) continue
         const delivery =
           item.input?.state === 'queued' ? (item.input.interrupting ? Delivery.Interrupting : Delivery.Queued) : Delivery.Delivered
-        blocks.push({ kind: 'you', id: item.id, text: item.content.text, at: ago(item.createdAt), delivery, links: item.content.links })
+        blocks.push({
+          kind: 'you',
+          id: item.id,
+          text: item.content.text,
+          at: ago(item.createdAt),
+          delivery,
+          links: item.content.links,
+          pictures: item.content.pictures,
+        })
         continue
       }
       case 'arrival':
@@ -404,6 +423,15 @@ export const blocksOf = (
       case 'issue_draft':
         blocks.push({ kind: 'draft', id: item.id, draft: item.content })
         continue
+      case 'setup':
+        blocks.push({ kind: 'setup', id: item.id, setup: item.content })
+        continue
+      case 'push_request':
+        blocks.push({ kind: 'push', id: item.id, at: ago(item.content.settledAt ?? item.createdAt), request: item.content })
+        continue
+      case 'review_draft':
+        blocks.push({ kind: 'review', id: item.id, review: item.content })
+        continue
       case 'notice':
         // A restart is Althar's business, not the person's; earlier versions said so in the thread.
         if (item.content.source === 'runtime' && item.content.title === RESTARTED) continue
@@ -427,13 +455,18 @@ export const blocksOf = (
         : { kind: 'message', id, text: streamed.text, pictures: [], files: [] },
     )
   }
-  // What an agent says after its step's result, closing its turn, folds with the work that led to it.
+  // What an agent says after its step's result, closing its turn, folds with the work that led to it. A run it starts on its own after, with tool calls or a plan, is work of its own: it folds under its own time, and its last message shows.
   const lastTurn = blocks.findLastIndex((block) => block.kind === 'turn')
   const merged: Array<Block> = []
   blocks.forEach((block, index) => {
     const step = merged.at(-1)
     const before = merged.at(-2)
-    const closing = block.kind === 'turn' && step?.kind === 'step' && before?.kind === 'turn' && before.agentId === block.agentId
+    const closing =
+      block.kind === 'turn' &&
+      step?.kind === 'step' &&
+      before?.kind === 'turn' &&
+      before.agentId === block.agentId &&
+      !block.parts.some((part) => part.kind === 'tool' || part.kind === 'plan')
     if (!closing || (turnRunning && index === lastTurn)) return void merged.push(block)
     const span = spans.get(before.id)
     const after = spans.get(block.id)

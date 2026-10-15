@@ -2,7 +2,7 @@ import { accessSync, constants } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, win32 } from 'node:path'
 
-import type { AgentDefinition, LaunchSpec } from './registry'
+import type { AgentDefinition, LaunchSpec, OutOnDevice } from './registry'
 
 /*
  * Finding an agent's command, on a Mac, Windows or Linux (ADR-012's "the
@@ -76,6 +76,12 @@ export interface Located {
   readonly command: string
   /** Whose it is: the person's own, the copy that ships with Althar, or the one Althar downloaded. */
   readonly whose: 'theirs' | 'bundled' | 'althar'
+  /**
+   * Where this copy is not here but out on the device (a Flatpak's host, where
+   * the person's own install lives): given the spec that names it, how that
+   * spec runs out there (`Installs.ts`'s `onDevice`).
+   */
+  readonly out?: (spec: LaunchSpec) => OutOnDevice
 }
 
 export interface LocateOptions {
@@ -125,12 +131,29 @@ export const quoted = (path: string, platform: string = process.platform): strin
       : `'${path.replaceAll("'", `'\\''`)}'`
 
 /**
+ * How a person's own terminal runs the copy the agent's commands point at:
+ * its path, where this system can reach it. A copy that lives inside the
+ * sandbox — the one that ships with the app in a Flatpak, under `/app` — is
+ * reached through the installed app instead, by the id the sandbox names.
+ */
+const inATerminal = (found: Located, flatpakId: string | undefined): string =>
+  found.whose === 'bundled' && flatpakId !== undefined && flatpakId !== ''
+    ? `flatpak run --command=${quoted(found.command)} ${quoted(flatpakId)}`
+    : quoted(found.command)
+
+/**
  * The agent, with every command it runs pointed at where its command is,
  * looked up each time, so a copy downloaded while Althar runs is used at
- * once; and what the person runs to sign in names the same copy. An agent
- * without a named command, or whose command is nowhere, is as it was.
+ * once; and what the person runs to sign in names the same copy — through
+ * the app where the copy lives inside its sandbox. An agent without a named
+ * command, or whose command is nowhere, is as it was.
  */
-export const usingLocated = (definition: AgentDefinition, find: () => Located | null): AgentDefinition => {
+export const usingLocated = (
+  definition: AgentDefinition,
+  find: () => Located | null,
+  /** The app that carries a bundled copy, in a Flatpak (`FLATPAK_ID`); none elsewhere. */
+  flatpakId?: string,
+): AgentDefinition => {
   const cli = definition.cli
   if (cli === undefined) return definition
   const pointed =
@@ -138,7 +161,9 @@ export const usingLocated = (definition: AgentDefinition, find: () => Located | 
     (...args: A): LaunchSpec => {
       const spec = make(...args)
       const found = spec.command === cli.name ? find() : null
-      return found === null ? spec : { ...spec, command: found.command }
+      if (found === null) return spec
+      const named = { ...spec, command: found.command }
+      return found.out === undefined ? named : { ...named, onDevice: found.out(named) }
     }
   const { signIn } = definition
   return {
@@ -148,9 +173,9 @@ export const usingLocated = (definition: AgentDefinition, find: () => Located | 
       ...signIn,
       get login() {
         const found = find()
-        return found === null || found.command === cli.name || !signIn.login.startsWith(`${cli.name} `)
+        return found === null || !signIn.login.startsWith(`${cli.name} `)
           ? signIn.login
-          : `${quoted(found.command)}${signIn.login.slice(cli.name.length)}`
+          : `${inATerminal(found, flatpakId)}${signIn.login.slice(cli.name.length)}`
       },
       status: pointed(signIn.status),
       ...(signIn.inApp === undefined ? {} : { inApp: { ...signIn.inApp, run: pointed(signIn.inApp.run) } }),
