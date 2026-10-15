@@ -3,7 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
+import { QuickSettings } from '../src/renderer/features/settings/QuickSettings'
+import type { Section } from '../src/renderer/features/settings/sections'
+import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { fakeClient, fakeHost, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
@@ -19,38 +21,46 @@ vi.mock('../src/renderer/shared/device', async (importOriginal) => {
   return { ...actual, platform: 'win32', device: actual.deviceWords('win32') }
 })
 
-function Settings() {
-  const [open, setOpen] = useState(true)
-  return <SettingsPanel start={useStart()} open={open} onOpenChange={setOpen} />
+/* The Settings tab, on a section. */
+function Settings({ at }: { at: Section }) {
+  const [section, setSection] = useState<Section>(at)
+  return <SettingsPage start={useStart()} section={section} onSection={setSection} />
 }
 
-const openModule = async (title: RegExp) => {
-  const panel = await screen.findByRole('dialog', { name: 'Settings' })
-  await userEvent.click(within(panel).getByRole('button', { name: title }))
-  return panel
-}
+const sections = () => within(screen.getByRole('navigation', { name: 'Settings' }))
 
 describe('settings on Windows', () => {
-  it('keeps this PC awake, and offers no count on the icon and the system’s sound, heard when chosen', async () => {
+  it('keep this PC awake, and offer no count on the icon and the system’s sound, heard when chosen', async () => {
     const host = fakeHost({ platform: 'win32', sounds: vi.fn(async () => []) })
     const { client } = fakeClient({ status: vi.fn(async () => ({ apiVersion: 1, appVersion: '0.0.0', agents: withoutOpenCode })) })
-    withServices(<Settings />, client, host)
-    const panel = await openModule(/^Keep awake/)
-    expect(within(panel).getByRole('heading', { name: 'This PC', level: 2 })).toBeTruthy()
-    expect(within(panel).getByRole('switch', { name: 'Keep this PC awake while work runs' })).toBeTruthy()
-    await userEvent.click(within(panel).getByRole('button', { name: 'Back to all settings' }))
-    // An agent not here says so in the PC's words.
-    expect(await within(panel).findByText('Not on this PC')).toBeTruthy()
+    withServices(<Settings at="this-mac" />, client, host)
+    expect(screen.getByRole('heading', { name: 'Work on this PC', level: 1 })).toBeTruthy()
+    expect(await screen.findByRole('switch', { name: 'Keep this PC awake while work runs' })).toBeTruthy()
+    expect(sections().getByRole('button', { name: 'Work on this PC' })).toBeTruthy()
 
-    await openModule(/^Notifications/)
-    expect(within(panel).queryByRole('switch', { name: /Count them/ })).toBeNull()
-    expect(within(panel).getByText('The system’s own sound, with each notification, or none.')).toBeTruthy()
-    await userEvent.click(within(panel).getByRole('combobox', { name: 'Sound' }))
+    // An agent not here says so in the PC's words.
+    await userEvent.click(sections().getByRole('button', { name: /^Agents/ }))
+    await userEvent.click(await screen.findByRole('tab', { name: /OpenCode/ }))
+    expect(screen.getByRole('region', { name: 'OpenCode isn’t on this PC' })).toBeTruthy()
+
+    await userEvent.click(sections().getByRole('button', { name: 'Notifications' }))
+    expect(screen.queryByRole('switch', { name: /Count them/ })).toBeNull()
+    expect(screen.getByText('The system’s own sound, with each notification, or none.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('combobox', { name: 'Sound' }))
     await userEvent.click(await screen.findByRole('option', { name: 'The system’s sound' }))
     expect(host.setPreference).toHaveBeenLastCalledWith('sound', 'default')
     expect(host.playSound).toHaveBeenCalledWith('default')
-    await userEvent.click(within(panel).getByRole('button', { name: 'Back to all settings' }))
-    await waitFor(() => expect(within(panel).getByRole('button', { name: /^Notifications\s*With sound/ })).toBeTruthy())
+    // Its card down the side says it.
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Sound\s*System sound/ })).toBeTruthy())
+  })
+
+  it('put back the system’s sound, where there are no named ones to choose from', async () => {
+    const host = fakeHost({ platform: 'win32', sounds: vi.fn(async () => []) })
+    withServices(<QuickSettings open onOpenChange={vi.fn()} onSettings={vi.fn()} />, fakeClient().client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Quick settings' })
+    await userEvent.click(within(panel).getByRole('switch', { name: 'Sound' }))
+    expect(host.setPreference).toHaveBeenLastCalledWith('sound', 'default')
+    await waitFor(() => expect(within(panel).getByRole('button', { name: /^Sound\s*System sound/ })).toBeTruthy())
   })
 
   it('says Althar is in the system tray, where Windows may tuck it away, with nothing to choose', async () => {
@@ -59,13 +69,10 @@ describe('settings on Windows', () => {
       appIcon: vi.fn(async () => null),
       edge: vi.fn(async () => ({ place: 'island', notch: false, platform: 'win32', tray: true })),
     })
-    withServices(<Settings />, fakeClient().client, host)
-    const panel = await openModule(/^In other apps\s*System tray/)
-    expect(within(panel).queryByRole('radiogroup')).toBeNull()
-    expect(within(panel).getByText('In the system tray')).toBeTruthy()
-    expect(
-      within(panel).getByText('Windows may tuck it under the ^ beside the clock. Drag it onto the taskbar to keep it in sight.'),
-    ).toBeTruthy()
+    withServices(<Settings at="appearance" />, fakeClient().client, host)
+    expect(await screen.findByText('In the system tray')).toBeTruthy()
+    expect(screen.queryByRole('radiogroup')).toBeNull()
+    expect(screen.getByText('Windows may tuck it under the ^ beside the clock. Drag it onto the taskbar to keep it in sight.')).toBeTruthy()
   })
 })
 
@@ -77,14 +84,12 @@ describe('settings on Linux', () => {
         appIcon: vi.fn(async () => null),
         edge: vi.fn(async () => ({ place: 'island', notch: false, platform: 'linux', tray })),
       })
-    const first = withServices(<Settings />, fakeClient().client, linux(true))
+    const first = withServices(<Settings at="appearance" />, fakeClient().client, linux(true))
     // A desktop may take the mark and not show it, which nothing tells Althar: the page says where it would be then.
-    const tray = await openModule(/^In other apps\s*System tray/)
-    expect(within(tray).getByText('Where the desktop has no tray, Althar shows only in its window.')).toBeTruthy()
+    expect(await screen.findByText('Where the desktop has no tray, Althar shows only in its window.')).toBeTruthy()
     first.unmount()
-    withServices(<Settings />, fakeClient().client, linux(false))
-    const panel = await openModule(/^In other apps\s*No tray/)
-    expect(within(panel).getByText('Only in Althar’s window')).toBeTruthy()
-    expect(within(panel).getByText('This desktop has no system tray, so Althar shows only in its own window.')).toBeTruthy()
+    withServices(<Settings at="appearance" />, fakeClient().client, linux(false))
+    expect(await screen.findByText('Only in Althar’s window')).toBeTruthy()
+    expect(screen.getByText('This desktop has no system tray, so Althar shows only in its own window.')).toBeTruthy()
   })
 })

@@ -192,7 +192,7 @@ const graphqlFailure = (product: Product, error: typeof GraphqlError.Type, statu
         ? 'unauthorized'
         : /RATE_?LIMIT/.test(code)
           ? 'rate_limited'
-          : /FORBIDDEN/.test(code)
+          : /FORBIDDEN|INSUFFICIENT_SCOPES/.test(code)
             ? 'forbidden'
             : /NOT_FOUND|ENTITY_NOT_FOUND/.test(code)
               ? 'not_found'

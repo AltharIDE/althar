@@ -93,7 +93,7 @@ describe('a project’s rules', () => {
     )
   })
 
-  it('changes what happens to the rest, and says while everything is allowed that what asks and goes ahead is off', async () => {
+  it('changes what happens to the rest, and says while everything is allowed that what asks, goes ahead and the rest is off', async () => {
     const { client } = fakeClient()
     withServices(<Rules />, client)
     await choose(
@@ -103,9 +103,10 @@ describe('a project’s rules', () => {
     await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', permissions: 'coordinator' }))
     expect(says('The rest')).toContain('the coordinator decides. What it can’t settle, and what Althar can’t read, comes to you.')
     expect(screen.queryByText('Off while everything is allowed.')).toBeNull()
-    await choose(within(sentence('The rest')).getByRole('button', { name: 'the coordinator decides' }), 'Allow everything')
-    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', permissions: 'allow' }))
-    expect(screen.getAllByText('Off while everything is allowed.')).toHaveLength(2)
+    // Allowing everything is the switch over the sentences, not what the rest gets.
+    await userEvent.click(screen.getByRole('switch', { name: 'Allow everything' }))
+    await waitFor(() => expect(client.setProjectRules).toHaveBeenLastCalledWith({ projectId: 'p1', allowEverything: true }))
+    expect(screen.getAllByText('Off while everything is allowed.')).toHaveLength(3)
   })
 
   it('takes a command out at once, and adds one where its sentence ends', async () => {
