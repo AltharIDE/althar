@@ -968,6 +968,9 @@ describe('each kind’s card', () => {
 describe('what stands between a ready change and merging', () => {
   const NOW = '2026-10-01T10:00:00.000Z'
   const passed = { outcome: 'passed' as const, passed: 5, failed: 0, running: 0, total: 5, failing: [], list: [] }
+  /** Checks named check 1, check 2… each in the state given. */
+  const listOf = (...states: ReadonlyArray<'passed' | 'skipped' | 'cancelled'>) =>
+    states.map((state, i) => ({ name: `check ${i + 1}`, state, summary: null }))
   const ready = (taskId: string, title: string, overrides: Parameters<typeof change>[0]) =>
     task({ taskId, title, phase: 'ready', change: change({ draft: false, checks: passed, ...overrides }) })
   const lanes = lanesOf(
@@ -982,6 +985,16 @@ describe('what stands between a ready change and merging', () => {
         ready('s6', 'Two at once', { localHead: 'def456', unpushed: 2, checks: change().checks }),
         // Commits counted before the branch's head here is known aren't said.
         ready('s7', 'Head not read yet', { unpushed: 2 }),
+        // Done, but one was cancelled: not all passed, and a host holds the merge on it.
+        ready('s8', 'A check cancelled', {
+          checks: { ...passed, passed: 3, list: listOf('passed', 'passed', 'passed', 'cancelled', 'skipped') },
+        }),
+        // One skipped: not every one passed, but nothing is in the way.
+        ready('s9', 'A check skipped', {
+          checks: { ...passed, passed: 4, list: listOf('passed', 'passed', 'passed', 'passed', 'skipped') },
+        }),
+        // Closed after it was ready: nothing is in its way, and nothing to do to it.
+        ready('s10', 'Closed since', { state: 'closed' }),
       ],
       calls: [],
     }),
@@ -1000,6 +1013,11 @@ describe('what stands between a ready change and merging', () => {
     expect(said('Commits to push')).toMatch(/3 commits not on the PR\s*Push 3 commits/)
     expect(said('Two at once')).toMatch(/2 commits not on the PR\s*·\s*test failed\s*Push 2 commits/)
     expect(said('Head not read yet')).toMatch(/All 5 checks passed\s*Accept and merge/)
+    // Cancelled: said in place of a pass, and nothing to do from here but open the task.
+    expect(said('A check cancelled')).toContain('check 4 cancelled')
+    expect(said('A check cancelled')).not.toMatch(/checks passed|Accept and merge/)
+    expect(said('A check skipped')).toMatch(/4 of 5 checks passed\s*Accept and merge/)
+    expect(said('Closed since')).not.toMatch(/checks passed|Accept and merge/)
   })
 })
 

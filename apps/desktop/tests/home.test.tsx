@@ -259,6 +259,17 @@ describe('the home', () => {
             ready(23, 'In conflict', { conflicts: true, target: 'main' }),
             ready(24, 'A check failed', { checks: change().checks }),
             ready(25, 'Checks still running', { checks: { ...passed, outcome: 'running', passed: 3, running: 2 } }),
+            ready(26, 'A check cancelled', {
+              checks: {
+                ...passed,
+                passed: 1,
+                total: 2,
+                list: [
+                  { name: 'lint', state: 'passed', summary: null },
+                  { name: 'e2e', state: 'cancelled', summary: null },
+                ],
+              },
+            }),
           ],
           calls: [],
           events: [],
@@ -299,6 +310,10 @@ describe('the home', () => {
     // While checks run there's nothing to do but wait: its button opens it.
     await userEvent.click(line('Checks still running').getByRole('button', { name: 'Review' }))
     expect(onTask).toHaveBeenLastCalledWith('thr25')
+    // A cancelled check is in the way, not a pass, and it is run again on the host: its button opens it.
+    expect(line('A check cancelled').getByText('api #26 · e2e cancelled · +12 −3')).toBeTruthy()
+    await userEvent.click(line('A check cancelled').getByRole('button', { name: 'Review' }))
+    expect(onTask).toHaveBeenLastCalledWith('thr26')
   })
 
   it('denies where it is', async () => {

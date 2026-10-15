@@ -355,7 +355,8 @@ export const readyCardOf = (work: BoardTask): Card => {
                 </Fact>
               ),
             }
-          : change === null
+          : // One merged or closed has nothing in its way, and nothing to do to it.
+            change === null || change.state !== 'open'
             ? {}
             : { foot: readyFoot(change) }),
       }
