@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   keyringIsSafe,
@@ -7,10 +7,23 @@ import {
   portalKeyUnavailable,
   portalSealUnavailable,
   PORTAL_FEATURE,
-  sealedByPortal,
+  sealWithPortal,
   sealsWithPortal,
   withPortalFeature,
+  type SafeStorageLike,
 } from '../src/main/keyring'
+
+const storage = (overrides: Partial<SafeStorageLike> = {}): SafeStorageLike => ({
+  getSelectedStorageBackend: vi.fn(() => 'gnome_libsecret'),
+  isEncryptionAvailable: vi.fn(() => true),
+  encryptString: vi.fn((value) => Buffer.from(`v10${value}`)),
+  decryptString: vi.fn((sealed) => sealed.toString().slice(3)),
+  encryptStringAsync: vi.fn(async (value) => Buffer.from(`v12${value}`)),
+  decryptStringAsync: vi.fn(async (sealed) => ({ result: sealed.toString().slice(3), shouldReEncrypt: false })),
+  ...overrides,
+})
+
+const encoded = (tag: string, value = 'ciphertext') => Buffer.from(`${tag}${value}`).toString('base64')
 
 describe('sealing secrets by keyring', () => {
   it('takes a real keyring on Linux, and nothing else', () => {
@@ -19,7 +32,6 @@ describe('sealing secrets by keyring', () => {
     expect(keyringIsSafe('linux', 'kwallet5')).toBe(true)
     expect(keyringIsSafe('linux', 'kwallet6')).toBe(true)
     expect(keyringIsSafe('linux', 'basic_text')).toBe(false)
-    // An allow-list, so anything it doesn't know — Electron's own `unknown` before it is ready, or a backend a later Electron adds — fails closed.
     expect(keyringIsSafe('linux', 'unknown')).toBe(false)
     expect(keyringIsSafe('linux', 'a_backend_from_the_future')).toBe(false)
   })
@@ -33,9 +45,6 @@ describe('sealing secrets by keyring', () => {
     expect(keyringUnavailable('linux')).toContain('gnome-keyring')
     expect(keyringUnavailable('linux')).toContain('KWallet')
     expect(keyringUnavailable('darwin')).toBe('The keychain Althar seals sign-ins with isn’t available.')
-  })
-
-  it('gives a specific failure when the app-specific Secret portal key is missing', () => {
     expect(portalKeyUnavailable).toContain('desktop Secret portal')
     expect(portalSealUnavailable).toContain('Sign in again')
   })
@@ -50,43 +59,90 @@ describe('the password store Electron is asked for', () => {
     expect(passwordStore([], 'KDE', false, 'linux')).toBe('gnome-libsecret')
     expect(passwordStore(['--password-store=basic'], undefined, false, 'linux')).toBeNull()
     expect(passwordStore(['--password-store', 'basic'], undefined, false, 'linux')).toBeNull()
-    // In a Flatpak the host's secret service is what is reachable; KWallet's own socket is not, so KDE needs it there too.
+    // Every Flatpak desktop, including KDE, uses the same portal-first path.
     expect(passwordStore([], 'KDE', true, 'linux')).toBe('gnome-libsecret')
-    // A Linux switch: macOS and Windows keep their own keychain.
+    expect(passwordStore([], 'GNOME', true, 'linux')).toBe('gnome-libsecret')
+    expect(passwordStore([], 'Hyprland', true, 'linux')).toBe('gnome-libsecret')
     expect(passwordStore([], undefined, false, 'darwin')).toBeNull()
     expect(passwordStore([], 'Hyprland', false, 'win32')).toBeNull()
   })
 })
 
-describe('sealing with the Secret portal’s key', () => {
-  it('is for a Flatpak off KDE, where libsecret’s key would be new at every start', () => {
-    expect(sealsWithPortal('GNOME', true, 'linux')).toBe(true)
-    expect(sealsWithPortal('ubuntu:GNOME', true, 'linux')).toBe(true)
-    expect(sealsWithPortal('Hyprland', true, 'linux')).toBe(true)
-    expect(sealsWithPortal(undefined, true, 'linux')).toBe(true)
-    // KDE keeps KWallet itself, as it was.
-    expect(sealsWithPortal('KDE', true, 'linux')).toBe(false)
-    expect(sealsWithPortal('X-Generic:KDE', true, 'linux')).toBe(false)
-    // Outside a Flatpak libsecret looks up where it stores; macOS and Windows keep their keychain.
-    expect(sealsWithPortal('GNOME', false, 'linux')).toBe(false)
-    expect(sealsWithPortal(undefined, true, 'darwin')).toBe(false)
+describe('the Secret portal and session fallback', () => {
+  it('prefers the app-specific portal on every Linux Flatpak desktop', () => {
+    expect(sealsWithPortal(true, 'linux')).toBe(true)
+    expect(sealsWithPortal(false, 'linux')).toBe(false)
+    expect(sealsWithPortal(true, 'darwin')).toBe(false)
   })
 
-  it('turns the portal’s key on for sealing, keeping the features the person passed', () => {
+  it('turns the portal key on for sealing while preserving features the person passed', () => {
     expect(withPortalFeature('')).toBe(PORTAL_FEATURE)
     expect(withPortalFeature('WaylandWindowDecorations')).toBe(`WaylandWindowDecorations,${PORTAL_FEATURE}`)
     expect(withPortalFeature(`${PORTAL_FEATURE},Other`)).toBe(`${PORTAL_FEATURE},Other`)
   })
 
-  it('keeps and opens only seals from the app-specific Secret portal key', () => {
-    const sealed = (tag: string) => new TextEncoder().encode(`${tag}\u0001\u0002ciphertext`)
-    expect(sealedByPortal(sealed('v12'))).toBe(true)
-    // v11 is the shared Secret Service key; v10 is Chromium's fixed key.
-    expect(sealedByPortal(sealed('v11'))).toBe(false)
-    expect(sealedByPortal(sealed('v10'))).toBe(false)
-    // An allow-list: nothing, plain text, or a tag a later Chromium adds fails closed.
-    expect(sealedByPortal(new Uint8Array())).toBe(false)
-    expect(sealedByPortal(new TextEncoder().encode('ghp_plain'))).toBe(false)
-    expect(sealedByPortal(sealed('v13'))).toBe(false)
+  it('seals with and opens the app-specific portal format', async () => {
+    const sealStore = storage()
+    const sealed = await sealWithPortal(true, 'credential', sealStore, 'linux')
+    expect('value' in sealed && Buffer.from(sealed.value, 'base64').subarray(0, 3).toString()).toBe('v12')
+    expect(vi.mocked(sealStore.encryptStringAsync)).toHaveBeenCalledWith('credential')
+    expect(vi.mocked(sealStore.encryptString)).not.toHaveBeenCalled()
+
+    const openStore = storage()
+    const opened = await sealWithPortal(false, encoded('v12', 'credential'), openStore, 'linux')
+    expect(opened).toEqual({ value: 'credential' })
+    expect(vi.mocked(openStore.decryptStringAsync)).toHaveBeenCalledWith(Buffer.from('v12credential'))
+    expect(vi.mocked(openStore.decryptString)).not.toHaveBeenCalled()
+  })
+
+  it('retries async decryption when Electron reports that its key was rotated', async () => {
+    const decryptStringAsync = vi
+      .fn()
+      .mockResolvedValueOnce({ result: 'old-key-read', shouldReEncrypt: true })
+      .mockResolvedValueOnce({ result: 'credential', shouldReEncrypt: false })
+    const store = storage({ decryptStringAsync })
+    expect(await sealWithPortal(false, encoded('v12'), store, 'linux')).toEqual({ value: 'credential' })
+    expect(decryptStringAsync).toHaveBeenCalledTimes(2)
+  })
+
+  it('falls back to safe sync safeStorage for the current session when the portal is absent or returns a shared format', async () => {
+    const absent = storage({ encryptStringAsync: vi.fn(async () => Buffer.from('v10fixed-fallback')) })
+    const sealed = await sealWithPortal(true, 'credential', absent, 'linux')
+    expect(sealed).toEqual({ value: encoded('v10', 'credential') })
+    expect(vi.mocked(absent.encryptString)).toHaveBeenCalledWith('credential')
+
+    const openStore = storage()
+    const opened = await sealWithPortal(false, encoded('v10', 'credential'), openStore, 'linux')
+    expect(opened).toEqual({ value: 'credential' })
+    expect(vi.mocked(openStore.decryptString)).toHaveBeenCalled()
+  })
+
+  it('falls back to a safe sync keyring when the portal errors, but never uses basic_text', async () => {
+    const erroring = storage({ encryptStringAsync: vi.fn(async () => Promise.reject(new Error('portal unavailable'))) })
+    expect(await sealWithPortal(true, 'credential', erroring, 'linux')).toEqual({ value: encoded('v10', 'credential') })
+
+    const noKeyring = storage({
+      getSelectedStorageBackend: vi.fn(() => 'basic_text'),
+      encryptStringAsync: vi.fn(async () => Buffer.from('v10fixed-fallback')),
+    })
+    expect(await sealWithPortal(true, 'credential', noKeyring, 'linux')).toEqual({ error: portalKeyUnavailable, keyring: true })
+    expect(vi.mocked(noKeyring.encryptString)).not.toHaveBeenCalled()
+
+    const sharedKeyring = storage({
+      getSelectedStorageBackend: vi.fn(() => 'kwallet6'),
+      encryptStringAsync: vi.fn(async () => Buffer.from('v11shared-service')),
+    })
+    expect(await sealWithPortal(true, 'credential', sharedKeyring, 'linux')).toEqual({ error: portalKeyUnavailable, keyring: true })
+    expect(vi.mocked(sharedKeyring.encryptString)).not.toHaveBeenCalled()
+  })
+
+  it('does not open shared-service or fixed-key async seals, or fall back from a failed portal seal', async () => {
+    const shared = storage()
+    expect(await sealWithPortal(false, encoded('v11'), shared, 'linux')).toEqual({ error: portalSealUnavailable, keyring: true })
+    expect(vi.mocked(shared.decryptString)).not.toHaveBeenCalled()
+
+    const failedPortal = storage({ decryptStringAsync: vi.fn(async () => Promise.reject(new Error('portal unavailable'))) })
+    expect(await sealWithPortal(false, encoded('v12'), failedPortal, 'linux')).toEqual({ error: portalSealUnavailable, keyring: true })
+    expect(vi.mocked(failedPortal.decryptString)).not.toHaveBeenCalled()
   })
 })

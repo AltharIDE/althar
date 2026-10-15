@@ -47,16 +47,7 @@ import {
 } from 'electron'
 
 import { appMenu, windowOptions } from './windowOptions'
-import {
-  keyringIsSafe,
-  keyringUnavailable,
-  passwordStore,
-  portalKeyUnavailable,
-  portalSealUnavailable,
-  sealedByPortal,
-  sealsWithPortal,
-  withPortalFeature,
-} from './keyring'
+import { keyringIsSafe, keyringUnavailable, passwordStore, sealWithPortal, sealsWithPortal, withPortalFeature } from './keyring'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -68,8 +59,8 @@ import {
  * person picked or dropped, or one of the repositories it found where people
  * keep code (repositories.ts), for the first screen and a new project to
  * offer. It seals and opens the runtime's secrets, such as a code host's
- * token, with Electron's safeStorage; off KDE in a Flatpak it requires the
- * app-specific Secret portal key. The runtime keeps secrets sealed and never
+ * token, with Electron's safeStorage; in a Flatpak it prefers the app-specific
+ * Secret portal key and falls back only to a safe session keyring. The runtime keeps secrets sealed and never
  * holds the key. It gives the Dock the icon the
  * person chose, and puts Althar at the edge of the screen (edgeWindows.ts):
  * round the notch, or in the menu bar. It keeps the app's own preferences
@@ -138,8 +129,8 @@ if (process.platform !== 'darwin') app.on('browser-window-created', (_event, win
 // Off a Mac, ask for a secret service where Electron would fall back to plain text (keyring.ts).
 const store = passwordStore(process.argv, process.env.XDG_CURRENT_DESKTOP, process.env.FLATPAK_ID !== undefined, process.platform)
 if (store !== null) app.commandLine.appendSwitch('password-store', store)
-// In a Flatpak off KDE, sign-ins are sealed with the Secret portal's key, the same at every start (keyring.ts).
-const portal = sealsWithPortal(process.env.XDG_CURRENT_DESKTOP, process.env.FLATPAK_ID !== undefined, process.platform)
+// In any Linux Flatpak, sign-ins prefer the app-specific Secret portal key (keyring.ts).
+const portal = sealsWithPortal(process.env.FLATPAK_ID !== undefined, process.platform)
 if (portal) app.commandLine.appendSwitch('enable-features', withPortalFeature(app.commandLine.getSwitchValue('enable-features')))
 
 /*
@@ -306,7 +297,10 @@ const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
 const seal = (child: UtilityProcess, message: RuntimeMessage) => {
   if (message.requestId === undefined || typeof message.value !== 'string') return
   const { requestId, value } = message
-  if (portal) return void sealWithPortal(child, message.type === 'seal', requestId, value)
+  if (portal)
+    return void sealWithPortal(message.type === 'seal', value, safeStorage, process.platform).then((reply) =>
+      child.postMessage({ type: 'sealed', requestId, ...reply }),
+    )
   // On Linux a keyring may be missing: Electron would fall back to plain text (basic_text), which is no seal at all, so it fails like a missing keychain would.
   const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'keychain'
   if (!safeStorage.isEncryptionAvailable() || !keyringIsSafe(process.platform, backend)) {
@@ -322,26 +316,6 @@ const seal = (child: UtilityProcess, message: RuntimeMessage) => {
           ? safeStorage.encryptString(value).toString('base64')
           : safeStorage.decryptString(Buffer.from(value, 'base64')),
     })
-  } catch (error) {
-    child.postMessage({ type: 'sealed', requestId, error: error instanceof Error ? error.message : String(error) })
-  }
-}
-
-/**
- * The same with the async encryptor, requiring the Secret portal's app-specific key. It says it is available even without a
- * keyring, sealing under Chromium's fixed key; that and the shared Secret Service key are refused.
- */
-const sealWithPortal = async (child: UtilityProcess, sealing: boolean, requestId: string, value: string) => {
-  try {
-    if (!sealing) {
-      const sealed = Buffer.from(value, 'base64')
-      if (!sealedByPortal(sealed)) return child.postMessage({ type: 'sealed', requestId, error: portalSealUnavailable, keyring: true })
-      const { result } = await safeStorage.decryptStringAsync(sealed)
-      return child.postMessage({ type: 'sealed', requestId, value: result })
-    }
-    const sealed = await safeStorage.encryptStringAsync(value)
-    if (!sealedByPortal(sealed)) return child.postMessage({ type: 'sealed', requestId, error: portalKeyUnavailable, keyring: true })
-    child.postMessage({ type: 'sealed', requestId, value: sealed.toString('base64') })
   } catch (error) {
     child.postMessage({ type: 'sealed', requestId, error: error instanceof Error ? error.message : String(error) })
   }
