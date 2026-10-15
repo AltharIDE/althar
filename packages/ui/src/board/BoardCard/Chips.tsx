@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import type { CodeHost } from '../../foundations/codeHost'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
+import { commandGlance } from '../../lib/commandGlance'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Code } from '../../primitives/Code/Code'
@@ -168,9 +169,25 @@ export function Thumbs({ pictures, making = 0, text, className, ...rest }: Thumb
 
 export type CommandChipProps = RootProps<'code', { children: string }>
 
-/** The command a permission asks to run, on one line, cut at its end where the card is narrow. */
-export function CommandChip({ className, ...rest }: CommandChipProps) {
-  return <Code className={cx(s.command, className)} {...rest} />
+/**
+ * The command a permission asks to run, once and short: its first command or
+ * two, each on a line cut at its end where the card is narrow, and a line
+ * for what is left out. The whole command is on hover and in the task.
+ */
+export function CommandChip({ className, children, title, ...rest }: CommandChipProps) {
+  const { lines, summary } = commandGlance(children)
+  return (
+    <>
+      <Code className={cx(s.command, className)} title={title ?? children} {...rest}>
+        {lines.map((line, i) => (
+          <span key={i} className={s.commandLine}>
+            {line}
+          </span>
+        ))}
+      </Code>
+      {summary !== null && <span className={s.commandMore}>{summary}</span>}
+    </>
+  )
 }
 
 export type FactProps = RootProps<

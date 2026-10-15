@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { ALLOWED, BY_RULE, MANY, PROJECT, REQUESTS, STAGING } from '../../fixtures/meridian'
+import { SCRIPT } from '../../fixtures/longCommand'
 import { OPUS } from '../../fixtures/models'
 import { AllowedBy, Decision, PermissionScope } from '../../foundations/vocabulary'
 import { threadDecorator } from '../../storybook/ThreadFrame'
@@ -18,6 +19,11 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Asks: Story = {}
+
+/** A long script: the card shows it whole in a block of its own that scrolls, with Copy; it never lengthens the card. */
+export const LongScript: Story = {
+  args: { what: 'Prototype: tasks waiting for a free agent', cmd: SCRIPT },
+}
 
 /** Keys pick an option; Enter answers. A yes beats once in violet and folds to a line with Undo. */
 export const AllowOnce: Story = {
