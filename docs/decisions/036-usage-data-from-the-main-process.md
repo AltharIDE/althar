@@ -38,7 +38,7 @@
     event to the main process, as it does nudges.
   - **On by default, turned off in Settings.** "Usage data" is an app
     preference (`usageData`), on by default, in Settings' foot, opening to
-    the whole list of what it sends and never sends. The first screen
+    its switch and one line on what it sends and never sends. The first screen
     doesn't ask: setting up stays about agents and repositories. The main
     process waits for the preferences to be read before the first event, and
     asks the switch as each event comes and again before each request goes,

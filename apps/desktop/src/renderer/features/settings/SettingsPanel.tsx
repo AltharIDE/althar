@@ -160,8 +160,6 @@ export const text = {
   notifyNote: 'Only while Althar isn’t in front. Never for progress.',
   preferenceFailed: 'That couldn’t be kept. Try again.',
   usage: 'Usage data',
-  usageWhat:
-    'What goes: Althar opening, an agent signed in, a project made, a task started and settled, an ask answered, a usage limit reached and an update installed. Each carries a random id for this install, Althar’s version and the system. Never your code, prompts, messages, names, paths or accounts.',
 }
 
 /** The notification switches as the kit shows them, from the preferences as kept. */
@@ -686,7 +684,6 @@ export function SettingsView({
             <SettingList>
               <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={doNotTrack} />
             </SettingList>
-            <p className={s.quiet}>{text.usageWhat}</p>
             {failed}
           </ControlSheet>
         </ControlDetail>
