@@ -41,7 +41,7 @@ The full suites are heavy: the desktop app's end-to-end run takes much of a
 Mac for its length. While you work, run what your change touches (the checks
 and tests of the packages you changed and of those that build on them, and
 the end-to-end specs for what you changed), and leave the rest to CI, which
-runs the checks and unit tests on the pull request and every suite after
+runs the checks and unit tests on the pull request and the heavy suites after
 merge.
 
 ## The repository
@@ -167,4 +167,4 @@ Work on a branch and open a pull request to `main`. On a pull request:
 
 Merge only when every check is green, the Cloudflare one included.
 
-After merge, `post-merge` runs every suite on `main`: the checks again, the coverage gates, the desktop app's end-to-end tests (with the fake agent, under a virtual display) and its Linux packages. Merges in quick succession share a run. When it fails, an issue titled "Main is red" says which run and which commits; fix or revert, and it closes itself when `main` is green again. `main` may be red for a while; a release may not: `release` cuts only a commit `post-merge` passed on. To run the heavy suites on a branch before merging, `gh workflow run post-merge.yml --ref <branch>`.
+After merge, `post-merge` runs the heavy part of `ui`, `harness` and `desktop` on `main`: their checks again, the coverage gates, the Storybook build, the desktop app's end-to-end tests (with the fake agent, under a virtual display) and its Linux packages. `pitch`, `site` and `brand` still run in full on their own. Merges in quick succession share a run. When it fails, an issue titled "Main is red" links the run and the merges since the last green one; fix or revert, and it closes itself when `main` is green again. `main` may be red for a while; a release may not: `release` cuts only a commit `post-merge` passed on. To run the heavy suites on a branch before merging, `gh workflow run post-merge.yml --ref <branch>`.

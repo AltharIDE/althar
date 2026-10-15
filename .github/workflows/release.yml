@@ -82,9 +82,9 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-      # Main may be red between releases, a release may not: post-merge.yml, every suite, has to have passed on this
+      # Main may be red between releases, a release may not: post-merge.yml, the heavy suites, has to have passed on this
       # very commit. Merges in quick succession share a post-merge run, so a commit can have none of its own.
-      - name: Every suite passed on this commit
+      - name: The heavy suites passed on this commit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

@@ -1,12 +1,14 @@
 name: post-merge
 
-# Every suite, after merge: checks again (two pull requests can each pass and still clash), the coverage gates, the desktop app's end-to-end run and its packages. A pull request
-# runs only the fast part (checks and unit tests, in desktop.yml, harness.yml and ui.yml), so a change to main doesn't
-# hold every open pull request up for the long runs. Main may go red for a while; a release can't: release.yml cuts
-# only a commit this workflow passed on.
+# The heavy part of desktop, harness and ui, after merge: their checks again (two pull requests can each pass and still
+# clash), the coverage gates, the Storybook build, the desktop app's end-to-end run and its packages. On a pull request
+# those workflows run only checks and unit tests, so a change to main doesn't hold every open pull request up for the
+# long runs. pitch, site and brand are quick, and still run in full on their own. Main may go red for a while; a
+# release can't: release.yml cuts only a commit this workflow passed on.
 #
 # Merges in quick succession share a run: one runs, the newest waits, and those between are skipped. When main goes
-# red, an issue titled "Main is red" says which run failed and on which commits; it is closed when main is green again.
+# red, an issue titled "Main is red" says which run failed and which merges since the last green run could have broken
+# it; it is closed when main is green again.
 #
 # Run by hand on any branch or tag (`gh workflow run post-merge.yml --ref <branch>`) to try the heavy suites before
 # merging, or on a release tag whose commit was skipped.
@@ -74,6 +76,7 @@ jobs:
         working-directory: .
       - run: bun run check
       - run: bun run test:coverage
+      - run: bun run build
 
   desktop:
     runs-on: ubuntu-24.04
@@ -134,31 +137,41 @@ jobs:
             apps/desktop/out/dist/althar-*.rpm
           if-no-files-found: error
 
-  # Main's state, as one open issue: opened (or added to) when a run on main fails, closed when one passes.
+  # Main's state, as one open issue: opened (or added to) when a run on main fails, closed when one passes. Only a run
+  # on main's newest commit speaks for main: a re-run of an older commit, or one a newer push is already waiting
+  # behind, leaves the issue to that newer run.
   report:
     needs: [harness, ui, desktop, package]
     if: ${{ always() && github.ref == 'refs/heads/main' && !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
+      actions: read
       issues: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       FAILED: ${{ contains(needs.*.result, 'failure') }}
       RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      BEFORE: ${{ github.event.before }}
     steps:
       - name: Open, add to or close "Main is red"
         run: |
+          head="$(gh api "repos/$GH_REPO/commits/main" --jq .sha)"
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "main is at ${head::8} now, past ${GITHUB_SHA::8}: its own run reports."
+            exit 0
+          fi
           title="Main is red"
           open="$(gh issue list --state open --search "in:title \"$title\"" --json number,title \
             --jq "map(select(.title == \"$title\"))[0].number // empty")"
           short="${GITHUB_SHA::8}"
           if [ "$FAILED" = true ]; then
             body="post-merge failed on $short: $RUN"
-            if [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
-              body="$body"$'\n\n'"Merged since the push before: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/${BEFORE::8}...$short"
+            # Merges in quick succession share a run, so the merge that broke main can be any since the last green one.
+            green="$(gh run list --workflow post-merge.yml --branch main --status success --limit 1 \
+              --json headSha --jq '.[0].headSha // empty')"
+            if [ -n "$green" ]; then
+              body="$body"$'\n\n'"Merged since post-merge last passed: $GITHUB_SERVER_URL/$GH_REPO/compare/${green::8}...$short"
             fi
             if [ -n "$open" ]; then
               gh issue comment "$open" --body "$body"
