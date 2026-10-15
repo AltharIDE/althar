@@ -1,5 +1,5 @@
 import { chmod, mkdir, readdir, realpath, rm, writeFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { isTreeHash, readObject } from './store'
 
 /** A skill chosen for a run: its id and the stored version to use. */
@@ -36,7 +36,7 @@ const canonical = async (path: string): Promise<string> => {
 
 const inside = (child: string, parent: string): boolean => {
   const path = relative(parent, child)
-  return path === '' || (!path.startsWith('..') && !isAbsolute(path))
+  return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path))
 }
 
 /**
