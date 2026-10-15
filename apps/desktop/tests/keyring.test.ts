@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { keyringIsSafe, keyringUnavailable, passwordStore } from '../src/main/keyring'
+import {
+  keyringIsSafe,
+  keyringUnavailable,
+  passwordStore,
+  PORTAL_FEATURE,
+  sealedByKeyring,
+  sealsWithPortal,
+  withPortalFeature,
+} from '../src/main/keyring'
 
 describe('sealing secrets by keyring', () => {
   it('takes a real keyring on Linux, and nothing else', () => {
@@ -62,5 +70,38 @@ describe('the password store Electron is asked for', () => {
     // The backend Electron reports for each switch: gnome-libsecret is gnome_libsecret, KWallet's keep their names.
     for (const store of asked) if (store !== null) expect(keyringIsSafe('linux', store.replace('-', '_'))).toBe(true)
     expect(new Set(asked)).toEqual(new Set([null, 'gnome-libsecret', 'kwallet5', 'kwallet6']))
+  })
+})
+
+describe('sealing with the Secret portal’s key', () => {
+  it('is for a Flatpak off KDE, where libsecret’s key would be new at every start', () => {
+    expect(sealsWithPortal('GNOME', true, 'linux')).toBe(true)
+    expect(sealsWithPortal('ubuntu:GNOME', true, 'linux')).toBe(true)
+    expect(sealsWithPortal('Hyprland', true, 'linux')).toBe(true)
+    expect(sealsWithPortal(undefined, true, 'linux')).toBe(true)
+    // KDE keeps KWallet itself, as it was.
+    expect(sealsWithPortal('KDE', true, 'linux')).toBe(false)
+    expect(sealsWithPortal('X-Generic:KDE', true, 'linux')).toBe(false)
+    // Outside a Flatpak libsecret looks up where it stores; macOS and Windows keep their keychain.
+    expect(sealsWithPortal('GNOME', false, 'linux')).toBe(false)
+    expect(sealsWithPortal(undefined, true, 'darwin')).toBe(false)
+  })
+
+  it('turns the portal’s key on for sealing, keeping the features the person passed', () => {
+    expect(withPortalFeature('')).toBe(PORTAL_FEATURE)
+    expect(withPortalFeature('WaylandWindowDecorations')).toBe(`WaylandWindowDecorations,${PORTAL_FEATURE}`)
+    expect(withPortalFeature(`${PORTAL_FEATURE},Other`)).toBe(`${PORTAL_FEATURE},Other`)
+  })
+
+  it('keeps only what a keyring’s key sealed, refusing Chromium’s fixed one', () => {
+    const sealed = (tag: string) => new TextEncoder().encode(`${tag}\u0001\u0002ciphertext`)
+    expect(sealedByKeyring(sealed('v11'))).toBe(true)
+    expect(sealedByKeyring(sealed('v12'))).toBe(true)
+    // v10: Chromium's key, the same in every copy of it, which the encryptor falls back to without saying so.
+    expect(sealedByKeyring(sealed('v10'))).toBe(false)
+    // An allow-list: nothing, plain text, or a tag a later Chromium adds fails closed.
+    expect(sealedByKeyring(new Uint8Array())).toBe(false)
+    expect(sealedByKeyring(new TextEncoder().encode('ghp_plain'))).toBe(false)
+    expect(sealedByKeyring(sealed('v13'))).toBe(false)
   })
 })

@@ -29,9 +29,9 @@ export const keyringIsSafe = (platform: NodeJS.Platform, backend: string): boole
  * would not survive a restart: inside a sandbox libsecret stores in a keyring
  * file of the app's own (`$XDG_DATA_HOME/keyrings/default.keyring`), while
  * Chromium looks the key up on the host's secret service, finds none, and
- * makes a new one at every start. Other desktops in a Flatpak still get
- * libsecret, and the same new key at each start (open questions, "The
- * Flatpak's keyring").
+ * makes a new one at every start. Other desktops in a Flatpak keep libsecret
+ * for Chromium's own use, and seal sign-ins with the Secret portal's key
+ * instead (sealsWithPortal).
  */
 export const passwordStore = (
   args: ReadonlyArray<string>,
@@ -48,6 +48,39 @@ export const passwordStore = (
   if (flatpak && kde) return kdeVersion === '5' ? 'kwallet5' : 'kwallet6'
   const recognised = ['x-cinnamon', 'deepin', 'gnome', 'pantheon', 'xfce', 'ukui', 'unity']
   return flatpak || kde || !names.some((name) => recognised.includes(name)) ? 'gnome-libsecret' : null
+}
+
+/**
+ * Whether sign-ins are sealed with safeStorage's async encryptor, whose key
+ * the Secret portal gives: in a Flatpak on any desktop but KDE, where
+ * safeStorage's own libsecret key would be made anew at every start. The
+ * portal (`org.freedesktop.portal.Secret`, which gnome-keyring and KWallet
+ * serve) hands each Flatpak a secret of its own, kept in the host's keyring,
+ * the same at every start; Chromium derives the key from it (HKDF-SHA-256,
+ * AES-256-GCM). Another Flatpak asking gets its own, not Althar's.
+ */
+export const sealsWithPortal = (desktop: string | undefined, flatpak: boolean, platform: NodeJS.Platform = process.platform): boolean =>
+  platform === 'linux' && flatpak && !(desktop ?? '').toLowerCase().split(':').includes('kde')
+
+/** Chromium's switch that has its Secret portal key seal, not only open (it opens by default). */
+export const PORTAL_FEATURE = 'SecretPortalKeyProviderUseForEncryption'
+
+/** `--enable-features` with the portal's key among them, keeping any the person passed. */
+export const withPortalFeature = (enabled: string): string => {
+  const features = enabled.split(',').filter((feature) => feature !== '')
+  return (features.includes(PORTAL_FEATURE) ? features : [...features, PORTAL_FEATURE]).join(',')
+}
+
+/**
+ * Whether what the async encryptor sealed is sealed with a keyring's key: a
+ * secret service's (`v11`) or the Secret portal's (`v12`). With neither it
+ * still seals, under Chromium's `v10` key, which is the same in every copy of
+ * Chromium and so no seal at all; and it says it is available either way. An
+ * allow-list, like keyringIsSafe: a tag a later Chromium adds fails closed.
+ */
+export const sealedByKeyring = (sealed: Uint8Array): boolean => {
+  const tag = new TextDecoder().decode(sealed.subarray(0, 3))
+  return tag === 'v11' || tag === 'v12'
 }
 
 /** What the window says when secrets can't be sealed here: on Linux, what to install; elsewhere, that the keychain is missing. */

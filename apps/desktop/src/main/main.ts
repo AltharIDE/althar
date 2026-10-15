@@ -47,7 +47,7 @@ import {
 } from 'electron'
 
 import { appMenu, windowOptions } from './windowOptions'
-import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
+import { keyringIsSafe, keyringUnavailable, passwordStore, sealedByKeyring, sealsWithPortal, withPortalFeature } from './keyring'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -134,6 +134,9 @@ const store = passwordStore(
   process.env.KDE_SESSION_VERSION,
 )
 if (store !== null) app.commandLine.appendSwitch('password-store', store)
+// In a Flatpak off KDE, sign-ins are sealed with the Secret portal's key, the same at every start (keyring.ts).
+const portal = sealsWithPortal(process.env.XDG_CURRENT_DESKTOP, process.env.FLATPAK_ID !== undefined, process.platform)
+if (portal) app.commandLine.appendSwitch('enable-features', withPortalFeature(app.commandLine.getSwitchValue('enable-features')))
 
 /*
  * Where the window keeps what it remembers, its tabs and pinned models. A
@@ -299,6 +302,7 @@ const nudged = (event: NonNullable<RuntimeMessage['event']>) => {
 const seal = (child: UtilityProcess, message: RuntimeMessage) => {
   if (message.requestId === undefined || typeof message.value !== 'string') return
   const { requestId, value } = message
+  if (portal) return void sealWithPortal(child, message.type === 'seal', requestId, value)
   // On Linux a keyring may be missing: Electron would fall back to plain text (basic_text), which is no seal at all, so it fails like a missing keychain would.
   const backend = process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'keychain'
   if (!safeStorage.isEncryptionAvailable() || !keyringIsSafe(process.platform, backend)) {
@@ -314,6 +318,25 @@ const seal = (child: UtilityProcess, message: RuntimeMessage) => {
           ? safeStorage.encryptString(value).toString('base64')
           : safeStorage.decryptString(Buffer.from(value, 'base64')),
     })
+  } catch (error) {
+    child.postMessage({ type: 'sealed', requestId, error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
+/**
+ * The same with the async encryptor, keyed by the Secret portal (or the host's secret service, where there is no portal). It
+ * says it is available even with neither, sealing under Chromium's fixed key: what that seals is refused like a missing keyring.
+ */
+const sealWithPortal = async (child: UtilityProcess, sealing: boolean, requestId: string, value: string) => {
+  try {
+    if (!sealing) {
+      const { result } = await safeStorage.decryptStringAsync(Buffer.from(value, 'base64'))
+      return child.postMessage({ type: 'sealed', requestId, value: result })
+    }
+    const sealed = await safeStorage.encryptStringAsync(value)
+    if (!sealedByKeyring(sealed))
+      return child.postMessage({ type: 'sealed', requestId, error: keyringUnavailable(process.platform), keyring: true })
+    child.postMessage({ type: 'sealed', requestId, value: sealed.toString('base64') })
   } catch (error) {
     child.postMessage({ type: 'sealed', requestId, error: error instanceof Error ? error.message : String(error) })
   }
