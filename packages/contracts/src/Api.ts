@@ -351,10 +351,12 @@ export const ProjectRulesView = Schema.Struct({
   /** Which revision of the rules these are: a change that replaces a list names it, so one made meanwhile isn't lost. */
   revision: Schema.Number,
   /**
-   * What no rule keeps: allowed (`rules`), judged by the coordinator (`coordinator`), or asked about (`ask`);
-   * or everything allowed (`allow`), what always asks with it, short of `never`.
+   * What no rule keeps: allowed (`rules`), judged by the coordinator (`coordinator`), or asked about (`ask`).
+   * While everything is allowed, what comes back once it isn't.
    */
-  permissions: Schema.Literals(['rules', 'coordinator', 'ask', 'allow']),
+  permissions: Schema.Literals(['rules', 'coordinator', 'ask']),
+  /** Everything is allowed: nothing waits for the person, what always asks included; only `never` still holds. */
+  allowEverything: Schema.Boolean,
   alwaysAsk: Schema.Array(RuleKind),
   never: Schema.Array(RuleKind),
   /** The kinds let through without asking, short of what always asks or is never allowed (ADR-018). */
@@ -655,6 +657,14 @@ export const ChangeSummary = Schema.Struct({
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),
   checks: Schema.NullOr(ChecksSummary),
+  /** The branch it merges into, as last seen: main. Absent where Althar saw it before it kept this. */
+  target: Schema.optional(Schema.String),
+  /**
+   * Whether its host says it conflicts with that branch, as last seen, so it
+   * can't merge until its branch is brought up to date. Null or absent where
+   * the host hasn't worked it out, or doesn't say.
+   */
+  conflicts: Schema.optional(Schema.NullOr(Schema.Boolean)),
   /** The commit at its head, as last seen: what accepting it merges, and nothing newer. */
   head: Schema.NullOr(Schema.String),
   /** Althar asks its host for news while the task is open. */
@@ -684,6 +694,9 @@ export type ChangeSummary = typeof ChangeSummary.Type
 export const TaskEnd = Schema.Literals(['draft', 'ready', 'none'])
 export type TaskEnd = typeof TaskEnd.Type
 
+/** The address as the message has it, which can differ from the one the tracker or host gives (`url`); none on a link unfurled before it was kept. */
+const Pasted = Schema.optional(Schema.String)
+
 /** A link the person pasted, unfurled: an issue, or a pull request. */
 export const Unfurl = Schema.Union([
   Schema.Struct({
@@ -692,6 +705,7 @@ export const Unfurl = Schema.Union([
     key: Schema.String,
     title: Schema.String,
     url: Schema.String,
+    pasted: Pasted,
     status: IssueStatus,
     priority: Schema.NullOr(Schema.Struct({ level: Schema.String, name: Schema.String })),
     container: Schema.NullOr(Schema.String),
@@ -702,6 +716,7 @@ export const Unfurl = Schema.Union([
     key: Schema.String,
     title: Schema.String,
     url: Schema.String,
+    pasted: Pasted,
     state: Schema.Literals(['draft', 'open', 'merged', 'closed']),
     repository: Schema.String,
   }),
@@ -895,7 +910,12 @@ export const QuestionItem = Schema.Struct({
   }),
 })
 
-/** Something the agent or Althar notes: a warning from the agent, or a change of scene, such as another agent taking over. */
+/**
+ * Something the agent or Althar notes: a warning from the agent, or a change of scene, such as another agent taking over.
+ * What Althar notes has a role, where it isn't news: `aside` for its own housekeeping along the way (a branch made, a
+ * loop stopped), which a task's thread keeps with its lead's work; `relayed` for what the coordinator passed on to a
+ * task's lead, written when the lead received it, which starts a round of the thread as what the person says does.
+ */
 export const NoticeItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('notice'),
@@ -904,6 +924,7 @@ export const NoticeItem = Schema.Struct({
     severity: Schema.Literals(['info', 'warning', 'error']),
     title: Schema.String,
     description: Schema.NullOr(Schema.String),
+    role: Schema.optional(Schema.Literals(['aside', 'relayed'])),
   }),
 })
 
@@ -1524,6 +1545,10 @@ export const AttentionRequest = Schema.Struct({
   /** Why it waits for the person: the rule that keeps it for them. */
   reason: Schema.String,
   command: Schema.NullOr(Schema.String),
+  /** The command as it reads at a glance (see BackgroundCommand); absent where it is not shortened or there is no command. */
+  label: Schema.optional(Schema.String),
+  /** For a permission: a kind or a command the project always asks about keeps it, so no "always allow" can answer it. */
+  held: Schema.optional(Schema.Boolean),
   /** For a step that needs the person: which, and why. */
   stuck: Schema.NullOr(StuckStep),
   /** For an agent's question: what it asks, field by field; it is answered in the thread, where it was asked. */
@@ -1663,6 +1688,8 @@ export const ThreadSnapshot = Schema.Struct({
     baseRef: Schema.NullOr(Schema.String),
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
+    /** What it makes, read from what it has now, as its card says: where it opens, an outputs view for a change only. */
+    kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
@@ -1712,6 +1739,12 @@ export const ThreadSnapshot = Schema.Struct({
      * its project's rules do, which `project` is.
      */
     resolveConflicts: Schema.Struct({ task: Schema.NullOr(Schema.Boolean), project: Schema.Boolean }),
+    /**
+     * Whether everything its agents ask is allowed, short of what its project
+     * never allows: turned on for the task (`task`), or by its project's
+     * rules for every task (`project`).
+     */
+    allowEverything: Schema.Struct({ task: Schema.Boolean, project: Schema.Boolean }),
     /** Someone else's pull request it reviews, where it is a review: its thread opens with it, and its view says what the lead can reach. */
     review: Schema.optional(Schema.NullOr(ReviewBrief)),
   }),
@@ -1736,6 +1769,8 @@ export const BoardTask = Schema.Struct({
   changed: Schema.NullOr(Schema.Struct({ files: Schema.Number, add: Schema.Number, del: Schema.Number })),
   /** A ready task's repositories with no pull request, not merged yet, which merge here. */
   here: Schema.Array(TaskRepositoryHere),
+  /** Not settled, everything its agents ask is allowed, by the task's own switch or its project's (ADR-043). Not without it. */
+  allowEverything: Schema.optional(Schema.Boolean),
 })
 export type BoardTask = typeof BoardTask.Type
 
@@ -2242,6 +2277,11 @@ export const Api = RpcGroup.make(
    */
   command('SetAgentsAtOnce', { count: Schema.NullOr(AtOnceCount) }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
+  /**
+   * Asks the thread's agent to compact its context, as a turn of its own after
+   * what was said before; it never waits for a place among the agents at work.
+   */
+  command('CompactContext', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
   /** Stops a task: every agent on it stops, and the step it was on waits until the person resumes it. */
   command('StopTask', { taskId: Schema.String }, Schema.Void),
@@ -2252,6 +2292,8 @@ export const Api = RpcGroup.make(
    * conflict.
    */
   command('SetTaskResolveConflicts', { taskId: Schema.String, resolveConflicts: Schema.NullOr(Schema.Boolean) }, Schema.Void),
+  /** Allows everything its agents ask on one task, short of what its project never allows; turned on, what waits on the person is decided again. */
+  command('SetTaskAllowEverything', { taskId: Schema.String, allowEverything: Schema.Boolean }, Schema.Void),
   /**
    * Carries a stopped task on from the step it was on: with its last lead,
    * or the agent and model given. What the person said before it waits in
@@ -2406,7 +2448,9 @@ export const Api = RpcGroup.make(
     'SetProjectRules',
     {
       projectId: Schema.String,
-      permissions: Schema.optional(Schema.Literals(['rules', 'coordinator', 'ask', 'allow'])),
+      permissions: Schema.optional(Schema.Literals(['rules', 'coordinator', 'ask'])),
+      /** Turned on, what waits on the person in the project's tasks is decided again, and goes ahead, short of `never`. */
+      allowEverything: Schema.optional(Schema.Boolean),
       alwaysAsk: Schema.optional(Schema.Array(RuleKind)),
       never: Schema.optional(Schema.Array(RuleKind)),
       alwaysAllow: Schema.optional(Schema.Array(RuleKind)),

@@ -8,6 +8,7 @@ import { useDownload } from '../lib/download'
 import { useHere } from '../lib/pathname'
 import { glassDrop, type GlassDrop } from './glassDrop'
 import { useLightUnder } from './lightUnder'
+import { scrolledAway } from './menuScroll'
 import s from './Nav.module.css'
 
 /*
@@ -91,25 +92,33 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
     return () => phone.removeEventListener('change', on)
   }, [])
 
-  // Escape closes it, and leaves you on its button. While it is open the page stays put, so a drag doesn't scroll the hero under the card.
+  // Escape closes it, and leaves you on its button. The page keeps scrolling under the card: a short move stays, and past that the menu closes. A tap beside the card closes it without following what is underneath.
   useEffect(() => {
     if (!open) return
+    const openedAt = window.scrollY
     const key = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
       setOpen(false)
       button.current?.focus()
     }
-    const html = document.documentElement
-    const body = document.body
-    const htmlOverflow = html.style.overflow
-    const bodyOverflow = body.style.overflow
-    html.style.overflow = 'hidden'
-    body.style.overflow = 'hidden'
+    const scroll = () => {
+      if (scrolledAway(openedAt, window.scrollY)) setOpen(false)
+    }
+    const outside = (e: MouseEvent) => {
+      const target = e.target
+      if (!(target instanceof Node)) return
+      if (bar.current?.contains(target) || sheetEl.current?.contains(target)) return
+      e.preventDefault()
+      e.stopPropagation()
+      setOpen(false)
+    }
     window.addEventListener('keydown', key)
+    window.addEventListener('scroll', scroll, { passive: true })
+    document.addEventListener('click', outside, true)
     return () => {
-      html.style.overflow = htmlOverflow
-      body.style.overflow = bodyOverflow
       window.removeEventListener('keydown', key)
+      window.removeEventListener('scroll', scroll)
+      document.removeEventListener('click', outside, true)
     }
   }, [open])
 
@@ -131,7 +140,7 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
         if (open && e.relatedTarget && !e.currentTarget.contains(e.relatedTarget)) close()
       }}
     >
-      {open && <button type="button" className={s.scrim} aria-label="Close menu" tabIndex={-1} onClick={close} />}
+      <div className={s.scrim} aria-hidden="true" />
       <header ref={bar} className={s.bar} onPointerLeave={() => lens.current?.point(null)}>
         <span className={s.glass} aria-hidden="true" />
         <span className={s.tint} aria-hidden="true" />
@@ -183,17 +192,17 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
           </span>
         </div>
       </header>
-      <div id={sheet} ref={sheetEl} className={cx(s.sheet, sheetUnder && s.lit, sheetUnder === 'ink' && s.ink)}>
+      <div id={sheet} ref={sheetEl} inert={!open} className={cx(s.sheet, sheetUnder && s.lit, sheetUnder === 'ink' && s.ink)}>
         <span className={s.glass} aria-hidden="true" />
         <span className={s.tint} aria-hidden="true" />
         <span className={s.graphite} aria-hidden="true" />
         <nav aria-label="Site">
-          {PAGES.map((p) => (
-            <a key={p.href} href={p.href} onClick={close} aria-current={here(p.href) ? 'page' : undefined}>
+          {PAGES.map((p, i) => (
+            <a key={p.href} href={p.href} style={nth(i)} onClick={close} aria-current={here(p.href) ? 'page' : undefined}>
               {p.name}
             </a>
           ))}
-          <a href={LINKS.repo} onClick={close}>
+          <a href={LINKS.repo} style={nth(PAGES.length)} onClick={close}>
             <BrandMark brand={Brand.GitHub} size={16} />
             GitHub
           </a>

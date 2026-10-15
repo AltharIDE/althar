@@ -285,6 +285,7 @@ describe('a GraphQL call', () => {
     [{ message: 'Authentication required', extensions: { code: 'AUTHENTICATION_ERROR' } }, 'unauthorized'],
     [{ message: 'Slow down', extensions: { code: 'RATELIMITED' } }, 'rate_limited'],
     [{ message: 'No', type: 'FORBIDDEN' }, 'forbidden'],
+    [{ message: 'Your token has not been granted the required scopes to execute this query.', type: 'INSUFFICIENT_SCOPES' }, 'forbidden'],
     [{ message: 'Gone', type: 'NOT_FOUND' }, 'not_found'],
     [{ message: 'Entity not found', extensions: { type: 'entity not found' } }, 'rejected'],
     [{ message: 'Bad input' }, 'rejected'],

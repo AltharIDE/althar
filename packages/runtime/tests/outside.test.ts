@@ -128,6 +128,11 @@ describe('links', () => {
           ['change', 'PR #2', 'merged', 'meridian/api'],
         ],
       )
+      // Each keeps its address as the message has it, without the comma after it, for the card to stand for it there.
+      assert.deepStrictEqual(
+        links.map((link) => link.pasted),
+        [`${HOST}/meridian/api/pull/1`, `${HOST}/meridian/api/pull/2`],
+      )
       // A message with no links, links nothing reaches, or one the runtime never heard, unfurls nothing.
       yield* issues.unfurlInput(yield* say(threadId, 'Nothing linked here.'))
       yield* issues.unfurlInput(yield* say(threadId, 'Only https://example.com/elsewhere here.'))

@@ -1,0 +1,65 @@
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.part {
+  display: flex;
+  flex-direction: column;
+}
+.head {
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--t-2);
+}
+.check {
+  display: block;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--t-2);
+  text-align: left;
+}
+button.row:hover {
+  color: var(--t-1);
+}
+.row > svg {
+  flex: none;
+}
+.caption {
+  flex: 1;
+  min-width: 0;
+}
+.good {
+  color: var(--ok);
+}
+.bad {
+  color: var(--danger);
+}
+.out {
+  max-height: 280px;
+  margin: 2px 0 8px;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: var(--r-lg);
+  background: var(--n-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+  white-space: pre-wrap;
+}
+.note {
+  margin: 2px 0 8px 22px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-2);
+}

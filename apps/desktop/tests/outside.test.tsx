@@ -629,17 +629,62 @@ describe('the thread, reaching outside', () => {
     expect(await screen.findByText('Rate-limit refunds')).toBeTruthy()
     expect(screen.getByText('Rate-limit charges')).toBeTruthy()
     expect(screen.getByText('meridian/api · Merged')).toBeTruthy()
+    // Althar's words for the pull request it opened, and the pull request under them.
     expect(screen.getByText('Opened draft pull request #12.')).toBeTruthy()
     expect(screen.getByText('meridian/api · Draft')).toBeTruthy()
-    // Implement, then the pull request: two steps, numbered as such.
-    expect(screen.getByRole('img', { name: 'Step 1 of 2' })).toBeTruthy()
-    expect(screen.getByRole('img', { name: 'Step 2 of 2' })).toBeTruthy()
     expect(screen.getByText('commented on PR #12 · src/limit.ts:14')).toBeTruthy()
     expect(screen.getByText('Seconds or a date?')).toBeTruthy()
     expect(screen.getByText('asked for changes on PR #12')).toBeTruthy()
     expect(screen.getByText('1 of 2 checks failed on PR #12')).toBeTruthy()
     expect(screen.getByText('Failed: test')).toBeTruthy()
     expect(screen.getByText('Merged PR #12')).toBeTruthy()
+  })
+
+  it('reads a pasted link as its key, with its card in the message it came in', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async (): Promise<ThreadSnapshot> =>
+        snapshot({
+          items: [
+            items.you('Do https://linear.app/m/issue/MER-231, like https://github.com/m/a/pull/1206. Not https://example.com/x.', null, [
+              {
+                kind: 'issue',
+                product: 'linear',
+                key: 'MER-231',
+                title: 'Rate-limit refunds',
+                url: 'https://linear.app/m/issue/MER-231/rate-limit-refunds',
+                pasted: 'https://linear.app/m/issue/MER-231',
+                status: { name: 'Todo', category: 'todo' },
+                priority: null,
+                container: null,
+              },
+              {
+                kind: 'change',
+                product: 'github',
+                key: 'PR #1206',
+                title: 'Rate-limit charges',
+                url: 'https://github.com/m/a/pull/1206',
+                pasted: 'https://github.com/m/a/pull/1206',
+                state: 'merged',
+                repository: 'meridian/api',
+              },
+            ]),
+            items.you('Nothing linked here.'),
+          ],
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    const [linked, plain] = await screen.findAllByRole('article', { name: 'You' })
+    const message = within(linked as HTMLElement)
+    // The words say each link's key where it was pasted; an address that didn't unfurl stays as written.
+    expect(message.getByText(/^Do /).textContent).toBe('Do MER-231, like #1206. Not https://example.com/x.')
+    // Each card is in the message, under its words, and opens the link.
+    expect(message.getByRole('link', { name: /Rate-limit refunds/ }).getAttribute('href')).toBe(
+      'https://linear.app/m/issue/MER-231/rate-limit-refunds',
+    )
+    expect(message.getByRole('link', { name: /Rate-limit charges/ }).getAttribute('href')).toBe('https://github.com/m/a/pull/1206')
+    expect(within(plain as HTMLElement).getByText('Nothing linked here.')).toBeTruthy()
+    expect(within(plain as HTMLElement).queryByRole('link')).toBeNull()
   })
 
   it('says when someone outside the repository wasn’t passed to the lead, and passes it on when asked', async () => {
@@ -770,10 +815,10 @@ describe('running what a task built, with no agent', () => {
           ended: { at: NOW, code: 0, timedOut: false, stopped: false, last: null, ...over },
         },
       }) as ThreadItem
-    // Installed, it is a line across the thread, and no more.
+    // Installed, it is Althar's housekeeping: it goes with the lead's work, and the line across the thread goes.
     current = { ...thread, items: [...thread.items, ended({})] }
     act(() => emit(changed('thread_item', setup.id)))
-    expect(await screen.findByText('Installed dependencies in meridian')).toBeTruthy()
+    await waitFor(() => expect(screen.queryByText('Installing dependencies in meridian…')).toBeNull())
     expect(screen.queryByText('bun install --frozen-lockfile')).toBeNull()
     // Failed, the end of what it printed stands under it, with how it ended; the lead hears of it.
     current = { ...thread, items: [...thread.items, ended({ code: 1, last: 'resolving\nerror: lockfile had changes' })] }
@@ -1632,7 +1677,7 @@ describe('what reaching outside says, in every case', () => {
     expect(screen.getByText('Failed: test, lint')).toBeTruthy()
     expect(screen.getByText('Closed MR !4')).toBeTruthy()
     expect(screen.getByText('Ready for review: PR #12')).toBeTruthy()
-    expect(screen.getByText('Push')).toBeTruthy()
+    expect(screen.getByText('Pushed althar/x.')).toBeTruthy()
     expect(screen.getByText('meridian/api · Open')).toBeTruthy()
     expect(screen.getByText('Refunds ignore the limit')).toBeTruthy()
   })

@@ -105,6 +105,9 @@ describe('accounts', () => {
       assert.deepStrictEqual(accounts.env(account), { FAKE_HOME: home })
       assert.isTrue(lstatSync(home).isDirectory())
       assert.isTrue(lstatSync(join(home, 'settings.json')).isSymbolicLink())
+      // The line to sign in names that same home: what the person runs signs
+      // the account in where its sessions will read the sign-in.
+      assert.strictEqual(yield* accounts.login(account.id), `FAKE_HOME='${home}' fake-login claude-code`)
     }).pipe(Effect.provide(withAccounts({}, [], { reachable: false, where: () => null, run: (spec) => spec }))),
   )
 

@@ -94,7 +94,7 @@ test('sends images dropped on a composer to the coordinator and to a lead, which
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
     await toConversation(page)
-    await expect(page.getByText('Did the task.')).toBeVisible()
+    await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
     await drop(page, composer(page), [{ name: 'wide.png', type: 'image/png', bytes: png(3000, 1500) }])
     await expect(page.getByRole('list', { name: '1 image to send' }).getByRole('img', { name: 'wide.png' })).toBeVisible()
     await page.screenshot({ path: 'test-results/images-task-composer.png' })
