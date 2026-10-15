@@ -79,6 +79,8 @@ export interface TaskModel {
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
+  /** Has the agent on the task compact its context, after what it was told before. */
+  readonly compact: () => Promise<void>
   /** Puts the lead on another model or effort, or hands the task to another agent with one. */
   readonly choose: (choice: Choice) => Promise<void>
   /** Hands the task to another agent with what the person says, and any images: the new lead's first turn, after its brief. */
@@ -91,6 +93,8 @@ export interface TaskModel {
   readonly resume: () => Promise<void>
   /** Whether its lead resolves conflicts on its own, otherwise than its project says; null goes back to the project. */
   readonly setResolveConflicts: (on: boolean | null) => Promise<void>
+  /** Allows everything its agents ask, short of what its project never allows, or takes it back: what waits goes ahead. */
+  readonly setAllowEverything: (on: boolean) => Promise<void>
   /** Settles it without its change; its worktree and branch stay. Whether it was abandoned. */
   readonly abandon: () => Promise<boolean>
   /** Opens it again, once abandoned, on its worktree and branch. */
@@ -155,7 +159,8 @@ export interface TaskModel {
   /** Clears one that ended by itself from the list. */
   readonly clearBackground: (id: string) => Promise<void>
   /** Runs what it built, with no agent, in its worktree. */
-  readonly runProject: () => Promise<void>
+  /** Runs one of the project's runnables in its worktree, its default without one. */
+  readonly runProject: (runnableId?: string | null) => Promise<void>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   readonly dismissError: () => void
@@ -279,7 +284,9 @@ export const useTask = (threadId: string): TaskModel => {
           ? current
           : { ...current, task: { ...current.task, launches: event.launches.filter((launch) => launch.taskId === current.task.id) } },
       )
-    if (event.threadId !== threadId) return
+    // Its project's rules, which belong to no thread: by their switch it may allow everything now, or no longer. Its head again.
+    const ofItsRules = event._tag === 'Changed' && event.aggregateType === 'policy' && event.projectId === snapshot?.project.id
+    if (event.threadId !== threadId && !ofItsRules) return
     // How full the lead's context is, as it says: kept on its session, which the composer shows.
     if (event._tag === 'Context')
       return void setSnapshot((current) =>
@@ -444,6 +451,7 @@ export const useTask = (threadId: string): TaskModel => {
       }
     },
     interrupt: () => act(() => client.interrupt(threadId)),
+    compact: () => act(() => client.compact(threadId)),
     choose: (choice) =>
       act(async () => {
         const session = snapshot?.session
@@ -455,6 +463,7 @@ export const useTask = (threadId: string): TaskModel => {
     skipReview: () => onTask((taskId) => client.skipReview(taskId)),
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
     setResolveConflicts: (on) => onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on })),
+    setAllowEverything: (on) => onTask((taskId) => client.setTaskAllowEverything({ taskId, allowEverything: on })),
     abandon: async () => {
       let abandoned = false
       await onTask(async (taskId) => {
@@ -564,7 +573,12 @@ export const useTask = (threadId: string): TaskModel => {
     stopBackground: (id) => act(() => client.stopBackground(threadId, id)),
     stopHolding: (holder, id) => act(() => client.stopBackground(holder, id)),
     clearBackground: (id) => act(() => client.clearBackground(threadId, id)),
-    runProject: () => act(async () => (snapshot === null ? undefined : client.runProject(snapshot.project.id, snapshot.task.id, threadId))),
+    runProject: (runnableId = null) =>
+      act(async () =>
+        snapshot === null
+          ? undefined
+          : client.runProject(snapshot.project.id, snapshot.task.id, threadId, ...(runnableId === null ? [] : [runnableId])),
+      ),
     stopLaunch: (id) => act(() => client.stopLaunch(id)),
     clearLaunch: (id) => act(() => client.clearLaunch(id)),
     dismissError: () => setError(null),

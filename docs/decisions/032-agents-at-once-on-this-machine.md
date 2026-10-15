@@ -1,6 +1,6 @@
 # ADR-032: A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn
 
-- **Status:** Accepted
+- **Status:** Accepted; its order of what waits amended by [ADR-037](037-what-the-person-does-goes-first.md)
 - **Date:** 2026-10-13
 - **Owner:** Repository maintainers
 - **Context:** Althar set no limit on tasks at once, and had no queue

@@ -79,7 +79,7 @@ test('the coordinator answers a task permission, leaves always-ask items to the 
   const { electronApp, page } = await launch(home)
   try {
     await openFirstProject(electronApp, page, repository(home))
-    // On the project first: until it shows, Settings is the home's, Althar's own.
+    // On the project first: its Settings are on its page.
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
     await openRules(page)
     await choose(page, 'allowed', 'The coordinator decides')
@@ -107,7 +107,7 @@ test('the coordinator answers a task permission, leaves always-ask items to the 
     // Deploying is still reserved for the person, even though the judge would allow it.
     await say(page, 'command-choices')
     await expect(page.getByText('Needs your permission')).toBeVisible()
-    await page.getByRole('button', { name: /^Allow/ }).click()
+    await page.getByRole('button', { name: /^Allow(?! everything)/ }).click()
     await expect(page.getByText('chosen=allow_once')).toHaveCount(2)
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
     await page.getByRole('button', { name: /since you looked/ }).click()

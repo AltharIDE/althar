@@ -1,0 +1,20 @@
+/** A permission asking to run a script: heredocs writing pages, a Playwright script, then a look at a port. */
+export const SCRIPT = [
+  "cd /Users/balazs/Charrette/althar/prototype-tasks-waiting/althar && python3 - <<'EOF'",
+  'import pathlib',
+  'pages = {',
+  ...Array.from({ length: 14 }, (_, i) => `    "state-${i}.html": "<h1>Tasks waiting for a free agent, state ${i}</h1>",`),
+  '}',
+  'for name, html in pages.items():',
+  '    pathlib.Path("proto", name).write_text(html)',
+  'EOF',
+  "cat > peek.mjs <<'EOF'",
+  "import { chromium } from 'playwright'",
+  'const browser = await chromium.launch()',
+  'const page = await browser.newPage()',
+  ...Array.from({ length: 10 }, (_, i) => `await page.goto('http://localhost:5374/state-${i}.html')`),
+  "await page.screenshot({ path: 'peek.png' })",
+  'await browser.close()',
+  'EOF',
+  'ls proto; lsof -iTCP:5374 -sTCP:LISTEN',
+].join('\n')

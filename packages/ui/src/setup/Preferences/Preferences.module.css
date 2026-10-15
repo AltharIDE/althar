@@ -109,6 +109,29 @@
   );
   transition: width 120ms ease-out;
 }
+/* compact: a step on the track for each number, lighter where it is filled; the sheet's padding is the row's */
+.row.compact {
+  padding: 0;
+}
+.steps {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.step {
+  position: absolute;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 99px;
+  background: var(--t-4);
+  opacity: 0.6;
+}
+.stepIn {
+  background: var(--on-ink);
+  opacity: 0.5;
+}
 .atDefault {
   position: absolute;
   top: 2px;

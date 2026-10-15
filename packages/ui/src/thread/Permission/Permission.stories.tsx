@@ -2,8 +2,10 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { ALLOWED, BY_RULE, MANY, PROJECT, REQUESTS, STAGING } from '../../fixtures/meridian'
+import { SCRIPT } from '../../fixtures/longCommand'
 import { OPUS } from '../../fixtures/models'
 import { AllowedBy, Decision, PermissionScope } from '../../foundations/vocabulary'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Allowed, Permission, Permissions } from './Permission'
 import { States, statesOn } from '../../storybook/States'
@@ -18,6 +20,11 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Asks: Story = {}
+
+/** A long script: the card shows it whole in a block of its own that scrolls, with Copy; it never lengthens the card. */
+export const LongScript: Story = {
+  args: { what: 'Prototype: tasks waiting for a free agent', cmd: SCRIPT },
+}
 
 /** Keys pick an option; Enter answers. A yes beats once in violet and folds to a line with Undo. */
 export const AllowOnce: Story = {
@@ -79,17 +86,28 @@ export const AllowAlwaysByPrefix: Story = {
   },
 }
 
-/** Kept for you by the always-ask list: an allow rule wouldn't hold, so Allow always isn't offered. Never allow is, by each scope. */
+/**
+ * Kept for you by the always-ask list: an allow rule wouldn't hold, so Allow always isn't offered. Never allow is, by each scope.
+ * Under the answers, the consumer says why, with a way out.
+ */
 export const HeldForYou: Story = {
   args: {
     offers: [Decision.AllowOnce, Decision.AllowAlways, Decision.Deny, Decision.DenyAlways],
     scopes: { [Decision.AllowAlways]: [], [Decision.DenyAlways]: [PermissionScope.Exact, PermissionScope.Prefix, PermissionScope.Kind] },
     defaultDecision: Decision.DenyAlways,
+    held: (
+      <>
+        Meridian always asks you about this, so there’s no “always allow”.{' '}
+        <LinkButton onClick={fn()}>Allow everything on this task</LinkButton>
+      </>
+    ),
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.queryByRole('radio', { name: /Yes, and always allow/ })).toBeNull()
     await expect(c.getByRole('combobox', { name: 'What to never allow' })).toBeInTheDocument()
+    await expect(c.getByText(/so there’s no “always allow”/)).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Allow everything on this task' })).toBeInTheDocument()
   },
 }
 

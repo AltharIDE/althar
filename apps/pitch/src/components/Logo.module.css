@@ -1,2 +1,0 @@
-.logo { flex: none; fill: currentColor; }
-.point { fill: var(--logo-point, var(--cobalt)); transition: fill 200ms; }

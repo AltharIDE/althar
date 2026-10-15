@@ -76,7 +76,7 @@ const plain = (projectId: string, title: string, description: string) =>
   })
 
 /** The task's card once it stands where `check` wants it. */
-const cardOnce = (taskId: string, check: (card: { readonly phase: string }) => boolean) =>
+const cardOnce = (taskId: string, check: (card: { readonly phase: string; readonly kind: string }) => boolean) =>
   Effect.gen(function* () {
     const queries = yield* Queries
     const [card] = yield* until(
@@ -198,6 +198,44 @@ describe("a task's kind", () => {
       const summary = (yield* queries.projects).projects.find((one) => one.id === project.projectId)
       assert.strictEqual(summary?.ready, 2)
       assert.sameMembers([...(yield* queries.finished)], [question.taskId, sketch.taskId])
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('reads the same kind on its thread as on its card, with its pull requests: a quick task that opened one is a change', () =>
+    Effect.gen(function* () {
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* open
+      const quick = yield* plain(project.projectId, 'Which partners still call v2?', '[lead:finish]')
+      yield* cardOnce(quick.taskId, (card) => card.phase === 'ready')
+      const kindOnThread = () => Effect.map(Effect.orDie(queries.thread(quick.threadId)), (snapshot) => snapshot.task.kind)
+      assert.strictEqual(yield* kindOnThread(), 'plain')
+      const at = new Date().toISOString()
+      yield* sql`INSERT INTO external_links ${sql.insert({
+        id: `xlink_${'3'.repeat(32)}`,
+        projectId: project.projectId,
+        taskId: quick.taskId,
+        connectionId: null,
+        product: 'github',
+        kind: 'change',
+        externalId: '7',
+        ref: '7',
+        key: '7',
+        url: 'https://github.com/acme/app/pull/7',
+        snapshot: JSON.stringify({
+          number: 7,
+          title: 'v2',
+          url: 'https://github.com/acme/app/pull/7',
+          state: 'open',
+          draft: false,
+          words: {},
+          repository: ['acme', 'app'],
+        }),
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      const card = yield* cardOnce(quick.taskId, (one) => one.kind === 'change')
+      assert.strictEqual(yield* kindOnThread(), card.kind)
     }).pipe(Effect.provide(withQueries())),
   )
 
