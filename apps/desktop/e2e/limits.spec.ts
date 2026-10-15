@@ -79,7 +79,7 @@ test('hands the task to the next free agent when its lead is out of usage', asyn
     await page.screenshot({ path: 'test-results/limit-moved-card.png', animations: 'disabled' })
     await openTask(page)
     await expect(page.getByText(/^Claude Code reached its usage limit, until .+\. Codex takes over\.$/)).toBeVisible()
-    await expect(page.getByText('Did the task.')).toBeVisible()
+    await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
     await page.screenshot({ path: 'test-results/limit-moved.png', animations: 'disabled' })
   } finally {
     await electronApp.close()
@@ -148,7 +148,7 @@ test('asks the person where the project says to, on the home too, and moves the 
     await page.keyboard.press('Escape')
     await page.getByRole('button', { name: /^Continue with/ }).click()
     await expect(page.getByText('Switched from Claude Code to Codex.')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText('Did the task.')).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible({ timeout: 15_000 })
   } finally {
     await electronApp.close()
   }
