@@ -3,8 +3,12 @@ import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { Logo } from '../../foundations/Logo/Logo'
+import { EdgeSpot } from '../../foundations/vocabulary'
 import { States } from '../../storybook/States'
+import { EdgeMini } from '../EdgeMini/EdgeMini'
 import {
+  AgentsAtOnce,
+  EdgeHere,
   EdgePlaces,
   EdgeScene,
   KeepAwake,
@@ -13,6 +17,7 @@ import {
   type NotifyChoices,
   OpenFilesIn,
   SettingList,
+  UsageData,
 } from './Preferences'
 
 const EDITORS = [
@@ -27,11 +32,16 @@ const SOUNDS = ['Basso', 'Blow', 'Glass', 'Ping', 'Pop', 'Purr', 'Tink']
 
 const ALL_ON: NotifyChoices = { calls: true, ready: true, stopped: true, badge: true }
 
+/* A 16 GB Mac with 10 cores, which runs four at once by default. */
+const MACHINE = { count: 4, memory: 16, cores: 10 }
+
 /* What the stories' play functions look for, as a consumer would hear it. */
+const onAtOnce = fn()
 const onAwake = fn()
 const onNotify = fn()
 const onPlay = fn()
 const onPlace = fn()
+const onUsage = fn()
 
 /* Stand-ins for what the app puts in the screen: the home layer's Island and EdgeSheet can't be drawn from here. */
 const island = (
@@ -72,6 +82,21 @@ const menuMark = (
   </>
 )
 
+/* How many agents at once, as a consumer keeps it: the person's number, or none for the default. */
+function AtOnce() {
+  const [own, setOwn] = useState<number | null>(null)
+  return (
+    <AgentsAtOnce
+      count={own ?? MACHINE.count}
+      machine={MACHINE}
+      onChange={(count) => {
+        setOwn(count)
+        onAtOnce(count)
+      }}
+    />
+  )
+}
+
 /* The sections as a consumer keeps them: each change shows at once and goes out. */
 function General() {
   const [awake, setAwake] = useState(true)
@@ -88,6 +113,7 @@ function General() {
         onBattery={battery}
         onBatteryChange={setBattery}
       />
+      <AtOnce />
       <OpenFilesIn editors={EDITORS} value={editor} onChange={setEditor} />
     </SettingList>
   )
@@ -110,11 +136,26 @@ function Notifications() {
   )
 }
 
+function Usage() {
+  const [on, setOn] = useState(true)
+  return (
+    <SettingList>
+      <UsageData
+        on={on}
+        onChange={(next) => {
+          setOn(next)
+          onUsage(next)
+        }}
+      />
+    </SettingList>
+  )
+}
+
 function Places() {
   const [place, setPlace] = useState<'island' | 'menu'>('island')
   return (
     <EdgePlaces
-      label="While you’re in another app"
+      label="In other apps"
       value={place}
       onChange={(next) => {
         setPlace(next)
@@ -166,6 +207,55 @@ export const GeneralSettings: Story = {
   },
 }
 
+/** Anonymous usage data, on as it starts, with the line on what it sends and never sends; turned off at once. */
+export const UsageDataSwitch: Story = {
+  render: () => <Usage />,
+  play: async ({ canvasElement }) => {
+    const usage = within(canvasElement).getByRole('switch', { name: 'Usage data' })
+    await expect(usage).toBeChecked()
+    await expect(usage).toHaveAccessibleDescription(
+      'Anonymous: steps such as a project made or a task settled. Never your code, what is written, or any name.',
+    )
+    await userEvent.click(usage)
+    await expect(onUsage).toHaveBeenCalledWith(false)
+    await expect(usage).not.toBeChecked()
+  },
+}
+
+/** How many agents work at once, and why: the default from this Mac's memory and cores, a number of the person's own, and back to the default. */
+export const AgentsAtOnceSetting: Story = {
+  render: () => (
+    <SettingList>
+      <AtOnce />
+    </SettingList>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const count = c.getByRole('slider', { name: 'Agents at once' })
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
+    await expect(c.getByText('4: this Mac has 16 GB and 10 cores. More tasks than that wait their turn.')).toBeInTheDocument()
+    await expect(c.queryByRole('button', { name: 'Use the default' })).toBeNull()
+    count.focus()
+    await userEvent.keyboard('{ArrowRight}{ArrowRight}')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(6)
+    await expect(count).toHaveAttribute('aria-valuenow', '6')
+    await expect(c.getByText(/^6: a little more than this Mac’s 16 GB suggests\./)).toBeInTheDocument()
+    await userEvent.keyboard('{End}')
+    await expect(c.getByText(/^16: well past what this Mac’s 16 GB suggests\./)).toBeInTheDocument()
+    await userEvent.click(c.getByRole('button', { name: 'Use the default' }))
+    await expect(onAtOnce).toHaveBeenLastCalledWith(null)
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
+    // Back on the default by the keys: the default again, not a number of the person's own.
+    count.focus()
+    await userEvent.keyboard('{ArrowLeft}')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(3)
+    await expect(count).toHaveAttribute('aria-valuenow', '3')
+    await userEvent.keyboard('{ArrowRight}')
+    await expect(onAtOnce).toHaveBeenLastCalledWith(null)
+    await expect(count).toHaveAttribute('aria-valuenow', '4')
+  },
+}
+
 /** What comes as a notification, each switch by its own key, and the sound, heard as it is chosen. */
 export const NotificationChoices: Story = {
   render: () => <Notifications />,
@@ -184,18 +274,54 @@ export const NotificationChoices: Story = {
   },
 }
 
-/** Where Althar shows in another app, each place as the screen would look. */
+/** Where Althar shows in another app, each place as the screen would look; arrows move between them. */
 export const WhereItShows: Story = {
-  decorators: [(Story) => <div style={{ width: 760 }}>{Story()}</div>],
+  decorators: [(Story) => <div style={{ width: 564 }}>{Story()}</div>],
   render: () => <Places />,
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
+    await expect(c.getByRole('radiogroup', { name: 'In other apps' })).toBeInTheDocument()
     await expect(c.getByRole('radio', { name: /Round the notch/ })).toBeChecked()
     await userEvent.click(c.getByRole('radio', { name: /In the menu bar/ }))
     await expect(onPlace).toHaveBeenCalledWith('menu')
     await expect(c.getByRole('radio', { name: /In the menu bar/ })).toBeChecked()
     await userEvent.click(c.getByRole('radio', { name: /Round the notch/ }))
     await expect(c.getByRole('radio', { name: /Round the notch/ })).toBeChecked()
+    // Arrows move between them, choosing as they go, and back round from the last.
+    await userEvent.keyboard('{ArrowRight}')
+    await expect(c.getByRole('radio', { name: /In the menu bar/ })).toBeChecked()
+    await expect(c.getByRole('radio', { name: /In the menu bar/ })).toHaveFocus()
+    await userEvent.keyboard('{ArrowRight}')
+    await expect(c.getByRole('radio', { name: /Round the notch/ })).toBeChecked()
+    // Tab leaves the group rather than going through it.
+    await userEvent.tab()
+    await expect(c.getByRole('radio', { name: /In the menu bar/ })).not.toHaveFocus()
+    await expect(c.getByRole('radio', { name: /Round the notch/ })).not.toHaveFocus()
+    // Its picture is beside its radio, never inside it.
+    await expect(
+      c
+        .getByRole('radio', { name: /Round the notch/ })
+        .closest('label')
+        ?.querySelector('[aria-hidden]:not([class*=radio])'),
+    ).toBeNull()
+  },
+}
+
+/** Where it shows with nothing to choose, as on Windows: the screen beside where, and what Windows may do with it. */
+export const NothingToChoose: Story = {
+  decorators: [(Story) => <div style={{ width: 564 }}>{Story()}</div>],
+  render: () => (
+    <EdgeHere
+      title="In the system tray"
+      note="Click Althar’s mark beside the clock to see what needs you and what runs."
+      why="Windows may tuck it under the ^ beside the clock. Drag it onto the taskbar to keep it in sight."
+      picture={<EdgeMini spot={EdgeSpot.WindowsTray} scale={2.6} />}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByText('In the system tray')).toBeInTheDocument()
+    await expect(c.queryByRole('radio')).toBeNull()
   },
 }
 
@@ -217,6 +343,18 @@ export const AllStates: Story = {
           node: (
             <SettingList>
               <KeepAwake on={false} onChange={fn()} onBattery={false} onBatteryChange={fn()} />
+            </SettingList>
+          ),
+        },
+        {
+          state: 'agents at once: the default, fewer, well past it, a small Mac past its one, and a big Mac under its sixteen',
+          node: (
+            <SettingList>
+              <AgentsAtOnce count={4} machine={MACHINE} onChange={fn()} />
+              <AgentsAtOnce count={2} machine={MACHINE} onChange={fn()} />
+              <AgentsAtOnce count={11} machine={MACHINE} onChange={fn()} />
+              <AgentsAtOnce count={2} machine={{ count: 1, memory: 8, cores: 8 }} onChange={fn()} />
+              <AgentsAtOnce count={12} machine={{ count: 16, memory: 128, cores: 16 }} onChange={fn()} />
             </SettingList>
           ),
         },
@@ -262,8 +400,57 @@ export const AllStates: Story = {
             </SettingList>
           ),
         },
+        {
+          state: 'usage data on',
+          node: (
+            <SettingList>
+              <UsageData on onChange={fn()} />
+            </SettingList>
+          ),
+        },
+        {
+          state: 'usage data with DO_NOT_TRACK set',
+          node: (
+            <SettingList>
+              <UsageData on onChange={fn()} doNotTrack />
+            </SettingList>
+          ),
+        },
         { state: 'the screen round the notch', node: <EdgeScene notch top={island} /> },
         { state: 'the screen with the menu bar', node: <EdgeScene menuItem={menuMark} sheet={sheet} /> },
+        { state: 'the screen, drawn small', node: <EdgeScene notch top={island} height={260} /> },
+        {
+          state: 'a Mac without a notch',
+          node: (
+            <EdgeHere
+              title="In the menu bar"
+              note="Click Althar’s mark to see what needs you and what runs."
+              why="This Mac’s screen has no notch, so Althar shows in the menu bar."
+              picture={<EdgeScene menuItem={menuMark} sheet={sheet} />}
+            />
+          ),
+        },
+        {
+          state: 'Linux, in the tray',
+          node: (
+            <EdgeHere
+              title="In the system tray"
+              note="Click Althar’s mark to see what needs you and what runs."
+              why="Where the desktop has no tray, Althar shows only in its window."
+              picture={<EdgeMini spot={EdgeSpot.LinuxTray} scale={2.6} />}
+            />
+          ),
+        },
+        {
+          state: 'Linux, no tray',
+          node: (
+            <EdgeHere
+              title="Only in Althar’s window"
+              note="This desktop has no system tray, so Althar shows only in its own window."
+              picture={<EdgeMini spot={EdgeSpot.WindowOnly} scale={2.6} />}
+            />
+          ),
+        },
       ]}
     />
   ),

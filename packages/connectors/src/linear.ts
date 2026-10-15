@@ -1,9 +1,11 @@
-import { Effect, Schema } from 'effect'
+import { Effect, Option, Schema } from 'effect'
 
+import { type Access, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
-import type { ConnectorFailed } from './errors'
-import { makeHttp } from './http'
-import type { Account, Issue, Priority, StatusCategory, Tracker } from './model'
+import { ConnectorFailed } from './errors'
+import { makeHttp, paged } from './http'
+import { type Account, type Container, type Issue, leftAsItIs, type Priority, type StatusCategory, type Tracker, unstarted } from './model'
+import { type Answer, answered, probe, readAs, refusalOf, stopped, UNREADABLE, UNSAID } from './probe'
 
 /*
  * Linear, a tracker, over its GraphQL API. An issue goes by its identifier
@@ -81,6 +83,37 @@ const issueOf = (issue: LinearIssue): Issue => {
 
 const Success = Schema.Struct({ success: Schema.Boolean })
 
+/** A page of a list, as Linear gives one: its nodes, and the cursor after them while there are more. */
+const Connection = <A>(node: Schema.Codec<A, unknown>) =>
+  Schema.Struct({
+    nodes: Schema.Array(node),
+    pageInfo: Schema.Struct({ hasNextPage: Schema.Boolean, endCursor: Schema.optional(Schema.NullOr(Schema.String)) }),
+  })
+
+const pageOf = <A>(connection: {
+  readonly nodes: ReadonlyArray<A>
+  readonly pageInfo: { readonly hasNextPage: boolean; readonly endCursor?: string | null | undefined }
+}) => ({
+  items: connection.nodes,
+  next: connection.pageInfo.hasNextPage ? (connection.pageInfo.endCursor ?? undefined) : undefined,
+})
+
+const Team = Schema.Struct({ id: Schema.String, key: Schema.String, name: Schema.String })
+
+/** A team's workflow state: its type, and where it sits on the board. */
+const State = Schema.Struct({ id: Schema.String, name: Schema.String, type: Schema.String, position: Schema.Number })
+
+/** A team's label or the workspace's, which any team's issue may take; a group only holds labels, and takes none itself. */
+const Label = Schema.Struct({ id: Schema.String, name: Schema.String, isGroup: Schema.optional(Schema.Boolean) })
+
+/** The labels a name each matches, in any case, as Linear's own picker matches them: a name it has no label for is left off. */
+const labelIdsOf = (labels: ReadonlyArray<typeof Label.Type>, names: ReadonlyArray<string>) => {
+  const byName = new Map<string, string>()
+  for (const label of labels)
+    if (label.isGroup !== true && !byName.has(label.name.toLowerCase())) byName.set(label.name.toLowerCase(), label.id)
+  return [...new Set(names.flatMap((name) => byName.get(name.trim().toLowerCase()) ?? []))]
+}
+
 /** A key as Linear writes it, however it was typed: mer-231 is MER-231. Anything else goes as it is. */
 const keyOf = (ref: string) => (/^[A-Z][A-Z0-9]*-\d+$/i.test(ref) ? ref.toUpperCase() : ref)
 
@@ -100,7 +133,7 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
 
   return {
     product,
-    capabilities: { links: true },
+    capabilities: { links: true, starts: true },
     account,
     issue: (ref) =>
       Effect.map(
@@ -112,6 +145,28 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
         ),
         ({ issue }) => issueOf(issue),
       ),
+    // Into the team's first started state, by its position on the board: In Progress, before In Review.
+    start: (issue) =>
+      Effect.gen(function* () {
+        if (!unstarted(issue.status.category)) return leftAsItIs(issue)
+        const { issue: found } = yield* http.graphql(
+          Schema.Struct({ issue: Schema.Struct({ team: Schema.Struct({ states: Schema.Struct({ nodes: Schema.Array(State) }) }) }) }),
+          url,
+          'query($id: String!) { issue(id: $id) { team { states(first: 100) { nodes { id name type position } } } } }',
+          { id: issue.id },
+        )
+        const [state] = found.team.states.nodes.filter((each) => each.type === 'started').toSorted((a, b) => a.position - b.position)
+        if (state === undefined)
+          return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Its team has no started state' })
+        const { issueUpdate } = yield* http.graphql(
+          Schema.Struct({ issueUpdate: Success }),
+          url,
+          'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
+          { id: issue.id, stateId: state.id },
+        )
+        if (!issueUpdate.success) return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Linear did not move it' })
+        return { moved: true, status: { name: state.name, category: 'started' } }
+      }),
     mine: (options = {}) =>
       Effect.map(
         http.graphql(
@@ -144,5 +199,114 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
           { issueId: issue.id, url: link.url, title: link.title },
         ),
       ),
+    // A team is where a Linear issue is filed.
+    containers: () =>
+      Effect.map(
+        paged<typeof Team.Type, string | null>(null, (after) =>
+          Effect.map(
+            http.graphql(
+              Schema.Struct({ teams: Connection(Team) }),
+              url,
+              'query($after: String) { teams(first: 100, after: $after) { nodes { id key name } pageInfo { hasNextPage endCursor } } }',
+              { after },
+            ),
+            ({ teams }) => pageOf(teams),
+          ),
+        ),
+        (teams) => teams.map((team): Container => ({ id: team.id, key: team.key, name: team.name })),
+      ),
+    create: (team, issue) =>
+      Effect.gen(function* () {
+        // Linear takes labels by id, and makes none from a name: the team's and the workspace's are read only when some are asked for.
+        const labelIds =
+          issue.labels.length === 0
+            ? []
+            : labelIdsOf(
+                yield* paged<typeof Label.Type, string | null>(null, (after) =>
+                  Effect.map(
+                    http.graphql(
+                      Schema.Struct({ issueLabels: Connection(Label) }),
+                      url,
+                      'query($teamId: ID!, $after: String) { issueLabels(first: 250, after: $after, filter: { or: [{ team: { id: { eq: $teamId } } }, { team: { null: true } }] }) { nodes { id name isGroup } pageInfo { hasNextPage endCursor } } }',
+                      { teamId: team, after },
+                    ),
+                    ({ issueLabels }) => pageOf(issueLabels),
+                  ),
+                ),
+                issue.labels,
+              )
+        const { issueCreate } = yield* http.graphql(
+          Schema.Struct({ issueCreate: Schema.Struct({ success: Schema.Boolean, issue: Schema.optional(Schema.NullOr(LinearIssue)) }) }),
+          url,
+          `mutation($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { ...IssueFields } } } ${IssueFields}`,
+          { input: { teamId: team, title: issue.title, description: issue.body, ...(labelIds.length === 0 ? {} : { labelIds }) } },
+        )
+        if (!issueCreate.success)
+          return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Linear did not file the issue' })
+        // Filed, by Linear's word, without saying which: an answer Althar can't read, never a refusal.
+        if (issueCreate.issue == null)
+          return yield* new ConnectorFailed({ product, reason: 'invalid_response', message: 'Linear filed the issue without saying which' })
+        return issueOf(issueCreate.issue)
+      }),
   }
 }
+
+/*
+ * What a Linear connection can do. Its sign-in asks to read and write, so a
+ * token from it may comment on issues, move them and file them (Linear's
+ * `write` covers `issues:create`); what a personal API key may do
+ * isn't said, as keys can be limited where they are made.
+ */
+
+const Envelope = Schema.Struct({
+  data: Schema.optional(Schema.NullOr(Schema.Unknown)),
+  errors: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        message: Schema.String,
+        extensions: Schema.optional(Schema.Struct({ code: Schema.optional(Schema.String), type: Schema.optional(Schema.String) })),
+      }),
+    ),
+  ),
+})
+
+const Viewer = Schema.Struct({
+  viewer: Schema.Struct({ id: Schema.String, name: Schema.String, displayName: Schema.optional(Schema.String) }),
+  organization: Schema.Struct({ name: Schema.String }),
+})
+
+const Teams = Schema.Struct({ teams: Schema.Struct({ nodes: Schema.Array(Schema.Struct({ key: Schema.String })) }) })
+
+/** A query's data, read by a schema, or why there is none: Linear says a credential it didn't take in a 400 as often as a 401. */
+const dataOf = <A>(schema: Schema.Codec<A, unknown>, answer: Answer): { readonly data: A } | { readonly reason: AccessReason } => {
+  const envelope = readAs(Envelope, answer)
+  const [error] = envelope?.errors ?? []
+  if (error !== undefined)
+    return /AUTHENTICATION|UNAUTHENTICATED/i.test(`${error.extensions?.code ?? ''} ${error.extensions?.type ?? ''}`)
+      ? { reason: { kind: 'refused' } }
+      : { reason: { kind: 'failed', message: error.message.slice(0, 300) } }
+  if (!answered(answer)) return { reason: refusalOf(answer) }
+  const data = Option.getOrUndefined(Schema.decodeUnknownOption(schema)(envelope?.data))
+  return data === undefined ? { reason: UNREADABLE } : { data }
+}
+
+export const accessLinear: Access = (input) =>
+  Effect.gen(function* () {
+    const url = `${input.apiUrl.replace(/\/+$/, '')}/graphql`
+    const me = dataOf(Viewer, yield* probe(input, url, { query: 'query { viewer { id name displayName } organization { name } }' }))
+    if ('reason' in me) return stopped([line('account', 'no', { reason: me.reason })])
+    const { viewer, organization } = me.data
+    const teams = dataOf(Teams, yield* probe(input, url, { query: 'query { teams(first: 100) { nodes { key } } }' }))
+    const signedIn = input.auth === 'pkce'
+    return {
+      account: { id: viewer.id, login: viewer.displayName ?? viewer.name, name: viewer.name },
+      lines: [
+        line('account', 'ok', { fact: `${viewer.name} · ${organization.name}` }),
+        'reason' in teams ? line('read', 'no', { reason: teams.reason }) : line('read', 'ok', { count: teams.data.teams.nodes.length }),
+        signedIn ? line('comment', 'ok') : line('comment', 'unknown', { reason: UNSAID }),
+        signedIn ? line('move', 'ok') : line('move', 'unknown', { reason: UNSAID }),
+      ],
+      expiresAt: null,
+      scopes: null,
+    }
+  })

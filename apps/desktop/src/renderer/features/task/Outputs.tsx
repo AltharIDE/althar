@@ -1,10 +1,13 @@
 import type { ChangeSummary, ChangedFile, TaskRepositoryMerged, ThreadSnapshot } from '@althar/contracts'
+import { doing, type Doing } from './actions'
 import {
   Button,
   type ChangeCheck,
   ChangeSet,
   ChangeState,
   CheckState,
+  Diverged,
+  Evidence,
   type ModelInfo,
   modKey,
   type PullRequest,
@@ -13,6 +16,7 @@ import {
 
 import { type NameModel, useModelNames } from '../../shared/modelNames'
 import { checkOf } from '../../shared/checks'
+import { taskEvidence } from '../../shared/evidence'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
 import s from './Task.module.css'
@@ -23,8 +27,14 @@ import { device } from '../../shared/device'
  * to accept it. Its pull requests merge on their host when it is accepted,
  * up to the heads shown, and its repositories whose work ended on its branch
  * merge here. A draft is marked ready here, what the lead committed since is
- * pushed here, and sending it back is a note to the lead. Before it is
- * ready, the same card shows what it has changed so far.
+ * pushed here, and sending it back is a note to the lead. A branch its pull
+ * request won't take a plain push of says why, and offers what puts it
+ * right. Before it is ready, the same card shows what it has changed so far.
+ * A task that went back to work after its pull request merged or closed
+ * shows its latest pull request, the earlier ones under it, and offers a new
+ * one for the commits that are in none yet (ADR-034). Above it, what the
+ * task built, as its lead last said it, what the lead showed of it working,
+ * and what it couldn't: its finished view, as its thread ends with.
  */
 
 export const text = {
@@ -41,6 +51,14 @@ export const text = {
   markReady: 'Mark ready for review',
   markReadyIn: (repository: string) => `Mark ${repository} ready for review`,
   openChange: 'Open a pull request',
+  openNewChange: 'Open a new pull request',
+  /** One of the task's earlier pull requests, before its latest: merged or closed. In a task of several repositories, by its own. */
+  earlier: (change: ChangeSummary, host: string, repository: string | undefined) =>
+    `Before this: ${repository === undefined ? '' : `${repository} `}${change.short} ${change.prefix}${change.number}, ${change.state === 'open' ? 'open' : change.state} on ${host}.`,
+  /** Commits after its last pull request merged or closed, in none yet. */
+  /** In a task of several repositories, by none: they may be in a repository that has had no pull request yet. */
+  unshipped: (n: number, change: ChangeSummary | undefined) =>
+    `${n === 1 ? 'One commit' : `${n} commits`}${change === undefined ? '' : ` after ${change.short} ${change.prefix}${change.number}`} ${n === 1 ? 'isn’t' : 'aren’t'} in a pull request yet.`,
   push: (n: number) => (n === 1 ? 'Push 1 commit' : `Push ${n} commits`),
   pushTo: (n: number, repository: string) => `${n === 1 ? 'Push 1 commit' : `Push ${n} commits`} to ${repository}`,
   unpushed: (n: number, change: ChangeSummary) =>
@@ -75,6 +93,10 @@ export const text = {
       : 'Push to each remote'
   },
   resolve: 'Ask the lead to resolve it',
+  /** A pull request in a sentence, and by name: in a task of several, whose. */
+  pullRequest: (change: ChangeSummary, several: boolean) =>
+    several ? `${nameOf(change.repository)}’s ${change.noun}` : `the ${change.noun}`,
+  named: (change: ChangeSummary) => `${change.short} ${change.prefix}${change.number}`,
   /** What a review that asked for changes found; its words are in the conversation. */
   found: (n: number) => (n === 1 ? '1 finding' : `${n} findings`),
   diffKey: modKey('D'),
@@ -131,6 +153,7 @@ export function Outputs({
   snapshot,
   lead,
   pending,
+  doing: acting = null,
   error,
   onAccept,
   onMergeHere,
@@ -144,10 +167,15 @@ export function Outputs({
   onPushHere,
   onPushBranch,
   onConnect,
+  refused = null,
+  onReplace,
+  onBringIn,
 }: {
   snapshot: ThreadSnapshot
   lead: ModelInfo
   pending: boolean
+  /** Which action is on its way, where one is: only its button shows as working; the others wait. */
+  doing?: Doing | null
   error: string | null
   /** The files merging it here conflicts in, after a merge refused for that. */
   conflict?: string | null
@@ -164,6 +192,12 @@ export function Outputs({
   onMergeHere: () => void
   onOpenChange: () => void
   onPush: (head: string, url: string) => void
+  /** The pull request a push was refused by for commits on it that aren't here, by its address. */
+  refused?: string | null
+  /** Replaces a pull request's commits with the branch, up to the head shown, while it is still at `replaces`: confirmed on the card. */
+  onReplace: (head: string, replaces: string, url: string) => void
+  /** Has the lead merge a pull request's commits into its branch, so a plain push works. */
+  onBringIn: (url: string) => void
   onMarkReady: (url: string) => void
   onSendBack: (note: string) => void
   /** Opens what it changed over the whole window, on a file or the first. */
@@ -181,8 +215,12 @@ export function Outputs({
     ),
   ].map((id) => named(id, reviewModelOf(snapshot, id)))
   const reviews = reviewsOf(snapshot, named)
-  const open = task.changes.filter((change) => change.state !== 'closed')
-  const closed = task.changes.filter((change) => change.state === 'closed')
+  // Its latest pull request in each repository, the open one else the newest; the others came before them.
+  const { latest, earlier } = latestOf(task.changes)
+  const open = latest.filter((change) => change.state !== 'closed')
+  const closed = latest.filter((change) => change.state === 'closed')
+  // Commits after its last pull request, in none yet: a new one opens for them, as the person says.
+  const shipping = ready && task.unshipped != null && task.unshipped.commits > 0 && snapshot.host?.connected === true
   // Its repositories: those with a pull request, those still to merge here, and those merged here already.
   const several = open.length + task.here.length + task.merged.length > 1
   const [first] = open
@@ -225,7 +263,8 @@ export function Outputs({
               onReviewDiff={() => onOpenFile()}
               diffKey={text.diffKey}
               onOpenFile={onOpenFile}
-              accepting={pending}
+              accepting={acting === doing.accept}
+              locked={pending}
               {...(error === null ? {} : { error })}
               text={{
                 number: (n) => `${first.prefix}${n}`,
@@ -272,8 +311,9 @@ export function Outputs({
         onReviewDiff={() => onOpenFile()}
         diffKey={text.diffKey}
         onOpenFile={onOpenFile}
+        locked={pending}
         {...(task.merged.some((one) => one.ahead > 0 && one.remote !== null) && onPushHere !== undefined
-          ? { onPush: onPushHere, pushing: pending }
+          ? { onPush: onPushHere, pushing: acting === doing.pushHere }
           : {})}
         text={{ push: () => text.pushHere(task.merged), prs: text.repositories }}
         {...(error === null ? {} : { error })}
@@ -290,7 +330,7 @@ export function Outputs({
           pushed: remotes.every((one) => one.pushed),
           ahead: remotes.reduce((sum, one) => sum + one.ahead, 0),
           onPush: onPushBranch,
-          pushing: pending,
+          pushing: acting === doing.pushBranch,
         }
   const pushedSomewhere = remotes.some((one) => one.pushed)
 
@@ -319,7 +359,8 @@ export function Outputs({
         onReviewDiff={() => onOpenFile()}
         diffKey={text.diffKey}
         onOpenFile={onOpenFile}
-        accepting={pending}
+        accepting={acting === doing.mergeHere}
+        locked={pending}
         {...(first !== undefined
           ? {}
           : conflict !== null && onResolve !== undefined
@@ -342,13 +383,28 @@ export function Outputs({
       </p>
     ) : null
 
-  const pushes = open.filter((one) => one.state === 'open' && one.unpushed > 0 && one.localHead !== null)
+  // A branch its pull request won't take a plain push of, as Althar counts it or as a push just found: said, with what puts it right, not pushed.
+  const parted = open.flatMap((one) =>
+    one.state !== 'open' || one.localHead === null
+      ? []
+      : one.diverged !== null
+        ? [{ change: one, ...one.diverged }]
+        : refused === one.url
+          ? [{ change: one, kind: 'moved' as const, local: one.unpushed, onPullRequest: null }]
+          : [],
+  )
+  const pushes = open.filter(
+    (one) => one.state === 'open' && one.unpushed > 0 && one.localHead !== null && !parted.some((p) => p.change.url === one.url),
+  )
   const drafts = open.filter((one) => one.state === 'open' && one.draft)
   // A pull request needs its host connected: without, there is nothing a press could open.
   const unpublished = ready && first === undefined && task.commits > 0 && snapshot.host?.connected === true
+  // What it built and what the lead showed of it working, above what it changed: what the person reads before accepting it.
+  const shown = taskEvidence(snapshot.items, snapshot.reports)
   return (
     <div className={s.outputs}>
       <ThreadMeasure className={s.outputsBody}>
+        <Evidence built={shown.built} pieces={shown.pieces} unverified={shown.unverified} headingLevel={2} />
         {change}
         {local}
         {done && <p className={s.quiet}>{text.mergedAll(task.merged)}</p>}
@@ -359,26 +415,78 @@ export function Outputs({
             {text.closed(one, productName(one.product))}
           </p>
         ))}
+        {earlier.map((one) => (
+          <p key={`earlier-${one.url}`} className={s.quiet}>
+            {text.earlier(one, productName(one.product), several ? nameOf(one.repository) : undefined)}{' '}
+            <a className={s.external} href={one.url} target="_blank" rel="noreferrer">
+              {text.openOn(productName(one.product))}
+            </a>
+          </p>
+        ))}
+        {shipping && task.unshipped != null && (
+          <p className={s.quiet}>
+            {text.unshipped(task.unshipped.commits, several ? undefined : latest.findLast((one) => one.state !== 'open'))}
+          </p>
+        )}
+        {parted.map(({ change: one, kind, local: here, onPullRequest }) => (
+          <Diverged
+            key={`parted-${one.url}`}
+            kind={kind}
+            local={here}
+            onPullRequest={onPullRequest}
+            pullRequest={text.pullRequest(one, several)}
+            named={text.named(one)}
+            // Only from the head the person saw it at: what anyone pushed since is never replaced.
+            {...(kind === 'rewritten' && one.head !== null
+              ? { onReplace: () => onReplace(one.localHead ?? '', one.head ?? '', one.url) }
+              : {})}
+            onMerge={() => onBringIn(one.url)}
+            replacing={acting === doing.replace(one.url)}
+            merging={acting === doing.bringIn(one.url)}
+            locked={pending}
+          />
+        ))}
         {pushes.map((one) => (
           <p key={`unpushed-${one.url}`} className={s.quiet}>
             {text.unpushed(one.unpushed, one)}
           </p>
         ))}
-        {(pushes.length > 0 || drafts.length > 0 || unpublished || first !== undefined) && (
+        {(pushes.length > 0 || drafts.length > 0 || unpublished || shipping || first !== undefined) && (
           <div className={s.changeActions}>
             {pushes.map((one) => (
-              <Button key={`push-${one.url}`} variant="signal" busy={pending} onClick={() => onPush(one.localHead ?? '', one.url)}>
+              <Button
+                key={`push-${one.url}`}
+                variant="signal"
+                busy={acting === doing.push(one.url)}
+                disabled={pending && acting !== doing.push(one.url)}
+                onClick={() => onPush(one.localHead ?? '', one.url)}
+              >
                 {several ? text.pushTo(one.unpushed, nameOf(one.repository)) : text.push(one.unpushed)}
               </Button>
             ))}
             {drafts.map((one) => (
-              <Button key={`ready-${one.url}`} busy={pending} onClick={() => onMarkReady(one.url)}>
+              <Button
+                key={`ready-${one.url}`}
+                busy={acting === doing.markReady(one.url)}
+                disabled={pending && acting !== doing.markReady(one.url)}
+                onClick={() => onMarkReady(one.url)}
+              >
                 {several ? text.markReadyIn(nameOf(one.repository)) : text.markReady}
               </Button>
             ))}
             {unpublished && (
-              <Button busy={pending} onClick={onOpenChange}>
+              <Button busy={acting === doing.openChange} disabled={pending && acting !== doing.openChange} onClick={onOpenChange}>
                 {text.openChange}
+              </Button>
+            )}
+            {shipping && (
+              <Button
+                variant="signal"
+                busy={acting === doing.openChange}
+                disabled={pending && acting !== doing.openChange}
+                onClick={onOpenChange}
+              >
+                {text.openNewChange}
               </Button>
             )}
             {open.map((one) => (
@@ -415,6 +523,24 @@ const PAGE_HOSTS: ReadonlyArray<readonly [RegExp, string]> = [
   [/(^|\.)gitea\./, 'Gitea'],
   [/(^|\.)forgejo\./, 'Forgejo'],
 ]
+
+/**
+ * A task's pull requests as its outputs show them: in each of its
+ * repositories the latest, the open one else the newest, and the earlier
+ * ones of its rounds of work before it, newest first.
+ */
+export const latestOf = (changes: ReadonlyArray<ChangeSummary>) => {
+  const byRepository = new Map<string, Array<ChangeSummary>>()
+  for (const change of changes) {
+    const where = change.slug ?? change.repository
+    byRepository.set(where, [...(byRepository.get(where) ?? []), change])
+  }
+  const latest = [...byRepository.values()].flatMap((all) => {
+    const one = all.find((change) => change.state === 'open') ?? all.at(-1)
+    return one === undefined ? [] : [one]
+  })
+  return { latest, earlier: changes.filter((change) => !latest.includes(change)).toReversed() }
+}
 
 /** Whether a task has outputs to show: a pull request, or anything changed or committed on its branch. */
 export const hasOutputs = ({ task }: ThreadSnapshot) =>

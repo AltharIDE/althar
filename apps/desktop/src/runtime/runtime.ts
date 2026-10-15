@@ -1,14 +1,15 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
-import { hostname } from 'node:os'
+import { existsSync, mkdirSync } from 'node:fs'
+import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
-import { connection, databaseIn, Folders, Nudges, Secrets, SecretsUnavailable, services } from '@althar/runtime'
+import { backupsIn, connection, databaseIn, Folders, Nudges, Secrets, SecretsUnavailable, services, UsageData } from '@althar/runtime'
 import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Queue, Stream } from 'effect'
 import { net } from 'electron'
 import { editorsHere, openInEditor } from './editors'
+import { type Device, deviceHere } from './onDevice'
 import { openInBrowser, openInTerminal } from './terminal'
 
 /*
@@ -17,7 +18,12 @@ import { openInBrowser, openInTerminal } from './terminal'
  * over the port the main process hands it. What comes to need the person, it
  * tells the main process, which notifies them. Asked to shut down, it stops
  * every session, records it, and exits. Its secrets are kept sealed in the
- * profile; the main process seals and opens them.
+ * profile; the main process seals and opens them. If an update couldn't move
+ * the store (it couldn't be copied first, or a migration didn't finish), it
+ * tells the main process what stopped it and where the copy is, serves
+ * nothing, and waits to be shut down: a restart would only stop the same way.
+ * What usage data says happened goes to the main process too, which sends it
+ * only while the person allows it.
  */
 
 type Port = Parameters<typeof emitterPort>[0]
@@ -57,8 +63,12 @@ const clientIds = Object.fromEntries(
   ).flatMap(([product, id]) => (id === undefined || id === '' ? [] : [[product, id]])),
 )
 
+/** Althar's GitHub App, by its slug, for where it is installed on an owner; with its id, GitHub's browser sign-in asks to be let in. */
+const githubApp =
+  process.env.ALTHAR_GITHUB_APP === undefined || process.env.ALTHAR_GITHUB_APP === '' ? undefined : process.env.ALTHAR_GITHUB_APP
+
 /* Secrets the main process is sealing or opening, by request. */
-const sealing = new Map<string, (answer: { readonly value?: string; readonly error?: string }) => void>()
+const sealing = new Map<string, (answer: { readonly value?: string; readonly error?: string; readonly keyring?: boolean }) => void>()
 
 /** Asks the main process to seal a secret, or open one; it alone holds the key. */
 const askMain = (type: 'seal' | 'open', value: string) =>
@@ -67,7 +77,12 @@ const askMain = (type: 'seal' | 'open', value: string) =>
     sealing.set(requestId, (answer) =>
       resume(
         answer.value === undefined
-          ? Effect.fail(new SecretsUnavailable({ reason: answer.error ?? 'Althar couldn’t open its keychain.' }))
+          ? Effect.fail(
+              new SecretsUnavailable({
+                reason: answer.error ?? 'Althar couldn’t open its keychain.',
+                ...(answer.keyring === true ? { keyring: true } : {}),
+              }),
+            )
           : Effect.succeed(answer.value),
       ),
     )
@@ -96,17 +111,57 @@ const appFetch: Fetch = (input, init) => net.fetch(input, init)
 /** OpenRouter's public list of models, with each one's scores and prices (ADR-015). */
 const MODEL_LIST = 'https://openrouter.ai/api/v1/models'
 
+/* The device outside a Flatpak, once its reach is measured at startup; everything is local until then, and anywhere but a Flatpak (onDevice.ts). */
+let device: Device | undefined
+/*
+ * The end-to-end tests' update that can't move the store: a migration after
+ * every real one that always fails, so it is never recorded. Packaged builds
+ * leave this out.
+ */
+const failingUpdate =
+  __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAIL_MIGRATION === '1'
+    ? { extraMigrations: [{ key: '9999_fails_on_purpose', statements: ['INSERT INTO no_such_table VALUES (1)'] }] }
+    : {}
+
 const options = {
   database: databaseIn(profile),
+  // A copy of the store before an update migrates it, the newest three.
+  backups: backupsIn(profile),
+  ...failingUpdate,
   worktreeRoot: required('ALTHAR_WORKTREES'),
   accountsRoot: join(profile, 'accounts'),
+  // Pictures agents hand back and what commands print, by digest; the main process serves the pictures from here.
+  artifactsRoot: join(profile, 'artifacts'),
   // Agents the person asked Althar to download, kept in the profile, never on their PATH.
   agentsRoot: join(profile, 'agents'),
   openTerminal: openInTerminal,
   openUrl: openInBrowser,
-  editors: { list: () => editorsHere(), open: openInEditor },
+  editors: {
+    list: () =>
+      device === undefined
+        ? editorsHere()
+        : editorsHere(homedir(), existsSync, process.platform, (known) =>
+            known.cli === undefined ? null : (device?.onDevice.where(known.cli.name) ?? null),
+          ),
+    open: (editor: string, folder: string, file: string | null, line: number | null) =>
+      device === undefined
+        ? openInEditor(editor, folder, file, line)
+        : openInEditor(editor, folder, file, line, process.platform, {
+            find: (name) => device?.onDevice.where(name) ?? null,
+            start: device.start,
+            path: device.path,
+          }),
+  },
   appVersion: process.env.ALTHAR_APP_VERSION ?? '0.0.0',
   deviceName: hostname(),
+}
+
+/** The machine the end-to-end tests name in `ALTHAR_MACHINE`, as `cores,GB`; without one, a large one: 64 cores and 256 GB. */
+const machineIn = (named: string | undefined) => {
+  const [cores, memory] = (named ?? '').split(',').map(Number)
+  return cores !== undefined && memory !== undefined && cores > 0 && memory > 0
+    ? { cores, memory: memory * 1024 ** 3 }
+    : { cores: 64, memory: 256 * 1024 ** 3 }
 }
 
 /* Ports and folders that arrive before the runtime is ready wait here. */
@@ -117,25 +172,44 @@ const ready = new Promise<Context.Context<Folders>>((resolve) => {
   isReady = resolve
 })
 
+/** The store an update couldn't move: what stopped, the copy from before (if one was made), and what was said. */
+const storeStopped = (stopped: 'moving' | 'copying', backup: string | null, reason: string) =>
+  Effect.andThen(
+    Effect.sync(() => parent.postMessage({ type: 'store-failed', stopped, backup, reason })),
+    Effect.never,
+  )
+
 const program = Effect.gen(function* () {
+  // In a Flatpak, the person's own agents and editors live outside the sandbox: where they are, and how to run them there.
+  device = yield* deviceHere()
+  // The Codex its adapter drives, out on the device, where Codex's own sandbox works (flatpak/codex-host.sh says why, and what to do without one).
+  if (process.env.FLATPAK_ID !== undefined) process.env.CODEX_PATH = '/app/bin/althar-host-codex'
   // The end-to-end tests drive the app against a scripted agent and a fake code host, keeping tokens in memory. Packaged builds leave this out.
   const fake =
     __ALTHAR_TEST_HOOKS__ && process.env.ALTHAR_FAKE_AGENTS === '1'
       ? {
           agents: (yield* Effect.promise(() => import('./fakeAgents'))).fakeAgents,
-          connectors: (yield* Effect.promise(() => import('./fakeConnectors'))).fakeConnectors,
+          // Every service, on a demo profile; else the end-to-end tests' GitHub.
+          connectors: yield* Effect.promise(() =>
+            import('./fakeConnectors').then((loaded) =>
+              process.env.ALTHAR_FAKE_CONNECTORS === 'demo' ? loaded.demoConnectors : loaded.fakeConnectors,
+            ),
+          ),
           secrets: Secrets.memory(),
           // Nothing opens in Terminal while the tests drive the app.
           openTerminal: () => Effect.succeed(false),
           openUrl: () => Effect.succeed(false),
+          // How many agents work at once comes from the machine a test names (`cores,GB`), else a large one, never the one running them.
+          busy: { machine: machineIn(process.env.ALTHAR_MACHINE) },
         }
       : undefined
   const context = yield* Layer.build(
     services(
       fake === undefined
         ? {
-            ...options,
+            ...(device === undefined ? options : { ...options, onDevice: device.onDevice, probeRoot: join(profile, 'probe') }),
             clientIds,
+            ...(githubApp === undefined ? {} : { githubApp }),
             secrets,
             fetch: appFetch,
             // What is known of models, for the coordinator to weigh (ADR-015): fetched as the runtime starts, kept in the profile.
@@ -143,11 +217,21 @@ const program = Effect.gen(function* () {
           }
         : { ...options, ...fake },
     ),
+  ).pipe(
+    Effect.catchTags({
+      MigrationFailed: (failure) => storeStopped('moving', failure.backup, failure.reason),
+      ForeignKeyViolations: (failure) =>
+        storeStopped('moving', failure.backup, `Rows in ${failure.tables.join(', ')} point at rows that aren’t there.`),
+      BackupFailed: (failure) => storeStopped('copying', null, failure.reason),
+    }),
   )
   isReady(context)
   // What needs the person goes to the main process, which notifies them and keeps the Dock's count.
   yield* Effect.forkScoped(
     Stream.runForEach(Context.get(context, Nudges).events, (event) => Effect.sync(() => parent.postMessage({ type: 'nudge', event }))),
+  )
+  yield* Effect.forkScoped(
+    Stream.runForEach(Context.get(context, UsageData).events, (usage) => Effect.sync(() => parent.postMessage({ type: 'usage', usage }))),
   )
   const ports = yield* Queue.unbounded<Port>()
   accept = (port) => void Queue.offerUnsafe(ports, port)

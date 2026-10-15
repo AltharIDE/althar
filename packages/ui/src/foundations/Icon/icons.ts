@@ -1,4 +1,5 @@
 import {
+  Activity,
   Archive,
   ArrowDown,
   ArrowRight,
@@ -27,6 +28,7 @@ import {
   MediaImage,
   Microphone,
   NavArrowDown,
+  NavArrowLeft,
   NavArrowRight,
   OpenNewWindow,
   Page,
@@ -75,6 +77,7 @@ export const ICONS = {
   knowledge: Book,
   artifact: Archive,
   chevron: NavArrowRight,
+  chevronL: NavArrowLeft,
   chevronD: NavArrowDown,
   arrow: ArrowRight,
   close: Xmark,
@@ -119,6 +122,8 @@ export const ICONS = {
   clock: Clock,
   /** Keeps the Mac awake while work runs. */
   cup: CoffeeCup,
+  /** How hard the computer works. */
+  load: Activity,
   /** Notifications. */
   bell: Bell,
   /** A sound, as a notification plays it. */

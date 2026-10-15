@@ -15,14 +15,16 @@ export interface DeviceWords {
   readonly the: string
   /** Where an app's icon carries a count, where the system has one: the Dock, Linux's launcher; Windows has none. */
   readonly count: string | null
+  /** The system's file manager: Finder, File Explorer, Files. */
+  readonly files: string
 }
 
 export const deviceWords = (platform: string): DeviceWords =>
   platform === 'darwin'
-    ? { this: 'this Mac', This: 'This Mac', the: 'the Mac', count: 'the Dock icon' }
+    ? { this: 'this Mac', This: 'This Mac', the: 'the Mac', count: 'the Dock icon', files: 'Finder' }
     : platform === 'win32'
-      ? { this: 'this PC', This: 'This PC', the: 'the PC', count: null }
-      : { this: 'this computer', This: 'This computer', the: 'the computer', count: 'the launcher icon' }
+      ? { this: 'this PC', This: 'This PC', the: 'the PC', count: null, files: 'File Explorer' }
+      : { this: 'this computer', This: 'This computer', the: 'the computer', count: 'the launcher icon', files: 'Files' }
 
 /** The system Althar runs on, as Node names it: darwin, win32, linux. */
 export const platform: string =

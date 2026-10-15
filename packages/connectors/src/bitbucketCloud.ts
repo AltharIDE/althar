@@ -1,5 +1,6 @@
 import { Effect, Schema } from 'effect'
 
+import { type Access, type AccessLine, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { tail } from './github'
@@ -18,6 +19,23 @@ import type {
   Review,
   Verdict,
 } from './model'
+import { noReviews } from './model'
+import {
+  type Answer,
+  answered,
+  failedOf,
+  limited,
+  probe,
+  type Reached,
+  reachLine,
+  readAs,
+  refusalOf,
+  seenOf,
+  stopped,
+  troubled,
+  UNREADABLE,
+  UNSAID,
+} from './probe'
 
 /*
  * Bitbucket Cloud: a code host of pull requests over its REST API
@@ -353,7 +371,7 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: false },
     account,
     repository: (path) =>
       Effect.gen(function* () {
@@ -540,6 +558,9 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
         // Althar's own reply: whether it counts as a member's doesn't matter, it is known by its receipt.
         (comment) => commentOf(comment, reply.threadId ?? String(comment.id), true),
       ),
+    // Reviews of a change Althar didn't open are GitHub's alone, for now.
+    changeToReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
+    postReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
     pushTarget: (repository) =>
       Effect.map(options.credential, (credential) => ({
         url: `${web}/${repository.path.join('/')}.git`,
@@ -550,3 +571,145 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
       })),
   }
 }
+
+/*
+ * What a Bitbucket Cloud connection can do. An Atlassian API token is made
+ * with scopes, and Bitbucket says which it was given only as it refuses a
+ * call for one: so the scopes are learnt from refusals, and where nothing
+ * Althar needs was refused, from a read Althar's token isn't made for. The
+ * account's own permission on a repository is its workspace's to say.
+ */
+
+/** Bitbucket's refusal of a token without a scope: the scopes it was given, and those the call needs. */
+const ScopesRefused = Schema.Struct({
+  error: Schema.Struct({
+    detail: Schema.Struct({
+      granted: Schema.optional(Schema.Array(Schema.String)),
+      required: Schema.optional(Schema.Array(Schema.String)),
+    }),
+  }),
+})
+
+/** Where an Atlassian account's API tokens are made and listed. */
+const TOKENS = 'https://id.atlassian.com/manage-profile/security/api-tokens'
+
+/** Bitbucket's permissions on a repository, the least first. */
+const PERMISSIONS = ['read', 'write', 'admin']
+
+/** A repository it sees, and the account's own permission there, where Bitbucket says. */
+interface Found {
+  readonly path: ReadonlyArray<string>
+  readonly permission: string | null
+}
+
+export const accessBitbucketCloud: Access = (input) =>
+  Effect.gen(function* () {
+    const api = input.apiUrl.replace(/\/+$/, '')
+    const ask = (url: string) => probe(input, url)
+    const repo = (path: ReadonlyArray<string>) => `${api}/repositories/${path.map(encodeURIComponent).join('/')}`
+    /** The scopes the token was given, once a refusal says. */
+    const said: { granted: ReadonlyArray<string> | null } = { granted: null }
+    /** Whether Bitbucket refused for a scope, as opposed to a rate limit; what it says it gave the token is kept. */
+    const refusedForScope = (answer: Answer) => {
+      if (answer.status !== 403 || limited(answer)) return false
+      const granted = readAs(ScopesRefused, answer)?.error.detail.granted
+      if (granted !== undefined) said.granted = granted
+      return true
+    }
+    /** The scope a refused call needs and the token wasn't given, or else the one Althar knows it needs. */
+    const missing = (answer: Answer, needed: string): AccessReason => {
+      const detail = readAs(ScopesRefused, answer)?.error.detail
+      const required = detail?.required ?? []
+      const scope = required.find((name) => !(detail?.granted ?? []).includes(name)) ?? required[0] ?? needed
+      return { kind: 'scope', scope, url: TOKENS }
+    }
+
+    const me = yield* ask(`${api}/user`)
+    if (!answered(me))
+      return {
+        ...stopped([line('account', 'no', { reason: refusedForScope(me) ? missing(me, 'read:user:bitbucket') : refusalOf(me) })]),
+        scopes: said.granted,
+      }
+    const user = readAs(User, me)
+    if (user === undefined) return stopped([line('account', 'no', { reason: UNREADABLE })])
+    const { id, login, name } = personOf(user)
+    const lines: Array<AccessLine> = [line('account', 'ok', { fact: login })]
+
+    const reachOf = (path: ReadonlyArray<string>) =>
+      Effect.gen(function* () {
+        const at = path.slice(0, 2)
+        const answer = yield* ask(repo(at))
+        if (!answered(answer))
+          return {
+            path,
+            missed:
+              answer.status === 404
+                ? { kind: 'unseen', names: [path.join('/')], url: null }
+                : refusedForScope(answer)
+                  ? missing(answer, 'read:repository:bitbucket')
+                  : failedOf(answer),
+          } satisfies Reached<Found>
+        const found = readAs(RepositoryAnswer, answer)
+        if (found === undefined) return { path, missed: UNREADABLE } satisfies Reached<Found>
+        // The account's own permission, asked as the adapter asks it: by the repository's name, matched by its full one.
+        const workspace = found.full_name.split('/')[0] ?? ''
+        const permissions = yield* ask(
+          `${api}/user/workspaces/${encodeURIComponent(workspace)}/permissions/repositories?q=${encodeURIComponent(`repository.name = ${quoted(found.name)}`)}`,
+        )
+        refusedForScope(permissions)
+        const permission = answered(permissions)
+          ? readAs(Permissions, permissions)?.values.find((one) => one.repository.full_name === found.full_name)?.permission
+          : undefined
+        return { path, seen: { path: at, permission: permission ?? null } } satisfies Reached<Found>
+      })
+    const reached: ReadonlyArray<Reached<Found>> = yield* Effect.forEach(input.repositories, reachOf, { concurrency: 4 })
+    const seen = seenOf(reached)
+    // The least permission among the repositories it sees, of those Bitbucket said.
+    const permission = PERMISSIONS.find((one) => seen.some((found) => found.permission === one)) ?? null
+    if (reached.length > 0) lines.push(reachLine(reached, permission))
+
+    const [first] = seen
+    const pulls = first === undefined ? null : yield* ask(`${repo(first.path)}/pullrequests?pagelen=1`)
+    const pipelines = first === undefined ? null : yield* ask(`${repo(first.path)}/pipelines/?pagelen=1`)
+    const pullsRefused = pulls !== null && refusedForScope(pulls) ? missing(pulls, 'read:pullrequest:bitbucket') : null
+    const pipelinesRefused = pipelines !== null && refusedForScope(pipelines) ? missing(pipelines, 'read:pipeline:bitbucket') : null
+    // Nothing refused has said which scopes it was given: a read of the workspace's webhooks, which Althar's token isn't made for, does.
+    const workspace = first?.path[0] ?? input.repositories[0]?.[0]
+    if (said.granted === null && workspace !== undefined)
+      refusedForScope(yield* ask(`${api}/workspaces/${encodeURIComponent(workspace)}/hooks`))
+    const { granted } = said
+    const scope = (name: string): AccessReason => ({ kind: 'scope', scope: name, url: TOKENS })
+    const role: AccessReason | null = permission === 'read' ? { kind: 'role', role: 'read' } : null
+
+    const pushLine = (): AccessLine => {
+      if (role !== null) return line('push', 'no', { reason: role })
+      if (granted !== null && !granted.includes('write:repository:bitbucket'))
+        return line('push', 'no', { reason: scope('write:repository:bitbucket') })
+      return permission === 'write' || permission === 'admin' ? line('push', 'ok') : line('push', 'unknown', { reason: UNSAID })
+    }
+    const changesLine = (): AccessLine => {
+      if (pullsRefused !== null) return line('changes', 'no', { reason: pullsRefused })
+      if (pulls !== null && troubled(pulls)) return line('changes', 'no', { reason: failedOf(pulls) })
+      // Merging needs write, whatever the token was given.
+      if (role !== null) return line('changes', 'no', { reason: role })
+      if (granted === null) return line('changes', 'unknown', { reason: UNSAID })
+      return granted.includes('write:pullrequest:bitbucket')
+        ? line('changes', 'ok')
+        : line('changes', 'no', { reason: scope('write:pullrequest:bitbucket') })
+    }
+    const checksLine = (): AccessLine => {
+      if (pipelinesRefused !== null) return line('checks', 'no', { reason: pipelinesRefused })
+      // Answered, or not found where a repository has Pipelines off.
+      if (pipelines !== null)
+        return answered(pipelines) || pipelines.status === 404
+          ? line('checks', 'ok')
+          : line('checks', 'no', { reason: failedOf(pipelines) })
+      if (granted === null) return line('checks', 'unknown', { reason: UNSAID })
+      return granted.includes('read:pipeline:bitbucket')
+        ? line('checks', 'ok')
+        : line('checks', 'no', { reason: scope('read:pipeline:bitbucket') })
+    }
+    lines.push(pushLine(), changesLine(), checksLine())
+
+    return { account: { id, login, name }, lines, expiresAt: null, scopes: granted }
+  })

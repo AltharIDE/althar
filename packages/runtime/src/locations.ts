@@ -38,3 +38,6 @@ export const defaultWorktrees = (env: NodeJS.ProcessEnv, home = homedir(), exist
 /** The profile's database, under the name Charrette gave it in a profile it left. */
 export const databaseIn = (profile: string, exists: Exists = existsSync) =>
   either(join(profile, 'althar.sqlite'), join(profile, 'charrette.sqlite'), exists)
+
+/** Where the store copies itself before an update migrates it: the newest three copies. */
+export const backupsIn = (profile: string) => join(profile, 'backups')

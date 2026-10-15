@@ -1,4 +1,4 @@
-import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
+import { createMemoryHistory, createRoute, createRouter, RouterProvider } from '@tanstack/react-router'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -65,12 +65,41 @@ describe('going from one task to another', () => {
     // Under way, the second opens on its conversation, though the first had opened on its outputs.
     expect(await screen.findByRole('region', { name: 'Thread' })).toBeTruthy()
     expect(screen.queryByRole('article', { name: 'Running one' })).toBeNull()
-    // Its bar goes back to its own project, and that project's tab to it, not to the first.
+    // Its way back goes to its own project, over its own title, and that project's tab to it, not to the first.
     expect(await screen.findByRole('button', { name: 'Back to p2' })).toBeTruthy()
-    expect(screen.getByRole('navigation', { name: 'Where you are' }).textContent).toContain('Running one')
+    expect(screen.getByRole('heading', { name: 'Running one' })).toBeTruthy()
     await waitFor(() =>
       expect(keptFrom(window.localStorage.getItem('althar.tabs'))?.places.p2).toEqual({ kind: 'thread', threadId: 'thb' }),
     )
     expect(keptFrom(window.localStorage.getItem('althar.tabs'))?.places.p1).not.toEqual({ kind: 'thread', threadId: 'thb' })
+  })
+})
+
+describe('a coordinator’s thread', () => {
+  it('opens as its project’s conversation, as a question the coordinator asks does from the home or a notification', async () => {
+    const getThread = vi.fn(async () => snapshot())
+    const { client } = fakeClient({
+      getThread,
+      listProjects: vi.fn(async () => ({ cursor: 3, projects: [{ ...project, coordinatorThreadId: 'thc' }] })),
+    })
+    const services = servicesFor(client)
+    const projectRoute = createRoute({
+      getParentRoute: () => rootRoute,
+      path: '/projects/$projectId',
+      validateSearch: (search: Record<string, unknown>) => ({ room: String(search.room) }),
+      component: () => <p>{`project ${projectRoute.useParams().projectId} ${projectRoute.useSearch().room}`}</p>,
+    })
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([taskRoute, projectRoute]),
+      history: createMemoryHistory({ initialEntries: ['/threads/thc'] }),
+      context: { client, cache: services.cache },
+    })
+    render(
+      <ServicesProvider value={services}>
+        <RouterProvider router={router} />
+      </ServicesProvider>,
+    )
+    expect(await screen.findByText(`project ${project.id} talk`)).toBeTruthy()
+    expect(getThread).not.toHaveBeenCalled()
   })
 })

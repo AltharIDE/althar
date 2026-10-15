@@ -6,9 +6,9 @@ import { AcceptPeek, ActionButton, Dock, type PeekStep, TaskStatus, TrackStep, W
 
 import { keys, reads } from '../../data/reads'
 import { useServices } from '../../data/services'
-import { waitsWords } from '../../shared/agents'
+import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModelNames } from '../../shared/modelNames'
-import { callKindOf } from '../../shared/calls'
+import { callKindOf, whereOf } from '../../shared/calls'
 import { checkOf } from '../../shared/checks'
 import { mergeHereLabel } from '../../shared/mergeHere'
 import { productBrand, productName } from '../../shared/products'
@@ -41,6 +41,7 @@ export const text = {
   openTask: 'Open the task',
   review: 'Review the changes',
   openChange: 'Open a pull request',
+  openNewChange: 'Open a new pull request',
   stepNote: { now: 'now', done: 'done' },
 }
 
@@ -107,7 +108,7 @@ export function DockView({
   const board = model.board
   const call = target.kind === 'call' ? board?.calls.find((candidate) => candidate.id === target.id) : undefined
   const task = target.kind === 'task' ? board?.tasks.find((candidate) => candidate.taskId === target.id) : undefined
-  const head = useHead(task?.phase === 'ready' && task.change !== null ? task.threadId : null, board?.cursor ?? 0)
+  const head = useHead(task?.phase === 'ready' && task.change?.state === 'open' ? task.threadId : null, board?.cursor ?? 0)
   useThreadAhead(call?.threadId ?? task?.threadId ?? null)
   const named = useModelNames()
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
@@ -122,8 +123,9 @@ export function DockView({
   if (call !== undefined) {
     const stuck = call.stuck
     return (
-      <Dock label={label} name={callKindOf(call)} sub={`${call.taskTitle} · ${ago(call.createdAt, new Date(now))}`} call onClose={onClose}>
-        {stuck === null ? (
+      <Dock label={label} name={callKindOf(call)} sub={`${whereOf(call)} · ${ago(call.createdAt, new Date(now))}`} call onClose={onClose}>
+        {/* A question is answered where it was asked: the task opens to it. */}
+        {call.kind === 'question' ? null : stuck === null ? (
           <PermissionCall request={call} project={project} onAnswer={model.answer} />
         ) : (
           <StuckCall
@@ -145,7 +147,8 @@ export function DockView({
   const sub = task.branch ?? task.slug
   const change = task.change
 
-  if (task.phase === 'ready' && change !== null) {
+  // Ready with its pull request open, it is accepted here; one merged or closed, with commits after it, opens a new one below.
+  if (task.phase === 'ready' && change !== null && change.state === 'open') {
     const brand = productBrand(change.product)
     return (
       <Dock label={label} name={text.phase.ready} sub={sub} onClose={onClose}>
@@ -173,6 +176,12 @@ export function DockView({
           text={{ number: (n: number) => `${change.prefix}${n}` }}
         />
         <div className={s.actions}>
+          {/* Another of its repositories, whose last pull request merged with commits after it, opens a new one. */}
+          {task.unshipped != null && (
+            <ActionButton icon="pr" disabled={model.opening === task.taskId} onClick={() => void model.openChange(task.taskId)}>
+              {text.openNewChange}
+            </ActionButton>
+          )}
           {/* A repository of the task that ended on its branch merges here, beside the pull request of the rest. */}
           {task.here.length > 0 && (
             <ActionButton icon="branch" disabled={model.merging === task.taskId} onClick={() => void model.mergeHere(task)}>
@@ -199,19 +208,23 @@ export function DockView({
         title={task.title}
         {...(waiting !== null
           ? { note: waiting }
-          : task.waits !== null
-            ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until)) }
-            : task.summary === null
-              ? {}
-              : { note: task.summary.split('\n')[0] ?? '' })}
+          : task.queued !== null
+            ? { note: queuedWords(task.queued) }
+            : task.waits !== null
+              ? { note: waitsWords(name(task.waits.agentId), clock(task.waits.until)) }
+              : task.summary === null
+                ? {}
+                : { note: task.summary.split('\n')[0] ?? '' })}
         status={
           task.phase === 'waiting'
             ? TaskStatus.Yours
-            : task.phase === 'stopped'
-              ? TaskStatus.Stopped
-              : task.phase === 'running'
-                ? TaskStatus.Running
-                : TaskStatus.Done
+            : task.queued !== null
+              ? TaskStatus.Queued
+              : task.phase === 'stopped'
+                ? TaskStatus.Stopped
+                : task.phase === 'running'
+                  ? TaskStatus.Running
+                  : TaskStatus.Done
         }
         steps={stepsOf(task)}
         lead={lead}
@@ -236,6 +249,12 @@ export function DockView({
         {task.phase === 'ready' && change === null && (
           <ActionButton icon="pr" disabled={model.opening === task.taskId} onClick={() => void model.openChange(task.taskId)}>
             {text.openChange}
+          </ActionButton>
+        )}
+        {/* Its last pull request merged or closed, the commits after it go in a new one (ADR-034). */}
+        {task.phase === 'ready' && change !== null && task.unshipped != null && (
+          <ActionButton icon="pr" disabled={model.opening === task.taskId} onClick={() => void model.openChange(task.taskId)}>
+            {text.openNewChange}
           </ActionButton>
         )}
         <ActionButton icon="arrow" onClick={() => onTask(task.threadId)}>

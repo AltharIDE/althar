@@ -1,20 +1,27 @@
 import { Brand, BrandMark, Logo } from '@althar/ui'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { INSTALL, LINKS } from '../content/facts'
-import { detectOs, type Os, OS_NAME, OsMark } from './OsMark'
+import { useDownload } from '../lib/download'
+import { OS_NAME, OsMark } from './OsMark'
 import { BRAND, CLOSE } from '../content/home'
 import { SHIFTS } from './Bar'
 import s from './Close.module.css'
 
-/** The download and the repository, as both developer pages end. The download is for the system the page is read on; a phone gets the Mac's. */
+/**
+ * The download and the repository, as both developer pages end. The download
+ * is the latest release's installer for the system the page is read on
+ * (useDownload), named; until that is known it reads as the Mac's, and where
+ * there is none it is a plain Download to the releases page.
+ */
 export function Get({ tone }: { tone: 'blue' | 'paper' }) {
-  const [os] = useState<Os>(() => detectOs() ?? 'mac')
+  const download = useDownload()
+  const os = download.pending ? 'mac' : download.os
   return (
     <div className={tone === 'blue' ? s.getBlue : s.get}>
-      <a className={s.primary} href={LINKS.releases}>
-        <OsMark id={os} size={16} />
-        Download for {OS_NAME[os]}
+      <a className={s.primary} href={download.href}>
+        {os && <OsMark id={os} size={16} />}
+        {os ? `Download for ${OS_NAME[os]}` : 'Download'}
       </a>
       <a className={s.secondary} href={LINKS.repo}>
         <BrandMark brand={Brand.GitHub} size={16} />

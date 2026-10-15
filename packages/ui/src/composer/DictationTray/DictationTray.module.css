@@ -1,0 +1,122 @@
+/* A tray on the composer's top edge, a shade off the paper it sits on; its bottom edge is the download's bar. */
+.tray {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  padding: 7px 8px 8px 12px;
+  border: 1px solid var(--line-2);
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  background: var(--n-3);
+  color: var(--t-2);
+  animation: rise var(--base) var(--ease);
+  /* narrow, the actions go under the words */
+  flex-wrap: wrap;
+}
+
+/* the icon and the words stay together; only the actions go under them */
+.main {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  gap: 9px;
+}
+
+.icon {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 3px;
+  color: var(--t-3);
+}
+
+.words {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.head {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-1);
+}
+
+.facts {
+  color: var(--t-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+
+.actions {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* the download, along the tray's bottom edge where it meets the composer */
+.bar {
+  position: absolute;
+  left: -1px;
+  bottom: -1px;
+  z-index: 1;
+  width: calc(100% + 2px);
+  height: 1.5px;
+  border: 0;
+  background: transparent;
+  appearance: none;
+}
+
+.bar::-webkit-progress-bar {
+  background: transparent;
+}
+
+.bar::-webkit-progress-value {
+  background: var(--live);
+  transition: width var(--fast) linear;
+}
+
+.bar::-moz-progress-bar {
+  background: var(--live);
+}
+
+/* stopped partway: what came down stays drawn, out of motion */
+.barStopped::-webkit-progress-value {
+  background: var(--t-3);
+}
+
+.barStopped::-moz-progress-bar {
+  background: var(--t-3);
+}
+
+.live {
+  font: inherit;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tray {
+    animation: none;
+  }
+  .bar::-webkit-progress-value {
+    transition: none;
+  }
+}

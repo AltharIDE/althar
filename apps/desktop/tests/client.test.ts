@@ -79,6 +79,9 @@ describe('the client', () => {
 
     const task = await client.createTask({ projectId: project.id, title: 'Say hello' })
     expect((await client.listTasks(project.id)).tasks.map((each) => each.title)).toEqual(['Say hello'])
+    // Found by a word begun, in its project and across every one.
+    expect((await client.searchTasks({ projectId: project.id, text: 'hel' })).tasks.map((each) => each.title)).toEqual(['Say hello'])
+    expect((await client.searchTasks({ text: 'goodbye' })).tasks).toEqual([])
     await client.startSession({ threadId: task.threadId, agentId: 'claude-code' })
     await eventually(
       () => client.getThread(task.threadId),
@@ -104,7 +107,15 @@ describe('the client', () => {
     expect(offered.find((agent) => agent.agentId === 'claude-code')).toMatchObject({ model: 'large', effort: 'high' })
     await client.interrupt(task.threadId)
     await client.switchAgent({ threadId: task.threadId, agentId: 'codex', model: 'small', effort: 'low' })
-    await client.stopSession(task.threadId)
+    // Stopped as a task: every agent on it stops, and nothing is left to stop.
+    await client.stopTask(task.id)
+    expect((await client.getThread(task.threadId, { limit: 0 })).session).toBeNull()
+    await client.renameTask(task.id, 'A better title')
+    expect((await client.getThread(task.threadId, { limit: 0 })).task.title).toBe('A better title')
+    await client.abandonTask(task.id)
+    expect((await client.getThread(task.threadId, { limit: 0 })).task.actions).toEqual(['reopen'])
+    await client.reopenTask(task.id)
+    expect((await client.getThread(task.threadId, { limit: 0 })).task.actions).toEqual(['abandon'])
     unwatch()
     await client.close()
   })
@@ -168,6 +179,27 @@ describe('the client', () => {
     await client.close()
   })
 
+  it('asks what connecting starts from, and is told what it can’t do, in words', async () => {
+    const { client } = await connected()
+    const guide = await client.getConnectGuide('linear')
+    expect([guide.places, guide.clis, guide.tokenPages.map((page) => page.product)]).toEqual([[], [], ['linear']])
+    expect(await client.findServer('jira', 'not a host')).toMatchObject({ product: null, reason: 'invalid' })
+    // gh's sign-in goes nowhere but over HTTPS to an instance Althar knows.
+    expect(messageOf(await client.connectCli('github', 'http://github.com').catch((error: unknown) => error))).toBe(
+      "Althar only gives gh's sign-in to a server it knows, over HTTPS. http://github.com isn't one.",
+    )
+    // A connection to sign in again, or to check, that isn't there.
+    for (const call of [
+      client.connectCli('github', 'https://github.com', 'conn_gone'),
+      client.startSignIn('github', 'https://github.com', 'conn_gone'),
+      client.checkConnection('conn_gone'),
+      client.connectToken({ product: 'linear', token: 'lin_api_x', connectionId: 'conn_gone' }),
+    ])
+      await expect(call).rejects.toBeInstanceOf(ApiError)
+    await expect(client.startSignIn('trello')).rejects.toBeInstanceOf(ApiError)
+    await client.close()
+  })
+
   it('tries a command once more, under the same id, when the runtime gave no answer; and watches again from the last change', async () => {
     const channel = new MessageChannel()
     const commands: Array<string> = []
@@ -180,23 +212,31 @@ describe('the client', () => {
           Status: () => Effect.die('unused'),
           GetFileDiff: () => Effect.die('unused'),
           GetBoard: () => Effect.die('unused'),
+          GetOlderSettled: () => Effect.die('unused'),
           GetHome: () => Effect.die('unused'),
           LeftHome: () => Effect.die('unused'),
+          SeeTask: () => Effect.die('unused'),
           Merge: () => Effect.die('unused'),
           ReadFolder: () => Effect.die('unused'),
           Push: () => Effect.die('unused'),
+          ReplacePullRequest: () => Effect.die('unused'),
+          MergeNote: () => Effect.die('unused'),
           MergeHere: () => Effect.die('unused'),
           PushHere: () => Effect.die('unused'),
           PushBranch: () => Effect.die('unused'),
           ListEditors: () => Effect.die('unused'),
+          GetLoad: () => Effect.die('unused'),
           InstallAgent: () => Effect.die('unused'),
           OpenInEditor: () => Effect.die('unused'),
           ListProjects: () => Effect.die('unused'),
           OpenProject: () => Effect.die('unused'),
           ListTasks: () => Effect.die('unused'),
+          SearchTasks: () => Effect.die('unused'),
           CreateTask: () => Effect.die('unused'),
           GetThread: () => Effect.die('unused'),
           GetThreadItem: () => Effect.die('unused'),
+          ReadOutput: () => Effect.die('unused'),
+          ReadDocument: () => Effect.die('unused'),
           // The first try gets no answer the client can read; the second works.
           StartSession: ({ commandId }) => {
             commands.push(commandId)
@@ -210,6 +250,8 @@ describe('the client', () => {
           SetModelBlocked: () => Effect.die('unused'),
           GetSettings: () => Effect.die('unused'),
           SetCoAuthor: () => Effect.die('unused'),
+          SetPostTeamReviews: () => Effect.die('unused'),
+          SetAgentsAtOnce: () => Effect.die('unused'),
           StartAccountSignIn: () => Effect.die('unused'),
           GetAccountSignIn: () => Effect.die('unused'),
           PasteAccountSignInCode: () => Effect.die('unused'),
@@ -220,26 +262,47 @@ describe('the client', () => {
             return refuse()
           },
           StopSession: () => Effect.die('unused'),
+          StopTask: () => Effect.die('unused'),
+          SetTaskResolveConflicts: () => Effect.die('unused'),
+          ResumeTask: () => Effect.die('unused'),
+          AbandonTask: () => Effect.die('unused'),
+          RenameTask: () => Effect.die('unused'),
+          ReopenTask: () => Effect.die('unused'),
           Send: () => Effect.die('unused'),
           TakeBack: () => Effect.die('unused'),
           Answer: () => Effect.die('unused'),
+          AnswerQuestion: () => Effect.die('unused'),
           GetCoordinator: () => Effect.die('unused'),
           StartTask: () => Effect.die('unused'),
           StartPlan: () => Effect.die('unused'),
           HoldPlan: () => Effect.die('unused'),
           ChangePlan: () => Effect.die('unused'),
+          ChangeIssueDraft: () => Effect.die('unused'),
+          FileIssueDraft: () => Effect.die('unused'),
+          DiscardIssueDraft: () => Effect.die('unused'),
+          ChangeReviewDraft: () => Effect.die('unused'),
+          PostReviewDraft: () => Effect.die('unused'),
+          DiscardReviewDraft: () => Effect.die('unused'),
           AnswerStuck: () => Effect.die('unused'),
           ListConnections: () => Effect.die('unused'),
           StartSignIn: () => Effect.die('unused'),
           GetSignIn: () => Effect.die('unused'),
           CancelSignIn: () => Effect.die('unused'),
           ConnectToken: () => Effect.die('unused'),
+          GetConnectGuide: () => Effect.die('unused'),
+          FindServer: () => Effect.die('unused'),
+          ConnectCli: () => Effect.die('unused'),
+          CheckConnection: () => Effect.die('unused'),
           Disconnect: () => Effect.die('unused'),
           ListIssues: () => Effect.die('unused'),
           MarkReady: () => Effect.die('unused'),
           SetUsageLimit: () => Effect.die('unused'),
           GetProjectRules: () => Effect.die('unused'),
+          GetProjectNotes: () => Effect.die('unused'),
+          DropProjectNote: () => Effect.die('unused'),
+          GetVocabulary: () => Effect.die('unused'),
           RenameProject: () => Effect.die('unused'),
+          SetProjectInk: () => Effect.die('unused'),
           RemoveProject: () => Effect.die('unused'),
           GetRepositories: () => Effect.die('unused'),
           AddRepositories: () => Effect.die('unused'),
@@ -254,7 +317,14 @@ describe('the client', () => {
           FindAccounts: () => Effect.die('unused'),
           SignInAccount: () => Effect.die('unused'),
           OpenChange: () => Effect.die('unused'),
+          SkipReview: () => Effect.die('unused'),
           RefreshTask: () => Effect.die('unused'),
+          StopListening: () => Effect.die('unused'),
+          StopBackground: () => Effect.die('unused'),
+          ClearBackground: () => Effect.die('unused'),
+          RunProject: () => Effect.die('unused'),
+          StopLaunch: () => Effect.die('unused'),
+          ClearLaunch: () => Effect.die('unused'),
           Watch: ({ since }) => {
             watches.push(since)
             return Stream.make({
@@ -284,10 +354,18 @@ describe('the client', () => {
     expect(commands).toHaveLength(3)
 
     const heard: Array<WatchEvent> = []
-    const unwatch = client.watch((event) => heard.push(event), 10)
+    // Each time it starts listening, at first and again once it broke, it says so.
+    let listening = 0
+    const unwatch = client.watch(
+      (event) => heard.push(event),
+      10,
+      () => {
+        listening += 1
+      },
+    )
     await eventually(
-      async () => watches,
-      (seen) => seen.length >= 2,
+      async () => [watches.length, listening],
+      ([seen, said]) => (seen ?? 0) >= 2 && (said ?? 0) >= 2,
     )
     unwatch()
     expect(watches.slice(0, 2)).toEqual([10, 15])

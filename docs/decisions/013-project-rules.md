@@ -1,7 +1,14 @@
 # ADR-013: Project rules: a mode, always ask, never, and command rules
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR-018](018-allow-always-keeps-a-rule.md)
+  (2026-10-10), which adds allow rules after what always asks
 - **Date:** 2026-10-04
+- **Amended:** 2026-10-10: the usage limit row offers "Ask me". The step
+  waits for the person, with each account that could take it over and when
+  the agent is back.
+  2026-10-12: the rules keep whether the project's leads resolve merge
+  conflicts on their own ([ADR-030](030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md)),
+  switched in the project's settings. Off unless the person turns it on.
 - **Owner:** Repository maintainers
 - **Context:** Every permission request reaches Althar
   ([ADR-007](007-permission-requests-reach-althar.md)), which answers it
@@ -103,7 +110,8 @@
   - **The screen offers only what Althar does.**
     - "The lead decides", the modes with a model as judge in other tools,
       comes when the lead answers requests.
-    - The review findings row and asking about a usage limit come later.
+    - The review findings row comes later. Asking about a usage limit came
+      with the amendment above.
 - **Alternatives considered:**
   - **Each agent's own rule files** (`.claude/settings.json`, Codex's rules,
     `opencode.json`). Each agent's differ in shape and reach. Althar's

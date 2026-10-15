@@ -4,11 +4,12 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect, Layer, Option } from 'effect'
+import { Effect, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { AlreadyDelivered, AttentionClosed, NoSession, NotFound, SessionFailed, SessionRunning } from '../src/errors'
 import { Instance } from '../src/Instance'
+import { Live } from '../src/Live'
 import { Permissions } from '../src/Permissions'
 import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
@@ -157,6 +158,29 @@ describe('sessions', () => {
         `echo: ${promptFor([{ body: 'use the retry helper', disposition: 'interrupt_and_continue' }], undefined)}`,
       )
     }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('stops a turn that is stopped as soon as it is said to have started', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const live = yield* Live
+        const { task: created } = yield* task()
+        yield* begin(created.threadId, 'codex')
+        // Stopped the moment it is said to have started, as a spent budget of turns does: it is said once the agent can be stopped.
+        const events = yield* live.subscribe
+        yield* Effect.forkScoped(
+          Stream.runForEach(events, (event) =>
+            event._tag === 'TurnStarted' && event.threadId === created.threadId
+              ? Effect.asVoid(Effect.forkScoped(Effect.ignore(sessions.interrupt(created.threadId))))
+              : Effect.void,
+          ),
+        )
+        yield* say(created.threadId, scenarios.slow)
+        const [turn] = yield* ended(created.threadId, 1)
+        assert.deepStrictEqual([turn?.state, turn?.stopReason], ['interrupted', 'cancelled'])
+      }),
+    ).pipe(Effect.provide(runtime())),
   )
 
   it.live('takes back a message waiting its turn, so the agent never reads it, and keeps one the agent has', () =>
@@ -352,6 +376,23 @@ describe('sessions', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('briefs the agent that takes over with what a failed command printed, not only that it failed', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { task: created } = yield* task('Fix the lint')
+      yield* begin(created.threadId, 'claude-code')
+      yield* say(created.threadId, scenarios.handsBack)
+      yield* ended(created.threadId, 1)
+      yield* sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode' })
+      yield* settled(created.threadId, 3)
+      const reply = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'agent_message').at(-1)?.content.text as string
+      assert.include(reply, 'You are taking over a task from Fake claude-code')
+      assert.include(reply, '[tool] npm run lint (failed)\n[it printed] src/a.ts\n  3:1  error  Unexpected any\n✗ 1 problem\nexit code: 1')
+      // A command that succeeded is said as before, without what it printed.
+      assert.include(reply, '[tool] git status --short (completed)\n')
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('hands the thread over with what the person said: the new lead takes it first, after its brief, and the old one never does', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -458,6 +499,115 @@ describe('sessions', () => {
       assert.deepStrictEqual(Option.getOrUndefined(running)?.context, { used: 1200, size: 200_000 })
     }).pipe(Effect.provide(runtime())),
   )
+
+  it.live('keeps what the agent says on its own whole, and apart from the next turn and the next time it wakes', () =>
+    Effect.gen(function* () {
+      const { task: created } = yield* task()
+      yield* begin(created.threadId, 'codex')
+      const woken = (rows: ReadonlyArray<{ readonly kind: string; readonly content: { readonly text?: unknown } }>) =>
+        rows.filter((item) => item.kind === 'agent_message' && item.content.text === 'Verify finished.').length
+      yield* say(created.threadId, scenarios.wakesItself)
+      // Its first words open the item; the rest is written as it grows and when it closes.
+      yield* until(threadItems(created.threadId), (rows) => rows.some((item) => String(item.content.text ?? '').startsWith('Verify')))
+      // A prompted turn takes over before the agent has gone quiet; what it says next on its own starts a new item.
+      yield* say(created.threadId, scenarios.wakesItself)
+      yield* until(threadItems(created.threadId), (rows) => woken(rows) === 2)
+      const texts = (yield* threadItems(created.threadId)).filter((item) => item.kind !== 'user_message').map((item) => item.content.text)
+      assert.deepStrictEqual(texts, ['Done', 'Verify finished.', 'Done', 'Verify finished.'])
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  describe('what a lead leaves running', () => {
+    /** What the thread's session has left running, as a client reads it. */
+    const shown = (threadId: string) =>
+      Effect.flatMap(Queries, (queries) =>
+        Effect.map(Effect.orDie(queries.thread(threadId, { limit: 0 })), (thread) => thread.session?.background ?? []),
+      )
+
+    it.live(
+      'keeps a command left running, by its command, with where it answers, until it is stopped; and one that ended by itself, to say how',
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions
+          const { task: created } = yield* task()
+          yield* begin(created.threadId, 'claude-code')
+          yield* say(created.threadId, scenarios.background)
+          yield* ended(created.threadId, 1)
+          // By its tool call's command, not by what the call says it does; where it answers, from what it printed, colours and all.
+          const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+          assert.deepInclude(serving, { command: 'bun dev', url: 'http://localhost:5173/', ended: null })
+          // Background work that isn't a command isn't kept.
+          assert.lengthOf(yield* shown(created.threadId), 1)
+          yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+          assert.lengthOf(yield* shown(created.threadId), 0)
+          // Gone already, there is nothing more to stop.
+          yield* sessions.stopBackground(created.threadId, serving?.id ?? '')
+
+          // One that ends by itself stays, with its exit code, until it is cleared.
+          yield* say(created.threadId, '[lead:serve-exits]')
+          yield* ended(created.threadId, 2)
+          const [exited] = yield* until(shown(created.threadId), (all) => all[0]?.ended != null)
+          assert.strictEqual(exited?.ended?.code, 1)
+          yield* sessions.clearBackground(created.threadId, exited?.id ?? '')
+          assert.lengthOf(yield* shown(created.threadId), 0)
+        }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live(
+      'keeps commands an agent starts of its own by their names; one that ended by itself says how, with or without a code; one it stopped goes',
+      () =>
+        Effect.gen(function* () {
+          const sessions = yield* Sessions
+          const { task: created } = yield* task()
+          yield* begin(created.threadId, 'claude-code')
+          yield* say(created.threadId, scenarios.backgroundOwn)
+          yield* ended(created.threadId, 1)
+          const all = yield* until(shown(created.threadId), (all) => all.length === 3)
+          // Output for a call or a command it never named changes nothing.
+          assert.deepStrictEqual(
+            all.map((left) => [left.command, left.url, left.ended?.code]),
+            [
+              ['npm run watch', null, undefined],
+              ['npm test', null, 0],
+              ['npm run lint', null, null],
+            ],
+          )
+          const [watch, test] = all
+          // Only one that ended is cleared; Stop on one that ended asks the agent nothing, and it goes.
+          yield* sessions.clearBackground(created.threadId, watch?.id ?? '')
+          assert.lengthOf(yield* shown(created.threadId), 3)
+          yield* sessions.stopBackground(created.threadId, test?.id ?? '')
+          assert.deepStrictEqual(
+            (yield* shown(created.threadId)).map((left) => left.command),
+            ['npm run watch', 'npm run lint'],
+          )
+        }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live('keeps one Codex left running, with where it answers from its tool call’s output after the turn', () =>
+      Effect.gen(function* () {
+        const { task: created } = yield* task()
+        yield* begin(created.threadId, 'codex')
+        yield* say(created.threadId, scenarios.backgroundCodex)
+        yield* ended(created.threadId, 1)
+        const [serving] = yield* until(shown(created.threadId), (all) => all[0]?.url != null)
+        assert.deepInclude(serving, { command: 'bun dev', url: 'http://localhost:5173/' })
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+
+    it.live('lets go of everything it left running when the session stops', () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        yield* begin(created.threadId, 'claude-code')
+        yield* say(created.threadId, scenarios.background)
+        yield* ended(created.threadId, 1)
+        yield* until(shown(created.threadId), (all) => all.length === 1)
+        yield* sessions.stop(created.threadId)
+        assert.lengthOf(yield* shown(created.threadId), 0)
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+    )
+  })
 
   describe('edges', () => {
     it.live('starts a first agent from a brief too, with input already waiting', () =>
@@ -625,6 +775,22 @@ describe('sessions', () => {
         assert.include(brief, 'The plan:\n- [in_progress] Write the test')
         assert.include(brief, 'Changed since the start:\nREADME.md | 900')
         assert.include(brief, 'Not yet committed:\n?? notes.txt')
+        // Whether its branch is published, as Althar knows it, and that a published one is merged into, never rebased.
+        const branch = execFileSync('git', ['branch', '--show-current'], { cwd: created.worktree }).toString().trim()
+        // Nothing says it was never pushed: unknown, it is merged into all the same.
+        assert.include(brief, `The branch ${branch} isn't on any remote Althar knows of, but it may still have been pushed some other way.`)
+        assert.include(brief, 'Bring the default branch in by merging it, never by rebasing')
+        const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: created.worktree }).toString().trim()
+        execFileSync('git', ['update-ref', `refs/remotes/origin/${branch}`, head], { cwd: created.worktree })
+        yield* sessions.switchAgent({ threadId: created.threadId, agentId: 'codex' })
+        const again = (yield* settled(created.threadId, 4)).at(-1)?.prompt ?? ''
+        assert.include(again, `The branch ${branch} is published: origin/${branch} has it at ${head.slice(0, 12)}.`)
+        // Pushed by Althar, by URL, with no remote-tracking ref: still published.
+        execFileSync('git', ['update-ref', '-d', `refs/remotes/origin/${branch}`], { cwd: created.worktree })
+        execFileSync('git', ['update-ref', `refs/althar/pushed/${branch}`, head], { cwd: created.worktree })
+        yield* sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode' })
+        const pushed = (yield* settled(created.threadId, 5)).at(-1)?.prompt ?? ''
+        assert.include(pushed, `The branch ${branch} is published: Althar pushed it, at ${head.slice(0, 12)}.`)
       }).pipe(Effect.provide(runtime())),
     )
   })

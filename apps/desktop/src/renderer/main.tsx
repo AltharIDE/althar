@@ -11,7 +11,9 @@ import { Launch, OpenFailed } from '@althar/ui/screens'
 
 import { receivePort } from './data/client'
 import { openWindow } from './data/open'
-import { ServicesProvider } from './data/services'
+import { ServicesProvider, type StoreFailure } from './data/services'
+import { useMaximized } from './shared/useWindowChrome'
+import { UpdateStoppedView } from './features/update/UpdateStoppedView'
 
 /*
  * The window's entry. The launch plays at once, while the window waits for
@@ -19,7 +21,9 @@ import { ServicesProvider } from './data/services'
  * the place it opens on shows is read under the launch, and the app is drawn
  * whole under it before the launch opens onto it. If it can't open (no port
  * within WAIT_PORT, or connecting or the first reads fail), it says so in
- * the launch's place, and offers to try again.
+ * the launch's place, and offers to try again. If an update couldn't move
+ * the store, main sends that instead of a port, and the window shows it,
+ * whatever it was showing.
  */
 
 /** How long the window waits for the runtime's port before it says it couldn't open. */
@@ -48,9 +52,36 @@ const openedBefore = (() => {
   }
 })()
 
+/** The launch's place when the window couldn't open: its own bar carries the window's buttons, so its third says maximize or restore. */
+function FailedOpen({ reason }: { reason: string }) {
+  // Subscribed only while this screen is the one shown, not for the window's whole life.
+  const maximized = useMaximized(window.althar)
+  const darwin = window.althar.platform === 'darwin'
+  return (
+    <OpenFailed
+      reason={reason}
+      onRetry={() => window.location.reload()}
+      // Off a Mac the window's own buttons sit in this bar too, so the window can still be closed here.
+      lights={darwin ? 'space' : 'drawn'}
+      {...(darwin
+        ? {}
+        : {
+            window: {
+              onClose: () => window.althar.window('close'),
+              onMinimize: () => window.althar.window('minimize'),
+              onToggleMaximize: () => window.althar.window('toggle-maximize'),
+              maximized,
+            },
+          })}
+    />
+  )
+}
+
 function Window() {
   const [opened, setOpened] = useState<Awaited<typeof opening> | null>(null)
   const [failed, setFailed] = useState<string | null>(null)
+  const [storeFailure, setStoreFailure] = useState<StoreFailure | null>(null)
+  useEffect(() => window.althar.onStoreFailed(setStoreFailure), [])
   useEffect(
     () =>
       // Drawn as a transition, a little at a time, so the launch playing over it keeps every frame.
@@ -60,7 +91,8 @@ function Window() {
       ),
     [],
   )
-  if (failed !== null) return <OpenFailed reason={failed} onRetry={() => window.location.reload()} />
+  if (storeFailure !== null) return <UpdateStoppedView failure={storeFailure} host={window.althar} />
+  if (failed !== null) return <FailedOpen reason={failed} />
   return (
     <Launch ready={opened !== null} quick={openedBefore}>
       {opened !== null && (

@@ -48,3 +48,18 @@ export const touchCard = (taskId: string) =>
       }),
     )
   })
+
+/**
+ * Tells watching clients the task's card and its own thread changed: a task
+ * that waits for a place shows who holds them in its thread (ADR-032), which
+ * the coordinator's card alone doesn't tell an open thread to read again.
+ */
+export const touchTask = (taskId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const ledger = yield* Ledger
+    yield* touchCard(taskId)
+    const [task] = yield* sql<{ projectId: ProjectId; revision: number }>`SELECT project_id, revision FROM tasks WHERE id = ${taskId}`
+    if (task !== undefined)
+      yield* ledger.notify({ projectId: task.projectId, aggregateType: 'task', aggregateId: taskId, aggregateRevision: task.revision })
+  })

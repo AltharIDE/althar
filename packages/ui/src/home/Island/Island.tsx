@@ -1,18 +1,22 @@
 import { type CSSProperties, type MouseEvent, type ReactNode, useEffect, useId, useRef } from 'react'
 
 import { Logo } from '../../foundations/Logo/Logo'
+import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
 import { useControlled } from '../../lib/controlled'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { LiveDot } from '../../primitives/LiveDot/LiveDot'
+import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
+import type { ProjectRef } from '../ProjectWord/ProjectWord'
 import s from './Island.module.css'
 
 /*
  * Althar round the notch, while you work in another app: a black shape the
- * notch seems to grow, with Althar's mark on its left and, on its right, how
- * many calls wait on you, violet and ringing, or with none, how many tasks
- * run, cobalt and still. With nothing going on it is the notch alone. A call
- * that comes in widens it a moment with whose it is and what kind. Pointed
+ * notch seems to grow, only for what needs you. With nothing waiting on you
+ * it is the notch alone, however much is in progress: running doesn't need
+ * you. With calls waiting, short wings: Althar's mark, faint, and a violet
+ * dot with how many, still. A call that comes in widens it a moment: whose
+ * it is by its project's mark, and what kind beside a ringing dot. Pointed
  * at, or its count pressed, it drops open into its sheet: an EdgeSheet in
  * ink. It draws itself at the top of what holds it, centred.
  */
@@ -23,8 +27,7 @@ export interface IslandText {
   /** The mark, as a way into the app. */
   openApp: string
   waiting: (n: number) => string
-  running: (n: number) => string
-  /** The count's name when there is nothing to count: it still opens the sheet. */
+  /** The count's name when nothing waits: it still opens the sheet. */
   nothing: string
 }
 
@@ -32,8 +35,7 @@ export const islandText: IslandText = {
   label: 'Althar',
   openApp: 'Open Althar',
   waiting: (n) => (n === 1 ? '1 needs you' : `${n} need you`),
-  running: (n) => `${n} running`,
-  nothing: 'Nothing in progress',
+  nothing: 'Nothing needs you',
 }
 
 /** The notch's size, in pixels. */
@@ -44,7 +46,7 @@ export interface NotchSize {
 
 /** A call that has just come in, as the island says it: whose, and what kind. */
 export interface IslandSaying {
-  project: string
+  project: ProjectRef
   kind: string
 }
 
@@ -55,8 +57,6 @@ export type IslandProps = RootProps<
     notch: NotchSize
     /** How many calls wait on you. */
     waiting: number
-    /** How many tasks have an agent on them. */
-    running: number
     /** A call that has just come in, said beside the notch until the consumer clears it. */
     saying?: IslandSaying | null
     /** Its sheet: an EdgeSheet in ink. */
@@ -73,14 +73,17 @@ export type IslandProps = RootProps<
 /** How long the pointer rests on it before it opens, and is away before it closes. */
 export const ISLAND_HOVER = { open: 200, close: 180 }
 
-/** The wings beside the notch: at rest, saying a call, and open. */
-const WING = { rest: 64, say: 190 }
-const OPEN_WIDTH = 470
+/** The wings beside the notch, at rest and saying a call, and how wide it opens. */
+const WING = { rest: 36, say: 84 }
+const OPEN_WIDTH = 360
+
+/** Room for the count's every digit past the first, and for a kind's words beside its dot, roughly. */
+const DIGIT = 7
+const kindWidth = (kind: string) => 26 + Math.ceil(kind.length * 6.6)
 
 export function Island({
   notch,
   waiting,
-  running,
   saying = null,
   children,
   open: openProp,
@@ -113,15 +116,17 @@ export function Island({
     later(false, ISLAND_HOVER.close)
   }
 
-  const quiet = waiting === 0 && running === 0 && saying === null && !open
+  const said = saying !== null && !open
+  const quiet = waiting === 0 && !said && !open
+  const wing = WING.rest + DIGIT * (String(waiting).length - 1)
   const width = open
-    ? Math.max(OPEN_WIDTH, notch.width + 2 * WING.rest)
-    : saying !== null
-      ? notch.width + 2 * WING.say
+    ? Math.max(OPEN_WIDTH, notch.width + 2 * wing)
+    : said
+      ? notch.width + 2 * Math.max(WING.say, kindWidth(saying.kind))
       : quiet
         ? notch.width
-        : notch.width + 2 * WING.rest
-  const count = waiting > 0 ? t.waiting(waiting) : running > 0 ? t.running(running) : t.nothing
+        : notch.width + 2 * wing
+  const count = waiting > 0 ? t.waiting(waiting) : t.nothing
 
   return (
     // Pointing at it opens it, for the pointer's sake; the count is the way in from the keyboard.
@@ -136,28 +141,23 @@ export function Island({
     >
       <div className={s.bar}>
         <span className={s.wing}>
-          {onOpenApp ? (
+          {said ? (
+            <span key={saying.project.seed} className={s.said}>
+              <ProjectMark seed={saying.project.seed} ink={saying.project.ink} size={14} />
+              <VisuallyHidden>{saying.project.name}</VisuallyHidden>
+            </span>
+          ) : onOpenApp ? (
             <button type="button" className={s.mark} aria-label={t.openApp} onClick={onOpenApp}>
-              <Logo size={15} />
+              <Logo size={13} />
             </button>
           ) : (
             <span className={s.mark}>
-              <Logo size={15} />
-            </span>
-          )}
-          {saying !== null && !open && (
-            <span key={saying.project} className={s.said}>
-              {saying.project}
+              <Logo size={13} />
             </span>
           )}
         </span>
         <span className={s.notch} aria-hidden="true" />
         <span className={cx(s.wing, s.right)}>
-          {saying !== null && !open && (
-            <span key={saying.kind} className={cx(s.said, s.kind)}>
-              {saying.kind}
-            </span>
-          )}
           <button
             type="button"
             className={s.count}
@@ -169,15 +169,16 @@ export function Island({
               setOpen(!open)
             }}
           >
-            {waiting > 0 ? (
+            {said ? (
+              // Only a call coming in rings; at rest the count is still.
+              <span key={saying.kind} className={s.said}>
+                <LiveDot signal ping urgent />
+                <span>{saying.kind}</span>
+              </span>
+            ) : waiting > 0 ? (
               <>
-                <LiveDot signal ping />
+                <LiveDot signal />
                 <span aria-hidden="true">{waiting}</span>
-              </>
-            ) : running > 0 ? (
-              <>
-                <LiveDot />
-                <span aria-hidden="true">{running}</span>
               </>
             ) : null}
           </button>

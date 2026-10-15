@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "How Althar talks to agents: one ACP adapter, the agent registry, and native side channels.",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

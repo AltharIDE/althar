@@ -35,7 +35,7 @@ the runtime behind it and the app wiring it up.
    - "3 running · 2 need you" in the chrome.
 3. **Work that doesn't need you.**
    - **Usage limits handled:** move to the next agent free, or wait for the reset.
-   - **The lead answers permission asks** within the project's rules, which the
+   - **The coordinator answers permission asks** within the project's rules, which the
      kit's ProjectRules screen sets.
    - **A step that stalls** becomes a call.
    - **macOS notifications** and a dock badge when something needs you or is
@@ -94,8 +94,8 @@ One pull request each:
      made. The agents and their accounts, and the connections, moved to
      Settings (⌘,). Not yet: a card for an agent that is signed out.
 
-   Next:
-   1. The lead answers permission requests: the "lead decides" mode.
+   Added on 2026-10-10: the coordinator answers permission requests in its
+   opt-in mode, with recorded reasons and human fallback ([ADR-019](../decisions/019-coordinator-judges-permissions.md)).
 
    Decided on 2026-10-04:
    - **No "send back" step.** The task's chat is how the person sends work
@@ -122,9 +122,13 @@ Confirmed with the user on 1 October 2026:
   as marking it ready is.
 - **A task without a pull request** merges into its base locally, as the
   person's click.
-- **No limit on tasks at once,** and no queue: a cap would be arbitrary, so
+- ~~**No limit on tasks at once,** and no queue: a cap would be arbitrary, so
   no flow is designed around one (changed on 3 October 2026; it was three
-  per project).
+  per project).~~ Reversed on 13 October 2026, after six test runs at once
+  rebooted a MacBook: each machine runs as many tasks' agents at once as its
+  cores and memory allow, or the person's own number, and the rest wait
+  their turn, first come, first served
+  ([ADR-032](../decisions/032-agents-at-once-on-this-machine.md), DEV-58).
 - **Permission asks** are the lead's to answer within the project's rules;
   only the "always ask me" list reaches the person.
 - **A usage limit is handled as configured:** stop and wait for the reset, or

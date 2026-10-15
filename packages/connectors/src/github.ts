@@ -1,23 +1,44 @@
 import { Effect, Schema } from 'effect'
 
+import { type Access, type AccessInput, type AccessLine, type AccessNeed, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
-import { makeHttp } from './http'
+import { makeHttp, paged } from './http'
 import type {
   Account,
   Activity,
   ChangeRequest,
+  ChangeToReview,
   Check,
   CheckState,
   CodeHost,
   Comment,
+  Container,
   Issue,
   Person,
   Repository,
   Review,
+  ReviewEvent,
   Tracker,
   Verdict,
 } from './model'
+import { leftAsItIs } from './model'
+import {
+  type Answer,
+  answered,
+  failedOf,
+  limited,
+  probe,
+  type Reached,
+  reachLine,
+  readAs,
+  refusalOf,
+  seenOf,
+  stopped,
+  troubled,
+  UNREADABLE,
+  UNSAID,
+} from './probe'
 
 /*
  * GitHub, and GitHub Enterprise Server: a code host over its REST API (and
@@ -56,12 +77,25 @@ const PullAnswer = Schema.Struct({
   state: Schema.String,
   draft: Schema.optional(Schema.Boolean),
   merged_at: Schema.optional(Schema.NullOr(Schema.String)),
-  head: Schema.Struct({ ref: Schema.String, sha: Schema.String }),
-  base: Schema.Struct({ ref: Schema.String }),
+  // The repository each side is on: a fork's, for a branch from one; null where the fork is gone.
+  head: Schema.Struct({
+    ref: Schema.String,
+    sha: Schema.String,
+    repo: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
+  }),
+  base: Schema.Struct({
+    ref: Schema.String,
+    sha: Schema.optional(Schema.String),
+    repo: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
+  }),
   user: Schema.optional(Schema.NullOr(User)),
+  author_association: Schema.optional(Schema.String),
   additions: Schema.optional(Schema.Number),
   deletions: Schema.optional(Schema.Number),
   changed_files: Schema.optional(Schema.Number),
+  // Worked out in the background: null until GitHub has, and said only when one pull request is read.
+  mergeable: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  mergeable_state: Schema.optional(Schema.NullOr(Schema.String)),
   updated_at: Schema.String,
 })
 type PullAnswer = typeof PullAnswer.Type
@@ -159,7 +193,34 @@ const changeOf = (pull: PullAnswer): ChangeRequest => ({
   deletions: pull.deletions ?? null,
   changedFiles: pull.changed_files ?? null,
   updatedAt: pull.updated_at,
+  // Not mergeable, or `dirty`, is GitHub's way of saying the merge conflicts.
+  ...(pull.mergeable === false || pull.mergeable_state === 'dirty'
+    ? { conflicts: true }
+    : pull.mergeable === true
+      ? { conflicts: false }
+      : {}),
 })
+
+/**
+ * A pull request to review, whoever opened it: whether GitHub names its
+ * author one of the repository's people, and the fork its branch is on (one
+ * GitHub no longer has is a fork all the same, with no path).
+ */
+const toReviewOf = (pull: PullAnswer): ChangeToReview => {
+  const head = pull.head.repo
+  const base = pull.base.repo?.full_name.toLowerCase()
+  return {
+    ...changeOf(pull),
+    member: memberOf(pull.author_association),
+    fork: head === undefined || head?.full_name.toLowerCase() === base ? null : head === null ? [] : head.full_name.split('/'),
+    baseSha: pull.base.sha ?? null,
+  }
+}
+
+/** What GitHub calls each verdict a review can post. */
+const EVENTS: Readonly<Record<ReviewEvent, string>> = { approve: 'APPROVE', request_changes: 'REQUEST_CHANGES', comment: 'COMMENT' }
+
+const PostedAnswer = Schema.Struct({ id: Schema.Number, html_url: Schema.optional(Schema.NullOr(Schema.String)) })
 
 /** A check run's state from its status and conclusion. */
 export const checkRunState = (status: string, conclusion: string | null | undefined): CheckState => {
@@ -193,8 +254,21 @@ export const tail = (log: string): string => {
   return lines.length > LOG_CHARACTERS ? lines.slice(-LOG_CHARACTERS) : lines
 }
 
+/** What every call to GitHub's API carries: its media type, and the version of the API it is written against. */
+const HEADERS = { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' }
+
 /** `owner/repo#12`: the ref GitHub's issues go by. */
 const issueRef = /^([^/\s]+)\/([^#\s]+)#(\d+)$/
+
+/** `owner/repo`: a repository, where an issue is filed. */
+const repositoryRef = /^([^/\s]+)\/([^/#\s]+)$/
+
+/** A repository the account is on, and whether an issue can be filed there. */
+const Listed = Schema.Struct({
+  full_name: Schema.String,
+  has_issues: Schema.optional(Schema.Boolean),
+  archived: Schema.optional(Schema.Boolean),
+})
 
 export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   const product = 'github' as const
@@ -204,7 +278,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
     product,
     fetch: options.fetch,
     authorization: Effect.map(options.credential, authorizationOf),
-    headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
+    headers: HEADERS,
   })
   const repo = (repository: Repository | ReadonlyArray<string>) =>
     `${api}/repos/${('path' in repository ? repository.path : repository).map(encodeURIComponent).join('/')}`
@@ -274,7 +348,7 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: true, threads: true, links: false },
+    capabilities: { drafts: true, checkLogs: true, threads: true, reviews: true, links: false, starts: false },
     account,
     repository: (path) =>
       Effect.map(http.json(RepositoryAnswer, 'GET', repo(path)), (answer) => ({
@@ -330,7 +404,13 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         .pipe(Effect.andThen(Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`), changeOf))),
     checks: (repository, sha) =>
       Effect.gen(function* () {
-        const runs = yield* http.cached(CheckRuns, `${repo(repository)}/commits/${sha}/check-runs?per_page=100`)
+        // A fine-grained token is given no check runs, and GitHub refuses them: the commit's statuses are read alone.
+        const runs = yield* http.cached(CheckRuns, `${repo(repository)}/commits/${sha}/check-runs?per_page=100`).pipe(
+          Effect.catchIf(
+            (error) => error.reason === 'forbidden',
+            () => Effect.succeed<typeof CheckRuns.Type>({ check_runs: [] }),
+          ),
+        )
         const statuses = yield* http.cached(CombinedStatus, `${repo(repository)}/commits/${sha}/status`)
         const fromRuns: ReadonlyArray<Check> = runs.check_runs.map((run) => ({
           id: `run:${run.id}:${run.app?.slug ?? ''}`,
@@ -405,6 +485,18 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
             }),
             (comment) => commentOf(comment, true),
           ),
+    changeToReview: (repository, number) => Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${number}`), toReviewOf),
+    postReview: (repository, number, review) =>
+      Effect.map(
+        http.json(PostedAnswer, 'POST', `${repo(repository)}/pulls/${number}/reviews`, {
+          ...(review.commit === null ? {} : { commit_id: review.commit }),
+          body: review.body,
+          event: EVENTS[review.event],
+          // On the change as it now reads: the right side of its diff.
+          comments: review.comments.map((comment) => ({ path: comment.path, line: comment.line, side: 'RIGHT', body: comment.body })),
+        }),
+        (posted) => ({ id: String(posted.id), url: posted.html_url ?? null }),
+      ),
     pushTarget: (repository) =>
       Effect.map(options.credential, (credential) => ({
         url: `${options.webUrl.replace(/\/+$/, '')}/${repository.path.join('/')}.git`,
@@ -442,5 +534,184 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
       }),
     // GitHub's issues have no links: the pull request's mention of the issue links the two.
     link: () => Effect.void,
+    // An issue is open or closed: a project board's Status is that board's own, so a started one is left as it is.
+    start: (issue) => Effect.succeed(leftAsItIs(issue)),
+    // The repositories the account is on, last pushed to first; one archived, or with its issues turned off, takes none.
+    containers: () =>
+      Effect.map(
+        // A page short of a hundred is the last.
+        paged(1, (page) =>
+          Effect.map(http.json(Schema.Array(Listed), 'GET', `${api}/user/repos?per_page=100&sort=pushed&page=${page}`), (repositories) => ({
+            items: repositories,
+            next: repositories.length < 100 ? undefined : page + 1,
+          })),
+        ),
+        (repositories) =>
+          repositories
+            .filter((repository) => repository.has_issues !== false && repository.archived !== true)
+            .map((repository): Container => ({ id: repository.full_name, key: repository.full_name, name: repository.full_name })),
+      ),
+    create: (container, issue) =>
+      Effect.gen(function* () {
+        const match = repositoryRef.exec(container)
+        if (match === null)
+          return yield* new ConnectorFailed({ product, reason: 'not_found', message: `Not a GitHub repository: ${container}` })
+        const [, owner = '', name = ''] = match
+        // GitHub sets labels only for someone who can push, and drops them silently for anyone else; it makes those the repository lacks.
+        const filed = yield* http.json(IssueAnswer, 'POST', `${repo([owner, name])}/issues`, {
+          title: issue.title,
+          body: issue.body,
+          ...(issue.labels.length === 0 ? {} : { labels: issue.labels }),
+        })
+        return issueOf(filed, owner, name)
+      }),
   }
 }
+
+/*
+ * What a GitHub connection can do. GitHub tells three kinds of token
+ * apart by what it says of them: Althar's GitHub App signs in by the device
+ * flow; a classic token, or an OAuth app's such as gh's, comes with its
+ * scopes in a header; a fine-grained token comes with none, and its
+ * permissions can't be read at all. Of those, only refusing a read shows:
+ * pull requests, issues, statuses and Actions are each asked of a
+ * repository it sees, and a write is said to be unknown.
+ */
+
+/** GitHub's page for a classic token, filled in: what it is for, and the scopes Althar uses, check runs included. */
+export const classicTokenPage = (webUrl: string): string =>
+  `${webUrl.replace(/\/+$/, '')}/settings/tokens/new?${new URLSearchParams({ description: 'Althar', scopes: 'repo,workflow' }).toString()}`
+
+/** Where a person's tokens are listed: fine-grained ones on github.com; on a company's own server, which may predate them, classic ones. */
+const tokensPage = (web: string) => (web === 'https://github.com' ? `${web}/settings/personal-access-tokens` : `${web}/settings/tokens`)
+
+/** GitHub's time a token runs out (`2027-01-08 00:00:00 UTC`, `2023-03-08 13:28:54 +0100`) as an ISO time; null when it isn't one. */
+export const expiryOf = (said: string | null): string | null => {
+  const match = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) (UTC|[+-]\d{2}:?\d{2})$/.exec(said?.trim() ?? '')
+  if (match === null) return null
+  const [, date = '', time = '', zone = ''] = match
+  const at = Date.parse(`${date}T${time}${zone === 'UTC' ? 'Z' : `${zone.slice(0, 3)}:${zone.slice(-2)}`}`)
+  return Number.isNaN(at) ? null : new Date(at).toISOString()
+}
+
+/** A repository it sees: its owner as GitHub spells it, whether the account may push there (GitHub says so only to some), and its default branch. */
+interface Found {
+  readonly path: ReadonlyArray<string>
+  readonly owner: string
+  readonly push: boolean | undefined
+  readonly branch: string
+}
+
+export const accessGitHub: Access = (input: AccessInput) =>
+  Effect.gen(function* () {
+    const api = input.apiUrl.replace(/\/+$/, '')
+    const web = input.webUrl.replace(/\/+$/, '')
+    const ask = (url: string) => probe(input, url, { headers: HEADERS })
+    const repo = (path: ReadonlyArray<string>) => `${api}/repos/${path.map(encodeURIComponent).join('/')}`
+
+    const me = yield* ask(`${api}/user`)
+    if (!answered(me)) return stopped([line('account', 'no', { reason: refusalOf(me) })])
+    const user = readAs(User, me)
+    if (user === undefined) return stopped([line('account', 'no', { reason: UNREADABLE })])
+    const said = me.headers.get('x-oauth-scopes')
+    const scopes =
+      said === null
+        ? null
+        : said
+            .split(',')
+            .map((scope) => scope.trim())
+            .filter((scope) => scope !== '')
+    const kind = input.auth === 'device_flow' ? 'app' : scopes === null ? 'fine' : 'classic'
+    // Where a token is put right: a classic one in the list of classic tokens.
+    const settings = kind === 'classic' ? `${web}/settings/tokens` : tokensPage(web)
+
+    const reachOf = (path: ReadonlyArray<string>) =>
+      Effect.map(ask(repo(path)), (answer): Reached<Found> => {
+        const owner = path[0] ?? ''
+        if (answered(answer)) {
+          const found = readAs(RepositoryAnswer, answer)
+          return found === undefined
+            ? { path, missed: UNREADABLE }
+            : {
+                path,
+                seen: { path, owner: found.full_name.split('/')[0] ?? owner, push: found.permissions?.push, branch: found.default_branch },
+              }
+        }
+        if (answer.status === 404)
+          return {
+            path,
+            missed:
+              kind === 'app'
+                ? {
+                    kind: 'not_installed',
+                    owner,
+                    url: input.appSlug === undefined ? null : `${web}/apps/${input.appSlug}/installations/new`,
+                  }
+                : { kind: 'unseen', names: [path.join('/')], url: settings },
+          }
+        if (answer.status === 403 && !limited(answer)) {
+          const sso = /^required; url=(\S+)/.exec(answer.headers.get('x-github-sso') ?? '')?.[1]
+          if (sso !== undefined) return { path, missed: { kind: 'sso', owner, url: sso } }
+          if (/OAuth App access restrictions/i.test(answer.message)) return { path, missed: { kind: 'restricted', owner } }
+        }
+        return { path, missed: failedOf(answer) }
+      })
+
+    /** A line a classic token's `repo` scope decides. */
+    const byScope = (need: AccessNeed) =>
+      scopes?.includes('repo') === true ? line(need, 'ok') : line(need, 'no', { reason: { kind: 'scope', scope: 'repo', url: settings } })
+
+    /** Why a fine-grained token's read was refused, by the permission its page names; null where it wasn't. */
+    const refusedFor = (answer: Answer, permission: string): AccessReason | null =>
+      troubled(answer) ? failedOf(answer) : answer.status === 403 ? { kind: 'permission', permission, url: settings } : null
+
+    /** A fine-grained token's line for a write, from a read of the same permission: no where it was refused, and unknown otherwise. */
+    const writeOf = (need: AccessNeed, url: string, permission: string) =>
+      Effect.map(ask(url), (answer) => {
+        const reason = refusedFor(answer, permission)
+        return reason === null ? line(need, 'unknown', { reason: UNSAID }) : line(need, 'no', { reason })
+      })
+
+    /** A fine-grained token's checks: check runs, which GitHub gives it none of, then the commit's statuses and Actions' runs. */
+    const checksOf = (found: Found) =>
+      Effect.gen(function* () {
+        const head = `${repo(found.path)}/commits/${encodeURIComponent(found.branch)}`
+        const runs = yield* ask(`${head}/check-runs?per_page=1`)
+        if (troubled(runs)) return line('checks', 'no', { reason: failedOf(runs) })
+        if (runs.status === 403) return line('checks', 'no', { reason: { kind: 'no_check_runs', url: classicTokenPage(web) } })
+        const statuses = refusedFor(yield* ask(`${head}/status`), 'Commit statuses')
+        if (statuses !== null) return line('checks', 'no', { reason: statuses })
+        const actions = refusedFor(yield* ask(`${repo(found.path)}/actions/runs?per_page=1`), 'Actions')
+        return actions === null ? line('checks', 'ok') : line('checks', 'no', { reason: actions })
+      })
+
+    const lines: Array<AccessLine> = [line('account', 'ok', { fact: user.login })]
+    const reached = yield* Effect.forEach(input.repositories, reachOf, { concurrency: 4 })
+    const seen = seenOf(reached)
+    const owners = [...new Set(seen.map((found) => found.owner))].join(', ')
+    if (reached.length > 0) lines.push(reachLine(reached, owners === '' ? null : owners))
+    const [first] = seen
+
+    // Where GitHub says the account itself may not push, no token of it may.
+    if (seen.some((found) => found.push === false)) lines.push(line('push', 'no', { reason: { kind: 'role', role: null } }))
+    else if (kind === 'classic') lines.push(byScope('push'))
+    else lines.push(kind === 'app' ? line('push', 'ok') : line('push', 'unknown', { reason: UNSAID }))
+
+    if (kind === 'classic') lines.push(byScope('changes'), byScope('checks'), byScope('issues'))
+    else if (kind === 'app') lines.push(line('changes', 'ok'), line('checks', 'ok'), line('issues', 'ok'))
+    else if (first === undefined)
+      lines.push(...(['changes', 'checks', 'issues'] as const).map((need) => line(need, 'unknown', { reason: UNSAID })))
+    else
+      lines.push(
+        yield* writeOf('changes', `${repo(first.path)}/pulls?per_page=1&state=all`, 'Pull requests'),
+        yield* checksOf(first),
+        yield* writeOf('issues', `${repo(first.path)}/issues?per_page=1`, 'Issues'),
+      )
+
+    return {
+      account: { id: String(user.id), login: user.login, name: user.name ?? null },
+      lines,
+      expiresAt: expiryOf(me.headers.get('github-authentication-token-expiration')),
+      scopes,
+    }
+  })

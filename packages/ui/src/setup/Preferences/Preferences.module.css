@@ -63,6 +63,132 @@
 .withGlyph .under {
   grid-column: 2 / -1;
 }
+/* back to the default, in the note's own size, after what it says */
+.reset {
+  font-size: inherit;
+}
+
+/* ---- agents at once: a stepped track that warms past the default ---- */
+/* the number, large, where the row's control goes */
+.value {
+  display: inline-block;
+  min-width: 2ch;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--warm) calc(var(--heat, 0) * 100%), var(--t-1));
+}
+.slider {
+  margin: 6px 0 4px;
+}
+.track {
+  position: relative;
+  height: 20px;
+  cursor: pointer;
+  touch-action: none;
+  outline: none;
+}
+.rail {
+  position: absolute;
+  inset: 7px 0;
+  border-radius: 99px;
+  background: var(--track);
+  overflow: hidden;
+}
+/* ink up to the default, warming past it the further it goes */
+.fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--t-1) 0%,
+    var(--t-1) calc(100% - var(--heat) * 100%),
+    color-mix(in srgb, var(--warm) calc(45% + var(--heat) * 55%), var(--danger)) 100%
+  );
+  transition: width 120ms ease-out;
+}
+.atDefault {
+  position: absolute;
+  top: 2px;
+  width: 2px;
+  height: 16px;
+  margin-left: -1px;
+  border-radius: 2px;
+  background: var(--signal);
+}
+.thumb {
+  position: absolute;
+  top: 1px;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  border-radius: 99px;
+  background: var(--paper);
+  border: 1px solid color-mix(in srgb, var(--warm) calc(var(--heat) * 100%), var(--line-3));
+  box-shadow: var(--lift-2);
+  transition:
+    left 120ms ease-out,
+    transform 160ms ease-out;
+}
+.held {
+  transform: scale(1.12);
+}
+.track:focus-visible .thumb {
+  box-shadow:
+    0 0 0 4px var(--signal-dim),
+    var(--lift-2);
+}
+/* it clicks into the default */
+.clicked {
+  border-color: var(--signal);
+  animation: click 280ms ease-out;
+}
+@keyframes click {
+  40% {
+    transform: scale(1.28);
+    box-shadow: 0 0 0 6px var(--signal-dim);
+  }
+}
+.scale {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--t-4);
+  font-variant-numeric: tabular-nums;
+}
+.mark {
+  position: absolute;
+  transform: translateX(-50%);
+  color: var(--signal);
+  white-space: nowrap;
+}
+.markStart {
+  transform: none;
+}
+.markEnd {
+  transform: translateX(-100%);
+}
+/* the row's glyph warms, and breathes faster, the further past the default */
+.breathe {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--warm) calc(var(--heat) * 100%), var(--t-1));
+  transition: background 200ms ease-out;
+  animation: breathe var(--speed) ease-in-out infinite;
+}
+@keyframes breathe {
+  50% {
+    box-shadow: 0 0 0 calc(var(--heat) * 6px) color-mix(in srgb, var(--warm) calc(var(--heat) * 35%), transparent);
+  }
+}
+
 /* what only matters while the row above is on: a well under its words */
 .well {
   padding: 0 12px;
@@ -205,34 +331,29 @@
   box-shadow: var(--lift-pop);
 }
 
-/* ---- the places, each a picture to choose ---- */
+/* ---- the places, each a picture to choose: its radio, unseen, lies over the whole card ---- */
 .places {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
 .place {
+  position: relative;
   display: grid;
-  padding: 0;
   overflow: hidden;
-  border: 0;
   border-radius: 12px;
   background: var(--paper);
   box-shadow: 0 0 0 1px var(--line);
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
   transition: box-shadow var(--fast) var(--ease);
 }
 .place:hover {
   box-shadow: 0 0 0 1px var(--line-3);
 }
-.place[aria-checked='true'],
-.place[aria-checked='true']:hover {
+.place:has(:checked),
+.place:has(:checked):hover {
   box-shadow: 0 0 0 2px var(--t-1);
 }
-.place:focus-visible {
+.place:has(:focus-visible) {
   outline: 2px solid var(--live);
   outline-offset: 2px;
 }
@@ -243,6 +364,16 @@
   display: grid;
   gap: 3px;
   padding: 10px 12px 12px;
+}
+.input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  appearance: none;
+  opacity: 0;
+  cursor: pointer;
 }
 .placeTitle {
   display: flex;
@@ -264,13 +395,61 @@
   border-radius: 50%;
   box-shadow: inset 0 0 0 1.5px var(--t-3);
 }
-.place[aria-checked='true'] .radio {
+.place:has(:checked) .radio {
   box-shadow: inset 0 0 0 4px var(--t-1);
+}
+
+/* ---- where it shows, with nothing to choose: the screen beside the words, or over them where there isn't room ---- */
+.here {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 18px;
+  align-items: center;
+  padding: 12px 16px 12px 12px;
+  border-radius: 12px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line);
+}
+.herePicture {
+  flex: 0 1 220px;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  min-height: 118px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--n-3);
+}
+.herePicture > .scene {
+  border-radius: 8px;
+}
+.hereWords {
+  flex: 1 1 200px;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.hereTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.hereNote,
+.hereWhy {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+.hereWhy {
+  color: var(--t-2);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .well,
   .place {
     transition: none;
+  }
+  .breathe {
+    animation: none;
   }
 }

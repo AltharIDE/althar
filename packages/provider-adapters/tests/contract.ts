@@ -3,14 +3,17 @@ import { Deferred, Effect, Fiber, Ref, Schedule, type Scope, Stream } from 'effe
 
 import { type AgentConnection, connect, type PermissionDecision, type PermissionRequest, type Transport } from '../src/AgentConnection'
 import type { SessionEvent } from '../src/events'
+import { type FieldAnswer, type Question, type QuestionAnswer, questionContent } from '../src/questions'
 import type { PermissionMeanings } from '../src/registry'
 
 /*
  * The adapter contract (docs/architecture/03), written once and run against
  * the fake agent in CI and against the real agents on demand. Each agent
  * supplies its transport, modes and option meanings, a model to switch to,
- * and prompts: a short turn, a long one, and one that runs a command the
- * agent asks permission for.
+ * and prompts: a short turn, a long one, one that runs a command the agent
+ * asks permission for, and one that asks the person a question. Agents
+ * differ in how they ask: in a form Althar answers (Claude Code's
+ * AskUserQuestion), or in their own words, in a reply.
  */
 
 export interface ContractSubject {
@@ -22,7 +25,9 @@ export interface ContractSubject {
   readonly sessionMeta?: Readonly<Record<string, unknown>>
   readonly permissions?: PermissionMeanings
   readonly model: { readonly optionId: string; readonly switchTo: string }
-  readonly prompts: { readonly short: string; readonly long: string; readonly command: string }
+  readonly prompts: { readonly short: string; readonly long: string; readonly command: string; readonly question: string }
+  /** How it asks the person something: in a form Althar answers, or in its own words, as a reply. */
+  readonly asks: 'form' | 'words'
 }
 
 export type Decide = (request: PermissionRequest) => Effect.Effect<PermissionDecision>
@@ -33,6 +38,7 @@ export const withConnection = <A, E>(
   subject: ContractSubject,
   use: (connection: AgentConnection, permissions: Ref.Ref<ReadonlyArray<PermissionRequest>>) => Effect.Effect<A, E, Scope.Scope>,
   decide: Decide = rejectAll,
+  onQuestion?: (question: Question) => Effect.Effect<QuestionAnswer>,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -45,6 +51,7 @@ export const withConnection = <A, E>(
             () => decide(request),
           ),
         ...(subject.permissions === undefined ? {} : { permissions: subject.permissions }),
+        ...(onQuestion === undefined ? {} : { onQuestion }),
       })
       return yield* use(connection, permissions)
     }),
@@ -150,6 +157,50 @@ export const contract = (subject: ContractSubject) =>
           assert.strictEqual(stopReason(events), 'end_turn')
         }),
       ),
+    )
+
+    it.live(
+      subject.asks === 'form'
+        ? 'asks the person in a form, and carries on with their answer'
+        : 'asks the person in its own words, with no form to answer',
+      () => {
+        const asked: Array<Question> = []
+        // The last option of a choice, the first of several picks, yes, and a word or a number where words are asked for.
+        const picks = (question: Question) =>
+          Object.fromEntries(
+            question.fields.map((field): [string, FieldAnswer] => [
+              field.id,
+              field.type === 'text' || field.type === 'number'
+                ? { values: [], words: field.type === 'number' ? '3' : 'blue' }
+                : { values: [(field.multiple ? field.options[0] : field.options.at(-1))?.value ?? ''] },
+            ]),
+          )
+        return withConnection(
+          subject,
+          (connection) =>
+            Effect.gen(function* () {
+              const session = yield* sessionIn(subject, connection)
+              const events = yield* Stream.runCollect(session.prompt(subject.prompts.question))
+              assert.strictEqual(stopReason(events), 'end_turn')
+              if (subject.asks === 'words') {
+                assert.lengthOf(asked, 0, 'the agent asked in a form')
+                assert.isNotEmpty(text(events).trim())
+                return
+              }
+              const [question] = asked
+              assert.isDefined(question, 'the agent never asked')
+              const choice = question?.fields.find((field) => field.type === 'choice' && !field.multiple)
+              const chosen = choice?.options.at(-1)?.label ?? ''
+              assert.isNotEmpty(chosen, 'the question offered no options')
+              assert.include(text(events).toLowerCase(), chosen.toLowerCase(), 'the agent did not carry on with the answer')
+            }),
+          rejectAll,
+          (question) =>
+            Effect.sync(() => asked.push(question)).pipe(
+              Effect.as({ action: 'accept' as const, content: questionContent(question, picks(question)) }),
+            ),
+        )
+      },
     )
 
     it.live('withdraws a waiting permission request when the turn is interrupted', () =>

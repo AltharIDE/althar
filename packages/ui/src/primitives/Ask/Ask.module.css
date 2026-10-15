@@ -59,6 +59,16 @@
   color: var(--t-1);
   font-weight: 550;
 }
+/* own words, which may wrap: the line keeps to its baseline, and stays as tall as one line when they don't */
+.wrap {
+  align-items: baseline;
+  padding-block: 8px;
+}
+.wrap .said {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .note {
   min-width: 0;
   color: var(--t-3);

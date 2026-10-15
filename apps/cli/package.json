@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "A command-line client for the Althar runtime: open a project, start a task, and talk to its agent.",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "bin": {
     "althar": "./dist/althar.js"
   },

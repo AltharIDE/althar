@@ -37,3 +37,38 @@ export function useInView(ref: RefObject<Element | null>, share = 0.3) {
   }, [ref, share])
   return on
 }
+
+/**
+ * While `ref` is off screen, everything animating inside it rests where it
+ * is, and goes on as it comes back. The app's components loop (a spinner's
+ * arc, the light's drift), some of them on the main thread; out of sight
+ * they would cost every frame of the page for nothing. `again` rebinds it
+ * when the element it points at changes.
+ */
+export function useRestAway(ref: RefObject<Element | null>, again?: unknown) {
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof el.getAnimations !== 'function') return
+    let rested: Animation[] = []
+    const wake = () => {
+      el.removeAttribute('data-away')
+      for (const run of rested) if (run.playState === 'paused') run.play()
+      rested = []
+    }
+    const io = new IntersectionObserver(
+      ([e]) => {
+        if (e?.isIntersecting) return wake()
+        // Anything started while away rests too (base.css), until it is back.
+        el.setAttribute('data-away', '')
+        rested = el.getAnimations({ subtree: true }).filter((run) => run.playState === 'running')
+        for (const run of rested) run.pause()
+      },
+      { rootMargin: '200px 0px' },
+    )
+    io.observe(el)
+    return () => {
+      io.disconnect()
+      wake()
+    }
+  }, [ref, again])
+}

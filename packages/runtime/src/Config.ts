@@ -1,13 +1,16 @@
+import { execFile } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 
 import { available, type Fetch, type Product, type ProductInfo } from '@althar/connectors'
-import { agents, type AgentDefinition, type Transport, usingLocated } from '@althar/provider-adapters'
+import { adapterNode, agents, type AgentDefinition, type SessionOptions, type Transport, usingLocated } from '@althar/provider-adapters'
 import { Context, Crypto, type Duration, Effect, Layer } from 'effect'
 
-import { UnknownAgent } from './errors'
-import { Installs } from './Installs'
+import type { Machine } from './atOnce'
+import { CliUnanswered, UnknownAgent } from './errors'
+import { Installs, type OnDevice } from './Installs'
+import type { LoadOptions } from './MachineLoad'
 import type { ModelFactsOptions } from './ModelFacts'
 
 export interface RuntimeOptions {
@@ -15,8 +18,26 @@ export interface RuntimeOptions {
   readonly worktreeRoot: string
   /** Where the homes of accounts Althar makes go (ADR-012): `<root>/<account>`. Without it, it makes none. */
   readonly accountsRoot?: string
+  /**
+   * Where the artifact store keeps its bytes (`Artifacts.ts`): pictures
+   * agents hand back and what commands print, `<root>/<digest>`. Without it,
+   * nothing is kept, and the thread says so.
+   */
+  readonly artifactsRoot?: string
   /** Where agents Althar downloads at the person's asking are kept (`Installs.ts`): `<root>/<agent>`. Without it, it downloads none. */
   readonly agentsRoot?: string
+  /**
+   * The device outside a sandbox that cannot see it (a Flatpak's host): the
+   * person's own commands are found and run out there (`Installs.ts`).
+   * Without it, everything is looked for and run here, as always.
+   */
+  readonly onDevice?: OnDevice
+  /**
+   * Where the models probe may start an agent whose copy lives outside the
+   * sandbox (a Flatpak): a folder the device sees at the same path too.
+   * Without it, the system's temporary folder (`Models.ts`).
+   */
+  readonly probeRoot?: string
   /** Opens a line in a terminal for the person to run, such as an agent's own sign-in; whether it could. Without it, the person runs it. */
   readonly openTerminal?: (line: string) => Effect.Effect<boolean>
   /** Opens a page in the person's browser, for an agent's sign-in that doesn't itself; whether it could. Without it, the window offers the link. */
@@ -35,6 +56,8 @@ export interface RuntimeOptions {
   readonly listenEvery?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
+  /** Althar's GitHub App, by its slug, for where it is installed on an owner. */
+  readonly githubApp?: string
   /**
    * How code hosts and trackers are called. The app gives its own network,
    * which trusts the certificates and proxies the Mac does, as a company's
@@ -43,10 +66,58 @@ export interface RuntimeOptions {
   readonly fetch?: Fetch
   /** How long stopping an agent waits for it to end its turn before it stops its process: 10 seconds unless a test says otherwise. */
   readonly stopGrace?: Duration.Duration
+  /** Maximum time for the coordinator to judge a permission, including startup: one minute by default. */
+  readonly permissionJudgeTimeout?: Duration.Duration
   /** When a turn counts as stalled, and how much work goes on before the person is asked (`Stalls.ts`). */
   readonly stalls?: StallOptions
   /** Where what is known of models comes from (`ModelFacts.ts`); without it, nothing is fetched and nothing is known. */
   readonly modelFacts?: ModelFactsOptions
+  /** How this computer's load is read, and how often at most (`MachineLoad.ts`). */
+  readonly load?: LoadOptions
+  /** How a task's worktree is set up before its lead starts (`Setups.ts`). */
+  readonly setups?: SetupOptions
+  /** When a lead that ended its turn counts as done, and how long a round waits for one that isn't (`leftRunning.ts`, `conflicts.ts`). */
+  readonly idle?: IdleOptions
+  /** How many tasks are at work at once here, and how what waits for a place is looked at (`Busy.ts`). */
+  readonly busy?: BusyOptions
+}
+
+/** Each is the default unless a test says otherwise. */
+export interface IdleOptions {
+  /** How long an agent must say nothing outside a turn, once what it left running ended, to be taken as done: 30 seconds. */
+  readonly quiet?: Duration.Duration
+  /** How long a round waits for a lead that is still at work before it judges the branch as it is: 45 minutes. */
+  readonly within?: Duration.Duration
+  /** How long an agent is given to wake once what it left running ended, before it speaks: five minutes. */
+  readonly wake?: Duration.Duration
+  /** How long after its turn ends a lead is given to report what it left running: two seconds. */
+  readonly reports?: Duration.Duration
+}
+
+export interface BusyOptions {
+  /** The machine the default is worked out from: this one, as Node says it, unless a test says. */
+  readonly machine?: Machine
+  /** How often what waits is looked at, besides whenever an agent's turn or session ends: every 5 seconds. */
+  readonly every?: Duration.Duration
+  /** How often the CPU of what agents left running is read, while any is: every 2 seconds. */
+  readonly sample?: Duration.Duration
+  /** How long what an agent left running must stay below real CPU before it stops taking a place: 30 seconds. */
+  readonly quiet?: Duration.Duration
+  /**
+   * The CPU time of each process in the tree of each of these agents (the agent's process and everything it started), by
+   * process and in milliseconds, by thread; null where it can't be said, as for an agent that is no process of its own:
+   * read with `ps` from the agent's process, once a sample.
+   */
+  readonly cpuOf?: (
+    agents: ReadonlyArray<{ readonly threadId: string; readonly pid: number | null }>,
+  ) => Effect.Effect<ReadonlyMap<string, ReadonlyMap<number, number> | null>>
+}
+
+export interface SetupOptions {
+  /** How long a setup may run before it is stopped and counts as failed: ten minutes unless a test says otherwise. */
+  readonly within?: Duration.Duration
+  /** The shell it runs in, as a login shell: the person's own (`SHELL`) unless a test says otherwise. */
+  readonly shell?: string
 }
 
 /** Each is the default unless a test says otherwise. */
@@ -74,8 +145,12 @@ export class RuntimeConfig extends Context.Service<RuntimeConfig, RuntimeOptions
 /** An agent the runtime can start: its registry entry, and how to reach it from a working directory. */
 export interface AgentEntry {
   readonly definition: AgentDefinition
-  /** How to reach it from a working directory, with an account's home in its environment (ADR-012). */
-  readonly transport: (cwd: string, env?: Readonly<Record<string, string>>) => Transport
+  /**
+   * How to reach it from a working directory, with an account's home in its
+   * environment (ADR-012); `untrusted`, as the lead of a review of someone
+   * else's pull request, with what keeps that repository's config from running.
+   */
+  readonly transport: (cwd: string, env?: Readonly<Record<string, string>>, options?: SessionOptions) => Transport
 }
 
 /**
@@ -109,12 +184,18 @@ export class Agents extends Context.Service<
    * isn't passed on either (provider-adapters' process environment). Nor
    * are the MCP servers the person set up for an agent themselves, which
    * Codex and OpenCode would otherwise load beside Althar's (ownTools.ts).
+   * The lead of a review of someone else's pull request also starts with what
+   * its registry entry says keeps that repository's config, hooks and plugins
+   * from loading, and with git that takes no repository the pull request
+   * carries for its own (`readingUntrusted`).
    */
   static readonly registry: Layer.Layer<Agents, never, Installs> = Layer.effect(
     Agents,
     Effect.gen(function* () {
       const installs = yield* Installs
-      return Agents.fromRegistry((definition) => usingLocated(definition, () => installs.locate(definition)))
+      // In a Flatpak a bundled copy lives inside the app's sandbox: the sign-in
+      // line the person runs names the app that carries it (`usingLocated`).
+      return Agents.fromRegistry((definition) => usingLocated(definition, () => installs.locate(definition), process.env.FLATPAK_ID))
     }),
   )
 
@@ -126,10 +207,15 @@ export class Agents extends Context.Service<
         .map(located)
         .map((definition) => ({
           definition,
-          transport: (cwd: string, env: Readonly<Record<string, string>> = {}) => {
-            const spec = definition.launch(process.execPath)
+          transport: (cwd: string, env: Readonly<Record<string, string>> = {}, options: SessionOptions = {}) => {
+            const spec = definition.launch(adapterNode())
             const own = definition.withoutOwnTools?.({ env: { ...process.env, ...env }, homeDir: homedir(), cwd }) ?? {}
-            return { _tag: 'Process' as const, spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...env } }, cwd }
+            const held = options.untrusted === true ? { ...readingUntrusted, ...definition.reviewing?.env?.({ ...spec.env, ...own }) } : {}
+            return {
+              _tag: 'Process' as const,
+              spec: { ...spec, env: { ...spec.env, ...withoutSignIns(signedOut), ...own, ...held, ...env } },
+              cwd,
+            }
           },
         })),
     )
@@ -147,6 +233,27 @@ export const withoutSignIns = (signedOut: string): Readonly<Record<string, strin
   GIT_TERMINAL_PROMPT: '0',
 })
 
+/**
+ * What the environment of a review's lead adds to `withoutSignIns`' (whose
+ * one git setting it keeps), beside its agent's `reviewing.env`. Git reads
+ * none of the person's config or the system's: a filter, diff or merge
+ * driver defined there (`python -m nbstripout`, a textconv) would run on the
+ * pull request's files as the lead's `git status` or `git diff` reads them,
+ * in the copy, where it finds the pull request's own modules first; the
+ * copy is a repository of its own whose config defines none (`addReadCopy`).
+ * And git uses a bare repository only where it is named, never one it finds
+ * by itself: a pull request can carry one, under any name, whose config
+ * names a program for git to run (an external diff, a signature checker);
+ * `git -C` into it would run it.
+ */
+export const readingUntrusted: Readonly<Record<string, string>> = {
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_KEY_1: 'safe.bareRepository',
+  GIT_CONFIG_VALUE_1: 'explicit',
+}
+
 /** Crypto from the platform's Web Crypto, which Node and Electron both have. */
 export const WebCrypto: Layer.Layer<Crypto.Crypto> = Layer.succeed(
   Crypto.Crypto,
@@ -160,12 +267,46 @@ export const WebCrypto: Layer.Layer<Crypto.Crypto> = Layer.succeed(
   }),
 )
 
+/** A command-line tool for a code host, whose sign-in on this device Althar can take a copy of. */
+export type CliTool = 'gh' | 'glab'
+
+/**
+ * The token a tool is signed in to a host with, read the way the tool itself
+ * hands it out (from its config or the keychain it keeps it in), or null
+ * where it isn't there or says it isn't signed in. A tool that didn't get to
+ * say, timed out or never started, fails. Only the runtime reads it; it goes
+ * to Althar's own keychain and never to an agent.
+ */
+export const cliToken = (tool: CliTool, host: string): Effect.Effect<string | null, CliUnanswered> =>
+  Effect.callback<string | null, CliUnanswered>((resume) => {
+    const args = tool === 'gh' ? ['auth', 'token', '--hostname', host] : ['config', 'get', 'token', '--host', host]
+    // An app opened from the Finder has a short PATH: where Homebrew puts the tools is looked in too.
+    const path = [process.env.PATH, '/opt/homebrew/bin', '/usr/local/bin']
+      .filter((part) => part !== undefined && part !== '')
+      .join(delimiter)
+    execFile(
+      tool,
+      args,
+      { timeout: 10_000, env: { ...process.env, PATH: path, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' } },
+      (error, stdout) => {
+        const token = stdout.trim()
+        if (error === null) return resume(Effect.succeed(/^\S{20,400}$/.test(token) ? token : null))
+        // It ran and said no, or isn't installed: it has no sign-in to give.
+        if (error.killed !== true && (typeof error.code === 'number' || error.code === 'ENOENT')) return resume(Effect.succeed(null))
+        resume(
+          Effect.fail(new CliUnanswered({ tool, message: `${tool} didn’t answer (${error.signal ?? error.code ?? 'no reason given'})` })),
+        )
+      },
+    )
+  })
+
 /**
  * The code hosts and trackers the runtime connects to (docs/architecture/06):
  * each product it has an adapter for, how it calls their APIs, the public ids
  * of Althar's own apps registered with them (a product without one takes
- * a pasted token), and the loopback port a browser sign-in comes back to.
- * Tests put fakes here.
+ * a pasted token), its GitHub App's slug, for where it is installed, the
+ * loopback port a browser sign-in comes back to, and how a command-line
+ * tool's sign-in is read. Tests put fakes here.
  */
 export class Connectors extends Context.Service<
   Connectors,
@@ -174,9 +315,25 @@ export class Connectors extends Context.Service<
     readonly fetch: Fetch
     readonly clientIds: Partial<Record<Product, string>>
     readonly callbackPort: number
+    readonly appSlug?: string
+    readonly cliToken: (tool: CliTool, host: string) => Effect.Effect<string | null, CliUnanswered>
   }
 >()('@althar/runtime/Connectors') {
   /** The products with adapters, over the network. */
-  static readonly live = (clientIds: Partial<Record<Product, string>> = {}, fetch: Fetch = globalThis.fetch): Layer.Layer<Connectors> =>
-    Layer.succeed(Connectors, Connectors.of({ products: available(), fetch, clientIds, callbackPort: 47821 }))
+  static readonly live = (
+    clientIds: Partial<Record<Product, string>> = {},
+    fetch: Fetch = globalThis.fetch,
+    appSlug?: string,
+  ): Layer.Layer<Connectors> =>
+    Layer.succeed(
+      Connectors,
+      Connectors.of({
+        products: available(),
+        fetch,
+        clientIds,
+        callbackPort: 47821,
+        cliToken,
+        ...(appSlug === undefined ? {} : { appSlug }),
+      }),
+    )
 }

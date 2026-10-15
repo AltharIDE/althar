@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto'
 import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises'
 import { basename, dirname, join, sep } from 'node:path'
 
 /*
  * The git repositories on this computer where people usually keep code, for
- * the first screen to offer before there is a project: ~/Projects,
+ * the first screen to offer before there is a project, and a new project
+ * after: ~/Projects,
  * ~/Developer, ~/code and the like, and a folder or two down in each. Only
  * read: names, the branch checked out, and when each was last worked on.
  * On a Mac it never looks in Documents, Desktop or Downloads, which the
@@ -15,6 +17,8 @@ import { basename, dirname, join, sep } from 'node:path'
 export interface FoundHere {
   /** Its root, under the place it was found in. */
   readonly path: string
+  /** Its root as the disk has it, without symbolic links: what a grant for it must still be. */
+  readonly real: string
   readonly name: string
   /** The branch checked out, or null where none is. */
   readonly branch: string | null
@@ -85,7 +89,7 @@ const repositoryAt = async (dir: string): Promise<FoundHere | null> => {
   const git = join(dir, '.git')
   const found = await lstat(git).catch(() => null)
   if (found?.isDirectory() !== true) return null
-  return { path: dir, name: basename(dir), branch: await branchOf(git), worked: await workedOn(git) }
+  return { path: dir, real: dir, name: basename(dir), branch: await branchOf(git), worked: await workedOn(git) }
 }
 
 /** The folders in `dir` worth looking in, by path. */
@@ -130,10 +134,43 @@ export const findRepositories = async (places: ReadonlyArray<string>): Promise<F
   const found = (await Promise.all(lookedIn.map((place) => repositoriesUnder(place, LOOK.depth)))).flat()
   const once = new Map<string, FoundHere>()
   for (const repository of found) {
-    const root = await realpath(repository.path).catch(() => repository.path)
-    if (!once.has(root)) once.set(root, repository)
+    // Off a Mac this is untried: Windows names one folder in more ways than one (case, a drive's letter), which it may list twice.
+    const real = await realpath(repository.path).catch(() => repository.path)
+    if (!once.has(real)) once.set(real, { ...repository, real })
   }
   return { lookedIn, repositories: [...once.values()].sort((a, b) => b.worked - a.worked).slice(0, LOOK.most) }
+}
+
+/**
+ * The folder to grant for a repository found, if it is still the one found:
+ * at the same place on disk, links followed, and still a repository. A grant
+ * goes to where it is on disk, so a link put in its place since can't send
+ * it anywhere else.
+ */
+export const stillFound = async (repository: Pick<FoundHere, 'path' | 'real'>): Promise<string | null> => {
+  const real = await realpath(repository.path).catch(() => null)
+  if (real !== repository.real) return null
+  const git = await lstat(join(real, '.git')).catch(() => null)
+  return git?.isDirectory() === true ? real : null
+}
+
+/**
+ * The ids the window knows the repositories found by: one id a repository,
+ * the same each time it is found, so a look made by another window, or two
+ * at once, never takes back an id a window still offers.
+ */
+export const foundIds = () => {
+  const byReal = new Map<string, string>()
+  const byId = new Map<string, FoundHere>()
+  return {
+    idOf: (repository: FoundHere) => {
+      const id = byReal.get(repository.real) ?? randomUUID()
+      byReal.set(repository.real, id)
+      byId.set(id, repository)
+      return id
+    },
+    found: (id: string) => byId.get(id),
+  }
 }
 
 /** A place as the person knows it: under their home, from ~. */
@@ -143,12 +180,12 @@ export const shownAt = (path: string, home: string) =>
 /**
  * The repositories found, as the window gets them: each by an id main
  * grants it by, and where it is as the person knows the place, never by its
- * path. `idOf` keeps which path an id stands for.
+ * path. `idOf` keeps which repository an id stands for.
  */
-export const forWindow = (found: FoundRepositories, home: string, idOf: (path: string) => string) => ({
+export const forWindow = (found: FoundRepositories, home: string, idOf: (repository: FoundHere) => string) => ({
   lookedIn: found.lookedIn.map((place) => shownAt(place, home)),
   repositories: found.repositories.map((repository) => ({
-    id: idOf(repository.path),
+    id: idOf(repository),
     name: repository.name,
     where: shownAt(repository.path, home),
     branch: repository.branch,

@@ -5,9 +5,9 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 import { MARKED } from '../../fixtures/marks'
 import { Room } from '../../foundations/vocabulary'
 import { States, statesOn } from '../../storybook/States'
-import { BackCrumb } from '../BackCrumb/BackCrumb'
+import { IconButton } from '../../primitives/IconButton/IconButton'
+import { ChromeButton } from '../ChromeButton/ChromeButton'
 import { RoomSwitch } from '../RoomSwitch/RoomSwitch'
-import { TitleBar } from '../TitleBar/TitleBar'
 import { WorkStatus } from '../WorkStatus/WorkStatus'
 import { type ProjectTab, ProjectTabs, type ProjectTabsProps } from './ProjectTabs'
 
@@ -43,7 +43,7 @@ const TWENTY: ProjectTab[] = Array.from({ length: 20 }, (_, i) => {
   return { ...base, id, seed: id, name: i < ALL.length ? base.name : `${base.name} ${i}`, running: i % 5 === 1, yours: i % 7 === 3 ? 1 : 0 }
 })
 
-/* The strip at the top of a window, with the screen's own bar below it, as the app puts them. */
+/* The bar at the top of a window, with the screen's own controls at its end, as the app puts them. */
 function Window({ initial, current: start = 'meridian', ...props }: Partial<ProjectTabsProps> & { initial?: readonly ProjectTab[] }) {
   const [open, setOpen] = useState<readonly ProjectTab[]>(initial ?? ALL.slice(0, 3))
   const [current, setCurrent] = useState<string | null>(start)
@@ -68,16 +68,20 @@ function Window({ initial, current: start = 'meridian', ...props }: Partial<Proj
           setOpen([...open, byId(id)])
           setCurrent(id)
         }}
-        onOpenFolder={fn()}
+        onNewProject={fn()}
+        end={
+          shown ? (
+            <>
+              <RoomSwitch value={Room.Talk} onChange={fn()} />
+              {shown.yours > 0 && <WorkStatus yours={shown.yours} onYours={fn()} />}
+              <ChromeButton icon="plus" label="New task" onClick={fn()} />
+            </>
+          ) : (
+            <IconButton icon="gear" label="Settings" size="small" onClick={fn()} />
+          )
+        }
         {...props}
       />
-      <TitleBar lights="none" end={shown && <WorkStatus running={shown.running ? 2 : 0} yours={shown.yours} onYours={fn()} />}>
-        {shown ? (
-          <RoomSwitch value={Room.Talk} onChange={fn()} />
-        ) : (
-          <BackCrumb to="Home" onBack={fn()} task="" title="What waits on you, across every project" />
-        )}
-      </TitleBar>
     </div>
   )
 }
@@ -94,15 +98,15 @@ type Story = StoryObj<typeof meta>
 export const InAProject: Story = {}
 /** The home has the window; its tab counts what waits across every project. */
 export const AtHome: Story = { args: { current: null } }
-/** More open than fit: each tab gives way down to its mark and a few letters, and the strip scrolls. */
+/** More open than fit: each tab gives way down to its mark and a few letters, and the tabs scroll. */
 export const ManyOpen: Story = { args: { initial: MANY, current: 'billing-web' } }
-/** Twenty open: every tab gives way down to its mark, and the strip scrolls, by wheel too. */
+/** Twenty open: every tab gives way down to its mark, and the tabs scroll, by wheel too. */
 export const TwentyOpen: Story = { args: { initial: TWENTY, current: 'tessera-14' } }
 /** Nothing open yet but the home. */
 export const OnlyHome: Story = { args: { initial: [], current: null } }
-/** Every project open: the + only opens a folder. */
+/** Every project open: the + starts a new project at once. */
 export const EveryProjectOpen: Story = { args: { initial: ALL } }
-/** In the app the system draws the lights; the strip keeps their space. */
+/** In the app the system draws the lights; the bar keeps their space. */
 export const NativeLights: Story = { args: { lights: 'space' } }
 
 export const SwitchingOpeningAndClosing: Story = {
@@ -122,6 +126,28 @@ export const SwitchingOpeningAndClosing: Story = {
     await expect(nav.getByRole('button', { name: /^Halyard/ })).toHaveAttribute('aria-current', 'page')
     await userEvent.click(nav.getByRole('button', { name: /^Home, 3 calls wait on you/ }))
     await expect(nav.getByRole('button', { name: /^Home/ })).toHaveAttribute('aria-current', 'page')
+  },
+}
+
+/** With another project to open, New project is the + menu's last item; with none, the + starts one at once. */
+export const StartingANewProject: Story = {
+  args: { onNewProject: fn() },
+  play: async ({ args, canvasElement }) => {
+    const nav = within(within(canvasElement).getByRole('navigation', { name: 'Projects' }))
+    await userEvent.click(nav.getByRole('button', { name: 'Open a project' }))
+    const menu = within(await within(document.body).findByRole('menu'))
+    await userEvent.click(menu.getByRole('menuitem', { name: /New project/ }))
+    await expect(args.onNewProject).toHaveBeenCalledOnce()
+  },
+}
+
+/** Every project open: the + is New project itself. */
+export const NewProjectAtOnce: Story = {
+  args: { initial: ALL, onNewProject: fn() },
+  play: async ({ args, canvasElement }) => {
+    const nav = within(within(canvasElement).getByRole('navigation', { name: 'Projects' }))
+    await userEvent.click(nav.getByRole('button', { name: 'New project' }))
+    await expect(args.onNewProject).toHaveBeenCalledOnce()
   },
 }
 

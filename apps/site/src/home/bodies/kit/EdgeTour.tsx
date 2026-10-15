@@ -2,11 +2,13 @@ import { EdgeSheet, Logo } from '@althar/ui'
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react'
 
 // Prototype: the kit's demo world, read from its source.
-import { EDGE_NEEDS, EDGE_WORK, edgeRowOf } from '../../../../../../packages/ui/src/fixtures/edge'
+import { EDGE_NEEDS, EDGE_WORK, edgeLineOf } from '../../../../../../packages/ui/src/fixtures/edge'
+import { HALYARD, MERIDIAN } from '../../../../../../packages/ui/src/fixtures/home'
 import { IslandOpen } from './app'
 import { BrowserWindow, Desktop, EditorWindow, TerminalWindow, type Wallpaper } from './Mac'
 import { useNarrow } from './Narrow'
 import { Reel, type ReelMoment } from './Reel'
+import { useStill } from '../../../lib/browser'
 import { cx } from '../../../lib/cx'
 import { useInView, useSeen } from './seen'
 import { Shot } from './Shot'
@@ -22,10 +24,6 @@ import t from './type.module.css'
 
 const none = () => {}
 
-const still = () =>
-  typeof window !== 'undefined' &&
-  (window.matchMedia('(prefers-reduced-motion: reduce)').matches || new URLSearchParams(window.location.search).has('t'))
-
 /**
  * The island as you would meet it: closed round the notch, then, a moment
  * after the picture is seen, dropping open, as it does when you point at it.
@@ -33,7 +31,8 @@ const still = () =>
 function OpeningIsland({ active, after = 1200 }: { active: boolean; after?: number }) {
   const spot = useRef<HTMLSpanElement>(null)
   const seen = useSeen(spot, 0.5)
-  const [open, setOpen] = useState(still)
+  const [opened, setOpen] = useState(false)
+  const open = useStill() || opened
   useEffect(() => {
     if (!active || open || !seen) return
     const timer = window.setTimeout(() => setOpen(true), after)
@@ -51,9 +50,8 @@ const MENU_SHEET = (
   <EdgeSheet
     tone="paper"
     waiting={EDGE_NEEDS.length}
-    working={EDGE_WORK.length}
-    needs={EDGE_NEEDS.map((row) => edgeRowOf(row, none))}
-    work={EDGE_WORK.map((row) => edgeRowOf(row, none))}
+    needs={EDGE_NEEDS.map((call) => edgeLineOf(call, none))}
+    work={EDGE_WORK}
     onOpenApp={none}
   />
 )
@@ -121,7 +119,7 @@ export const EDGE_MOMENTS: ReelMoment[] = [
         label="A pull request ready for you, said round the notch over a browser"
         wallpaper="light"
         app="Chrome"
-        island={<IslandOpen open={false} saying={{ project: 'Meridian', kind: 'Ready to accept' }} />}
+        island={<IslandOpen open={false} saying={{ project: MERIDIAN, kind: 'Ready to accept' }} />}
         window={(style) => <BrowserWindow style={style} />}
         at={{ left: 90, top: 40, width: 1260, height: 800 }}
       />
@@ -149,7 +147,7 @@ export const EDGE_MOMENTS: ReelMoment[] = [
         label="A permission asked round the notch over an empty desktop"
         wallpaper="light"
         app="Finder"
-        island={<IslandOpen open={false} saying={{ project: 'Halyard', kind: 'Permission' }} />}
+        island={<IslandOpen open={false} saying={{ project: HALYARD, kind: 'Permission' }} />}
       />
     ),
   },
@@ -175,6 +173,7 @@ export function EdgeTour({ tone = 'ink' }: { tone?: 'paper' | 'ink' }) {
 function MenuBarNote() {
   const ref = useRef<HTMLDivElement>(null)
   const seen = useInView(ref, 0.35)
+  const still = useStill()
   return (
     <div ref={ref} className={s.menuNote}>
       <div className={s.menuWords}>
@@ -201,7 +200,7 @@ function MenuBarNote() {
           label="Althar in the menu bar: its mark clicked, and the list dropped open under it"
           frame={s.sceneFrame}
         >
-          <div className={cx(s.corner, (seen || still()) && s.cornerOn, still() && s.cornerStill)}>
+          <div className={cx(s.corner, (seen || still) && s.cornerOn, still && s.cornerStill)}>
             <div className={s.cornerBar}>
               <span className={s.cornerMenus}>
                 <span>Shell</span>

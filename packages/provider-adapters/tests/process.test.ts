@@ -1,9 +1,14 @@
+import { mkdtempSync, realpathSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { assert, describe, it } from '@effect/vitest'
-import { Deferred, Effect, Exit, Scope, Stream } from 'effect'
+import { Deferred, Effect, Exit, Fiber, Scope, Stream } from 'effect'
 
 import { connect } from '../src/AgentConnection'
 import { AgentExited, AgentStartFailed } from '../src/errors'
-import { asNode, type CapturedFrame, childEnvironment, environmentDigest, spawnOwned } from '../src/process'
+import { adapterNode, asNode, type CapturedFrame, childEnvironment, environmentDigest, spawnOwned } from '../src/process'
+import { agents } from '../src/registry'
 import { fakeAgentMain, scenarios } from '../src/testing'
 import { text } from './contract'
 
@@ -73,6 +78,36 @@ describe('the process transport', () => {
     ),
   )
 
+  it.live('keeps a question waiting when the agent that asked it goes', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const asked = yield* Deferred.make<void>()
+        const answered = yield* Deferred.make<void>()
+        let dropped = false
+        const connection = yield* connect({
+          transport: fakeProcess,
+          onPermission: reject,
+          onQuestion: () =>
+            Deferred.succeed(asked, undefined).pipe(
+              Effect.andThen(Deferred.await(answered)),
+              Effect.as({ action: 'cancel' as const }),
+              Effect.onInterrupt(() => Effect.sync(() => (dropped = true))),
+            ),
+        })
+        const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+        const turn = yield* Effect.forkChild(Effect.flip(Stream.runCollect(session.prompt(scenarios.question))))
+        yield* Deferred.await(asked)
+        process.kill(connection.process?.pid ?? 0, 'SIGKILL')
+        assert.instanceOf(yield* Fiber.join(turn), AgentExited)
+        yield* connection.closed
+        yield* Effect.sleep('50 millis')
+        // Its going is not its taking the question back: whoever asked through Althar lets it go.
+        assert.isFalse(dropped)
+        yield* Deferred.succeed(answered, undefined)
+      }),
+    ),
+  )
+
   it.live('stops the whole process group when the scope closes, and says how', () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
@@ -83,6 +118,19 @@ describe('the process transport', () => {
       assert.isFalse(isAlive(pid))
       assert.deepStrictEqual(yield* connection.process?.stopped ?? Effect.die('no process'), { signal: 'SIGTERM', survivors: false })
     }),
+  )
+
+  it.live('keeps what a process printed though it exited before it was read, every time', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        for (let n = 0; n < 20; n += 1) {
+          const owned = yield* spawnOwned({ command: '/bin/sh', args: ['-c', 'echo done; exit 3'] }, '/tmp')
+          assert.strictEqual((yield* Deferred.await(owned.exited)).code, 3)
+          const printed = yield* Effect.promise(() => new Response(owned.stdout).text())
+          assert.strictEqual(printed, 'done\n')
+        }
+      }),
+    ),
   )
 
   it.live('fails to start a command that does not exist', () =>
@@ -124,6 +172,37 @@ describe('the process transport', () => {
     }),
   )
 
+  it.live('stops an adapter on a Node of its own, and all it started, though it ignores TERM', () =>
+    Effect.gen(function* () {
+      // A Node at a path of its own, as the app ships one: not the binary the runtime runs on.
+      const node = join(mkdtempSync(join(tmpdir(), 'althar-node-')), 'node')
+      symlinkSync(process.execPath, node)
+      const adapter = [
+        "process.on('SIGTERM', () => {})",
+        "const started = require('node:child_process').spawn('sleep', ['30'])",
+        'process.stderr.write(`${started.pid}\\n`)',
+        "process.stdout.write(String(process.env.ELECTRON_RUN_AS_NODE ?? 'none'))",
+        'setInterval(() => {}, 1000)',
+      ].join(';')
+      const scope = yield* Scope.make()
+      const owned = yield* Scope.provide(scope)(
+        spawnOwned({ command: node, args: ['-e', adapter], env: { ALTHAR_NODE: node } }, '/tmp', { grace: '200 millis' }),
+      )
+      const reader = owned.stdout.getReader()
+      const said = new TextDecoder().decode((yield* Effect.promise(() => reader.read())).value)
+      reader.releaseLock()
+      for (let waited = 0; owned.stderrTail() === '' && waited < 2_000; waited += 25) yield* Effect.sleep('25 millis')
+      const started = Number(owned.stderrTail().trim())
+      assert.strictEqual(said, 'none')
+      assert.isTrue(isAlive(started))
+      yield* Scope.close(scope, Exit.void)
+      assert.isFalse(isAlive(owned.pid))
+      assert.isTrue(yield* goneSoon(started))
+      assert.deepStrictEqual(yield* Deferred.await(owned.stopped), { signal: 'SIGKILL', survivors: false })
+      assert.deepStrictEqual(yield* Deferred.await(owned.exited), { code: null, signal: 'SIGKILL' })
+    }),
+  )
+
   it.live('has nothing to stop when the group has already gone', () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()
@@ -132,6 +211,38 @@ describe('the process transport', () => {
       yield* Effect.sleep('50 millis')
       yield* Scope.close(scope, Exit.void)
       assert.deepStrictEqual(yield* Deferred.await(owned.stopped), { signal: 'none', survivors: false })
+    }),
+  )
+
+  it.live('runs a spec where it says it lives, with the cwd and environment it assembled', () =>
+    Effect.gen(function* () {
+      const said: Array<{ cwd?: string; env: Readonly<Record<string, string | undefined>> }> = []
+      const spec = {
+        command: 'nowhere',
+        args: [] as ReadonlyArray<string>,
+        onDevice: (at: { cwd?: string; env: Readonly<Record<string, string | undefined>> }) => {
+          said.push(at)
+          return {
+            command: '/bin/sh',
+            args: ['-c', 'sleep 0.1; printf %s "$PWD|$SMOKE"'],
+            env: { SMOKE: 'yes' },
+            inheritEnv: ['DBUS_SESSION_BUS_ADDRESS'],
+          }
+        },
+      }
+      const scope = yield* Scope.make()
+      const owned = yield* Scope.provide(scope)(spawnOwned(spec, '/tmp'))
+      const reader = owned.stdout.getReader()
+      let text = ''
+      for (;;) {
+        const { done, value } = yield* Effect.promise(() => reader.read())
+        if (done) break
+        text += new TextDecoder().decode(value)
+      }
+      yield* Scope.close(scope, Exit.void)
+      assert.strictEqual(text, `${realpathSync('/tmp')}|yes`)
+      assert.strictEqual(said[0]?.cwd, '/tmp')
+      assert.strictEqual(said[0]?.env.SMOKE, undefined)
     }),
   )
 })
@@ -164,6 +275,23 @@ describe('childEnvironment', () => {
         MODE: 'x',
       },
     )
+  })
+
+  it('runs the bundled adapters on the Node the app names, else on the binary it runs on', () => {
+    assert.strictEqual(
+      adapterNode({ ALTHAR_NODE: '/Applications/Althar.app/Contents/Resources/node/bin/node' }),
+      '/Applications/Althar.app/Contents/Resources/node/bin/node',
+    )
+    assert.strictEqual(adapterNode({}), process.execPath)
+    assert.strictEqual(adapterNode({ ALTHAR_NODE: '' }), process.execPath)
+  })
+
+  it('never tells the Node the app ships to run as Electron, even under Electron', () => {
+    const node = '/Applications/Althar.app/Contents/Resources/node/bin/node'
+    const spec = agents['claude-code'].launch(node)
+    assert.strictEqual(spec.command, node)
+    assert.isUndefined(childEnvironment(spec, { ELECTRON_RUN_AS_NODE: '1' }, true).ELECTRON_RUN_AS_NODE)
+    assert.deepStrictEqual(asNode(spec, true), {})
   })
 
   it("runs Electron's own binary as Node", () => {

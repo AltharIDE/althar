@@ -93,6 +93,7 @@ flowchart LR
 | Electron main | Windows, deep links, application quit, updates, narrow IPC bridge | Workflow rules, provider sessions, project state |
 | Runtime | Commands, queries, policy, workflow scheduling, persistence, process supervision | Provider model loop or window state |
 | Provider child | Provider-native conversation, model/tool loop, provider context | Althar project or workflow truth |
+| Speech process | Dictation's speech model: bringing it down, and turning speech into text on this machine (ADR-017) | Anything but speech; it starts when someone dictates and stops when idle |
 | SQLite | Canonical local structured state | Large blobs or live process streams |
 | Artifact store | Content-addressed immutable bytes | Mutable domain authority |
 
@@ -194,14 +195,29 @@ test, or network call is running.
 
 While the person works in another app, Althar shows at the edge of the
 screen: an island round the notch on a Mac that has one, otherwise its mark
-in the menu bar, with a sheet under it. Each is a page of its own, given a
-port to the runtime as a window is, so it reads and answers through the same
-API and holds no state the main process must keep. The main process only
-places it: it finds the notch (AppKit knows it; Electron doesn't), keeps the
-person's choice beside the app's icon, and, since a panel above the menu bar
+in the menu bar or the system tray, with a sheet under it. A desktop with no
+tray has no edge; Althar is then only in its window. Each is a page of its
+own, given a port to the runtime as a window is, so it reads and answers
+through the same API and holds no state the main process must keep. The
+main process only places it: it finds the notch (AppKit knows it; Electron
+doesn't), keeps the person's choice beside the app's icon, notes when the
+system has no tray to give the mark, and, since a panel above the menu bar
 isn't told when the pointer arrives while another app is active, watches the
-pointer against where the island draws. The island never takes focus from
-what the person is typing in.
+pointer against where the island draws. Settings asks it where the edge is,
+on every system, and offers a choice only where there is a notch. The island
+never takes focus from what the person is typing in.
+
+### Dictation
+
+The composer's microphone records in the window, in memory. The first time
+someone presses it, with no speech model on the machine, the composer offers
+the model and its size; nothing comes down until they say so, and the
+microphone is asked for first. The main process asks the system for the
+microphone, reads whether the model is there from the profile's `speech/`
+folder, and starts a speech utility process to bring it down and to turn
+what was said into text. That process runs a native addon (sherpa-onnx), so
+it is kept apart from the runtime, and stops once it has sat idle. Nothing
+said leaves the machine (ADR-017).
 
 ### Window close and application quit
 
@@ -274,6 +290,23 @@ The runtime:
 Queries return projections shaped for screens. They do not expose SQL tables or
 mutable domain objects directly. Every unbounded result is paginated.
 
+Finding a task (`SearchTasks`, and the coordinator's `find_tasks`) reads a
+full-text index kept in the store (SQLite's FTS5, ADR-035): one row of text a
+task, holding its title; what the person asked of it, as they asked it and in
+their later messages to its lead; its lead's step summaries and what it said
+it built; its pull requests' numbers, its issue's key and its branches; and
+the files its agents changed, as their tool calls name them. The runtime
+writes a task's row in the transaction that changes one of those (`Search.ts`:
+the task made or renamed, a message from the person, a step's report, a pull
+request, issue or new branch linked), so the files stand as of the lead's
+last report; tasks made before the index get their rows in the background as
+the runtime starts. Nothing reads git or a worktree to search. Each word
+typed finds the words it begins, every word must be found, and results come
+best first by bm25 (the title counting most), the most recently changed
+first among those within a tenth of each other; in one project, or every one
+not removed. Where a found task stands is read as its card's phase is, from
+the store and the agents at work.
+
 ### Change notifications
 
 Notifications tell the UI that a projection changed. They carry a resumable
@@ -325,9 +358,10 @@ an agent, Git, or a test runner. Standard input/output (`stdio`) are byte
 streams through which the runtime may send requests and receive structured
 events. Agents speak ACP over `stdio`.
 
-Bundled ACP adapters written for Node run on Electron's own Node (the Electron
-binary started with `ELECTRON_RUN_AS_NODE`), so Althar doesn't depend on a
-Node installed on the machine.
+Bundled ACP adapters written for Node run on a Node the packaged app ships
+(ADR-033), so Althar doesn't depend on a Node installed on the machine, and
+its own binary never runs as Node: its `runAsNode` fuse is off. In
+development they run on Electron's binary as Node (`ELECTRON_RUN_AS_NODE`).
 
 Starting a process is easy. Owning its complete lifecycle is the hard part.
 

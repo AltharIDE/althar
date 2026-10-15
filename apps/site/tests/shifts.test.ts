@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 
-import { SHIFTS, ShiftKind, type Shift } from '../src/content/shifts'
-import { byMonth, countByKind, daysCovered, latest, newestFirst, onlyKind } from '../src/shifts/group'
+import { SHIFTS, ShiftKind, UPCOMING, type Shift } from '../src/content/shifts'
+import { byMonth, countByKind, daysCovered, latest, newestFirst, onlyKind, soonestFirst, stillAhead, untilWord } from '../src/shifts/group'
 
 const shift = (id: string, date: string, kind = ShiftKind.Model): Shift => ({
   id,
@@ -94,5 +94,68 @@ describe('ordering and grouping', () => {
     const mixed = [shift('a', '2026-09-01', ShiftKind.Limits), shift('b', '2026-09-02')]
     expect(onlyKind(mixed, ShiftKind.Limits).map((s) => s.id)).toEqual(['a'])
     expect(onlyKind(mixed, null)).toHaveLength(2)
+  })
+})
+
+describe('the upcoming changes we list', () => {
+  it('has ids of its own, apart from the shifts that happened', () => {
+    const ids = UPCOMING.map((u) => u.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    const happened = new Set(SHIFTS.map((s) => s.id))
+    for (const id of ids) expect(happened.has(id), id).toBe(false)
+  })
+
+  it('dates each as a real day, announced before it takes effect', () => {
+    for (const u of UPCOMING) {
+      for (const day of [u.date, u.announced]) {
+        expect(day, u.id).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+        expect(new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10), u.id).toBe(day)
+      }
+      expect(u.announced <= u.date, u.id).toBe(true)
+    }
+  })
+
+  it('links a source over https, and says it in a sentence or two', () => {
+    for (const u of UPCOMING) {
+      expect(new URL(u.source.url).protocol, u.id).toBe('https:')
+      expect(u.title.length, u.id).toBeLessThanOrEqual(64)
+      expect(u.what.length, u.id).toBeLessThanOrEqual(200)
+      expect(u.what.endsWith('.'), u.id).toBe(true)
+    }
+  })
+})
+
+describe('what is still to come', () => {
+  const NOW = Date.parse('2026-10-10T15:30:00Z')
+  const list = [
+    shift('a', '2026-12-11'),
+    shift('b', '2026-10-10'),
+    shift('c', '2026-10-14'),
+    shift('d', '2026-10-09'),
+    shift('e', '2026-10-14'),
+  ]
+
+  it('puts the soonest first, and same-day ones in a stable order', () => {
+    expect(soonestFirst(list).map((s) => s.id)).toEqual(['d', 'b', 'c', 'e', 'a'])
+  })
+
+  it('keeps what lands today or later, and drops what has passed', () => {
+    expect(stillAhead(list, NOW).map((s) => s.id)).toEqual(['a', 'b', 'c', 'e'])
+  })
+
+  it('groups by month from the soonest, with the soonest first inside it', () => {
+    const months = byMonth(list, soonestFirst)
+    expect(months.map((m) => [m.key, m.items.map((s) => s.id)])).toEqual([
+      ['2026-10', ['d', 'b', 'c', 'e']],
+      ['2026-12', ['a']],
+    ])
+  })
+
+  it('says how far off a day is', () => {
+    expect(untilWord('2026-10-10', NOW)).toBe('today')
+    expect(untilWord('2026-10-11', NOW)).toBe('tomorrow')
+    expect(untilWord('2026-10-14', NOW)).toBe('in 4 days')
+    expect(untilWord('2026-11-24', NOW)).toBe('in 45 days')
+    expect(untilWord('2027-04-01', NOW)).toBe('in 6 months')
   })
 })

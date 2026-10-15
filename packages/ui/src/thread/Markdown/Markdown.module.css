@@ -73,6 +73,30 @@
   color: var(--t-1);
   white-space: pre-wrap;
 }
+/* a block's copy waits in a band above its first line, in the top-right corner, until the block is hovered, focused or, on touch, always there; the band is reserved, so the code never moves and the copied label never lands on it */
+.block {
+  position: relative;
+}
+.block pre {
+  margin: 0;
+  padding-top: 36px;
+}
+.copy {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.block:hover > .copy,
+.block:focus-within > .copy {
+  opacity: 1;
+}
+@media (hover: none) {
+  .copy {
+    opacity: 1;
+  }
+}
 .md blockquote {
   padding: 9px 12px;
   border-radius: 8px;
@@ -85,23 +109,6 @@
 .md hr {
   border: 0;
   border-top: 1px solid var(--line);
-}
-.tableWrap {
-  overflow-x: auto;
-}
-.md table {
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.md th,
-.md td {
-  padding: 5px 10px 5px 0;
-  border-bottom: 1px solid var(--line);
-  text-align: left;
-}
-.md th {
-  font-weight: 600;
-  color: var(--t-1);
 }
 
 .panel {

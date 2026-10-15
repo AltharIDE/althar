@@ -1,7 +1,7 @@
 import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { ProjectInk, TaskStatus } from '@althar/ui'
+import { ProjectInk } from '@althar/ui'
 
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from '../src/renderer/features/settings/EdgePicture'
 
@@ -10,20 +10,27 @@ import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from '../src/rendere
 const MERIDIAN = { seed: 'meridian', ink: ProjectInk.Clay, name: 'meridian' }
 
 describe('the edge, pictured in settings', () => {
-  it('draws the home’s own work, and a busy moment only where nothing waits or runs', () => {
-    const quiet = {
-      waiting: 0,
-      running: 1,
-      lines: [{ id: 't1', status: TaskStatus.Running, project: MERIDIAN, title: 'Retry the checkout call' }],
-    }
+  it('draws the home’s own calls and work, and a busy moment only where nothing waits or is in progress', () => {
+    const quiet = { waiting: 0, needs: [], work: { inProgress: 1 } }
     expect(shownGlance(quiet)).toBe(quiet)
-    expect(shownGlance({ waiting: 0, running: 0, lines: [] })).toBe(EXAMPLE)
+    expect(shownGlance({ waiting: 0, needs: [], work: { inProgress: 0 } })).toBe(EXAMPLE)
     expect(shownGlance(undefined)).toBe(EXAMPLE)
     const menu = render(<MenuPicture glance={quiet} />)
-    expect(menu.container.textContent).toContain('Retry the checkout call')
+    // Running doesn't need the person: the work is one line under what does.
+    expect(menu.container.textContent).toContain('Nothing needs you')
+    expect(menu.container.textContent).toContain('1 in progress')
     menu.unmount()
-    const island = render(<IslandPicture glance={EXAMPLE} />)
-    expect(island.container.textContent).toContain('Publish the SDK to npm')
+    const island = render(
+      <IslandPicture
+        glance={{
+          waiting: 1,
+          needs: [{ id: 'c1', kind: 'Permission', project: MERIDIAN, title: 'Retry the checkout call', command: 'npm test' }],
+          work: { inProgress: 2, held: 1 },
+        }}
+      />,
+    )
+    expect(island.container.textContent).toContain('Retry the checkout call')
     expect(island.container.textContent).toContain('Permission')
+    expect(island.container.textContent).toContain('2 in progress · 1 held')
   })
 })

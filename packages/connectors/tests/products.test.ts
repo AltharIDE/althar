@@ -72,7 +72,11 @@ describe('the products', () => {
         ['trello', 'key'],
       ],
     )
-    for (const info of Object.values(products)) assert.match(info.token.help(info.hosted?.webUrl ?? 'https://example.com'), /^https:\/\//)
+    for (const info of Object.values(products)) {
+      const webUrl = info.hosted?.webUrl ?? 'https://example.com'
+      assert.match(info.token.page(webUrl, { name: 'Althar' }), /^https:\/\//)
+      assert.match(info.token.settings(webUrl), /^https:\/\//)
+    }
     // Trello makes a token for the key typed, and says when the key isn't one.
     assert.strictEqual(
       products.trello.token.helpForKey?.replace('{key}', 'k'),
@@ -84,6 +88,40 @@ describe('the products', () => {
     assert.strictEqual(wrong(`${key}${key}`), 'That’s the Power-Up’s secret; paste its API key')
     assert.strictEqual(wrong(key.slice(1)), 'An API key is 32 characters')
     assert.strictEqual(wrong(`${key.slice(1)}x`), 'An API key is 32 characters')
+  })
+
+  it('fill in the pages where a token is made, with what Althar needs of it', () => {
+    const purpose = 'Althar+pushes+task+branches%2C+opens+their+pull+requests+and+reads+their+checks.'
+    // A fine-grained token on github.com, for the owner of the repositories, with the permissions Althar uses.
+    assert.strictEqual(
+      products.github.token.page('https://github.com/', { name: 'Althar on Northwind', owner: 'northwind' }),
+      `https://github.com/settings/personal-access-tokens/new?name=Althar+on+Northwind&description=${purpose}&target_name=northwind&expires_in=90&contents=write&pull_requests=write&issues=write&statuses=read&actions=read&workflows=write`,
+    )
+    // GitHub takes forty characters of a name, and no owner where none is known.
+    const long = new URL(products.github.token.page('https://github.com', { name: 'A'.repeat(60) }))
+    assert.strictEqual(long.searchParams.get('name'), 'A'.repeat(40))
+    assert.isNull(long.searchParams.get('target_name'))
+    // A company's own server may predate fine-grained tokens: a classic one, with check runs.
+    assert.strictEqual(
+      products.github.token.page('https://git.northwind.dev', { name: 'Althar' }),
+      'https://git.northwind.dev/settings/tokens/new?description=Althar&scopes=repo%2Cworkflow',
+    )
+    assert.strictEqual(products.github.token.settings('https://github.com'), 'https://github.com/settings/personal-access-tokens')
+    assert.strictEqual(products.github.token.settings('https://git.northwind.dev/'), 'https://git.northwind.dev/settings/tokens')
+    assert.strictEqual(
+      products.gitlab.token.page('https://gitlab.com', { name: 'Althar' }),
+      `https://gitlab.com/-/user_settings/personal_access_tokens?name=Althar&description=${purpose}&scopes=api`,
+    )
+    assert.strictEqual(
+      products.jira_dc.token.page('https://jira.northwind.dev/', { name: 'Althar' }),
+      'https://jira.northwind.dev/secure/ViewProfile.jspa?selectedTab=com.atlassian.pats.pats-plugin:jira-user-personal-access-tokens',
+    )
+    // Bitbucket Cloud and Data Center are one service, as a person connects it.
+    assert.deepStrictEqual(
+      Object.values(products).map((info) => info.service),
+      ['github', 'gitlab', 'bitbucket', 'bitbucket', 'linear', 'jira', 'jira', 'trello'],
+    )
+    for (const info of available()) assert.isNotNull(info.access)
   })
 
   it('make their adapters', () => {

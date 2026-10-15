@@ -17,9 +17,9 @@ export const permissionPolicyText: Record<PermissionPolicy, ChoiceWords> = {
     title: 'Allow, except what you keep',
     note: 'Agents carry on without stopping. What “Always ask me” lists waits for you; what “Never” lists is refused.',
   },
-  [PermissionPolicy.Lead]: {
-    title: 'The agent in charge decides',
-    note: 'Each task has one agent in charge of it, its lead. It allows what the task needs and passes the rest to you.',
+  [PermissionPolicy.Coordinator]: {
+    title: 'The coordinator decides',
+    note: 'The coordinator decides within the project’s rules, with a reason. Anything it can’t decide waits for you.',
   },
   [PermissionPolicy.AllowAll]: { title: 'Allow everything', note: 'Nothing asks. Every request is still recorded on its task.' },
   [PermissionPolicy.Ask]: { title: 'Ask me', note: 'Anything no rule covers waits for you.' },

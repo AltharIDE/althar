@@ -5,7 +5,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Instance } from '../src/Instance'
 import { Plans } from '../src/Plans'
-import { inkFor, Projects } from '../src/Projects'
+import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
@@ -49,21 +49,6 @@ const planned = (projectId: string, title: string, description: string) =>
   })
 
 describe("a project's ink", () => {
-  it('is the same for the same seed, and passes over the inks taken while one is free', () => {
-    assert.strictEqual(inkFor('proj_a', []), inkFor('proj_a', []))
-    const first = inkFor('proj_a', [])
-    assert.notStrictEqual(inkFor('proj_a', [first]), first)
-    const all = ['clay', 'ochre', 'olive', 'moss', 'teal', 'slate', 'rose', 'umber']
-    assert.strictEqual(inkFor('proj_a', all), first)
-    assert.strictEqual(
-      inkFor(
-        'proj_b',
-        all.filter((ink) => ink !== 'teal'),
-      ),
-      'teal',
-    )
-  })
-
   it.live('is chosen when the project is made, apart from the others, and kept', () =>
     Effect.gen(function* () {
       const queries = yield* Queries
@@ -89,7 +74,7 @@ describe('the home', () => {
       const busy = yield* open
       const done = yield* open
       const working = yield* planned(busy.projectId, 'Retry the call', '[lead:wait]')
-      const ready = yield* planned(done.projectId, 'Name it better', '[lead:finish]')
+      const ready = yield* planned(done.projectId, 'Name it better', '[lead:finish] [lead:edit]')
       const quiet = yield* planned(done.projectId, 'Say nothing', 'Nothing to say.')
       const home = yield* until(
         Effect.map(queries.home(), (snapshot) => [snapshot]),

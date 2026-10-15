@@ -30,6 +30,18 @@
   padding: 0 8px 0 18px;
   border-bottom: 1px solid var(--line);
 }
+/* a step back: a round chevron, as an opened module of Settings has */
+.stepped {
+  gap: 8px;
+  padding-left: 12px;
+}
+.back {
+  border-radius: 99px;
+  background: var(--sunk);
+}
+.back svg {
+  transform: rotate(180deg);
+}
 .title {
   margin: 0;
   font-size: 13px;

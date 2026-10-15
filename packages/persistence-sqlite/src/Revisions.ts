@@ -11,6 +11,7 @@ import { RevisionConflict, RowNotFound } from './errors'
 export const revisionedTables = [
   'projects',
   'project_settings',
+  'project_notes',
   'tasks',
   'task_repository_requirements',
   'task_plans',
@@ -37,6 +38,9 @@ export const revisionedTables = [
   'mutation_receipts',
   'connections',
   'external_links',
+  'issue_drafts',
+  'conflict_resolutions',
+  'review_drafts',
 ] as const
 export type RevisionedTable = (typeof revisionedTables)[number]
 

@@ -153,6 +153,20 @@ The fast path must not create a hidden “single repository project” subtype.
 
 ### Create a project
 
+The deliberate path opens a tab of its own, as a browser opens a new tab,
+and starts with the name: the project is named first, then given its
+folders. The window makes the project's id before the project exists, so its
+mark, drawn from the id, is the one it keeps; the runtime refuses an id
+already taken. Its colour is offered as the runtime would pick it, and can
+be changed. Folders come from the system's picker, several at once, dropped
+on the window, or, one press away, from the repositories found where people
+keep code, those named like the project first. Each is read as it is added,
+and what reading them found is said before anything is made: the code host
+each is on and whether Althar is connected to it, as whom, and any already
+in another project. A project made on purpose is new even where its first
+folder is another project's; that folder stays the other project's to find.
+Closing the tab makes nothing.
+
 The deliberate path lets a user:
 
 - name the outcome or body of work;
@@ -192,15 +206,27 @@ Tasks, evidence, and decisions remain readable when a source is unavailable.
 
 ### Changing a project after it is made
 
-A project's menu renames it, opens its repositories and its rules, and removes
-it. Each change is recorded as a fact of the project, so every window reads
-the project again.
+A project's settings, opened from the top of its screen, rename it and change
+the ink its mark is drawn in, open its repositories and its rules, connect
+its code host, and remove it. Each change is recorded as a fact of the
+project, so every window reads the project again.
 
 - **Renaming** changes its name only. Its slug, and so the folders its tasks'
   worktrees are in, stays, and so does its mark, drawn from its id.
-- **Adding** a folder binds the repositories at it, as opening it would find
-  them: the one it is or is in, whole, or those directly inside it. One left
-  out before comes back with its role and slug.
+- **Its ink** is picked for it when it is made, the first no other project
+  has, and kept; the person can pick another of the eight, even one another
+  project has. The drawing, from its id, stays.
+- **Adding** a folder, picked or dropped, binds the repositories at it, as
+  opening it would find them: the one it is or is in, whole, or those
+  directly inside it. One left out before comes back with its role and slug.
+- **Where a repository's work goes** is read from its remote (`origin`, else
+  its first; as it was added where this device has no clone): the code host
+  it is on, its path there, and whether the person is connected there, and
+  as whom, from the connections on this device. Nothing is asked of the
+  host. A host Althar doesn't know is named by its address; a repository
+  with no remote, or one that is a folder, keeps its work on this device.
+  The Repositories screen draws each folder wired to where its work goes,
+  and reads it again when a connection is made or stops working.
 - **Leaving a repository out** sets its binding's `detached_at`. New tasks
   can't require it and the coordinator stops reading it; tasks made with it
   keep their requirement and their worktree. The last binding stays, since a
@@ -237,8 +263,26 @@ It never:
 - rewrites remotes;
 - initializes Git without a separate explicit action.
 
-A project can declare a setup command, run in each new worktree, and untracked
-files to copy into it, such as `.env`.
+Each new worktree is set up before its lead starts, by Althar itself and
+outside any agent's sandbox: the setup kept for its repository, else the
+install its lockfile names, which never changes the lockfile
+([ADR-023](../decisions/023-althar-runs-the-project.md),
+[03](03-agent-runtime-and-auth.md#setting-up-a-worktree)). Untracked files to
+copy into it, such as `.env`, are not declared yet.
+
+A planned task's worktree is on its own branch from the start. A plain task's,
+one the coordinator starts with no plan (a question, a quick look, a
+prototype), has no branch: it is detached at the commit the task starts from,
+set up the same way, with a scratch folder (`.althar/scratch`) that ignores
+everything in it for what its lead throws away. Its branch's name is planned
+as any task's, and Althar makes the branch where the lead first changes the
+repository, with that work on it, as its turn ends or as it reports
+(`workspaces.branched_at`;
+[ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)), so
+nothing is lost. The lead stays in the same folder and session, the branch
+stays on this Mac, and the task stays plain until the person asks its lead to
+make it a change (`make_it_a_change`), which makes its branch then where it
+has none.
 
 Working on a plain branch in the user's own checkout may come later, as an
 explicit per-project choice. It relaxes the rules above and must say so where
@@ -265,7 +309,8 @@ drafts it, and New task has the person tick them; with one, it is that one.
 Its lead may still read the others where they are.
 
 The task's worktrees sit side by side in its folder, each on the task's
-branch, and its lead starts there: in the one worktree, or the folder in it
+branch (a plain task's, on none until its lead first writes, when each gets
+it), and its lead starts there: in the one worktree, or the folder in it
 the project is about, where there is one; in the task's folder, where there
 are several. Writing outside all of them asks. Each repository is published
 on its own: a pull request where its host is connected, its branch where
@@ -404,8 +449,8 @@ same source location, while each run still receives its own managed workspace.
 | `CoordinatorThread` | The project is created (later, one per member) | Archived with the project; never truncated |
 | `RepositoryBinding` | Source identity joins a project | Detached/tombstoned |
 | `RepositoryLocation` | A host maps or clones a binding | Remapped, unavailable, or removed |
-| `Task` | Desired work is recorded | Completed, cancelled, or archived |
-| `Run` | A task is submitted under a workflow and policy | Logical outcome chosen |
+| `Task` | Desired work is recorded | Done once merged, for good; abandoned, which can be reopened; or archived with its project ([05](05-workflow-engine.md#task-and-run-lifecycle)) |
+| `Run` | A task is submitted under a workflow and policy | Logical outcome chosen; suspended meanwhile while its task is stopped or abandoned |
 | `RunAttempt` | Execution or retry is admitted | Succeeded, failed, cancelled, interrupted |
 | `Workspace` | A task's first run is admitted on a device | Retained, published, or cleaned with the task |
 | `WorkspaceSnapshot` | A node attempt starts or ends, a switch, an interrupt | Immutable |

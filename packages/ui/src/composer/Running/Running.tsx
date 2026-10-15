@@ -16,14 +16,18 @@ import s from './Running.module.css'
 
 export interface RunningProcess {
   id: string
-  /** What was run: bun dev. */
+  /** What was run, whole: cd /work/tree && bun dev 2>&1 | tail -20. Shown in full on hover. */
   command: string
+  /** The same at a glance, where it can be said shorter: bun dev. Without it, the command is shown. */
+  label?: string
   /** Where it answers, when it serves: localhost:5173. */
   url?: string
   /** How long it has run, or when it stopped: 12m. */
   since?: string
-  /** It exited on its own, with this code. */
-  exited?: number
+  /** Where it runs, where several places run things: a task, the default branch. */
+  where?: string
+  /** It exited on its own, with this code; null where the code isn't known. */
+  exited?: number | null
 }
 
 export interface RunningText {
@@ -33,7 +37,9 @@ export interface RunningText {
   ran: string
   /** The pill, with more than one. */
   count: (n: number) => string
-  exited: (code: number) => string
+  exited: (code: number | null) => string
+  /** The pill, after what still runs: how many of the rest exited. */
+  someExited: (n: number) => string
   stop: string
   stopLabel: (command: string) => string
   /** Clear one that exited from the list. */
@@ -48,7 +54,8 @@ export const runningText: RunningText = {
   title: 'Running',
   ran: 'Ran',
   count: (n) => `${n} processes`,
-  exited: (code) => `exited ${code}`,
+  exited: (code) => (code === null ? 'ended' : `exited ${code}`),
+  someExited: (n) => `${n} exited`,
   stop: 'Stop',
   stopLabel: (command) => `Stop ${command}`,
   dismiss: 'Clear',
@@ -74,11 +81,17 @@ export interface RunningProps {
   text?: Partial<RunningText>
 }
 
+/** An exit that went wrong, as far as it is known. */
+const bad = (code: number | null) => code !== null && code !== 0
+
 export function Running({ processes, onStop, onDismiss, onOutput, onOpenUrl, open, defaultOpen, onOpenChange, text }: RunningProps) {
   const t = { ...runningText, ...text }
   if (!processes.length) return null
-  const one = processes.length === 1 ? processes[0] : undefined
-  const live = processes.some((p) => p.exited === undefined)
+  const running = processes.filter((p) => p.exited === undefined)
+  const live = running.length > 0
+  // The pill names the one still running, or the only one; else it counts them.
+  const one = running.length === 1 ? running[0] : processes.length === 1 ? processes[0] : undefined
+  const ended = processes.length - running.length
 
   return (
     <Popover
@@ -96,9 +109,16 @@ export function Running({ processes, onStop, onDismiss, onOutput, onOpenUrl, ope
           {live ? <LiveDot /> : <Icon name="terminal" size={11} className={s.still} />}
           <span className={s.text}>
             <span className={s.k}>{live ? t.title : t.ran}</span>
-            {one ? <code className={cx(s.name, s.mono)}>{one.command}</code> : <span className={s.name}>{t.count(processes.length)}</span>}
+            {one ? (
+              <code className={cx(s.name, s.mono)} title={one.command}>
+                {one.label ?? one.command}
+              </code>
+            ) : (
+              <span className={s.name}>{t.count(live ? running.length : processes.length)}</span>
+            )}
             {one?.url && <span className={s.what}>· {one.url}</span>}
-            {one?.exited !== undefined && <span className={cx(s.what, one.exited !== 0 && s.bad)}>· {t.exited(one.exited)}</span>}
+            {one?.exited !== undefined && <span className={cx(s.what, bad(one.exited) && s.bad)}>· {t.exited(one.exited)}</span>}
+            {live && ended > 0 && <span className={s.what}>· {t.someExited(ended)}</span>}
           </span>
           <Icon name="chevronD" size={9} className={s.chev} />
         </button>
@@ -113,7 +133,9 @@ export function Running({ processes, onStop, onDismiss, onOutput, onOpenUrl, ope
             <span className={s.rowGlyph}>{p.exited === undefined ? <LiveDot /> : <Icon name="terminal" size={12} />}</span>
             <span className={s.rowMain}>
               <span className={s.rowTitle}>
-                <code className={s.command}>{p.command}</code>
+                <code className={s.command} title={p.command}>
+                  {p.label ?? p.command}
+                </code>
                 {p.url &&
                   (onOpenUrl ? (
                     <LinkButton className={s.url} aria-label={t.openLabel(p.url)} onClick={() => onOpenUrl(p.id)}>
@@ -124,23 +146,35 @@ export function Running({ processes, onStop, onDismiss, onOutput, onOpenUrl, ope
                   ))}
               </span>
               <span className={s.rowMeta}>
-                {p.exited !== undefined && <span className={cx(p.exited !== 0 && s.bad)}>{t.exited(p.exited)}</span>}
-                {p.exited !== undefined && p.since && ' · '}
-                {p.since}
+                {[
+                  p.where !== undefined && (
+                    <span key="where" className={s.where}>
+                      {p.where}
+                    </span>
+                  ),
+                  p.exited !== undefined && (
+                    <span key="exited" className={cx(bad(p.exited) && s.bad)}>
+                      {t.exited(p.exited)}
+                    </span>
+                  ),
+                  p.since !== undefined && <span key="since">{p.since}</span>,
+                ]
+                  .filter(Boolean)
+                  .flatMap((part, at) => (at === 0 ? [part] : [<span key={`and${at}`}> · </span>, part]))}
               </span>
             </span>
             {onOutput && (
-              <ActionButton size="small" aria-label={t.outputLabel(p.command)} onClick={() => onOutput(p.id)}>
+              <ActionButton size="small" aria-label={t.outputLabel(p.label ?? p.command)} onClick={() => onOutput(p.id)}>
                 {t.output}
               </ActionButton>
             )}
             {onStop && p.exited === undefined && (
-              <ActionButton size="small" aria-label={t.stopLabel(p.command)} onClick={() => onStop(p.id)}>
+              <ActionButton size="small" aria-label={t.stopLabel(p.label ?? p.command)} onClick={() => onStop(p.id)}>
                 {t.stop}
               </ActionButton>
             )}
             {onDismiss && p.exited !== undefined && (
-              <ActionButton size="small" aria-label={t.dismissLabel(p.command)} onClick={() => onDismiss(p.id)}>
+              <ActionButton size="small" aria-label={t.dismissLabel(p.label ?? p.command)} onClick={() => onDismiss(p.id)}>
                 {t.dismiss}
               </ActionButton>
             )}

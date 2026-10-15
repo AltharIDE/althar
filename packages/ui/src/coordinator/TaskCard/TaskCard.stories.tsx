@@ -34,6 +34,14 @@ export const Running: Story = {
   },
 }
 
+/** Its lead at an effort it was set to, by the coordinator or the person: said beside its model. */
+export const WithEffort: Story = {
+  args: { effort: 'High' },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('High')).toBeVisible()
+  },
+}
+
 /** Something in it waits on you: violet, and the button answers. */
 export const WaitingOnYou: Story = {
   args: {
