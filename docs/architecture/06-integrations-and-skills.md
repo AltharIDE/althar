@@ -291,7 +291,7 @@ service's model.
     settings cannot stand in for checking it. Every destination is checked
     again after planning; applying or undoing a merge does not recursively
     update submodule checkouts. See the
-    [submodule status failure notes](../troubleshooting/local-merge-submodules.md).
+    [notes on submodules and merging here](../troubleshooting/local-merge-submodules.md).
   - Refs move first and checkouts last. A checkout that refuses anyway
     (something written there since) puts back what moved, so it is all or
     none.

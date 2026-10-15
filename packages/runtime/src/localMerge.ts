@@ -1,6 +1,6 @@
 import { Effect } from 'effect'
 
-import { commitOf, git, gitExactly, gitOutcome, trackedStatus } from './git'
+import { commitOf, git, gitOutcome, trackedStatus } from './git'
 
 /*
  * Merging a task's branch into its repository's default branch on this Mac,
@@ -40,9 +40,10 @@ export type MergePlan =
 
 /** The working tree of `root`'s repository that has `branch` checked out, if any. */
 export const checkedOut = (root: string, branch: string) =>
-  Effect.map(gitExactly(root, 'worktree', 'list', '--porcelain', '-z'), (listing) => {
+  // Lines, not -z: that needs git 2.36, and the system git some installs run is older.
+  Effect.map(git(root, 'worktree', 'list', '--porcelain'), (listing) => {
     let path: string | null = null
-    for (const line of listing.split('\0')) {
+    for (const line of listing.split('\n')) {
       if (line.startsWith('worktree ')) path = line.slice('worktree '.length)
       else if (line === `branch refs/heads/${branch}`) return path
       else if (line === '') path = null
