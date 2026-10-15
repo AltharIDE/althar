@@ -20,6 +20,7 @@ import {
 import { contextMeter } from '../../shared/ContextMeter'
 import { useModels } from '../../data/models'
 import { useDictation } from '../../shared/dictation/useDictation'
+import { draftKey, useDraft } from '../../shared/drafts'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
@@ -175,10 +176,13 @@ export function ProjectView({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
-  const [draft, setDraft] = useState('')
-  const voice = useDictation(setDraft, { projectId: model.project?.id ?? model.coordinator?.project.id ?? null })
+  // What the person writes to the coordinator, kept by the project while they are elsewhere, as are its images and what they dictate.
+  const about = model.project?.id ?? model.coordinator?.project.id ?? null
+  const draftOf = draftKey.coordinator(about ?? '')
+  const [draft, setDraft] = useDraft(draftOf)
+  const voice = useDictation(draftOf, { projectId: about })
   // Images to send with what the person says, and which agents take them.
-  const images = useImages()
+  const images = useImages(draftOf)
   const models = useModels()
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
@@ -360,7 +364,7 @@ export function ProjectView({
         trackers,
         open: (url) => window.open(url, '_blank'),
       })}
-      // What the project runs, with no agent, on its default branch (ADR-042).
+      // What the project runs, with no agent, on its default branch (ADR-043).
       {...(coordinator === null
         ? {}
         : {

@@ -20,7 +20,7 @@ import { ago, running } from '../../shared/time'
 import { useRuns } from './useRuns'
 
 /*
- * What a project runs, from the top of its screen or a task's bar (ADR-042):
+ * What a project runs, from the top of its screen or a task's bar (ADR-043):
  * the Run button, whose one press runs the default and whose list starts and
  * stops the rest, here (in the task's worktree, or a copy of the default
  * branch); and, opened from it, adding something to run, the whole list, and

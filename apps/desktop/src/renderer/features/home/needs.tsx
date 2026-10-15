@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import type { HomeCall, HomeTask } from '@althar/contracts'
 import { Button, type EdgeWork, NeedLine, type ProjectRef } from '@althar/ui'
 
+import { commandOf, titleOf } from '../../shared/callCommand'
 import { callKindOf, isFinished, kindWords, readyKindOf, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
@@ -163,8 +164,8 @@ export const needsOf = ({
           threadId: call.threadId,
           kind: kindWords.permission,
           project,
-          title: call.title,
-          command: call.command ?? call.title,
+          title: titleOf(call),
+          ...commandOf(call),
           answer: answerOf(reply, project),
         },
       ]
@@ -191,8 +192,8 @@ export const needsOf = ({
             threadId: call.threadId,
             kind: kindWords.permission,
             project,
-            title: call.title,
-            command: call.command ?? call.title,
+            title: titleOf(call),
+            ...commandOf(call),
             permission: call,
           }
         : {

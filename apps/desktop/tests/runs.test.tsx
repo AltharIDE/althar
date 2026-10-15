@@ -13,7 +13,7 @@ import { coordinatorSnapshot, fakeClient, repositories, runnables, scripts } fro
 import { withServices } from './render'
 
 /*
- * What a project runs, from its front (ADR-042): the default one press away,
+ * What a project runs, from its front (ADR-043): the default one press away,
  * the rest from the list, several at once; adding something more to run,
  * three ways; and the whole list to order, edit and remove.
  */

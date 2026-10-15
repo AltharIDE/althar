@@ -62,3 +62,22 @@
 .first {
   font: 11.5px var(--mono);
 }
+
+/* flat: rows of words in a message, no box; the header a quiet line over them, each cell wrapping in place */
+.flat {
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.flat .table thead th {
+  background: transparent;
+  border-bottom-color: var(--line-2);
+}
+.flat .table :is(th, td) {
+  height: auto;
+  min-width: 0;
+  padding: 8px 18px 8px 0;
+  line-height: 1.45;
+  vertical-align: top;
+  white-space: normal;
+}
