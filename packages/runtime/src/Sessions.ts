@@ -229,7 +229,7 @@ interface Running {
   readonly stopRequest: Deferred.Deferred<StopRequest>
   readonly ended: Deferred.Deferred<void>
   /** The brief the session's first turn starts with, and what it asks for when no input is waiting. */
-  brief: { readonly text: string; readonly closing: string } | undefined
+  brief: Brief | undefined
   /** Takes back the session's Althar tools. */
   readonly revokeTools: Effect.Effect<void>
   turnRunning: boolean
@@ -273,6 +273,14 @@ const heardContext = (running: Running, event: SessionEvent) => {
 const accountOf = (input: { readonly accountId?: string }) => (input.accountId === undefined ? {} : { accountId: input.accountId })
 
 type StopRequest = { readonly state: 'completed' } | { readonly state: 'superseded'; readonly by: string }
+
+/** What a new session's first turn starts with, and what it asks for with nothing waiting; `byPerson`, where the person started it. */
+interface Brief {
+  readonly text: string
+  readonly closing: string
+  /** The person started or switched to the agent: its first turn is theirs, and goes on at once (ADR-037). */
+  readonly byPerson?: boolean
+}
 
 type Store =
   | Artifacts
@@ -440,6 +448,8 @@ export class Sessions extends Context.Service<
       readonly message?: { readonly envelope: CommandEnvelope; readonly body: string; readonly images?: ReadonlyArray<InputImage> }
       /** The account it runs on, where the person picked one; else as `Limits.pick` says. */
       readonly accountId?: string
+      /** The person switched, not Althar: the new agent's first turn is theirs, and goes on at once (ADR-037). */
+      readonly byPerson?: boolean
     }): Effect.Effect<string, NotFound | UnknownAgent | SessionFailed | GitFailed | TaskRefused | Failure>
     /** Stops the turn running, if there is one; the session waits for what comes next. */
     interrupt(threadId: string): Effect.Effect<void, NoSession>
@@ -503,7 +513,14 @@ export class Sessions extends Context.Service<
     ): Effect.Effect<void>
     gateTurns(
       gate: (
-        agent: { readonly taskId: string; readonly threadId: string; readonly sessionId: string; readonly review: boolean },
+        agent: {
+          readonly taskId: string
+          readonly threadId: string
+          readonly sessionId: string
+          readonly review: boolean
+          /** Its first turn after the person started or switched to it: theirs, as what they say is. */
+          readonly byPerson: boolean
+        },
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) => Effect.Effect<boolean>,
     ): Effect.Effect<void>
@@ -545,7 +562,13 @@ export class Sessions extends Context.Service<
         Effect.void
       /* What a lead's or a reviewer's turns wait for, once Busy says (gateTurns): until then, nothing. */
       let gate = (
-        _agent: { readonly taskId: string; readonly threadId: string; readonly sessionId: string; readonly review: boolean },
+        _agent: {
+          readonly taskId: string
+          readonly threadId: string
+          readonly sessionId: string
+          readonly review: boolean
+          readonly byPerson: boolean
+        },
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) => Effect.as(work(Effect.void), true)
       const run = <A, E>(effect: Effect.Effect<A, E, Store>) => Effect.provideContext(effect, context)
@@ -1209,7 +1232,13 @@ export class Sessions extends Context.Service<
             // is still queued after one wakes it again, and asks again.
             if (running.stopping || !(running.brief !== undefined || (yield* hasQueued(thread.threadId)))) return
             yield* gate(
-              { taskId: thread.taskId, threadId: thread.threadId, sessionId: running.sessionId, review: thread.role === 'reviewer' },
+              {
+                taskId: thread.taskId,
+                threadId: thread.threadId,
+                sessionId: running.sessionId,
+                review: thread.role === 'reviewer',
+                byPerson: running.brief?.byPerson === true,
+              },
               (begun) =>
                 Effect.suspend(() => {
                   if (running.stopping) return Effect.succeed(false)
@@ -1474,10 +1503,7 @@ export class Sessions extends Context.Service<
         })
 
       /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
-      const activate = (
-        connected: Effect.Success<ReturnType<typeof connectSession>>,
-        brief: { readonly text: string; readonly closing: string },
-      ) =>
+      const activate = (connected: Effect.Success<ReturnType<typeof connectSession>>, brief: Brief) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const { sessionId, entry, account, thread, connection, agent, scope, revokeTools } = connected
@@ -1726,7 +1752,8 @@ export class Sessions extends Context.Service<
                 commandId: input.envelope.commandId,
                 disposition,
                 body: input.body,
-                authorActorId: input.envelope.actorId,
+                // What Althar writes quietly is its own, whoever's command it came with: the person's words are only what they say.
+                authorActorId: input.quiet === true ? instance.systemId : input.envelope.actorId,
                 state: 'queued',
                 acceptedAt: yield* timestamp,
               })}`
@@ -2183,6 +2210,7 @@ export class Sessions extends Context.Service<
         readonly about?: 'limit' | 'stall'
         readonly accountId?: string
         readonly message?: { readonly envelope: CommandEnvelope; readonly body: string; readonly images?: ReadonlyArray<InputImage> }
+        readonly byPerson?: boolean
       }) =>
         exclusive(
           input.threadId,
@@ -2217,7 +2245,11 @@ export class Sessions extends Context.Service<
                 ...(input.message.images === undefined ? {} : { images: input.message.images }),
               })
             const brief = yield* briefFor(thread, { kind: 'takeover', from })
-            return yield* activate(connected, { text: brief, closing: 'Carry on with the task from where it stands.' })
+            return yield* activate(connected, {
+              text: brief,
+              closing: 'Carry on with the task from where it stands.',
+              ...(input.byPerson === true ? { byPerson: true } : {}),
+            })
           }),
         )
 
