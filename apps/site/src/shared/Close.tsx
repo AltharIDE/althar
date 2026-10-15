@@ -1,7 +1,7 @@
 import { Brand, BrandMark, Logo } from '@althar/ui'
 import { useEffect, useRef } from 'react'
 
-import { INSTALL, LINKS } from '../content/facts'
+import { LINKS, PLATFORMS } from '../content/facts'
 import { useDownload } from '../lib/download'
 import { OS_NAME, OsMark } from './OsMark'
 import { BRAND, CLOSE } from '../content/home'
@@ -11,8 +11,10 @@ import s from './Close.module.css'
 /**
  * The download and the repository, as both developer pages end. The download
  * is the latest release's installer for the system the page is read on
- * (useDownload), named; until that is known it reads as the Mac's, and where
- * there is none it is a plain Download to the releases page.
+ * (useDownload), named; until that is known it reads as the Mac's. Where the
+ * release has no build for the reader's system or chip, it goes to the latest
+ * release and a line under it says so plainly; where the system or the
+ * release can't be known, it is a plain Download to the latest release.
  */
 export function Get({ tone }: { tone: 'blue' | 'paper' }) {
   const download = useDownload()
@@ -21,13 +23,32 @@ export function Get({ tone }: { tone: 'blue' | 'paper' }) {
     <div className={tone === 'blue' ? s.getBlue : s.get}>
       <a className={s.primary} href={download.href}>
         {os && <OsMark id={os} size={16} />}
-        {os ? `Download for ${OS_NAME[os]}` : 'Download'}
+        {os ? `Download for ${OS_NAME[os]}` : download.missing ? 'See the latest release' : 'Download'}
       </a>
       <a className={s.secondary} href={LINKS.repo}>
         <BrandMark brand={Brand.GitHub} size={16} />
         Star on GitHub
       </a>
+      {download.missing && <p className={s.missing}>{download.missing}</p>}
     </div>
+  )
+}
+
+/**
+ * Each system, what it needs, and what to download for it (PLATFORMS), as a
+ * list beside a Get of the same tone: a system with no build says Coming.
+ */
+export function Platforms({ tone }: { tone: 'blue' | 'paper' }) {
+  return (
+    <ul className={tone === 'blue' ? s.systemsBlue : s.systems} aria-label="Systems">
+      {PLATFORMS.map((p) => (
+        <li key={p.os} className={p.files ? undefined : s.coming}>
+          <OsMark id={p.os} size={15} />
+          <b>{p.name}</b>
+          <span>{p.files ? `${p.needs} · ${p.files}` : p.needs}</span>
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -88,11 +109,7 @@ export function Close() {
           </div>
           <div>
             <Get tone="blue" />
-            <pre className={s.code}>
-              <span aria-hidden="true">$ </span>
-              {INSTALL.brew}
-            </pre>
-            <p className={s.platforms}>{INSTALL.platforms}</p>
+            <Platforms tone="blue" />
           </div>
         </div>
         <nav className={s.links} aria-label="More">

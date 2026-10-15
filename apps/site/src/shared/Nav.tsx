@@ -69,7 +69,7 @@ export function Nav({ opening = false }: { opening?: boolean } = {}) {
   // The hero's opening starts once the page's script runs; so does the nav's entrance, timed to follow it. Held still, it is simply there.
   const opened = useHydrated()
   const held = useStill()
-  // The reader's own installer once known, the releases page until then. It reads Download either way: the capsule keeps its width.
+  // The reader's own installer once known, the latest release's page until then or where there is none. It reads Download either way: the capsule keeps its width.
   const download = useDownload()
 
   useEffect(() => {
