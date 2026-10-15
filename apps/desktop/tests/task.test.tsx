@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { type AgentStatus, ApiError, type LimitCall, type StuckStep, type ThreadSnapshot } from '@althar/contracts'
 import { TaskStatus } from '@althar/ui'
@@ -8,7 +8,7 @@ import { TaskStatus } from '@althar/ui'
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
 import { lookedOf, noOutputsOf, readsOf } from '../src/renderer/features/task/NoOutputsView'
 import { conflictsOf } from '../src/renderer/features/task/Outputs'
-import { elapsedOf, openingFace, sinceOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
+import { elapsedOf, forgetChosenFaces, openingFace, sinceOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { numberOf, reachOf, reviewedUnfurl } from '../src/renderer/features/task/ReviewCard'
 import { agents, change, changed, fakeClient, items, models, snapshot, status, streamed, usual } from './fixtures'
@@ -2254,6 +2254,8 @@ describe('a task’s outputs before it has made anything', () => {
   })
 })
 
+beforeEach(forgetChosenFaces)
+
 describe('the face a task opens on', () => {
   const file: ChangedFile = { path: 'src/a.ts', from: null, status: 'modified', add: 1, del: 0, binary: false, uncommitted: false }
   const base = snapshot()
@@ -2304,5 +2306,16 @@ describe('the face a task opens on', () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => ready) })
     withServices(<Task />, client)
     expect((await screen.findByRole('radio', { name: /Conversation/ })).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('keeps the view the person picked when they open the task again', async () => {
+    const ready = snapshot({ task: { ...base.task, kind: 'plain', phase: 'ready', files: [file] } })
+    const { client } = fakeClient({ getThread: vi.fn(async () => ready) })
+    const first = withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    expect(screen.getByRole('radio', { name: /Outputs/ }).getAttribute('aria-checked')).toBe('true')
+    first.unmount()
+    withServices(<Task />, client)
+    expect((await screen.findByRole('radio', { name: /Outputs/ })).getAttribute('aria-checked')).toBe('true')
   })
 })

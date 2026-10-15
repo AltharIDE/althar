@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
@@ -231,6 +231,12 @@ const typing = (event: KeyboardEvent) => {
   )
 }
 
+/** The face the person picked for each task, kept while the app is open. */
+const chosenFaces = new Map<string, Face>()
+
+/** Forgets what was picked, for tests. */
+export const forgetChosenFaces = () => chosenFaces.clear()
+
 /**
  * The face a task opens on. A call waiting on the person is answered in the
  * conversation, whatever the task is. Otherwise a change that is ready, or
@@ -288,12 +294,21 @@ export function TaskView({
   // Whether its title is a field, from its menu's Rename or from pressing the title.
   const [renaming, setRenaming] = useState(false)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
-  const [face, setFace] = useState<Face | null>(null)
+  const [face, showFace] = useState<Face | null>(null)
+  // Their choice is kept for the task, so opening it again from the board or home doesn't undo it.
+  const taskId = model.snapshot?.task.id
+  const setFace = useCallback(
+    (value: Face) => {
+      if (taskId !== undefined) chosenFaces.set(taskId, value)
+      showFace(value)
+    },
+    [taskId],
+  )
   // An agent's question waiting is kept to answer it here, whatever else the task is.
   const [asking, setAsking] = useState<string | null | undefined>(undefined)
   if (face === null && model.snapshot !== null) {
     setAsking(model.snapshot.attention.find((call) => call.kind === 'question')?.id ?? null)
-    setFace(openingFace(model.snapshot))
+    showFace(chosenFaces.get(model.snapshot.task.id) ?? openingFace(model.snapshot))
   }
   const named = useModelNames()
   const editors = useEditors(model.snapshot?.task.id ?? '')
@@ -339,7 +354,7 @@ export function TaskView({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onBack, open])
+  }, [onBack, open, setFace])
   // A running turn says how long it has worked so far, a task under way how long it has run, and a run of it how long it has been up.
   const now = useNow(ticking(model.snapshot) || (model.snapshot?.task.launches.some((launch) => launch.ended === null) ?? false))
   // What its pull request says while the task is open shows on the pill over the composer for a moment.
