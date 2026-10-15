@@ -25,10 +25,26 @@ export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void):
   // A change the monitor reports is newer than the snapshot read after it: the snapshot never overwrites one.
   let heard = false
 
+  // The snapshot is read once the monitor says it is listening (it prints a line then), or after a second without word, so a
+  // change between the two cannot be missed.
+  let read = false
+  const snapshot = () => {
+    if (read || stopped) return
+    read = true
+    execFile(
+      'gdbus',
+      ['call', ...PORTAL, '--method', 'org.freedesktop.portal.Settings.ReadOne', 'org.freedesktop.appearance', 'color-scheme'],
+      { timeout: 5000 },
+      (error, out) => {
+        if (!stopped && !heard) changed(error === null ? parseScheme(out) : undefined)
+      },
+    )
+  }
   try {
     monitor = spawn('gdbus', ['monitor', ...PORTAL], { stdio: ['ignore', 'pipe', 'ignore'] })
     let pending = ''
     monitor.stdout?.on('data', (chunk: Buffer) => {
+      snapshot()
       const lines = (pending + chunk.toString()).split('\n')
       pending = lines.pop() ?? ''
       for (const line of lines) {
@@ -39,23 +55,18 @@ export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void):
         changed(scheme)
       }
     })
-    monitor.on('error', () => undefined)
+    monitor.on('error', snapshot)
     monitor.unref()
   } catch {
     // No gdbus: the default stands.
   }
 
-  execFile(
-    'gdbus',
-    ['call', ...PORTAL, '--method', 'org.freedesktop.portal.Settings.ReadOne', 'org.freedesktop.appearance', 'color-scheme'],
-    { timeout: 5000 },
-    (error, out) => {
-      if (!stopped && !heard) changed(error === null ? parseScheme(out) : undefined)
-    },
-  )
+  const timer = setTimeout(snapshot, 1000)
+  timer.unref()
 
   return () => {
     stopped = true
+    clearTimeout(timer)
     monitor?.kill()
   }
 }
