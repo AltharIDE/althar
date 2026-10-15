@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  Free and open source · Apache 2.0 · macOS, Windows and Linux
+  Free and open source · Apache 2.0 · macOS (Apple silicon) and Linux · Windows coming
 </p>
 
 <br />
@@ -226,25 +226,19 @@ Everything runs on your machine. The project's tasks, threads and history are ke
 ## Get started
 
 > [!NOTE]
-> **Early.** Althar runs on macOS, Windows and Linux, and is tested most on macOS. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues).
+> **Early.** Althar runs on macOS on Apple silicon and on Linux, and is tested most on macOS. Windows is coming. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues).
 
-Sign in each agent you want to use with its own tool first:
+[Download Althar](https://github.com/AltharIDE/althar/releases/latest) for your system from the latest release:
 
-```bash
-claude auth login
-```
+| System | Needs | Download |
+| --- | --- | --- |
+| macOS | macOS 13 Ventura or later, on Apple silicon | `Althar-<version>-arm64.dmg` |
+| Linux | x64 | `Althar-<version>.AppImage`, which updates itself, or the `.deb` or `.rpm` |
+| Windows | | Not yet: coming |
 
-```bash
-codex login
-```
+Open it, and its first screen finds the agents on your computer, downloads one you don't have where it can, and signs each in, in your browser or with a one-time code. Then pick the repositories your first project works in.
 
-```bash
-opencode auth login
-```
-
-Then [download Althar](https://github.com/AltharIDE/althar/releases/latest) for your system, open it, and pick the repositories your first project works in. The first screen shows which agents are ready.
-
-To build it from source instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
+To run it from source instead, on a Mac or on Linux, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## The thesis
 

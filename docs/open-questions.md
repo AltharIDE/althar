@@ -333,9 +333,16 @@ never under running work.
   of them the agents' entitlements (JIT, unsigned executable memory, no
   library validation). Decided in ADR-033: each executable is signed with
   its own, and only Claude Code's binary may load any library.
-- [ ] **A download link that stays the same.** The site and the README link
-  the Releases page. A fixed asset name (`Althar-arm64.dmg`) would let
-  `releases/latest/download/…` start the download directly.
+- [ ] **A download link that stays the same.** The site's Download asks
+  GitHub's API for the latest release and links the reader's installer
+  itself, versioned name and all (`apps/site/src/lib/download.ts`); where
+  the API doesn't answer, it links the latest release's page, as the README
+  does. A fixed asset name (`Althar-arm64.dmg`), uploaded beside the
+  versioned files the update feeds name, would let
+  `releases/latest/download/…` start the download from anywhere, the README
+  included, at the cost of each installer twice on every release. Such a
+  link would be broken until the first release that carries it is
+  published.
 
 ## The desktop app, 29 September
 
