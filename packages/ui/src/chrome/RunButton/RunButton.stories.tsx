@@ -5,16 +5,16 @@ import { type RunTarget, RunButton } from './RunButton'
 
 /* What althar runs, on its default branch: its repository's own way first, then what the person and the coordinator kept. */
 const MANY: RunTarget[] = [
-  { id: 'pitch', name: 'Pitch site', command: 'bun run dev', where: 'main', from: 'repository' },
+  { id: 'dev', name: 'Public site', command: 'bun run dev', where: 'main', from: 'repository' },
   { id: 'storybook', name: 'Storybook', command: 'bun --filter @althar/ui storybook', where: 'main', from: 'person' },
   { id: 'desktop', name: 'Desktop app', command: 'bun --filter @althar/desktop dev', where: 'main', from: 'coordinator' },
-  { id: 'site', name: 'Public site', command: 'bun run site', where: 'main', from: 'person' },
+  { id: 'site', name: 'Site preview', command: 'bun run site', where: 'main', from: 'person' },
   { id: 'e2e', name: 'Desktop end-to-end tests', command: 'bun --filter @althar/desktop test:e2e', where: 'main', from: 'agent' },
 ]
 
-/* Several at once: the pitch site up, Storybook starting, the end-to-end tests failed a while ago. */
+/* Several at once: the public site up, Storybook starting, the end-to-end tests failed a while ago. */
 const BUSY: RunTarget[] = [
-  { ...MANY[0]!, run: { state: 'running', url: 'localhost:5290', since: '12m' } },
+  { ...MANY[0]!, run: { state: 'running', url: 'localhost:5320', since: '12m' } },
   { ...MANY[1]!, run: { state: 'starting' } },
   MANY[2]!,
   { ...MANY[3]!, run: { state: 'ended', code: 0, since: '3m ago' } },
@@ -33,8 +33,8 @@ type Story = StoryObj<typeof meta>
 /** One press runs the default, the first of the list, as the one Run button did. */
 export const Default: Story = {
   play: async ({ args, canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Run Pitch site' }))
-    await expect(args.onRun).toHaveBeenCalledWith('pitch')
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Run Public site' }))
+    await expect(args.onRun).toHaveBeenCalledWith('dev')
   },
 }
 
@@ -46,13 +46,13 @@ export const SeveralRunning: Story = {
   args: { targets: BUSY, defaultOpen: true },
   play: async ({ args }) => {
     const page = within(document.body)
-    const running = await page.findByRole('menuitemcheckbox', { name: 'Pitch site' })
+    const running = await page.findByRole('menuitemcheckbox', { name: 'Public site' })
     await expect(running).toHaveAttribute('aria-checked', 'true')
-    await expect(page.getByText('localhost:5290')).toBeInTheDocument()
+    await expect(page.getByText('localhost:5320')).toBeInTheDocument()
     await expect(page.getByText(/Failed 8m ago · exit 1/)).toBeInTheDocument()
     await expect(page.getByText(/Finished 3m ago/)).toBeInTheDocument()
     await userEvent.click(running)
-    await expect(args.onStop).toHaveBeenCalledWith('pitch')
+    await expect(args.onStop).toHaveBeenCalledWith('dev')
     await userEvent.click(page.getByRole('menuitemcheckbox', { name: 'Desktop app' }))
     await expect(args.onRun).toHaveBeenCalledWith('desktop')
     await userEvent.click(page.getByRole('menuitem', { name: 'Add something to run…' }))
@@ -64,8 +64,8 @@ export const SeveralRunning: Story = {
 export const DefaultRunning: Story = {
   args: { targets: BUSY },
   play: async ({ args, canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Pitch site · localhost:5290' }))
-    await expect(args.onOpen).toHaveBeenCalledWith('pitch')
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Public site · localhost:5320' }))
+    await expect(args.onOpen).toHaveBeenCalledWith('dev')
   },
 }
 
@@ -87,7 +87,7 @@ export const RunningWithNoAddress: Story = {
 export const OnATask: Story = {
   args: {
     targets: [
-      { ...MANY[0]!, where: 'this task', elsewhere: { where: 'on main', url: 'localhost:5290' } },
+      { ...MANY[0]!, where: 'this task', elsewhere: { where: 'on main', url: 'localhost:5320' } },
       { ...MANY[1]!, where: 'this task', run: { state: 'running', url: 'localhost:6007', since: '4m' } },
       { ...MANY[2]!, where: 'this task' },
     ],

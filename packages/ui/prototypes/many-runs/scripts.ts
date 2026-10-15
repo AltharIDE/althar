@@ -36,7 +36,7 @@ export const SCRIPTS: ReadonlyArray<Script> = Object.entries(manifests)
   )
   .sort((a, b) => Number(!SERVES.test(a.name)) - Number(!SERVES.test(b.name)))
 
-/** A script's name as a runnable would take it: Storybook for storybook, Pitch images for images. */
+/** A script's name as a runnable would take it: Storybook for storybook, Site images for images. */
 export const nameOf = (script: Script) => {
   const words = script.name.replace(/[:_-]+/g, ' ')
   const named = words.charAt(0).toUpperCase() + words.slice(1)

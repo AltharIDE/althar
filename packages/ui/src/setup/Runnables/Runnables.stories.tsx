@@ -9,11 +9,11 @@ const SCRIPTS: PickableScript[] = [
   { id: 'check', command: 'bun run check', body: "bun --filter '*' check" },
   { id: 'storybook', command: 'bun --filter @althar/ui storybook', body: 'storybook dev --port 6006 --no-open' },
   { id: 'desktop', command: 'bun --filter @althar/desktop dev', body: 'bun run build && electron .' },
-  { id: 'preview', command: 'bun --filter @althar/pitch preview', body: 'vp preview' },
+  { id: 'preview', command: 'bun --filter @althar/site preview', body: 'vp preview' },
 ]
 
 const LISTED: ListedRunnable[] = [
-  { id: 'pitch', name: 'Pitch site', command: 'bun run dev', about: 'althar · Worked out from the repository' },
+  { id: 'dev', name: 'Public site', command: 'bun run dev', about: 'althar · Worked out from the repository' },
   { id: 'storybook', name: 'Storybook', command: 'bun --filter @althar/ui storybook', about: 'althar · Added by you' },
   { id: 'desktop', name: 'Desktop app', command: 'bun --filter @althar/desktop dev', about: 'althar · Added by the coordinator' },
   { id: 'probe', command: 'bun --filter @althar/runtime probe:tools', about: 'althar · Added by you' },
@@ -45,7 +45,7 @@ export const List: Story = {
     const grip = await page.findByRole('button', { name: 'Drag to move Storybook' })
     grip.focus()
     await userEvent.keyboard('{ArrowUp}')
-    await expect(args.onOrder).toHaveBeenCalledWith(['storybook', 'pitch', 'desktop', 'probe'])
+    await expect(args.onOrder).toHaveBeenCalledWith(['storybook', 'dev', 'desktop', 'probe'])
     // It shows where it was put, the default now, and its grip keeps the focus.
     await expect(page.getAllByRole('listitem')[0]).toHaveTextContent(/^Storybook.*Default$/)
     await expect(grip).toHaveFocus()
@@ -71,12 +71,12 @@ export const AddTyped: StoryObj<typeof AddRunnable> = {
   play: async ({ args }) => {
     const page = within(document.body)
     await expect(page.getByRole('button', { name: 'Add' })).toBeDisabled()
-    await userEvent.type(await page.findByRole('textbox', { name: /Command/ }), 'bun --filter @althar/pitch preview')
-    await userEvent.type(page.getByRole('textbox', { name: /Name/ }), 'Pitch site, as built')
+    await userEvent.type(await page.findByRole('textbox', { name: /Command/ }), 'bun --filter @althar/site preview')
+    await userEvent.type(page.getByRole('textbox', { name: /Name/ }), 'Public site, as built')
     await userEvent.click(page.getByRole('button', { name: 'Add' }))
     await expect(args.onAdd).toHaveBeenCalledWith({
-      name: 'Pitch site, as built',
-      command: 'bun --filter @althar/pitch preview',
+      name: 'Public site, as built',
+      command: 'bun --filter @althar/site preview',
       repository: 'althar',
     })
   },
@@ -186,9 +186,9 @@ export const EditOwn: StoryObj<typeof EditRunnable> = {
   args: { ...Edit.args, name: null, command: 'bun run dev', own: true, from: 'repository' } as StoryObj<typeof EditRunnable>['args'],
   play: async ({ args }) => {
     const page = within(document.body)
-    await userEvent.type(await page.findByRole('textbox', { name: /Name/ }), 'Pitch site')
+    await userEvent.type(await page.findByRole('textbox', { name: /Name/ }), 'Public site')
     await userEvent.click(page.getByRole('button', { name: 'Save' }))
-    await expect(args.onSave).toHaveBeenCalledWith({ name: 'Pitch site', command: null, repository: 'althar' })
+    await expect(args.onSave).toHaveBeenCalledWith({ name: 'Public site', command: null, repository: 'althar' })
     await userEvent.click(page.getByRole('button', { name: 'Remove' }))
     await expect(args.onRemove).toHaveBeenCalledOnce()
   },

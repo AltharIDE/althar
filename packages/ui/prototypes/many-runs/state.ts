@@ -77,14 +77,14 @@ export interface Proto {
 const MIN = 60_000
 
 export const RUNNABLES: Record<string, Runnable> = {
-  pitch: {
-    id: 'pitch',
-    name: 'Pitch site',
+  dev: {
+    id: 'dev',
+    name: 'Public site',
     command: 'bun run dev',
     where: 'here',
     source: 'repository',
     script: 'althar · dev',
-    goes: { kind: 'serves', port: 5290 },
+    goes: { kind: 'serves', port: 5320 },
   },
   storybook: {
     id: 'storybook',
@@ -106,7 +106,7 @@ export const RUNNABLES: Record<string, Runnable> = {
   },
   site: {
     id: 'site',
-    name: 'Public site',
+    name: 'Site preview',
     command: 'bun run site',
     where: 'here',
     source: 'person',
@@ -142,10 +142,10 @@ export const RUNNABLES: Record<string, Runnable> = {
   },
 }
 
-const MANY = ['pitch', 'storybook', 'desktop', 'site', 'unit', 'e2e', 'probe'].map((id) => RUNNABLES[id]!)
+const MANY = ['dev', 'storybook', 'desktop', 'site', 'unit', 'e2e', 'probe'].map((id) => RUNNABLES[id]!)
 
 /** The one the repository says, as Althar works it out today: unnamed, so its command names it. */
-const ONE: Runnable = { ...RUNNABLES.pitch!, name: undefined }
+const ONE: Runnable = { ...RUNNABLES.dev!, name: undefined }
 
 /** What the coordinator finds when asked: what the repository runs that isn't kept yet. */
 export const FOUND: ReadonlyArray<Runnable> = [
@@ -179,8 +179,8 @@ const run = (runnableId: string, place: Place, state: RunState, startedMinutesAg
 }
 
 const BUSY: ReadonlyArray<Run> = [
-  // The default branch: the pitch site up, Storybook starting, the UI tests passed, the end-to-end tests failed.
-  run('pitch', 'main', 'running', 12),
+  // The default branch: the public site up, Storybook starting, the UI tests passed, the end-to-end tests failed.
+  run('dev', 'main', 'running', 12),
   run('storybook', 'main', 'starting', 0.1),
   run('unit', 'main', 'ended', 6, { endedAt: Date.now() - 3 * MIN, code: 0 }),
   run('e2e', 'main', 'failed', 14, { endedAt: Date.now() - 8 * MIN, code: 1 }),
@@ -197,9 +197,9 @@ const seeded = (scenario: Scenario): Pick<Proto, 'runnables' | 'defaultId' | 'ru
     case 'one':
       return { runnables: [ONE], defaultId: ONE.id, runs: [] }
     case 'many':
-      return { runnables: MANY, defaultId: 'pitch', runs: [] }
+      return { runnables: MANY, defaultId: 'dev', runs: [] }
     case 'busy':
-      return { runnables: MANY, defaultId: 'pitch', runs: BUSY }
+      return { runnables: MANY, defaultId: 'dev', runs: BUSY }
   }
 }
 

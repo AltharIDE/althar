@@ -186,7 +186,7 @@ const goesOf = (command: string): Goes =>
         : /desktop.* dev/.test(command)
           ? { kind: 'window' }
           : /\bdev\b/.test(command)
-            ? { kind: 'serves', port: 5290 }
+            ? { kind: 'serves', port: 5320 }
             : { kind: 'finishes' }
 
 const { client } = fakeClient({

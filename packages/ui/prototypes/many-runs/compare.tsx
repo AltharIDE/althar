@@ -54,7 +54,7 @@ const DIRECTIONS = [
     key: 'd',
     shot: 'D',
     title: 'D · A launcher on ⌘R, the list in project settings',
-    what: '“Run Pitch site ⌘R” stays as today’s button, and ⌘R runs the default from anywhere. ⇧⌘R opens the app’s own ⌘K finder over what runs (to stop), what is kept (to run), all 89 package.json scripts (to run once), and the coordinator. The list is kept in the project’s Settings, as a “What it runs” module.',
+    what: '“Run Public site ⌘R” stays as today’s button, and ⌘R runs the default from anywhere. ⇧⌘R opens the app’s own ⌘K finder over what runs (to stop), what is kept (to run), all 89 package.json scripts (to run once), and the coordinator. The list is kept in the project’s Settings, as a “What it runs” module.',
   },
   {
     key: 'e',
@@ -70,10 +70,10 @@ function Compare() {
       <header style={{ display: 'grid', gap: 8 }}>
         <Heading level={1}>Many things to run, not one Run</Heading>
         <p style={{ margin: 0, maxWidth: 820 }}>
-          Five ways to show that a project runs many things (the pitch site, Storybook, the desktop app, the public site, the UI tests, the
-          desktop end-to-end tests, a one-off probe), run any of them, see what runs, and add or remove them. Each is the real app on a fake
-          runtime, with this repository’s real scripts and ports; only the Run button changed. Under each page, a strip switches between
-          nothing known yet, one, many, and several running, and between the project and a task.
+          Five ways to show that a project runs many things (the public site, Storybook, the desktop app, the site preview, the UI tests,
+          the desktop end-to-end tests, a one-off probe), run any of them, see what runs, and add or remove them. Each is the real app on a
+          fake runtime, with this repository’s real scripts and ports; only the Run button changed. Under each page, a strip switches
+          between nothing known yet, one, many, and several running, and between the project and a task.
         </p>
       </header>
       {DIRECTIONS.map((direction) => {

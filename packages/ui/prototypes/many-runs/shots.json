@@ -10,12 +10,12 @@
   {
     "id": "A1",
     "page": "a.html?s=many",
-    "caption": "A · Project, nothing running: the split button runs the default, “Run Pitch site”; the chevron holds the rest."
+    "caption": "A · Project, nothing running: the split button runs the default, “Run Public site”; the chevron holds the rest."
   },
   {
     "id": "A2",
     "page": "a.html?s=busy&open=menu",
-    "caption": "A · Project, several running: the chevron’s list, running ones on top and checked (Pitch site at its address, Storybook starting), the rest with how they last ended (finished, failed exit 1) or where they came from, then Add… and Edit the list…"
+    "caption": "A · Project, several running: the chevron’s list, running ones on top and checked (Public site at its address, Storybook starting), the rest with how they last ended (finished, failed exit 1) or where they came from, then Add… and Edit the list…"
   },
   {
     "id": "A3",
@@ -118,7 +118,7 @@
   {
     "id": "D1",
     "page": "d.html?s=many",
-    "caption": "D · Project: “Run Pitch site ⌘R” as today’s button, and a search glyph for the launcher, ⇧⌘R."
+    "caption": "D · Project: “Run Public site ⌘R” as today’s button, and a search glyph for the launcher, ⇧⌘R."
   },
   {
     "id": "D2",
@@ -130,7 +130,7 @@
     "id": "D4",
     "page": "d.html?s=many",
     "click": ["button:has-text('Settings')"],
-    "caption": "D · The list is kept in the project’s settings: a “What it runs” module, 7, Pitch site by default."
+    "caption": "D · The list is kept in the project’s settings: a “What it runs” module, 7, Public site by default."
   },
   {
     "id": "D5",
