@@ -947,3 +947,61 @@ describe('GitLab as a tracker', () => {
     }),
   )
 })
+
+describe('GitLab listing merge requests', () => {
+  it.effect('asks for them newest change first, narrowed as asked, one more than the limit, and reads what holds each up', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([
+        ['GET', `${API}/user`, { json: user(5, 'you') }],
+        [
+          'GET',
+          /\/merge_requests\?/,
+          {
+            json: [
+              request({ detailed_merge_status: 'requested_changes' }),
+              request({ iid: 13, title: 'Send back', draft: false, work_in_progress: false, detailed_merge_status: 'not_approved' }),
+              request({ iid: 14, detailed_merge_status: 'ci_still_running' }),
+            ],
+          },
+        ],
+      ])
+      const list = yield* host.listChanges(repository, {
+        state: 'merged',
+        author: 'ninemate',
+        text: 'rate limit',
+        reviewRequested: true,
+        draft: true,
+        limit: 2,
+      })
+      const asked = new URL(sent.find((one) => one.url.includes('/merge_requests'))?.url ?? '')
+      assert.strictEqual(asked.pathname, '/api/v4/projects/34675721/merge_requests')
+      assert.deepStrictEqual(Object.fromEntries(asked.searchParams), {
+        state: 'merged',
+        order_by: 'updated_at',
+        sort: 'desc',
+        per_page: '3',
+        author_username: 'ninemate',
+        search: 'rate limit',
+        in: 'title',
+        reviewer_username: 'you',
+        wip: 'yes',
+      })
+      assert.isTrue(list.more)
+      assert.deepStrictEqual(
+        list.changes.map((change) => [change.number, change.title, change.draft, change.body, change.reviewDecision, change.checks]),
+        [
+          [12, 'Rate-limit refunds', true, '', 'changes_requested', null],
+          [13, 'Send back', false, '', 'review_required', null],
+        ],
+      )
+    }),
+  )
+
+  it.effect('names the scope it lacks where GitLab refuses', () =>
+    Effect.gen(function* () {
+      const { host } = gitlab([['GET', /\/merge_requests\?/, { status: 403, json: { error: 'insufficient_scope' } }]])
+      const refused = yield* Effect.flip(host.listChanges(repository, { state: 'open', limit: 30 }))
+      assert.deepInclude(refused, { reason: 'forbidden', scope: 'read_api' })
+    }),
+  )
+})

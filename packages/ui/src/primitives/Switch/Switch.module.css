@@ -16,6 +16,10 @@
 .switch[aria-checked='true'] {
   background: var(--t-1);
 }
+/* on, a hover keeps it dark: the off hover's grey would read as off */
+.switch[aria-checked='true']:hover:not(:disabled) {
+  background: var(--t-2);
+}
 .switch:disabled {
   cursor: default;
   opacity: 0.45;

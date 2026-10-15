@@ -210,6 +210,10 @@ export const runtime = (
     readonly countdown?: Duration.Duration
     readonly connectors?: Layer.Layer<Connectors>
     readonly listenEvery?: Duration.Duration
+    /** How long a pull request may show no checks before it counts as having none; none at all unless a test says. */
+    readonly checksAppear?: Duration.Duration
+    /** How long a change's checks may run before it is the person's; 45 minutes unless a test says. */
+    readonly checksStuck?: Duration.Duration
     readonly each?: Readonly<Record<string, FakeAgentOptions>>
     /** Agents signed in on a key, paid per use, rather than a plan. */
     readonly perUse?: ReadonlyArray<string>
@@ -248,6 +252,8 @@ export const runtime = (
     secrets: Secrets.memory(),
     connectors: more.connectors ?? fakeConnectors({}),
     ...(more.listenEvery === undefined ? {} : { listenEvery: more.listenEvery }),
+    checksAppear: more.checksAppear ?? Duration.zero,
+    ...(more.checksStuck === undefined ? {} : { checksStuck: more.checksStuck }),
     ...(more.stalls === undefined ? {} : { stalls: more.stalls }),
     ...(more.stopGrace === undefined ? {} : { stopGrace: more.stopGrace }),
     ...(more.permissionJudgeTimeout === undefined ? {} : { permissionJudgeTimeout: more.permissionJudgeTimeout }),

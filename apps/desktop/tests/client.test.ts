@@ -257,6 +257,7 @@ describe('the client', () => {
           PasteAccountSignInCode: () => Effect.die('unused'),
           CancelAccountSignIn: () => Effect.die('unused'),
           // A refusal is an answer: it isn't tried again.
+          CompactContext: () => Effect.die('unused'),
           Interrupt: ({ commandId }) => {
             commands.push(commandId)
             return refuse()
@@ -264,6 +265,7 @@ describe('the client', () => {
           StopSession: () => Effect.die('unused'),
           StopTask: () => Effect.die('unused'),
           SetTaskResolveConflicts: () => Effect.die('unused'),
+          SetTaskAllowEverything: () => Effect.die('unused'),
           ResumeTask: () => Effect.die('unused'),
           AbandonTask: () => Effect.die('unused'),
           RenameTask: () => Effect.die('unused'),
@@ -324,6 +326,10 @@ describe('the client', () => {
           ClearBackground: () => Effect.die('unused'),
           RunProject: () => Effect.die('unused'),
           StopLaunch: () => Effect.die('unused'),
+          KeepRunnable: () => Effect.die('unused'),
+          DropRunnable: () => Effect.die('unused'),
+          OrderRunnables: () => Effect.die('unused'),
+          GetRepositoryScripts: () => Effect.die('unused'),
           ClearLaunch: () => Effect.die('unused'),
           Watch: ({ since }) => {
             watches.push(since)

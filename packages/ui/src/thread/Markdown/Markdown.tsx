@@ -46,9 +46,6 @@ const known = (t: Token): t is MarkedToken => KNOWN.has(t.type)
 
 const LEVELS: readonly HeadingLevel[] = [1, 2, 3, 4, 5, 6]
 
-/** How long a cell's text may be before a table's cells wrap rather than keep to one line. */
-const LONG_CELL = 48
-
 /** The blocks of a source, without the blank space between them. */
 export function markdownBlocks(source: string): number {
   return Lexer.lex(source).filter((t) => t.type !== 'space' && t.type !== 'def').length
@@ -126,9 +123,9 @@ function Block({ token, base, t }: { token: Token; base: HeadingLevel; t: Markdo
       )
     }
     case 'code':
-      /* the copy sits in the block's corner; the code keeps clear of it */
+      /* the copy sits in the block's corner, over a band the code keeps clear of; beside a single line instead */
       return (
-        <div className={s.block}>
+        <div className={token.text.includes('\n') ? s.block : `${s.block} ${s.oneLine}`}>
           <pre>
             <code>{token.text}</code>
           </pre>
@@ -146,15 +143,15 @@ function Block({ token, base, t }: { token: Token; base: HeadingLevel; t: Markdo
         </blockquote>
       )
     case 'table': {
-      /* the kit's table: it scrolls sideways, and sentences in its cells wrap */
-      const long = [token.header, ...token.rows].some((row) => row.some((cell) => cell.text.length > LONG_CELL))
+      /* the kit's table, as rows of words in what is said rather than a box: its cells wrap, so nothing is cut off at the column's edge */
       return (
         <Table
           head={token.header.map((cell) => inline(cell.tokens, t))}
           rows={token.rows.map((row) => row.map((cell) => inline(cell.tokens, t)))}
           align={token.align}
           rowHeaders={false}
-          wrap={long}
+          wrap
+          flat
           {...(t.table === undefined ? {} : { text: t.table })}
         />
       )
