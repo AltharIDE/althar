@@ -1,6 +1,6 @@
 # ADR-031: Althar hands the coordinator to a fresh session before its context fills, and keeps the project's notes
 
-- **Status:** Accepted
+- **Status:** Accepted; extended to a task's lead by [ADR-038](038-a-lead-starts-afresh-at-a-break.md)
 - **Date:** 2026-10-11
 - **Owner:** Repository maintainers
 - **Context:** The coordinator is one long conversation (ADR-004). Its

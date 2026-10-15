@@ -94,3 +94,29 @@ describe('a long dictation', () => {
     expect(getByRole('textbox').scrollTop).toBe(PAGE - VIEW - 100)
   })
 })
+
+describe('back to a composer', () => {
+  const back = (arrived: boolean) => (
+    <Composer
+      value="Keep the limiter. Also check the retry path."
+      onChange={vi.fn()}
+      onSubmit={vi.fn()}
+      placeholder="Tell the lead"
+      dictation={{ elapsed: null, arrived, onStart: vi.fn(), onStop: vi.fn() }}
+    />
+  )
+
+  it('puts the cursor after the draft it comes back with', () => {
+    const { getByRole } = render(back(false))
+    const field = getByRole('textbox', { name: 'Tell the lead' }) as HTMLTextAreaElement
+    expect(field.selectionStart).toBe(field.value.length)
+    expect(field.selectionEnd).toBe(field.value.length)
+  })
+
+  it('says, quietly, when what was said was written down while you were away', () => {
+    const { queryByText, rerender } = render(back(true))
+    expect(queryByText('What you said was written down while you were away.')).not.toBeNull()
+    rerender(back(false))
+    expect(queryByText('What you said was written down while you were away.')).toBeNull()
+  })
+})

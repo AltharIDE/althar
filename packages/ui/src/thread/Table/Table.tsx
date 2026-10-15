@@ -23,6 +23,8 @@ export type TableProps = RootProps<
     align?: readonly (ColumnAlign | null)[]
     /** Cells wrap rather than keep to one line: for sentences in cells, as agents write. */
     wrap?: boolean
+    /** Rows of words in what is said, with no box around them: for a table in a message. */
+    flat?: boolean
     text?: Partial<TableText>
   }
 >
@@ -30,14 +32,25 @@ export type TableProps = RootProps<
 export type ColumnAlign = 'left' | 'center' | 'right'
 
 /** A small table the agent wrote: results, a comparison. It scrolls sideways rather than squeezing. */
-export function Table({ head, rows, caption, rowHeaders = true, align = [], wrap = false, text, className, ...rest }: TableProps) {
+export function Table({
+  head,
+  rows,
+  caption,
+  rowHeaders = true,
+  align = [],
+  wrap = false,
+  flat = false,
+  text,
+  className,
+  ...rest
+}: TableProps) {
   const t = { ...tableText, ...text }
   const sits = (j: number) => {
     const a = align[j]
     return a === undefined || a === null ? undefined : { textAlign: a }
   }
   return (
-    <div className={cx(s.wrap, className)} tabIndex={0} role="region" aria-label={caption ?? t.label} {...rest}>
+    <div className={cx(s.wrap, flat && s.flat, className)} tabIndex={0} role="region" aria-label={caption ?? t.label} {...rest}>
       <table className={cx(s.table, wrap && s.wraps)}>
         {caption && <caption className={s.caption}>{caption}</caption>}
         <thead>

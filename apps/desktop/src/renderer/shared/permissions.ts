@@ -1,4 +1,5 @@
 import type { AllowedBy, AlwaysScope, AttentionRequest, RuleKind } from '@althar/contracts'
+import { titleOf } from './callCommand'
 import { Decision, type PermissionAnswer, type PermissionRequest, PermissionScope } from '@althar/ui'
 
 /*
@@ -54,7 +55,7 @@ export const permissionOf = (call: AttentionRequest): PermissionRequest => {
   const kind = call.always?.kind ?? null
   return {
     id: call.id,
-    what: call.title,
+    what: titleOf(call),
     cmd: call.command ?? call.title,
     why: call.reason,
     ...(prefix === null ? {} : { prefix }),

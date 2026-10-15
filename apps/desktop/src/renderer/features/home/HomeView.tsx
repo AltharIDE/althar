@@ -7,6 +7,7 @@ import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type
 import { queuedOfWords } from '../../shared/agents'
 import { readyOf, standingCalls } from '../../shared/calls'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
+import { type Next, standingText } from '../../shared/standing'
 import { ago, clock, useNow } from '../../shared/time'
 import { BarEnd, useNewTab } from '../tabs/TabsFrame'
 import type { EdgeGlance } from '../settings/EdgePicture'
@@ -168,6 +169,24 @@ export function HomeView({
     })
   }
 
+  // A ready change's next thing, done from its line: the person's own (merge, push) at once, at the heads they saw; the lead's as a note to it.
+  const doNext = (task: HomeTask, next: Next) => {
+    const change = task.change
+    if (change === null) return
+    const where = `${change.short} ${change.prefix}${change.number}`
+    switch (next.kind) {
+      case 'merge':
+        return void model.merge(task.taskId, change.head ?? '', change.url)
+      case 'push':
+        return void model.push(task.taskId, change.localHead ?? '', change.url)
+      case 'resolve':
+        return void model.sendBack(task, standingText.resolveNote(where, change.target ?? null))
+      case 'fix':
+        return void model.sendBack(task, standingText.fixNote(where, next.failing))
+    }
+  }
+  const doing = (taskId: string) => [model.merging, model.pushing, model.sending].includes(taskId)
+
   // What waits, each gathered under its project; a call answered here stays its line, quiet, until the person leaves.
   const waits: ReadonlyArray<HomeNeed> = needs.map((need) => ({
     key: need.id,
@@ -180,6 +199,8 @@ export function HomeView({
       answers: (call, project) => (
         <PermissionAnswers request={permissionOf(call)} project={project.name} onAnswer={(given) => answer(call, replyOf(given))} />
       ),
+      onNext: doNext,
+      doing,
     }),
   }))
 
