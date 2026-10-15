@@ -15,6 +15,8 @@ import type {
   ProjectRulesView,
   ProjectRepository,
   ProjectSummary,
+  RepositoryScript,
+  Runnable,
   Status,
   TaskSummary,
   ThreadItem,
@@ -48,6 +50,7 @@ export const projectRules: ProjectRulesView = {
   projectId: 'p1',
   revision: 1,
   permissions: 'rules',
+  allowEverything: false,
   alwaysAsk: ['default-branch', 'force-push', 'many-branches', 'delete-branch', 'deploy', 'outside'],
   never: [],
   alwaysAllow: [],
@@ -219,6 +222,32 @@ export const repositories: ReadonlyArray<ProjectRepository> = [
     role: 'infrastructure',
     fork: null,
     tasks: 0,
+  },
+]
+
+/** What meridian runs: its repository's own way, worked out from it, and Storybook, which the person added. */
+export const runnables: ReadonlyArray<Runnable> = [
+  { id: 'rnbl_dev', name: null, command: 'bun run dev', repository: 'meridian-api', own: true, from: 'repository' },
+  {
+    id: 'rnbl_storybook',
+    name: 'Storybook',
+    command: 'bun --filter @meridian/ui storybook',
+    repository: 'meridian-api',
+    own: false,
+    from: 'person',
+  },
+]
+
+/** meridian's package.json scripts, the root's and a workspace's. */
+export const scripts: ReadonlyArray<RepositoryScript> = [
+  { repository: 'meridian-api', package: 'meridian', name: 'dev', body: 'vite', command: 'bun run dev' },
+  { repository: 'meridian-api', package: 'meridian', name: 'test:watch', body: 'vitest', command: 'bun run test:watch' },
+  {
+    repository: 'meridian-api',
+    package: '@meridian/ui',
+    name: 'storybook',
+    body: 'storybook dev',
+    command: 'bun --filter @meridian/ui storybook',
   },
 ]
 
@@ -610,7 +639,7 @@ export const coordinatorSnapshot = (overrides: Partial<CoordinatorSnapshot> = {}
   items: [],
   earlier: false,
   host: null,
-  runCommand: null,
+  runnables: [],
   launches: [],
   ...overrides,
 })
@@ -683,9 +712,10 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     merged: [],
     actions: ['stop', 'abandon'],
     planId: null,
-    runCommand: null,
+    runnables: [],
     launches: [],
     resolveConflicts: { task: null, project: false },
+    allowEverything: { task: false, project: false },
   },
   session: {
     id: 's1',
@@ -856,6 +886,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     compact: vi.fn(async () => {}),
     stopTask: vi.fn(async () => {}),
     setTaskResolveConflicts: vi.fn(async () => {}),
+    setTaskAllowEverything: vi.fn(async () => {}),
     resumeTask: vi.fn(async () => {}),
     abandonTask: vi.fn(async () => {}),
     reopenTask: vi.fn(async () => {}),
@@ -926,9 +957,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     stopListening: vi.fn(async () => {}),
     stopBackground: vi.fn(async () => {}),
     clearBackground: vi.fn(async () => {}),
-    runProject: vi.fn(async (_projectId: string, taskId: string | null, _threadId: string | null) => ({
+    runProject: vi.fn(async (_projectId: string, taskId: string | null, _threadId: string | null, runnableId?: string) => ({
       id: 'proc_run',
       taskId,
+      runnableId: runnableId ?? 'rnbl_dev',
       where: taskId === null ? 'main' : 'the task',
       command: 'bun run dev',
       url: null,
@@ -937,6 +969,10 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     })),
     stopLaunch: vi.fn(async () => {}),
     clearLaunch: vi.fn(async () => {}),
+    keepRunnable: vi.fn(async () => ({ id: 'rnbl_kept' })),
+    dropRunnable: vi.fn(async () => {}),
+    orderRunnables: vi.fn(async () => {}),
+    getRepositoryScripts: vi.fn(async () => scripts),
     watch: (listener, since, onWatching) => {
       watching.push(since)
       listeners.add(listener)

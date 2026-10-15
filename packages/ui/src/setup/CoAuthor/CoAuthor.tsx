@@ -1,9 +1,11 @@
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useId, useState } from 'react'
 
+import { HalftoneMark } from '../../foundations/HalftoneMark/HalftoneMark'
 import { Logo } from '../../foundations/Logo/Logo'
 import { cx } from '../../lib/cx'
 import { useRefocus } from '../../lib/refocus'
 import { Button } from '../../primitives/Button/Button'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import s from './CoAuthor.module.css'
 import { identicon } from './identicon'
 
@@ -13,10 +15,13 @@ import { identicon } from './identicon'
  * under it the person's face with Althar's beside it. The person stays the
  * author; the agents' own credit lines are taken out either way. Turned off,
  * the line is struck through and Althar's face leaves the commit; and as it
- * is turned off, once, set large over the commit, why it would be kept:
- * Althar is free, and this line is how most developers hear of it, with a
- * way to put it back. Opened again while off, it shows only what goes out.
- * The switch is the consumer's, in the head of what holds this.
+ * is turned off, once, on a card of its own over the commit, why it would be
+ * kept: Althar is free, and this line is how most developers hear of it.
+ * Althar's mark comes up beside it, dot by dot, in a little light. The card
+ * puts it back in one press, or is left off in another, which the person's
+ * choice is; focus then lands on what goes out now. Opened again while off,
+ * it shows only what goes out. The switch is the consumer's, in the head of
+ * what holds this.
  */
 
 export interface CoAuthorText {
@@ -26,6 +31,8 @@ export interface CoAuthorText {
   ask: string
   why: string
   again: string
+  /** Leaves it off: the card goes, and what goes out stays. */
+  leave: string
   /** The commit, for a screen reader. */
   commit: string
   /** Between the person's name and Althar's, under the commit. */
@@ -42,6 +49,7 @@ export const coAuthorText: CoAuthorText = {
   ask: 'Althar is free, and we have no marketing budget.',
   why: 'This line on your commits is how most developers hear about it. If you can, we’d be grateful if you left it on.',
   again: 'Put Althar back on your commits',
+  leave: 'Leave it off',
   commit: 'A commit as GitHub shows it',
   and: 'and',
   althar: 'Althar',
@@ -71,16 +79,17 @@ export interface CoAuthorProps {
   commit: CoAuthorCommit
   /** Althar's face as the code host shows it, the AltharAi account's picture. The mark on ink, without it. */
   picture?: ReactNode
-  /** Whether it says, large, why it would stay. Without it, once it is turned off while it shows, until it is turned on again. */
+  /** Whether it asks why it would stay. Without it, once it is turned off while it shows, until it is turned on again or left off. */
   asking?: boolean
   text?: Partial<CoAuthorText>
   className?: string
 }
 
-/** Althar as co-author, on a commit as the code host shows it; turned off, it says once, large, why it would stay. */
+/** Althar as co-author, on a commit as the code host shows it; turned off, it asks once, on a card of its own, why it would stay. */
 export function CoAuthor({ on, onChange, trailer, author, commit, picture, asking: driven, text, className }: CoAuthorProps) {
   const t = { ...coAuthorText, ...text }
-  // Turned off while this shows: the ask, until it is turned on again or opened afresh.
+  const askId = useId()
+  // Turned off while this shows: the ask, until it is turned on again, left off, or opened afresh.
   const [turnedOff, setTurnedOff] = useState(false)
   const [was, setWas] = useState(on)
   if (on !== was) {
@@ -88,23 +97,33 @@ export function CoAuthor({ on, onChange, trailer, author, commit, picture, askin
     setTurnedOff(!on)
   }
   const asking = !on && (driven ?? turnedOff)
-  // Put back from the ask, which went with the focus: it lands on the line that says what it does now.
-  const line = useRefocus<HTMLParagraphElement>(asking)
+  // Back from the ask, which went with the focus: it lands on the line that says what goes out now.
+  const said = useRefocus<HTMLParagraphElement>(asking)
   return (
     <div className={cx(s.coAuthor, className)}>
       {on && (
-        <p ref={line} tabIndex={-1} className={s.line}>
+        <p ref={said} tabIndex={-1} className={s.line}>
           {t.line}
         </p>
       )}
       {asking && (
-        <div className={s.ask}>
-          <p className={s.big}>{t.ask}</p>
-          <p className={s.why}>{t.why}</p>
-          <Button variant="ink" onClick={() => onChange(true)}>
-            {t.again}
-          </Button>
-        </div>
+        <section className={s.ask} aria-labelledby={askId}>
+          <div className={s.askWords}>
+            <p id={askId} className={s.big}>
+              {t.ask}
+            </p>
+            <p className={s.why}>{t.why}</p>
+            <div className={s.askActions}>
+              <Button variant="ink" onClick={() => onChange(true)}>
+                {t.again}
+              </Button>
+              {driven === undefined && <LinkButton onClick={() => setTurnedOff(false)}>{t.leave}</LinkButton>}
+            </div>
+          </div>
+          <span className={s.askMark} aria-hidden="true">
+            <HalftoneMark size={88} rise />
+          </span>
+        </section>
       )}
       <figure className={cx(s.commit, !on && s.off)} aria-label={t.commit}>
         <div className={s.message}>
@@ -130,7 +149,7 @@ export function CoAuthor({ on, onChange, trailer, author, commit, picture, askin
           <code className={s.sha}>{commit.sha}</code>
         </figcaption>
       </figure>
-      <p className={s.after}>
+      <p {...(on ? {} : { ref: said, tabIndex: -1 })} className={s.after}>
         {on ? (
           <>
             {t.opened}{' '}

@@ -4,6 +4,7 @@ import { expect, fn, userEvent, within } from 'storybook/test'
 import { NEXT } from '../../fixtures/board'
 import { States, statesOn } from '../../storybook/States'
 import { BoardList } from '../Board/Board'
+import { Fact } from '../BoardCard/Chips'
 import { cardStates, laneDecorator, listDecorator } from '../../storybook/lane'
 import { NextRow } from './NextRow'
 
@@ -25,6 +26,8 @@ export const ForAWorker: Story = { args: { ...WORKERS, place: 1 } }
 /** Held on a call of yours: violet, like the call. */
 export const HeldOnYou: Story = { args: { ...HELD, place: 1 } }
 export const Current: Story = { args: { current: true } }
+/** Will start allowing everything it asks, by its own switch or its project's. */
+export const Unrestricted: Story = { args: { foot: <Fact tone="warm">Unrestricted</Fact> } }
 
 /** The queue as it stands, in order. */
 export const Queue: Story = {
@@ -54,6 +57,7 @@ export const AllStates: Story = {
         { state: 'for a worker', node: <NextRow {...args} {...WORKERS} place={1} /> },
         { state: 'held on you', node: <NextRow {...args} {...HELD} place={1} /> },
         { state: 'current', node: <NextRow {...args} current /> },
+        { state: 'unrestricted', node: <NextRow {...args} foot={<Fact tone="warm">Unrestricted</Fact>} /> },
         { state: 'hover', node: <NextRow {...args} /> },
         { state: 'focus', node: <NextRow {...args} /> },
       ].map((c) => ({ ...c, node: <BoardList>{c.node}</BoardList> }))}

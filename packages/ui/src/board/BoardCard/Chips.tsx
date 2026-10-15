@@ -1,13 +1,16 @@
-import type { ReactNode } from 'react'
+import { Children, isValidElement, type ReactNode } from 'react'
 
 import type { CodeHost } from '../../foundations/codeHost'
 import { Icon, type IconName } from '../../foundations/Icon/Icon'
 import { BrandMark } from '../../foundations/Marks/Marks'
+import { commandGlance } from '../../lib/commandGlance'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { Code } from '../../primitives/Code/Code'
 import { Delta } from '../../primitives/FileChanges/FileChanges'
+import { LiveDot } from '../../primitives/LiveDot/LiveDot'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
+import b from '../Board/Board.module.css'
 import s from './Chips.module.css'
 
 /*
@@ -168,32 +171,90 @@ export function Thumbs({ pictures, making = 0, text, className, ...rest }: Thumb
 
 export type CommandChipProps = RootProps<'code', { children: string }>
 
-/** The command a permission asks to run, on one line, cut at its end where the card is narrow. */
-export function CommandChip({ className, ...rest }: CommandChipProps) {
-  return <Code className={cx(s.command, className)} {...rest} />
+/**
+ * The command a permission asks to run, once and short: its first command or
+ * two, each on a line cut at its end where the card is narrow, and a line
+ * for what is left out. The whole command is on hover and in the task.
+ */
+export function CommandChip({ className, children, title, ...rest }: CommandChipProps) {
+  const { lines, summary } = commandGlance(children)
+  return (
+    <>
+      <Code className={cx(s.command, className)} title={title ?? children} {...rest}>
+        {lines.map((line, i) => (
+          <span key={i} className={s.commandLine}>
+            {line}
+          </span>
+        ))}
+      </Code>
+      {summary !== null && <span className={s.commandMore}>{summary}</span>}
+    </>
+  )
 }
 
 export type FactProps = RootProps<
   'span',
   {
-    /** A glyph before it, where one helps: a check for checks that passed, a branch for a conflict. */
+    /** A glyph before it, where one helps: a check for checks that passed, a branch for a conflict. A live fact has its dot instead. */
     icon?: IconName
     /**
      * quiet: a plain fact. ok: something went well, its glyph green. warm: it
      * needs a hand, but nothing is lost, as with a merge conflict. danger:
-     * something failed.
+     * something failed. live: someone else is at it, such as checks still
+     * running, with a cobalt dot.
      */
-    tone?: 'quiet' | 'ok' | 'warm' | 'danger'
+    tone?: 'quiet' | 'ok' | 'warm' | 'danger' | 'live'
     children: ReactNode
   }
 >
 
-/** One fact at a card's foot, with a glyph where it helps: checks passed, a conflict. */
+/** One fact at a card's foot, with a glyph where it helps: checks passed, a conflict, checks still running. */
 export function Fact({ icon, tone = 'quiet', children, className, ...rest }: FactProps) {
   return (
     <span className={cx(s.fact, s[tone], className)} {...rest}>
-      {icon !== undefined && <Icon name={icon} size={11} />}
+      {tone === 'live' ? <LiveDot /> : icon !== undefined && <Icon name={icon} size={11} />}
       {children}
+    </span>
+  )
+}
+
+export type FactLineProps = RootProps<'span', { children: ReactNode }>
+
+/**
+ * Facts said as one line, a middot between them, the most pressing first:
+ * “2 commits not on the PR · harness failed”. Where the card is narrow, it
+ * wraps between them.
+ */
+export function FactLine({ children, className, ...rest }: FactLineProps) {
+  const facts = Children.toArray(children)
+  return (
+    <span className={cx(s.factLine, className)} {...rest}>
+      {facts.map((fact, i) => (
+        <span key={isValidElement(fact) && fact.key !== null ? fact.key : i} className={s.factLinePart}>
+          {i > 0 && (
+            <span className={s.dot} aria-hidden="true">
+              ·
+            </span>
+          )}
+          {fact}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+export type NextStepProps = RootProps<'span', { children: ReactNode }>
+
+/**
+ * The one next thing to do, at the end of a card's foot: Push 3 commits,
+ * Accept and merge. Words, not a button: the card is the button, and opens
+ * its task, where it is done.
+ */
+export function NextStep({ children, className, ...rest }: NextStepProps) {
+  return (
+    <span className={cx(b.go, className)} {...rest}>
+      {children}
+      <Icon name="arrow" size={11} />
     </span>
   )
 }

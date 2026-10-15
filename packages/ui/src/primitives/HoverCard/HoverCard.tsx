@@ -93,15 +93,18 @@ export interface TooltipProps {
   kbd?: string
   placement?: OverlayPlacement
   align?: OverlayAlign
+  /** Kept shut, as while the control is dragged. */
+  shut?: boolean
 }
 
 /** A control's name, and its shortcut, on hover or focus: for controls that show only a glyph. Unlike a title attribute, the keyboard sees it too. */
-export function Tooltip({ children, label, kbd, placement = 'above', align = 'start' }: TooltipProps) {
+export function Tooltip({ children, label, kbd, placement = 'above', align = 'start', shut = false }: TooltipProps) {
   return (
     <HoverCard
       placement={placement}
       align={align}
       className={s.tip}
+      {...(shut ? { open: false } : {})}
       card={
         <>
           {label}

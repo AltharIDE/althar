@@ -1,0 +1,54 @@
+/* on the person's side, as what they say is */
+.relayed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.from {
+  margin: 0 4px 6px 0;
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+.bubble {
+  position: relative;
+  max-width: min(78%, 540px);
+  padding: 13px 16px 10px;
+  overflow: hidden;
+  border-radius: 16px 16px 5px 16px;
+  background: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+/* the mark, printed faint in its corner */
+.mark {
+  position: absolute;
+  right: 10px;
+  bottom: -6px;
+  opacity: 0.3;
+  pointer-events: none;
+}
+.words {
+  position: relative;
+}
+.title {
+  margin: 0 0 4px;
+  font-size: var(--prose-size);
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--t-1);
+}
+.title::first-letter {
+  text-transform: uppercase;
+}
+.clamp,
+.body {
+  --prose-size: 13.5px;
+  --t-1: var(--t-2);
+}
+.clamp {
+  max-height: calc(13.5px * 1.62 * 3);
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+.more {
+  margin-top: 4px;
+}
