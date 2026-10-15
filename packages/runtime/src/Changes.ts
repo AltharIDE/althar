@@ -1955,11 +1955,18 @@ export class Changes extends Context.Service<
       const handsOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const rows = yield* sql<{ outcome: string | null; endedAt: string; failed: number; hasChecks: number }>`
-            SELECT json_extract(l.snapshot, '$.checks.outcome') AS outcome, r.ended_at,
-              -- Whether the repository's pull requests have had checks before: one with none never will, and isn't kept waiting.
+          const rows = yield* sql<{ outcome: string | null; endedAt: string; pushedAt: string | null; failed: number; hasChecks: number }>`
+            SELECT
+              -- What the checks of its head say: those of a head before it, which a push has left behind, say nothing.
+              CASE WHEN json_extract(l.snapshot, '$.checks.sha') = json_extract(l.snapshot, '$.headSha')
+                THEN json_extract(l.snapshot, '$.checks.outcome') END AS outcome,
+              r.ended_at,
+              -- When Althar last pushed to it: its checks may take a moment to show after that too.
+              (SELECT max(c.updated_at) FROM repository_changes c WHERE c.pull_request_url = json_extract(l.snapshot, '$.url')) AS pushed_at,
+              -- Whether the repository's pull requests, this one included, have had checks before: one with none never will, and isn't
+              -- kept waiting.
               EXISTS (SELECT 1 FROM external_links e JOIN observations c ON c.subject_type = 'external_link' AND c.subject_id = e.id
-                AND c.kind = 'checks' WHERE e.project_id = l.project_id AND e.kind = 'change' AND e.id != l.id
+                AND c.kind = 'checks' WHERE e.project_id = l.project_id AND e.kind = 'change'
                 AND json_extract(e.snapshot, '$.repository') = json_extract(l.snapshot, '$.repository')) AS has_checks,
               (SELECT count(*) FROM observations o WHERE o.subject_type = 'external_link' AND o.subject_id = l.id
                 AND o.kind = 'checks' AND json_extract(o.payload, '$.outcome') = 'failed' AND o.observed_at >= r.ended_at) AS failed
@@ -1979,9 +1986,20 @@ export class Changes extends Context.Service<
           const running = rows.some(
             (row) =>
               row.outcome === 'running' ||
-              ((row.outcome === null || row.outcome === 'none') && row.hasChecks === 1 && now - Date.parse(row.endedAt) < checksAppear),
+              ((row.outcome === null || row.outcome === 'none') &&
+                row.hasChecks === 1 &&
+                now - Math.max(Date.parse(row.endedAt), row.pushedAt === null ? 0 : Date.parse(row.pushedAt)) < checksAppear),
           )
           return { failed, running, given: failed > FIX_ROUNDS } satisfies Hands
+        })
+
+      /** Whether the task's plan is still under way, as while it publishes, its pull request open already. */
+      const publishing = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [run] = yield* sql<{ state: string }>`
+            SELECT state FROM runs WHERE task_id = ${taskId} AND plan_id IS NOT NULL ORDER BY created_at DESC LIMIT 1`
+          return run?.state === 'running'
         })
 
       /** Says in the task's thread that its checks still failed after FIX_ROUNDS fixes while Althar saw them through: the change is the person's now. */
@@ -2060,7 +2078,10 @@ export class Changes extends Context.Service<
           let alone = false
           let happened = false
           let checks = before.checks
-          if (now.headSha !== null) {
+          // While its plan still publishes, how its checks end waits: once the run has ended, they are heard as the change's,
+          // and a failure goes where it should (ADR-040).
+          if (now.headSha !== null && (yield* publishing(link.taskId))) happened = true
+          else if (now.headSha !== null) {
             const sum = checksOf(now.headSha, yield* host.checks(repository, now.headSha))
             const finished = sum.outcome === 'passed' || sum.outcome === 'failed'
             // Checks still running keep the pull request worth asking about.
@@ -3518,7 +3539,8 @@ export class Changes extends Context.Service<
                 // Before the person has seen the change, its checks are Althar's to see through: a fix for checks that failed goes up at
                 // once (ADR-040). Anything else waits for the person, as ever.
                 const hands = yield* handsOf(taskId)
-                if (hands !== null && !hands.given && hands.failed > 0) {
+                const failing = snapshot.checks?.outcome === 'failed' && snapshot.checks.sha === snapshot.headSha
+                if (hands !== null && !hands.given && failing) {
                   const pushed = yield* Effect.exit(push(taskId, ahead.head, snapshot.url))
                   if (pushed._tag === 'Success')
                     return [
