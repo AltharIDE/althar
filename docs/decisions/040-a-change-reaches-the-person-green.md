@@ -23,8 +23,10 @@
     is Running, with the step "Checks running", and it holds no place among
     the agents at work, since nothing works on this machine meanwhile. A pull
     request that shows no checks yet counts as running for a minute after
-    the work came back (`checksAppear`), while the host registers them. Once
-    they pass, it comes to the person, in Needs you.
+    the work came back (`checksAppear`), while the host registers them,
+    where the repository's pull requests have had checks before; in one that
+    never has, it comes to the person at once. Once they pass, it comes to
+    the person, in Needs you.
   - **A failure goes to its lead, which is started again if its session has
     ended**, on the agent it was last on. It is told the person hasn't seen
     the change, so its fix goes up as it makes it, and how many tries are
