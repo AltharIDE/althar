@@ -44,3 +44,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [034](034-a-task-goes-back-to-work-and-ships-again.md) | A task goes back to work whenever its lead does, and ships again in a pull request of its own |
 | [035](035-a-task-s-kind-is-read-from-what-it-has.md) | A task's kind is read from what it has, and its card has nothing to press |
 | [036](036-usage-data-from-the-main-process.md) | Anonymous usage data goes from the main process, named events only |
+| [037](037-what-the-person-does-goes-first.md) | What the person does goes first, a task keeps its place between its steps, and new work waits |

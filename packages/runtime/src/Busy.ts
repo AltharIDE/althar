@@ -21,11 +21,13 @@ import { Sessions } from './Sessions'
  * under way, or in a turn. Either one with something it left running that is
  * at work takes its place too, though its step is done: its process tree uses
  * real CPU, or did within the last `quiet` (`working`). A server left running
- * and sitting idle takes none. A lead or reviewer only waiting on the
- * person's answer to a question takes none, unless what it left running is
- * at work; nor once the person answered, while the answer waits for a place
- * to be told. The coordinator, the permission judge and
- * the runs Althar makes itself take no place.
+ * and sitting idle takes none. A lead or reviewer waiting on the person, on
+ * a question or a permission, keeps its place for `askGrace` (five minutes,
+ * while its agent's cache is warm, so an answer soon goes on where it was),
+ * then takes none, unless what it left running is at work; nor once the
+ * person answered, while an answer kept before waits to be told. The
+ * coordinator, the permission judge and the runs Althar makes itself take no
+ * place.
  *
  * Starting an agent on work asks for a place first (`enter`): a plan's first
  * step, the step after it (a review after the lead's, the lead settling
@@ -33,14 +35,25 @@ import { Sessions } from './Sessions'
  * resume, a step back from a usage limit, a conflict or the checks on one put
  * to its lead, and an answer told to an agent that waits on it. So does every
  * turn of a lead or a reviewer not already at work (`turn`): what the person
- * says to it, an agent they start or switch to. Without a place, it waits:
- * written in the store where it waits, so a restart doesn't lose it, or, a
- * turn, in what the thread has queued; behind whatever waited before it.
- * When a place frees, what waited longest starts (`queue`): looked at
- * whenever an agent's turn or session ends, what it left running changes or
- * goes idle or starts working, or the person answers or is asked something,
- * and every few seconds while anything waits. One agent's work follows on in its own place: a lead at
- * work on a step takes no other for its turns.
+ * says to it, an agent they start or switch to, and what Althar tells it.
+ *
+ * What waits goes in the order the person would choose (`Order`, ADR-037):
+ * first what the person did, which never waits, and starts though every place
+ * is taken (their answer, what they say to an agent, a task they resume); then
+ * the work of a task already under way (the step after another, a step
+ * carried on after a restart or back from a usage limit, a conflict or check
+ * round, what Althar tells an agent); then new work (a plan's first step).
+ * Within each, what waited longest goes first. A step after another on the
+ * same task takes the place of the agent before it, ahead of whatever waits,
+ * so a task never loses its place between its own steps; unless what that
+ * agent left running still runs, when the two would be two agents at work.
+ * Without a place, work waits: written in the store where it waits, so a
+ * restart doesn't lose it, or, a turn, in what the thread has queued. When a
+ * place frees, what stands first starts (`queue`): looked at whenever an
+ * agent's turn or session ends, what it left running changes or goes idle or
+ * starts working, or the person answers or is asked something, and every few
+ * seconds while anything waits. One agent's work follows on in its own place:
+ * a lead at work on a step takes no other for its turns.
  *
  * How many may be at once is the person's number, kept in the profile's
  * settings once they change it; otherwise the default this machine's cores
@@ -60,6 +73,14 @@ export interface AtOnce {
   readonly machine: AtOnceDefault
 }
 
+/**
+ * Where work that waits for a place stands (ADR-037): what the person did,
+ * which starts at once; the work of a task already under way; new work.
+ */
+export type Order = 'person' | 'underway' | 'new'
+
+const RANK: Readonly<Record<Order, number>> = { person: 0, underway: 1, new: 2 }
+
 /** Which of a task's agents: its lead, or its reviewer. */
 export interface Agent {
   readonly taskId: string
@@ -73,6 +94,8 @@ export interface Entering<A> {
   readonly review?: boolean | undefined
   /** It follows this agent of the same task, done with its step. */
   readonly after?: 'lead' | 'review' | undefined
+  /** Where it stands among what waits: new work, unless said; a step after another, under way. */
+  readonly order?: Order | undefined
   /** With a place, what starts it, run holding the place, so nothing takes it meanwhile. */
   readonly next?: ((done: A) => Effect.Effect<void, unknown>) | undefined
 }
@@ -88,9 +111,11 @@ export interface Holder extends Agent {
 /** How much of a core, of the time between two samples, what an agent left running must use to count as at work. */
 const WORKING_SHARE = 0.05
 
-/** Something waiting for a place: its task's agent, since when, and what starts it once it has one. */
+/** Something waiting for a place: its task's agent, where it stands, since when, and what starts it once it has one. */
 export interface Waiter extends Agent {
-  /** When it began waiting: what waited longest goes first. */
+  /** Where it stands: what the person did first, then work under way, then new work. */
+  readonly order: Order
+  /** When it began waiting: within its order, what waited longest goes first. */
   readonly since: string
   /**
    * Starts it, outside the queue's lock, its place held for it until this
@@ -104,6 +129,10 @@ export interface Waiter extends Agent {
 /** A task's agent as it is counted: its lead by the task, its reviewer apart. */
 const keyOf = (taskId: string, review?: boolean) => (review === true ? `${taskId} review` : taskId)
 const waiterKey = (waiter: Agent) => keyOf(waiter.taskId, waiter.review)
+
+/** What waits, in the order it starts: by where it stands, then what waited longest. */
+const inOrder = (waiters: ReadonlyArray<Waiter>) =>
+  waiters.toSorted((a, b) => RANK[a.order] - RANK[b.order] || a.since.localeCompare(b.since))
 
 export class Busy extends Context.Service<
   Busy,
@@ -152,6 +181,7 @@ export class Busy extends Context.Service<
       const every = options.every ?? Duration.seconds(5)
       const sampleEvery = options.sample ?? Duration.seconds(2)
       const quiet = Duration.toMillis(options.quiet ?? Duration.seconds(30))
+      const askGrace = Duration.toMillis(options.askGrace ?? Duration.minutes(5))
       const cpuOf =
         options.cpuOf ??
         ((agents: ReadonlyArray<{ readonly threadId: string; readonly pid: number | null }>) =>
@@ -261,14 +291,19 @@ export class Busy extends Context.Service<
           UNION ALL
           SELECT h.task_id, h.id, h.kind = 'step' FROM provider_sessions p JOIN threads h ON h.id = p.thread_id
           WHERE p.state = 'starting' AND h.kind IN ('task', 'step') AND h.task_id IS NOT NULL`
-        // An agent waiting on the person's answer isn't using the machine, nor while their answer waits for a place: what it
-        // left running still is.
+        // An agent waiting on the person's answer, to a question or a permission, keeps its place a few minutes, so an answer
+        // soon goes on where it was; past that it isn't using the machine, nor while an answer kept before waits for a place.
+        // What it left running still is.
+        const askedBefore = new Date((yield* Clock.currentTimeMillis) - askGrace).toISOString()
         const asking = new Set(
           (yield* sql<{ threadId: string | null }>`
             SELECT json_extract(payload, '$.threadId') AS thread_id FROM attention_requests WHERE kind = 'question'
-              AND (state = 'open' OR (state = 'answered' AND json_extract(payload, '$.waitsForPlace') IS NOT NULL))`).map(
-            (row) => row.threadId,
-          ),
+              AND ((state = 'open' AND created_at <= ${askedBefore})
+                OR (state = 'answered' AND json_extract(payload, '$.waitsForPlace') IS NOT NULL))
+            UNION ALL
+            SELECT s.thread_id FROM attention_requests q JOIN permission_requests r ON r.id = q.permission_request_id
+            JOIN provider_sessions s ON s.id = r.provider_session_id
+            WHERE q.kind = 'permission' AND q.state = 'open' AND q.created_at <= ${askedBefore}`).map((row) => row.threadId),
         )
         const at = new Set<string>()
         const holders = new Map<string, Holder>()
@@ -281,38 +316,61 @@ export class Busy extends Context.Service<
         for (const key of starting.keys()) take(key.replace(/ review$/, ''), key.endsWith(' review'), null, false)
         for (const row of under)
           if (row.threadId === null || !asking.has(row.threadId)) take(row.taskId, row.review === 1, row.threadId, false)
+        // What the person said to an agent, still to be delivered, is its next turn on its way: the place isn't given to
+        // anything else in between.
+        const told = new Set(
+          (yield* sql<{ threadId: string }>`
+            SELECT DISTINCT i.thread_id FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
+            WHERE i.state = 'queued' AND a.kind = 'person'`).map((row) => row.threadId),
+        )
         const lingering = new Set<string>()
         for (const session of yield* sessions.onTasks) {
           // Left running and idle, it is nothing to wait for; not yet read, it counts.
           const working = session.background && (sampled.get(session.threadId)?.working ?? true)
           if (working) lingering.add(keyOf(session.taskId, session.reviewer))
-          const turning = session.turnRunning && !asking.has(session.threadId)
+          const turning = (session.turnRunning || told.has(session.threadId)) && !asking.has(session.threadId)
           if (working || turning) take(session.taskId, session.reviewer, session.threadId, !turning)
         }
         return { at, lingering, holders: [...holders.values()] }
       })
 
-      /** Everything waiting, what waited longest first. */
+      /** Everything waiting, in the order it starts. */
       const waiting = Effect.map(
         Effect.forEach(sources, (source) =>
           source.pipe(Effect.catchCause((cause) => Effect.as(Effect.logWarning('Could not read what waits for a place', cause), []))),
         ),
-        (all) => [...all.flat(), ...turns.values()].toSorted((a, b) => a.since.localeCompare(b.since)),
+        (all) => inOrder([...all.flat(), ...turns.values()]),
       )
 
-      /** Whether `key` has a place now: its agent at work already, or one free with nothing waiting before it. */
-      const roomFor = (key: string, at: ReadonlySet<string>) =>
+      /**
+       * Whether `key` has a place now: what the person did always has; its agent at work already has; otherwise one free,
+       * with nothing waiting that stands before it.
+       */
+      const roomFor = (key: string, at: ReadonlySet<string>, order: Order) =>
         Effect.gen(function* () {
-          if (at.has(key)) return true
+          if (order === 'person' || at.has(key)) return true
           if (at.size >= (yield* atOnce).count) return false
-          // Work waiting for a place of its own goes first; what waits on an agent at work, or is on its way, takes none.
-          return !(yield* waiting).some((waiter) => waiterKey(waiter) !== key && !at.has(waiterKey(waiter)))
+          // Work waiting for a place of its own, standing where this does or before it, goes first; what waits on an agent at
+          // work, or is on its way, takes none.
+          return !(yield* waiting).some(
+            (waiter) => waiterKey(waiter) !== key && !at.has(waiterKey(waiter)) && RANK[waiter.order] <= RANK[order],
+          )
         })
 
+      /** Whether the person's own words wait in the thread to be delivered: then a turn there is theirs. */
+      const personSaid = (threadId: string) =>
+        Effect.map(
+          sql<{ one: number }>`
+            SELECT 1 AS one FROM user_inputs i JOIN actors a ON a.id = i.author_actor_id
+            WHERE i.thread_id = ${threadId} AND i.state = 'queued' AND a.kind = 'person' LIMIT 1`,
+          (rows) => rows.length > 0,
+        )
+
       /**
-       * Starts what waited longest while there are places, and what waits on
-       * an agent at work already; then, where how many are at work or may be
-       * changed, the cards of what still waits are read again.
+       * Starts what stands first while there are places, what the person did
+       * whether or not there is one, and what waits on an agent at work
+       * already; then, where how many are at work or may be changed, the
+       * cards of what still waits are read again.
        */
       const look = lock.withPermits(1)(
         Effect.gen(function* () {
@@ -325,7 +383,7 @@ export class Busy extends Context.Service<
             const key = waiterKey(waiter)
             // On its way already: it is counted, and not started twice.
             if (starting.has(key)) continue
-            if (!busy.has(key) && busy.size >= most) {
+            if (waiter.order !== 'person' && !busy.has(key) && busy.size >= most) {
               left.push(waiter.taskId)
               continue
             }
@@ -431,24 +489,28 @@ export class Busy extends Context.Service<
             AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.task_id = h.task_id AND r.state = 'suspended'
               AND r.created_at = (SELECT max(created_at) FROM runs WHERE task_id = h.task_id))`
         const live = new Set((yield* sessions.onTasks).map((session) => session.threadId))
-        return rows
-          .filter((row) => !live.has(row.threadId))
-          .map((row) => ({
-            taskId: row.taskId,
-            review: row.kind === 'step',
-            since: row.since,
-            // Its place held until its first turn is under way, or waits again in its own session's queue.
-            start: Effect.gen(function* () {
-              // No agent was ever on it to start again: nothing waits.
-              if (!(yield* sessions.startLast(row.threadId)))
-                return yield* sql`UPDATE threads SET waits_for_place = NULL WHERE id = ${row.threadId}`
-              for (let waited = 0; waited < 30_000; waited += 100) {
-                const on = (yield* sessions.onTasks).find((session) => session.threadId === row.threadId)
-                if (on === undefined || on.turnRunning || turns.has(row.threadId)) return
-                yield* Effect.sleep(Duration.millis(100))
-              }
-            }),
-          }))
+        return yield* Effect.forEach(
+          rows.filter((row) => !live.has(row.threadId)),
+          (row) =>
+            Effect.map(personSaid(row.threadId), (person) => ({
+              taskId: row.taskId,
+              review: row.kind === 'step',
+              // What the person said starts at once; what Althar said to it is the work of a task under way.
+              order: person ? ('person' as const) : ('underway' as const),
+              since: row.since,
+              // Its place held until its first turn is under way, or waits again in its own session's queue.
+              start: Effect.gen(function* () {
+                // No agent was ever on it to start again: nothing waits.
+                if (!(yield* sessions.startLast(row.threadId)))
+                  return yield* sql`UPDATE threads SET waits_for_place = NULL WHERE id = ${row.threadId}`
+                for (let waited = 0; waited < 30_000; waited += 100) {
+                  const on = (yield* sessions.onTasks).find((session) => session.threadId === row.threadId)
+                  if (on === undefined || on.turnRunning || turns.has(row.threadId)) return
+                  yield* Effect.sleep(Duration.millis(100))
+                }
+              }),
+            })),
+        )
       })
       sources.push(restored)
 
@@ -458,10 +520,13 @@ export class Busy extends Context.Service<
           const decided = yield* lock.withPermits(1)(
             Effect.gen(function* () {
               const { at, lingering } = yield* atWork
-              // The agent it follows is done with its step: its place is this one's, unless what it left running still runs.
+              // The agent it follows, at work and done with its step, hands this one its place, ahead of whatever waits: a
+              // task never loses its place between its own steps. Unless what that agent left running still runs: then the
+              // two would be two agents at work, and this one waits for a place of its own, as work under way.
               const before = how.after === undefined ? undefined : keyOf(taskId, how.after === 'review')
-              if (before !== undefined && before !== key && !lingering.has(before)) at.delete(before)
-              const room = yield* roomFor(key, at)
+              const handed = before !== undefined && before !== key && at.has(before) && !lingering.has(before)
+              if (handed) at.delete(before)
+              const room = handed || (yield* roomFor(key, at, how.order ?? (how.after === undefined ? 'new' : 'underway')))
               const done = yield* then(room)
               // Held from here, so nothing takes the place before what starts it is under way.
               if (room && how.next !== undefined) hold(key)
@@ -480,9 +545,11 @@ export class Busy extends Context.Service<
       ) =>
         Effect.gen(function* () {
           const key = keyOf(agent.taskId, agent.review)
+          // What the person says to an agent goes on at once; what Althar tells it is the work of a task under way.
+          const order: Order = (yield* personSaid(agent.threadId)) ? 'person' : 'underway'
           const room = yield* lock.withPermits(1)(
             Effect.gen(function* () {
-              const room = yield* roomFor(key, (yield* atWork).at)
+              const room = yield* roomFor(key, (yield* atWork).at, order)
               if (room) {
                 hold(key)
                 turns.delete(agent.threadId)
@@ -492,7 +559,7 @@ export class Busy extends Context.Service<
               // Since when it waits, kept where it was first said: a turn asked again keeps its place in the queue.
               yield* sql`UPDATE threads SET waits_for_place = coalesce(waits_for_place, ${yield* timestamp}) WHERE id = ${agent.threadId}`
               const [kept] = yield* sql<{ since: string }>`SELECT waits_for_place AS since FROM threads WHERE id = ${agent.threadId}`
-              turns.set(agent.threadId, { ...agent, since: kept?.since ?? (yield* timestamp), start: work })
+              turns.set(agent.threadId, { ...agent, order, since: kept?.since ?? (yield* timestamp), start: work })
               return false
             }),
           )
