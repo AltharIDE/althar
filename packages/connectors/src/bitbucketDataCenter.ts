@@ -599,6 +599,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
       ),
     // A build's log is the build server's, which Althar isn't signed in to.
     checkLog: () => Effect.succeed(null),
+    rerun: () => Effect.succeed(false),
     activity: (repository, number, cursor) =>
       Effect.gen(function* () {
         const activities = yield* all(ActivityAnswer, `${pull(repository, number)}/activities`)

@@ -292,8 +292,13 @@ export interface CodeHost {
    */
   merge(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
   checks(repository: Repository, sha: string): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
-  /** The end of a check's log, when the host keeps one Althar can read. */
-  checkLog(repository: Repository, check: Check): Effect.Effect<string | null, ConnectorFailed>
+  /** The end of a check's log, or with `whole` all of it, when the host keeps one Althar can read. */
+  checkLog(repository: Repository, check: Check, whole?: boolean): Effect.Effect<string | null, ConnectorFailed>
+  /**
+   * Runs a check again, as for one that may have failed by chance: true where
+   * the host began it again, false where it can't run that check again.
+   */
+  rerun(repository: Repository, check: Check): Effect.Effect<boolean, ConnectorFailed>
   /** Comments and reviews since a cursor (from the start without one). */
   activity(repository: Repository, number: number, cursor: string | null): Effect.Effect<Activity, ConnectorFailed>
   /** Replies on a change: in a comment's thread, or in its conversation. */

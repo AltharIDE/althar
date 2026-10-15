@@ -1,22 +1,7 @@
 name: harness
 
+# On a pull request, checks and unit tests. The coverage gate runs after merge, in post-merge.yml.
 on:
-  push:
-    branches: [main]
-    paths:
-      [
-        'packages/connectors/**',
-        'packages/contracts/**',
-        'packages/domain/**',
-        'packages/persistence-sqlite/**',
-        'packages/provider-adapters/**',
-        'packages/runtime/**',
-        'apps/cli/**',
-        'package.json',
-        'bun.lock',
-        'vite.config.ts',
-        '.github/workflows/harness.yml',
-      ]
   pull_request:
     paths:
       [
@@ -70,4 +55,5 @@ jobs:
           node-version-file: .node-version
       - run: bun install --frozen-lockfile
         working-directory: .
-      - run: bun run verify
+      - run: bun run check
+      - run: bun run test
