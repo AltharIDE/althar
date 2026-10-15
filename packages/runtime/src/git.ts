@@ -427,24 +427,16 @@ export const restoreWorktree = (repository: string, path: string, branch: string
   Effect.andThen(git(repository, 'worktree', 'prune'), git(repository, 'worktree', 'add', path, branch))
 
 /**
- * Changes that prevent moving a checkout. A failed read stays a failure,
- * even when git wrote no status. Check each initialized submodule too:
- * --ignore-submodules=none on the parent doesn't override a nested one's
- * own ignore settings. Untracked files are checked separately by the merge.
+ * Changes not committed in a checkout, its own files only: a submodule's
+ * state is left out (`all`), or only whether it is at the commit recorded for
+ * it (`dirty`), so git never runs a status inside one. That one runs from the
+ * submodule's folder, where in the document portal getcwd fails, and a
+ * submodule the merge leaves alone never needs reading. A failed read stays a
+ * failure, even when git wrote no status. Untracked files are checked
+ * separately by the merge.
  */
-export const trackedStatus = (cwd: string): Effect.Effect<string, GitFailed> =>
-  Effect.gen(function* () {
-    const status = yield* git(cwd, 'status', '--porcelain', '--untracked-files=no', '--ignore-submodules=none')
-    if (status !== '') return status
-    return yield* git(
-      cwd,
-      'submodule',
-      'foreach',
-      '--quiet',
-      '--recursive',
-      'git status --porcelain --untracked-files=no --ignore-submodules=none || { printf "Cannot read submodule status: %s\\n" "$displaypath" >&2; exit 1; }',
-    )
-  })
+export const trackedStatus = (cwd: string, submodules: 'all' | 'dirty' = 'all'): Effect.Effect<string, GitFailed> =>
+  git(cwd, 'status', '--porcelain', '--untracked-files=no', `--ignore-submodules=${submodules}`)
 
 /** Puts back a worktree whose folder is gone that never had a branch, detached where it started. */
 export const restoreDetachedWorktree = (repository: string, path: string, commit: string) =>

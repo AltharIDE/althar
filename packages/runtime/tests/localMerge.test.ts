@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -56,6 +56,18 @@ const taskIn = (roots: ReadonlyArray<string>, opened: string) =>
       WHERE w.task_id = ${task.taskId} ORDER BY b.created_at, b.rowid`
     return { task, worktrees }
   })
+
+/** Makes a repository in place at `library` a submodule of `root`, its git directory under the project's: its path. */
+const withLibrary = (root: string) => {
+  const library = join(root, 'library')
+  mkdirSync(library)
+  git(library, 'init', '-q', '-b', 'main')
+  commit(library, 'README.md', '# Library\n')
+  git(root, 'submodule', 'add', '-q', './library', 'library')
+  git(root, 'submodule', 'absorbgitdirs')
+  git(root, 'commit', '-q', '-m', 'Add library')
+  return library
+}
 
 const mergeHere = (taskId: string, heads: ReadonlyArray<{ readonly repository: string; readonly head: string }>) =>
   Effect.flatMap(Changes, (changes) => changes.mergeHere(taskId, heads))
@@ -351,58 +363,102 @@ describe('merging a task here', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('merges nothing where a submodule of the checkout can’t be read, and says where and what git said', () =>
+  it.live('merges where a submodule it leaves alone can’t be read, and leaves that submodule as it is', () =>
     Effect.gen(function* () {
       const root = repository()
-      // A repository already in place becomes the submodule, its git directory moved under the parent's.
-      mkdirSync(join(root, 'library'))
-      git(join(root, 'library'), 'init', '-q', '-b', 'main')
-      commit(join(root, 'library'), 'README.md', '# Library\n')
-      git(root, 'submodule', 'add', '-q', './library', 'library')
-      git(root, 'submodule', 'absorbgitdirs')
-      git(root, 'commit', '-q', '-m', 'Add library')
+      withLibrary(root)
       const { task, worktrees } = yield* taskIn([root], root)
       const head = commit(worktrees[0]?.path ?? '', 'retry.ts', 'retry\n')
-      const tip = git(root, 'rev-parse', 'main')
-      // The submodule's repository is gone from under its checkout: git can't say whether it changed.
-      rmSync(join(root, '.git', 'modules', 'library'), { recursive: true, force: true })
-      const refused = yield* Effect.flip(mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }]))
-      const [, why, detail] = cantOf(refused)
-      assert.strictEqual(why, 'unreadable')
-      assert.isTrue(detail?.startsWith(`${realpathSync(root)}\n`))
-      assert.include(detail, 'library')
-      assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
-      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+      // library's index is broken: git's status of the project fails inside it, as the person's did.
+      const index = join(root, '.git', 'modules', 'library', 'index')
+      writeFileSync(index, 'broken')
+      assert.throws(() => git(root, 'status', '--porcelain'), /'git status --porcelain=2' failed in submodule library/)
+      yield* mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }])
+      assert.strictEqual(git(root, 'rev-parse', 'main'), git(worktrees[0]?.path ?? '', 'rev-parse', 'HEAD'))
+      assert.isTrue(existsSync(join(root, 'retry.ts')))
+      assert.strictEqual(readFileSync(index, 'utf8'), 'broken')
+      assert.strictEqual(yield* stateOf(task.taskId), 'done')
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('merges nothing where a nested submodule’s own ignore setting hides changes not committed', () =>
+  it.live('merges nothing where it moves a submodule with changes not committed, not at its commit, or that can’t be read', () =>
     Effect.gen(function* () {
       const root = repository()
-      // library, a submodule of the project, has inner as a submodule of its own.
-      const library = join(root, 'library')
-      const inner = join(library, 'inner')
-      mkdirSync(inner, { recursive: true })
-      git(inner, 'init', '-q', '-b', 'main')
-      commit(inner, 'README.md', '# Inner\n')
-      git(library, 'init', '-q', '-b', 'main')
-      git(library, 'submodule', 'add', '-q', './inner', 'inner')
-      git(library, 'commit', '-q', '-m', 'Add inner')
-      git(root, 'submodule', 'add', '-q', './library', 'library')
-      git(root, 'commit', '-q', '-m', 'Add library')
+      const library = withLibrary(root)
       const { task, worktrees } = yield* taskIn([root], root)
-      const head = commit(worktrees[0]?.path ?? '', 'retry.ts', 'retry\n')
+      const worktree = worktrees[0]?.path ?? ''
+      // The task moves library on: a commit in library's repository, recorded on the task's branch.
+      const was = git(library, 'rev-parse', 'HEAD')
+      const next = git(library, 'commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'Next')
+      git(worktree, 'update-index', '--cacheinfo', `160000,${next},library`)
+      git(worktree, 'commit', '-q', '-m', 'Move library on')
+      const head = git(worktree, 'rev-parse', 'HEAD')
       const tip = git(root, 'rev-parse', 'main')
-      // A change in inner that library is told to ignore: the project's own status reads clean.
-      git(library, 'config', 'submodule.inner.ignore', 'all')
-      writeFileSync(join(inner, 'README.md'), '# Not yet\n')
-      assert.strictEqual(git(root, 'status', '--porcelain', '--untracked-files=no', '--ignore-submodules=none'), '')
-      const refused = yield* Effect.flip(mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }]))
-      assert.deepStrictEqual(cantOf(refused).slice(1), ['busy', realpathSync(root)])
+      const refusal = () => Effect.map(Effect.flip(mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }])), cantOf)
+      const there = join(realpathSync(root), 'library')
+      writeFileSync(join(library, 'README.md'), '# Not yet\n')
+      assert.deepStrictEqual((yield* refusal()).slice(1), ['submodule', there])
+      git(library, 'checkout', '-q', '--', 'README.md')
+      git(library, 'checkout', '-q', next)
+      assert.deepStrictEqual((yield* refusal()).slice(1), ['submodule', there])
+      git(library, 'checkout', '-q', 'main')
+      const modules = join(root, '.git', 'modules', 'library')
+      renameSync(modules, `${modules}.away`)
+      const [, why, detail] = yield* refusal()
+      assert.strictEqual(why, 'unreadable')
+      assert.isTrue(detail?.startsWith(`${there}\n`))
+      renameSync(`${modules}.away`, modules)
       assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
       assert.strictEqual(yield* stateOf(task.taskId), 'open')
+      // Clean when planned, changed before anything moves: nothing moves.
+      const plan = yield* planMerge(root, 'main', head, 'Merge')
+      if (plan.kind !== 'move') return assert.fail(`planned ${plan.kind}`)
+      writeFileSync(join(library, 'README.md'), '# Not yet\n')
+      assert.deepStrictEqual((yield* applyMerges([{ root, branch: 'main', plan }]))?.problem, {
+        kind: 'submodule',
+        checkout: realpathSync(root),
+        submodule: there,
+      })
+      assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
+      git(library, 'checkout', '-q', '--', 'README.md')
+      // Clean and at its commit, it merges: the record moves, library's checkout stays where it was.
+      yield* mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }])
+      assert.include(git(root, 'ls-tree', 'main', 'library'), next)
+      assert.strictEqual(git(library, 'rev-parse', 'HEAD'), was)
+      assert.strictEqual(yield* stateOf(task.taskId), 'done')
     }).pipe(Effect.provide(runtime())),
   )
+
+  it.live('fast-forwards with a git older than 2.36, which has no `worktree list -z`', () => {
+    // git as 2.35 had it, in front of the real one: no `worktree list -z` (2.36), no `merge-tree --write-tree` (2.38).
+    const shim = realpathSync(mkdtempSync(join(tmpdir(), 'althar-old-git-')))
+    const real = execFileSync('sh', ['-c', 'command -v git']).toString().trim()
+    writeFileSync(
+      join(shim, 'git'),
+      [
+        '#!/bin/sh',
+        'case " $* " in',
+        `  *" worktree "*" -z "*) echo "error: unknown switch \\\`z'" >&2; exit 129 ;;`,
+        '  *" --write-tree "*) echo "usage: git merge-tree <base-tree> <branch1> <branch2>" >&2; exit 129 ;;',
+        'esac',
+        `exec '${real}' "$@"`,
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    )
+    const path = process.env.PATH
+    return Effect.gen(function* () {
+      process.env.PATH = `${shim}:${path ?? ''}`
+      const root = repository()
+      assert.throws(() => git(root, 'worktree', 'list', '--porcelain', '-z'), /unknown switch/)
+      const { task, worktrees } = yield* taskIn([root], root)
+      const head = commit(worktrees[0]?.path ?? '', 'retry.ts', 'retry\n')
+      yield* mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }])
+      assert.strictEqual(git(root, 'rev-parse', 'main'), git(worktrees[0]?.path ?? '', 'rev-parse', 'HEAD'))
+      assert.isTrue(existsSync(join(root, 'retry.ts')))
+      assert.strictEqual(yield* stateOf(task.taskId), 'done')
+    }).pipe(Effect.ensuring(Effect.sync(() => (process.env.PATH = path))), Effect.provide(runtime()))
+  })
 
   it.live('finds the worktree that has a branch whatever its path', () =>
     Effect.gen(function* () {

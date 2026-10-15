@@ -1,3 +1,6 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { Effect } from 'effect'
 
 import { commitOf, git, gitExactly, gitOutcome, trackedStatus } from './git'
@@ -12,8 +15,12 @@ import { commitOf, git, gitExactly, gitOutcome, trackedStatus } from './git'
  * working tree has it checked out; or, where one does, by a fast-forward
  * there, only while that working tree has nothing uncommitted and no file git
  * doesn't track where the merge puts one, so the person's own work is never
- * touched. Refs move first and checkouts last, since a checkout can still
- * refuse; when one does, what moved is put back. Nothing is pushed.
+ * touched. A submodule's checkout never moves (the person runs `git
+ * submodule update`), so only those whose recorded commit the merge changes
+ * are read, and must be clean, at the commit recorded for them: any other is
+ * left alone, whatever its state, even one git can't read. Refs move first
+ * and checkouts last, since a checkout can still refuse; when one does, what
+ * moved is put back. Nothing is pushed.
  */
 
 /** What merging a commit into a branch here would do. */
@@ -33,7 +40,9 @@ export type MergePlan =
   | { readonly kind: 'conflicts'; readonly files: ReadonlyArray<string> }
   /** It can't now: the branch is checked out in a working tree with changes not committed, or files git doesn't track where the merge puts some. */
   | { readonly kind: 'busy'; readonly checkout: string; readonly untracked: ReadonlyArray<string> }
-  /** It can't safely check the checkout, including its submodules. Keep the complete diagnostic, not just its last line. */
+  /** It can't now: it moves the submodule checked out at `submodule`, which has changes not committed or isn't at the commit recorded for it. */
+  | { readonly kind: 'submodule'; readonly checkout: string; readonly submodule: string }
+  /** It can't safely read `checkout`, the checkout or a submodule the merge moves. Keep the complete diagnostic, not just its last line. */
   | { readonly kind: 'unreadable'; readonly checkout: string; readonly detail: string }
   /** It can't: there's no such branch here. */
   | { readonly kind: 'missing' }
@@ -58,6 +67,49 @@ const checkCheckout = (checkout: string) =>
     }),
   )
 
+/** The paths of the submodules whose recorded commit moving from `from` to `to` changes, adds or removes: the only ones a merge touches. */
+const submodulesMoved = (root: string, from: string, to: string) =>
+  Effect.map(gitExactly(root, 'diff', '--raw', '--no-renames', '-z', from, to), (raw) => {
+    const fields = raw.split('\0')
+    const moved: Array<string> = []
+    for (let at = 0; at + 1 < fields.length; at += 2) {
+      const [before, after] = (fields[at] ?? '').slice(1).split(' ')
+      if (before === '160000' || after === '160000') moved.push(fields[at + 1] ?? '')
+    }
+    return moved
+  })
+
+/** The commit a listing's first entry records for a submodule, its `column`: 2 in `git ls-tree -z`, 1 in `git ls-files -s -z`; '' for none. */
+const recordedIn = (listing: string, column: number) => {
+  const fields = (listing.split('\0')[0] ?? '').split(/[ \t]/)
+  return fields[0] === '160000' ? (fields[column] ?? '') : ''
+}
+
+/**
+ * Whether the submodules moving `checkout` from `from` to `to` changes can
+ * be left where they are: each checked out there must be at the commit
+ * `from` and the index record for it, with nothing not committed.
+ */
+const checkSubmodules = (root: string, checkout: string, from: string, to: string) =>
+  Effect.gen(function* () {
+    for (const path of yield* submodulesMoved(root, from, to)) {
+      const submodule = join(checkout, path)
+      // Not checked out here: there's nothing of it the merge could leave behind.
+      if (!existsSync(join(submodule, '.git'))) continue
+      const recorded = recordedIn(yield* gitExactly(root, '--literal-pathspecs', 'ls-tree', '-z', from, '--', path), 2)
+      const indexed = recordedIn(yield* gitExactly(checkout, '--literal-pathspecs', 'ls-files', '-s', '-z', '--', path), 1)
+      const problem = yield* Effect.all([git(submodule, 'rev-parse', 'HEAD'), trackedStatus(submodule, 'dirty')]).pipe(
+        Effect.match({
+          onFailure: (error) => ({ kind: 'unreadable', checkout: submodule, detail: error.stderr }) as const,
+          onSuccess: ([head, changes]) =>
+            head === recorded && indexed === recorded && changes === '' ? null : ({ kind: 'submodule', checkout, submodule } as const),
+        }),
+      )
+      if (problem !== null) return problem
+    }
+    return null
+  })
+
 /** What merging `head` into `branch` in the repository at `root` would do, with `message` for a merge commit. Nothing moves. */
 export const planMerge = (root: string, branch: string, head: string, message: string) =>
   Effect.gen(function* () {
@@ -72,6 +124,10 @@ export const planMerge = (root: string, branch: string, head: string, message: s
     }
     const merge = yield* mergeOf(root, tip, head, message)
     if (merge.kind === 'conflicts') return merge
+    if (checkout !== null) {
+      const problem = yield* checkSubmodules(root, checkout, tip, merge.to)
+      if (problem !== null) return problem satisfies MergePlan
+    }
     // A fast-forward in a working tree won't overwrite a file git doesn't track there, where the merge puts one.
     const untracked = checkout === null ? [] : yield* inTheWay(root, checkout, tip, merge.to)
     if (checkout !== null && untracked.length > 0) return { kind: 'busy', checkout, untracked } as const satisfies MergePlan
@@ -149,17 +205,19 @@ export const undoMerge = (root: string, branch: string, plan: Move) =>
 export const applyMerges = <M extends { readonly root: string; readonly branch: string; readonly plan: Move }>(moves: ReadonlyArray<M>) =>
   Effect.gen(function* () {
     // Planning may take time across repositories. Read every checkout again
-    // before any ref moves, so a newly unreadable submodule stops them all,
-    // as does one switched to another branch, or its branch moved, since: a
-    // fast-forward there would move whatever it has now. A branch checked
-    // out nowhere must still be: moving its ref would leave a checkout behind.
+    // before any ref moves, so one with changes since stops them all, as does
+    // a submodule it moves that has some, or can't be read, now; as does one
+    // switched to another branch, or its branch moved, since: a fast-forward
+    // there would move whatever it has now. A branch checked out nowhere must
+    // still be: moving its ref would leave a checkout behind.
     for (const move of moves) {
       if (move.plan.checkout === null) {
         if ((yield* checkedOut(move.root, move.branch)) !== null) return { ...move, problem: { kind: 'moved' } as const }
         continue
       }
       if (!(yield* stillOn(move.plan.checkout, move.branch, move.plan.from))) return { ...move, problem: { kind: 'moved' } as const }
-      const problem = yield* checkCheckout(move.plan.checkout)
+      const problem =
+        (yield* checkCheckout(move.plan.checkout)) ?? (yield* checkSubmodules(move.root, move.plan.checkout, move.plan.from, move.plan.to))
       if (problem !== null) return { ...move, problem }
     }
     const done: Array<M> = []

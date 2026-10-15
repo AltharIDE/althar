@@ -1668,7 +1668,7 @@ export class Changes extends Context.Service<
               return { repository, plan, settle }
             }),
           )
-          // A submodule that can't be read stops the merge, with its path and git's own words, before anything else.
+          // A checkout, or a submodule the merge moves, that can't be read stops the merge, with its path and git's own words, before anything else.
           for (const { repository, plan } of plans)
             if (plan.kind === 'unreadable') return yield* cant('unreadable', named(repository, `${plan.checkout}\n${plan.detail}`))
           const conflicting = plans.flatMap(({ repository, plan }) =>
@@ -1693,6 +1693,8 @@ export class Changes extends Context.Service<
               return yield* plan.untracked.length > 0
                 ? cant('untracked', `${plan.untracked.join(', ')} in ${plan.checkout}`)
                 : cant('busy', plan.checkout)
+          for (const { repository, plan } of plans)
+            if (plan.kind === 'submodule') return yield* cant('submodule', named(repository, plan.submodule))
           const refused = yield* applyMerges(
             plans.flatMap(({ repository, plan }) =>
               plan.kind === 'move' ? [{ root: repository.root, branch: repository.base, plan, repository }] : [],
@@ -1700,6 +1702,7 @@ export class Changes extends Context.Service<
           )
           if (refused?.problem?.kind === 'unreadable')
             return yield* cant('unreadable', named(refused.repository, `${refused.problem.checkout}\n${refused.problem.detail}`))
+          if (refused?.problem?.kind === 'submodule') return yield* cant('submodule', named(refused.repository, refused.problem.submodule))
           if (refused !== null)
             return yield* refused.plan.checkout === null || refused.problem?.kind === 'moved'
               ? cant('moved', several ? `${refused.repository.name}’s ${refused.branch}` : refused.branch)

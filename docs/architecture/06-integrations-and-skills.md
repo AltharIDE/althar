@@ -292,12 +292,13 @@ service's model.
     out, or by a fast-forward in the working tree that has it. That needs
     nothing uncommitted there, and no file git doesn't track where the merge
     puts one, so the person's own work is never touched.
-  - A checkout whose status cannot be read, including an initialized nested
-    submodule, stops every repository before any ref moves. The refusal
-    retains the checkout path and Git's complete diagnostic. Submodule ignore
-    settings cannot stand in for checking it. Every destination is checked
-    again after planning; applying or undoing a merge does not recursively
-    update submodule checkouts. See the
+  - Submodule checkouts never move with it. Only a submodule whose recorded
+    commit the merge changes is read, and it must be clean, at the commit
+    recorded for it; any other is left alone, whatever its state, even one
+    git can't read. A checkout or such a submodule that can't be read stops
+    every repository, with its path and git's complete diagnostic. Every
+    destination is checked again, and must still have the branch, before any
+    ref moves. See the
     [notes on submodules and merging here](../troubleshooting/local-merge-submodules.md).
   - Refs move first and checkouts last. A checkout that refuses anyway
     (something written there since) puts back what moved, so it is all or
