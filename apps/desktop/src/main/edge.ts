@@ -163,7 +163,7 @@ export type TrayItem = { readonly label: string; readonly action: 'open' | 'quit
 export const trayItems = (waiting: number): readonly TrayItem[] => [
   { label: 'Open Althar', action: 'open' },
   ...(waiting > 0
-    ? [{ label: waiting === 1 ? '1 call waiting on you' : `${waiting} calls waiting on you`, action: 'open' as const }]
+    ? [{ label: waiting === 1 ? '1 thing waiting on you' : `${waiting} things waiting on you`, action: 'open' as const }]
     : []),
   { separator: true },
   { label: 'Quit Althar', action: 'quit' },

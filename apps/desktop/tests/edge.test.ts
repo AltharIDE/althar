@@ -132,7 +132,7 @@ describe('the tray off a Mac', () => {
 
   it('has a menu that opens, says what waits, and quits', () => {
     expect(trayItems(0).map((item) => ('label' in item ? item.label : '-'))).toEqual(['Open Althar', '-', 'Quit Althar'])
-    expect(trayItems(1)[1]).toMatchObject({ label: '1 call waiting on you', action: 'open' })
-    expect(trayItems(3)[1]).toMatchObject({ label: '3 calls waiting on you' })
+    expect(trayItems(1)[1]).toMatchObject({ label: '1 thing waiting on you', action: 'open' })
+    expect(trayItems(3)[1]).toMatchObject({ label: '3 things waiting on you' })
   })
 })
