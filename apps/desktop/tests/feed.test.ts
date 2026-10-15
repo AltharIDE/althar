@@ -5,7 +5,7 @@ import type { ProjectList, ThreadSnapshot } from '@althar/contracts'
 
 import { follow, GATHER } from '../src/renderer/data/feed'
 import { continued, homeSince, keys, makeQueryClient, readFirst, reads, recheckStatus } from '../src/renderer/data/reads'
-import { changed, coordinatorSnapshot, fakeClient, items, project, snapshot, status, streamed } from './fixtures'
+import { changed, coordinatorSnapshot, fakeClient, items, planUsage, project, snapshot, status, streamed, usageWarning } from './fixtures'
 
 /*
  * The window's cache and its one watch: what a change ends, read again
@@ -47,6 +47,20 @@ describe('the window’s watch', () => {
     stop()
     emit(changed('task', 't2'))
     expect(heard).toEqual(['t1', 'i1'])
+  })
+
+  it('puts plan usage in the cache as it comes, whole, and tells whoever listens', () => {
+    const { client, cache, feed, emit } = opened()
+    const heard: Array<string> = []
+    feed.listen((event) => heard.push(event._tag))
+    const usage = planUsage(undefined, [usageWarning()])
+    emit({ _tag: 'PlanUsage', usage })
+    expect(cache.getQueryData(keys.planUsage)).toEqual(usage)
+    emit({ _tag: 'PlanUsage', usage: planUsage() })
+    expect(cache.getQueryData(keys.planUsage)).toEqual(planUsage())
+    expect(heard).toEqual(['PlanUsage', 'PlanUsage'])
+    // Nothing is read: what it carries is all there is.
+    expect(client.getPlanUsage).not.toHaveBeenCalled()
   })
 
   it('reads again what a change ends, gathered, on screen or not; and nothing else', async () => {

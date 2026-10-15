@@ -28,6 +28,7 @@ import {
   type FolderReading,
   type IssueList,
   type Load,
+  type PlanUsage,
   type OutputText,
   type Product,
   type ChangeTarget,
@@ -312,6 +313,10 @@ export interface Client {
   readonly listEditors: () => Promise<ReadonlyArray<{ readonly id: string; readonly name: string }>>
   /** How hard this computer works now, and Althar's work's part, for the bar while it shows it. */
   readonly getLoad: () => Promise<Load>
+  /** Every account's plan usage and the warnings not yet seen; with `refresh`, each account is read again first rather than as kept. */
+  readonly getPlanUsage: (options?: { readonly refresh?: boolean }) => Promise<PlanUsage>
+  /** The person has seen these warnings, each by its account and window: they are not told again for its reset. */
+  readonly acknowledgeUsageWarnings: (warnings: ReadonlyArray<{ readonly accountId: string; readonly windowKey: string }>) => Promise<void>
   /** Downloads an agent for the person, checks it, and keeps it for Althar to run; done once it is ready. */
   readonly installAgent: (agentId: string) => Promise<void>
   /** Opens a task's folder in an editor, at one of its files and a line; whether it could. */
@@ -539,6 +544,8 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     pushBranch: (taskId, heads) => command((commandId) => api.PushBranch({ commandId, taskId, heads })),
     listEditors: () => settle(api.ListEditors({})),
     getLoad: () => settle(api.GetLoad({})),
+    getPlanUsage: (options = {}) => settle(api.GetPlanUsage(options.refresh === undefined ? {} : { refresh: options.refresh })),
+    acknowledgeUsageWarnings: (warnings) => command((commandId) => api.AcknowledgeUsageWarnings({ commandId, warnings })),
     openInEditor: (input) => command((commandId) => api.OpenInEditor({ commandId, ...input })),
     installAgent: (agentId) => command((commandId) => api.InstallAgent({ commandId, agentId })),
     push: (taskId, head, url) => command((commandId) => api.Push({ commandId, taskId, head, ...(url === undefined ? {} : { url }) })),

@@ -16,6 +16,8 @@ import { keys } from './reads'
  *   permission the rules answered, which moves nothing but the home's count
  *   of them and comes with every edit an agent makes, reads the home again
  *   only while it shows; off screen it is marked, for its next visit;
+ * - plan usage, which the runtime sends whole whenever it changes, is put in
+ *   the cache as it comes;
  * - a thread (a task's, or a project's coordinator) is only marked out of
  *   date. The screen showing it reads what changed item by item, as it hears
  *   the same change; one that isn't showing is read again when it is next
@@ -189,6 +191,8 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
         void cache.invalidateQueries({ queryKey, exact: true, refetchType: renamed ? 'active' : 'none' })
       }
     }
+    // Plan usage comes whole each time, so it is the cache's as it is, not read again.
+    if (event._tag === 'PlanUsage') cache.setQueryData(keys.planUsage, event.usage)
     for (const listener of listeners) listener(event)
   }
 
