@@ -1,5 +1,6 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
+import { keys, modKey } from '../../foundations/keys'
 import { device } from '../../foundations/device'
 import type { CodeHost } from '../../foundations/codeHost'
 import { Icon } from '../../foundations/Icon/Icon'
@@ -185,7 +186,7 @@ export const newProjectText: NewProjectText = {
   count: (count) => (count === 1 ? '1 repository' : `${count} repositories`),
   create: (name) => `Create ${name}`,
   createUnnamed: 'Create project',
-  createKbd: '⌘↵',
+  createKbd: modKey(keys.enter),
   needsName: 'Name the project first.',
   needsFolder: 'Add a folder first.',
   swatches: {},
