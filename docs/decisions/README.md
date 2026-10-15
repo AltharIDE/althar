@@ -45,3 +45,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [035](035-a-task-s-kind-is-read-from-what-it-has.md) | A task's kind is read from what it has, and its card has nothing to press |
 | [036](036-usage-data-from-the-main-process.md) | Anonymous usage data goes from the main process, named events only |
 | [037](037-what-the-person-does-goes-first.md) | What the person does goes first, a task keeps its place between its steps, and new work waits |
+| [038](038-a-lead-starts-afresh-at-a-break.md) | A task's lead starts afresh before its context grows large, and at a break in its work |

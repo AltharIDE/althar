@@ -2369,6 +2369,8 @@ export class Runs extends Context.Service<
               { step: 'implement', summary, ...builds, ...descriptions, ...(yield* shows) },
               { id: itemId },
             )
+            // A step done is a break in the lead's work, with a run or without: its next turn may start afresh (ADR-038).
+            yield* sessions.atBreak(access.threadId)
             return reply('Althar has your summary.')
           }
           // After its plan, the lead's report opens a round of work of its own, which it finishes (ADR-034).
@@ -2438,6 +2440,8 @@ export class Runs extends Context.Service<
             }),
           )
           if (!taken) return yield* dropped
+          // A step done is a break in the lead's work: its next turn may start afresh (ADR-038).
+          yield* sessions.atBreak(access.threadId)
           if (quiet) {
             yield* rest(current.taskId)
             // A pull request that merged while it ran settles the task now.
