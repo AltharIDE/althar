@@ -186,8 +186,14 @@ export const branchOnFirstWrite = (
             actorId: instance.systemId,
           })
         }
+        // Althar's own housekeeping, kept with the lead's work.
         if (title !== null)
-          yield* addItem({ projectId: first.projectId, threadId: first.threadId }, 'notice', { source: 'runtime', severity: 'info', title })
+          yield* addItem({ projectId: first.projectId, threadId: first.threadId }, 'notice', {
+            source: 'runtime',
+            severity: 'info',
+            title,
+            role: 'aside',
+          })
         yield* indexTask(taskId)
       }),
     )

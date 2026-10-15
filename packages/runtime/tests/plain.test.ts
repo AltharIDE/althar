@@ -235,9 +235,9 @@ describe('a plain task', () => {
       assert.deepInclude(card, { kind: 'plain', branch: worktree.branch })
       assert.deepInclude((yield* queries.board(place.projectId)).tasks.find((one) => one.taskId === task.id)?.changed, { files: 1 })
       // Said in its thread, and recorded.
-      assert.include(
-        (yield* notices(task.threadId)).map((notice) => notice.title),
-        `This task’s work is on a branch of its own now, ${worktree.branch}, which stays on ${thisDevice()}.`,
+      assert.deepInclude(
+        (yield* notices(task.threadId)).map((notice) => [notice.title, notice.role]),
+        [`This task’s work is on a branch of its own now, ${worktree.branch}, which stays on ${thisDevice()}.`, 'aside'],
       )
       const [fact] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'workspace.branched'`
       assert.deepStrictEqual(JSON.parse(fact?.payload ?? '{}'), { from: null, to: worktree.branch })
@@ -779,6 +779,8 @@ describe('making a quick task a change', () => {
         severity: 'info',
         title: 'This task is a change now: with no review, it ends on its branch, as its repository isn’t on a code host Althar knows.',
         description: `Its work is on its branch ${worktree.branch}.`,
+        // Althar's own housekeeping, kept with the lead's work.
+        role: 'aside',
       })
       // Its thread says nothing of a branch that stays here.
       assert.notInclude(said.map((notice) => notice.title).join('\n'), `stays on ${thisDevice()}`)

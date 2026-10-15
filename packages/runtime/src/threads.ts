@@ -68,6 +68,29 @@ export const addItem = (
     return id
   })
 
+/**
+ * Moves an item to the end of its thread, unless nothing but `after`
+ * follows it already. It keeps when it was made; windows read it again,
+ * and place it by its new sequence.
+ */
+export const moveToEnd = (projectId: ProjectId, threadId: string, id: string, after: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const ledger = yield* Ledger
+    yield* sql.withTransaction(
+      Effect.gen(function* () {
+        const [behind] = yield* sql<{ count: number; last: number }>`
+          SELECT count(*) AS count, (SELECT max(sequence) FROM thread_items WHERE thread_id = ${threadId}) AS last
+          FROM thread_items
+          WHERE thread_id = ${threadId} AND sequence > (SELECT sequence FROM thread_items WHERE id = ${id})
+            AND id NOT IN ${sql.in([id, ...after])}`
+        if (behind === undefined || behind.count === 0) return
+        const revision = yield* change('thread_items', id, { sequence: behind.last + 1 })
+        yield* ledger.notify({ projectId, aggregateType: 'thread_item', aggregateId: id, aggregateRevision: revision })
+      }),
+    )
+  })
+
 /** Replaces an item's content. */
 export const updateItem = (projectId: ProjectId, id: string, content: unknown) =>
   Effect.gen(function* () {

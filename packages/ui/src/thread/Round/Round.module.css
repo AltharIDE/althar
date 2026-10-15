@@ -1,0 +1,44 @@
+/* block, so what it holds spaces itself by the rules below, not by gaps */
+.round {
+  display: block;
+}
+/* what it says and the line of its work, a breath apart: the work sits back between the words */
+.round > :not(:first-child) {
+  margin-top: 20px;
+}
+.round > .head + * {
+  margin-top: 0;
+}
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.part {
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--t-2);
+}
+.at {
+  font-size: 11px;
+  color: var(--t-3);
+}
+
+/* Copy, close under what it copies, waits for the round to be hovered or reached by keyboard */
+.round > .actions {
+  display: flex;
+  margin-top: 4px;
+  margin-left: -8px;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.round:hover > .actions,
+.actions:focus-within {
+  opacity: 1;
+}
+@media (hover: none) {
+  .actions {
+    opacity: 1;
+  }
+}

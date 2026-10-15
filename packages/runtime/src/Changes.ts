@@ -14,9 +14,26 @@ import {
   type Repository,
 } from '@althar/connectors'
 import { PushRequestItem } from '@althar/contracts'
+import type { PermissionRequest } from '@althar/provider-adapters'
 import { type ActorId, type CommandEnvelope, Ids, newId, type ProjectId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { Cause, Clock, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Scope, Semaphore, Stream } from 'effect'
+import {
+  Cause,
+  Clock,
+  Context,
+  type Crypto,
+  Deferred,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Queue,
+  Ref,
+  Schema,
+  Scope,
+  Semaphore,
+  Stream,
+} from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Busy } from './Busy'
@@ -148,6 +165,10 @@ const Snapshot = Schema.Struct({
       ),
     }),
   ),
+  /** The branch it merges into; absent from a snapshot kept before this was. */
+  target: Schema.optional(Schema.String),
+  /** Whether the host says it conflicts with that branch; null where it hasn't said, absent from one kept before this was. */
+  conflicts: Schema.optional(Schema.NullOr(Schema.Boolean)),
 })
 type Snapshot = typeof Snapshot.Type
 
@@ -290,6 +311,9 @@ export const STUCK_AFTER = Duration.minutes(45)
 /** How long a check run again may take to show it runs before a failure is taken as its result (ADR-041). */
 const RERUN_SHOWS = Duration.minutes(3)
 
+/** How long `push_tag` waits for the person before it returns, and the lead is told later: well within what agents wait for a tool. */
+export const TAG_ANSWERED_WITHIN = Duration.seconds(30)
+
 /** How many lines of a check's log `read_check_log` gives at a time. */
 const LOG_PAGE = 300
 
@@ -333,6 +357,8 @@ const snapshotOf = (
   repository: [...repository],
   words: { noun: words.noun, short: words.short, prefix: words.prefix },
   checks,
+  target: change.target,
+  conflicts: change.conflicts ?? null,
 })
 
 type Store =
@@ -1810,6 +1836,124 @@ export class Changes extends Context.Service<
               title: `Pushed ${pushed.map((one) => `${one.branch} to ${one.remote.slice(0, one.remote.indexOf('/'))}`).join(', ')}.`,
             })
           return pushed
+        })
+
+      /**
+       * Pushes a tag the lead made to the remote its repository's work goes
+       * to, with the person's own git, as they would from a terminal: never
+       * forced, so a tag the remote has already stays as it is there. Agents
+       * have no sign-in to the code host, so Althar pushes for them, once the
+       * request is allowed as the lead's own `git push` of it would be: a tag
+       * often starts a release, so the rules hold it for the person
+       * (ADR-013), short of a project that allows everything or never this.
+       */
+      const pushTag = (taskId: string, input: unknown, access: ToolAccess) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const asked = yield* Schema.decodeUnknownEffect(TagAsked)(input).pipe(
+            Effect.mapError((error) => new ToolRefused({ message: `Althar couldn't read that: ${error.message}` })),
+          )
+          const tag = asked.tag.trim().replace(/^refs\/tags\//, '')
+          const repositories = yield* sql<{ slug: string; base: string; root: string; worktree: string }>`
+            SELECT b.slug, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root, w.path AS worktree
+            FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write'
+            ORDER BY b.created_at, b.rowid`
+          const named = asked.repository == null ? null : String(asked.repository).trim()
+          const candidates = named === null ? repositories : repositories.filter((one) => one.slug === named)
+          const [repository] = candidates
+          if (repository === undefined || candidates.length > 1)
+            return yield* new ToolRefused({
+              message:
+                repositories.length === 0
+                  ? 'This task has no repository of its own to push a tag from.'
+                  : `Say which repository with repository, as one of: ${repositories.map((one) => one.slug).join(', ')}.`,
+            })
+          // A name git takes for a tag, and never one read as an option.
+          const valid = yield* gitOutcome(repository.root, 'check-ref-format', `refs/tags/${tag}`)
+          if (tag === '' || tag.startsWith('-') || valid.code !== 0)
+            return yield* new ToolRefused({ message: `\`${tag}\` isn't a name git takes for a tag.` })
+          const [commit = null] = yield* commitsOf(repository.worktree, [`refs/tags/${tag}`])
+          if (commit === null)
+            return yield* new ToolRefused({
+              message: `There's no tag ${tag} here. Make it first, with \`git tag ${tag}\` on the commit it's for, then call push_tag.`,
+            })
+          const remote = yield* remoteOf(repository.root, repository.base)
+          if (remote === null) return yield* new ToolRefused({ message: `${repository.slug} has no remote to push ${tag} to.` })
+          if (Option.isNone(yield* sessions.running(access.threadId)))
+            return yield* new ToolRefused({ message: 'Only a running lead can push a tag.' })
+          const command = `git push ${remote} refs/tags/${tag}`
+          const request: PermissionRequest = {
+            sessionId: access.sessionId,
+            toolCallId: `push_tag:${yield* newId(Ids.permissionRequest)}`,
+            title: command,
+            kind: 'execute',
+            rawInput: { command },
+            paths: [],
+            options: [
+              { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+              { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+            ],
+          }
+          // What became of it, in words for the lead: pushed, or why not.
+          const settled = Effect.gen(function* () {
+            const decision = yield* sessions.askPermission(access.threadId, request)
+            if (decision.decision !== 'allow')
+              return `${tag} wasn't pushed: ${decision.reason ?? "the person didn't allow it"}. Don't push it another way.`
+            yield* gitWithin(60_000, repository.root, 'push', '--', remote, `refs/tags/${tag}:refs/tags/${tag}`)
+            yield* addItem({ projectId: access.projectId as ProjectId, threadId: access.threadId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: `Pushed tag ${tag} to ${remote}.`,
+            })
+            return `Pushed ${tag}, on ${commit.slice(0, 8)}, to ${remote}.`
+          }).pipe(
+            Effect.catchTag('GitFailed', (failed) =>
+              /! \[rejected\].*\(already exists\)/i.test(failed.stderr)
+                ? Effect.succeed(`${remote} has a tag ${tag} already, on another commit, so ${tag} wasn't pushed. Althar doesn't move it.`)
+                : refusal(taskId, remote, failed).pipe(
+                    Effect.catchTag('PushRefused', (refused) =>
+                      Effect.succeed(
+                        refused.why === 'denied'
+                          ? `${remote} didn't take the person's sign-in, so ${tag} wasn't pushed. Tell the person.`
+                          : `${remote} refused ${tag}${refused.said === undefined || refused.said === '' ? '' : `: ${refused.said}`}. Tell the person.`,
+                      ),
+                    ),
+                    Effect.catchTag('GitFailed', (other) =>
+                      Effect.succeed(`Pushing ${tag} failed: ${other.stderr.trim().split('\n').at(-1) ?? ''}`),
+                    ),
+                  ),
+            ),
+            Effect.catchTag('NoSession', () => Effect.succeed(`${tag} wasn't pushed: the session that asked has ended.`)),
+          )
+          // Answered soon, as by the rules or a person looking, the call says what happened; else the lead is told once it is, so a
+          // call isn't held past what an agent waits for a tool.
+          const said = yield* Deferred.make<string>()
+          const state = yield* Ref.make<'waiting' | 'late' | 'done'>('waiting')
+          yield* Effect.forkIn(
+            provide(
+              Effect.gen(function* () {
+                const words = yield* settled
+                yield* Deferred.succeed(said, words)
+                const late = yield* Ref.modify(state, (now) => [now === 'late', 'done' as const])
+                if (!late || Option.isNone(yield* sessions.running(access.threadId))) return
+                yield* sessions.send({
+                  envelope: yield* envelope('thread.send', { threadId: access.threadId }, undefined, instance.systemId),
+                  threadId: access.threadId,
+                  body: words,
+                  quiet: true,
+                })
+              }),
+            ),
+            scope,
+          )
+          const soon = yield* Deferred.await(said).pipe(Effect.timeoutOption(TAG_ANSWERED_WITHIN))
+          if (Option.isSome(soon)) return soon.value
+          const late = yield* Ref.modify(state, (now) => (now === 'done' ? [false, now] : [true, 'late' as const]))
+          if (!late) return yield* Deferred.await(said)
+          return `Asked the person to allow pushing ${tag} to ${remote}. Nothing goes up until they do; you'll be told when it's pushed, or if it isn't.`
         })
 
       const reply = (
@@ -3467,6 +3611,7 @@ export class Changes extends Context.Service<
       const PushAsked = Schema.Struct({
         pull_request: Schema.optional(Schema.NullOr(Schema.Union([Schema.Number, Schema.String]))),
       })
+      const TagAsked = Schema.Struct({ tag: Schema.String, repository: Schema.optional(Schema.NullOr(Schema.String)) })
       const LogAsked = Schema.Struct({
         check: Schema.String,
         from_line: Schema.optional(Schema.NullOr(Schema.Number)),
@@ -3765,6 +3910,12 @@ export class Changes extends Context.Service<
                 ].join(' ')
               }),
             ),
+        ),
+        leadTool(
+          'push_tag',
+          "Pushes a tag you've made to the remote the repository's work goes to, as `git push <remote> refs/tags/<tag>` would; you can't push it yourself, since you have no sign-in to the code host. Make the tag first with `git tag` on the commit it's for, such as v1.2.0 on the release's commit on the default branch. A tag often starts a release, so it waits for the person to allow it, as such a push of yours would, and returns once it's pushed or they've said no. It never moves a tag the remote has already. In a task of several repositories, repository names the one.",
+          { type: 'object', properties: { tag: { type: 'string' }, repository: { type: 'string' } }, required: ['tag'] },
+          (taskId, input, access) => pushTag(taskId, input, access),
         ),
       ])
 

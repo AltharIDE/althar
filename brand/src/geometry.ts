@@ -1,7 +1,7 @@
 /*
  * Althar's mark, drawn once. The section through an architect's triangular
  * scale ruler, bored through the middle, with a point in the bore. On a 24
- * grid; the same drawing is in the UI package's Logo and in the pitch, the
+ * grid; the same drawing is in the UI package's Logo and in the site, the
  * favicons and the banners, and tests/drift.test.ts keeps every copy equal to
  * this one.
  */

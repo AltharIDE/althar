@@ -31,6 +31,8 @@ export interface Dictation {
   kbd?: string
   /** Writing down what was said, or getting the speech model ready: the microphone turns. */
   busy?: boolean
+  /** What was said was written down while you were away from this composer: a quiet line over the field says so. */
+  arrived?: boolean
   /** The speech model coming down, from 0 to 1: a ring fills round the microphone. */
   progress?: number
   /** The microphone's tray (`tray`) is open. */
@@ -109,6 +111,8 @@ export interface ComposerText {
   inputsNote: string
   /** The field's placeholder while dictating. */
   listening: string
+  /** Over the field, when what was said was written down while you were away. */
+  dictatedAway: string
   queued: (n: number) => string
   /** Takes a queued message back into the field. */
   editQueued: string
@@ -143,6 +147,7 @@ export const composerText: ComposerText = {
   systemDefault: 'System default',
   inputsNote: 'Other microphones show here once Althar may use the microphone.',
   listening: 'Listening…',
+  dictatedAway: 'What you said was written down while you were away.',
   queued: (n) => (n === 1 ? 'Queued; the lead reads it next' : `${n} queued; the lead reads them in order`),
   editQueued: 'Edit',
   unqueue: (text) => `Take “${text}” out of the queue`,
@@ -266,6 +271,12 @@ export function Composer({
   /* the microphone takes focus back when its tray closes with focus inside it */
   const mic = useRefocus<HTMLButtonElement>(tray != null)
 
+  /* Back to a draft kept from before, the cursor goes after what is there, to carry on from it. */
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el) el.setSelectionRange(el.value.length, el.value.length)
+  }, [ref])
+
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
@@ -373,6 +384,7 @@ export function Composer({
           /* what the consumer says of images, announced as it changes; empty, it takes no room */
           <output className={s.imageNote}>{imageNote}</output>
         )}
+        {dictation?.arrived && <p className={s.imageNote}>{t.dictatedAway}</p>}
         {images.length > 0 && (
           <ul className={s.images} aria-label={t.images(images.length)}>
             {images.map((image) => (

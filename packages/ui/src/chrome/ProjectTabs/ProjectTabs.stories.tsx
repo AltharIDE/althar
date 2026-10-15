@@ -43,10 +43,16 @@ const TWENTY: ProjectTab[] = Array.from({ length: 20 }, (_, i) => {
   return { ...base, id, seed: id, name: i < ALL.length ? base.name : `${base.name} ${i}`, running: i % 5 === 1, yours: i % 7 === 3 ? 1 : 0 }
 })
 
-/* The bar at the top of a window, with the screen's own controls at its end, as the app puts them. */
-function Window({ initial, current: start = 'meridian', ...props }: Partial<ProjectTabsProps> & { initial?: readonly ProjectTab[] }) {
+/* The bar at the top of a window, with the screen's own controls at its end, as the app puts them; with `withSettings`, Althar's settings open in their tab. */
+function Window({
+  initial,
+  current: start = 'meridian',
+  withSettings = false,
+  ...props
+}: Partial<ProjectTabsProps> & { initial?: readonly ProjectTab[]; withSettings?: boolean }) {
   const [open, setOpen] = useState<readonly ProjectTab[]>(initial ?? ALL.slice(0, 3))
   const [current, setCurrent] = useState<string | null>(start)
+  const [settings, setSettings] = useState<'none' | 'open' | 'current'>(withSettings ? 'current' : 'none')
   const others = ALL.filter((p) => !open.some((tab) => tab.id === p.id))
   const shown = current === null ? undefined : open.find((tab) => tab.id === current)
   return (
@@ -57,7 +63,19 @@ function Window({ initial, current: start = 'meridian', ...props }: Partial<Proj
         current={current}
         yours={ALL.reduce((sum, p) => sum + p.yours, 0)}
         others={others}
-        onSelect={setCurrent}
+        {...(settings === 'none'
+          ? {}
+          : {
+              settings: {
+                current: settings === 'current',
+                onSelect: () => setSettings('current'),
+                onClose: () => setSettings('none'),
+              },
+            })}
+        onSelect={(id) => {
+          setCurrent(id)
+          if (settings === 'current') setSettings('open')
+        }}
         onClose={(id) => {
           const at = open.findIndex((tab) => tab.id === id)
           const rest = open.filter((tab) => tab.id !== id)
@@ -126,6 +144,22 @@ export const SwitchingOpeningAndClosing: Story = {
     await expect(nav.getByRole('button', { name: /^Halyard/ })).toHaveAttribute('aria-current', 'page')
     await userEvent.click(nav.getByRole('button', { name: /^Home, 3 calls wait on you/ }))
     await expect(nav.getByRole('button', { name: /^Home/ })).toHaveAttribute('aria-current', 'page')
+  },
+}
+
+/** Althar's settings open in a tab of their own, beside the home's: pressing another tab keeps it, its × closes it. */
+export const WithSettings: Story = {
+  args: { withSettings: true },
+  play: async ({ canvasElement }) => {
+    const nav = within(within(canvasElement).getByRole('navigation', { name: 'Projects' }))
+    await expect(nav.getByRole('button', { name: 'Settings' })).toHaveAttribute('aria-current', 'page')
+    await userEvent.click(nav.getByRole('button', { name: /^Halyard/ }))
+    await expect(nav.getByRole('button', { name: 'Settings' })).not.toHaveAttribute('aria-current')
+    await expect(nav.getByRole('button', { name: /^Halyard/ })).toHaveAttribute('aria-current', 'page')
+    await userEvent.click(nav.getByRole('button', { name: 'Settings' }))
+    await expect(nav.getByRole('button', { name: 'Settings' })).toHaveAttribute('aria-current', 'page')
+    await userEvent.click(nav.getByRole('button', { name: 'Close Settings' }))
+    await expect(nav.queryByRole('button', { name: 'Settings' })).toBeNull()
   },
 }
 

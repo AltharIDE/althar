@@ -2,7 +2,10 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { Issue, IssueRef } from '../../coordinator/Issue/Issue'
+import { FROM_231, MER_231 } from '../../fixtures/coordinator'
 import { SHOT_AFTER, SHOT_BEFORE } from '../../fixtures/shots'
+import { Brand } from '../../foundations/brands/brands'
 import { AttachmentKind, Delivery } from '../../foundations/vocabulary'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { ThreadShellProvider } from '../Shell/Shell'
@@ -94,6 +97,43 @@ export const Long: Story = {
   },
 }
 
+const PR_1184 = {
+  mark: Brand.GitHub,
+  source: 'GitHub',
+  id: 'PR #1184',
+  title: 'Add idempotency keys to charges',
+  href: 'https://github.com/meridian/api/pull/1184',
+  meta: 'meridian/api · Merged',
+}
+
+/** A link you pasted: its key where you pasted it, and its card in the bubble under what you said, as part of the message. */
+export const WithLink: Story = {
+  args: {
+    children: (
+      <>
+        Take <IssueRef {...FROM_231} /> next, once the limiter is in.
+      </>
+    ),
+    unfurl: <Issue {...MER_231} />,
+  },
+}
+/** Two links: a card each, one under the other, in the order they were pasted. */
+export const WithLinks: Story = {
+  args: {
+    children: (
+      <>
+        Do <IssueRef {...FROM_231} /> the way <IssueRef mark={Brand.GitHub} id="#1184" /> did it for charges, keys and all.
+      </>
+    ),
+    unfurl: (
+      <>
+        <Issue {...MER_231} />
+        <Issue {...PR_1184} />
+      </>
+    ),
+  },
+}
+
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'button:first-child', focus: 'button:first-child', pressed: 'button:first-child' }),
   render: (args) => (
@@ -109,10 +149,9 @@ export const AllStates: Story = {
         { state: 'attachments, still', node: <You {...args} {...WithAttachments.args} onOpenAttachment={undefined} /> },
         { state: 'attachment, hover', force: 'hover', node: <You {...args} {...WithAttachments.args} /> },
         { state: 'attachment, focus', force: 'focus', node: <You {...args} {...WithAttachments.args} /> },
-        {
-          state: 'unfurled link',
-          node: <You {...args} unfurl={<span style={{ fontSize: 12, color: 'var(--t-3)' }}>docs.stripe.com · Rate limits</span>} />,
-        },
+        { state: 'unfurled link', node: <You {...args} {...WithLink.args} /> },
+        { state: 'unfurled links', node: <You {...args} {...WithLinks.args} /> },
+        { state: 'unfurled link, queued', node: <You {...args} {...WithLink.args} delivery={Delivery.Queued} at={undefined} /> },
       ]}
     />
   ),
