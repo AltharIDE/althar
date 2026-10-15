@@ -903,9 +903,11 @@ describe('each kind’s card', () => {
     expect(reading.getByText('Review')).toBeTruthy()
     expect(reading.getByText('ninemate')).toBeTruthy()
     expect(reading.getByText('1 finding so far')).toBeTruthy()
-    // Ready to accept, and how its checks went.
+    // Ready to accept: how its checks went, or which failed, and the next thing to do. A draft isn't in the way: accepting marks it ready.
     expect(within(cardOf('Ready with checks')).getByText('All 8 checks passed')).toBeTruthy()
-    expect(within(cardOf('Checks failed')).getByText('1 check failed')).toBeTruthy()
+    expect(within(cardOf('Ready with checks')).getByText('Accept and merge')).toBeTruthy()
+    expect(within(cardOf('Checks failed')).getByText('test failed')).toBeTruthy()
+    expect(within(cardOf('Checks failed')).getByText('Ask the lead to fix it')).toBeTruthy()
     expect(within(cardOf('Unchecked')).getByText('No checks ran')).toBeTruthy()
     // A review drafted: its findings, louder, then what they come to.
     const drafted = within(cardOf('Review #1199'))
@@ -960,6 +962,44 @@ describe('each kind’s card', () => {
     expect(within(settled).getByText('althar/add-a-retry')).toBeTruthy()
     const next = screen.getByRole('button', { name: 'Up next, a change' }).closest('li') as HTMLElement
     expect(within(next).getByText('Change')).toBeTruthy()
+  })
+})
+
+describe('what stands between a ready change and merging', () => {
+  const NOW = '2026-10-01T10:00:00.000Z'
+  const passed = { outcome: 'passed' as const, passed: 5, failed: 0, running: 0, total: 5, failing: [], list: [] }
+  const ready = (taskId: string, title: string, overrides: Parameters<typeof change>[0]) =>
+    task({ taskId, title, phase: 'ready', change: change({ draft: false, checks: passed, ...overrides }) })
+  const lanes = lanesOf(
+    board({
+      tasks: [
+        ready('s1', 'Good to merge', {}),
+        ready('s2', 'Still a draft', { draft: true }),
+        ready('s3', 'Checks still running', { checks: { ...passed, outcome: 'running', passed: 3, running: 2 } }),
+        ready('s4', 'In conflict', { conflicts: true, target: 'main' }),
+        ready('s5', 'Commits to push', { localHead: 'def456', unpushed: 3 }),
+        // Commits here and a check that failed on what is pushed: the push first, as it runs the checks again.
+        ready('s6', 'Two at once', { localHead: 'def456', unpushed: 2, checks: change().checks }),
+        // Commits counted before the branch's head here is known aren't said.
+        ready('s7', 'Head not read yet', { unpushed: 2 }),
+      ],
+      calls: [],
+    }),
+  )
+  const cardOf = (title: string) => screen.getByRole('button', { name: title }).closest('article') as HTMLElement
+
+  it('says it in one line, the most pressing first, with the one next thing to do at its end', () => {
+    withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+    const said = (title: string) => cardOf(title).textContent ?? ''
+    expect(said('Good to merge')).toMatch(/All 5 checks passed\s*Accept and merge/)
+    expect(said('Still a draft')).toMatch(/All 5 checks passed\s*Accept and merge/)
+    // Checks running: nothing to do but wait.
+    expect(said('Checks still running')).toContain('Checks running, 3 of 5 passed')
+    expect(within(cardOf('Checks still running')).queryByText(/Accept and merge|Push/)).toBeNull()
+    expect(said('In conflict')).toMatch(/Conflicts with main\s*Ask the lead to resolve it/)
+    expect(said('Commits to push')).toMatch(/3 commits not on the PR\s*Push 3 commits/)
+    expect(said('Two at once')).toMatch(/2 commits not on the PR\s*·\s*test failed\s*Push 2 commits/)
+    expect(said('Head not read yet')).toMatch(/All 5 checks passed\s*Accept and merge/)
   })
 })
 

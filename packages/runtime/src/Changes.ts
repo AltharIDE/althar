@@ -145,6 +145,10 @@ const Snapshot = Schema.Struct({
       ),
     }),
   ),
+  /** The branch it merges into; absent from a snapshot kept before this was. */
+  target: Schema.optional(Schema.String),
+  /** Whether the host says it conflicts with that branch; null where it hasn't said, absent from one kept before this was. */
+  conflicts: Schema.optional(Schema.NullOr(Schema.Boolean)),
 })
 type Snapshot = typeof Snapshot.Type
 
@@ -310,6 +314,8 @@ const snapshotOf = (
   repository: [...repository],
   words: { noun: words.noun, short: words.short, prefix: words.prefix },
   checks,
+  target: change.target,
+  conflicts: change.conflicts ?? null,
 })
 
 type Store =

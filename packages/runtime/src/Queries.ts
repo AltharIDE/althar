@@ -262,6 +262,9 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
   if (n === null || productIs === undefined || (state !== 'open' && state !== 'merged' && state !== 'closed')) return null
   const outcome = text(checks, 'outcome')
   const failing = field(checks, 'failing')
+  // Where the host said whether it conflicts, and which branch it merges into: absent from a snapshot kept before them.
+  const conflicts = field(value, 'conflicts')
+  const target = text(value, 'target')
   return {
     product: productIs,
     number: n,
@@ -289,6 +292,8 @@ export const changeOf = (value: unknown, product: string, listening: boolean): C
             failing: Array.isArray(failing) ? failing.filter((name) => typeof name === 'string') : [],
             list: Option.getOrElse(decodeChecks(field(checks, 'list') ?? []), () => []),
           },
+    ...(target === '' ? {} : { target }),
+    ...(typeof conflicts === 'boolean' ? { conflicts } : {}),
     head: text(value, 'headSha') || null,
     listening,
     localHead: null,

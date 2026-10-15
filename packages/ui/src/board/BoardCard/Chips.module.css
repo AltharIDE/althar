@@ -138,6 +138,28 @@
 .danger {
   color: var(--danger);
 }
+/* someone else is at it, as checks running: a cobalt dot, the words quiet */
+.live {
+  gap: 6px;
+  color: var(--t-2);
+}
+
+/* facts as one line, a middot between them; it wraps between facts, never inside one's glyph and words */
+.factLine {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  min-width: 0;
+}
+.factLinePart {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dot {
+  color: var(--t-4);
+}
 
 .findings {
   display: inline-flex;

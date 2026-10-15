@@ -6,13 +6,17 @@ import { Button, type EdgeWork, NeedLine, type ProjectRef } from '@althar/ui'
 import { callKindOf, isFinished, kindWords, readyKindOf, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
+import { factsOf, type Next, nextWords, standingOf } from '../../shared/standing'
 import { text as stuckText } from '../task/StuckCall'
 
 /*
  * What waits on the person across every project, as the home and the edge
  * of the screen both list it: each call and each task ready to accept, as a
  * NeedLine of its kind with the one thing to know to answer it. A permission
- * is answered where it is; a stuck step and a ready task open their task.
+ * is answered where it is; a stuck step opens its task. A ready change says
+ * what stands between it and merging, as its board card does, and where the
+ * place offers it (the home), its button is the one next thing to do: push,
+ * accept and merge, or ask its lead to fix the checks or resolve a conflict.
  * Answered there, its line stays where it was, at its height, and goes
  * quiet, with what was said where its answers were, until the place is left.
  */
@@ -38,13 +42,6 @@ export const needText = {
   /** A change on its branch alone, by its size. */
   onBranch: 'On its branch',
   branchSize: (files: number, add: number, del: number) => `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
-  /** A change ready to accept, in a line: where, its checks, how big. */
-  checks: {
-    failed: (n: number) => (n === 1 ? '1 check failed' : `${n} checks failed`),
-    running: 'checks running',
-    passed: 'checks passed',
-    none: 'no checks',
-  },
   /** A review drafted, in a line: whose pull request, and what the draft found. */
   by: (author: string) => `by ${author}`,
   findings: (n: number) => (n === 0 ? 'no findings' : n === 1 ? '1 finding' : `${n} findings`),
@@ -59,10 +56,12 @@ export interface Need {
   readonly title: string
   /** The command a permission asks to run. */
   readonly command?: string
-  /** Otherwise, what to answer by: why it stalled, or the change and its checks. */
+  /** Otherwise, what to answer by: why it stalled, or the change and what stands between it and merging. */
   readonly brief?: string
   /** A permission, which is answered in place. */
   readonly permission?: HomeCall
+  /** A ready change: the task, and the one next thing its pull request needs, done from its line where the place offers it. */
+  readonly ready?: { readonly task: HomeTask; readonly next: Next }
   /** Answered here: which way, what was said, and where it was kept or what to do instead. */
   readonly answer?: { readonly kind: string; readonly said: string; readonly note: string; readonly denied: boolean }
 }
@@ -114,24 +113,19 @@ export const briefOf = (task: HomeTask): string => {
   const change = task.change
   if (change === null)
     return task.changed === null ? needText.onBranch : needText.branchSize(task.changed.files, task.changed.add, task.changed.del)
-  const checks = change.checks
-  const said =
-    checks === null
-      ? needText.checks.none
-      : checks.failed > 0
-        ? needText.checks.failed(checks.failed)
-        : checks.running > 0
-          ? needText.checks.running
-          : checks.passed > 0
-            ? needText.checks.passed
-            : needText.checks.none
-  const parts: ReadonlyArray<string | null> = [
-    `${change.repository.slice(change.repository.lastIndexOf('/') + 1)} ${change.prefix}${change.number}`,
-    said,
-    change.additions === null || change.deletions === null ? null : `+${change.additions} −${change.deletions}`,
-  ]
-  return parts.filter((part) => part !== null).join(' · ')
+  const where = `${change.repository.slice(change.repository.lastIndexOf('/') + 1)} ${change.prefix}${change.number}`
+  // One merged or closed has nothing in its way; it says only which it was.
+  if (change.state !== 'open') return where
+  // What stands between it and merging, as the board's card says it, or how its checks went where nothing does; then how big.
+  const size = change.additions === null || change.deletions === null ? [] : [`+${change.additions} −${change.deletions}`]
+  return [where, ...factsOf(change).map((one) => one.words), ...size].join(' · ')
 }
+
+/** The one next thing a ready task's open pull request needs, where it has one: none for a review, a plain task, or a conflict handed back. */
+export const nextOf = (task: HomeTask): Next | null =>
+  task.kind !== 'change' || task.handedBack != null || task.change === null || task.change.state !== 'open'
+    ? null
+    : standingOf(task.change).next
 
 /** The calls first, then the tasks ready to accept; any in a project not known yet waits until it is. */
 export const needsOf = ({
@@ -208,25 +202,28 @@ export const needsOf = ({
   ...ready.flatMap((task): ReadonlyArray<Need> => {
     const project = refs.get(task.projectId)
     // A plain task that finished waits on its board, not here.
-    return project === undefined || isFinished(task)
-      ? []
-      : [
-          {
-            id: task.taskId,
-            threadId: task.threadId,
-            kind: readyKindOf(task),
-            project,
-            title: task.title,
-            brief: task.handedBack ?? briefOf(task),
-          },
-        ]
+    if (project === undefined || isFinished(task)) return []
+    const next = nextOf(task)
+    return [
+      {
+        id: task.taskId,
+        threadId: task.threadId,
+        kind: readyKindOf(task),
+        project,
+        title: task.title,
+        brief: task.handedBack ?? briefOf(task),
+        ...(next === null ? {} : { ready: { task, next } }),
+      },
+    ]
   }),
 ]
 
 /**
  * A need's line: its title opens its task; a permission's answers give it
  * there (Deny and Allow once, unless the place gives every answer the call
- * offers, as the home does), the others' button opens it too.
+ * offers, as the home does); a ready change's button is the one next thing
+ * its pull request needs, where the place does it (`onNext`); the others'
+ * button opens it too.
  */
 export function needLineOf(
   need: Need,
@@ -234,15 +231,21 @@ export function needLineOf(
     onOpen,
     onAnswer,
     answers,
+    onNext,
+    doing,
   }: {
     onOpen: (threadId: string) => void
     onAnswer: (call: HomeCall, project: ProjectRef, decision: 'allow' | 'reject') => void
     /** A permission's answers, in place of Deny and Allow once. */
     answers?: (call: HomeCall, project: ProjectRef) => ReactNode
+    /** Does a ready change's next thing; without it, its button opens the task to review. */
+    onNext?: (task: HomeTask, next: Next) => void
+    /** Whether a task's next thing is under way, so its button says so and waits. */
+    doing?: (taskId: string) => boolean
   },
 ): ReactNode {
   const open = () => onOpen(need.threadId)
-  const { permission, answer } = need
+  const { permission, answer, ready } = need
   // Answered here: where it was, as high as it was, quiet; focus comes to it from the button pressed.
   if (answer !== undefined)
     return (
@@ -267,7 +270,17 @@ export function needLineOf(
       {...(need.brief === undefined ? {} : { brief: need.brief })}
       onOpen={open}
       actions={
-        permission === undefined ? (
+        ready !== undefined && onNext !== undefined ? (
+          <Button
+            size="small"
+            // Merging and pushing are the person's own to do, so they're violet; asking the lead isn't.
+            {...(ready.next.kind === 'merge' || ready.next.kind === 'push' ? { variant: 'signal' as const } : {})}
+            busy={doing?.(ready.task.taskId) === true}
+            onClick={() => onNext(ready.task, ready.next)}
+          >
+            {nextWords(ready.next)}
+          </Button>
+        ) : permission === undefined ? (
           <Button size="small" {...(need.kind === kindWords.question ? { variant: 'signal' as const } : {})} onClick={open}>
             {need.kind === kindWords.ready || need.kind === kindWords.drafted
               ? needText.review

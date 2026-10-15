@@ -655,6 +655,14 @@ export const ChangeSummary = Schema.Struct({
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),
   checks: Schema.NullOr(ChecksSummary),
+  /** The branch it merges into, as last seen: main. Absent where Althar saw it before it kept this. */
+  target: Schema.optional(Schema.String),
+  /**
+   * Whether its host says it conflicts with that branch, as last seen, so it
+   * can't merge until its branch is brought up to date. Null or absent where
+   * the host hasn't worked it out, or doesn't say.
+   */
+  conflicts: Schema.optional(Schema.NullOr(Schema.Boolean)),
   /** The commit at its head, as last seen: what accepting it merges, and nothing newer. */
   head: Schema.NullOr(Schema.String),
   /** Althar asks its host for news while the task is open. */
