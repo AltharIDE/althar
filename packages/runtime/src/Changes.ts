@@ -1612,6 +1612,7 @@ export class Changes extends Context.Service<
               return { repository, plan, settle }
             }),
           )
+          // A submodule that can't be read stops the merge, with its path and git's own words, before anything else.
           for (const { repository, plan } of plans)
             if (plan.kind === 'unreadable') return yield* cant('unreadable', named(repository, `${plan.checkout}\n${plan.detail}`))
           const conflicting = plans.flatMap(({ repository, plan }) =>
@@ -1644,7 +1645,7 @@ export class Changes extends Context.Service<
           if (refused?.problem?.kind === 'unreadable')
             return yield* cant('unreadable', named(refused.repository, `${refused.problem.checkout}\n${refused.problem.detail}`))
           if (refused !== null)
-            return yield* refused.plan.checkout === null
+            return yield* refused.plan.checkout === null || refused.problem?.kind === 'moved'
               ? cant('moved', several ? `${refused.repository.name}’s ${refused.branch}` : refused.branch)
               : cant('busy', refused.plan.checkout)
           for (const { settle } of plans) yield* settle

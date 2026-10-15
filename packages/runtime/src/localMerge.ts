@@ -126,12 +126,18 @@ export const applyMerge = (root: string, branch: string, plan: Move) =>
     ? git(root, 'update-ref', `refs/heads/${branch}`, plan.to, plan.from)
     : git(plan.checkout, '-c', 'submodule.recurse=false', 'merge', '--ff-only', '--quiet', plan.to)
 
+/** Whether `checkout` still has `branch` checked out, at `at`. */
+const stillOn = (checkout: string, branch: string, at: string) =>
+  Effect.gen(function* () {
+    const on = yield* gitOutcome(checkout, 'symbolic-ref', '--quiet', 'HEAD')
+    return on.stdout.trim() === `refs/heads/${branch}` && (yield* commitOf(checkout, 'HEAD')) === at
+  })
+
 /** Puts `branch` back where `plan` found it, only while it's where the merge left it, and, in a checkout, nothing changed since. */
 export const undoMerge = (root: string, branch: string, plan: Move) =>
   Effect.gen(function* () {
     if (plan.checkout === null) return yield* git(root, 'update-ref', `refs/heads/${branch}`, plan.from, plan.to)
-    const on = yield* gitOutcome(plan.checkout, 'symbolic-ref', '--quiet', 'HEAD')
-    if (on.stdout.trim() !== `refs/heads/${branch}` || (yield* commitOf(plan.checkout, 'HEAD')) !== plan.to) return ''
+    if (!(yield* stillOn(plan.checkout, branch, plan.to))) return ''
     return yield* git(plan.checkout, '-c', 'submodule.recurse=false', 'reset', '--keep', '--quiet', plan.from)
   })
 
@@ -143,9 +149,16 @@ export const undoMerge = (root: string, branch: string, plan: Move) =>
 export const applyMerges = <M extends { readonly root: string; readonly branch: string; readonly plan: Move }>(moves: ReadonlyArray<M>) =>
   Effect.gen(function* () {
     // Planning may take time across repositories. Read every checkout again
-    // before any ref moves, so a newly unreadable submodule stops them all.
+    // before any ref moves, so a newly unreadable submodule stops them all,
+    // as does one switched to another branch, or its branch moved, since: a
+    // fast-forward there would move whatever it has now. A branch checked
+    // out nowhere must still be: moving its ref would leave a checkout behind.
     for (const move of moves) {
-      if (move.plan.checkout === null) continue
+      if (move.plan.checkout === null) {
+        if ((yield* checkedOut(move.root, move.branch)) !== null) return { ...move, problem: { kind: 'moved' } as const }
+        continue
+      }
+      if (!(yield* stillOn(move.plan.checkout, move.branch, move.plan.from))) return { ...move, problem: { kind: 'moved' } as const }
       const problem = yield* checkCheckout(move.plan.checkout)
       if (problem !== null) return { ...move, problem }
     }

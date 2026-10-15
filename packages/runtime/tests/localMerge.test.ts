@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -351,6 +351,59 @@ describe('merging a task here', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('merges nothing where a submodule of the checkout can’t be read, and says where and what git said', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      // A repository already in place becomes the submodule, its git directory moved under the parent's.
+      mkdirSync(join(root, 'library'))
+      git(join(root, 'library'), 'init', '-q', '-b', 'main')
+      commit(join(root, 'library'), 'README.md', '# Library\n')
+      git(root, 'submodule', 'add', '-q', './library', 'library')
+      git(root, 'submodule', 'absorbgitdirs')
+      git(root, 'commit', '-q', '-m', 'Add library')
+      const { task, worktrees } = yield* taskIn([root], root)
+      const head = commit(worktrees[0]?.path ?? '', 'retry.ts', 'retry\n')
+      const tip = git(root, 'rev-parse', 'main')
+      // The submodule's repository is gone from under its checkout: git can't say whether it changed.
+      rmSync(join(root, '.git', 'modules', 'library'), { recursive: true, force: true })
+      const refused = yield* Effect.flip(mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }]))
+      const [, why, detail] = cantOf(refused)
+      assert.strictEqual(why, 'unreadable')
+      assert.isTrue(detail?.startsWith(`${realpathSync(root)}\n`))
+      assert.include(detail, 'library')
+      assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
+      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('merges nothing where a nested submodule’s own ignore setting hides changes not committed', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      // library, a submodule of the project, has inner as a submodule of its own.
+      const library = join(root, 'library')
+      const inner = join(library, 'inner')
+      mkdirSync(inner, { recursive: true })
+      git(inner, 'init', '-q', '-b', 'main')
+      commit(inner, 'README.md', '# Inner\n')
+      git(library, 'init', '-q', '-b', 'main')
+      git(library, 'submodule', 'add', '-q', './inner', 'inner')
+      git(library, 'commit', '-q', '-m', 'Add inner')
+      git(root, 'submodule', 'add', '-q', './library', 'library')
+      git(root, 'commit', '-q', '-m', 'Add library')
+      const { task, worktrees } = yield* taskIn([root], root)
+      const head = commit(worktrees[0]?.path ?? '', 'retry.ts', 'retry\n')
+      const tip = git(root, 'rev-parse', 'main')
+      // A change in inner that library is told to ignore: the project's own status reads clean.
+      git(library, 'config', 'submodule.inner.ignore', 'all')
+      writeFileSync(join(inner, 'README.md'), '# Not yet\n')
+      assert.strictEqual(git(root, 'status', '--porcelain', '--untracked-files=no', '--ignore-submodules=none'), '')
+      const refused = yield* Effect.flip(mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }]))
+      assert.deepStrictEqual(cantOf(refused).slice(1), ['busy', realpathSync(root)])
+      assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
+      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+    }).pipe(Effect.provide(runtime())),
+  )
+
   it.live('merges every repository of a task, or none of them', () =>
     Effect.gen(function* () {
       const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
@@ -466,8 +519,29 @@ describe('merging a task here', () => {
         moves.slice(1).map((move) => git(move.root, 'rev-parse', 'main')),
         moves.slice(1).map((move) => move.before),
       )
-      // Nothing in the way, every one moves.
+      // A checkout switched to another branch since the plan, clean and able to fast-forward: nothing moves, that branch neither.
       git(bare ?? '', 'update-ref', 'refs/heads/main', moves[0]?.before ?? '')
+      git(open ?? '', 'checkout', '-q', '-b', 'elsewhere', 'main')
+      const switched = yield* applyMerges(moves)
+      assert.strictEqual(switched?.root, open)
+      assert.deepStrictEqual(switched?.problem, { kind: 'moved' })
+      assert.deepStrictEqual(
+        moves.map((move) => git(move.root, 'rev-parse', 'main')),
+        moves.map((move) => move.before),
+      )
+      assert.strictEqual(git(open ?? '', 'rev-parse', 'elsewhere'), moves[1]?.before)
+      git(open ?? '', 'checkout', '-q', 'main')
+      // A branch checked out nowhere when planned, checked out since: its ref doesn't move from under that checkout.
+      git(bare ?? '', 'checkout', '-q', 'main')
+      const attached = yield* applyMerges(moves)
+      assert.strictEqual(attached?.root, bare)
+      assert.deepStrictEqual(attached?.problem, { kind: 'moved' })
+      assert.deepStrictEqual(
+        moves.map((move) => git(move.root, 'rev-parse', 'main')),
+        moves.map((move) => move.before),
+      )
+      git(bare ?? '', 'checkout', '-q', 'mine')
+      // Nothing in the way, every one moves.
       assert.isNull(yield* applyMerges(moves))
       assert.deepStrictEqual(
         moves.map((move) => git(move.root, 'rev-parse', 'main')),
