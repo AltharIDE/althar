@@ -166,7 +166,7 @@ export class Permissions extends Context.Service<
     /** Decides again every request of a project still waiting on the person, by its rules as they now are: what they no longer keep for the person is answered. */
     reconsider(projectId: string): Effect.Effect<void>
     /**
-     * Allows everything on one task, or takes it back (ADR-042), recorded as
+     * Allows everything on one task, or takes it back (ADR-043), recorded as
      * the person's: turned on, what its agents wait on is decided again, and
      * goes ahead, short of what its project never allows.
      */
@@ -288,7 +288,7 @@ export class Permissions extends Context.Service<
       /**
        * The rules a task's requests are decided by now, and the revision they
        * are: its project's, everything allowed where the task itself allows
-       * everything (ADR-042). A change the person makes applies to the next request.
+       * everything (ADR-043). A change the person makes applies to the next request.
        */
       const rulesNow = (projectId: ProjectId, taskId: string | null) =>
         Effect.gen(function* () {

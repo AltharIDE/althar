@@ -57,8 +57,8 @@ test('makes the first project of a repository it found, starts a task, and talks
     await page.keyboard.press('o')
     await expect(page.getByRole('heading', { name: 'Nothing changed', level: 2 })).toBeVisible()
     await page.keyboard.press('c')
-    // The lead is briefed first, and reports its step; its summary is what shows, its work folded above it.
-    await expect(page.getByText('Did the task.')).toBeVisible()
+    // The lead is briefed first, and reports its step: what it built is its result, its work one line above it (ADR-042).
+    await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
 
     await say(page, 'hello')
     await expect(page.getByText('Hello', { exact: true })).toBeVisible()
@@ -74,9 +74,9 @@ test('makes the first project of a repository it found, starts a task, and talks
     // An edit inside the worktree: the project's rules allow it without asking.
     await say(page, 'tool')
     await expect(page.getByText('chosen=allow-once')).toBeVisible()
-    // The turn is over, so its work folds under how long it took.
+    // The round is over, so its work is one line, how long it took.
     await page
-      .getByRole('button', { name: /^Worked for/ })
+      .getByRole('button', { name: /[Ww]orked \d/ })
       .last()
       .click()
     await expect(page.getByText('hello.txt', { exact: true })).toBeVisible()
@@ -92,15 +92,15 @@ test('makes the first project of a repository it found, starts a task, and talks
 
     await say(page, 'think')
     await expect(page.getByText('Done', { exact: true })).toBeVisible()
-    // Its fold says how long it worked once the turn has ended; until then it is still working.
-    await expect(page.getByRole('button', { name: /^Working for/ })).toHaveCount(0)
+    // Its line says how long it worked once the round has ended; until then it is still working.
+    await expect(page.getByRole('button', { name: /^Working · / })).toHaveCount(0)
     await page
-      .getByRole('button', { name: /^Worked for/ })
+      .getByRole('button', { name: /[Ww]orked \d/ })
       .last()
       .click()
     await expect(page.getByRole('button', { name: 'Thought' })).toBeVisible()
-    // A turn with nothing to say folds whole once it ends.
-    const folds = page.getByRole('button', { name: /^Worked for/ })
+    // A round with nothing to say is its line alone, with who worked.
+    const folds = page.getByRole('button', { name: /[Ww]orked \d/ })
     const before = await folds.count()
     await say(page, 'updates')
     await expect(folds).toHaveCount(before + 1)
@@ -179,10 +179,10 @@ test('asks the coordinator, which plans a task that is implemented, reviewed, se
     await expect(page.getByRole('button', { name: 'Merge into main' })).toBeVisible()
     await page.screenshot({ path: 'test-results/outputs.png' })
     await toConversation(page)
-    await expect(page.getByText('Did the task.')).toBeVisible()
+    await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
+    // The reviewer in its own voice: what it found, then, after the lead settled it, that it holds.
     await expect(page.getByText('The heading needs fixing.')).toBeVisible()
-    await expect(page.getByText(/round 2/)).toBeVisible()
-    await expect(page.getByRole('button', { name: /^Worked for/ }).first()).toBeVisible()
+    await expect(page.getByText('Looks good to me.')).toBeVisible()
     await page.screenshot({ path: 'test-results/steps.png' })
   } finally {
     await electronApp.close()

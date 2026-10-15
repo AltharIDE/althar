@@ -11,7 +11,7 @@ import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
  * (ADR-018). In a task's thread several wait as a stack, with Allow all;
  * in the dock beside the board, one. One the project always asks about
  * offers no "always allow", and says so, with a way out where the screen
- * has one: allowing everything on the task (ADR-042), or the rules.
+ * has one: allowing everything on the task (ADR-043), or the rules.
  */
 
 export const text = {

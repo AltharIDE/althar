@@ -1,4 +1,4 @@
-# ADR-042: Allow everything is one switch, for a project or a task
+# ADR-043: Allow everything is one switch, for a project or a task
 
 - **Status:** Accepted
 - **Date:** 2026-10-15

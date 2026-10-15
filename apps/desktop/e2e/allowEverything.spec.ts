@@ -8,7 +8,7 @@ import { repository } from '../tests/repository'
 import { launch, openFirstProject, planTask, say, startTask, toConversation } from './support'
 
 /*
- * Allow everything (ADR-042), as the person meets it: a new project always
+ * Allow everything (ADR-043), as the person meets it: a new project always
  * asks before deploying, so a lead's deploys, run at once as parallel tool
  * calls, wait as a stack whose card says why it has no "always allow", and
  * offers allowing everything on the task. Taken, the whole stack goes

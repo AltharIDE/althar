@@ -298,7 +298,12 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
   // What it asks, or what it wants to do; for a step that needs the person, what stopped it.
   const why =
     call.stuck === null
-      ? call.title
+      ? call.kind === 'permission' && call.command !== null
+        ? // What it asks is often the command itself, which the chip below shows, once.
+          call.command === call.title || call.title.includes('\n') || call.title.length > 120
+          ? ''
+          : call.title
+        : call.title
       : call.stuck.step === 'publish' && call.stuck.why !== 'not_connected'
         ? stuckText.publishing(call.stuck)
         : stuckText.what(call.stuck, name(call.stuck.agentId) || 'The agent')
@@ -307,7 +312,9 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
     word: callKindOf(call),
     at: ago(call.createdAt),
     why,
-    ...(call.kind === 'permission' && call.command !== null ? { object: <CommandChip>{call.command}</CommandChip> } : {}),
+    ...(call.kind === 'permission' && call.command !== null
+      ? { object: <CommandChip title={call.command}>{call.label ?? call.command}</CommandChip> }
+      : {}),
   }
 }
 

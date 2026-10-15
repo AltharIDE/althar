@@ -897,7 +897,12 @@ export const QuestionItem = Schema.Struct({
   }),
 })
 
-/** Something the agent or Althar notes: a warning from the agent, or a change of scene, such as another agent taking over. */
+/**
+ * Something the agent or Althar notes: a warning from the agent, or a change of scene, such as another agent taking over.
+ * What Althar notes has a role, where it isn't news: `aside` for its own housekeeping along the way (a branch made, a
+ * loop stopped), which a task's thread keeps with its lead's work; `relayed` for what the coordinator passed on to a
+ * task's lead, written when the lead received it, which starts a round of the thread as what the person says does.
+ */
 export const NoticeItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('notice'),
@@ -906,6 +911,7 @@ export const NoticeItem = Schema.Struct({
     severity: Schema.Literals(['info', 'warning', 'error']),
     title: Schema.String,
     description: Schema.NullOr(Schema.String),
+    role: Schema.optional(Schema.Literals(['aside', 'relayed'])),
   }),
 })
 
@@ -1524,6 +1530,8 @@ export const AttentionRequest = Schema.Struct({
   /** Why it waits for the person: the rule that keeps it for them. */
   reason: Schema.String,
   command: Schema.NullOr(Schema.String),
+  /** The command as it reads at a glance (see BackgroundCommand); absent where it is not shortened or there is no command. */
+  label: Schema.optional(Schema.String),
   /** For a permission: a kind or a command the project always asks about keeps it, so no "always allow" can answer it. */
   held: Schema.optional(Schema.Boolean),
   /** For a step that needs the person: which, and why. */
@@ -1744,7 +1752,7 @@ export const BoardTask = Schema.Struct({
   changed: Schema.NullOr(Schema.Struct({ files: Schema.Number, add: Schema.Number, del: Schema.Number })),
   /** A ready task's repositories with no pull request, not merged yet, which merge here. */
   here: Schema.Array(TaskRepositoryHere),
-  /** Not settled, everything its agents ask is allowed, by the task's own switch or its project's (ADR-042). Not without it. */
+  /** Not settled, everything its agents ask is allowed, by the task's own switch or its project's (ADR-043). Not without it. */
   allowEverything: Schema.optional(Schema.Boolean),
 })
 export type BoardTask = typeof BoardTask.Type
