@@ -1954,7 +1954,9 @@ export class Queries extends Context.Service<
             WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC LIMIT 1)
               AND a.state IN ('admitted', 'running', 'held') ORDER BY a.admitted_at DESC LIMIT 1`
           // Where it stands, from its card, which shows its links too: the header reads those with git, below.
-          const card = yield* cardFor(head.taskId, { issue: null, changes: [] })
+          // Its links are read first and given to it: its kind, and where it opens, depend on its pull requests.
+          const links = yield* linksOf(head.taskId)
+          const card = yield* cardFor(head.taskId, links)
           const session = yield* sessionOf(threadId)
           // Who leads it when no lead runs: the last on its thread, else its plan's.
           const [last] = yield* sql<{ agentId: string; model: string | null; account: string | null }>`
@@ -1968,9 +1970,9 @@ export class Queries extends Context.Service<
             SELECT count(*) AS left FROM runs r, json_each(r.parameters, '$.steps') s
             WHERE r.id = (SELECT id FROM runs WHERE task_id = ${head.taskId} ORDER BY created_at DESC, rowid DESC LIMIT 1)
               AND r.state = 'running' AND json_extract(s.value, '$.key') = 'review' AND NOT json_extract(s.value, '$.skipped')`
-          // Its links, whose open pull requests say what isn't pushed, what git says of its worktrees, and its host, read at the same time.
-          const [links, said, host] = yield* Effect.all(
-            [linksOf(head.taskId), gitOf(head.taskId, { changed: true, here: true, fresh: page.fresh === true }), hostOf(head.projectId)],
+          // What git says of its worktrees, and its host, read at the same time.
+          const [said, host] = yield* Effect.all(
+            [gitOf(head.taskId, { changed: true, here: true, fresh: page.fresh === true }), hostOf(head.projectId)],
             {
               concurrency: 'unbounded',
             },
@@ -1991,6 +1993,7 @@ export class Queries extends Context.Service<
               worktree: head.worktree,
               baseRef: head.baseRef,
               phase: card?.phase ?? null,
+              kind: card?.kind,
               handedBack: card?.handedBack ?? null,
               waits: card?.waits ?? null,
               queued: card?.queued ?? null,

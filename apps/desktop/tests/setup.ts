@@ -1,6 +1,7 @@
 import { cleanup } from '@testing-library/react'
 import { afterEach } from 'vitest'
 
+import { forgetChosenFaces } from '../src/renderer/features/task/chosenFaces'
 import { forgetSessions } from '../src/renderer/shared/dictation/sessions'
 import { forgetDrafts } from '../src/renderer/shared/drafts'
 
@@ -38,6 +39,7 @@ if (typeof window !== 'undefined') {
     cleanup()
     // What a view keeps in storage, like the person's pinned models, starts empty in each test, as do the drafts and dictation the window keeps by thread.
     window.localStorage.clear()
+    forgetChosenFaces()
     forgetDrafts()
     forgetSessions()
   })

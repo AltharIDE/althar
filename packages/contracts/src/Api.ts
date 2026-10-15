@@ -1686,6 +1686,8 @@ export const ThreadSnapshot = Schema.Struct({
     baseRef: Schema.NullOr(Schema.String),
     /** Where it stands, as its card says: ready once its run passed review. */
     phase: Schema.NullOr(TaskPhase),
+    /** What it makes, read from what it has now, as its card says: where it opens, an outputs view for a change only. */
+    kind: Schema.optional(TaskKind),
     /** Why its lead couldn't resolve a conflict, or fix the checks on the merge, which is the person's now, as its card says. */
     handedBack: Schema.optional(Schema.NullOr(Schema.String)),
     /** Its step held until an agent's usage limit resets: which agent, and when it is back. */
