@@ -411,11 +411,10 @@ test('tells only what the person keeps on, keeps the Mac awake while work runs, 
     await page.getByRole('menuitem', { name: /Stop the task/ }).click()
     await expect.poll(holds, { timeout: 15_000 }).toBe(0)
 
-    // From the home's Settings: no notification for a ready task, and no count on the Dock.
-    await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
-    await page.keyboard.press('Meta+,')
-    const settings = page.getByRole('dialog', { name: 'Settings' })
-    await settings.getByRole('button', { name: /^Notifications/ }).click()
+    // From Althar's settings, on their tab: no notification for a ready task, and no count on the Dock.
+    await page.keyboard.press('ControlOrMeta+Shift+Comma')
+    const settings = page.getByRole('main')
+    await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'Notifications' }).click()
     await settings.getByRole('switch', { name: 'A task is ready for you' }).click()
     await settings.getByRole('switch', { name: COUNT }).click()
     await expect.poll(kept).toContain('"notifyReady": false')
@@ -431,16 +430,18 @@ test('tells only what the person keeps on, keeps the Mac awake while work runs, 
     await catchWhatReachesThem(electronApp)
     const tabs = page.getByRole('navigation', { name: 'Projects' })
     await tabs.getByRole('button', { name: /^Home/ }).click()
-    await page.keyboard.press('Meta+,')
-    const settings = page.getByRole('dialog', { name: 'Settings' })
-    await expect(settings.getByRole('switch', { name: 'Keep awake' })).toHaveAttribute('aria-checked', 'true')
-    await settings.getByRole('button', { name: /^Notifications/ }).click()
+    await page.keyboard.press('ControlOrMeta+Comma')
+    const quick = page.getByRole('dialog', { name: 'Quick settings' })
+    await expect(quick.getByRole('switch', { name: 'Keep awake' })).toHaveAttribute('aria-checked', 'true')
+    // A card's name opens the Settings tab at its section, which the tab kept between launches too.
+    await quick.getByRole('button', { name: /^Notifications/ }).click()
+    const settings = page.getByRole('main')
     await expect(settings.getByRole('switch', { name: 'A task is ready for you' })).toHaveAttribute('aria-checked', 'false')
     await expect(settings.getByRole('switch', { name: COUNT })).toHaveAttribute('aria-checked', 'false')
     await expect(settings.getByRole('switch', { name: 'A call waits on you' })).toHaveAttribute('aria-checked', 'true')
-    await page.keyboard.press('Escape')
-    await page.keyboard.press('Escape')
-    await expect(settings).toHaveCount(0)
+    await tabs.getByRole('button', { name: 'Close Settings' }).click()
+    await expect(tabs.getByRole('button', { name: /^Settings/ })).toHaveCount(0)
+    await tabs.getByRole('button', { name: /^Home/ }).click()
 
     // A task ready while the person is elsewhere: it waits, but nothing says so outside the window.
     await page
