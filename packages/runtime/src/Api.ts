@@ -644,6 +644,13 @@ export const handlers = Api.toLayer(
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
       Interrupt: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
+      CompactContext: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.compact', { threadId }, commandId), (made) => sessions.compact({ envelope: made, threadId })),
+          ),
+        ),
       // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
       StopSession: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })))),

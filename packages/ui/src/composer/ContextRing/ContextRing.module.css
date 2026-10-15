@@ -1,3 +1,13 @@
+.meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.compact {
+  padding: 0 4px;
+  text-decoration: none;
+}
+
 .ring {
   display: grid;
   place-items: center;

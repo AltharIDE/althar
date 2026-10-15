@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import type { ModelInfo } from '../../primitives/Model/Model'
 import { HoverCard } from '../../primitives/HoverCard/HoverCard'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import s from './ContextRing.module.css'
 
 export interface ContextRingText {
@@ -11,6 +12,10 @@ export interface ContextRingText {
   share: (percent: number) => ReactNode
   /** Used of total, in thousands of tokens. */
   amount: (used: number, total: number) => string
+  /** The action that compacts it. */
+  compact: string
+  /** While it compacts. */
+  compacting: string
 }
 
 const k = (n: number) => (n >= 1000 ? `${n / 1000}M` : `${n}k`)
@@ -23,6 +28,8 @@ export const contextRingText: ContextRingText = {
     </>
   ),
   amount: (used, total) => `${k(used)} of ${k(total)}`,
+  compact: 'Compact',
+  compacting: 'Compacting…',
 }
 
 export interface ContextRingProps {
@@ -39,6 +46,10 @@ export interface ContextRingProps {
   /** Show the detail from the start, as for a screenshot. */
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
+  /** Compacts the context: given, a quiet Compact beside the ring. The consumer gives it only once compacting is worth it. */
+  onCompact?: () => void
+  /** A compaction asked for and not yet done: Compact is off, and says so. */
+  compacting?: boolean
   text?: Partial<ContextRingText>
 }
 
@@ -47,9 +58,24 @@ const C = 2 * Math.PI * R
 
 /**
  * How full the model's context is: a ring you can read at a glance and
- * ignore otherwise. The numbers are behind it, on hover or focus.
+ * ignore otherwise. The numbers are behind it, on hover or focus. Where it
+ * is worth it, a quiet Compact beside the ring has the agent sum up what it
+ * holds, so each turn after reads less.
  */
-export function ContextRing({ used, total, model, note, open, defaultOpen, onOpenChange, text }: ContextRingProps) {
+export function ContextRing({ onCompact, compacting, ...ring }: ContextRingProps) {
+  if (onCompact === undefined) return <Ring {...ring} />
+  const t = { ...contextRingText, ...ring.text }
+  return (
+    <span className={s.meter}>
+      <LinkButton className={s.compact} onClick={onCompact} disabled={compacting === true}>
+        {compacting === true ? t.compacting : t.compact}
+      </LinkButton>
+      <Ring {...ring} />
+    </span>
+  )
+}
+
+function Ring({ used, total, model, note, open, defaultOpen, onOpenChange, text }: Omit<ContextRingProps, 'onCompact' | 'compacting'>) {
   const t = { ...contextRingText, ...text }
   const pct = total > 0 ? Math.min(1, Math.max(0, used / total)) : 0
   const percent = Math.round(pct * 100)

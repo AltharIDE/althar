@@ -333,6 +333,18 @@ const settleEffort = (definition: AgentDefinition, agent: AgentSession, asked: s
     }
   })
 
+/** What the person asks an agent's context be compacted with: the agent's own command, sent bare as a turn of its own. */
+export const COMPACT = '/compact'
+
+/** Tokens in a line: 412k, 1.2M. */
+const tokensWord = (tokens: number) => (tokens >= 1_000_000 ? `${Math.round(tokens / 100_000) / 10}M` : `${Math.round(tokens / 1000)}k`)
+
+/** What the thread says once an agent compacted its context: from how full to how full, where it said both. */
+export const compactedWords = (name: string, before: { readonly used: number } | null, after: { readonly used: number } | null) =>
+  before !== null && after !== null && after.used < before.used
+    ? `Compacted ${name}'s context: ${tokensWord(before.used)} → ${tokensWord(after.used)} tokens.`
+    : `Compacted ${name}'s context.`
+
 /**
  * What a turn says to the agent: the brief when the session is new, then each
  * input, an interrupting one first. With no input waiting, a new session is
@@ -422,6 +434,13 @@ export class Sessions extends Context.Service<
       /** Input Althar writes, such as findings to settle: delivered, but shown in the thread by what it came from, not as the person's message. */
       readonly quiet?: boolean
     }): Effect.Effect<AcceptedInput, NotFound | Failure>
+    /**
+     * Asks the thread's agent to compact its context, with its own command
+     * (`COMPACT`), as a turn of its own after what was said before it. It
+     * never waits for a place among the agents at work: it is one call of the
+     * agent's, and loads nothing here. Refused where no agent is on the thread.
+     */
+    compact(input: { readonly envelope: CommandEnvelope; readonly threadId: string }): Effect.Effect<void, NotFound | Failure>
     /** Takes back a message still waiting its turn, by its thread item: the agent never reads it. One the agent has stays. */
     takeBack(input: {
       readonly envelope: CommandEnvelope
@@ -849,7 +868,8 @@ export class Sessions extends Context.Service<
           // A coordinator or lead handing its work over takes no more turns. One whose context is filling up hands it over now,
           // between turns, never in one: what waits goes to the fresh session (ADR-031, ADR-038).
           if (running.handover === 'under_way') return false
-          if (running.handover === 'none' && (yield* dueToHandOver(running))) {
+          // A compaction the person asked for comes first: it may leave nothing to hand over.
+          if (running.handover === 'none' && !(yield* compactsNext(thread.threadId)) && (yield* dueToHandOver(running))) {
             running.handover = 'under_way'
             yield* Effect.forkIn(run(handOver(running)), sessionsScope)
             return false
@@ -870,11 +890,17 @@ export class Sessions extends Context.Service<
           )
           // What an agent out of usage was given goes on with word of that, by the name of the agent it went to.
           const agents = yield* Agents
-          const inputs = queued.map(({ cutBy, ...input }) => {
+          const all = queued.map(({ cutBy, ...input }) => {
             const by = cutBy === null ? undefined : (agents.list.find((entry) => entry.definition.id === cutBy)?.definition.name ?? cutBy)
             const withheld = sent.withheld.get(input.id) ?? 0
             return { ...input, ...(by === undefined ? {} : { cutShort: by }), ...(withheld === 0 ? {} : { withheld }) }
           })
+          // Compacting the agent's context is a turn of its own, said bare as the agent's own command, once its brief is read; what
+          // was said before it goes first, and what after, next.
+          const compactAt = all.findIndex((input) => input.body === COMPACT)
+          const compacting = compactAt === 0 && running.brief === undefined
+          const inputs = compacting ? all.slice(0, 1) : compactAt === -1 ? all : all.slice(0, compactAt)
+          const before = running.context
           if (inputs.length === 0 && running.brief === undefined) return false
           // The coordinator speaks when spoken to: its brief waits for the person's first message.
           if (inputs.length === 0 && thread.role === 'coordinator') return false
@@ -896,7 +922,7 @@ export class Sessions extends Context.Service<
                   ),
                 )
               : null
-          let prompt = promptFor(inputs, briefed)
+          let prompt = compacting ? COMPACT : promptFor(inputs, briefed)
           const turnId = yield* newId(Ids.turnDelivery)
           const [session] = yield* sql<{
             model: string | null
@@ -913,7 +939,7 @@ export class Sessions extends Context.Service<
                   if (still.length < inputs.length) return yield* new TakenBack()
                 }
                 // What became of its plans since it last spoke, which only the cards show the person: read with the turn's record, so none falls between two turns.
-                if (thread.role === 'coordinator' && named !== null) {
+                if (thread.role === 'coordinator' && named !== null && !compacting) {
                   const news = yield* coordinatorNews(thread.threadId, thread.projectId, named).pipe(
                     Effect.catchCause((cause) =>
                       Effect.as(Effect.logWarning('Could not read what changed for the coordinator', cause), null),
@@ -1162,6 +1188,13 @@ export class Sessions extends Context.Service<
           const resetsAt =
             Option.isSome(failure) && failure.value._tag === 'AgentRequestFailed' ? failure.value.resetsAt : ended?.failure?.resetsAt
           if (errorClass === 'usage_limit') yield* accountLimited(running, resetsAt)
+          // A compaction says how far it took the context, as the agent says it.
+          if (compacting && state === 'completed')
+            yield* addItem(
+              { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId: turnId },
+              'notice',
+              { source: 'runtime', severity: 'info', title: compactedWords(running.entry.definition.name, before, running.context) },
+            )
           yield* live.publish({
             _tag: 'TurnEnded',
             threadId: thread.threadId,
@@ -1212,6 +1245,18 @@ export class Sessions extends Context.Service<
         })
 
       /** Whether the thread has input waiting to be delivered. */
+      /** Whether what the thread's agent is given next is a compaction (`COMPACT`), in the order turns take their input. */
+      const compactsNext = (threadId: string) =>
+        run(
+          Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient
+            const [next] = yield* sql<{ body: string }>`
+              SELECT body FROM user_inputs WHERE thread_id = ${threadId} AND state = 'queued'
+              ORDER BY disposition = 'interrupt_and_continue' DESC, sequence LIMIT 1`
+            return next?.body === COMPACT
+          }),
+        ).pipe(Effect.orElseSucceed(() => false))
+
       const hasQueued = (threadId: string) =>
         run(
           Effect.gen(function* () {
@@ -1241,6 +1286,15 @@ export class Sessions extends Context.Service<
             // A lead's or a reviewer's turns, one at a time, each waiting for a place among the agents at work here: what
             // is still queued after one wakes it again, and asks again.
             if (running.stopping || !(running.brief !== undefined || (yield* hasQueued(thread.threadId)))) return
+            // A compaction is one call of the agent's own, and loads nothing here: it never waits for a place.
+            const delivered = (effect: Effect.Effect<boolean, unknown, Store>) =>
+              run(effect).pipe(
+                Effect.flatMap((more) => (more ? Queue.offer(running.wake, undefined) : Effect.succeed(false))),
+                Effect.asVoid,
+                Effect.catchCause((cause) => Effect.logWarning('Could not deliver a turn', cause)),
+              )
+            if (running.brief === undefined && (yield* compactsNext(thread.threadId)))
+              return yield* delivered(running.delivering.withPermits(1)(deliver(running)))
             yield* gate(
               { taskId: thread.taskId, threadId: thread.threadId, sessionId: running.sessionId, review: thread.role === 'reviewer' },
               (begun) =>
@@ -2354,6 +2408,13 @@ export class Sessions extends Context.Service<
         start: (input) => run(start(input)),
         startLast: (threadId) => run(startLast(threadId)),
         send: (input) => run(send(input)),
+        compact: (input) =>
+          run(
+            Effect.gen(function* () {
+              if (!threads.has(input.threadId)) return yield* new NotFound({ kind: 'agent on the thread', id: input.threadId })
+              yield* send({ envelope: input.envelope, threadId: input.threadId, body: COMPACT, disposition: 'after_current', quiet: true })
+            }),
+          ),
         takeBack: (input) => run(takeBack(input)),
         setModel: (input) => run(setModel(input)),
         setEffort: (input) => run(setEffort(input)),

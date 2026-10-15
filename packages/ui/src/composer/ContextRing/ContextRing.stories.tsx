@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, userEvent, waitFor, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { CODEX } from '../../fixtures/models'
 import { States, statesParameters } from '../../storybook/States'
@@ -35,6 +35,22 @@ export const NearlyFull: Story = {
 /** Without a model, the numbers stand alone. */
 export const NoModel: Story = { args: { model: undefined, used: 40, defaultOpen: true } }
 
+/** Full enough to be worth it: a quiet Compact beside the ring has the agent sum up what it holds. */
+export const WithCompact: Story = {
+  args: { used: 372, onCompact: fn() },
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Compact' }))
+    await expect(args.onCompact).toHaveBeenCalledOnce()
+  },
+}
+/** Asked for and not yet done: Compact is off, and says so. */
+export const Compacting: Story = {
+  args: { used: 372, onCompact: fn(), compacting: true },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole('button', { name: 'Compacting…' })).toBeDisabled()
+  },
+}
+
 export const AllStates: Story = {
   parameters: statesParameters,
   render: () => (
@@ -45,6 +61,8 @@ export const AllStates: Story = {
         { state: 'focus', node: <ContextRing used={122} total={400} model={CODEX} /> },
         { state: 'empty', node: <ContextRing used={0} total={400} model={CODEX} /> },
         { state: 'full', node: <ContextRing used={400} total={400} model={CODEX} /> },
+        { state: 'compact', node: <ContextRing used={372} total={400} model={CODEX} onCompact={() => {}} /> },
+        { state: 'compacting', node: <ContextRing used={372} total={400} model={CODEX} onCompact={() => {}} compacting /> },
       ]}
     />
   ),
