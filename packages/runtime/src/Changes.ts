@@ -3676,9 +3676,10 @@ export class Changes extends Context.Service<
                 }
                 const { link, snapshot, where, ahead, left } = chosen
                 const unpushed = left.length === 0 ? [] : [`Not included, since they aren't committed: ${filesWord(left)}.`]
-                // Before the person has seen the change, its checks are Althar's to see through: a fix goes up at once (ADR-040).
+                // Before the person has seen the change, its checks are Althar's to see through: a fix for checks that failed goes up at
+                // once (ADR-040). Anything else waits for the person, as ever.
                 const hands = yield* handsOf(taskId)
-                if (hands !== null && !hands.given) {
+                if (hands !== null && !hands.given && hands.failed > 0) {
                   const pushed = yield* Effect.exit(push(taskId, ahead.head, snapshot.url))
                   if (pushed._tag === 'Success')
                     return [
