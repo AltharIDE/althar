@@ -313,7 +313,7 @@ export function ProjectView({
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
-        meter={contextMeter(session, named)}
+        meter={contextMeter(session, named, model.compact)}
         picker={
           model.agents.length > 0 &&
           chosen !== null && (
