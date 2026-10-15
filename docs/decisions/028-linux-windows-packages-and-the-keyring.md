@@ -36,20 +36,14 @@
     the app asks for `--password-store=gnome-libsecret` before it is ready:
     libsecret speaks the Secret Service API, which gnome-keyring, KeePassXC
     and KWallet all serve. A `--password-store` the person chose themselves
-    is left alone. In a Flatpak on KDE it asks for KWallet itself
-    (`kwallet6`, `kwallet5` on Plasma 5) and the manifest lets the sandbox
-    talk to `org.kde.kwalletd6` and `org.kde.kwalletd5`: inside a sandbox
-    libsecret keeps a keyring of its own in a file and stores the key there,
-    while Chromium looks it up in the host's service, finds none, and makes a
-    new key at every start, so nothing sealed in one run opens in the next.
-    KWallet's wallet is the host's, so its key stays. Elsewhere in a Flatpak
-    it is still libsecret, with that fault.
+    is left alone, and in a Flatpak it is asked for whatever the desktop is.
     The refusal's words are the only secret error shown verbatim; everything
     else of the keychain's gets the generic sentence. A sealed sign-in the
     keychain can no longer open (`decryptString` throws) is not the keychain
     being away: main marks it `unreadable`, the runtime doesn't ask again, and
     the connection says it needs signing in again, like one its service refused.
-    That is what a restart did in a Flatpak that sealed with libsecret.
+    In the Flatpak that is what every restart does today (open questions, "The
+    Flatpak's keyring").
   - **The Flatpak is experimental.** It carries the app and the toolchain for
     its own work with network, display, GPU, the keyring and the device's own
     tools through the broad `flatpak-spawn` permission (ADR-027); its worktrees live

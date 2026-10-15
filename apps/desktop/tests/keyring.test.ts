@@ -44,13 +44,8 @@ describe('the password store Electron is asked for', () => {
     expect(passwordStore([], 'KDE', false, 'linux')).toBe('gnome-libsecret')
     expect(passwordStore(['--password-store=basic'], undefined, false, 'linux')).toBeNull()
     expect(passwordStore(['--password-store', 'basic'], undefined, false, 'linux')).toBeNull()
-    // In a Flatpak libsecret keeps its own file keyring, whose key Chromium doesn't find again: KDE asks for KWallet itself, and everywhere else libsecret.
-    expect(passwordStore([], 'KDE', true, 'linux')).toBe('kwallet6')
-    expect(passwordStore([], 'KDE', true, 'linux', '6')).toBe('kwallet6')
-    expect(passwordStore([], 'KDE', true, 'linux', '5')).toBe('kwallet5')
-    expect(passwordStore([], 'ubuntu:GNOME', true, 'linux')).toBe('gnome-libsecret')
-    expect(passwordStore([], 'sway', true, 'linux')).toBe('gnome-libsecret')
-    expect(passwordStore(['--password-store=gnome-libsecret'], 'KDE', true, 'linux')).toBeNull()
+    // In a Flatpak the host's secret service is what is reachable; KWallet's own socket is not, so KDE needs it there too.
+    expect(passwordStore([], 'KDE', true, 'linux')).toBe('gnome-libsecret')
     // A Linux switch: macOS and Windows keep their own keychain.
     expect(passwordStore([], undefined, false, 'darwin')).toBeNull()
     expect(passwordStore([], 'Hyprland', false, 'win32')).toBeNull()

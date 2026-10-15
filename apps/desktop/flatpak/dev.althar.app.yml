@@ -11,7 +11,7 @@ base-version: '24.08'
 command: althar
 separate-locales: false
 
-# Network, display, GPU and the host keyring (and KDE's wallet) are available. The permission to
+# Network, display, GPU and the host keyring are available. The permission to
 # talk to org.freedesktop.Flatpak is broad: it can run commands on the host,
 # which the app uses to reach the person's tools. Project folders enter via
 # the document portal; the host bridge is not a sandbox boundary.
@@ -23,9 +23,6 @@ finish-args:
   - --share=ipc
   - --device=dri
   - --talk-name=org.freedesktop.secrets
-  # KDE's own wallet, which Chromium's kwallet backend talks to (the app asks for it on KDE, src/main/keyring.ts): its key is the host's, so it outlives a restart.
-  - --talk-name=org.kde.kwalletd6
-  - --talk-name=org.kde.kwalletd5
   # The person's own agents and editors, found and run where they are
   # installed (Codex among them: flatpak/codex-host.sh); nothing else.
   - --talk-name=org.freedesktop.Flatpak

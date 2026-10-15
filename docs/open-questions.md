@@ -11,19 +11,22 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
 
 ## The Flatpak's keyring, 15 October
 
-- [x] **Where the sealing key lives in the Flatpak, so it survives a restart.**
-  On KDE: KWallet itself, `--password-store=kwallet6` (`kwallet5` on Plasma 5)
-  with `--talk-name=org.kde.kwalletd6`/`5` in the manifest (ADR-028). Found
-  with the person's own Flatpak on KDE (Electron 44): inside the sandbox
-  libsecret keeps its keyring in a file of the app's own, but Chromium looks
-  the key up in the host's service, finds none, and logs "OSCrypt generated a
-  new password" at every start, so a sign-in sealed in one run was unreadable
-  in the next. Not yet seen working in a rebuilt Flatpak.
-- [ ] **The same under GNOME in the Flatpak.** It still asks for libsecret, with
-  the fault above. Leanings: Chromium looking up through libsecret's own
-  backend, as it stores (an Electron/Chromium fix); or Althar keeping the
-  key itself. Settled when a whole task has survived a restart under GNOME
-  and KDE (ADR-028).
+- [ ] **Where the sealing key lives in the Flatpak, so it survives a restart.**
+  Found with the person's own Flatpak on KDE (Electron 44, `gnome-libsecret`).
+  Inside the sandbox libsecret keeps its keyring in a file of the app's own
+  (`~/.var/app/dev.althar.app/data/keyrings/default.keyring`, opened with a
+  secret the desktop portal keeps in the host's wallet), but Chromium looks the
+  key up where the host's secret service is, finds none, and logs "OSCrypt
+  generated a new password" at every start, replacing the one it made before.
+  A sign-in sealed in one run is then unreadable in the next
+  (`safeStorage.decryptString` fails), so every connection has to be signed in
+  again after each launch. Althar now says so ("sign in again", the connection
+  goes to `reauth_required`) rather than "unreachable", but the key still
+  changes. Leanings, none tried in the Flatpak: on KDE, `--password-store=kwallet6`
+  with `--talk-name=org.kde.kwalletd6` in the manifest (the wallet is the host's, so
+  the key stays); Chromium looking up through libsecret's own backend, as it
+  stores; or Althar keeping the key itself. Not settled until a whole task has
+  survived a restart under GNOME and KDE (ADR-028).
 
 ## Usage data, 12 October
 
