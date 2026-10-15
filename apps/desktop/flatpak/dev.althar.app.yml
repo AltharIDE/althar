@@ -23,21 +23,7 @@ finish-args:
   # X11 clients need shared memory; without it fallback-x11 is slow and some drawing breaks (Flathub's Electron sample keeps it too).
   - --share=ipc
   - --device=dri
-  # Electron's Linux storage can use the host's secret service. Flatpak
-  # sign-ins off KDE require the app-specific Secret portal key instead
-  # (org.freedesktop.portal.Secret, keyring.ts); the app accepts only its v12
-  # seals and fails closed if that portal is unavailable. The portal is
-  # reachable by default and needs no D-Bus permission here.
   - --talk-name=org.freedesktop.secrets
-  # KWallet itself, which the app asks for on KDE (keyring.ts). Through
-  # libsecret the sealing key would not survive a restart: in a sandbox
-  # libsecret stores in a keyring file of the app's own, while Chromium looks
-  # the key up on the host's secret service, finds none and makes a new one at
-  # every start (the reason other desktops use the portal). Chromium keeps the
-  # key in the host's network wallet, folder
-  # "Chromium Keys", entry "Chromium Safe Storage"; kwalletd5 is Plasma 5's.
-  - --talk-name=org.kde.kwalletd6
-  - --talk-name=org.kde.kwalletd5
   # The edge's tray icon: Electron asks the desktop's StatusNotifierWatcher to
   # show it, and without this talk permission the sandbox cannot see the
   # watcher, so the tray silently does not appear. Under Flatpak Electron

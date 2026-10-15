@@ -9,38 +9,6 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
-## The Flatpak's keyring, 15 October
-
-- [x] **Where the sealing key lives in a Flatpak on KDE, so it survives a
-  restart.** In KWallet itself: the app asks for `--password-store=kwallet6`
-  (`kwallet5` on Plasma 5), and the manifest lets it talk to
-  `org.kde.kwalletd6` and `org.kde.kwalletd5`
-  ([ADR-028](decisions/028-linux-windows-packages-and-the-keyring.md)). The
-  cause of the new key at every start: inside a sandbox libsecret's
-  `secret_password_store` writes to a keyring file of the app's own
-  (`~/.var/app/dev.althar.app/data/keyrings/default.keyring`, opened with a
-  secret the portal keeps in the host's wallet), while Chromium looks the key
-  up with `secret_service_search`, which asks the host's secret service. It
-  finds none there, logs "OSCrypt generated a new password" and stores a new
-  one in the file again. Shown with the same Electron 44.5 and a keyring of its
-  own: two runs, two new keys, and the second can't open what the first sealed.
-  `SECRET_BACKEND` can't route around it: libsecret checks for a sandbox
-  first. Decided with the person, 15 October; whether a sign-in survives
-  `flatpak kill dev.althar.app` on the person's Plasma is still theirs to test.
-- [x] **The same for GNOME and other desktops in a Flatpak.** Off KDE the
-  main process uses Electron's async `safeStorage` with Chromium's
-  `SecretPortalKeyProviderUseForEncryption` switch. It accepts only `v12`,
-  the Secret portal's stable secret scoped to Althar's Flatpak id; shared
-  Secret Service (`v11`) and fixed-key (`v10`) seals fail closed. On GNOME,
-  xdg-desktop-portal selects the GNOME Keyring Secret backend. A desktop
-  without the app-specific Secret portal cannot save sign-ins, even if it has
-  only the shared Secret Service; this keeps ADR-011's app-specific boundary.
-  The KDE/KWallet path from #201 is unchanged. The runtime still passes opaque
-  seals to and from the main process, and old non-portal seals may require one
-  sign-in again; no files are deleted. Decided 15 October 2026 in
-  [ADR-028](decisions/028-linux-windows-packages-and-the-keyring.md). A real
-  GNOME session still needs the by-hand restart test.
-
 ## Usage data, 12 October
 
 - [x] **Where usage data goes from, and what can.** The main process, with

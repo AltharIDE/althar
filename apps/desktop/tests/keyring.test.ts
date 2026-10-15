@@ -50,33 +50,11 @@ describe('the password store Electron is asked for', () => {
     expect(passwordStore([], 'KDE', false, 'linux')).toBe('gnome-libsecret')
     expect(passwordStore(['--password-store=basic'], undefined, false, 'linux')).toBeNull()
     expect(passwordStore(['--password-store', 'basic'], undefined, false, 'linux')).toBeNull()
-    // Outside a Flatpak libsecret looks up where it stores, so KDE keeps it, whatever Plasma it is.
-    expect(passwordStore([], 'KDE', false, 'linux', '6')).toBe('gnome-libsecret')
-    // In a Flatpak every other desktop gets libsecret, whatever Electron would pick.
-    expect(passwordStore([], 'GNOME', true, 'linux')).toBe('gnome-libsecret')
-    expect(passwordStore([], 'Hyprland', true, 'linux')).toBe('gnome-libsecret')
+    // In a Flatpak the host's secret service is what is reachable; KWallet's own socket is not, so KDE needs it there too.
+    expect(passwordStore([], 'KDE', true, 'linux')).toBe('gnome-libsecret')
     // A Linux switch: macOS and Windows keep their own keychain.
     expect(passwordStore([], undefined, false, 'darwin')).toBeNull()
     expect(passwordStore([], 'Hyprland', false, 'win32')).toBeNull()
-  })
-
-  it('asks for KWallet itself in a Flatpak on KDE, where libsecret keeps the key in a file Chromium never looks in', () => {
-    expect(passwordStore([], 'KDE', true, 'linux', '6')).toBe('kwallet6')
-    expect(passwordStore([], 'KDE', true, 'linux', '5')).toBe('kwallet5')
-    // Plasma 6 is the KWallet a session without a version is taken for.
-    expect(passwordStore([], 'KDE', true, 'linux')).toBe('kwallet6')
-    expect(passwordStore([], 'X-Generic:KDE', true, 'linux', '6')).toBe('kwallet6')
-    expect(passwordStore(['--password-store=gnome-libsecret'], 'KDE', true, 'linux', '6')).toBeNull()
-  })
-
-  it('only ever asks for a store whose backend is a keyring', () => {
-    const desktops = [undefined, 'KDE', 'GNOME', 'Hyprland', 'sway']
-    const asked = desktops.flatMap((desktop) =>
-      [false, true].flatMap((flatpak) => ['5', '6', undefined].map((version) => passwordStore([], desktop, flatpak, 'linux', version))),
-    )
-    // The backend Electron reports for each switch: gnome-libsecret is gnome_libsecret, KWallet's keep their names.
-    for (const store of asked) if (store !== null) expect(keyringIsSafe('linux', store.replace('-', '_'))).toBe(true)
-    expect(new Set(asked)).toEqual(new Set([null, 'gnome-libsecret', 'kwallet5', 'kwallet6']))
   })
 })
 
