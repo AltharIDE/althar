@@ -1156,3 +1156,23 @@ CREATE TRIGGER task_search_changed AFTER UPDATE ON task_search_rows BEGIN
   INSERT INTO task_search (task_search, rowid, title, asked, summaries, refs, files) VALUES ('delete', old.id, old.title, old.asked, old.summaries, old.refs, old.files);
   INSERT INTO task_search (rowid, title, asked, summaries, refs, files) VALUES (new.id, new.title, new.asked, new.summaries, new.refs, new.files);
 END;
+
+CREATE TABLE plan_usage_readings (
+  account_id TEXT NOT NULL REFERENCES agent_accounts (id),
+  agent_id TEXT NOT NULL,
+  source TEXT NOT NULL,
+  plan TEXT,
+  windows TEXT NOT NULL CHECK (json_valid(windows)),
+  observed_at TEXT NOT NULL CHECK (observed_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  PRIMARY KEY (account_id)
+) STRICT;
+
+CREATE TABLE plan_usage_warnings (
+  account_id TEXT NOT NULL REFERENCES agent_accounts (id),
+  window_key TEXT NOT NULL,
+  threshold INTEGER NOT NULL CHECK (threshold BETWEEN 0 AND 100),
+  resets_at TEXT,
+  raised_at TEXT NOT NULL CHECK (raised_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  acknowledged_at TEXT CHECK (acknowledged_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z'),
+  PRIMARY KEY (account_id, window_key)
+) STRICT;
