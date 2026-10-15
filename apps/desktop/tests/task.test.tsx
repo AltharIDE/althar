@@ -2318,4 +2318,17 @@ describe('the face a task opens on', () => {
     withServices(<Task />, client)
     expect((await screen.findByRole('radio', { name: /Outputs/ })).getAttribute('aria-checked')).toBe('true')
   })
+
+  it('opens on the conversation when a call waits, though Outputs was picked before', async () => {
+    const ready = snapshot({ task: { ...base.task, kind: 'plain', phase: 'ready', files: [file] } })
+    const asking = snapshot({ task: { ...ready.task, phase: 'waiting' }, attention: asks })
+    let current = ready
+    const { client } = fakeClient({ getThread: vi.fn(async () => current) })
+    const first = withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('radio', { name: /Outputs/ }))
+    first.unmount()
+    current = asking
+    withServices(<Task />, client)
+    expect((await screen.findByRole('radio', { name: /Conversation/ })).getAttribute('aria-checked')).toBe('true')
+  })
 })

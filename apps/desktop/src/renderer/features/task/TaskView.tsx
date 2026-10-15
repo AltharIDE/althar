@@ -308,7 +308,8 @@ export function TaskView({
   const [asking, setAsking] = useState<string | null | undefined>(undefined)
   if (face === null && model.snapshot !== null) {
     setAsking(model.snapshot.attention.find((call) => call.kind === 'question')?.id ?? null)
-    showFace(chosenFaces.get(model.snapshot.task.id) ?? openingFace(model.snapshot))
+    // A call waiting is answered in the conversation, ahead of a view picked earlier.
+    showFace(model.snapshot.attention.length > 0 ? 'talk' : (chosenFaces.get(model.snapshot.task.id) ?? openingFace(model.snapshot)))
   }
   const named = useModelNames()
   const editors = useEditors(model.snapshot?.task.id ?? '')
