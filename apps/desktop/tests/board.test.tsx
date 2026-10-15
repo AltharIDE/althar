@@ -507,10 +507,10 @@ describe('the board', () => {
     expect(startSession).not.toHaveBeenCalled()
   })
 
-  it('does not report a restart failure after Send back has queued its note', async () => {
+  it('shows the queued note status when the lead fails before a session exists', async () => {
     const send = vi.fn(async () => {})
     const startSession = vi.fn(async () => {
-      throw new ApiError({ reason: 'SessionFailed', message: "Claude Code couldn't start." })
+      throw new ApiError({ reason: 'NoAccount', message: 'No signed-in account is available.' })
     })
     const base = snapshot()
     const { client } = fakeClient({
@@ -532,7 +532,11 @@ describe('the board', () => {
 
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
-    expect(screen.queryByText("Claude Code couldn't start.")).toBeNull()
+    const status = await screen.findByRole('alert')
+    expect(status.textContent).toContain('Note queued, but the lead could not start.')
+    expect(status.textContent).toContain('No signed-in account is available.')
+    expect(status.textContent).toContain("The note is already queued; don't send it again.")
+    expect(screen.queryByRole('textbox')).toBeNull()
   })
 
   it('pushes what the lead committed since before the pull request can be accepted, up to what the dock showed', async () => {

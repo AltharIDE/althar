@@ -95,8 +95,11 @@ export const useWorkActions = (): WorkActions => {
             })
           await client.send({ threadId: task.threadId, body: note, disposition: 'after_current' })
           if (restarting && lead !== null)
-            await client.startSession({ threadId: task.threadId, agentId: lead }).catch(() => {
-              // The note is already queued. Reporting a failure now would encourage a retry that sends it twice.
+            await client.startSession({ threadId: task.threadId, agentId: lead }).catch((failure: unknown) => {
+              // Another start took over after the read: the queued note will go to that session.
+              if (failure instanceof ApiError && failure.reason === 'SessionRunning') return
+              // Keep the queued note, and say not to send it again while making the startup failure clear.
+              setError(`Note queued, but the lead could not start. ${messageOf(failure)} The note is already queued; don't send it again.`)
             })
         }),
       [busy, client],
