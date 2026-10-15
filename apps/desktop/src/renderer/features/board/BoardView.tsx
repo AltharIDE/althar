@@ -12,9 +12,11 @@ import {
   CallCard,
   CommandChip,
   Fact,
+  FactLine,
   FileChips,
   Findings,
   NextRow,
+  NextStep,
   Outcome,
   PullChip,
   SettledRow,
@@ -32,6 +34,7 @@ import { busyWords, waitsWords } from '../../shared/agents'
 import { callKindOf, kindWords, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
+import { factsOf, nextWords, standingOf } from '../../shared/standing'
 import { afterSteps, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
@@ -76,9 +79,9 @@ export const text = {
   reviewDrafted: 'Review drafted',
   /** A conflict its lead couldn't resolve, or the checks on the merge it couldn't fix: the person's now. */
   mergeConflict: 'Merge conflict',
+  /** A running change's checks; a ready one's say what stands (shared/standing). */
   checks: {
     passed: (n: number) => (n === 1 ? '1 check passed' : `All ${n} checks passed`),
-    none: 'No checks ran',
     soFar: (passed: number, total: number) => `${passed} of ${total} checks passed`,
     failed: (n: number) => (n === 1 ? '1 check failed' : `${n} checks failed`),
   },
@@ -164,9 +167,9 @@ const theirs = (reviewing: ReviewBrief) => (
   />
 )
 
-/** How its checks stand, in one fact: all passed, some failed, or how many so far. None where it has none to say. */
-const checksFact = (checks: ChangeSummary['checks'], ready: boolean): ReactNode => {
-  if (checks === null || checks.total === 0) return ready ? <Fact>{text.checks.none}</Fact> : null
+/** How a running change's checks stand, in one fact: all passed, some failed, or how many so far. None where it has none to say. */
+const checksFact = (checks: ChangeSummary['checks']): ReactNode => {
+  if (checks === null || checks.total === 0) return null
   if (checks.failed > 0)
     return (
       <Fact icon="close" tone="danger">
@@ -253,7 +256,7 @@ export const runningCardOf = (work: BoardTask, now: string, name: (id: string | 
         ...(beforeWork
           ? {}
           : change !== null && change.state === 'open'
-            ? { object: pullChip(change), foot: checksFact(change.checks, false) }
+            ? { object: pullChip(change), foot: checksFact(change.checks) }
             : work.branch !== null && !empty(work.changed)
               ? {
                   object: (
@@ -364,14 +367,37 @@ export const readyCardOf = (work: BoardTask): Card => {
                 </Fact>
               ),
             }
-          : change === null
+          : // One merged or closed has nothing in its way, and nothing to do to it.
+            change === null || change.state !== 'open'
             ? {}
-            : { foot: checksFact(change.checks, true) }),
+            : { foot: readyFoot(change) }),
       }
     }
     default:
       return unreachable(work.kind)
   }
+}
+
+/**
+ * A ready pull request's foot: what stands between it and merging, as one
+ * line, the most pressing first in its colour (only it with its glyph), or
+ * how its checks went where nothing does; then the one next thing to do,
+ * which its task does.
+ */
+const readyFoot = (change: ChangeSummary): ReactNode => {
+  const standing = standingOf(change)
+  return (
+    <>
+      <FactLine>
+        {factsOf(change, standing).map((one, i) => (
+          <Fact key={one.words} {...(i === 0 && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
+            {one.words}
+          </Fact>
+        ))}
+      </FactLine>
+      {standing.next !== null && <NextStep>{nextWords(standing.next)}</NextStep>}
+    </>
+  )
 }
 
 export function BoardView({

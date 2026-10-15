@@ -205,9 +205,9 @@ describe('the home', () => {
     expect(within(needs).getByText('On its branch: 3 files, +40 −12')).toBeTruthy()
     expect(within(needs).getByText('On its branch')).toBeTruthy()
     expect(screen.queryByText(/althar\/branch|retry-the-call|name-it/)).toBeNull()
-    // A change with its checks, the worst first, in its one line.
-    expect(within(needs).getByText(/1 check failed/)).toBeTruthy()
-    expect(within(needs).getByText(/no checks/)).toBeTruthy()
+    // A change with what stands between it and merging, or how its checks went, then how big, in its one line.
+    expect(within(needs).getByText('api #12 · test failed · +12 −3')).toBeTruthy()
+    expect(within(needs).getByText('api #13 · No checks ran')).toBeTruthy()
     expect(within(needs).getByText('The agent stopped before the step was done.')).toBeTruthy()
     expect(within(needs).getAllByText('Write outside the worktree')).toHaveLength(2)
     expect(screen.queryByText(/^Gone/)).toBeNull()
@@ -223,10 +223,12 @@ describe('the home', () => {
     await waitFor(() => expect(settled).toBe(document.activeElement))
     expect(within(settled).queryByRole('button', { name: /Allow once|Deny/ })).toBeNull()
 
-    // Review opens the task itself, and the projects stay where they are; the answered line kept its project's place.
+    // Review opens a task with nothing to do from its line, and the projects stay where they are; the answered line kept its project's place.
     expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toEqual(['halyard', 'meridian'])
-    await userEvent.click(within(within(needs).getByRole('article', { name: 'Name it better' })).getByRole('button', { name: 'Review' }))
-    expect(onTask).toHaveBeenLastCalledWith('th5')
+    await userEvent.click(
+      within(within(needs).getByRole('article', { name: 'Ended on its branch' })).getByRole('button', { name: 'Review' }),
+    )
+    expect(onTask).toHaveBeenLastCalledWith('th8')
     expect(screen.queryByRole('complementary', { name: 'Beside the home' })).toBeNull()
     expect(screen.getByRole('complementary', { name: 'Projects' })).toBeTruthy()
 
@@ -235,6 +237,83 @@ describe('the home', () => {
     expect(onTask).toHaveBeenLastCalledWith('th4')
     await userEvent.click(within(needs).getByRole('button', { name: 'Name it better' }))
     expect(onTask).toHaveBeenLastCalledWith('th5')
+  })
+
+  it('says what stands between a ready change and merging, and does the next thing from its line', async () => {
+    const passed = { outcome: 'passed' as const, passed: 5, failed: 0, running: 0, total: 5, failing: [], list: [] }
+    const ready = (n: number, title: string, overrides: Parameters<typeof change>[0]) =>
+      task({
+        taskId: `r${n}`,
+        threadId: `thr${n}`,
+        title,
+        phase: 'ready',
+        change: change({ number: n, draft: false, checks: passed, ...overrides }),
+      })
+    const { client } = fakeClient({
+      getHome: vi.fn(async () =>
+        home({
+          looked: null,
+          tasks: [
+            ready(21, 'Good to merge', {}),
+            ready(22, 'Commits to push', { localHead: 'def456', unpushed: 3 }),
+            ready(23, 'In conflict', { conflicts: true, target: 'main' }),
+            ready(24, 'A check failed', { checks: change().checks }),
+            ready(25, 'Checks still running', { checks: { ...passed, outcome: 'running', passed: 3, running: 2 } }),
+            ready(26, 'A check cancelled', {
+              checks: {
+                ...passed,
+                passed: 1,
+                total: 2,
+                list: [
+                  { name: 'lint', state: 'passed', summary: null },
+                  { name: 'e2e', state: 'cancelled', summary: null },
+                ],
+              },
+            }),
+          ],
+          calls: [],
+          events: [],
+          projects: [project],
+        }),
+      ),
+    })
+    const onTask = vi.fn()
+    withServices(<Home onTask={onTask} />, client)
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
+    const line = (title: string) => within(within(needs).getByRole('article', { name: title }))
+    expect(line('Good to merge').getByText('api #21 · All 5 checks passed · +12 −3')).toBeTruthy()
+    expect(line('Commits to push').getByText('api #22 · 3 commits not on the PR · +12 −3')).toBeTruthy()
+    expect(line('In conflict').getByText('api #23 · Conflicts with main · +12 −3')).toBeTruthy()
+    expect(line('Checks still running').getByText('api #25 · Checks running, 3 of 5 passed · +12 −3')).toBeTruthy()
+
+    // The person's own to do, done at once, at the heads they saw.
+    await userEvent.click(line('Good to merge').getByRole('button', { name: 'Accept and merge' }))
+    expect(client.merge).toHaveBeenCalledWith('r21', 'abc123', 'https://github.com/meridian/api/pull/12')
+    await userEvent.click(line('Commits to push').getByRole('button', { name: 'Push 3 commits' }))
+    expect(client.push).toHaveBeenCalledWith('r22', 'def456', 'https://github.com/meridian/api/pull/12')
+    // The lead's, as a note to it.
+    await userEvent.click(line('In conflict').getByRole('button', { name: 'Ask the lead to resolve it' }))
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadId: 'thr23',
+          body: expect.stringMatching(/^PR #23 conflicts with main\. Bring the branch up to date: merge main into it/),
+        }),
+      ),
+    )
+    await userEvent.click(line('A check failed').getByRole('button', { name: 'Ask the lead to fix it' }))
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith(
+        expect.objectContaining({ threadId: 'thr24', body: 'A check on PR #24 failed: test. Fix what made it fail, then ask to push.' }),
+      ),
+    )
+    // While checks run there's nothing to do but wait: its button opens it.
+    await userEvent.click(line('Checks still running').getByRole('button', { name: 'Review' }))
+    expect(onTask).toHaveBeenLastCalledWith('thr25')
+    // A cancelled check is in the way, not a pass, and it is run again on the host: its button opens it.
+    expect(line('A check cancelled').getByText('api #26 · e2e cancelled · +12 −3')).toBeTruthy()
+    await userEvent.click(line('A check cancelled').getByRole('button', { name: 'Review' }))
+    expect(onTask).toHaveBeenLastCalledWith('thr26')
   })
 
   it('denies where it is', async () => {
