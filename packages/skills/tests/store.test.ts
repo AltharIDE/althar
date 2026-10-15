@@ -159,6 +159,10 @@ describe('projectRun', () => {
     await expect(projectRun({ ...base, root, keepOutOf: [join(root, 'runs', 'run-1', 'codex', 'repo')], selected: [] })).rejects.toThrow(
       'is inside',
     )
+    const alias = join(root, '..', `alias-${Date.now()}`)
+    await symlink(root, alias)
+    await expect(projectRun({ ...base, root, keepOutOf: [alias], selected: [] })).rejects.toThrow('inside')
+    await rm(alias)
     await expect(projectRun({ ...base, root, keepOutOf: ['/somewhere/else'], selected: [] })).resolves.toBeDefined()
     await expect(projectRun({ ...base, root, runId: '..', selected: [] })).rejects.toThrow('unsafe')
     await expect(projectRun({ ...base, root, agent: 'a/b', selected: [] })).rejects.toThrow('unsafe')

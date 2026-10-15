@@ -1,5 +1,5 @@
-import { chmod, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { chmod, mkdir, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { isTreeHash, readObject } from './store'
 
 /** A skill chosen for a run: its id and the stored version to use. */
@@ -23,8 +23,19 @@ export interface Projected {
   readonly omitted: ReadonlyArray<{ readonly id: string; readonly missing: ReadonlyArray<string> }>
 }
 
+/** The path with symlinks resolved in its deepest existing part, so an alias cannot hide an overlap. */
+const canonical = async (path: string): Promise<string> => {
+  const absolute = resolve(path)
+  try {
+    return await realpath(absolute)
+  } catch {
+    const parent = dirname(absolute)
+    return parent === absolute ? absolute : join(await canonical(parent), basename(absolute))
+  }
+}
+
 const inside = (child: string, parent: string): boolean => {
-  const path = relative(resolve(parent), resolve(child))
+  const path = relative(parent, child)
   return path === '' || (!path.startsWith('..') && !isAbsolute(path))
 }
 
@@ -48,9 +59,11 @@ export const projectRun = async (input: {
   const base = join(root, 'runs', runId, agent)
   const directory = layout === 'claude-plugin' ? join(base, 'plugin') : base
   const skillsAt = layout === 'claude-plugin' ? join(directory, 'skills') : directory
+  const where = await canonical(base)
   for (const repository of keepOutOf) {
-    if (inside(base, repository)) throw new Error(`${base} is inside the repository ${repository}`)
-    if (inside(repository, base)) throw new Error(`the repository ${repository} is inside ${base}, which is removed first`)
+    const there = await canonical(repository)
+    if (inside(where, there)) throw new Error(`${base} is inside the repository ${repository}`)
+    if (inside(there, where)) throw new Error(`the repository ${repository} is inside ${base}, which is removed first`)
   }
   const seen = new Set<string>()
   for (const { id, treeHash } of selected) {
