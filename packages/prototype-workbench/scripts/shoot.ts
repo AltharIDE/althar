@@ -9,6 +9,7 @@
  *
  * --out      where the shots go (test-results/prototype by default)
  * --size     the window, as 1280x800 (the default)
+ * --scale    pixels to a point: 1, the default, as evidence handed to Althar wants; 2 for a sharper shot
  * --clean    without the bar, which otherwise says in each shot what it shows
  * --no-side  without the shots side by side
  *
@@ -39,6 +40,7 @@ const { values, positionals } = parseArgs({
   options: {
     out: { type: 'string', default: 'test-results/prototype' },
     size: { type: 'string', default: '1280x800' },
+    scale: { type: 'string', default: '1' },
     clean: { type: 'boolean', default: false },
     side: { type: 'boolean', default: true },
   },
@@ -46,8 +48,11 @@ const { values, positionals } = parseArgs({
 
 const address = positionals[0]
 const size = /^(\d+)x(\d+)$/.exec(values.size)
-if (address === undefined || size === null) {
-  process.stderr.write('Usage: shoot.ts <the workbench page’s address> [--out folder] [--size 1280x800] [--clean] [--no-side]\n')
+const scale = Number(values.scale)
+if (address === undefined || size === null || !(scale > 0)) {
+  process.stderr.write(
+    'Usage: shoot.ts <the workbench page’s address> [--out folder] [--size 1280x800] [--scale 1] [--clean] [--no-side]\n',
+  )
   process.exit(2)
 }
 
@@ -62,7 +67,7 @@ const out = resolve(values.out)
 await mkdir(out, { recursive: true })
 const browser = await chromium.launch()
 try {
-  const page = await browser.newPage({ viewport: { width: Number(size[1]), height: Number(size[2]) }, deviceScaleFactor: 2 })
+  const page = await browser.newPage({ viewport: { width: Number(size[1]), height: Number(size[2]) }, deviceScaleFactor: scale })
   const failures: string[] = []
   page.on('pageerror', (error) => failures.push(error.message))
   await page.goto(address)

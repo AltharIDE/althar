@@ -54,7 +54,7 @@ With it served, from the root, outside an agent's sandbox (Chromium can't start 
 bun run prototype:shoot http://localhost:5400 --out test-results/board-card
 ```
 
-It walks the live page through every direction at every state, Today first, then A1, A2…, and each state side by side, and writes them in order with a caption each, in the list it prints and in `shots.md` beside them. `--clean` leaves the bar out, `--no-side` the side by side shots, and `--size 1440x900` sets the window.
+It walks the live page through every direction at every state, Today first, then A1, A2…, and each state side by side, and writes them in order with a caption each, in the list it prints and in `shots.md` beside them. `--clean` leaves the bar out, `--no-side` the side by side shots, `--size 1440x900` sets the window, and `--scale 2` takes them sharper than the 1× evidence wants.
 
 ## Work on it
 
