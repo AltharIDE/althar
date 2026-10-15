@@ -146,9 +146,7 @@ export const fakeAgents = (
           : // An account's own options, by its home's folder name (`codex@work`), or `@usual` for the agent's usual folder.
             {
               _tag: 'InProcess',
-              // What works until it is stopped gives up after two seconds, not five: a test that stops it does so well before.
               agent: fakeAgent({
-                hold: 2_000,
                 ...options,
                 ...each[agentId],
                 ...each[`${agentId}@${env.FAKE_HOME === undefined ? 'usual' : basename(env.FAKE_HOME)}`],
