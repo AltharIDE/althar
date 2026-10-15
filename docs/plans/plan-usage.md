@@ -63,8 +63,13 @@ for the person's word) with a narrow **usage read**:
   **in memory, for one call to that provider's usage URL, and for nothing
   else**.
 - It never writes, refreshes, copies, persists, logs or sends the token
-  anywhere but that URL, and never off the device. If the token is expired,
-  Althar asks the agent to refresh it (its own status command) and retries.
+  anywhere but that URL, and never off the device. An expired token is not
+  refreshed by Althar, and a status command is not assumed to refresh it
+  (OpenCode's `auth list` only lists saved credentials). The source shows a
+  fault, "sign in again", with the agent's own login flow
+  (`signIn.login`) as the action. Where the agent refreshes by itself while
+  it runs (a Codex app-server or a Claude session), the next read picks the
+  new token up.
 - One call per account at most every 60 seconds or the provider's stated
   interval, cached and shared across sessions, with backoff on a 429.
 - Each (agent, provider) source is its own adapter, enabled only after a
@@ -85,6 +90,26 @@ costs a little plan usage). Both are unverified. If neither works, Claude
 accounts with no session cannot be covered until Anthropic clears the
 endpoint in writing or adds an official read. This is the one place the
 requirement may not be met today, and the first Claude spike settles it.
+
+### What counts as a subscription
+
+Coverage is owed to subscription accounts, so the classification must be
+right. Today `registry.ts:492` makes every OpenCode sign-in `paidBy: 'key'`
+("paid per use, as far as Althar can tell"), which would put a ChatGPT, Go or
+Zen sign-in under the API-key row and skip its source. So:
+
+- The classification for OpenCode moves from the account to the **provider
+  credential**: an OpenCode account holds one entry per provider
+  (`auth.json`), and each is a plan (an OAuth sign-in to ChatGPT, Go, Zen,
+  Copilot) or a key. An account is a subscription account if any of its
+  credentials is a plan, and each plan credential has its own source and row.
+- How to tell a plan credential from a key in `opencode auth list` output (or
+  its `auth.json` entry type) is unverified; the OpenCode spike settles it.
+  Until it does, a credential Althar cannot classify counts as a fault, not
+  as a key.
+- The contract test covers the classification as well: for each registry
+  (agent, provider) pair that can be a plan, `paidBy` must say `plan` for a
+  plan sign-in, and the pair must declare a usage source.
 
 ### Coverage is enforced
 
@@ -276,7 +301,9 @@ run in parallel.
    Talk room; a badge when none is open.
 4. **The usage tab.** Ctrl/Cmd+U and the side-menu entry; every account, its
    windows, its source and age.
-5. **OpenCode sources.** One spike then one source per provider the person
+5. **OpenCode sources.** First, per-provider plan-or-key detection replacing
+   `paidBy: () => 'key'`, with its contract test. Then one spike, then one
+   source per provider the person
    can sign in with (ChatGPT first, then Go or Zen, Copilot, Gemini), each
    behind the usage-read rules; faults visible; accounts with no source
    refused.
