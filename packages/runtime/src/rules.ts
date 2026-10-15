@@ -2,7 +2,7 @@ import { realpathSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 
-import type { PermissionRequest } from '@althar/provider-adapters'
+import { type PermissionRequest, SECRET_PLACES } from '@althar/provider-adapters'
 
 /*
  * The rules for agents' requests (ADR-013). What no project can change:
@@ -60,13 +60,25 @@ const RULE_WORDS: Readonly<Record<RuleId, string>> = {
   outside: "writing outside the task's worktree",
 }
 
-/** Why the rules keep a request for the person, and which kind it is: one a project names, or one they can't tell. */
+/**
+ * Why the rules keep a request for the person, and which kind it is: one a
+ * project names, or one they can't tell. `floor` marks what could lose work
+ * or a secret (docs/plans/safety-pass.md): a force push, a push to or a
+ * deletion of the default branch, deleting or moving by force a branch that
+ * isn't the task's, git discarding work in another checkout or what it keeps
+ * to recover lost work, deleting outside the task's worktree, reading a
+ * `.env` outside it, and a push the rules can't read. It asks the person even
+ * with everything allowed, and the coordinator never answers it; only Never,
+ * or a kind the person always allows while everything isn't allowed, settles
+ * it otherwise.
+ */
 interface Kept {
   readonly reason: string
   readonly rule: RuleId | 'unclear'
+  readonly floor?: boolean
 }
 
-const kept = (reason: string, rule: RuleId | 'unclear'): Kept => ({ reason, rule })
+const kept = (reason: string, rule: RuleId | 'unclear', floor = false): Kept => (floor ? { reason, rule, floor } : { reason, rule })
 
 /**
  * A command the person named (ADR-013, ADR-018): asked about, refused, or
@@ -189,6 +201,102 @@ const credentialReason = (words: ReadonlyArray<string>): string | undefined => {
     index += ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path'].includes(words[index] ?? '') ? 2 : 1
   return (words[index] ?? '').startsWith('credential') ? CREDENTIALS_REFUSED : undefined
 }
+
+/*
+ * Reading credentials is what no project can change (ADR-013), and the
+ * keychain and git's helpers aren't all of them: people keep keys, tokens and
+ * sign-ins in plain files under their home folder too. A request that names
+ * one, as a path it reads or writes or as a word of a command, is refused for
+ * every role, whatever the project allows. This holds only for what reaches
+ * Althar, and only for what a request names: a command that finds such a file
+ * itself (`grep -r token ~`) isn't seen, and a command an agent's sandbox runs
+ * without asking never reaches Althar (docs/plans/safety-pass.md).
+ */
+
+/** What of `~/.ssh` holds no secret: public keys, the hosts it knows, and its config. */
+const SSH_PUBLIC = /^\.ssh\/([^/]*\.pub|known_hosts(\.old)?|config|authorized_keys)$/
+
+const SECRETS_REFUSED =
+  "Agents don't read the person's keys, tokens or sign-ins, such as ~/.ssh, ~/.aws or ~/.npmrc. Tell the person what's needed."
+
+/** Whether a place, as a path from the home folder, is where a secret is kept. */
+const secretFromHome = (fromHome: string): boolean => {
+  if (fromHome === '' || fromHome === '..' || fromHome.startsWith(`..${sep}`) || isAbsolute(fromHome)) return false
+  const path = fromHome.split(sep).join('/')
+  return !SSH_PUBLIC.test(path) && SECRET_PLACES.some((place) => path === place || path.startsWith(`${place}/`))
+}
+
+/** The home folder, as a command may name it at the start of a path. */
+const HOME_WORD = /^(~|\$HOME|\$\{HOME\})(?=$|\/)/
+
+/** Whether a path, named from a folder, is where a secret is kept: as written, and with symlinks followed. */
+const secretPath = (path: string, cwd: string, follow: (path: string) => string = realpathSync): boolean => {
+  const home = homedir()
+  const full = resolve(cwd, path.replace(HOME_WORD, home))
+  if (secretFromHome(relative(home, full))) return true
+  try {
+    return secretFromHome(relative(follow(home), follow(full)))
+  } catch {
+    return false
+  }
+}
+
+/** The paths a command's word may name: itself, and what follows an `@` or an `=` (`curl -d @file`, `--key-file=path`). */
+const pathsInWord = (word: string): ReadonlyArray<string> =>
+  [...new Set([word, word.slice(word.lastIndexOf('@') + 1), word.slice(word.indexOf('=') + 1)])].filter(
+    (part) => part !== '' && (HOME_WORD.test(part) || part.startsWith('/') || part.startsWith('.') || part.includes('/')),
+  )
+
+/** The home folder named anywhere in a line, quoted or inside `$(…)` too, with the path that follows it. */
+const homeMentions = (text: string): ReadonlyArray<string> => {
+  const home = homedir()
+  // A home folder at the root would match every absolute path; then only `~` and `$HOME` name it.
+  const named = home === '/' ? '' : `|${literal(home)}`
+  const mentions = new RegExp(`(?:~|\\$HOME|\\$\\{HOME\\}${named})(/[^\\s'"\`;|&<>()]*)`, 'g')
+  return [...text.matchAll(mentions)].map((match) => (match[1] ?? '').replace(/^\//, ''))
+}
+
+/**
+ * Why a command line may not run because it names where the person keeps a
+ * secret, or nothing. Each command's words are read from the folder it runs
+ * in, after any `cd`; where that isn't known (`cwd` undefined), only paths
+ * named from the home folder or the root count. A line read whole too, so a
+ * path inside quotes or `$(…)` counts.
+ */
+const secretCommandReason = (text: string, cwd?: string): string | undefined => {
+  if (homeMentions(text).some((fromHome) => secretFromHome(fromHome.split('/').join(sep)))) return SECRETS_REFUSED
+  let at = cwd
+  for (const words of parseCommandLine(text).commands) {
+    if (words[0] === 'cd') {
+      const target = (words[1] ?? '~').replace(HOME_WORD, homedir())
+      at = target.startsWith('/') ? target : at === undefined ? undefined : resolve(at, target)
+      continue
+    }
+    for (const word of words.slice(1))
+      for (const path of pathsInWord(word))
+        if ((at !== undefined || HOME_WORD.test(path) || path.startsWith('/')) && secretPath(path, at ?? '/')) return SECRETS_REFUSED
+  }
+  return undefined
+}
+
+/** Why a request may not go ahead because it reads or writes where the person keeps a secret, or nothing. */
+const secretReason = (request: PermissionRequest, cwd?: string): string | undefined => {
+  const command = request.kind === 'execute' || request.kind === 'other' ? (commandIn(request.rawInput) ?? request.title) : undefined
+  if (command !== undefined && secretCommandReason(command, cwd) !== undefined) return SECRETS_REFUSED
+  return pathsOf(request).some((path) => (cwd !== undefined || HOME_WORD.test(path) || isAbsolute(path)) && secretPath(path, cwd ?? '/'))
+    ? SECRETS_REFUSED
+    : undefined
+}
+
+/** A `.env` file, which holds a project's secrets; not one that only shows what goes in it (`.env.example`). */
+const envFile = (path: string) => {
+  const name = path.split('/').at(-1) ?? ''
+  return /^\.env(\.[\w.-]+)?$/.test(name) && !/\.(example|sample|template|dist|defaults?)$/.test(name)
+}
+
+/** A `.env` file outside the task's worktree, which the person keeps: it asks, whoever else would answer. */
+const envKept = (path: string) =>
+  kept(`Reading ${path}, outside the task's worktree, always asks: a .env file holds the person's secrets.`, 'outside', true)
 
 /** The Flatpak grants the app a broad host bridge; agents must not invoke it directly. */
 const deviceBridgeReason = (words: ReadonlyArray<string>): string | undefined =>
@@ -701,26 +809,34 @@ const pushKinds = (args: ReadonlyArray<string>, context: RuleContext): ReadonlyA
       continue
     }
     if (/^(-f|--force|--force-with-lease(=.*)?|--force-if-includes)$/.test(arg) || /^-[a-z]*f[a-z]*$/.test(arg))
-      found.push(kept('A force push always asks.', 'force-push'))
-    else if (/^(--all|--branches|--mirror)$/.test(arg)) found.push(kept('Pushing every branch always asks.', 'many-branches'))
+      found.push(kept('A force push always asks.', 'force-push', true))
+    else if (arg === '--mirror')
+      // A mirror makes the remote's branches the same as here: it forces them, and deletes those not here.
+      found.push(
+        kept('Pushing every branch always asks.', 'many-branches'),
+        kept('A mirror push forces every branch, which always asks.', 'force-push', true),
+        kept("A mirror push deletes the remote's branches that aren't here, which always asks.", 'delete-branch', true),
+      )
+    else if (/^(--all|--branches)$/.test(arg)) found.push(kept('Pushing every branch always asks.', 'many-branches'))
     else if (/^(--tags|--follow-tags)$/.test(arg))
       found.push(kept('Pushing tags always asks; they often start a release.', 'many-branches'))
-    else if (arg === '--prune') found.push(kept('A push that deletes remote branches always asks.', 'delete-branch'))
+    else if (arg === '--prune') found.push(kept('A push that deletes remote branches always asks.', 'delete-branch', true))
     else if (arg === '-d' || arg === '--delete') deleting = true
     else if (PUSH_OPTIONS_WITH_VALUE.includes(arg)) index += 1
     else if (!PUSH_OPTIONS_WITH_VALUE.some((option) => arg.startsWith(`${option}=`)) && !PUSH_FLAGS_HARMLESS.test(arg))
-      found.push(kept(`Althar can't tell what \`${arg}\` does to a push, so it asks.`, 'unclear'))
+      found.push(kept(`Althar can't tell what \`${arg}\` does to a push, so it asks.`, 'unclear', true))
   }
   const [, ...refspecs] = positional
   const destinations: Array<{ readonly branch: string; readonly deletes: boolean }> = []
   if (refspecs.length === 0) {
-    if (deleting) found.push(kept(`Althar can't tell which branch this deletes, so it asks.`, 'unclear'))
-    else if (context.currentBranch === undefined) found.push(kept(`Althar can't tell which branch this pushes, so it asks.`, 'unclear'))
+    if (deleting) found.push(kept(`Althar can't tell which branch this deletes, so it asks.`, 'unclear', true))
+    else if (context.currentBranch === undefined)
+      found.push(kept(`Althar can't tell which branch this pushes, so it asks.`, 'unclear', true))
     else destinations.push({ branch: context.currentBranch, deletes: false })
   }
   for (const written of refspecs) {
     // A forced refspec still goes somewhere, which counts too.
-    if (written.startsWith('+')) found.push(kept('A force push always asks.', 'force-push'))
+    if (written.startsWith('+')) found.push(kept('A force push always asks.', 'force-push', true))
     const refspec = written.replace(/^\+/, '')
     if (refspec.includes('*')) {
       found.push(kept('A push to a pattern of branches always asks.', 'many-branches'))
@@ -735,7 +851,7 @@ const pushKinds = (args: ReadonlyArray<string>, context: RuleContext): ReadonlyA
     }
     if (destination === 'HEAD' || (colon === -1 && source === 'HEAD')) {
       if (context.currentBranch === undefined) {
-        found.push(kept(`Althar can't tell which branch this pushes, so it asks.`, 'unclear'))
+        found.push(kept(`Althar can't tell which branch this pushes, so it asks.`, 'unclear', true))
         continue
       }
       destination = context.currentBranch
@@ -745,15 +861,16 @@ const pushKinds = (args: ReadonlyArray<string>, context: RuleContext): ReadonlyA
       continue
     }
     if (destination.startsWith('refs/') && !destination.startsWith('refs/heads/')) {
-      found.push(kept(`Althar can't tell what \`${destination}\` is, so it asks.`, 'unclear'))
+      found.push(kept(`Althar can't tell what \`${destination}\` is, so it asks.`, 'unclear', true))
       continue
     }
     destinations.push({ branch: destination.replace(/^refs\/heads\//, ''), deletes: deleting || (colon !== -1 && source === '') })
   }
   for (const { branch, deletes } of destinations) {
     if (mains.includes(branch))
-      found.push(kept(deletes ? `Deleting ${branch} always asks.` : `A push to ${branch} always asks.`, 'default-branch'))
-    else if (deletes && !own(branch)) found.push(kept(`Deleting ${branch}, which isn't this task's branch, always asks.`, 'delete-branch'))
+      found.push(kept(deletes ? `Deleting ${branch} always asks.` : `A push to ${branch} always asks.`, 'default-branch', true))
+    else if (deletes && !own(branch))
+      found.push(kept(`Deleting ${branch}, which isn't this task's branch, always asks.`, 'delete-branch', true))
   }
   return found
 }
@@ -879,6 +996,185 @@ const writes = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
   return targets
 }
 
+/** A command's operands: its words that aren't flags, redirects or where a redirect goes. */
+const operandsOf = (words: ReadonlyArray<string>) =>
+  words
+    .slice(1)
+    .filter((word, index, all) => !word.startsWith('-') && !REDIRECTS.includes(word) && !REDIRECTS.includes(all[index - 1] ?? ''))
+
+/**
+ * The places a command deletes or moves away, as its words say: what `rm`
+ * and the like name, the sources of `mv`, the folders `find -delete` starts
+ * from, and what `rsync --delete` or `--remove-source-files` removes.
+ */
+const removes = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const program = (words[0] ?? '').split('/').at(-1) ?? ''
+  const operands = operandsOf(words)
+  if (['rm', 'rmdir', 'unlink', 'shred', 'rimraf', 'trash'].includes(program)) return operands
+  if (program === 'mv') return operands.slice(0, -1)
+  if (program === 'rsync')
+    return [
+      ...(words.some((word) => word.startsWith('--delete')) ? operands.slice(-1) : []),
+      ...(words.includes('--remove-source-files') ? operands.slice(0, -1) : []),
+    ]
+  if (program === 'find') {
+    const deletes =
+      words.includes('-delete') ||
+      words.some(
+        (word, index) =>
+          ['-exec', '-execdir', '-ok', '-okdir'].includes(word) && /(^|\/)(rm|rmdir|unlink|shred)$/.test(words[index + 1] ?? ''),
+      )
+    if (!deletes) return []
+    const from = words.slice(1).findIndex((word) => word.startsWith('-') || word === '(' || word === '!')
+    const roots = from === -1 ? words.slice(1) : words.slice(1, from + 1)
+    return roots.length === 0 ? ['.'] : roots
+  }
+  return []
+}
+
+/** Package managers that install on this computer for everyone, by the subcommands that do: outside any task's worktree. */
+const INSTALLERS: Readonly<Record<string, RegExp>> = {
+  brew: /^(install|reinstall|uninstall|remove|rm|upgrade|link|unlink|tap|untap|autoremove|cleanup|services)$/,
+  cargo: /^(install|uninstall)$/,
+  go: /^install$/,
+  gem: /^(install|uninstall|update)$/,
+  pipx: /^(install|uninstall|upgrade|upgrade-all|reinstall|reinstall-all|inject|uninject)$/,
+  apt: /^(install|reinstall|remove|purge|upgrade|full-upgrade|dist-upgrade|autoremove)$/,
+  'apt-get': /^(install|reinstall|remove|purge|upgrade|dist-upgrade|autoremove)$/,
+  dnf: /^(install|reinstall|remove|erase|upgrade|update|autoremove)$/,
+  yum: /^(install|reinstall|remove|erase|upgrade|update|autoremove)$/,
+  zypper: /^(install|in|remove|rm|update|up|dist-upgrade|dup)$/,
+  apk: /^(add|del|upgrade)$/,
+  port: /^(install|uninstall|upgrade|activate|deactivate)$/,
+  snap: /^(install|remove|refresh)$/,
+}
+
+/** What a JavaScript package manager does to installed packages: with `-g`, it does it for the whole computer. */
+const JS_INSTALLS = /^(install|i|add|uninstall|un|remove|rm|r|update|up|upgrade|link|ln|unlink)$/
+
+/** Whether a command installs or removes software for the whole computer, as its words say, outside any task. */
+const installsGlobally = (words: ReadonlyArray<string>): boolean => {
+  const [first = '', ...rest] = words
+  const program = first.slice(first.lastIndexOf('/') + 1)
+  const [sub = '', next = ''] = rest.filter((word) => !word.startsWith('-'))
+  if (INSTALLERS[program]?.test(sub) === true) return true
+  if (program === 'pacman') return rest.some((word) => /^-[SRU]/.test(word))
+  if (['npm', 'pnpm', 'bun'].includes(program))
+    return JS_INSTALLS.test(sub) && rest.some((word) => word === '-g' || word === '--global' || word === '--location=global')
+  if (program === 'yarn') return sub === 'global'
+  if (program === 'uv')
+    return (sub === 'tool' && /^(install|uninstall|upgrade)$/.test(next)) || (sub === 'pip' && rest.includes('--system'))
+  if (/^pip(3(\.\d+)?)?$/.test(program))
+    return /^(install|uninstall)$/.test(sub) && rest.some((word) => word === '--user' || word === '--break-system-packages')
+  return false
+}
+
+/** Whether a short or long flag is among a command's words: `-D` in `-D` or `-Df`, `--delete` as itself. */
+const hasFlag = (args: ReadonlyArray<string>, ...flags: ReadonlyArray<string>) =>
+  args.some(
+    (arg) =>
+      flags.includes(arg) || (/^-[a-zA-Z]{2,}$/.test(arg) && flags.some((flag) => /^-[a-zA-Z]$/.test(flag) && arg.includes(flag.slice(1)))),
+  )
+
+/** The value a flag takes, as the next word or joined with `=`: `-B name`, `--force-create=name`. */
+const flagValue = (args: ReadonlyArray<string>, ...flags: ReadonlyArray<string>): string | undefined => {
+  for (const [index, arg] of args.entries()) {
+    if (flags.includes(arg)) return args[index + 1]
+    const joined = flags.find((flag) => flag.startsWith('--') && arg.startsWith(`${flag}=`))
+    if (joined !== undefined) return arg.slice(joined.length + 1)
+  }
+  return undefined
+}
+
+/**
+ * What a git command that isn't a push does that could lose work, here or
+ * in every checkout of the repository: deleting a branch that isn't the
+ * task's, or moving, renaming or resetting one by force (a worktree shares
+ * its repository's branches, so they are the person's too, and their commits
+ * may be nowhere else); clearing the stash, which every checkout shares; and
+ * throwing away what git keeps to recover lost work (`reflog expire`, `gc
+ * --prune=now`, `prune`).
+ */
+const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
+  const others = (branches: ReadonlyArray<string | undefined>) =>
+    branches.filter((branch): branch is string => branch !== undefined && branch !== '' && branch !== context.taskBranch)
+  const branchKept = (how: string, branches: ReadonlyArray<string | undefined>) =>
+    others(branches)
+      .slice(0, 1)
+      .map((branch) =>
+        kept(`${how} ${branch}, which isn't this task's branch, always asks: its commits may be nowhere else.`, 'delete-branch', true),
+      )
+  const named = git.args.filter((arg) => !arg.startsWith('-'))
+  switch (git.subcommand) {
+    case 'branch': {
+      if (hasFlag(git.args, '-d', '-D', '--delete')) return branchKept('Deleting the branch', named)
+      const renames = hasFlag(git.args, '-m', '-M', '--move')
+      const copies = hasFlag(git.args, '-c', '-C', '--copy')
+      const forced = hasFlag(git.args, '-f', '--force', '-M', '-C')
+      if (renames || copies) {
+        const [from, to] = named.length >= 2 ? named : [context.currentBranch, named[0]]
+        return [...(renames ? branchKept('Renaming the branch', [from]) : []), ...(forced ? branchKept('Replacing the branch', [to]) : [])]
+      }
+      return forced ? branchKept('Moving the branch', [named[0]]) : []
+    }
+    case 'checkout':
+      return branchKept('Resetting the branch', [flagValue(git.args, '-B')])
+    case 'switch':
+      return branchKept('Resetting the branch', [flagValue(git.args, '-C', '--force-create')])
+    case 'update-ref': {
+      const ref = git.args.filter((arg, index, all) => !arg.startsWith('-') && all[index - 1] !== '-m')[0] ?? ''
+      if (!ref.startsWith('refs/heads/')) return []
+      return branchKept(git.args.includes('-d') ? 'Deleting the branch' : 'Moving the branch', [ref.slice('refs/heads/'.length)])
+    }
+    case 'stash':
+      return git.args[0] === 'clear'
+        ? [kept("Clearing git's stash always asks: every checkout of the repository shares it, the person's too.", 'outside', true)]
+        : []
+    case 'reflog':
+    case 'gc':
+    case 'prune': {
+      const forgets =
+        git.subcommand === 'prune' ||
+        (git.subcommand === 'reflog' && ['expire', 'delete'].includes(git.args[0] ?? '')) ||
+        (git.subcommand === 'gc' && git.args.some((arg) => /^--prune=(now|all)$/.test(arg)))
+      return forgets
+        ? [
+            kept(
+              `\`git ${git.subcommand}\` throws away what git keeps to recover lost work, in every checkout of the repository, so it always asks.`,
+              'outside',
+              true,
+            ),
+          ]
+        : []
+    }
+    default:
+      return []
+  }
+}
+
+/** Whether a git command throws away work in the checkout it runs in: changes not committed, files it doesn't track, a stash. */
+const discards = (git: GitCall): boolean => {
+  const { subcommand, args } = git
+  switch (subcommand) {
+    case 'reset':
+      return args.includes('--hard')
+    case 'clean':
+      return hasFlag(args, '-f', '--force')
+    case 'checkout':
+      return args.some((arg) => ['--', '.', '-f', '--force'].includes(arg))
+    case 'switch':
+      return hasFlag(args, '-f', '--force', '--discard-changes')
+    case 'restore':
+      return !hasFlag(args, '-S', '--staged') || hasFlag(args, '-W', '--worktree')
+    case 'stash':
+      return !['list', 'show'].includes(args[0] ?? '')
+    case 'rm':
+      return true
+    default:
+      return false
+  }
+}
+
 /** One command of a line, and what of it the rules keep for the person: every kind, and those of where its output goes. */
 interface CommandKinds {
   readonly words: ReadonlyArray<string>
@@ -913,22 +1209,51 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
     const git = gitCall(words, cwd)
     if (git !== undefined) {
       const repository = [locate(where, cwd, git.cwd), ...git.elsewhere.map((path) => locate(where, cwd, path))]
-      if (repository.some((path) => outside(where, path)))
-        kinds.push(kept(`Git in another folder always asks: ${repository.find((path) => outside(where, path))}`, 'outside'))
-      if (git.subcommand === 'push') kinds.push(...pushKinds(git.args, context))
+      const elsewhere = repository.find((path) => outside(where, path))
+      if (elsewhere !== undefined) {
+        kinds.push(kept(`Git in another folder always asks: ${elsewhere}`, 'outside'))
+        // The person's own checkout, say: what they haven't committed there is nowhere else.
+        if (discards(git))
+          kinds.push(
+            kept(
+              `\`git ${git.subcommand}\` in another checkout always asks: it could throw away work there: ${elsewhere}`,
+              'outside',
+              true,
+            ),
+          )
+      }
+      kinds.push(...(git.subcommand === 'push' ? pushKinds(git.args, context) : gitKinds(git, context)))
       if (git.subcommand === 'worktree' || git.subcommand === 'clone') {
         const target = writes([
           'touch',
           ...git.args.filter((arg) => !['add', 'remove', 'prune', 'move', 'lock', 'unlock'].includes(arg)),
         ]).find((path) => outside(where, locate(where, cwd, path)))
-        if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
+        if (target !== undefined)
+          kinds.push(
+            git.subcommand === 'worktree' && git.args.includes('remove')
+              ? kept(`Removing a worktree that isn't the task's always asks: ${target}`, 'outside', true)
+              : kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'),
+          )
       }
       continue
     }
+    if (commandsIn(words).some(installsGlobally)) kinds.push(kept('Installing on this computer, outside the task, always asks.', 'outside'))
+    // What it deletes or moves away outside the worktree could be anyone's work: the person's own checkout, their documents.
+    const gone = commandsIn(words)
+      .flatMap(removes)
+      .find((path) => outside(where, locate(where, cwd, path)))
     const target = writes(words)
       .filter((path) => !redirects(words).includes(path))
       .find((path) => outside(where, locate(where, cwd, path)))
-    if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
+    if (gone !== undefined)
+      kinds.push(kept(`Deleting or moving away what's outside the task's worktree always asks: ${gone}`, 'outside', true))
+    else if (target !== undefined) kinds.push(kept(`Writing outside the task's worktree always asks: ${target}`, 'outside'))
+    // A project's secrets, in a `.env` file the task doesn't own: the person's checkout's, say.
+    const env = words
+      .slice(1)
+      .flatMap(pathsInWord)
+      .find((path) => envFile(path) && outside(where, locate(where, cwd, path)))
+    if (env !== undefined) kinds.push(envKept(env))
   }
   return { opaque, commands: each }
 }
@@ -938,7 +1263,7 @@ const commandKinds = (text: string, context: RuleContext): ReadonlyArray<Kept> =
   const { commands, opaque } = eachCommand(text, context)
   return [
     ...(opaque && /\bpush\b|\bdeploy\b|\bpublish\b|\bmerge\b/.test(text)
-      ? [kept(`Althar can't tell what this command does until it runs, so it asks.`, 'unclear')]
+      ? [kept(`Althar can't tell what this command does until it runs, so it asks.`, 'unclear', /\bpush\b/.test(text))]
       : []),
     ...commands.flatMap((command) => command.kinds),
   ]
@@ -1058,15 +1383,26 @@ const CHANGES: ReadonlyArray<PermissionRequest['kind']> = ['edit', 'delete', 'mo
 /** What the rules keep for the person in a request, whatever the project says of it: every kind it is, and why. */
 const keptOf = (request: PermissionRequest, context: RuleContext): ReadonlyArray<Kept> => {
   if (request.kind === 'execute' || request.kind === 'other') return commandKinds(commandOf(request), context)
+  const paths = pathsOf(request)
+  // A `.env` file the task doesn't own, read or changed: the person's checkout's, say.
+  const envs = paths.filter(envFile)
+  const env = envs.length === 0 ? undefined : envs.find((path) => outside(places(context), locate(places(context), context.worktree, path)))
+  const secrets = env === undefined ? [] : [envKept(env)]
   if (CHANGES.includes(request.kind)) {
-    const paths = pathsOf(request)
     if (paths.length === 0)
       return [kept(`Althar can't tell where this ${request.kind === 'edit' ? 'edit writes' : 'change goes'}, so it asks.`, 'unclear')]
     const where = places(context)
     const escaping = paths.find((path) => outside(where, locate(where, context.worktree, path)))
-    if (escaping !== undefined) return [kept(`Writing outside the task's worktree always asks: ${escaping}`, 'outside')]
+    if (escaping !== undefined)
+      return [
+        ...secrets,
+        // Deleting or moving away what's outside could be anyone's work; an edit there only writes.
+        request.kind === 'edit'
+          ? kept(`Writing outside the task's worktree always asks: ${escaping}`, 'outside')
+          : kept(`Deleting or moving away what's outside the task's worktree always asks: ${escaping}`, 'outside', true),
+      ]
   }
-  return []
+  return secrets
 }
 
 /** Kinds of request that only look, which even a project that asks about everything lets through. */
@@ -1075,16 +1411,21 @@ const LOOKS: ReadonlyArray<PermissionRequest['kind']> = ['read', 'search', 'thin
 /**
  * Decides a permission request from the rules and the project's (ADR-013).
  * What no project can change comes first: a code host is reached only
- * through Althar, and no one reads credentials. A request can be several
- * kinds at once (`git push --force origin main` is a force push and a push to
- * the default branch), and every kind counts. Then, in order:
+ * through Althar, and no one reads credentials, in the keychain or in the
+ * files people keep them in. A request can be several kinds at once (`git
+ * push --force origin main` is a force push and a push to the default
+ * branch), and every kind counts. Then, in order:
  * - what the project never allows is refused: any kind it is, or a command
  *   the project named;
  * - with everything allowed, anything else is allowed, short of what the
  *   rules can't read where the project never allows something: that is
- *   refused, with how to run it so they can;
+ *   refused, with how to run it so they can; and short of what could lose
+ *   work or a secret (`Kept`'s floor), which asks the person;
  * - a kind on the always-ask list, or a command the project asks about, is
  *   held for the person, whatever else would answer;
+ * - what could lose work or a secret asks the person where the project would
+ *   otherwise have the coordinator judge it or let a read through, unless
+ *   its kind is always allowed;
  * - what would ask otherwise (what the rules can't tell, or, where the
  *   project asks about everything or has the coordinator decide, anything
  *   but reads and changes to the task's own files, which every agent's
@@ -1104,8 +1445,11 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
       .commands.map((words) => credentialReason(unwrap(words)) ?? hostReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
       .find((reason) => reason !== undefined)
     if (refused !== undefined) return { verdict: 'deny', reason: refused }
-    if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
   }
+  // Nor the files people keep keys and sign-ins in, whatever the request does with them.
+  const secret = secretReason(request, context.worktree)
+  if (secret !== undefined) return { verdict: 'deny', reason: secret }
+  if (named?.decision === 'never') return { verdict: 'deny', reason: `The project's rules never allow \`${named.pattern.trim()}\`.` }
   const found = keptOf(request, context)
   const never = found.find((each) => each.rule !== 'unclear' && project.never.includes(each.rule))
   if (never !== undefined && never.rule !== 'unclear')
@@ -1114,18 +1458,24 @@ export const decide = (request: PermissionRequest, context: RuleContext): Verdic
   if (project.mode === 'allow') {
     // With no one to ask, what the rules can't read can't be let past what is never allowed.
     const neverAny = project.never.length > 0 || project.commands.some((rule) => rule.decision === 'never')
-    return unclear !== undefined && neverAny
-      ? {
-          verdict: 'deny',
-          reason: `${unclear.reason.replace(/,? so it asks\.$/, '.')} The project's rules never allow some things, so it's refused: run it with its words spelled out, without \`eval\` or \`$(…)\`, naming the branch or file.`,
-        }
-      : ALLOW
+    if (unclear !== undefined && neverAny)
+      return {
+        verdict: 'deny',
+        reason: `${unclear.reason.replace(/,? so it asks\.$/, '.')} The project's rules never allow some things, so it's refused: run it with its words spelled out, without \`eval\` or \`$(…)\`, naming the branch or file.`,
+      }
+    // What could lose work or a secret still asks: allowing everything is for what the person would wave through.
+    const floor = found.find((each) => each.floor === true)
+    return floor === undefined ? ALLOW : ask(floor.reason.replace(/ always asks/, ' always asks, even with everything allowed'), false)
   }
   const asked = found.find((each) => each.rule === 'unclear' || project.ask.includes(each.rule))
   // What always asks waits for the person, whatever the allow rules say.
   if (asked !== undefined && found.some((each) => each.rule !== 'unclear' && project.ask.includes(each.rule)))
     return ask(asked.reason, true)
   if (named !== undefined) return ask(asked?.reason ?? `The project's rules ask before \`${named.pattern.trim()}\`.`, true)
+  // What could lose work or a secret is the person's to answer, not the coordinator's, unless they always allow its kind; where
+  // the project lets the rest through ("Allowed"), a kind taken off the always-ask list is the person's own choice.
+  const floor = found.find((each) => each.floor === true && each.rule !== 'unclear' && !project.allow.includes(each.rule))
+  if (floor !== undefined && project.mode !== 'rules') return ask(floor.reason, false)
   // Reads, and changes to the task's own files, go through, as they would in any agent's sandbox.
   const ownFiles = CHANGES.includes(request.kind) && found.length === 0
   const routine = LOOKS.includes(request.kind) || ownFiles
@@ -1898,7 +2248,11 @@ export const decideReader = (request: PermissionRequest, options: { readonly off
   if (ALTHAR_TOOL.test(request.title)) return ALLOW
   switch (request.kind) {
     case 'read':
-    case 'search':
+    case 'search': {
+      // A reader may read anything but where the person keeps keys and sign-ins.
+      const secret = secretReason(request)
+      return secret === undefined ? ALLOW : deny(secret)
+    }
     case 'think':
       return ALLOW
     case 'fetch':
@@ -1913,7 +2267,9 @@ export const decideReader = (request: PermissionRequest, options: { readonly off
       const reason =
         parseCommandLine(command)
           .commands.map((words) => credentialReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
-          .find((found) => found !== undefined) ?? readerCommandReason(command)
+          .find((found) => found !== undefined) ??
+        secretCommandReason(command) ??
+        readerCommandReason(command)
       return reason === undefined ? ALLOW : deny(reason)
     }
   }
