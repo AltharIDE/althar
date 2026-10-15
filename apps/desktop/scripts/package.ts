@@ -145,6 +145,22 @@ writeFileSync(
 )
 // npm, for a flat node_modules the adapters' own lookups find their way through.
 execFileSync('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock'], { cwd: stage, stdio: 'inherit' })
+/*
+ * The workspace patches the Claude adapter (the repository's `patches/`, applied by bun); this install is npm's, so the same patch is applied here, or the app would not get plan usage before a turn's first figure.
+ */
+const adapterDir = join(stage, 'node_modules', '@agentclientprotocol', 'claude-agent-acp')
+const adapterPatch = join(
+  desktop,
+  '..',
+  '..',
+  'patches',
+  `@agentclientprotocol%2Fclaude-agent-acp@${own.dependencies['@agentclientprotocol/claude-agent-acp']}.patch`,
+)
+if (!existsSync(adapterPatch))
+  throw new Error(
+    `The Claude adapter is at ${own.dependencies['@agentclientprotocol/claude-agent-acp']} and has no patch at ${adapterPatch}: make it again for this version`,
+  )
+execFileSync('git', ['apply', adapterPatch], { cwd: adapterDir, stdio: 'inherit' })
 for (const [name, version] of Object.entries(pinned)) {
   const staged = versionAt(join(stage, 'node_modules', name, 'package.json'))
   if (staged !== version) throw new Error(`The package has ${name} ${staged}, but the workspace runs ${version}`)

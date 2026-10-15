@@ -271,8 +271,15 @@ export const readOpenCodeCredentials = (
     const inherited = { ...childEnvironment(spec), ...options.home }
     const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env: inherited })
     const env = launched === spec ? inherited : { ...childEnvironment(launched), ...options.home }
-    execFile(launched.command, [...launched.args], { timeout: options.timeout ?? 15_000, env }, (error, stdout) => {
-      if (error !== null) return resolve({ kind: 'failed', message: `${agent.name} would not list its sign-ins.` })
+    execFile(launched.command, [...launched.args], { timeout: options.timeout ?? 15_000, env }, (error, stdout, stderr) => {
+      if (error !== null) {
+        // Why, in a few words, for the person to act on: a missing command, an unknown flag, a timeout.
+        const why = (String(stderr).trim().split('\n').pop() || error.message.split('\n')[0] || '').slice(0, 160)
+        return resolve({
+          kind: 'failed',
+          message: `${agent.name} would not list its sign-ins${why === '' ? '' : `: ${why}`}.`.replace(/\.+$/, '.'),
+        })
+      }
       const found = openCodeCredentials(stdout)
       resolve(
         found === null
