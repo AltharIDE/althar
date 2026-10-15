@@ -4,7 +4,8 @@
 # sign-in and sessions), the device outside it (the person's own OpenCode and
 # Codex, through the permission the manifest asks for),
 # data that persists beside the profile (its home is fresh each run), and
-# permissions (no host filesystem or ssh-agent socket). The window's own
+# permissions (no host filesystem or ssh-agent socket, but the tray watcher
+# and the keyring reachable). The window's own
 # behavior is
 # the same X11 smoke the other packages use: ALTHAR_BIN=/usr/bin/althar
 # ALTHAR_ARGS=--ozone-platform=x11 scripts/x11-smoke.sh. Needs the app
@@ -28,6 +29,7 @@ echo "$perms" | grep -qE '(^|[=;])network(;|$)' && ok "network shared" || bad "n
 echo "$perms" | grep -qE '(^|[=;])ipc(;|$)' && ok "shared memory allowed (ipc)" || bad "shared memory (ipc)"
 echo "$perms" | grep -q 'wayland' && ok "wayland allowed" || bad "wayland allowed"
 echo "$perms" | grep -q 'org.freedesktop.secrets' && ok "the keyring is reachable (org.freedesktop.secrets)" || bad "keyring reachable"
+echo "$perms" | grep -q 'org.kde.StatusNotifierWatcher' && ok "the tray watcher is reachable (org.kde.StatusNotifierWatcher)" || bad "tray watcher reachable"
 echo "$perms" | grep -q 'org.freedesktop.Flatpak' && ok "the device is reachable (org.freedesktop.Flatpak)" || bad "device reachable"
 echo "$perms" | grep -q 'ssh-auth' && bad "ssh agent is not exposed" || ok "ssh agent is not exposed"
 echo "$perms" | grep -q 'filesystems=host' && bad "no host filesystem in permissions" || ok "no host filesystem in permissions"
