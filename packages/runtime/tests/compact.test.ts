@@ -168,6 +168,46 @@ describe('compacting an agent’s context', () => {
     }).pipe(Effect.provide(oneAtOnce())),
   )
 
+  it.live('says so when the agent couldn’t compact', () =>
+    Effect.gen(function* () {
+      const projectId = yield* opened
+      const task = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+      yield* answered(task.threadId, 1)
+      yield* say(task.threadId, 'Look again. [lead:compact-fails] [context:10/1000000]')
+      yield* answered(task.threadId, 2)
+      yield* compact(task.threadId)
+      yield* answered(task.threadId, 3)
+      const said = yield* titles(task.threadId)
+      assert.include(said, "Fake codex couldn't compact its context.")
+      assert.isFalse(said.some((title) => title?.startsWith('Compacted') === true))
+    }).pipe(Effect.provide(oneAtOnce())),
+  )
+
+  it.live('takes a coordinator’s first message of /compact as its own turn, and its brief with the next', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const coordinator = yield* Coordinator
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const threadId = yield* coordinator.thread(project.projectId)
+      const tell = (body: string) =>
+        Effect.gen(function* () {
+          yield* coordinator.say({
+            envelope: yield* Runtime.envelope('thread.send', { body }),
+            threadId,
+            body,
+            disposition: 'after_current',
+          })
+        })
+      yield* tell(COMPACT)
+      yield* tell('Hello.')
+      // Nothing is left behind it: the brief goes with what was said next.
+      const rows = yield* until(prompts(threadId), (all) => all.length === 2 && all.every((row) => row.state === 'completed'))
+      assert.strictEqual(rows[0]?.prompt, COMPACT)
+      assert.match(rows[1]?.prompt ?? '', /^You are the coordinator of the project /)
+      assert.match(rows[1]?.prompt ?? '', /Hello\.$/)
+    }).pipe(Effect.provide(oneAtOnce())),
+  )
+
   it.live('is refused where no agent is on the thread', () =>
     Effect.gen(function* () {
       const projectId = yield* opened

@@ -1168,7 +1168,19 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
       // Asked to compact, as Claude Code, Codex and OpenCode take `/compact`, it says its context holds a tenth of what it may.
+      // With `[lead:compact-fails]`, it says so in a call of its own and ends its turn as usual, as Claude Code does.
       if (text === '/compact') {
+        if (session.markers.has('[lead:compact-fails]')) {
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'compact',
+            title: 'Compact conversation',
+            kind: 'think',
+            status: 'in_progress',
+          })
+          await update({ sessionUpdate: 'tool_call_update', toolCallId: 'compact', status: 'failed' })
+          return ended()
+        }
         await update({ sessionUpdate: 'usage_update', used: Math.round(session.contextSize / 10), size: session.contextSize })
         await say('Compacted the conversation.')
         return ended()

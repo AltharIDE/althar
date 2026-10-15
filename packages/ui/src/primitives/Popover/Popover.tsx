@@ -80,6 +80,8 @@ export function Popover({
   // Pointing opens and closes it after a moment; one it opened leaves focus where it was.
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const pointed = useRef(false)
+  // Whether focus went into the panel: one only pointed at gives none back as it closes, so typing elsewhere goes on.
+  const tookFocus = useRef(false)
   useEffect(() => () => clearTimeout(timer.current), [])
   const mouse = (e: PointerEvent) => hover && e.pointerType !== 'touch'
   const enter = (e: PointerEvent) => {
@@ -138,9 +140,14 @@ export function Popover({
           onInteractOutside={onInteractOutside}
           onPointerEnter={(e) => mouse(e) && clearTimeout(timer.current)}
           onPointerLeave={leave}
+          onCloseAutoFocus={(e) => {
+            if (!tookFocus.current) e.preventDefault()
+            tookFocus.current = false
+          }}
           onOpenAutoFocus={(e) => {
             // Opened by pointing, focus stays where it was: the panel is only being looked at.
             if (pointed.current) return e.preventDefault()
+            tookFocus.current = true
             if (initialFocus !== 'panel') return
             e.preventDefault()
             if (e.currentTarget instanceof HTMLElement) e.currentTarget.focus()
