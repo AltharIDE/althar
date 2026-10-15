@@ -155,8 +155,8 @@ export const findNotch = (primaryHeight: number): Promise<Notch | null> =>
 
 /** The mark's picture in resources/tray: a template on a Mac, light for a dark panel and dark for a light one elsewhere. */
 export const markFile = (platform: NodeJS.Platform, dark: boolean, yours: boolean): string => {
-  const kind = platform === 'darwin' ? 'Template' : dark ? 'Light' : 'Dark'
-  return `mark${yours ? 'Yours' : ''}${kind}.png`
+  const ink = dark ? 'Light' : 'Dark'
+  return `mark${yours ? 'Yours' : ''}${platform === 'darwin' ? 'Template' : ink}.png`
 }
 
 /** What the tray's menu holds off a Mac, where the mark itself may not take a click: open, what waits, quit. */
