@@ -17,21 +17,6 @@ const isKeyring = (backend: string) => backend === 'gnome_libsecret' || backend.
 export const keyringIsSafe = (platform: NodeJS.Platform, backend: string): boolean => platform !== 'linux' || isKeyring(backend)
 
 /**
- * Which KWallet a Flatpak on KDE should ask for. The sandbox is told neither
- * the Plasma version (`KDE_SESSION_VERSION` isn't forwarded) nor anything else
- * that says it, so it asks the session bus which wallet daemon is there:
- * `owned` says whether a name has an owner, for the two names the manifest
- * lets the sandbox talk to. Neither, as when the wallet isn't started yet, is
- * Plasma 6, the one Plasma 5's end of life leaves, unless the person says
- * otherwise with `flatpak override --env=KDE_SESSION_VERSION=5`.
- */
-export const walletOf = (owned: (name: string) => boolean, kdeSession: string | undefined): 'kwallet5' | 'kwallet6' => {
-  if (owned('org.kde.kwalletd6')) return 'kwallet6'
-  if (owned('org.kde.kwalletd5')) return 'kwallet5'
-  return kdeSession === '5' ? 'kwallet5' : 'kwallet6'
-}
-
-/**
  * Which password store to ask Electron for, off a Mac. Electron picks
  * gnome_libsecret only for desktops it recognises and plain text for others.
  * Asking for gnome_libsecret on an unrecognised desktop or KDE is safe:
@@ -50,13 +35,13 @@ export const passwordStore = (
   desktop: string | undefined,
   flatpak: boolean,
   platform: NodeJS.Platform = process.platform,
-  wallet: 'kwallet5' | 'kwallet6' = 'kwallet6',
+  kdeSession?: string,
 ): 'gnome-libsecret' | 'kwallet5' | 'kwallet6' | null => {
   // A Linux switch: macOS and Windows keep their own keychain, which Electron knows without being told.
   if (platform !== 'linux') return null
   if (args.some((arg) => arg === '--password-store' || arg.startsWith('--password-store='))) return null
   const names = (desktop ?? '').toLowerCase().split(':')
-  if (flatpak && names.includes('kde')) return wallet
+  if (flatpak && names.includes('kde')) return kdeSession === '5' ? 'kwallet5' : 'kwallet6'
   const recognised = ['x-cinnamon', 'deepin', 'gnome', 'pantheon', 'xfce', 'ukui', 'unity']
   return flatpak || names.includes('kde') || !names.some((name) => recognised.includes(name)) ? 'gnome-libsecret' : null
 }
