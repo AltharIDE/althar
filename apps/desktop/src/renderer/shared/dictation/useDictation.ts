@@ -1,6 +1,14 @@
 import { type Dispatch, type RefObject, type SetStateAction, useEffect, useEffectEvent, useRef, useState } from 'react'
 
-import { type Dictation, type DictationState as TrayState, DictationSetup, type DictationTrayProps } from '@althar/ui'
+import {
+  chord,
+  commandDown,
+  type Dictation,
+  type DictationState as TrayState,
+  DictationSetup,
+  type DictationTrayProps,
+  keys,
+} from '@althar/ui'
 
 import { reads } from '../../data/reads'
 import { type DictationEvent, type DictationHost, type DictationState, type DownloadStop, useServices } from '../../data/services'
@@ -54,8 +62,7 @@ interface Said extends Recorded {
 }
 
 /* The shortcut, as the window's own system writes it. */
-const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent)
-export const SHORTCUT = MAC ? '⌘⇧D' : 'Ctrl+Shift+D'
+export const SHORTCUT = chord(keys.mod, keys.shift, 'D')
 /* Held this long, the shortcut is held to talk: letting go stops. */
 const HELD = 500
 
@@ -401,7 +408,7 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
     claims.push(me)
     const mine = () => claims.at(-1) === me
     const onDown = (event: KeyboardEvent) => {
-      if (!mine() || event.key.toLowerCase() !== 'd' || !(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey) return
+      if (!mine() || event.key.toLowerCase() !== 'd' || !commandDown(event) || !event.shiftKey || event.altKey) return
       event.preventDefault()
       if (!event.repeat) shortcutDown()
     }

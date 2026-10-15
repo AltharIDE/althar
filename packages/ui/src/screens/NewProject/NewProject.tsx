@@ -1,6 +1,6 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 
-import { keys, modKey } from '../../foundations/keys'
+import { commandDown, keys, modKey } from '../../foundations/keys'
 import { device } from '../../foundations/device'
 import type { CodeHost } from '../../foundations/codeHost'
 import { Icon } from '../../foundations/Icon/Icon'
@@ -311,7 +311,7 @@ export function NewProject({
       if (creating || overlaid() || (event.target instanceof Element && event.target.closest('[data-own-escape]') !== null)) return
       event.preventDefault()
       onCancel()
-    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+    } else if (event.key === 'Enter' && commandDown(event)) {
       event.preventDefault()
       create()
     }
