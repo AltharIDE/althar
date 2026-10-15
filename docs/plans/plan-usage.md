@@ -69,8 +69,9 @@ Per agent, today:
 
 **What would change this.** If the person decides endpoint calls are worth
 it, that is an architecture decision to amend rule 3 first, and a separate
-read of each provider's terms. It would help OpenCode on a ChatGPT login
-only. Not recommended.
+read of each provider's terms. The Claude endpoint stays out whatever is
+decided, unless Anthropic clears that use in writing. It would help OpenCode
+on a ChatGPT login only. Not recommended.
 
 **The 1-month window.** No source found offers one. Codex's snapshot has
 `primary`, `secondary` and `credits`, not a monthly window. OpenCode's own
