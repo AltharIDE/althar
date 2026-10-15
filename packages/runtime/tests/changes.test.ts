@@ -1773,3 +1773,134 @@ describe('a change whose checks Althar sees through', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 })
+
+/*
+ * What failed, said in full (ADR-041): a failed check run again once before
+ * its lead is told, a check's whole log a page at a time, and the thread
+ * saying when Althar can't read the checks, or when they have run too long.
+ */
+describe('what failed, in full', () => {
+  const failing = { name: 'test', state: 'failed' as const, log: 'FAIL limit.test.ts' }
+  const passing = { name: 'test', state: 'passed' as const }
+  const notices = (threadId: string) =>
+    Effect.map(items(threadId), (all) => all.flatMap((item) => (item.kind === 'notice' ? [String(item.content.title)] : [])))
+  const fixesOn = (bare: string) =>
+    git(bare, 'ls-tree', '--name-only', 'althar/add-a-retry')
+      .split('\n')
+      .filter((name) => name.startsWith('fixed-'))
+  const AGAIN = 'Running test on PR #1 again, once, in case it failed by chance.'
+
+  it.live('runs a failed check again once, and tells its lead only if it fails again', () => {
+    const { working, bare } = hosted()
+    const first: Array<string> = []
+    const github: FakeService = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      checksFor: (_, sha) => {
+        if (first.length === 0) first.push(sha)
+        // The first commit fails, and fails again when run again; the lead's fix passes.
+        return sha === first[0] ? [failing] : [passing]
+      },
+    })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:fix-push]',
+      )
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && fixesOn(bare).length === 1, Duration.seconds(30))
+      assert.lengthOf(github.reruns, 1)
+      assert.include(yield* notices(ready?.threadId ?? ''), AGAIN)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('takes a check that passes when run again as passed: its lead isn’t told', () => {
+    const { working, bare } = hosted()
+    const github: FakeService = makeFakeService({
+      pushUrl: () => bare,
+      headOf: tipOf(bare),
+      checksFor: () => (github.reruns.length === 0 ? [failing] : [passing]),
+    })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(
+        working,
+        'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit] [lead:fix-push]',
+      )
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready' && github.reruns.length === 1, Duration.seconds(30))
+      yield* Effect.sleep('500 millis')
+      assert.lengthOf(fixesOn(bare), 0)
+      assert.include(yield* notices(ready?.threadId ?? ''), AGAIN)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('gives its lead a check’s whole log, a page at a time', () => {
+    const { working, bare } = hosted()
+    const log = Array.from({ length: 700 }, (_, index) => `line ${index + 1}`).join('\n')
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [{ name: 'test', state: 'running', log }] })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [card] = yield* until(cards(projectId), (all) => all[0]?.change != null, Duration.seconds(20))
+      const lead = { role: 'lead' as const, projectId, threadId: card?.threadId ?? '', sessionId: 'none', taskId: card?.taskId ?? '' }
+      const last = yield* callTool(lead, 'read_check_log', { check: 'test' })
+      assert.match(last, /^Lines 401 to 700 of 700 of test's log on PR #1; from_line 101 reads the page before:\n```\nline 401\n/)
+      assert.match(last, /line 700\n```$/)
+      const firstPage = yield* callTool(lead, 'read_check_log', { check: 'Test', from_line: 1 })
+      assert.match(firstPage, /^Lines 1 to 300 of 700 of test's log on PR #1; from_line 301 reads on:\n```\nline 1\n/)
+      assert.include(yield* callTool(lead, 'read_check_log', { check: 'lint' }), 'PR #1 has no check called "lint". Its checks: test.')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
+  it.live('makes a change the person’s when its checks run too long, and says so', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), checksFor: () => [{ name: 'test', state: 'running' }] })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
+      const said = yield* until(
+        notices(ready?.threadId ?? ''),
+        (all) => all.some((title) => title.includes('have run for')),
+        Duration.seconds(10),
+      )
+      assert.isTrue(
+        said.some((title) => /^The checks on PR #1 have run for (a minute|\d+ minutes), so the change is yours now\.$/.test(title)),
+      )
+    }).pipe(
+      Effect.provide(
+        Queries.layer.pipe(
+          Layer.provideMerge(
+            runtime(
+              ':memory:',
+              {},
+              { connectors: fakeConnectors({ github }), listenEvery: Duration.millis(100), checksStuck: Duration.millis(300) },
+            ),
+          ),
+        ),
+      ),
+    )
+  })
+
+  it.live('says when it can’t read the checks, and hears the rest all the same', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare) })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const [card] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      github.failNext('checks', 'forbidden')
+      github.commentAs(1, 'dana', 'Looks good.')
+      const threadId = card?.threadId ?? ''
+      yield* until(arrivals(threadId), (all) => all.some((one) => one.kind === 'comment'), Duration.seconds(10))
+      assert.isTrue(
+        (yield* notices(threadId)).some((title) => title.startsWith("Althar can't read the checks on PR #1: its host refused them")),
+      )
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})

@@ -45,3 +45,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [035](035-a-task-s-kind-is-read-from-what-it-has.md) | A task's kind is read from what it has, and its card has nothing to press |
 | [036](036-usage-data-from-the-main-process.md) | Anonymous usage data goes from the main process, named events only |
 | [040](040-a-change-reaches-the-person-green.md) | Until the person has looked, a change's checks are Althar's to see through |
+| [041](041-what-failed-said-in-full.md) | What failed is said in full: a check run again once, its whole log on request, and the checks Althar can't see |

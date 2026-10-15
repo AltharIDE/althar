@@ -59,6 +59,8 @@ export interface RuntimeOptions {
    * host registers its checks a few seconds after a push. A minute unless a test says otherwise (ADR-040).
    */
   readonly checksAppear?: Duration.Duration
+  /** How long a change's checks may run, while Althar sees them through, before the change is the person's: 45 minutes unless a test says (ADR-041). */
+  readonly checksStuck?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
   /** Althar's GitHub App, by its slug, for where it is installed on an owner. */
