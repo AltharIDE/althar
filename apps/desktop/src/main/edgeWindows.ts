@@ -2,7 +2,19 @@ import { join } from 'node:path'
 
 import { BrowserWindow, Menu, nativeImage, nativeTheme, type Rectangle, screen, Tray } from 'electron'
 
-import { DEFAULT_EDGE, type EdgePlace, edgeIn, findNotch, markFile, type Notch, pointerOn, readEdge, sheetBounds, trayItems, writeEdge } from './edge'
+import {
+  DEFAULT_EDGE,
+  type EdgePlace,
+  edgeIn,
+  findNotch,
+  markFile,
+  type Notch,
+  pointerOn,
+  readEdge,
+  sheetBounds,
+  trayItems,
+  writeEdge,
+} from './edge'
 
 /*
  * The edge of the screen, drawn (edge.ts holds the choice and finds the
