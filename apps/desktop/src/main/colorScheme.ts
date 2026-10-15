@@ -22,15 +22,8 @@ export const darkPanel = (scheme: Scheme | undefined): boolean => scheme !== 2
 export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void): (() => void) => {
   let monitor: ChildProcess | undefined
   let stopped = false
-
-  execFile(
-    'gdbus',
-    ['call', ...PORTAL, '--method', 'org.freedesktop.portal.Settings.ReadOne', 'org.freedesktop.appearance', 'color-scheme'],
-    { timeout: 5000 },
-    (error, out) => {
-      if (!stopped) changed(error === null ? parseScheme(out) : undefined)
-    },
-  )
+  // A change the monitor reports is newer than the snapshot read after it: the snapshot never overwrites one.
+  let heard = false
 
   try {
     monitor = spawn('gdbus', ['monitor', ...PORTAL], { stdio: ['ignore', 'pipe', 'ignore'] })
@@ -41,7 +34,9 @@ export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void):
       for (const line of lines) {
         if (!line.includes('SettingChanged') || !line.includes('color-scheme')) continue
         const scheme = parseScheme(line)
-        if (scheme !== undefined && !stopped) changed(scheme)
+        if (scheme === undefined || stopped) continue
+        heard = true
+        changed(scheme)
       }
     })
     monitor.on('error', () => undefined)
@@ -49,6 +44,15 @@ export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void):
   } catch {
     // No gdbus: the default stands.
   }
+
+  execFile(
+    'gdbus',
+    ['call', ...PORTAL, '--method', 'org.freedesktop.portal.Settings.ReadOne', 'org.freedesktop.appearance', 'color-scheme'],
+    { timeout: 5000 },
+    (error, out) => {
+      if (!stopped && !heard) changed(error === null ? parseScheme(out) : undefined)
+    },
+  )
 
   return () => {
     stopped = true
