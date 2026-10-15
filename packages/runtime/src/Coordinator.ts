@@ -7,6 +7,7 @@ import { knownModelName } from '@althar/contracts'
 import { Context, type Crypto, Effect, Layer, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { thisDevice } from './device'
 import { Busy } from './Busy'
 import { touchCard } from './cards'
 import { Changes } from './Changes'
@@ -1141,7 +1142,7 @@ export class Coordinator extends Context.Service<
         ),
         tool(
           'start_task',
-          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it, and an effort it lists where it matters; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. It starts with no branch; if its lead changes the repository, Althar puts that on a branch of its own, which stays on this Mac. Should the person want what it made as a real change, reviewed and in a pull request, they ask its lead, which makes it one; pass that on with message_lead. A change worth reviewing, or that should end in a pull request from the start, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
+          `Starts something small at once, without a plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead you pick, as list_models writes it, and an effort it lists where it matters; no review, nothing published, and no wait. Give it a title (at most ${TITLE_LENGTH} characters) and what the lead needs to know. It starts with no branch; if its lead changes the repository, Althar puts that on a branch of its own, which stays on ${thisDevice()}. Should the person want what it made as a real change, reviewed and in a pull request, they ask its lead, which makes it one; pass that on with message_lead. A change worth reviewing, or that should end in a pull request from the start, is draft_task and propose_plan instead; to try what a task has built, ask its lead with message_lead.`,
           {
             type: 'object',
             properties: {
