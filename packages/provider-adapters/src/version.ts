@@ -21,13 +21,17 @@ export const majorOf = (version: string): number | null => {
 }
 
 /**
- * Why no session starts on this version of the agent: its `why`, where the
- * agent runs at one major only and this is another. Null where it runs, or
- * where the version couldn't be read, which isn't taken as another major.
+ * Why no session starts on this version of the agent, where it runs at one
+ * major only: its `why` where this is another, and where the version couldn't
+ * be read, that it can't be told to be that one. Null where it runs.
  */
-export const unsupportedAt = (agent: Pick<AgentDefinition, 'supported'>, version: string | null): string | null => {
+export const unsupportedAt = (agent: Pick<AgentDefinition, 'name' | 'supported'>, version: string | null): string | null => {
+  if (agent.supported === undefined) return null
   const major = version === null ? null : majorOf(version)
-  return agent.supported === undefined || major === null || major === agent.supported.major ? null : agent.supported.why
+  if (major === agent.supported.major) return null
+  return major === null
+    ? `Althar couldn’t tell which version of ${agent.name} this is, and starts no session on one it can’t tell is ${agent.name} ${agent.supported.major}. Check that its --version answers, then check again.`
+    : agent.supported.why
 }
 
 /** The same, for the copy its commands run now, asked of it now: the person may have changed it since Althar started. */

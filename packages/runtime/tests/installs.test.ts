@@ -314,6 +314,11 @@ describe('downloading an agent', () => {
     const refused = await mislabelled.run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))
     assert.include(JSON.stringify(refused), 'OpenCode 2 isn’t supported yet')
     assert.isFalse(existsSync(join(mislabelled.root, 'opencode', 'current')))
+    // Nor one whose version can't be told: it can't be told to be 1.x.
+    const unsaid = using({ fetch: github(archive('opencode dev build'), { tag: 'v1.19.0' }).fetch })
+    const untold = await unsaid.run(Effect.flatMap(Installs, (installs) => installs.install(opencode)))
+    assert.include(JSON.stringify(untold), 'couldn’t tell which version of OpenCode this is')
+    assert.isFalse(existsSync(join(unsaid.root, 'opencode', 'current')))
     // An agent run at any version still takes GitHub's latest release, whatever its major.
     const { supported: _, ...anyVersion } = opencode
     const latest = github(archive('2.0.29'), { tag: 'v2.0.29' })

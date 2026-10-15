@@ -45,17 +45,21 @@ describe('the major Althar runs an agent at', () => {
     expect(unsupportedAt(agents.opencode, '0.9.1')).toBe(why)
   })
 
-  it('stops nothing where the version can’t be read, or the agent runs at any', () => {
-    expect(unsupportedAt(agents.opencode, null)).toBeNull()
-    expect(unsupportedAt(agents.opencode, 'nightly')).toBeNull()
+  it('starts nothing where the version can’t be read, as it can’t be told to be 1.x; an agent run at any version is never stopped', () => {
+    const unknown = unsupportedAt(agents.opencode, null)
+    expect(unknown).toContain('couldn’t tell which version of OpenCode this is')
+    expect(unknown).toContain('OpenCode 1')
+    expect(unsupportedAt(agents.opencode, 'nightly')).toBe(unknown)
     expect(unsupportedAt(agents['claude-code'], '3.0.0')).toBeNull()
+    expect(unsupportedAt(agents['claude-code'], null)).toBeNull()
   })
 
   it('asks the copy the agent runs now, as OpenCode 2 prints it', async () => {
     expect(await Effect.runPromise(unsupportedNow(saying('opencode v2.0.29')))).toBe(why)
     expect(await Effect.runPromise(unsupportedNow(saying('1.19.0')))).toBeNull()
-    expect(
-      await Effect.runPromise(unsupportedNow({ ...agents.opencode, version: () => ({ command: 'althar-no-such-cli', args: [] }) })),
-    ).toBeNull()
+    // A copy that doesn't answer, or answers with no version, isn't run.
+    const silent = { ...agents.opencode, version: () => ({ command: 'althar-no-such-cli', args: [] }) }
+    expect(await Effect.runPromise(unsupportedNow(silent))).toContain('couldn’t tell which version')
+    expect(await Effect.runPromise(unsupportedNow(saying('opencode dev build')))).toContain('couldn’t tell which version')
   })
 })

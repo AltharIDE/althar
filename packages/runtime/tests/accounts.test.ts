@@ -21,7 +21,7 @@ import * as Runtime from '../src/Runtime'
 import { Secrets } from '../src/Secrets'
 import { anyOf, SignIns } from '../src/SignIns'
 import { usableModels } from '../src/usableModels'
-import { fakeAgents, fakeConnectors, items, launches, repository, runtime, until } from './support'
+import { definition, fakeAgents, fakeConnectors, items, launches, repository, runtime, until } from './support'
 
 /*
  * Several accounts per agent (ADR-012): the agent's usual folder first, then
@@ -344,6 +344,44 @@ describe('accounts', () => {
       // The account signed out doesn't count: the agent isn't out while another can run.
       assert.isTrue((yield* limits.out('codex'))._tag === 'None')
     }).pipe(Effect.provide(withAccounts({}, [away])))
+  })
+
+  it.effect('never run the sign-in status of an agent at a version no session starts on, or one that can’t be told', () => {
+    /* The fake `too-new`, its version as given, its status command leaving a trace in a file of its own when it runs. */
+    const at = (version: string) => {
+      const asked = join(mkdtempSync(join(tmpdir(), 'althar-asked-')), 'asked')
+      const plain = definition('too-new')
+      const entry = {
+        definition: {
+          ...plain,
+          version: () => ({ command: 'sh', args: ['-c', `echo ${version}`] }),
+          signIn: { ...plain.signIn, status: () => ({ command: 'sh', args: ['-c', `echo "$FAKE_HOME" >> ${asked}`] }) },
+        },
+        transport: () => {
+          throw new Error('Not started here')
+        },
+      }
+      const agents = Layer.succeed(Agents, Agents.of({ list: [entry], get: () => Effect.succeed(entry) }))
+      return { asked, layer: Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { agents }))) }
+    }
+    const check = Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const signIns = yield* SignIns
+      const [usual] = yield* accounts.of('too-new')
+      return { account: yield* signIns.account(usual!, true), agent: yield* signIns.of('too-new', true) }
+    })
+    return Effect.gen(function* () {
+      // OpenCode 2's status could answer for another account: it isn't asked, and says it can't tell.
+      for (const said of ['opencode v2.0.29', 'opencode dev build']) {
+        const { asked, layer } = at(said)
+        assert.deepStrictEqual(yield* Effect.provide(check, layer), { account: { status: 'unknown', paidBy: 'unknown' }, agent: 'unknown' })
+        assert.isFalse(existsSync(asked), said)
+      }
+      // The version it runs at is asked as before.
+      const { asked, layer } = at('1.19.0')
+      assert.strictEqual((yield* Effect.provide(check, layer)).agent, 'signed_in')
+      assert.isTrue(existsSync(asked))
+    })
   })
 
   it.live('offer no model of an agent whose only account a project allows is signed out', () => {
