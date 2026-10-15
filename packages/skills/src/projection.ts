@@ -1,6 +1,6 @@
 import { chmod, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { readObject } from './store'
+import { isTreeHash, readObject } from './store'
 
 /** A skill chosen for a run: its id and the stored version to use. */
 export interface Selected {
@@ -40,6 +40,12 @@ export const projectRun = async (input: {
   const directory = join(root, 'runs', runId, agent)
   for (const repository of keepOutOf) {
     if (inside(directory, repository)) throw new Error(`${directory} is inside the repository ${repository}`)
+  }
+  const seen = new Set<string>()
+  for (const { id, treeHash } of selected) {
+    if (seen.has(id)) throw new Error(`the skill ${id} is selected twice`)
+    seen.add(id)
+    if (!isTreeHash(treeHash)) throw new Error(`the skill ${id} has no valid tree hash`)
   }
   const projected: string[] = []
   const omitted: Array<{ id: string; missing: string[] }> = []

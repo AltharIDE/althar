@@ -12,21 +12,26 @@ import { type Parsed } from './catalog'
  *   runs/<run-id>/<agent>/ one run's projection (projection.ts)
  */
 
-const Install = z.strictObject({
-  id: z.string().min(1),
-  /** `github` can be refreshed from its repository; `local` only by re-importing; `althar-default` comes with the catalog. */
-  source: z.enum(['github', 'local', 'althar-default']),
-  repo: z.string().optional(),
-  sha: z
-    .string()
-    .regex(/^[0-9a-f]{40}$/)
-    .optional(),
-  subpath: z.string().optional(),
-  treeHash: z.string().regex(/^[0-9a-f]{64}$/),
-  review: z.enum(['not-reviewed', 'reviewed', 'default']),
-  /** Whether it is bound for use; installed is not the same as active. */
-  active: z.boolean(),
-})
+const Install = z
+  .strictObject({
+    id: z.string().min(1),
+    /** `github` can be refreshed from its repository; `local` only by re-importing; `althar-default` comes with the catalog. */
+    source: z.enum(['github', 'local', 'althar-default']),
+    repo: z.string().optional(),
+    sha: z
+      .string()
+      .regex(/^[0-9a-f]{40}$/)
+      .optional(),
+    subpath: z.string().optional(),
+    treeHash: z.string().regex(/^[0-9a-f]{64}$/),
+    review: z.enum(['not-reviewed', 'reviewed', 'default']),
+    /** Whether it is bound for use; installed is not the same as active. */
+    active: z.boolean(),
+  })
+  .refine((install) => !(install.active && install.review === 'not-reviewed'), {
+    message: 'an install that was not reviewed cannot be active',
+    path: ['active'],
+  })
 
 const Installs = z.strictObject({ version: z.literal(1), installs: z.array(Install) })
 
@@ -35,7 +40,14 @@ export type Installs = z.infer<typeof Installs>
 
 export const EMPTY_INSTALLS: Installs = { version: 1, installs: [] }
 
-const objectDirectory = (root: string, hash: string) => join(root, 'objects', hash)
+const HASH = /^[0-9a-f]{64}$/
+
+export const isTreeHash = (value: string): boolean => HASH.test(value)
+
+const objectDirectory = (root: string, hash: string) => {
+  if (!isTreeHash(hash)) throw new Error('a tree hash is 64 lowercase hex characters')
+  return join(root, 'objects', hash)
+}
 
 /** Writes `text` so a reader sees the old file or the new one, never half. */
 const writeAtomically = async (path: string, text: string): Promise<void> => {

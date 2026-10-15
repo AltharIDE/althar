@@ -15,10 +15,11 @@ if (checked.ok) {
 blockedBeforeCommit(changedPaths, DEFAULT_REPOSITORY_FILES) // skill and OpenSpec paths, blocked unless the project allows them
 ```
 
-- **Validation rejects what grants a harness something.** `allowed-tools` and `hooks` are refused, as are unsafe paths, a name that is not the directory's, and oversized trees. Scripts and fields outside the specification are flagged for the review card. Nothing in a skill is run.
+- **Validation rejects what grants a harness something.** `allowed-tools` and `hooks` are refused, as are unsafe paths, a name that is not the directory's, and oversized trees. Scripts and fields outside the specification are flagged for the review card. Push and pull-request instructions in the text are flagged, or rejected when the default catalog is built (`pushes: 'reject'`). Nothing in a skill is run. **Callers must validate before `putObject`**: the store keeps whatever it is given under its hash, and does not check it is a safe skill.
+- **Installed is not active.** An install that is `not-reviewed` cannot be written as `active`; activation follows the review card.
 - **The store is content-addressed.** `objects/<tree-hash>/` is immutable; reading one back checks it still hashes to its name and holds no links. `installs.json` is written atomically.
-- **Projection copies read-only, outside every project.** It refuses a store inside any repository it is told to keep out of, and leaves out a skill whose `needs` the agent lacks (reported, not hidden).
-- **The guard looks at paths only.** `.agents/skills`, `.claude/skills` and `.opencode/skills` at any depth, and `openspec/`, are blocked before commit and before push unless the project turned the matching setting on. Every setting is off by default.
+- **Projection copies read-only, into Althar's own directory.** It refuses a store inside any repository listed in `keepOutOf`, so the caller must list the project's repositories: an empty list guards nothing. It refuses a repeated skill id and a malformed tree hash, and leaves out a skill whose `needs` the agent lacks (reported, not hidden).
+- **The guard looks at paths only.** `.agents/skills`, `.claude/skills` and `.opencode/skills`, and `openspec/`, at any depth, are blocked before commit and before push unless the project turned the matching setting on. Every setting is off by default. Paths must be plain and unquoted (for example from `git status -z`), a rename as both its paths.
 
 ## Work on it
 

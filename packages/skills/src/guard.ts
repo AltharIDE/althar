@@ -23,12 +23,18 @@ const segmentsOf = (path: string): string[] =>
     .split('/')
     .filter((part) => part !== '' && part !== '.')
 
-/** Which protected class a repository-relative path falls under: a file below a native skill root at any depth, or below `openspec/`. */
+/**
+ * Which protected class a repository-relative path falls under: a file below a native skill root, or below an
+ * `openspec/` directory, at any depth, so a monorepo subproject is covered too (a docs folder named `openspec`
+ * is a false positive that a one-time grant clears). Callers pass plain, unquoted paths, one per entry, such as
+ * from `git status --porcelain -z`; a rename is two paths, old and new, both to be checked.
+ */
 export const protectedKind = (path: string): ProtectedKind | null => {
   const parts = segmentsOf(path)
-  if (parts[0]?.toLowerCase() === 'openspec' && parts.length > 1) return 'openspec'
-  for (let at = 0; at + 2 < parts.length; at++) {
-    if (SKILL_ROOTS.has(parts[at]!.toLowerCase()) && parts[at + 1]!.toLowerCase() === 'skills') return 'skills'
+  for (let at = 0; at + 1 < parts.length; at++) {
+    const part = parts[at]!.toLowerCase()
+    if (part === 'openspec') return 'openspec'
+    if (at + 2 < parts.length && SKILL_ROOTS.has(part) && parts[at + 1]!.toLowerCase() === 'skills') return 'skills'
   }
   return null
 }

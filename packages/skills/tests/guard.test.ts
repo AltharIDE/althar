@@ -11,9 +11,10 @@ describe('protectedKind', () => {
     ['.claude\\skills\\x\\SKILL.md', 'skills'],
     ['openspec/changes/a/proposal.md', 'openspec'],
     ['OpenSpec/specs/a.md', 'openspec'],
+    ['apps/web/openspec/changes/a.md', 'openspec'],
   ])('puts %s under %s', (path, kind) => expect(protectedKind(path)).toBe(kind))
 
-  it.each(['src/skills/a.ts', '.claude/settings.json', '.claude/skills', 'openspec', 'docs/openspec/a.md', 'skills/x/SKILL.md'])(
+  it.each(['src/skills/a.ts', '.claude/settings.json', '.claude/skills', 'openspec', 'skills/x/SKILL.md', 'openspecs/a.md'])(
     'leaves %s alone',
     (path) => expect(protectedKind(path)).toBeNull(),
   )

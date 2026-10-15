@@ -1,5 +1,6 @@
 import { type Files } from './hash'
 import { parseFrontmatter } from './frontmatter'
+import { lintPushes } from './lint'
 
 /** Why a skill was refused, or what a person should look at on its review card. */
 export interface Finding {
@@ -53,7 +54,13 @@ export interface Checked {
 }
 
 /** Checks a fetched skill, held in memory, against the Agent Skills rules and Althar's. Runs nothing in it. */
-export const validateSkill = (directory: string, files: Files, limits: Limits = DEFAULT_LIMITS): Checked => {
+export const validateSkill = (
+  directory: string,
+  files: Files,
+  limits: Limits = DEFAULT_LIMITS,
+  /** How serious push instructions in the text are: `reject` for the default catalog, `flag` for a person's own install. */
+  pushes: Finding['level'] = 'flag',
+): Checked => {
   const findings: Finding[] = []
   const reject = (code: string, message: string, path?: string) =>
     findings.push({ level: 'reject', code, message, ...(path === undefined ? {} : { path }) })
@@ -69,6 +76,8 @@ export const validateSkill = (directory: string, files: Files, limits: Limits = 
     if (looksExecutable(path)) flag('executable', 'a script; Althar never runs it, the agent might', path)
   }
   if (bytes > limits.bytes) reject('too-large', `${bytes} bytes in all; at most ${limits.bytes}`)
+
+  findings.push(...lintPushes(files, pushes))
 
   const skill = files.get('SKILL.md')
   if (skill === undefined) {

@@ -83,6 +83,14 @@ describe('validateSkill', () => {
     expect(codes(files as Record<string, string>)).toContain(code)
   })
 
+  it('flags push text by default and rejects it when the catalog asks', () => {
+    const files = tree({ ...good(), 'references/a.md': 'then git push origin main' })
+    expect(validateSkill('my-skill', files).ok).toBe(true)
+    const strict = validateSkill('my-skill', files, undefined, 'reject')
+    expect(strict.ok).toBe(false)
+    expect(strict.findings.map((finding) => finding.code)).toEqual(['pushes'])
+  })
+
   it('refuses a skill with too many files or too many bytes', () => {
     const limits = { files: 1, bytes: 10, fileBytes: 5 }
     const checked = validateSkill('my-skill', tree({ ...good(), 'a.md': 'x' }), limits)

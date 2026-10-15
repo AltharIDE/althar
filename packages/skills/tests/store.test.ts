@@ -72,6 +72,14 @@ describe('installs.json', () => {
     expect((await readInstalls(root)).ok).toBe(false)
   })
 
+  it('does not let an install be active before it is reviewed', async () => {
+    const install = { id: 'x', source: 'github' as const, treeHash: HASH, review: 'not-reviewed' as const, active: true }
+    await expect(writeInstalls(root, { version: 1, installs: [install] })).rejects.toThrow('cannot be active')
+    await writeFile(join(root, 'installs.json'), JSON.stringify({ version: 1, installs: [install] }))
+    expect((await readInstalls(root)).ok).toBe(false)
+    await expect(writeInstalls(root, { version: 1, installs: [{ ...install, review: 'reviewed' }] })).resolves.toBeUndefined()
+  })
+
   it('refuses to write an install that does not fit the schema', async () => {
     await expect(
       writeInstalls(root, { version: 1, installs: [{ id: 'x', source: 'github', treeHash: 'short', review: 'default', active: true }] }),
@@ -128,6 +136,17 @@ describe('projectRun', () => {
     await releaseRun(root, 'run-1')
     expect(existsSync(join(root, 'runs', 'run-1'))).toBe(false)
     await releaseRun(root, 'never-ran')
+  })
+
+  it('refuses a tree hash that is not a hash, before reading anything', async () => {
+    await expect(readObject(root, '../../x')).rejects.toThrow('64 lowercase hex')
+    await expect(projectRun({ ...base, root, selected: [{ id: 'a', treeHash: '../../x' }] })).rejects.toThrow('no valid tree hash')
+  })
+
+  it('refuses the same skill chosen twice', async () => {
+    const hash = await putObject(root, tree(good('dup')))
+    const dup = { id: 'dup', treeHash: hash }
+    await expect(projectRun({ ...base, root, selected: [dup, dup] })).rejects.toThrow('selected twice')
   })
 
   it('refuses a store inside a repository, and unsafe names', async () => {

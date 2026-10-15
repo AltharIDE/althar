@@ -250,7 +250,7 @@ it can; do not describe a staging check alone as preventing writes.
 
 Define protected repository paths independently of provenance: every
 supported native skill root at any repository depth (`**/.agents/skills/**`,
-`**/.claude/skills/**`, and `**/.opencode/skills/**`) and `openspec/**`.
+`**/.claude/skills/**`, and `**/.opencode/skills/**`) and `**/openspec/**` (so a monorepo subproject is covered; a docs folder that happens to be named `openspec` needs a one-time grant).
 Before staging or committing, inspect changed
 paths and block changes under a skill root when its write setting is off, or
 under `openspec/` when the OpenSpec write setting is off, unless an explicit
