@@ -47,5 +47,6 @@ export default defineConfig({
     dedupe: ['react', 'react-dom', '@tanstack/react-query', '@tanstack/react-router'],
   },
   css: { modules: { localsConvention: 'camelCaseOnly', generateScopedName: '[name]__[local]__[hash:base64:4]' } },
-  server: { port: 5356, strictPort: true, fs: { allow: [repo] } },
+  // Polling, so a server started inside the sandbox still sees edits.
+  server: { port: 5356, strictPort: true, fs: { allow: [repo] }, watch: { usePolling: true, interval: 1000 } },
 })
