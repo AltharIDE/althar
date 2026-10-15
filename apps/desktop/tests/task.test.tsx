@@ -1504,6 +1504,50 @@ describe('a task', () => {
     await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a2', decision: 'reject', reason: 'Open a PR instead' }))
   })
 
+  it('opens with focus on a permission waiting, so Enter answers it and then the next', async () => {
+    const call = (id: string) => ({
+      id,
+      kind: 'permission' as const,
+      stuck: null,
+      title: `Run ${id}`,
+      reason: 'It asks.',
+      command: id,
+      createdAt: '2026-09-29T12:00:00.000Z',
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [call('a1'), call('a2')] })) })
+    withServices(<Task />, client)
+    await screen.findByText(/1 of 2/)
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Yes, this once/ })).toBe(document.activeElement))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'allow' }))
+    await screen.findByText(/2 of 2/)
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Yes, this once/ })).toBe(document.activeElement))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a2', decision: 'allow' }))
+  })
+
+  it('doesn’t take focus from the composer for a permission that comes while it is typed in', async () => {
+    const call = {
+      id: 'a1',
+      kind: 'permission' as const,
+      stuck: null,
+      title: 'Run git push',
+      reason: 'It asks.',
+      command: 'git push',
+      createdAt: '2026-09-29T12:00:00.000Z',
+    }
+    const getThread = vi.fn(async () => thread())
+    const { client, emit } = fakeClient({ getThread })
+    withServices(<Task />, client)
+    const box = await screen.findByPlaceholderText(/^Tell .+ something$/)
+    box.focus()
+    getThread.mockImplementation(async () => thread({ attention: [call] }))
+    act(() => emit(changed('attention_request', 'a1', 'th1')))
+    await screen.findByText('Needs your permission')
+    await act(async () => {})
+    expect(box).toBe(document.activeElement)
+  })
+
   it('keeps an answer as a rule by the scope the runtime offers, and offers no always it wouldn’t keep', async () => {
     const call = {
       id: 'a1',

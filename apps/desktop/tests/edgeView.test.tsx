@@ -168,6 +168,26 @@ describe('the edge', () => {
     expect(screen.queryByText('Allowed')).toBeNull()
   })
 
+  it('under the menu bar, opens with focus on the first permission’s Allow once, so Enter answers it', async () => {
+    let visibility: DocumentVisibilityState = 'hidden'
+    const seen = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility)
+    try {
+      const { client } = fakeClient({ getHome: vi.fn(async () => home({ calls: [permission], projects: [project, halyard] })) })
+      withServices(<Edge shown={{ place: 'menu' }} />, client)
+      const allow = within(await screen.findByRole('article', { name: 'Run npm publish' })).getByRole('button', { name: 'Allow once' })
+      // Kept hidden between clicks, it takes nothing.
+      expect(allow).not.toBe(document.activeElement)
+      visibility = 'visible'
+      act(() => void document.dispatchEvent(new Event('visibilitychange')))
+      expect(allow).toBe(document.activeElement)
+      await userEvent.keyboard('{Enter}')
+      expect(client.answer).toHaveBeenCalledWith(expect.objectContaining({ attentionId: 'a1', decision: 'allow' }))
+      expect(await screen.findByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })).toBeTruthy()
+    } finally {
+      seen.mockRestore()
+    }
+  })
+
   it('keeps a call answered here as a line, with focus on it, until the island closes', async () => {
     const pointed: Array<(on: boolean) => void> = []
     const host = fakeHost({ onEdgePointed: vi.fn((listener) => (pointed.push(listener), () => {})) })

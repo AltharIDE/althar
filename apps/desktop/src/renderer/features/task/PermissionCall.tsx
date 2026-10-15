@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import type { AttentionRequest } from '@althar/contracts'
-import { Permission, Permissions } from '@althar/ui'
+import { Permission, type PermissionFocus, Permissions } from '@althar/ui'
 
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 
@@ -34,9 +34,28 @@ const useAnswers = (onAnswer: AnswerCall) => {
   return { round, send }
 }
 
-export function PermissionCall({ request, project, onAnswer }: { request: AttentionRequest; project: string; onAnswer: AnswerCall }) {
+export function PermissionCall({
+  request,
+  project,
+  onAnswer,
+  focusOnMount,
+}: {
+  request: AttentionRequest
+  project: string
+  onAnswer: AnswerCall
+  /** Takes focus as it shows, so Enter answers it (the kit's `PermissionFocus`). */
+  focusOnMount?: PermissionFocus
+}) {
   const { round, send } = useAnswers(onAnswer)
-  return <Permission key={round} {...permissionOf(request)} project={project} onAnswer={(answer) => send(request.id, replyOf(answer))} />
+  return (
+    <Permission
+      key={round}
+      {...permissionOf(request)}
+      project={project}
+      focusOnMount={focusOnMount}
+      onAnswer={(answer) => send(request.id, replyOf(answer))}
+    />
+  )
 }
 
 /** The task's permission calls, as one stack: each answer goes back to its own agent. */
@@ -44,10 +63,13 @@ export function PermissionCalls({
   requests,
   project,
   onAnswer,
+  focusOnMount,
 }: {
   requests: ReadonlyArray<AttentionRequest>
   project: string
   onAnswer: AnswerCall
+  /** The first card takes focus as it shows, so Enter answers it; the kit's `PermissionFocus`. */
+  focusOnMount?: PermissionFocus
 }) {
   const { round, send } = useAnswers(onAnswer)
   if (requests.length === 0) return null
@@ -56,6 +78,7 @@ export function PermissionCalls({
       key={round}
       items={requests.map(permissionOf)}
       project={project}
+      focusOnMount={focusOnMount}
       onAnswer={(request, answer) => send(request.id, replyOf(answer))}
     />
   )

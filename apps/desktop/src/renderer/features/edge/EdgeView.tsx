@@ -4,7 +4,7 @@ import { EdgeSheet, Island, ISLAND_HOVER, type NotchSize } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { refOf, text as homeText } from '../home/HomeView'
-import { needLineOf, needsOf, workOf } from '../home/needs'
+import { DEFAULT_ANSWER, needLineOf, needsOf, workOf } from '../home/needs'
 import s from './Edge.module.css'
 import type { EdgeModel } from './useEdge'
 import { isFinished } from '../../shared/calls'
@@ -97,7 +97,11 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
         )}
       </Pointed>
     )
-  return <Measured onHeight={host.edgeSize}>{sheet}</Measured>
+  return (
+    <Measured onHeight={host.edgeSize} showing={showing}>
+      {sheet}
+    </Measured>
+  )
 }
 
 /**
@@ -148,9 +152,14 @@ function Pointed({
 /**
  * The menu bar's sheet, telling the main process how tall it draws, so its
  * window fits it; taller than the screen allows, it scrolls in the window.
+ * Its window takes focus as it opens; within it, focus goes to the first
+ * permission's Allow once, so Enter answers it, as the window's card does.
  */
-function Measured({ children, onHeight }: { children: ReactNode; onHeight: (height: number) => void }) {
+function Measured({ children, onHeight, showing }: { children: ReactNode; onHeight: (height: number) => void; showing: boolean }) {
   const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (showing) box.current?.querySelector<HTMLElement>(DEFAULT_ANSWER)?.focus({ preventScroll: true })
+  }, [showing])
   useEffect(() => {
     const element = box.current
     if (element === null) return

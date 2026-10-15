@@ -278,15 +278,21 @@ export function TaskView({
   // Ready, or merged here with its remote still to have it, it opens on what it made: there is something there to do.
   // An agent's question waiting comes first: it opens on the conversation, where it is answered.
   const [asking, setAsking] = useState<string | null | undefined>(undefined)
+  // Without one, a permission waiting as it opens takes focus, so Enter answers it; one that comes later takes it only while nothing else has it.
+  const [permitting, setPermitting] = useState(false)
   if (face === null && model.snapshot !== null) {
     const question = model.snapshot.attention.find((call) => call.kind === 'question')
     setAsking(question?.id ?? null)
+    setPermitting(question === undefined && model.snapshot.attention.some((call) => call.kind === 'permission'))
     setFace(
       question === undefined &&
         ((model.snapshot.task.phase === 'ready' && hasOutputs(model.snapshot)) || model.snapshot.task.merged.some((one) => one.ahead > 0))
         ? 'out'
         : 'talk',
     )
+  } else if (permitting && model.snapshot !== null && !model.snapshot.attention.some((call) => call.kind === 'permission')) {
+    // Those answered, one that comes later is like any other: it doesn't take focus from what is being typed.
+    setPermitting(false)
   }
   const named = useModelNames()
   const editors = useEditors(model.snapshot?.task.id ?? '')
@@ -788,6 +794,7 @@ export function TaskView({
             <PermissionCalls
               requests={snapshot.attention.filter((request) => request.kind === 'permission')}
               project={snapshot.project.name}
+              focusOnMount={permitting || 'idle'}
               onAnswer={model.answer}
             />
           </Thread>

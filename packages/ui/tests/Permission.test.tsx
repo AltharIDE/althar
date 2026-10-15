@@ -24,6 +24,47 @@ describe('Permission', () => {
     expect(screen.getByText('Allowed always')).toBeInTheDocument()
   })
 
+  it('answers with Enter on a choice, as the button says', () => {
+    const onAnswer = vi.fn()
+    render(<Permission {...STAGING} project={project} onAnswer={onAnswer} />)
+    const once = screen.getByRole('radio', { name: /Yes, this once/ })
+    fireEvent.keyDown(once, { key: 'Enter', shiftKey: true })
+    expect(onAnswer).not.toHaveBeenCalled()
+    fireEvent.keyDown(once, { key: 'Enter' })
+    expect(onAnswer).toHaveBeenCalledWith({ decision: Decision.AllowOnce, cmd: STAGING.cmd })
+  })
+
+  it('takes focus as it shows when told, on the answer picked, so Enter answers at once', async () => {
+    const onAnswer = vi.fn()
+    render(<Permission {...STAGING} project={project} onAnswer={onAnswer} focusOnMount />)
+    await act(async () => {})
+    const once = screen.getByRole('radio', { name: /Yes, this once/ })
+    expect(once).toHaveFocus()
+    fireEvent.keyDown(document.activeElement!, { key: 'Enter' })
+    expect(onAnswer).toHaveBeenCalledWith({ decision: Decision.AllowOnce, cmd: STAGING.cmd })
+  })
+
+  it('takes focus only while idle when told so: never from a field being typed in', async () => {
+    const field = document.createElement('input')
+    document.body.append(field)
+    field.focus()
+    const { unmount } = render(<Permission {...STAGING} project={project} focusOnMount="idle" />)
+    await act(async () => {})
+    expect(field).toHaveFocus()
+    unmount()
+    field.blur()
+    render(<Permission {...STAGING} project={project} focusOnMount="idle" />)
+    await act(async () => {})
+    expect(screen.getByRole('radio', { name: /Yes, this once/ })).toHaveFocus()
+    field.remove()
+  })
+
+  it('leaves focus where it is unless told', async () => {
+    render(<Permission {...STAGING} project={project} />)
+    await act(async () => {})
+    expect(document.body).toHaveFocus()
+  })
+
   it('ignores keys that pick nothing, and keys typed into the note', () => {
     render(<Permission {...STAGING} project={project} />)
     fireEvent.keyDown(form(), { key: '9' })
@@ -179,6 +220,21 @@ describe('Permissions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
     expect(onUndo).toHaveBeenCalledWith(STAGING, { decision: Decision.AllowOnce, cmd: STAGING.cmd })
     expect(form()).toBeInTheDocument()
+  })
+
+  it('goes through a stack with Enter alone: each card after one answered takes focus', async () => {
+    const onAnswer = vi.fn()
+    render(<Permissions items={REQUESTS} project={project} onAnswer={onAnswer} focusOnMount />)
+    for (const [i, request] of REQUESTS.entries()) {
+      await act(async () => {})
+      expect(screen.getByText(new RegExp(`${i + 1} of ${REQUESTS.length}`))).toBeInTheDocument()
+      const picked = document.activeElement
+      expect(picked).toBeInstanceOf(HTMLInputElement)
+      fireEvent.keyDown(picked!, { key: 'Enter' })
+      expect(onAnswer).toHaveBeenLastCalledWith(request, expect.objectContaining({ cmd: request.cmd }))
+      settle()
+    }
+    expect(onAnswer).toHaveBeenCalledTimes(REQUESTS.length)
   })
 
   it('beats the card in front once for Allow all, then folds', () => {
