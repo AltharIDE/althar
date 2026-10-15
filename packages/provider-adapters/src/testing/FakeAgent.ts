@@ -212,6 +212,13 @@ export interface FakeAgentOptions {
   readonly slowStart?: number
   /** Whether it says it takes images in a prompt, as Claude Code, Codex and OpenCode do. True unless false. */
   readonly images?: boolean
+  /**
+   * How long, in milliseconds, it keeps at what it works on until it is
+   * stopped (`[lead:wait]`, `[lead:slowly]`, `[review:wait]` and the like)
+   * when nothing stops it: five or six seconds, long enough to be seen at
+   * work in the app, unless a test that needs less asks for less.
+   */
+  readonly hold?: number
 }
 
 interface SessionState {
@@ -221,6 +228,8 @@ interface SessionState {
   effort: string
   cancelled: boolean
   stubborn: boolean
+  /** How long it keeps at what it works on until stopped, when nothing stops it, if the test said; otherwise each hold's own. */
+  hold: number | undefined
   abort: AbortController | undefined
   directories: number
   mcpServers: number
@@ -636,7 +645,7 @@ const playRole = async (
     if (available.has('report_review')) {
       // Reviews until it is stopped: for a review cut short in the middle; or, `[review:wait-later]`, a later round.
       if (session.markers.has('[review:wait]') || (session.markers.has('[review:wait-later]') && text.startsWith('Round '))) {
-        for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        await holdOn(session, 5_000)
         return 'Stopped reviewing.'
       }
       if (session.markers.has('[review:always]'))
@@ -691,7 +700,7 @@ const playRole = async (
     }
     if (available.has('finish_step')) {
       // A lead that takes a while over what it was asked, `[lead:slowly]`: long enough to be seen at work.
-      if (text.includes('[lead:slowly]')) for (let waited = 0; !session.cancelled && waited < 6_000; waited += 10) await pause(10)
+      if (text.includes('[lead:slowly]')) await holdOn(session, 6_000)
       // A lead that leaves a dev server running, once, then carries on as its other markers say.
       if (text.includes('[lead:serve') && !session.played.has('[lead:serve]')) {
         session.played.add('[lead:serve]')
@@ -805,7 +814,7 @@ const playRole = async (
       if (merging !== undefined && session.markers.has('[lead:resolve-fails]'))
         return "Couldn't settle the conflict: both sides change the same lines."
       if (merging !== undefined && session.markers.has('[lead:resolve-wait]')) {
-        for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        await holdOn(session, 5_000)
         return 'Stopped before settling it.'
       }
       const more = session.markers.has('[lead:resolve-more]')
@@ -813,7 +822,7 @@ const playRole = async (
       const hold = session.markers.has('[lead:resolve-hold]')
       if (merging !== undefined && (session.markers.has('[lead:resolve]') || more || fix || hold)) {
         resolveIn(session.cwd, merging)
-        if (hold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        if (hold) await holdOn(session, 5_000)
         if (fix) {
           commitIn(session.cwd, 'tests.txt', 'Fix what the tests found')
           return 'Merged it, settled the conflict, committed the merge, and fixed what the tests found.'
@@ -884,14 +893,14 @@ const playRole = async (
       if ((session.markers.has('[lead:fix]') || fixMore || fixHold) && text.startsWith('Checks failed')) {
         commitIn(session.cwd, 'fixed.txt', 'Fix the failing check')
         await call('finish_step', { summary: 'Fixed the failing check, and committed it.', built: BUILT_FIXED })
-        if (fixHold) for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        if (fixHold) await holdOn(session, 5_000)
         if (!fixMore) return 'Fixed the failing check, and committed it.'
         commitIn(session.cwd, 'more.txt', 'Tidy up while here')
         return 'Fixed the failing check, committed it, and tidied up while here.'
       }
       // Works until it is stopped: for a lead that goes in the middle of its step.
       if (text.includes('[lead:wait]')) {
-        for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+        await holdOn(session, 5_000)
         return 'Stopped working.'
       }
       return undefined
@@ -1014,6 +1023,11 @@ const permissionOptions = (alwaysOnly: boolean): Array<acp.PermissionOption> =>
 
 const pause = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds))
 
+/** Keeps at it until the session is stopped, or for the hold the test asked for, or else as long as given. */
+const holdOn = async (session: SessionState, milliseconds: number) => {
+  for (let waited = 0; !session.cancelled && waited < (session.hold ?? milliseconds); waited += 10) await pause(10)
+}
+
 export const fakeAgent = (options: FakeAgentOptions = {}): InProcessAgent => ({ _tag: 'InProcessAgent', app: fakeAgentApp(options) })
 
 export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
@@ -1065,6 +1079,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         model: 'small',
         effort: variants ? '' : 'medium',
         cancelled: false,
+        hold: options.hold,
         stubborn: false,
         abort: undefined,
         directories: params.additionalDirectories?.length ?? 0,
@@ -1521,7 +1536,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           return ended()
         case scenarios.slow:
           await say('Starting')
-          for (let waited = 0; !session.cancelled && waited < 5_000; waited += 10) await pause(10)
+          await holdOn(session, 5_000)
           return { stopReason: session.cancelled ? 'cancelled' : 'end_turn' }
         case scenarios.usageLimit:
           throw new acp.RequestError(-32603, USAGE_LIMIT_MESSAGE)

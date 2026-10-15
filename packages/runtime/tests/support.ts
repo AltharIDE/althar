@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
@@ -32,24 +32,31 @@ import { Secrets } from '../src/Secrets'
 import type { LoadOptions } from '../src/MachineLoad'
 import type { ModelFactsOptions } from '../src/ModelFacts'
 
+/** The repository every test starts from, made once per worker: copying it is much quicker than running git anew. */
+let template: string | undefined
+
 /** A git repository with one commit on `main`. */
 export const repository = () => {
+  if (template === undefined) {
+    template = mkdtempSync(join(tmpdir(), 'althar-template-'))
+    const run = (...args: Array<string>) =>
+      execFileSync('git', args, {
+        cwd: template,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 'Test',
+          GIT_AUTHOR_EMAIL: 'test@althar.test',
+          GIT_COMMITTER_NAME: 'Test',
+          GIT_COMMITTER_EMAIL: 'test@althar.test',
+        },
+      })
+    run('init', '-q', '-b', 'main')
+    writeFileSync(join(template, 'README.md'), '# Meridian\n')
+    run('add', '.')
+    run('commit', '-q', '-m', 'Start')
+  }
   const path = mkdtempSync(join(tmpdir(), 'althar-repo-'))
-  const run = (...args: Array<string>) =>
-    execFileSync('git', args, {
-      cwd: path,
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: 'Test',
-        GIT_AUTHOR_EMAIL: 'test@althar.test',
-        GIT_COMMITTER_NAME: 'Test',
-        GIT_COMMITTER_EMAIL: 'test@althar.test',
-      },
-    })
-  run('init', '-q', '-b', 'main')
-  writeFileSync(join(path, 'README.md'), '# Meridian\n')
-  run('add', '.')
-  run('commit', '-q', '-m', 'Start')
+  cpSync(template, path, { recursive: true })
   return path
 }
 
@@ -139,7 +146,9 @@ export const fakeAgents = (
           : // An account's own options, by its home's folder name (`codex@work`), or `@usual` for the agent's usual folder.
             {
               _tag: 'InProcess',
+              // What works until it is stopped gives up after two seconds, not five: a test that stops it does so well before.
               agent: fakeAgent({
+                hold: 2_000,
                 ...options,
                 ...each[agentId],
                 ...each[`${agentId}@${env.FAKE_HOME === undefined ? 'usual' : basename(env.FAKE_HOME)}`],

@@ -424,9 +424,10 @@ describe('the CPU an agent uses', () => {
   it.live('tells a server sitting idle from a busy loop and a runner of short-lived workers, in real processes', () =>
     Effect.gen(function* () {
       const start = (script: string) => spawn('sh', ['-c', script], { stdio: 'ignore' })
+      // Each ends by itself once this worker is gone, so a run cut short leaves no loop spinning on the machine.
       const idle = start('sleep 60')
-      const busy = start('while :; do :; done')
-      const runner = start('while :; do sleep 0.05; done')
+      const busy = start('while kill -0 $PPID 2>/dev/null; do :; done')
+      const runner = start('while kill -0 $PPID 2>/dev/null; do sleep 0.05; done')
       try {
         const pids = [idle, busy, runner].map((child) => child.pid ?? 0)
         yield* Effect.sleep('300 millis')
