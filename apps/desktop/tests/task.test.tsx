@@ -1959,6 +1959,24 @@ describe('a task', () => {
     expect(vi.mocked(client.send).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.startSession).mock.invocationCallOrder[0] ?? 0)
   })
 
+  it('treats a stale session summary as stopped and queues the note before starting the picked lead', async () => {
+    const base = thread()
+    const stale = thread({
+      session: base.session === null ? null : { ...base.session, held: false },
+      task: { ...base.task, phase: 'stopped', actions: ['abandon'] },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => stale) })
+    withServices(<Task />, client)
+    await waitFor(() => expect(client.status).toHaveBeenCalled())
+    expect(await screen.findByText('Stopped')).toBeTruthy()
+    await userEvent.click(await screen.findByRole('button', { name: 'Lead: gpt-5.2-codex Medium' }))
+    await userEvent.click(await screen.findByRole('radio', { name: /Claude Code default/ }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Tell Claude Code something' }), 'Carry on{Enter}')
+    await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'default' }))
+    expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Carry on', disposition: 'after_current' })
+    expect(vi.mocked(client.send).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.startSession).mock.invocationCallOrder[0] ?? 0)
+  })
+
   it('shows text as it streams; reads a changed item alone, and the head alone for anything else', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {

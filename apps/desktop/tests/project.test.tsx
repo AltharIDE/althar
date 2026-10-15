@@ -439,15 +439,15 @@ describe('the Talk room', () => {
   })
 
   it('talks to the coordinator on the agent last used, or on another the person picks', async () => {
-    const { client } = fakeClient()
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ session: { ...session, held: false } })) })
     withServices(<Project />, client)
     expect(await screen.findByText('Ask the coordinator about meridian, or say what should change.')).toBeTruthy()
     const box = screen.getByRole('textbox', { name: 'Tell the coordinator something' })
     await userEvent.type(box, 'Add a retry{Enter}')
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Add a retry', disposition: 'after_current' }))
-    // Started first, as it ran last, so a send that fails was never queued.
+    // A stale session summary is not held: queue the note before starting the coordinator.
     expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code' })
-    expect(vi.mocked(client.startSession).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.send).mock.invocationCallOrder[0] ?? 0)
+    expect(vi.mocked(client.send).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.startSession).mock.invocationCallOrder[0] ?? 0)
 
     await userEvent.click(screen.getByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
     await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
@@ -525,21 +525,22 @@ describe('the Talk room', () => {
     expect(screen.getByRole('img', { name: 'bug.png' })).toBeTruthy()
   })
 
-  it('puts what was said back when the coordinator didn’t start, since nothing was queued, and sends on past one already starting', async () => {
+  it('keeps a queued note when the coordinator cannot start, and accepts one already starting', async () => {
     const { client } = fakeClient()
     vi.mocked(client.startSession).mockRejectedValueOnce(new ApiError({ reason: 'SessionFailed', message: "Claude Code couldn't start." }))
     withServices(<Project />, client)
     const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
     await userEvent.type(box, 'Plan it{Enter}')
     expect(await screen.findByText("Claude Code couldn't start.")).toBeTruthy()
-    expect(client.send).not.toHaveBeenCalled()
-    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('Plan it'))
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Plan it', disposition: 'after_current' }))
+    expect((box as HTMLTextAreaElement).value).toBe('')
+    expect(vi.mocked(client.send).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.startSession).mock.invocationCallOrder[0] ?? 0)
     // One already starting, as from a message just before, takes this one next.
     vi.mocked(client.startSession).mockRejectedValueOnce(
       new ApiError({ reason: 'SessionRunning', message: 'An agent is already working on this task.' }),
     )
-    await userEvent.type(box, '{Enter}')
-    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Plan it', disposition: 'after_current' }))
+    await userEvent.type(box, 'Next{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Next', disposition: 'after_current' }))
     await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe(''))
   })
 

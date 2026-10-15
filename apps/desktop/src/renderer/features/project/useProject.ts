@@ -283,18 +283,14 @@ export const useProject = (projectId: string): ProjectModel => {
         body,
         'after_current',
         async () => {
-          /*
-           * Not running, it starts first, as it ran last or as the person picked, and its brief waits
-           * for what they say. Started in the same call as the send, an agent that didn't start would
-           * fail a message the queue has already, which would then go back in the composer to be sent
-           * twice; started first, a send that fails was never queued. One already starting, as for a
-           * message just before, reads this one next.
-           */
+          // Queue the note before starting so the coordinator can read it with its brief on its first turn.
+          await send(body, 'after_current', images)
           if (threadId !== null && coordinator !== null && (coordinator.session === null || !coordinator.session.held) && choice !== null)
             await client.startSession(startOf(threadId, choice)).catch((failure: unknown) => {
-              if (!(failure instanceof ApiError && failure.reason === 'SessionRunning')) throw failure
+              if (failure instanceof ApiError && failure.reason === 'SessionRunning') return
+              // The note is already queued: keep it visible and report why the coordinator did not start.
+              fail(failure)
             })
-          await send(body, 'after_current', images)
         },
         images,
       ),

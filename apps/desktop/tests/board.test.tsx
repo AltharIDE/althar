@@ -457,6 +457,56 @@ describe('the board', () => {
     expect(send.mock.invocationCallOrder[0]).toBeLessThan(startSession.mock.invocationCallOrder[0] ?? 0)
   })
 
+  it.each([
+    ['a stale session summary', false, true],
+    ['a held session', true, false],
+  ] as const)('sends back with a note when %s', async (_description, held, starts) => {
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
+    const base = snapshot()
+    const { client } = fakeClient({
+      send,
+      startSession,
+      getBoard: vi.fn(async () => board()),
+      getThread: vi.fn(async () =>
+        snapshot({
+          session: base.session === null ? null : { ...base.session, held },
+          task: { ...base.task, id: 't4' },
+        }),
+      ),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ threadId: 'th4', body: 'Please rename it.', disposition: 'after_current' }))
+    if (starts) {
+      await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
+      expect(send.mock.invocationCallOrder[0]).toBeLessThan(startSession.mock.invocationCallOrder[0] ?? 0)
+    } else expect(startSession).not.toHaveBeenCalled()
+  })
+
+  it('reports that Send back has no lead to start after queuing the note', async () => {
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
+    const tasks = board().tasks.map((work) => (work.taskId === 't4' ? { ...work, lead: null } : work))
+    const { client } = fakeClient({
+      send,
+      startSession,
+      getBoard: vi.fn(async () => board({ tasks })),
+      getThread: vi.fn(async () => snapshot({ session: null, task: { ...snapshot().task, id: 't4' } })),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
+    expect(await screen.findByText('This task has no lead to start. Pick an agent for it first.')).toBeTruthy()
+    expect(send).toHaveBeenCalledWith({ threadId: 'th4', body: 'Please rename it.', disposition: 'after_current' })
+    expect(startSession).not.toHaveBeenCalled()
+  })
+
   it('pushes what the lead committed since before the pull request can be accepted, up to what the dock showed', async () => {
     const push = vi
       .fn<(taskId: string, head: string, url?: string) => Promise<void>>()
