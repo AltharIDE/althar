@@ -982,6 +982,7 @@ export class Changes extends Context.Service<
             remote: task.branch,
             cwd: task.path,
             base: task.baseCommit,
+            ref: task.baseRef ?? own.defaultBranch,
             head,
           })
           yield* pushTo(task.path, pushTarget, task.branch, head)
@@ -1436,6 +1437,7 @@ export class Changes extends Context.Service<
             remote: nameOf(snapshot),
             cwd: workspace.path,
             base: workspace.baseCommit,
+            ref: workspace.base,
             head,
           })
           // Refused, it says why in a sentence, not git's hint: the pull request has commits the branch doesn't.
@@ -1472,6 +1474,7 @@ export class Changes extends Context.Service<
             remote: where,
             cwd: workspace.path,
             base: workspace.baseCommit,
+            ref: workspace.base,
             head,
           })
           yield* pushTo(workspace.path, pushTarget, workspace.branch, head, replaces).pipe(
@@ -1776,6 +1779,7 @@ export class Changes extends Context.Service<
               remote: `${remote}/${repository.branch}`,
               cwd: repository.worktree,
               base: repository.baseCommit,
+              ref: repository.base,
               head: sent,
             })
             yield* gitWithin(60_000, repository.worktree, 'push', '--', remote, `${sent}:refs/heads/${repository.branch}`).pipe(
@@ -1830,6 +1834,7 @@ export class Changes extends Context.Service<
               remote,
               cwd: repository.worktree,
               base: repository.baseCommit,
+              ref: repository.base,
               head,
             })
             // As the person would push it: their remote, their branch there, their sign-in. A prompt for a password fails rather than waits.

@@ -27,7 +27,9 @@ export interface RuntimeOptions {
   readonly artifactsRoot?: string
   /**
    * The shared skills store and the local catalog that seeds it. Claude Code leads are given the active skills as a
-   * plugin for their session alone. Without it, no run has Althar-selected skills.
+   * plugin for their session alone. Without it, no run has Althar-selected skills. This is one switch for the whole
+   * runtime: there are no per-project bindings or selection yet, so every project's lead gets the same active set.
+   * The per-project `repositoryFiles` rules only govern what reaches a repository, not what a run is given.
    */
   readonly skills?: SkillsConfig
   /** Where agents Althar downloads at the person's asking are kept (`Installs.ts`): `<root>/<agent>`. Without it, it downloads none. */

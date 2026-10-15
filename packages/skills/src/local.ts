@@ -2,7 +2,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { parseCatalog, type CatalogEntry } from './catalog'
 import { type Files, treeHash } from './hash'
-import { putObject, readInstalls, withInstall, writeInstalls } from './store'
+import { putObject, readInstalls, serialized, withInstall, writeInstalls } from './store'
 import { validateSkill } from './validate'
 
 /**
@@ -56,7 +56,10 @@ export const loadLocalCatalog = async (directory: string): Promise<LocalCatalog>
  * Puts a local catalog's skills in the store and records them as installed defaults, active. Defaults the person
  * deactivated stay deactivated: an existing install keeps its `active` choice and only its version moves.
  */
-export const installLocalCatalog = async (root: string, directory: string): Promise<LocalCatalog> => {
+export const installLocalCatalog = (root: string, directory: string): Promise<LocalCatalog & { readonly removed: ReadonlyArray<string> }> =>
+  serialized(root, () => install(root, directory))
+
+const install = async (root: string, directory: string): Promise<LocalCatalog & { readonly removed: ReadonlyArray<string> }> => {
   const catalog = await loadLocalCatalog(directory)
   const read = await readInstalls(root)
   if (!read.ok) throw new Error(read.error)
@@ -72,8 +75,21 @@ export const installLocalCatalog = async (root: string, directory: string): Prom
       active: was?.active ?? true,
     })
   }
+  // A default the catalog no longer lists is dropped, and said: it must not stay active in every run. Its stored version is kept.
+  const listed = new Set(catalog.skills.map(({ entry }) => entry.id))
+  const removed = installs.installs.filter(({ id, source }) => source === 'althar-default' && !listed.has(id)).map(({ id }) => id)
+  installs = { version: 1, installs: installs.installs.filter(({ id }) => !removed.includes(id)) }
   await writeInstalls(root, installs)
-  return catalog
+  return { ...catalog, removed }
+}
+
+/** The defaults an update of the catalog would drop, to show before it is applied. */
+export const removedByCatalog = async (root: string, directory: string): Promise<ReadonlyArray<string>> => {
+  const catalog = await loadLocalCatalog(directory)
+  const read = await readInstalls(root)
+  if (!read.ok) throw new Error(read.error)
+  const listed = new Set(catalog.skills.map(({ entry }) => entry.id))
+  return read.value.installs.filter(({ id, source }) => source === 'althar-default' && !listed.has(id)).map(({ id }) => id)
 }
 
 /** The skills a run uses by default: the active installs, with what each needs, from the catalog they came with. */

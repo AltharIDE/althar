@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { parseNulPaths } from '../src/guard'
-import { activeSelection, installLocalCatalog, loadLocalCatalog } from '../src/local'
+import { activeSelection, installLocalCatalog, loadLocalCatalog, removedByCatalog } from '../src/local'
 import { projectRun } from '../src/projection'
 import { readInstalls, withInstall, writeInstalls } from '../src/store'
 import { good, skillMd, writeCatalog } from './support'
@@ -58,6 +58,29 @@ describe('a local catalog', () => {
     await installLocalCatalog(root, catalog)
     const selection = await activeSelection(root, new Map([['beta', ['subagents']]]))
     expect(selection.map(({ id, needs }) => `${id} ${needs.join()}`)).toEqual(['beta subagents'])
+  })
+
+  it('drops a default the catalog no longer lists, after saying so, and keeps the person’s own installs', async () => {
+    await writeCatalog(catalog, { alpha: good('alpha'), beta: good('beta') })
+    await installLocalCatalog(root, catalog)
+    const read = await readInstalls(root)
+    if (!read.ok) throw new Error('unreadable')
+    const own = { id: 'mine', source: 'local' as const, treeHash: 'c'.repeat(64), review: 'reviewed' as const, active: true }
+    await writeInstalls(root, withInstall(read.value, own))
+    const next = await mkdtemp(join(tmpdir(), 'althar-catalog-'))
+    await writeCatalog(next, { alpha: good('alpha') })
+    expect(await removedByCatalog(root, next)).toEqual(['beta'])
+    const result = await installLocalCatalog(root, next)
+    expect(result.removed).toEqual(['beta'])
+    expect((await activeSelection(root, new Map())).map(({ id }) => id)).toEqual(['alpha', 'mine'])
+    await rm(next, { recursive: true, force: true })
+  })
+
+  it('stays consistent when installs happen at once', async () => {
+    await writeCatalog(catalog, { alpha: good('alpha'), beta: good('beta') })
+    await Promise.all(Array.from({ length: 8 }, () => installLocalCatalog(root, catalog)))
+    const read = await readInstalls(root)
+    expect(read.ok && read.value.installs.map(({ id }) => id)).toEqual(['alpha', 'beta'])
   })
 
   it('refuses to install over a damaged installs.json', async () => {

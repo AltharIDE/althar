@@ -51,7 +51,9 @@ describe('the paths a push would send', () => {
         'é/ü.md',
       ])
       assert.deepStrictEqual((yield* pathsPushed(root, before, head)).toSorted(), ['.claude/skills/old/SKILL.md', 'docs-old.md'])
-      assert.deepStrictEqual((yield* pathsPushed(root, null, head)).toSorted(), [
+      // With no base recorded, from where the branch left the default branch; only then, failing that, every path.
+      assert.deepStrictEqual(yield* pathsPushed(root, null, head, 'main'), [])
+      assert.deepStrictEqual((yield* pathsPushed(root, null, head, 'no-such-ref')).toSorted(), [
         'README.md',
         'docs-old.md',
         'src/odd name "q".ts',
@@ -115,7 +117,7 @@ describe('pushing a task’s branch', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('sends them once the project turns pushing them on, and never because writing them is on', () =>
+  it.live('sends them only once the project allows both writing and pushing them', () =>
     Effect.gen(function* () {
       const { project, task, remote, slug, path, branch } = yield* taskWithRemote
       const changes = yield* Changes
@@ -124,13 +126,16 @@ describe('pushing a task’s branch', () => {
       const head = commitFiles(path, { '.claude/skills/x/SKILL.md': 'skill' })
       yield* policies.set(project.projectId, { repositoryFiles: { writeSkills: true, writeOpenSpec: true, pushProtected: false } }, person)
       assert.strictEqual(refusal(yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: slug, head }]))).why, 'protected')
+      // Pushing alone is not enough: the files were never allowed into the repository.
       yield* policies.set(project.projectId, { repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: true } }, person)
+      assert.strictEqual(refusal(yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: slug, head }]))).why, 'protected')
+      yield* policies.set(project.projectId, { repositoryFiles: { writeSkills: true, writeOpenSpec: false, pushProtected: true } }, person)
       assert.deepStrictEqual(yield* changes.pushBranch(task.taskId, [{ repository: slug, head }]), [{ branch, remote: 'origin' }])
       assert.include(git(remote, 'ls-tree', '-r', '--name-only', branch), '.claude/skills/x/SKILL.md')
     }).pipe(Effect.provide(runtime())),
   )
 
-  it.live('does not hold back skill files the repository already had', () =>
+  it.live('does not hold back skill files the repository already had, even with no base commit recorded', () =>
     Effect.gen(function* () {
       const root = repository()
       commitFiles(root, { '.claude/skills/team/SKILL.md': 'the team’s own' })
@@ -150,6 +155,7 @@ describe('pushing a task’s branch', () => {
       })
       const [worktree] = yield* sql<{ slug: string; path: string }>`
         SELECT b.slug, w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${task.taskId}`
+      yield* sql`UPDATE workspaces SET base_commit = NULL WHERE task_id = ${task.taskId}`
       const head = commitFiles(worktree?.path ?? '', { 'src/new.ts': 'new' })
       const pushed = yield* (yield* Changes).pushBranch(task.taskId, [{ repository: worktree?.slug ?? '', head }])
       assert.strictEqual(pushed.length, 1)

@@ -589,18 +589,33 @@ checks and the harness permission rules remain the enforcement.
   skills, not its start.
 - **Per-project settings.** `repositoryFiles` on the project's rules (a new
   revision per change, like the others): `writeSkills`, `writeOpenSpec`,
-  `pushProtected`, each off unless set. The API reads and sets them. Nothing
-  yet reads `writeSkills` or `writeOpenSpec`, because nothing in this slice
-  writes skills or OpenSpec into a repository.
+  `pushProtected`, each off unless set. The API reads and sets them. They
+  govern what reaches a repository, not what a run is given: delivery is one
+  switch for the whole runtime (`RuntimeOptions.skills`), with no per-project
+  selection or bindings yet (stage 4), so every project's Claude Code lead gets
+  the same active set. A per-project switch for delivery does not exist.
+- **Where the write settings bite.** A harness commits in the task's worktree
+  by itself, where Althar cannot check its staging, so the first point Althar
+  controls is the push. Both consents are required there: the class's write
+  setting (`writeSkills`, `writeOpenSpec`) and `pushProtected`. Commit-time
+  blocking before staging is not built (it needs the agents' own git to be
+  interposed), and Althar's local merge into a default branch is not guarded.
 - **Push guard.** Every push Althar makes for a task (publish, push the
   branch, push to a pull request, replace after a rewrite, push after a local
   merge) first lists what the commits since the task's base changed (git `-z`,
   no renames, no quoting) and refuses with `PushRefused` (`protected`) any path
   under a protected root unless `pushProtected` is on. It is path-based and
   ignores who wrote the file, and a protected file the repository already had
-  and the task did not touch does not block.
+  and the task did not touch does not block. With no base commit recorded, the
+  base is where the branch left the repository's default branch; only if that
+  is not found either are all paths counted, so the push is held, not let by.
 
-**Not yet:** the commit-time check; the Repository files section in the
+- **Catalog updates.** Installing the local catalog is serialized per store,
+  and a default the catalog no longer lists is dropped from `installs.json`
+  (its stored version is kept) and reported (`removedByCatalog` lists them first,
+  for the later update screen); a person's own installs are untouched.
+
+**Not yet:** the commit-time check before staging; the Repository files section in the
 project's settings window; Codex and OpenCode delivery (OpenCode 1.x only;
 2.x is to be refused, per the OpenCode 2 plan, which is not in this tree); the
 `althar-skills` catalog and any GitHub fetch (the fixture catalog is a local

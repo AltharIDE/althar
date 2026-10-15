@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { z } from 'zod'
@@ -52,7 +53,7 @@ const objectDirectory = (root: string, hash: string) => {
 /** Writes `text` so a reader sees the old file or the new one, never half. */
 const writeAtomically = async (path: string, text: string): Promise<void> => {
   await mkdir(dirname(path), { recursive: true })
-  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`
+  const temporary = `${path}.${randomUUID()}.tmp`
   await writeFile(temporary, text, { mode: 0o600 })
   await rename(temporary, path)
 }
@@ -68,7 +69,7 @@ export const putObject = async (root: string, files: Files): Promise<string> => 
   const hash = treeHash(files)
   const directory = objectDirectory(root, hash)
   if (await exists(directory)) return hash
-  const staging = `${directory}.${process.pid}.${Date.now()}.partial`
+  const staging = `${directory}.${randomUUID()}.partial`
   for (const [path, bytes] of files) {
     const target = join(staging, path)
     await mkdir(dirname(target), { recursive: true })
@@ -108,6 +109,18 @@ export const readObject = async (root: string, hash: string): Promise<Files> => 
   await walk('')
   if (treeHash(files) !== hash) throw new Error(`the stored skill ${hash} no longer matches its hash`)
   return files
+}
+
+const queues = new Map<string, Promise<unknown>>()
+
+/** Runs `work` after every earlier one on the same store has finished: installs.json is read, changed and rewritten, and two at once would lose one. */
+export const serialized = <A>(root: string, work: () => Promise<A>): Promise<A> => {
+  const run = (queues.get(root) ?? Promise.resolve()).then(work)
+  queues.set(
+    root,
+    run.catch(() => undefined),
+  )
+  return run
 }
 
 export const readInstalls = async (root: string): Promise<Parsed<Installs>> => {

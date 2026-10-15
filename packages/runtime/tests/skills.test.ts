@@ -9,6 +9,7 @@ import type { RuntimeOptions } from '../src/Config'
 import { SqlClient } from 'effect/sql'
 
 import { Sessions } from '../src/Sessions'
+import { claudeRunSkills } from '../src/Skills'
 import { launches, runtime, sessionMetas, task } from './support'
 
 /*
@@ -108,5 +109,30 @@ describe('skills for a Claude Code lead', () => {
         yield* sessions.stop(created.threadId)
       }),
     ),
+  )
+})
+
+describe('setting skills up for several leads at once', () => {
+  it.live('keeps the store consistent and gives each its own run', () =>
+    Effect.promise(async () => {
+      const skills = await makeStore({ alpha: skill('alpha'), beta: skill('beta') }, {})
+      const runs = await Promise.all(Array.from({ length: 8 }, (_, at) => claudeRunSkills(skills, `run-${at}`, [])))
+      for (const run of runs) {
+        assert.isTrue(existsSync(join(run.plugin, 'skills', 'alpha', 'SKILL.md')))
+        assert.isTrue(existsSync(join(run.plugin, 'skills', 'beta', 'SKILL.md')))
+      }
+      assert.strictEqual(new Set(runs.map((run) => run.plugin)).size, 8)
+      const installs = JSON.parse(readFileSync(join(skills.root, 'installs.json'), 'utf8')) as {
+        installs: Array<{ id: string; active: boolean }>
+      }
+      assert.deepStrictEqual(
+        installs.installs.map(({ id, active }) => [id, active]),
+        [
+          ['alpha', true],
+          ['beta', true],
+        ],
+      )
+      await Promise.all(runs.map((run) => run.release()))
+    }),
   )
 })
