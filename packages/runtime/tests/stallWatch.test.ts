@@ -212,7 +212,7 @@ describe('an agent going round in circles', () => {
     done(id, 'completed', `The file ${path} has been updated successfully.`),
   ]
 
-  it('tells edits apart by what they change, not by their title and the same reply, as Claude Code sends them', () => {
+  it('tells edits apart by what they change, not by their title and the same reply, with their text in the input', () => {
     const { watch } = watching()
     watch.observe(started('u1'), 0)
     const oneFile = ['a', 'b', 'c', 'd'].flatMap((change) => edit(change, 'src/board.ts', change))
@@ -230,6 +230,42 @@ describe('an agent going round in circles', () => {
     // The same change, again and again, is going round in circles.
     const same = ['k', 'l', 'm', 'n'].flatMap((id) => edit(id, 'src/board.ts', 'x'))
     assert.deepStrictEqual(tags(same.flatMap((event) => watch.observe(event, 30))), ['Redirect'])
+  })
+
+  /*
+   * An edit as Claude Code sends it to Althar: its adapter leaves the file
+   * text out of the input for a client that asks as Althar does, so every
+   * edit to a file has the same input and the same reply, and only its diff
+   * says what it changes. The reply's content is only words.
+   */
+  const heardEdit = (id: string, path: string, change: string) => [
+    agent({ _tag: 'ToolCall', toolCallId: id, title: `Edit ${path}`, kind: 'edit', status: 'pending', rawInput: {} }),
+    agent({
+      _tag: 'ToolCallUpdate',
+      toolCallId: id,
+      rawInput: { file_path: path, replace_all: false },
+      content: [{ _tag: 'Diff', path, created: false, change }],
+    }),
+    agent({
+      _tag: 'ToolCallUpdate',
+      toolCallId: id,
+      status: 'completed',
+      rawOutput: `The file ${path} has been updated successfully.`,
+      content: [{ _tag: 'Text', text: 'Updated' }],
+    }),
+  ]
+
+  it('tells edits apart by their diff where the input leaves out what they write', () => {
+    const { watch } = watching()
+    watch.observe(started('u1'), 0)
+    const oneFile = ['a', 'b', 'c', 'd', 'e', 'f'].flatMap((change) => heardEdit(change, 'src/board.ts', change))
+    assert.deepStrictEqual(
+      oneFile.flatMap((event) => watch.observe(event, 10)),
+      [],
+    )
+    // The same change, again and again, is still going round in circles.
+    const same = ['k', 'l', 'm', 'n'].flatMap((id) => heardEdit(id, 'src/board.ts', 'x'))
+    assert.deepStrictEqual(tags(same.flatMap((event) => watch.observe(event, 20))), ['Redirect'])
   })
 
   it('never takes a call with nothing to tell it by but its title for the same as another', () => {
