@@ -123,12 +123,10 @@ export const sealWithPortal = async (
   const sealed = Buffer.from(value, 'base64')
   if (sealedByPortal(sealed)) {
     try {
-      // Chromium may rotate its key during decryption. Electron says to call
-      // again so the same ciphertext is opened with the newly available key.
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        const { result, shouldReEncrypt } = await storage.decryptStringAsync(sealed)
-        if (!shouldReEncrypt) return { value: result }
-      }
+      // shouldReEncrypt only says the seal came from another provider or an
+      // older key; the plaintext is already open, and the next save seals it anew.
+      const { result } = await storage.decryptStringAsync(sealed)
+      return { value: result }
     } catch {
       // A portal-sealed value cannot be opened by the session fallback.
     }

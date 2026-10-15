@@ -95,14 +95,11 @@ describe('the Secret portal and session fallback', () => {
     expect(vi.mocked(openStore.decryptString)).not.toHaveBeenCalled()
   })
 
-  it('retries async decryption when Electron reports that its key was rotated', async () => {
-    const decryptStringAsync = vi
-      .fn()
-      .mockResolvedValueOnce({ result: 'old-key-read', shouldReEncrypt: true })
-      .mockResolvedValueOnce({ result: 'credential', shouldReEncrypt: false })
+  it('opens a seal Electron says belongs to another provider, once', async () => {
+    const decryptStringAsync = vi.fn().mockResolvedValue({ result: 'credential', shouldReEncrypt: true })
     const store = storage({ decryptStringAsync })
     expect(await sealWithPortal(false, encoded('v12'), store, 'linux')).toEqual({ value: 'credential' })
-    expect(decryptStringAsync).toHaveBeenCalledTimes(2)
+    expect(decryptStringAsync).toHaveBeenCalledTimes(1)
   })
 
   it('falls back to safe sync safeStorage for the current session when the portal is absent or returns a shared format', async () => {
