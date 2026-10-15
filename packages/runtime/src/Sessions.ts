@@ -856,6 +856,9 @@ export class Sessions extends Context.Service<
           if (thread.role === 'coordinator') return dueForHandover(running.context)
           if (thread.role !== 'task' || thread.review !== null) return false
           if ([...running.background.values()].some((left) => left.ended === null)) return false
+          // Still at work though its turn ended, or within the moment an agent takes to say what it left running (Codex says so
+          // after its turn): not yet.
+          if (yield* busyNow(thread.threadId)) return false
           const idle = running.turnEndedAt !== null && (yield* Clock.currentTimeMillis) - running.turnEndedAt >= CACHE_LIFE
           return dueForLeadHandover(running.context, running.atBreak || idle)
         })
@@ -2321,9 +2324,15 @@ export class Sessions extends Context.Service<
           previous.thread.threadId,
           Effect.gen(function* () {
             const sql = yield* SqlClient.SqlClient
-            const { thread } = previous
             // Stopped or switched while it waited: nothing is left to hand over.
-            if (thread.role === 'reviewer' || threads.get(thread.threadId) !== previous || previous.stopping) return
+            if (previous.thread.role === 'reviewer' || threads.get(previous.thread.threadId) !== previous || previous.stopping) return
+            // A lead's task as it is now, not as its session found it: it may have a branch, a pull request or a new name since.
+            const thread = previous.thread.role === 'task' ? yield* loadThread(previous.thread.threadId) : previous.thread
+            // Something it left running since it was due would stop with it: it carries on as it is, and is looked at again.
+            if (thread.role === 'task' && [...previous.background.values()].some((left) => left.ended === null)) {
+              previous.handover = 'none'
+              return yield* Queue.offer(previous.wake, undefined)
+            }
             const [session] = yield* sql<{ model: string | null; effort: string | null }>`
               SELECT model, effort FROM provider_sessions WHERE id = ${previous.sessionId}`
             const model = session?.model ?? undefined
