@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type * as acp from '@agentclientprotocol/sdk'
 import type { ToolKind } from '@althar/domain'
 
@@ -69,12 +71,13 @@ export type Handed =
  * What a tool call holds, as its content says: words (a result, or a
  * command's output where the agent has no other way to send it), what it
  * hands back, a file it changes, or the terminal its command runs in. A
- * diff keeps its path, and whether the file is new, not its text.
+ * diff keeps its path, and whether the file is new, not its text: what it
+ * changes is only a digest (`changeOf`), to tell one edit from another.
  */
 export type ToolContent =
   | { readonly _tag: 'Text'; readonly text: string }
   | Handed
-  | { readonly _tag: 'Diff'; readonly path: string; readonly created: boolean }
+  | { readonly _tag: 'Diff'; readonly path: string; readonly created: boolean; readonly change: string }
   | { readonly _tag: 'Terminal'; readonly terminalId: string }
 
 /**
@@ -216,6 +219,18 @@ export const handedOf = (content: acp.ContentBlock): Handed | undefined => {
   }
 }
 
+/**
+ * What a diff changes, as a digest: the same text before and after gives the
+ * same digest, and nothing of the text can be read back from it. Claude
+ * Code's adapter leaves an edit's text out of its input for a client that
+ * asks as Althar does, so the diff is all that tells two edits to a file apart.
+ */
+export const changeOf = (oldText: string | null | undefined, newText: string) =>
+  createHash('sha256')
+    .update(JSON.stringify([oldText ?? null, newText]))
+    .digest('hex')
+    .slice(0, 16)
+
 const toolContentOf = (content: ReadonlyArray<acp.ToolCallContent> | null | undefined): ReadonlyArray<ToolContent> | undefined =>
   content === null || content === undefined
     ? undefined
@@ -228,7 +243,14 @@ const toolContentOf = (content: ReadonlyArray<acp.ToolCallContent> | null | unde
             return handed === undefined ? [] : [handed]
           }
           case 'diff':
-            return [{ _tag: 'Diff', path: entry.path, created: entry.oldText === null || entry.oldText === undefined }]
+            return [
+              {
+                _tag: 'Diff',
+                path: entry.path,
+                created: entry.oldText === null || entry.oldText === undefined,
+                change: changeOf(entry.oldText, entry.newText),
+              },
+            ]
           case 'terminal':
             return [{ _tag: 'Terminal', terminalId: entry.terminalId }]
         }

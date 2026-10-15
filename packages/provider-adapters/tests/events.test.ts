@@ -1,7 +1,7 @@
 import type * as acp from '@agentclientprotocol/sdk'
 import { assert, describe, it } from '@effect/vitest'
 
-import { handedOf, normalize, normalizeOptions, normalizeUsage, terminalOf } from '../src/events'
+import { changeOf, handedOf, normalize, normalizeOptions, normalizeUsage, terminalOf } from '../src/events'
 
 describe('normalize', () => {
   it('keeps text, and what a message hands back beside it; sound and a thought’s pictures pass through as they came', () => {
@@ -95,8 +95,8 @@ describe('normalize', () => {
           { _tag: 'Text', text: 'done' },
           { _tag: 'Image', data: 'AAAA', mimeType: 'image/png' },
           { _tag: 'Link', uri: '/w/shot.png', name: '/w/shot.png' },
-          { _tag: 'Diff', path: '/w/docs/new.md', created: true },
-          { _tag: 'Diff', path: '/w/src/a.ts', created: false },
+          { _tag: 'Diff', path: '/w/docs/new.md', created: true, change: changeOf(undefined, '# New') },
+          { _tag: 'Diff', path: '/w/src/a.ts', created: false, change: changeOf('a', 'b') },
           { _tag: 'Terminal', terminalId: 't' },
         ],
       },
@@ -118,6 +118,18 @@ describe('normalize', () => {
         content: [{ _tag: 'Terminal', terminalId: 't' }],
       },
     )
+  })
+
+  it('tells what a diff changes by a digest that holds none of its text', () => {
+    assert.strictEqual(changeOf('a', 'b'), changeOf('a', 'b'))
+    assert.notStrictEqual(changeOf('a', 'b'), changeOf('a', 'c'))
+    assert.notStrictEqual(changeOf('a', 'b'), changeOf('b', 'a'))
+    // A new file and an emptied one are different changes.
+    assert.strictEqual(changeOf(null, 'b'), changeOf(undefined, 'b'))
+    assert.notStrictEqual(changeOf(null, 'b'), changeOf('', 'b'))
+    const secret = 'API_KEY=sk-live-0123456789'
+    assert.notInclude(changeOf(null, secret), 'sk-live')
+    assert.match(changeOf(null, secret), /^[0-9a-f]{16}$/)
   })
 
   it('hears a command’s output and its end in the tool call’s _meta, as Claude Code and Codex send them', () => {

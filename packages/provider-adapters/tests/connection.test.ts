@@ -4,9 +4,9 @@ import { Deferred, Effect, Fiber, Ref, Stream } from 'effect'
 import { answerFor, connect, type PermissionOption } from '../src/AgentConnection'
 import { type Question, type QuestionAnswer, questionContent } from '../src/questions'
 import { AgentRequestFailed, OptionUnavailable, TurnInProgress } from '../src/errors'
-import type { SessionEvent } from '../src/events'
+import { changeOf, type SessionEvent } from '../src/events'
 import type { Classified } from '../src/failures'
-import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, SCREENSHOT_PNG, scenarios, WHY } from '../src/testing'
+import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, HANDED_DOCUMENT, SCREENSHOT_PNG, scenarios, WHY } from '../src/testing'
 import { type ContractSubject, type Decide, text, withConnection } from './contract'
 
 const fake: ContractSubject = {
@@ -140,7 +140,9 @@ describe('AgentConnection', () => {
       const shot = updates.find((event) => event.toolCallId === 'shot')
       assert.strictEqual(shot?.content?.[1]?._tag, 'Image')
       const wrote = find(events, 'ToolCall').find((event) => event.toolCallId === 'write-doc')
-      assert.deepStrictEqual(wrote?.content, [{ _tag: 'Diff', path: '/tmp/docs/notes.md', created: true }])
+      assert.deepStrictEqual(wrote?.content, [
+        { _tag: 'Diff', path: '/tmp/docs/notes.md', created: true, change: changeOf(null, HANDED_DOCUMENT.body) },
+      ])
       const handed = find(events, 'AgentContent').map((event) => event.content._tag)
       assert.deepStrictEqual(handed, ['Link', 'Image'])
     }),
