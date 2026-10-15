@@ -46,3 +46,10 @@ describe('commandGlance', () => {
     expect(commandGlance('mkdir out\nls out')).toEqual({ lines: ['mkdir out', 'ls out'], summary: null })
   })
 })
+
+describe('commandGlance cd', () => {
+  it('keeps a cd joined with ||, or after another command', () => {
+    expect(commandGlance('cd /missing || exit 1').lines).toEqual(['cd /missing', 'exit 1'])
+    expect(commandGlance('echo start; cd /target; run').lines).toEqual(['echo start', 'cd /target'])
+  })
+})

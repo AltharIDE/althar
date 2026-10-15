@@ -10,14 +10,25 @@ import { commandGlance } from '@althar/ui'
 
 type Call = Pick<AttentionRequest, 'title' | 'command' | 'label'>
 
-const MULTI = /\n|^.{121,}/s
+const LONG = /\n|^.{121,}/s
 
-/** What the agent asked, on one line. */
-export const titleOf = (call: Pick<Call, 'title'>): string =>
-  MULTI.test(call.title) ? (commandGlance(call.title).lines[0] ?? call.title) : call.title
+/** Whether the title is the command itself, and says more than one short command. */
+const isScript = (call: Call): boolean => {
+  const command = call.command ?? call.title
+  if (call.command !== null && call.command !== call.title && !LONG.test(call.title)) return false
+  if (LONG.test(command)) return true
+  const { lines, summary } = commandGlance(command)
+  return lines.length > 1 || summary !== null
+}
 
-/** The command to show under the title, as it reads at a glance; none where the title is the command and is short. */
+/** What the agent asked, on one line: its title, or where that is the command, a plain heading above the command. */
+export const titleOf = (call: Call): string => {
+  if (!isScript(call)) return call.title
+  return LONG.test(call.command ?? call.title) || (call.command ?? call.title).includes('\n') ? 'Run a script' : 'Run commands'
+}
+
+/** The command to show under the title, as it reads at a glance; none where the title is the command and is one short command. */
 export const commandOf = (call: Call): { readonly command: string } | Record<string, never> => {
   const command = call.command ?? call.title
-  return call.command === call.title && !MULTI.test(command) ? {} : { command: call.label ?? command }
+  return call.command === call.title && !isScript(call) ? {} : { command: call.label ?? command }
 }

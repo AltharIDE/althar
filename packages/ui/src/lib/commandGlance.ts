@@ -79,13 +79,21 @@ const splitLine = (line: string): string[] => {
   return parts.filter((part) => part !== '')
 }
 
+/** A leading `cd dir &&` is left out, as it only says where; any `cd` joined with `||`, or after another command, stays. */
+const dropLeadingCd = (all: Statement[], whole: string): Statement[] => {
+  const first = all[0]
+  if (first === undefined || all.length < 2 || !/^(cd|pushd)\s/.test(first.text)) return all
+  const after = whole.slice(whole.indexOf(first.text) + first.text.length).trimStart()
+  return after.startsWith('||') ? all : all.slice(1)
+}
+
 const cut = (text: string) => (text.length > WIDTH ? `${text.slice(0, WIDTH - 1).trimEnd()}…` : text)
 
 /** A command as a card shows it at a glance; `command` is the shortened form (`label`) where the runtime gave one. */
 export function commandGlance(command: string, words: Partial<GlanceWords> = {}): CommandGlance {
   const w = { ...glanceWords, ...words }
   const whole = command.trim()
-  const statements = statementsOf(whole).filter((one, index, all) => !(index < all.length - 1 && /^(cd|pushd)\s/.test(one.text)))
+  const statements = dropLeadingCd(statementsOf(whole), whole)
   if (statements.length === 0) return { lines: [cut(whole)], summary: null }
   const shown = statements.slice(0, SHOWN)
   const lines = shown.map((one) => cut(one.body > 0 ? `${one.text} …` : one.text))

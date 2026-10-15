@@ -187,6 +187,13 @@
     grid-area: brief;
     font-size: 11.5px;
   }
+  .glance {
+    grid-area: brief;
+    overflow: hidden;
+  }
+  .glance .brief {
+    grid-area: auto;
+  }
   .kind,
   .whose {
     font-size: 11.5px;
