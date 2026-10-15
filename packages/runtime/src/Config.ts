@@ -54,6 +54,11 @@ export interface RuntimeOptions {
   readonly countdown?: Duration.Duration
   /** How often a task's pull requests are asked for news while it listens: 30 seconds unless a test says otherwise. */
   readonly listenEvery?: Duration.Duration
+  /**
+   * How long after a change's work comes back its pull request may show no checks before Althar takes it to have none: a
+   * host registers its checks a few seconds after a push. A minute unless a test says otherwise (ADR-040).
+   */
+  readonly checksAppear?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
   /** Althar's GitHub App, by its slug, for where it is installed on an owner. */
