@@ -34,6 +34,29 @@ describe('Permission', () => {
     expect(onAnswer).toHaveBeenCalledWith({ decision: Decision.AllowOnce, cmd: STAGING.cmd })
   })
 
+  it('ignores Enter held down: only a fresh press answers', () => {
+    const onAnswer = vi.fn()
+    render(<Permission {...STAGING} project={project} onAnswer={onAnswer} />)
+    const once = screen.getByRole('radio', { name: /Yes, this once/ })
+    fireEvent.keyDown(once, { key: 'Enter', repeat: true })
+    expect(onAnswer).not.toHaveBeenCalled()
+    fireEvent.keyDown(once, { key: 'Enter' })
+    expect(onAnswer).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not take focus on `idle` while a dialog is open', async () => {
+    const dialog = document.createElement('div')
+    dialog.setAttribute('aria-modal', 'true')
+    document.body.append(dialog)
+    try {
+      render(<Permission {...STAGING} project={project} onAnswer={vi.fn()} focusOnMount="idle" />)
+      await act(async () => {})
+      expect(document.activeElement).toBe(document.body)
+    } finally {
+      dialog.remove()
+    }
+  })
+
   it('takes focus as it shows when told, on the answer picked, so Enter answers at once', async () => {
     const onAnswer = vi.fn()
     render(<Permission {...STAGING} project={project} onAnswer={onAnswer} focusOnMount />)

@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -183,6 +183,28 @@ describe('the edge', () => {
       await userEvent.keyboard('{Enter}')
       expect(client.answer).toHaveBeenCalledWith(expect.objectContaining({ attentionId: 'a1', decision: 'allow' }))
       expect(await screen.findByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })).toBeTruthy()
+    } finally {
+      seen.mockRestore()
+    }
+  })
+
+  it('under the menu bar, focuses an Allow once that comes in while the sheet is open, and ignores held Enter', async () => {
+    let calls: ReadonlyArray<HomeCall> = []
+    const seen = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => 'visible')
+    try {
+      const { client, emit } = fakeClient({
+        getHome: vi.fn(async () => home({ tasks: [running], calls, projects: [project, halyard] })),
+      })
+      withServices(<Edge shown={{ place: 'menu' }} />, client)
+      await act(async () => {})
+      calls = [permission]
+      act(() => emit(changed('attention_request', 'a1', 'th3', 'p2')))
+      const allow = await within(await screen.findByRole('article', { name: 'Run npm publish' })).findByRole('button', {
+        name: 'Allow once',
+      })
+      await waitFor(() => expect(allow).toBe(document.activeElement))
+      fireEvent.keyDown(allow, { key: 'Enter', repeat: true })
+      expect(client.answer).not.toHaveBeenCalled()
     } finally {
       seen.mockRestore()
     }

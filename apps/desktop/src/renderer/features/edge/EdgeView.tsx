@@ -157,9 +157,13 @@ function Pointed({
  */
 function Measured({ children, onHeight, showing }: { children: ReactNode; onHeight: (height: number) => void; showing: boolean }) {
   const box = useRef<HTMLDivElement>(null)
+  // As it shows, and again whenever focus is left on the page with an Allow waiting: a permission arriving, or the next one once this is answered.
   useEffect(() => {
-    if (showing) box.current?.querySelector<HTMLElement>(DEFAULT_ANSWER)?.focus({ preventScroll: true })
-  }, [showing])
+    const element = box.current
+    if (!showing || element === null) return
+    if (document.activeElement !== null && document.activeElement !== document.body) return
+    element.querySelector<HTMLElement>(DEFAULT_ANSWER)?.focus({ preventScroll: true })
+  })
   useEffect(() => {
     const element = box.current
     if (element === null) return
@@ -171,7 +175,15 @@ function Measured({ children, onHeight, showing }: { children: ReactNode; onHeig
   }, [onHeight])
   return (
     <div className={s.menu}>
-      <div ref={box}>{children}</div>
+      <div
+        ref={box}
+        onKeyDownCapture={(e) => {
+          // Held down, Enter would click each Allow that takes focus after the last.
+          if (e.key === 'Enter' && e.repeat) e.preventDefault()
+        }}
+      >
+        {children}
+      </div>
     </div>
   )
 }

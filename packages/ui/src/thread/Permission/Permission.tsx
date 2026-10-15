@@ -228,8 +228,11 @@ type Phase = null | 'beat' | 'out' | 'outNo'
  */
 export type PermissionFocus = boolean | 'idle'
 
-/** Focus is on the page itself: nothing has it that a card would take it from. */
-const focusIsIdle = () => document.activeElement === null || document.activeElement === document.body
+/** Focus is on the page itself, with no dialog open and no text selected: nothing the person is at that a card would take focus from. */
+const focusIsIdle = () =>
+  (document.activeElement === null || document.activeElement === document.body) &&
+  document.querySelector('dialog[open], [aria-modal="true"]') === null &&
+  (window.getSelection()?.isCollapsed ?? true)
 
 interface CardProps extends PermissionRequest {
   project: string
@@ -390,6 +393,11 @@ function Card({
         }}
         onKeyDown={(e) => {
           const target = e.target
+          // A key held down repeats: once a card is answered the next takes focus, and it must wait for a fresh press.
+          if (e.key === 'Enter' && e.repeat) {
+            e.preventDefault()
+            return
+          }
           if (phase || e.defaultPrevented || (target instanceof HTMLInputElement && target.type === 'text')) return
           // Enter on a choice gives it, as the button says: not every engine submits a form from a radio. A field and a button do on their own.
           if (e.key === 'Enter' && target instanceof HTMLInputElement && target.type === 'radio') {
