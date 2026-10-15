@@ -56,6 +56,11 @@
     as plain `bun`, failing sign-in and sessions alike. In a reader role,
     commands reach Althar's reader rules, which refuse direct and wrapped
     `flatpak-spawn` commands.
+  - **The desktop's tray carries the edge's icon.** The manifest asks for
+    `--talk-name=org.kde.StatusNotifierWatcher`, so the StatusNotifierItem
+    Electron registers for the tray (edgeWindows.ts) reaches the desktop's
+    watcher. Registered from a Flatpak, the item sits on the app's own unique
+    bus name, so the Flatpak needs no own-name permission.
   - **git has no ssh-agent socket.** Althar's own pushes use the code-host
     connections it keeps. The manifest does not expose the person's ssh
     agent to the sandbox.
