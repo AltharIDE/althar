@@ -39,10 +39,14 @@ two of them are safety or account problems:
    off the person's MCP servers is a form 2.x says it ignores [D,
    unverified here].
 
-Recommendation: keep 1.x as the supported line, pin Althar's own download to
-1.x, and say plainly in Settings when the person's OpenCode is 2.x. Then make
-the adapter version-aware in the stages below, and switch the default only
-once a signed-in contract run passes on 2.x.
+Recommendation: keep 1.x as the supported line, and pin Althar's own
+download to 1.x. **Gate 2.x:** where the person's OpenCode is 2.x, Althar
+starts no OpenCode session and says why in Settings. A warning alone isn't
+enough while the MCP switch-off may be void: that control keeps the person's
+MCP servers, some acting with their credentials, out of agent sessions. Then
+make the adapter version-aware in the stages below, lift the gate once the
+switch-off is shown to hold on 2.x, and switch the default only once a
+signed-in contract run passes there.
 
 ## What OpenCode 2 is
 
@@ -157,7 +161,7 @@ and nothing signed in.
 | **Sign-in status (`signIn.read`)** | `└ 1 credentials` | `OpenAI  API key  stored`; `--format json` gives `[{id, name, connections:[{type, method, label}]}]` | **always "can't tell"** [V] |
 | **Status per account (ADR-012)** | reads the home's `auth.json` | through the user-wide service: answers from whichever home started it, or waits out the 15 s timeout if the port is taken; `--standalone` reads the home's own | **wrong account** [V] |
 | Login line (`signIn.login`) | `opencode auth login` | same name; goes through the service unless `--standalone` (which it accepts); `acp --login` is new | unverified per account |
-| Credentials in an existing home | `auth.json` | imports `auth.json` into `opencode.db` on first run and leaves the file | survives [V, a fake key] |
+| Credentials in an existing home | `auth.json` | imports `auth.json` into `opencode.db` on first run and leaves the file | API key survives [V, a fake key]; OAuth and plan sign-ins unverified |
 | History in an existing home | `opencode.db` | adds tables; lists and `session/load`s the 1.x session, but as a copy taken once | one-way [V] |
 | **Back to 1.x** | n/a | a home 2.x created: 1.x fails ("no session table"); a home 1.x made first: 1.x still works | **one-way** [V] |
 | Data home (`home.variable: XDG_DATA_HOME`) | `opencode/` | `opencode/`, but the service's state and password are under `XDG_STATE_HOME`/`XDG_CONFIG_HOME`, which aren't per account | partly [V] |
@@ -225,18 +229,24 @@ rejection, and the question asked in words.
 
 - **What the person does.** Running `opencode upgrade --major` (or
   installing `@opencode/cli`) outside Althar changes the binary Althar runs,
-  at once. Their existing Althar accounts keep their sign-ins: 2.x imports
-  each home's `auth.json` [V]. But from then on 1.x may refuse those homes
+  at once. An API-key sign-in survives: 2.x imported a home's `auth.json`
+  with a fake key into `opencode.db` [V]. Only that shape was tried. Whether
+  OAuth and plan sign-ins (ChatGPT, Go, Zen, Copilot) carry over, and still
+  refresh, is unverified. But from then on 1.x may refuse those homes
   (a home 2.x created certainly; one it only migrated still opened with 1.x
   in the one test here), and history diverges. Going back to 1.x after
   using 2.x through Althar is not safe.
 - **The safest default.** Stay on 1.x, and detect the major from the version
-  Althar already reads. On 2.x, until the follow-up lands, show the gaps in
-  Settings; don't block, since it is the person's own install. Offering both
+  Althar already reads. On 2.x, until the follow-up lands, start no OpenCode
+  session and say why in Settings. It is the person's own install, but a
+  warning can't hold the boundary that keeps their MCP servers out. Each
+  session would load them if the switch-off is void. Offering both
   side by side isn't practical: OpenCode doesn't install them side by side,
   and the homes don't go back.
-- **Migrating accounts.** Nothing for Althar to do for sign-ins. Once 2.x is
-  supported, a note per account ("opened with OpenCode 2; OpenCode 1 can't
+- **Migrating accounts.** API-key sign-ins need nothing from Althar [V, a
+  fake key]. OAuth and plan sign-ins need a signed-in check before 2.x is
+  supported: that they are imported, still refresh, and read as signed in.
+  Once 2.x is supported, a note per account ("opened with OpenCode 2; OpenCode 1 can't
   open it again") is enough.
 - **Plan-usage design** (`plan-usage-data-acp-vs-api-research-and-design`).
   It reads `opencode auth list`. On 2.x that output changes, and must be
@@ -259,9 +269,10 @@ rejection, and the question asked in words.
 
 ## Follow-up, staged
 
-1. **Now, small.** Pin `Installs.ts` to 1.x. Show the major in Settings, and
-   on 2.x list the gaps (rejections end the turn; sign-in can't tell). Add
-   the probe dates.
+1. **Now, small.** Pin `Installs.ts` to 1.x. Gate 2.x: where the major is
+   2 or more, start no OpenCode session, and say in Settings why (the
+   person's MCP servers may load; rejections end the turn; sign-in can't
+   tell). Add the probe dates.
 2. **Sign-in on 2.x.** `--standalone --format json` status, and a
    `--standalone` login line. Parse by version (`versionIn`, major ≥ 2).
    Unit tests on recorded output.
@@ -270,7 +281,8 @@ rejection, and the question asked in words.
    The contract runs per major, with `asks: 'form'` on 2.x.
 4. **Config by version.** Native 2.x inline config (`permissions`,
    `mcp.servers…disabled`), checked over ACP that the person's MCP servers
-   stay off. Agree `OPENCODE_CONFIG_DIR` semantics with the skills plan.
+   stay off. Lift the gate from step 1 only then, as an opt-in in Settings.
+   Agree `OPENCODE_CONFIG_DIR` semantics with the skills plan.
 5. **Homes.** A note when a home has been opened by 2.x. Never fall back to
    1.x on such a home.
 6. **Switch the default.** Once 2–5 pass a signed-in contract run on 2.x,

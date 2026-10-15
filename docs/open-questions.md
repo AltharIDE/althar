@@ -17,9 +17,11 @@ Researched in [the OpenCode 2 plan](plans/opencode-2.md).
   runs, so an `opencode upgrade --major` switches Althar too. Rejecting a
   command then ends the turn, and every 2.x account's sign-in reads as
   "can't tell".
-  - Leaning: 1.x stays the supported line. Althar's download is pinned to
-    1.x, Settings names the gaps on 2.x, and the adapter becomes
-    version-aware in stages.
+  - Leaning: 1.x stays the supported line, and Althar's download is pinned
+    to it. On 2.x no OpenCode session starts, and Settings says why, until
+    the person's MCP servers are shown to stay off there. A warning alone
+    wouldn't hold that boundary. Then the adapter becomes version-aware in
+    stages.
 - [ ] **Carrying on after a rejection on 2.x.** It ignores
   `continue_loop_on_deny`, and no replacement is documented. Ask upstream,
   or treat a rejection as one that stops the turn and tell the lead in the
