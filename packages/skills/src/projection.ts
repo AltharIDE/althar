@@ -50,6 +50,7 @@ export const projectRun = async (input: {
   const skillsAt = layout === 'claude-plugin' ? join(directory, 'skills') : directory
   for (const repository of keepOutOf) {
     if (inside(base, repository)) throw new Error(`${base} is inside the repository ${repository}`)
+    if (inside(repository, base)) throw new Error(`the repository ${repository} is inside ${base}, which is removed first`)
   }
   const seen = new Set<string>()
   for (const { id, treeHash } of selected) {

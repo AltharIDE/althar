@@ -127,8 +127,9 @@ export const readInstalls = async (root: string): Promise<Parsed<Installs>> => {
   let text: string
   try {
     text = await readFile(join(root, 'installs.json'), 'utf8')
-  } catch {
-    return { ok: true, value: EMPTY_INSTALLS }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ok: true, value: EMPTY_INSTALLS }
+    throw error
   }
   let json: unknown
   try {

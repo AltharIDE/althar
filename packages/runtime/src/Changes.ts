@@ -1854,6 +1854,8 @@ export class Changes extends Context.Service<
             if (followed.code !== 0 || followed.stdout === '') continue
             const remote = followed.stdout
             const at = remote.indexOf('/')
+            // What is sent is the branch's tip, which may be ahead of the task's head: guard that, not the head.
+            const tip = (yield* commitsOf(repository.root, [`refs/heads/${repository.base}`]))[0] ?? head
             yield* guardPush({
               projectId: task.projectId,
               taskId,
@@ -1861,7 +1863,7 @@ export class Changes extends Context.Service<
               cwd: repository.worktree,
               base: repository.baseCommit,
               ref: repository.base,
-              head,
+              head: tip,
             })
             // As the person would push it: their remote, their branch there, their sign-in. A prompt for a password fails rather than waits.
             yield* gitWithin(

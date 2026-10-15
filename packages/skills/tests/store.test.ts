@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -63,6 +63,11 @@ describe('installs.json', () => {
     expect(installs.installs.map(({ id, active }) => `${id}:${active}`)).toEqual(['a-skill:false', 'b-skill:false'])
     await writeInstalls(root, installs)
     expect(await readInstalls(root)).toEqual({ ok: true, value: installs })
+  })
+
+  it('surfaces a read error other than a missing file, so an unreadable record is never taken for empty', async () => {
+    await mkdir(join(root, 'installs.json'))
+    await expect(readInstalls(root)).rejects.toThrow()
   })
 
   it('says why it cannot read a damaged file', async () => {
@@ -151,6 +156,9 @@ describe('projectRun', () => {
 
   it('refuses a store inside a repository, and unsafe names', async () => {
     await expect(projectRun({ ...base, root, keepOutOf: [join(root, '..')], selected: [] })).rejects.toThrow('inside the repository')
+    await expect(projectRun({ ...base, root, keepOutOf: [join(root, 'runs', 'run-1', 'codex', 'repo')], selected: [] })).rejects.toThrow(
+      'is inside',
+    )
     await expect(projectRun({ ...base, root, keepOutOf: ['/somewhere/else'], selected: [] })).resolves.toBeDefined()
     await expect(projectRun({ ...base, root, runId: '..', selected: [] })).rejects.toThrow('unsafe')
     await expect(projectRun({ ...base, root, agent: 'a/b', selected: [] })).rejects.toThrow('unsafe')
