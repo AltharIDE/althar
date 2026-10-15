@@ -85,7 +85,8 @@ export const useWorkActions = (): WorkActions => {
         busy(setSending, task.taskId, async () => {
           const head = await client.getThread(task.threadId, { limit: 0 })
           const restarting = head.session === null || !head.session.held
-          const lead = task.lead
+          // The lead as the thread has it now, not as the card was read: it may have changed since.
+          const lead = head.task.lead?.agentId ?? null
           // A thread the runtime no longer holds can't take it — its recorded session may be stale or dead — so the lead starts again on the agent that led it.
           // A held thread takes the note itself: running, after the current turn; between turns, now. With no lead to start, the person is told why.
           if (restarting && lead === null)

@@ -432,6 +432,7 @@ describe('the board', () => {
           task: {
             ...snapshot().task,
             id: 't4',
+            lead: { agentId: 'claude-code', model: null, account: null },
             files: [{ path: 'src/limit.ts', from: null, status: 'modified', add: 12, del: 3, binary: false, uncommitted: false }],
           },
         }),
@@ -471,7 +472,7 @@ describe('the board', () => {
       getThread: vi.fn(async () =>
         snapshot({
           session: base.session === null ? null : { ...base.session, held },
-          task: { ...base.task, id: 't4' },
+          task: { ...base.task, id: 't4', lead: { agentId: 'claude-code', model: null, account: null } },
         }),
       ),
     })
@@ -487,15 +488,33 @@ describe('the board', () => {
     } else expect(startSession).not.toHaveBeenCalled()
   })
 
-  it('reports that Send back has no lead to start without queuing the note', async () => {
+  it('starts the lead the thread has now, not the one the board card was read with', async () => {
     const send = vi.fn(async () => {})
     const startSession = vi.fn(async () => 's1')
-    const tasks = board().tasks.map((work) => (work.taskId === 't4' ? { ...work, lead: null } : work))
     const { client } = fakeClient({
       send,
       startSession,
-      getBoard: vi.fn(async () => board({ tasks })),
-      getThread: vi.fn(async () => snapshot({ session: null, task: { ...snapshot().task, id: 't4' } })),
+      getBoard: vi.fn(async () => board()),
+      getThread: vi.fn(async () =>
+        snapshot({ session: null, task: { ...snapshot().task, id: 't4', lead: { agentId: 'codex', model: null, account: null } } }),
+      ),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
+    await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'codex' }))
+  })
+
+  it('reports that Send back has no lead to start without queuing the note', async () => {
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
+    const { client } = fakeClient({
+      send,
+      startSession,
+      getBoard: vi.fn(async () => board()),
+      getThread: vi.fn(async () => snapshot({ session: null, task: { ...snapshot().task, id: 't4', lead: null } })),
     })
     withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
     const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
@@ -520,7 +539,7 @@ describe('the board', () => {
       getThread: vi.fn(async () =>
         snapshot({
           session: base.session === null ? null : { ...base.session, held: false },
-          task: { ...base.task, id: 't4' },
+          task: { ...base.task, id: 't4', lead: { agentId: 'claude-code', model: null, account: null } },
         }),
       ),
     })
