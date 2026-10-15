@@ -110,6 +110,8 @@ export interface BusyOptions {
   readonly sample?: Duration.Duration
   /** How long what an agent left running must stay below real CPU before it stops taking a place: 30 seconds. */
   readonly quiet?: Duration.Duration
+  /** How long an agent waiting on the person's answer, to a question or a permission, keeps its place: five minutes. */
+  readonly askGrace?: Duration.Duration
   /**
    * The CPU time of each process in the tree of each of these agents (the agent's process and everything it started), by
    * process and in milliseconds, by thread; null where it can't be said, as for an agent that is no process of its own:
