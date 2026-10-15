@@ -7,16 +7,13 @@ import type { NameModel } from './modelNames'
 /*
  * How full the context of the agent on a conversation is, for its composer:
  * the kit's ring, from what the agent last said of it while it runs. Nothing
- * where it hasn't said. Once it holds enough to be worth it, Compact beside
- * the ring has the agent sum up what it holds; it says it is compacting until
- * the agent says how full it is again.
+ * where it hasn't said. Its detail, as you point at it, holds Compact, which
+ * has the agent sum up what it holds; it says it is compacting until the
+ * agent says how full it is again.
  */
 
 /** Tokens, as the ring counts them: in thousands, to a tenth. */
 const thousands = (tokens: number) => Math.round(tokens / 100) / 10
-
-/** From how full compacting is offered, in tokens: where a lead at a break starts afresh, too (ADR-038). */
-export const COMPACT_FROM = 80_000
 
 /** How long Compact stays off, at most, for an agent that never says how full it is after. */
 const COMPACTING_AT_MOST = 120_000
@@ -46,7 +43,7 @@ function ContextMeter({
     return () => clearTimeout(gone)
   }, [asked])
   const compact =
-    onCompact === undefined || used < COMPACT_FROM
+    onCompact === undefined
       ? {}
       : {
           onCompact: () => {

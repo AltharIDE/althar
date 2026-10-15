@@ -13,12 +13,13 @@
   that asks for a place can wait a long time, while a compaction that waits
   stops being cheap: its agent's cache goes cold meanwhile.
 - **Decision:**
-  - **Compact sits beside the context ring in the composer,** for a task's
-    agent and the coordinator alike, once the context holds 80,000 tokens
-    or more (where a fresh start pays, as in ADR-038). It is a quiet text
-    action, not a button that draws the eye. Asked for, it says
-    "Compacting…" and stays off until the agent says how full its context
-    is again, or for two minutes at most.
+  - **Compact is in the context ring's detail,** for a task's agent and the
+    coordinator alike: the ring opens it as you point at it (and as you press
+    it, or press Enter on it), and it stays while the pointer is over the ring
+    or the panel. Under the numbers, Compact. Asked for, it says
+    "Compacting…" and stays off until the agent says how full its context is
+    again, or for two minutes at most. The ring's detail is a popover now, not
+    a tooltip, since it holds an action (the kit's Popover, with `hover`).
   - **It sends the agent its own command, `/compact`,** which Claude Code,
     Codex and OpenCode all take over ACP, bare, as a turn of its own after
     what the agent was told before (`CompactContext`, `Sessions.compact`).
@@ -33,10 +34,9 @@
     The person keeps the agent they were talking to, with its own summary of
     what it was doing, rather than a brief from the record; Althar's own
     handovers carry on as they are.
-  - **Compact from the ring's card.** The card is for reading and holds no
-    actions; a second click target inside it would be hard to find.
-  - **Always show Compact.** Compacting a small context gains nothing, and a
-    control that is always there is one more thing to read.
+  - **A quiet Compact beside the ring, from 80,000 tokens.** The first
+    version; the person wanted it in the ring's detail, where it is found as
+    you look at how full the context is, and doesn't sit in the composer.
 - **Trade-off:** the summary is the agent's own, made by its own rules, and
   what it keeps differs by agent. OpenCode runs a project's own command
   named `compact` before its built-in one. Two minutes is a guess at how

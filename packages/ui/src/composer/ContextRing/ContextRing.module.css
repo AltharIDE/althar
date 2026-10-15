@@ -1,13 +1,3 @@
-.meter {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
-.compact {
-  padding: 0 4px;
-  text-decoration: none;
-}
-
 .ring {
   display: grid;
   place-items: center;
@@ -65,4 +55,20 @@
   font-size: 11.5px;
   line-height: 1.45;
   color: var(--t-3);
+}
+
+/* the detail: the numbers, then what can be done about them */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-2);
+}
+.foot {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
 }
