@@ -49,8 +49,18 @@
     `claude-usual` home under the app's profile, with the person's settings
     linked in; its status and sign-in run the host's own `claude` where there
     is one, and the bundled CLI otherwise, so they inspect the same home its
-    sessions use. In a reader role, commands reach Althar's reader rules,
-    which refuse direct and wrapped `flatpak-spawn` commands.
+    sessions use. The bundled CLI is a Bun-compiled executable, whose
+    JavaScript payload sits in a trailer at the end of the file: the manifest
+    keeps flatpak-builder's strip and debug-info step off it
+    (`dev.althar.app.yml`), which would drop the payload and leave it running
+    as plain `bun`, failing sign-in and sessions alike. In a reader role,
+    commands reach Althar's reader rules, which refuse direct and wrapped
+    `flatpak-spawn` commands.
+  - **The desktop's tray carries the edge's icon.** The manifest asks for
+    `--talk-name=org.kde.StatusNotifierWatcher`, so the StatusNotifierItem
+    Electron registers for the tray (edgeWindows.ts) reaches the desktop's
+    watcher. Registered from a Flatpak, the item sits on the app's own unique
+    bus name, so the Flatpak needs no own-name permission.
   - **git has no ssh-agent socket.** Althar's own pushes use the code-host
     connections it keeps. The manifest does not expose the person's ssh
     agent to the sandbox.
