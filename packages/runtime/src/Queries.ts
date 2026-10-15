@@ -1706,7 +1706,13 @@ export class Queries extends Context.Service<
           const from = since ?? looked ?? new Date(Date.now() - FIRST_LOOK).toISOString()
           const rows = yield* sql<{ id: string; projectId: string; state: string; createdAt: string; settledAt: string | null }>`
             SELECT k.id, k.project_id, k.state, k.created_at, k.settled_at FROM tasks k JOIN projects p ON p.id = k.project_id
-            WHERE p.archived_at IS NULL AND k.state = 'open' ORDER BY k.created_at, k.id`
+            WHERE p.archived_at IS NULL AND (k.state = 'open' OR k.id IN (
+              -- A merged task the board still shows can be ready again, with commits after its pull request in none yet.
+              SELECT id FROM (
+                SELECT id, state, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY settled_at DESC, id DESC) AS place
+                FROM tasks WHERE state IN ('done', 'abandoned'))
+              WHERE state = 'done' AND place <= ${SETTLED_SHOWN}))
+            ORDER BY k.created_at, k.id`
           const tasks = yield* Effect.forEach(
             rows,
             (row) =>

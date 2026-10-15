@@ -295,6 +295,29 @@ describe('a task that goes back to work', () => {
   )
 
   it.live(
+    'is ready on the home as on the board when a merged task has commits after its pull request',
+    () => {
+      const { working, bare, github } = onGitHub()
+      return Effect.gen(function* () {
+        const queries = yield* Queries
+        const task = yield* merged(working, bare, github)
+        const homeHas = Effect.map(queries.home(), (home) => home.tasks.filter((one) => one.taskId === task.taskId).map((one) => one.phase))
+        // Merged and settled, it is on neither: the board keeps it below, and the home has no use for it.
+        assert.deepStrictEqual(yield* homeHas, [])
+        // The person commits to its branch after the merge: still done, but ready for a new pull request, on the board and the home.
+        writeFileSync(join(task.path, 'after.txt'), 'after the merge\n')
+        git(task.path, 'add', '-A')
+        git(task.path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', 'After the merge')
+        const [ready] = yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(10))
+        assert.strictEqual((yield* taskRow(task.taskId))?.state, 'done')
+        assert.strictEqual(ready?.unshipped?.commits, 1)
+        yield* until(homeHas, (phases) => phases[0] === 'ready', Duration.seconds(10))
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
     'needs the person when its lead asks them something in a round, and goes on with their answer',
     () => {
       const { working, bare, github } = onGitHub()
