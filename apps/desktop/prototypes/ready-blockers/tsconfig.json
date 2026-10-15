@@ -1,5 +1,0 @@
-{
-  "extends": "../../tsconfig.json",
-  "compilerOptions": { "paths": { "@althar/ui": ["./kit.ts"], "vitest": ["./vitest.ts"] } },
-  "include": [".", "../../src/renderer/global.d.ts"]
-}
