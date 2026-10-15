@@ -225,7 +225,7 @@ describe('a project’s front page', () => {
     expect(
       rulesLineOf({
         ...projectRules,
-        permissions: 'allow',
+        allowEverything: true,
         alwaysAsk: ['deploy'],
         commands: [{ pattern: 'npm publish', decision: 'ask' }],
       }),

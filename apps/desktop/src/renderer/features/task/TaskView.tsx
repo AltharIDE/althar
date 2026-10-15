@@ -251,10 +251,13 @@ const firstChange = (view: FileView): number | undefined => {
 export function TaskView({
   model,
   onBack,
+  onRules,
 }: {
   model: TaskModel
   /** Back to the project, on Escape. */
   onBack: () => void
+  /** Opens its project's rules, from a card the project always asks about. */
+  onRules?: () => void
 }) {
   // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
   const kept = draftKey.task(model.snapshot?.threadId ?? '')
@@ -521,6 +524,12 @@ export function TaskView({
                 project: snapshot.task.resolveConflicts.project,
                 onChange: (choice: TaskConflicts) => void model.setResolveConflicts(choice === 'project' ? null : choice === 'on'),
               },
+              // And whether everything its agents ask is allowed: by its own switch, or its project's.
+              allowEverything: {
+                on: snapshot.task.allowEverything.task,
+                project: snapshot.task.allowEverything.project,
+                onChange: (on: boolean) => void model.setAllowEverything(on),
+              },
             }
           : {})}
         // Its folder opens in the editor files open in, once it has a worktree: a plain task's has no branch, but is there.
@@ -785,6 +794,13 @@ export function TaskView({
               requests={snapshot.attention.filter((request) => request.kind === 'permission')}
               project={snapshot.project.name}
               onAnswer={model.answer}
+              // Out of what the project always asks about: everything on this task allowed, where it isn't yet; or the rules.
+              wayOut={{
+                ...(snapshot.task.allowEverything.task || snapshot.task.phase === 'settled'
+                  ? {}
+                  : { onAllowEverything: () => void model.setAllowEverything(true) }),
+                ...(onRules === undefined ? {} : { onRules }),
+              }}
             />
           </Thread>
         </TaskFace>
