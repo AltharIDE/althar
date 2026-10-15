@@ -21,20 +21,27 @@ export const keyringIsSafe = (platform: NodeJS.Platform, backend: string): boole
  * gnome_libsecret only for desktops it recognises and plain text for others.
  * Asking for gnome_libsecret on an unrecognised desktop or KDE is safe:
  * libsecret speaks the Secret Service API that gnome-keyring, KeePassXC and
- * KWallet all serve. In a Flatpak it is asked for every desktop because the
- * sandbox reaches the host's secret service, not KWallet's own socket. A
- * `--password-store` the person chose themselves is left alone.
+ * KWallet all serve. A Flatpak on KDE is the exception, and asks for KWallet
+ * itself (`kwallet6`, or `kwallet5` on Plasma 5): inside a sandbox libsecret
+ * keeps its keyring in a file of the app's own, stores the sealing key
+ * there, and Chromium looks it up in the host's service, where it isn't, so it
+ * makes a new key at every start and what an earlier run sealed can't be
+ * opened (ADR-028). KWallet's own wallet is the host's and has one key, kept;
+ * the manifest lets the sandbox talk to it. A `--password-store` the person
+ * chose themselves is left alone.
  */
 export const passwordStore = (
   args: ReadonlyArray<string>,
   desktop: string | undefined,
   flatpak: boolean,
   platform: NodeJS.Platform = process.platform,
-): 'gnome-libsecret' | null => {
+  kdeSession?: string,
+): 'gnome-libsecret' | 'kwallet5' | 'kwallet6' | null => {
   // A Linux switch: macOS and Windows keep their own keychain, which Electron knows without being told.
   if (platform !== 'linux') return null
   if (args.some((arg) => arg === '--password-store' || arg.startsWith('--password-store='))) return null
   const names = (desktop ?? '').toLowerCase().split(':')
+  if (flatpak && names.includes('kde')) return kdeSession === '5' ? 'kwallet5' : 'kwallet6'
   const recognised = ['x-cinnamon', 'deepin', 'gnome', 'pantheon', 'xfce', 'ukui', 'unity']
   return flatpak || names.includes('kde') || !names.some((name) => recognised.includes(name)) ? 'gnome-libsecret' : null
 }

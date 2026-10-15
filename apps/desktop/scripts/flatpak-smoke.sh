@@ -28,6 +28,7 @@ echo "$perms" | grep -qE '(^|[=;])network(;|$)' && ok "network shared" || bad "n
 echo "$perms" | grep -qE '(^|[=;])ipc(;|$)' && ok "shared memory allowed (ipc)" || bad "shared memory (ipc)"
 echo "$perms" | grep -q 'wayland' && ok "wayland allowed" || bad "wayland allowed"
 echo "$perms" | grep -q 'org.freedesktop.secrets' && ok "the keyring is reachable (org.freedesktop.secrets)" || bad "keyring reachable"
+echo "$perms" | grep -q 'org.kde.kwalletd6' && ok "KDE's wallet is reachable (org.kde.kwalletd6)" || bad "KDE wallet reachable"
 echo "$perms" | grep -q 'org.freedesktop.Flatpak' && ok "the device is reachable (org.freedesktop.Flatpak)" || bad "device reachable"
 echo "$perms" | grep -q 'ssh-auth' && bad "ssh agent is not exposed" || ok "ssh agent is not exposed"
 echo "$perms" | grep -q 'filesystems=host' && bad "no host filesystem in permissions" || ok "no host filesystem in permissions"

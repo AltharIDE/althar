@@ -126,7 +126,13 @@ app.setName('Althar')
 if (process.platform !== 'darwin') app.on('browser-window-created', (_event, window) => window.setMenuBarVisibility(false))
 
 // Off a Mac, ask for a secret service where Electron would fall back to plain text (keyring.ts).
-const store = passwordStore(process.argv, process.env.XDG_CURRENT_DESKTOP, process.env.FLATPAK_ID !== undefined, process.platform)
+const store = passwordStore(
+  process.argv,
+  process.env.XDG_CURRENT_DESKTOP,
+  process.env.FLATPAK_ID !== undefined,
+  process.platform,
+  process.env.KDE_SESSION_VERSION,
+)
 if (store !== null) app.commandLine.appendSwitch('password-store', store)
 
 /*
