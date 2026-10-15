@@ -35,7 +35,7 @@ import { dropNote, keepNote, NOTE_LENGTH, NoteRefused, NOTES_KEPT, notesOf, sayN
 import { envelope } from './envelope'
 import { fact } from './records'
 import { type PlanStep, Runs } from './Runs'
-import { type Disposition, Sessions } from './Sessions'
+import { type Disposition, passedOn, Sessions } from './Sessions'
 import { blockedModelsOf } from './preferences'
 import type { InputImage } from './sentImages'
 import { SignIns } from './SignIns'
@@ -746,11 +746,13 @@ export class Coordinator extends Context.Service<
                 SELECT w.branch FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id
                 WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId} AND w.access = 'write' AND w.branched_at IS NOT NULL
                 ORDER BY b.created_at, b.rowid`
+              // Althar's own housekeeping, kept with the lead's work.
               yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
                 source: 'runtime',
                 severity: 'info',
                 title: `This task is a change now: ${who}, ${ends}.`,
                 ...(branches.length === 0 ? {} : { description: `Its work is ${branchedWords(branches.map((one) => one.branch))}.` }),
+                role: 'aside',
               })
               // What the coordinator hears at its next turn: what it is called now and was, who reviews it, and how it ends.
               const [revised] = yield* sql<{ revision: number }>`SELECT revision FROM tasks WHERE id = ${taskId}`
@@ -883,18 +885,13 @@ export class Coordinator extends Context.Service<
           const { task: reference, message: body, now } = yield* read(Passed, input)
           const task = yield* taskOf(access, reference)
           const lead = yield* sessions.running(task.threadId)
+          // Its thread says it once the lead has it: a lead mid-turn reads it only once that turn ends (Sessions.ts).
           yield* sessions.send({
             envelope: yield* envelope('thread.send', { threadId: task.threadId, body }, undefined, instance.coordinatorId),
             threadId: task.threadId,
-            body: `The coordinator passes this on:\n\n${body}`,
+            body: passedOn(body),
             disposition: now === true ? 'interrupt_and_continue' : 'after_current',
             quiet: true,
-          })
-          yield* addItem({ projectId: access.projectId as ProjectId, threadId: task.threadId }, 'notice', {
-            source: 'runtime',
-            severity: 'info',
-            title: 'From the coordinator:',
-            description: body,
           })
           // Queued for a lead that isn't running, it waits until one starts: the coordinator says so to the person.
           return Option.isSome(lead)

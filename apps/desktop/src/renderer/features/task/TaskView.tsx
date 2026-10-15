@@ -23,7 +23,6 @@ import {
   type TaskConflicts,
   TaskMenu,
   TaskStatus,
-  Finished,
   Thread,
   ThreadDivider,
   ThreadShellProvider,
@@ -49,9 +48,7 @@ import { stepNames, stepText, trackFor } from '../../shared/steps'
 import { ago, clock, running, useNow } from '../../shared/time'
 import { shortFolder } from '../../shared/folders'
 import { documentVersions, editorPath, wholePath } from '../../shared/handed'
-import { taskEvidence } from '../../shared/evidence'
-import { blocksOf } from '../../shared/thread'
-import { ThreadBlocks } from '../../shared/ThreadBlocks'
+import { roundsOf } from '../../shared/rounds'
 import { DocumentPanel, useThreadHost } from '../../shared/ThreadHost'
 import { type Outgoing, takesImages, useImages } from '../../shared/useImages'
 import { runningOf } from '../../shared/running'
@@ -62,6 +59,7 @@ import { PermissionCalls } from './PermissionCall'
 import { reachOf, ReviewCard, reviewedUnfurl } from './ReviewCard'
 import { usePostTeamReviews } from '../settings/usePostTeamReviews'
 import { StuckCall } from './StuckCall'
+import { TaskThread } from './TaskThread'
 import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
 import { NoOutputsView } from './NoOutputsView'
@@ -394,19 +392,17 @@ export function TaskView({
             pictures: [],
           },
         ]),
-    ...blocksOf(
+    // The thread in rounds: each ask, its lead's acknowledgement, its work in one line, and its result, which ends it (ADR-041).
+    ...roundsOf(
       { items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree, queue, outputs: model.outputs },
       model.streaming,
       (iso) => ago(iso),
       now,
     ),
   ]
-  // What the task built, as its lead last said it, closes its thread once no step is under way, with what its steps showed gathered under it.
-  const finished = taskEvidence(snapshot.items, snapshot.reports)
-  const closing = finished.built !== null && !busy && snapshot.task.step === null && snapshot.task.phase !== 'waiting'
   // What each document was last changed by, so one open beside the thread follows its edits.
   const versionOf = documentVersions(
-    blocks.flatMap((block) => (block.kind === 'turn' ? block.parts : [])),
+    blocks.flatMap((block) => (block.kind === 'round' ? block.parts : [])),
     snapshot.task.worktree,
   )
   // A file the lead wrote or pointed at opens in the person's editor, as its changes do.
@@ -733,12 +729,12 @@ export function TaskView({
               </ThreadDivider>
             )}
             <ThreadShellProvider value={host.shell}>
-              <ThreadBlocks
-                blocks={blocks}
+              <TaskThread
+                rounds={blocks}
+                versionOf={versionOf}
                 threadId={snapshot.threadId}
                 worktree={snapshot.task.worktree}
                 {...(openFile === undefined ? {} : { openFile })}
-                gathered={closing}
                 session={session}
                 project={snapshot.project.name}
                 onPassOn={(words) => void model.send(words)}
@@ -769,9 +765,6 @@ export function TaskView({
                   />
                 )}
               />
-              {closing && finished.built !== null && (
-                <Finished built={finished.built} pieces={finished.pieces} unverified={finished.unverified} />
-              )}
             </ThreadShellProvider>
             {snapshot.attention.map((request) =>
               request.kind === 'stuck' && request.stuck !== null ? (

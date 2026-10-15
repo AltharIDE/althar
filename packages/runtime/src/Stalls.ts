@@ -86,13 +86,15 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
         return thread === undefined || session === undefined ? undefined : { ...thread, ...session, name: nameOf(session.agentId) }
       })
 
-    const say = (projectId: ProjectId, threadId: string, title: string, description?: string) =>
+    /** Says in the thread what Althar did; `aside` where it is its own housekeeping, kept with the agent's work, and asks nothing of the person. */
+    const say = (projectId: ProjectId, threadId: string, title: string, description?: string, role?: 'aside') =>
       addItem({ projectId, threadId }, 'notice', {
         source: 'runtime',
         severity: 'warning',
         title,
         about: 'stall',
         ...(description === undefined ? {} : { description }),
+        ...(role === undefined ? {} : { role }),
       })
 
     /** Tells the agent something of Althar's, then stops its turn so it hears it now. */
@@ -150,6 +152,8 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
               place.projectId,
               action.threadId,
               `${place.name} showed no sign of work for ${spanOf(action.quietFor)}${running}, so Althar stopped its turn and told it to carry on.`,
+              undefined,
+              'aside',
             )
             return yield* stopAndTell(action.threadId, carryingOn(action))
           }
@@ -158,6 +162,8 @@ export const watchStalls = <R>(onGiveUp: (giveUp: GiveUp) => Effect.Effect<boole
               place.projectId,
               action.threadId,
               `${place.name} ran \`${action.repeated}\` ${action.times} times in a row to the same end, so Althar stopped its turn and told it to try another way.`,
+              undefined,
+              'aside',
             )
             return yield* stopAndTell(action.threadId, redirecting(action))
           case 'Restart': {

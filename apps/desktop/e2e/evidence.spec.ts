@@ -12,11 +12,11 @@ import { launch, openFirstProject, startTask, toConversation } from './support'
  * real window with the fake agent (`[lead:evidence]`): what it built, then a
  * screenshot it saved in its worktree, served from the artifact store, a
  * test run and what it couldn't try; at the top of what the task made, and
- * in the closing card that ends its thread. The screenshots it takes are
+ * under its lead's report in the thread, as what it said last. The screenshots it takes are
  * this change's own evidence (test-results/evidence-*.png).
  */
 
-test('shows what the task built and what the lead showed of it: atop its outputs, and closing its thread', async () => {
+test('shows what the task built and what the lead showed of it: atop its outputs, and as its lead’s result in its thread', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
   const projects = join(home, 'Projects')
   mkdirSync(projects)
@@ -49,18 +49,18 @@ test('shows what the task built and what the lead showed of it: atop its outputs
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
 
-    // In the conversation, the closing card ends the thread, under the lead's step: what it built, then the proof.
+    // In the conversation, the lead's report is what it said last: what it built, its screenshot large, what it checked
+    // and what it couldn't; no card closes the thread (ADR-041).
     await toConversation(page)
-    await expect(page.getByText('Did the task.')).toBeVisible()
-    const card = page.getByRole('article', { name: 'What the task built' })
-    await expect(card.getByRole('heading', { name: 'What it built', level: 3 })).toBeVisible()
-    await expect(card.getByRole('heading', { name: 'Evidence', level: 3 })).toBeVisible()
-    await expect(card.getByRole('heading', { name: 'Unverified', level: 3 })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Evidence', level: 4 })).toHaveCount(0)
-    await card.scrollIntoViewIfNeeded()
+    const round = page.getByRole('article').filter({ hasText: 'Checkout retries once when the payment call fails' }).last()
+    await expect(round.getByRole('button', { name: /View The retry button after a failed checkout full size/ })).toBeVisible()
+    await expect(round.getByText('What it checked')).toBeVisible()
+    await expect(round.getByText('Not checked')).toBeVisible()
+    await expect(page.getByRole('article', { name: 'What the task built' })).toHaveCount(0)
+    await round.scrollIntoViewIfNeeded()
     await page.waitForTimeout(400)
     await page.screenshot({ path: 'test-results/evidence-thread.png', fullPage: true })
-    await card.screenshot({ path: 'test-results/evidence-closing-card.png' })
+    await round.screenshot({ path: 'test-results/evidence-round.png' })
   } finally {
     await electronApp.close()
   }

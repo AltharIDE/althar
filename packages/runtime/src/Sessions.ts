@@ -71,7 +71,7 @@ import { evidenceForReview } from './evidence'
 import { scratchOf } from './firstWrite'
 import { quickIn } from './kinds'
 import { defaultEffortOf } from './preferences'
-import { addItem, betweenTurns, type OutputSoFar, recorder, toolItem, transcript } from './threads'
+import { addItem, betweenTurns, moveToEnd, type OutputSoFar, recorder, toolItem, transcript } from './threads'
 import {
   commandOfCall,
   exitCodeIn,
@@ -364,6 +364,14 @@ export const promptFor = (
   if (brief === undefined) return said.join('\n\n')
   return [brief.text, ...(parts.length === 0 ? [brief.closing] : said)].join('\n\n')
 }
+
+const PASSED_ON = 'The coordinator passes this on:\n\n'
+
+/** What the coordinator passes on to a task's lead, as the lead is told it. */
+export const passedOn = (body: string) => `${PASSED_ON}${body}`
+
+/** What the coordinator passed on, in its own words, from what the lead was told. */
+const passedOnOf = (told: string) => (told.startsWith(PASSED_ON) ? told.slice(PASSED_ON.length) : told)
 
 /** Why a turn ended in failure, as a class for the record. */
 export const errorClassOf = (
@@ -810,6 +818,48 @@ export class Sessions extends Context.Service<
           return { images, withheld }
         })
 
+      /**
+       * The thread shows what a turn gives the agent where the agent reads it,
+       * in the order it reads it: once the turn before has ended, not where
+       * it was sent. What the person said moves to the end of the thread,
+       * unless nothing but what comes after it in this turn follows it
+       * already; what the coordinator passed on is said now (a lead mid-turn
+       * reads it only once that turn ends, and one that isn't running only
+       * once one starts). What an earlier turn gave an agent stays where that
+       * one read it.
+       */
+      const shownWhereRead = (
+        running: Running,
+        deliveryId: string,
+        inputs: ReadonlyArray<{ readonly id: string; readonly body: string; readonly relayed: number; readonly given: number }>,
+      ) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { thread } = running
+          const fresh = inputs.filter((input) => input.given === 0)
+          if (fresh.length === 0) return
+          const shown = yield* sql<{ id: string; userInputId: string }>`
+            SELECT id, user_input_id FROM thread_items
+            WHERE thread_id = ${thread.threadId} AND user_input_id IN ${sql.in(fresh.map((input) => input.id))}`
+          const itemsOf = (input: { readonly id: string }) => shown.filter((item) => item.userInputId === input.id).map((item) => item.id)
+          for (const [index, input] of fresh.entries()) {
+            if (input.relayed === 1)
+              yield* addItem(
+                { projectId: thread.projectId, threadId: thread.threadId, sessionId: running.sessionId, deliveryId },
+                'notice',
+                {
+                  source: 'runtime',
+                  severity: 'info',
+                  title: 'From the coordinator:',
+                  description: passedOnOf(input.body),
+                  role: 'relayed',
+                },
+              )
+            for (const itemId of itemsOf(input))
+              yield* moveToEnd(thread.projectId, thread.threadId, itemId, fresh.slice(index + 1).flatMap(itemsOf))
+          }
+        })
+
       /** Delivers the queued input as one turn, and records it to its end. */
       const deliver = (running: Running) =>
         Effect.gen(function* () {
@@ -823,9 +873,22 @@ export class Sessions extends Context.Service<
             yield* Effect.forkIn(run(handOver(running)), sessionsScope)
             return false
           }
-          const queued = yield* sql<{ id: string; body: string; disposition: string; author: string; shown: number; cutBy: string | null }>`
+          const queued = yield* sql<{
+            id: string
+            body: string
+            disposition: string
+            author: string
+            shown: number
+            relayed: number
+            given: number
+            cutBy: string | null
+          }>`
             SELECT i.id, i.body, i.disposition, a.kind AS author,
               EXISTS (SELECT 1 FROM thread_items ti WHERE ti.user_input_id = i.id) AS shown,
+              i.author_actor_id = ${instance.coordinatorId} AS relayed,
+              -- An earlier turn gave it to an agent already: the thread shows it where that one read it.
+              EXISTS (SELECT 1 FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
+                WHERE di.user_input_id = i.id AND d.delivered_at IS NOT NULL) AS given,
               (SELECT s.agent_id FROM turn_delivery_inputs di JOIN turn_deliveries d ON d.id = di.delivery_id
                 JOIN provider_sessions s ON s.id = d.provider_session_id
                 WHERE di.user_input_id = i.id AND d.error_class = 'usage_limit' ORDER BY d.requested_at DESC LIMIT 1) AS cut_by
@@ -944,6 +1007,10 @@ export class Sessions extends Context.Service<
                   actorId: instance.systemId,
                 })
               }
+              // How the thread shows it never stops the turn: each change to it is its own savepoint, undone where it fails.
+              yield* shownWhereRead(running, turnId, inputs).pipe(
+                Effect.catchCause((cause) => Effect.logWarning('Could not show what a turn gives the agent where it reads it', cause)),
+              )
             }),
           )
           // What the person says to a task's lead after its plan opens a round of work, before the lead reads it, or its card says it
@@ -2055,8 +2122,12 @@ export class Sessions extends Context.Service<
             "When you have done the task, or can't go further without the person, call Althar's finish_step tool with a summary of a few lines: what you changed, how you checked it, and anything left open. The person reads that summary rather than everything you did.",
             // After its plan, what the person asks for is a round of work of its own (ADR-034).
             "Once the plan's steps are done, what the person asks you for is a round of work of its own: when you have done it, call finish_step the same way, with your summary and evidence. Where they only asked something and you changed nothing, answer them; there is nothing to finish. What you commit after the task's pull request merged or closed goes in a new pull request, which the person opens from the task.",
+            // The thread reads in rounds: what was asked, the lead's word on it, its work folded into one line, and what it did.
+            'When you pick up something to do, whether the task, a message from the person, what the coordinator passes on or the findings of a review, first say in a sentence or two what you understood and what you will do, then do it. Say little while you work: your words along the way are folded in with your work. When you are done, end with a message that says what you did, what to look at, and what is left.',
             // What the lead shows of its work: evidence that fits the task, and what it couldn't show.
             "As you work, gather evidence that the change does what it should, and hand it with finish_step, each piece with a caption saying what it shows. Choose what fits the task: for a change someone sees, screenshots of the states you changed (the repository's docs may say how to take them); otherwise the test run or command that shows it, with its exit code and output, a response, a log, or a before and after. Where nothing fits, as for a typo or a version bump, a single note saying so is enough. Don't say something works without showing it: what you changed but couldn't show working, and why, goes in `unverified`, which the person reads as what is still theirs to check. Take a screenshot at 1× (a device scale of 1, not a Retina 2×), of only the part that changed where you can, and look at each once: every picture you read stays in your context for the rest of the task, and a whole Retina screen costs as much as a few thousand words.",
+            // Each screenshot shows once, with its caption.
+            "Show each screenshot once. Don't hand over again, or take again, one you have already handed over, unless the screen has changed since. Never list your screenshots in a table or a list in a message: each one shows with its caption already.",
             // What the task built, which ends it: the person reads it before the proof, and it is said again when the work changes.
             "When you finish the task, say in finish_step's `built` what it has built, as it stands now, the way you would wrap up a session for the person: what it does for them now, the main changes and where they are, anything left open or decided along the way (\"the images aren't in the pull request because…\"), and what they should do next (try it at its local address, push, check it on a real device). A few lines or a short list, in plain words, about where it ended rather than how it got there: a review finding you fixed belongs only if it changed what was built. For a prototype or anything to look at, say how to see it. Settling a review that changes the work, say it again, so it never describes an earlier version; and once the plan's steps are done, when you change the work after (a failed check, what people said on the pull request), call finish_step again with `built` as it now stands.",
             // Althar reaches the code host for the task (ADR-011).
