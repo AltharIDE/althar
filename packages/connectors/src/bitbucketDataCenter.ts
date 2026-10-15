@@ -7,18 +7,21 @@ import { type Http, makeHttp } from './http'
 import type {
   Account,
   Activity,
+  ChangeList,
+  ChangeQuery,
   ChangeRequest,
   Check,
   CheckState,
   CodeHost,
   Comment,
+  ListedChange,
   MergeMethod,
   Person,
   Repository,
   Review,
   Verdict,
 } from './model'
-import { noReviews, stillOpen } from './model'
+import { lacking, noReviews, stillOpen } from './model'
 import {
   answered,
   failedOf,
@@ -99,7 +102,8 @@ const PullAnswer = Schema.Struct({
   fromRef: RefAnswer,
   toRef: RefAnswer,
   author: Schema.optional(Schema.NullOr(Schema.Struct({ user: UserAnswer }))),
-  reviewers: Schema.optional(Schema.Array(Schema.Struct({ user: UserAnswer }))),
+  // Each reviewer, and how they left it: APPROVED, NEEDS_WORK, or UNAPPROVED.
+  reviewers: Schema.optional(Schema.Array(Schema.Struct({ user: UserAnswer, status: Schema.optional(Schema.String) }))),
   links: Schema.optional(Schema.Struct({ self: Schema.optional(Schema.Array(Schema.Struct({ href: Schema.String }))) })),
   // Whether it would merge cleanly, as Data Center last worked it out: `current` false is from before a branch moved.
   properties: Schema.optional(
@@ -116,6 +120,12 @@ const conflictsOf = (result: { readonly outcome: string; readonly current?: bool
   result === undefined || result.current === false || (result.outcome !== 'CONFLICTED' && result.outcome !== 'CLEAN')
     ? {}
     : { conflicts: result.outcome === 'CONFLICTED' }
+
+/** Data Center's state for each a list can ask for: a declined pull request is closed. */
+const LISTED_STATES = { open: 'OPEN', closed: 'DECLINED', merged: 'MERGED', all: 'ALL' } as const
+
+/** How many pull requests a page of Data Center's list holds, at most. */
+const LISTED_PAGE = 100
 
 const Mergeability = Schema.Struct({
   canMerge: Schema.Boolean,
@@ -187,6 +197,8 @@ const Page = <A>(item: Schema.Codec<A, unknown>) =>
     isLastPage: Schema.optional(Schema.Boolean),
     nextPageStart: Schema.optional(Schema.NullOr(Schema.Number)),
   })
+
+const ListedPage = Page(PullAnswer)
 
 /** How many pages of a hundred activities, or build statuses, are read. */
 const PAGES = 10
@@ -337,6 +349,78 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
     ...conflictsOf(answer.properties?.mergeResult),
   })
 
+  /** A pull request as a list gives it: where its reviewers left it, and no word of its checks, which a list doesn't say. */
+  const listedOf = (repository: Repository, answer: PullAnswer): ListedChange => {
+    const said = answer.reviewers ?? []
+    const fork = within(repository, answer.fromRef) ? null : answer.fromRef.repository.project.key
+    return {
+      ...changeOf(repository, answer),
+      // Never read from a list: what it says is read with the pull request.
+      body: '',
+      forkOwner: fork,
+      reviewDecision: said.some((one) => one.status === 'NEEDS_WORK')
+        ? 'changes_requested'
+        : said.some((one) => one.status === 'APPROVED')
+          ? 'approved'
+          : null,
+      checks: null,
+    }
+  }
+
+  /**
+   * A repository's pull requests, newest change first: by author, and asking
+   * the account to review, as Data Center filters by role; by words, as its
+   * filter text finds them, kept to those with them in the title; and drafts,
+   * which only some versions filter. Narrowed here, it reads page after page,
+   * within a bound, until it has more than asked or the list ends: a first
+   * page with none to keep doesn't hide those on the next.
+   */
+  const listChanges = (repository: Repository, query: ChangeQuery) =>
+    Effect.gen(function* () {
+      const limit = Math.min(Math.max(query.limit, 1), LISTED_PAGE)
+      const author = query.author?.trim().replace(/^@/, '')
+      const words = query.text?.trim().toLowerCase() ?? ''
+      // Narrowed here as well as there: a page as full as it can be, so as many as asked are left.
+      const narrowed = words !== '' || query.draft !== undefined
+      const params = new URLSearchParams({
+        state: LISTED_STATES[query.state],
+        order: 'NEWEST',
+        limit: String(narrowed ? LISTED_PAGE : limit),
+      })
+      if (author !== undefined && author !== '') {
+        params.set('role.1', 'AUTHOR')
+        params.set('username.1', author)
+      }
+      if (query.reviewRequested === true) {
+        params.set('role.2', 'REVIEWER')
+        params.set('username.2', (yield* whoami).name)
+      }
+      if (words !== '') params.set('filterText', words)
+      const kept: Array<PullAnswer> = []
+      let start: number | null | undefined = 0
+      let ended = false
+      for (let read = 0; read < (narrowed ? PAGES : 1) && start != null && kept.length <= limit; read += 1) {
+        const page: typeof ListedPage.Type = yield* http.cached(
+          ListedPage,
+          `${base(repository)}/pull-requests?${params.toString()}&start=${start}`,
+        )
+        kept.push(
+          ...page.values.filter(
+            (answer) =>
+              (words === '' || answer.title.toLowerCase().includes(words)) &&
+              (query.draft === undefined || (answer.draft === true) === query.draft),
+          ),
+        )
+        ended = page.isLastPage !== false
+        start = ended ? null : page.nextPageStart
+      }
+      const found = kept.toSorted((a, b) => b.updatedDate - a.updatedDate)
+      return {
+        changes: found.slice(0, limit).map((answer) => listedOf(repository, answer)),
+        more: found.length > limit || !ended,
+      } satisfies ChangeList
+    }).pipe(Effect.mapError(lacking('Repository read')))
+
   /** Whether this repository is the one a ref is in. */
   const within = (repository: Repository, ref: typeof RefAnswer.Type) =>
     ref.repository.project.key.toLowerCase() === (repository.path[0] ?? '').toLowerCase() && ref.repository.slug === repository.path[1]
@@ -448,6 +532,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
             ),
           )
       }),
+    listChanges,
     change: (repository, number) => Effect.map(http.cached(PullAnswer, pull(repository, number)), (answer) => changeOf(repository, answer)),
     markReady: (repository, change) =>
       Effect.gen(function* () {

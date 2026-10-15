@@ -767,6 +767,50 @@ describe('a task that ends in a pull request', () => {
   })
 })
 
+describe('what the host says of a ready pull request’s conflicts', () => {
+  it.live('reaches the board and the home as the host says it now, with the branch it merges into', () => {
+    const { working, bare } = hosted()
+    // That it conflicts, that it doesn't, or nothing. Here the branches merge cleanly, so no lead is asked to resolve it.
+    let says: boolean | undefined = true
+    const github = makeFakeService({ pushUrl: () => bare, headOf: tipOf(bare), conflictsOf: () => says })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      yield* connect('github', HOST)
+      const projectId = yield* ask(working, 'Add a retry. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
+      const queries = yield* Queries
+      const seen = Effect.gen(function* () {
+        const board = (yield* Effect.orDie(queries.board(projectId))).tasks[0]?.change
+        const home = (yield* Effect.orDie(queries.home())).tasks[0]?.change
+        return { board: { target: board?.target, conflicts: board?.conflicts }, home: { target: home?.target, conflicts: home?.conflicts } }
+      })
+      const saying = (conflicts: boolean | undefined) =>
+        until(
+          Effect.map(seen, (both) => [both]),
+          ([both]) =>
+            both !== undefined &&
+            both.board.conflicts === conflicts &&
+            both.home.conflicts === conflicts &&
+            both.board.target !== undefined,
+          Duration.seconds(20),
+        )
+      const [conflicting] = yield* saying(true)
+      assert.deepStrictEqual(conflicting, { board: { target: 'main', conflicts: true }, home: { target: 'main', conflicts: true } })
+      // It no longer does: the card says so, rather than what the host said before.
+      says = false
+      const [clean] = yield* saying(false)
+      assert.deepStrictEqual(clean, { board: { target: 'main', conflicts: false }, home: { target: 'main', conflicts: false } })
+      // The host doesn't say: nor does the card.
+      says = true
+      yield* saying(true)
+      says = undefined
+      const [unknown] = yield* saying(undefined)
+      assert.deepStrictEqual(unknown, { board: { target: 'main', conflicts: undefined }, home: { target: 'main', conflicts: undefined } })
+      const [ready] = yield* cards(projectId)
+      assert.strictEqual(ready?.phase, 'ready')
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+})
+
 describe('a pull request, by the person and the lead', () => {
   it.live('is marked ready by the person, read and replied on by the lead, and pushed by the person as far as they saw', () => {
     const { working, bare } = hosted()

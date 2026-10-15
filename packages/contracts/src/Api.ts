@@ -655,6 +655,14 @@ export const ChangeSummary = Schema.Struct({
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),
   checks: Schema.NullOr(ChecksSummary),
+  /** The branch it merges into, as last seen: main. Absent where Althar saw it before it kept this. */
+  target: Schema.optional(Schema.String),
+  /**
+   * Whether its host says it conflicts with that branch, as last seen, so it
+   * can't merge until its branch is brought up to date. Null or absent where
+   * the host hasn't worked it out, or doesn't say.
+   */
+  conflicts: Schema.optional(Schema.NullOr(Schema.Boolean)),
   /** The commit at its head, as last seen: what accepting it merges, and nothing newer. */
   head: Schema.NullOr(Schema.String),
   /** Althar asks its host for news while the task is open. */
@@ -895,7 +903,12 @@ export const QuestionItem = Schema.Struct({
   }),
 })
 
-/** Something the agent or Althar notes: a warning from the agent, or a change of scene, such as another agent taking over. */
+/**
+ * Something the agent or Althar notes: a warning from the agent, or a change of scene, such as another agent taking over.
+ * What Althar notes has a role, where it isn't news: `aside` for its own housekeeping along the way (a branch made, a
+ * loop stopped), which a task's thread keeps with its lead's work; `relayed` for what the coordinator passed on to a
+ * task's lead, written when the lead received it, which starts a round of the thread as what the person says does.
+ */
 export const NoticeItem = Schema.Struct({
   ...itemFields,
   kind: Schema.Literal('notice'),
@@ -904,6 +917,7 @@ export const NoticeItem = Schema.Struct({
     severity: Schema.Literals(['info', 'warning', 'error']),
     title: Schema.String,
     description: Schema.NullOr(Schema.String),
+    role: Schema.optional(Schema.Literals(['aside', 'relayed'])),
   }),
 })
 
@@ -1522,6 +1536,8 @@ export const AttentionRequest = Schema.Struct({
   /** Why it waits for the person: the rule that keeps it for them. */
   reason: Schema.String,
   command: Schema.NullOr(Schema.String),
+  /** The command as it reads at a glance (see BackgroundCommand); absent where it is not shortened or there is no command. */
+  label: Schema.optional(Schema.String),
   /** For a step that needs the person: which, and why. */
   stuck: Schema.NullOr(StuckStep),
   /** For an agent's question: what it asks, field by field; it is answered in the thread, where it was asked. */
