@@ -161,13 +161,13 @@ export interface AgentsAtOnceText {
 export const agentsAtOnceText: AgentsAtOnceText = {
   title: 'Agents at once',
   note: (n, { count, memory, cores }) => {
-    if (n === count) return `${n}: this Mac has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`
-    if (n === 1) return '1: one at a time. The calmest this Mac can be.'
-    if (n < count) return `${n}: fewer than this Mac could carry.`
-    if (n <= count + 2) return `${n}: a little more than this Mac’s ${memory} GB suggests. Tests may slow down.`
-    return `${n}: well past what this Mac’s ${memory} GB suggests. Expect it to run hot.`
+    if (n === count) return `${n}: ${device.this} has ${memory} GB and ${cores} cores. More tasks than that wait their turn.`
+    if (n === 1) return `1: one at a time. The calmest ${device.this} can be.`
+    if (n < count) return `${n}: fewer than ${device.this} could carry.`
+    if (n <= count + 2) return `${n}: a little more than ${device.this}’s ${memory} GB suggests. Tests may slow down.`
+    return `${n}: well past what ${device.this}’s ${memory} GB suggests. Expect it to run hot.`
   },
-  mark: ({ count }) => `${count} · this Mac`,
+  mark: ({ count }) => `${count} · ${device.this}`,
   reset: 'Use the default',
 }
 

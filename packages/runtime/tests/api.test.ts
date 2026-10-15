@@ -1826,7 +1826,7 @@ describe('code hosts and trackers, through the API', () => {
         )
         // gh isn't signed in here; and a server that doesn't answer is said to be one.
         const noCli = yield* Effect.flip(client.ConnectCli({ commandId: commandId(), product: 'github', webUrl: HOST }))
-        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', "gh isn't signed in to github.test on this Mac."])
+        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', `gh isn't signed in to github.test on ${thisDevice()}.`])
         const server = yield* client.FindServer({ service: 'jira', webUrl: 'jira.meridian.dev' })
         assert.deepStrictEqual(server, { product: null, webUrl: 'https://jira.meridian.dev', reason: 'unreachable', tokenPage: null })
         const { issues } = yield* client.ListIssues({ projectId: project.id })

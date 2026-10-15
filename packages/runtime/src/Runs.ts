@@ -17,6 +17,7 @@ import type { Ledger } from '@althar/persistence-sqlite'
 import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Schema, Semaphore, Stream } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
+import { thisDevice } from './device'
 import { Busy } from './Busy'
 import type { Artifacts } from './Artifacts'
 import { touchCard } from './cards'
@@ -2332,7 +2333,7 @@ export class Runs extends Context.Service<
           const reply = (said: string) =>
             branched.length === 0
               ? said
-              : `${said} You changed the repository, so Althar put the task's work on a branch of its own, ${branched.join(', ')}, which stays on this Mac: commit there.`
+              : `${said} You changed the repository, so Althar put the task's work on a branch of its own, ${branched.join(', ')}, which stays on ${thisDevice()}: commit there.`
           const itemId = yield* newId(Ids.threadItem)
           const shows = Effect.gen(function* () {
             const kept = yield* keepEvidence({ projectId: access.projectId as ProjectId, itemId, folders: [] }, evidence)

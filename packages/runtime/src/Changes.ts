@@ -3226,7 +3226,7 @@ export class Changes extends Context.Service<
           const workspace = yield* worktreeOf(taskId, snapshot.url)
           if (workspace === undefined || !existsSync(workspace.path))
             return yield* new ToolRefused({
-              message: "The task's worktree isn't on this Mac, so Althar can't see what is on its branch. Tell the person.",
+              message: `The task's worktree isn't on ${thisDevice()}, so Althar can't see what is on its branch. Tell the person.`,
             })
           // What the pull request has: its branch as the remote says now, else as its host says, else as Althar last pushed it, else as last seen.
           const tip = yield* remoteTip(workspace.path, yield* pushTargetOf(host, repository, workspace.path), workspace.branch)
