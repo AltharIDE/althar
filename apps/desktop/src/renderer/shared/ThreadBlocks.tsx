@@ -7,6 +7,7 @@ import {
   Evidence,
   FindingState,
   Issue,
+  IssueRef,
   LinkButton,
   Markdown,
   Plan,
@@ -35,6 +36,7 @@ import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
+import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
 import { answersOf, partsOf, pickedOf, questionText } from './questions'
@@ -291,6 +293,17 @@ function StepView({ id, result, of, gathered }: { id: string; result: StepResult
   )
 }
 
+/** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
+function Said({ text, links }: { text: string; links: ReadonlyArray<Unfurl> }) {
+  return pastedIn(text, links).map((piece, at) =>
+    typeof piece === 'string' ? (
+      <Fragment key={at}>{piece}</Fragment>
+    ) : (
+      <IssueRef key={at} mark={productBrand(piece.product)} id={keyOf(piece)} linear={piece.product === 'linear'} />
+    ),
+  )
+}
+
 /** A link the person pasted, unfurled: an issue as its tracker shows it, or a pull request. */
 function LinkView({ link }: { link: Unfurl }) {
   if (link.kind === 'issue')
@@ -489,24 +502,18 @@ export function ThreadBlocks({
     switch (block.kind) {
       case 'you':
         return (
-          <Fragment key={block.id}>
-            <You
-              at={block.at}
-              delivery={block.delivery}
-              {...(queued === undefined ? {} : { text: { queued } })}
-              // The images sent with it, each opening full size with the others.
-              {...(block.pictures.length === 0 ? {} : { attach: sentAttachments(block.pictures) })}
-            >
-              {block.text}
-            </You>
-            {block.links.length > 0 && (
-              <div className={s.links}>
-                {block.links.map((link) => (
-                  <LinkView key={link.url} link={link} />
-                ))}
-              </div>
-            )}
-          </Fragment>
+          <You
+            key={block.id}
+            at={block.at}
+            delivery={block.delivery}
+            {...(queued === undefined ? {} : { text: { queued } })}
+            // The images sent with it, each opening full size with the others.
+            {...(block.pictures.length === 0 ? {} : { attach: sentAttachments(block.pictures) })}
+            // The links in it that unfurled, in the bubble under the words, so they read as part of what the person said.
+            {...(block.links.length === 0 ? {} : { unfurl: block.links.map((link) => <LinkView key={link.url} link={link} />) })}
+          >
+            {block.links.length === 0 || block.text === '' ? block.text : <Said text={block.text} links={block.links} />}
+          </You>
         )
       case 'arrival':
         return <ArrivalView key={block.id} arrival={block.arrival} at={block.at} {...(onPassOn === undefined ? {} : { onPassOn })} />

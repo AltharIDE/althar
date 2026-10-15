@@ -684,6 +684,9 @@ export type ChangeSummary = typeof ChangeSummary.Type
 export const TaskEnd = Schema.Literals(['draft', 'ready', 'none'])
 export type TaskEnd = typeof TaskEnd.Type
 
+/** The address as the message has it, which can differ from the one the tracker or host gives (`url`); none on a link unfurled before it was kept. */
+const Pasted = Schema.optional(Schema.String)
+
 /** A link the person pasted, unfurled: an issue, or a pull request. */
 export const Unfurl = Schema.Union([
   Schema.Struct({
@@ -692,6 +695,7 @@ export const Unfurl = Schema.Union([
     key: Schema.String,
     title: Schema.String,
     url: Schema.String,
+    pasted: Pasted,
     status: IssueStatus,
     priority: Schema.NullOr(Schema.Struct({ level: Schema.String, name: Schema.String })),
     container: Schema.NullOr(Schema.String),
@@ -702,6 +706,7 @@ export const Unfurl = Schema.Union([
     key: Schema.String,
     title: Schema.String,
     url: Schema.String,
+    pasted: Pasted,
     state: Schema.Literals(['draft', 'open', 'merged', 'closed']),
     repository: Schema.String,
   }),
