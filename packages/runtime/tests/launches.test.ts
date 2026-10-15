@@ -412,9 +412,17 @@ describe('what a project runs', () => {
           ['Storybook', 'npm run storybook', 'person'],
         ],
       )
-      // Both run at once, from the default branch's one copy; each answers where it says.
-      const dev = yield* launches.start({ projectId, taskId: null, threadId: null })
-      const book = yield* launches.start({ projectId, taskId: null, runnableId: storybook.id, threadId: null })
+      // Both run at once, from the default branch's one copy; each answers where it says. Asked together, as from
+      // the Run button's list, they take turns at the copy, and the same one asked twice is one run.
+      const [dev, book, twice] = yield* Effect.all(
+        [
+          launches.start({ projectId, taskId: null, threadId: null }),
+          launches.start({ projectId, taskId: null, runnableId: storybook.id, threadId: null }),
+          launches.start({ projectId, taskId: null, runnableId: storybook.id, threadId: null }),
+        ],
+        { concurrency: 'unbounded' },
+      )
+      assert.strictEqual(twice.id, book.id)
       assert.deepInclude(dev, { runnableId: own?.id ?? null, command: 'npm run dev', label: 'npm run dev' })
       assert.deepInclude(book, { runnableId: storybook.id, command: 'npm run storybook', label: 'Storybook' })
       const serving = yield* until(launches.ofProject(projectId), (all) => all.length === 2 && all.every((one) => one.url !== null))
