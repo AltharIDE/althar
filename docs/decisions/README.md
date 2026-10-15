@@ -46,3 +46,4 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [036](036-usage-data-from-the-main-process.md) | Anonymous usage data goes from the main process, named events only |
 | [037](037-what-the-person-does-goes-first.md) | What the person does goes first, a task keeps its place between its steps, and new work waits |
 | [038](038-a-lead-starts-afresh-at-a-break.md) | A task's lead starts afresh before its context grows large, and at a break in its work |
+| [039](039-the-person-compacts-an-agent-s-context.md) | The person can have an agent compact its context, at once, with the agent's own command |

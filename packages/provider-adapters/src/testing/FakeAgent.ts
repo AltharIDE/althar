@@ -241,6 +241,8 @@ interface SessionState {
   background: Map<string, { readonly toolCallId: string; readonly outputPath?: string }>
   /** How many commands it has left running, so each has an id of its own. */
   served: number
+  /** How large it last said its context is, in tokens. */
+  contextSize: number
 }
 
 /** What `bun dev` prints, coloured as Vite colours it. */
@@ -1079,6 +1081,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         })(),
         markers: new Set(),
         played: new Set(),
+        contextSize: CONTEXT_SIZE,
         coordinator: false,
         runs: 0,
         background: new Map(),
@@ -1164,8 +1167,27 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
+      // Asked to compact, as Claude Code, Codex and OpenCode take `/compact`, it says its context holds a tenth of what it may.
+      // With `[lead:compact-fails]`, it says so in a call of its own and ends its turn as usual, as Claude Code does.
+      if (text === '/compact') {
+        if (session.markers.has('[lead:compact-fails]')) {
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'compact',
+            title: 'Compact conversation',
+            kind: 'think',
+            status: 'in_progress',
+          })
+          await update({ sessionUpdate: 'tool_call_update', toolCallId: 'compact', status: 'failed' })
+          return ended()
+        }
+        await update({ sessionUpdate: 'usage_update', used: Math.round(session.contextSize / 10), size: session.contextSize })
+        await say('Compacted the conversation.')
+        return ended()
+      }
       if (filled !== null) {
         const size = filled[3] === undefined ? CONTEXT_SIZE : Number(filled[3])
+        session.contextSize = size
         const usage = { sessionUpdate: 'usage_update' as const, used: Math.round((size * Number(filled[2])) / 100), size }
         if (filled[1] === undefined) await update(usage)
         else setTimeout(() => void update(usage), 300)
