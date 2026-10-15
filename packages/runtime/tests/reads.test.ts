@@ -242,6 +242,56 @@ describe('the git screens read with', () => {
     }),
   )
 
+  it.live('loads the 30 most recently settled tasks, counts all 35, and pages back to the rest', () =>
+    Effect.gen(function* () {
+      const projects = yield* Projects
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const ids = yield* Effect.forEach(
+        Array.from({ length: 35 }, (_, n) => n),
+        (n) =>
+          Effect.gen(function* () {
+            const task = yield* projects.createTask({
+              envelope: yield* Runtime.envelope('task.create', {}),
+              projectId: project.projectId,
+              title: `Task ${n}`,
+              description: '',
+              draft: true,
+            })
+            // Task 0 settled first, task 34 last; every fifth was abandoned.
+            const at = new Date(Date.UTC(2026, 0, 1, 0, n)).toISOString()
+            yield* sql`UPDATE tasks SET state = ${n % 5 === 0 ? 'abandoned' : 'done'}, settled_at = ${at} WHERE id = ${task.taskId}`
+            return { taskId: task.taskId as string, at }
+          }),
+      )
+      const board = yield* queries.board(project.projectId)
+      assert.strictEqual(board.settledTotal, 35)
+      assert.deepStrictEqual(
+        board.tasks.map((task) => task.taskId).toSorted(),
+        ids
+          .slice(5)
+          .map((one) => one.taskId)
+          .toSorted(),
+      )
+
+      const oldest = board.tasks.map((task) => task.settledAt ?? '').toSorted()[0] ?? ''
+      const older = yield* queries.olderSettled(
+        project.projectId,
+        oldest,
+        board.tasks.find((task) => task.settledAt === oldest)?.taskId ?? '',
+      )
+      assert.deepStrictEqual(
+        older.map((task) => task.taskId),
+        ids
+          .slice(0, 5)
+          .map((one) => one.taskId)
+          .toReversed(),
+      )
+      assert.strictEqual((yield* queries.olderSettled(project.projectId, ids[0]?.at ?? '', ids[0]?.taskId ?? '')).length, 0)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.effect("stamps a worktree's index, linked or not, anew whenever git writes it", () =>
     Effect.gen(function* () {
       const root = repository()

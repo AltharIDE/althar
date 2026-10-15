@@ -50,7 +50,13 @@
   grid-area: 1 / 1;
 }
 
+/* Not stretched to the row: the words arriving can be taller than the text, and a stretched field measures itself as tall as they are, then keeps that height once they are gone. */
+.field > textarea {
+  align-self: start;
+}
+
 .interim {
+  position: relative;
   max-height: 200px;
   overflow: hidden;
   padding: 1px 4px 0 1px;
@@ -70,6 +76,8 @@
 .composer textarea.under {
   color: transparent;
   caret-color: var(--t-1);
+  /* the overlay scrolls while words arrive; the field stays still under it, so the two stay letter for letter */
+  overflow: hidden;
 }
 
 /* what you sent while it worked, above the field, in order */
@@ -122,6 +130,94 @@
 
 .queuedEdit {
   flex: none;
+}
+
+/* what was sent with it, after its words */
+.queuedAttached {
+  color: var(--t-3);
+}
+
+.queuedText > .queuedAttached:not(:first-child)::before {
+  content: ' · ';
+}
+
+/* images held over the composer: its edge drawn dashed, and what dropping does said over the field */
+.composer.over {
+  border-style: dashed;
+  border-color: var(--t-3);
+  background: var(--n-1);
+}
+
+.dropping {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+  font-size: 12.5px;
+  color: var(--t-2);
+  pointer-events: none;
+}
+
+/* the images to send, small, above the field, each with its way off */
+.images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 6px -4px;
+  padding: 0;
+  list-style: none;
+}
+
+.image {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--n-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+.imageThumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.imagePlaceholder {
+  display: grid;
+  place-items: center;
+  color: var(--t-3);
+}
+
+.imageRemove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  background: var(--paper);
+  box-shadow: var(--lift);
+}
+
+/* what the consumer says of images: a line over the field; empty, it takes no room, its gap given back */
+.imageNote {
+  display: block;
+  margin: 0 0 2px -1px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--t-2);
+}
+
+.imageNote:empty {
+  height: 0;
+  margin: -4px 0 0;
+  overflow: hidden;
 }
 
 /* the composer with what sits on its top edge: what floats over the thread, and a tray joined to it in the flow */

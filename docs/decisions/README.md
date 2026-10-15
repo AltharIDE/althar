@@ -34,3 +34,13 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [024](024-signed-releases-and-updates.md) | Signed releases on GitHub, and an app that updates itself |
 | [025](025-new-project-in-its-own-tab.md) | A new project is made in a tab of its own, under the id the window gave it |
 | [026](026-connecting-walks-the-person-in.md) | Connecting walks the person in, and says what the connection can do |
+| [027](027-what-the-flatpak-reaches.md) | What the Flatpak reaches, and what it does not |
+| [028](028-linux-windows-packages-and-the-keyring.md) | Linux windows, packages and the keyring |
+| [029](029-the-load-read-when-asked.md) | How hard the computer works is read by the runtime, only while a window shows it |
+| [030](030-the-lead-resolves-conflicts-and-althar-pushes-the-merge.md) | Where the project says so, the lead resolves a conflict unasked, and Althar pushes the merge |
+| [031](031-coordinator-handed-over-before-it-fills.md) | Althar hands the coordinator to a fresh session before its context fills, and keeps the project's notes |
+| [032](032-agents-at-once-on-this-machine.md) | A machine runs as many tasks' agents at once as its cores and memory allow, and the rest wait their turn |
+| [033](033-adapters-on-a-node-of-their-own.md) | The agent adapters run on a Node the app ships, and Althar's binary never runs as Node |
+| [034](034-a-task-goes-back-to-work-and-ships-again.md) | A task goes back to work whenever its lead does, and ships again in a pull request of its own |
+| [035](035-a-task-s-kind-is-read-from-what-it-has.md) | A task's kind is read from what it has, and its card has nothing to press |
+| [036](036-usage-data-from-the-main-process.md) | Anonymous usage data goes from the main process, named events only |

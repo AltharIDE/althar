@@ -22,6 +22,17 @@ import { statements as artifactImages } from './0017_artifact_images'
 import { statements as questions } from './0018_questions'
 import { statements as runCommands } from './0019_run_commands'
 import { statements as issueDrafts } from './0020_issue_drafts'
+import { statements as inputImages } from './0021_input_images'
+import { statements as connectionCli } from './0022_connection_cli'
+import { statements as worktreeSetup } from './0023_worktree_setup'
+import { statements as conflictResolutions } from './0024_conflict_resolutions'
+import { statements as pushRequests } from './0025_push_requests'
+import { statements as projectNotes } from './0026_project_notes'
+import { statements as agentsAtOnce } from './0027_agents_at_once'
+import { statements as taskSeen } from './0028_task_seen'
+import { statements as reviewDrafts } from './0029_review_drafts'
+import { statements as taskSearch } from './0030_task_search'
+import { statements as branchOnFirstWrite } from './0031_branch_on_first_write'
 
 export interface Migration {
   /** `<number>_<name>`, the order they run in. */
@@ -61,6 +72,17 @@ export const migrations: ReadonlyArray<Migration> = [
   { key: '0018_questions', statements: questions },
   { key: '0019_run_commands', statements: runCommands },
   { key: '0020_issue_drafts', statements: issueDrafts },
+  { key: '0021_input_images', statements: inputImages },
+  { key: '0022_connection_cli', statements: connectionCli },
+  { key: '0023_worktree_setup', statements: worktreeSetup },
+  { key: '0024_conflict_resolutions', statements: conflictResolutions },
+  { key: '0025_push_requests', statements: pushRequests },
+  { key: '0026_project_notes', statements: projectNotes },
+  { key: '0027_agents_at_once', statements: agentsAtOnce },
+  { key: '0028_task_seen', statements: taskSeen },
+  { key: '0029_review_drafts', statements: reviewDrafts },
+  { key: '0030_task_search', statements: taskSearch },
+  { key: '0031_branch_on_first_write', statements: branchOnFirstWrite },
 ]
 
 const run = (statements: ReadonlyArray<string>) =>

@@ -4,7 +4,7 @@ import { type Access, type AccessLine, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { makeHttp } from './http'
-import type { Account, Container, Issue, Person, StatusCategory, Tracker } from './model'
+import { type Account, type Container, type Issue, leftAsItIs, type Person, type StatusCategory, type Tracker } from './model'
 import { answered, failedOf, probe, readAs, stopped, UNREADABLE, UNSAID } from './probe'
 
 /*
@@ -171,7 +171,7 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
 
   return {
     product,
-    capabilities: { links: true },
+    capabilities: { links: true, starts: false },
     account,
     issue,
     // The cards the account is on, not archived, on an open board; those done or cancelled left out, as other trackers' are.
@@ -212,6 +212,8 @@ export const makeTrello = (options: AdapterOptions): Tracker => {
         if (attached.some((attachment) => attachment.url === link.url)) return
         yield* call(Schema.Unknown, 'POST', `${api}/cards/${issue.id}/attachments`, { url: link.url, name: link.title })
       }),
+    // A card's status is its list, named as each board likes: which list is "in progress" would be a guess, so a card stays where it is.
+    start: (issue) => Effect.succeed(leftAsItIs(issue)),
     // A list is where a card is filed: every open list on the account's open boards, named with its board. Trello lists every board in one answer, unpaged.
     containers: () =>
       Effect.map(

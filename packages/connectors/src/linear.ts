@@ -4,7 +4,7 @@ import { type Access, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { makeHttp, paged } from './http'
-import type { Account, Container, Issue, Priority, StatusCategory, Tracker } from './model'
+import { type Account, type Container, type Issue, leftAsItIs, type Priority, type StatusCategory, type Tracker, unstarted } from './model'
 import { type Answer, answered, probe, readAs, refusalOf, stopped, UNREADABLE, UNSAID } from './probe'
 
 /*
@@ -100,6 +100,9 @@ const pageOf = <A>(connection: {
 
 const Team = Schema.Struct({ id: Schema.String, key: Schema.String, name: Schema.String })
 
+/** A team's workflow state: its type, and where it sits on the board. */
+const State = Schema.Struct({ id: Schema.String, name: Schema.String, type: Schema.String, position: Schema.Number })
+
 /** A team's label or the workspace's, which any team's issue may take; a group only holds labels, and takes none itself. */
 const Label = Schema.Struct({ id: Schema.String, name: Schema.String, isGroup: Schema.optional(Schema.Boolean) })
 
@@ -130,7 +133,7 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
 
   return {
     product,
-    capabilities: { links: true },
+    capabilities: { links: true, starts: true },
     account,
     issue: (ref) =>
       Effect.map(
@@ -142,6 +145,28 @@ export const makeLinear = (options: AdapterOptions): Tracker => {
         ),
         ({ issue }) => issueOf(issue),
       ),
+    // Into the team's first started state, by its position on the board: In Progress, before In Review.
+    start: (issue) =>
+      Effect.gen(function* () {
+        if (!unstarted(issue.status.category)) return leftAsItIs(issue)
+        const { issue: found } = yield* http.graphql(
+          Schema.Struct({ issue: Schema.Struct({ team: Schema.Struct({ states: Schema.Struct({ nodes: Schema.Array(State) }) }) }) }),
+          url,
+          'query($id: String!) { issue(id: $id) { team { states(first: 100) { nodes { id name type position } } } } }',
+          { id: issue.id },
+        )
+        const [state] = found.team.states.nodes.filter((each) => each.type === 'started').toSorted((a, b) => a.position - b.position)
+        if (state === undefined)
+          return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Its team has no started state' })
+        const { issueUpdate } = yield* http.graphql(
+          Schema.Struct({ issueUpdate: Success }),
+          url,
+          'mutation($id: String!, $stateId: String!) { issueUpdate(id: $id, input: { stateId: $stateId }) { success } }',
+          { id: issue.id, stateId: state.id },
+        )
+        if (!issueUpdate.success) return yield* new ConnectorFailed({ product, reason: 'rejected', message: 'Linear did not move it' })
+        return { moved: true, status: { name: state.name, category: 'started' } }
+      }),
     mine: (options = {}) =>
       Effect.map(
         http.graphql(

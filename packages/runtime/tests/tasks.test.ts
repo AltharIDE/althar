@@ -843,3 +843,97 @@ describe('a task’s course', () => {
     }).pipe(Effect.provide(withQueries({ stopGrace: Duration.seconds(2) }))),
   )
 })
+
+describe('renaming a task', () => {
+  /** The title and slug the task's screen reads, and the card the coordinator's thread shows. */
+  const named = (threadId: string, taskId: string) =>
+    Effect.gen(function* () {
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const { task } = yield* queries.thread(threadId, { limit: 0 })
+      const [row] = yield* sql<{ title: string; slug: string }>`SELECT title, slug FROM tasks WHERE id = ${taskId}`
+      return { title: task.title, row, slug: task.slug, branch: task.branch, worktree: task.worktree }
+    })
+
+  it.live('gives a task in any state another title, keeping its slug, branch and worktree, and says who did', () =>
+    Effect.gen(function* () {
+      const plans = yield* Plans
+      const tasks = yield* Tasks
+      const sql = yield* SqlClient.SqlClient
+      const { task, planId, actor } = yield* planned('Retry checkout [lead:wait]')
+      const first = yield* named(task.threadId, task.taskId)
+      // Planned.
+      yield* tasks.rename({ envelope: yield* command('task.rename'), taskId: task.taskId, title: '  Retry the checkout  ' })
+      assert.strictEqual((yield* named(task.threadId, task.taskId)).title, 'Retry the checkout')
+      // Running.
+      yield* plans.start(planId, actor)
+      yield* standsAt(task.threadId, (now) => now.phase === 'running')
+      const running = yield* named(task.threadId, task.taskId)
+      yield* tasks.rename({ envelope: yield* command('task.rename'), taskId: task.taskId, title: 'Retry payments' })
+      const renamed = yield* named(task.threadId, task.taskId)
+      assert.strictEqual(renamed.title, 'Retry payments')
+      assert.deepStrictEqual([renamed.slug, renamed.branch, renamed.worktree], [first.slug, running.branch, running.worktree])
+      assert.isNotNull(renamed.branch)
+      // Abandoned.
+      yield* tasks.abandon({ envelope: yield* command('task.abandon'), taskId: task.taskId })
+      yield* tasks.rename({ envelope: yield* command('task.rename'), taskId: task.taskId, title: 'Retry, later' })
+      const settled = yield* named(task.threadId, task.taskId)
+      assert.deepStrictEqual([settled.title, settled.slug, settled.branch], ['Retry, later', first.slug, running.branch])
+      // The record says who, and what it was; naming it what it is already says nothing.
+      yield* tasks.rename({ envelope: yield* command('task.rename'), taskId: task.taskId, title: 'Retry, later' })
+      const events = yield* sql<{ actorId: string; payload: string }>`
+        SELECT actor_id, payload FROM record_events WHERE type = 'task.renamed' AND aggregate_id = ${task.taskId} ORDER BY sequence`
+      assert.deepStrictEqual(
+        events.map((event) => [event.actorId, JSON.parse(event.payload)]),
+        [
+          [actor, { title: 'Retry the checkout', was: 'Retry checkout [lead:wait]' }],
+          [actor, { title: 'Retry payments', was: 'Retry the checkout' }],
+          [actor, { title: 'Retry, later', was: 'Retry payments' }],
+        ],
+      )
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('refuses an empty title, and one past the limit draft_task keeps, and a task that is not there', () =>
+    Effect.gen(function* () {
+      const tasks = yield* Tasks
+      const { task } = yield* planned('Retry checkout')
+      const flipped = (taskId: string, title: string) =>
+        Effect.gen(function* () {
+          return (yield* Effect.flip(tasks.rename({ envelope: yield* command('task.rename'), taskId, title }))) as {
+            _tag?: string
+            why?: string
+          }
+        })
+      assert.strictEqual((yield* flipped(task.taskId, '   ')).why, 'no_title')
+      assert.strictEqual((yield* flipped(task.taskId, 'x'.repeat(61))).why, 'title_too_long')
+      assert.strictEqual((yield* flipped('task_missing', 'Fine'))._tag, 'NotFound')
+      // Sixty is the limit, as draft_task has it, counted after trimming.
+      yield* tasks.rename({ envelope: yield* command('task.rename'), taskId: task.taskId, title: ` ${'x'.repeat(60)} ` })
+      assert.strictEqual((yield* named(task.threadId, task.taskId)).title, 'x'.repeat(60))
+      // Refused, it is as it was.
+      yield* flipped(task.taskId, '')
+      assert.strictEqual((yield* named(task.threadId, task.taskId)).title, 'x'.repeat(60))
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('keeps the new title across a restart', () =>
+    Effect.gen(function* () {
+      const file = join(mkdtempSync(join(tmpdir(), 'althar-rename-')), 'althar.sqlite')
+      const before = yield* Effect.gen(function* () {
+        const tasks = yield* Tasks
+        const { task } = yield* planned('Retry checkout')
+        const first = yield* named(task.threadId, task.taskId)
+        yield* tasks.rename({ envelope: yield* command('task.rename'), taskId: task.taskId, title: 'Retry payments' })
+        return { task, first }
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(file)))))
+      yield* Effect.gen(function* () {
+        const after = yield* named(before.task.threadId, before.task.taskId)
+        assert.deepStrictEqual(
+          [after.title, after.slug, after.branch, after.worktree],
+          ['Retry payments', before.first.slug, before.first.branch, before.first.worktree],
+        )
+      }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(file)))))
+    }),
+  )
+})

@@ -2,7 +2,9 @@ import type { SessionEvent } from '@althar/provider-adapters'
 import { assert, describe, it } from '@effect/vitest'
 
 import type { LiveEvent } from '../src/Live'
-import { cpuTimeOf, treeCpuOf, treeCpus } from '../src/processTree'
+import { spawn } from 'node:child_process'
+
+import { cpuTimeOf, treeCpuOf, treeCpus, treeMembers, treeMembersOf, workedBetween } from '../src/processTree'
 import { type Finished, makeStallWatch, repeated, spanOf, type StallAction, type StallLimits } from '../src/stallWatch'
 import { Effect } from 'effect'
 
@@ -210,7 +212,7 @@ describe('an agent going round in circles', () => {
     done(id, 'completed', `The file ${path} has been updated successfully.`),
   ]
 
-  it('tells edits apart by what they change, not by their title and the same reply, as Claude Code sends them', () => {
+  it('tells edits apart by what they change, not by their title and the same reply, with their text in the input', () => {
     const { watch } = watching()
     watch.observe(started('u1'), 0)
     const oneFile = ['a', 'b', 'c', 'd'].flatMap((change) => edit(change, 'src/board.ts', change))
@@ -228,6 +230,42 @@ describe('an agent going round in circles', () => {
     // The same change, again and again, is going round in circles.
     const same = ['k', 'l', 'm', 'n'].flatMap((id) => edit(id, 'src/board.ts', 'x'))
     assert.deepStrictEqual(tags(same.flatMap((event) => watch.observe(event, 30))), ['Redirect'])
+  })
+
+  /*
+   * An edit as Claude Code sends it to Althar: its adapter leaves the file
+   * text out of the input for a client that asks as Althar does, so every
+   * edit to a file has the same input and the same reply, and only its diff
+   * says what it changes. The reply's content is only words.
+   */
+  const heardEdit = (id: string, path: string, change: string) => [
+    agent({ _tag: 'ToolCall', toolCallId: id, title: `Edit ${path}`, kind: 'edit', status: 'pending', rawInput: {} }),
+    agent({
+      _tag: 'ToolCallUpdate',
+      toolCallId: id,
+      rawInput: { file_path: path, replace_all: false },
+      content: [{ _tag: 'Diff', path, created: false, change }],
+    }),
+    agent({
+      _tag: 'ToolCallUpdate',
+      toolCallId: id,
+      status: 'completed',
+      rawOutput: `The file ${path} has been updated successfully.`,
+      content: [{ _tag: 'Text', text: 'Updated' }],
+    }),
+  ]
+
+  it('tells edits apart by their diff where the input leaves out what they write', () => {
+    const { watch } = watching()
+    watch.observe(started('u1'), 0)
+    const oneFile = ['a', 'b', 'c', 'd', 'e', 'f'].flatMap((change) => heardEdit(change, 'src/board.ts', change))
+    assert.deepStrictEqual(
+      oneFile.flatMap((event) => watch.observe(event, 10)),
+      [],
+    )
+    // The same change, again and again, is still going round in circles.
+    const same = ['k', 'l', 'm', 'n'].flatMap((id) => heardEdit(id, 'src/board.ts', 'x'))
+    assert.deepStrictEqual(tags(same.flatMap((event) => watch.observe(event, 20))), ['Redirect'])
   })
 
   it('never takes a call with nothing to tell it by but its title for the same as another', () => {
@@ -330,6 +368,119 @@ describe('the CPU an agent uses', () => {
     assert.strictEqual(treeCpuOf(listing, 12), 500)
     assert.isNull(treeCpuOf(listing, 99))
   })
+
+  it('keeps each process of a tree apart, and tells work from a tree that only lost a process', () => {
+    const listing = [' 10     1  0:01.00', ' 11    10  0:02.00', ' 12    11  0:00.50', ' 13     1  0:09.00'].join('\n')
+    assert.deepStrictEqual(
+      [...(treeMembersOf(listing, 10) ?? [])],
+      [
+        [10, 1_000],
+        [11, 2_000],
+        [12, 500],
+      ],
+    )
+    const before = new Map([
+      [10, 1_000],
+      [11, 2_000],
+    ])
+    // The same processes standing still: no work. A little time, short of 5% of a core over 5 seconds: none either.
+    assert.isFalse(workedBetween(before, new Map(before), 5_000, 0.05))
+    assert.isFalse(
+      workedBetween(
+        before,
+        new Map([
+          [10, 1_200],
+          [11, 2_000],
+        ]),
+        5_000,
+        0.05,
+      ),
+    )
+    assert.isTrue(
+      workedBetween(
+        before,
+        new Map([
+          [10, 1_300],
+          [11, 2_000],
+        ]),
+        5_000,
+        0.05,
+      ),
+    )
+    // A worker that began or ended is work, though the tree's total fell: a runner's workers are gone by the next reading.
+    assert.isTrue(workedBetween(before, new Map([[10, 1_000]]), 5_000, 0.05))
+    assert.isTrue(
+      workedBetween(
+        before,
+        new Map([
+          [10, 1_000],
+          [12, 0],
+        ]),
+        5_000,
+        0.05,
+      ),
+    )
+    // An exited child's time leaving doesn't hide a survivor's: each is taken by itself.
+    assert.isTrue(
+      workedBetween(
+        new Map([
+          [10, 1_000],
+          [11, 9_000],
+        ]),
+        new Map([
+          [10, 2_000],
+          [11, 9_000],
+        ]),
+        2_000,
+        0.05,
+      ),
+    )
+  })
+
+  it.effect('reads each process of the trees asked for, null for one that is gone, and nothing for none', () =>
+    Effect.gen(function* () {
+      const members = yield* treeMembers([process.pid, 2 ** 22 + 12_345])
+      assert.isTrue((members.get(process.pid) ?? new Map()).has(process.pid))
+      assert.isNull(members.get(2 ** 22 + 12_345))
+      assert.strictEqual((yield* treeMembers([])).size, 0)
+    }),
+  )
+
+  it('walks a tree once, though a listing loops back on itself', () => {
+    const looped = [' 10    11  0:01.00', ' 11    10  0:02.00'].join('\n')
+    assert.deepStrictEqual(
+      [...(treeMembersOf(looped, 10) ?? [])],
+      [
+        [10, 1_000],
+        [11, 2_000],
+      ],
+    )
+  })
+
+  it.live('tells a server sitting idle from a busy loop and a runner of short-lived workers, in real processes', () =>
+    Effect.gen(function* () {
+      const start = (script: string) => spawn('sh', ['-c', script], { stdio: 'ignore' })
+      // Each ends by itself once this worker is gone, so a run cut short leaves no loop spinning on the machine.
+      const idle = start('sleep 60')
+      const busy = start('while kill -0 $PPID 2>/dev/null; do :; done')
+      const runner = start('while kill -0 $PPID 2>/dev/null; do sleep 0.05; done')
+      try {
+        const pids = [idle, busy, runner].map((child) => child.pid ?? 0)
+        yield* Effect.sleep('300 millis')
+        const first = yield* treeMembers(pids)
+        yield* Effect.sleep('1500 millis')
+        const second = yield* treeMembers(pids)
+        const worked = pids.map((pid) => {
+          const was = first.get(pid)
+          const now = second.get(pid)
+          return was != null && now != null && workedBetween(was, now, 1_500, 0.05)
+        })
+        assert.deepStrictEqual(worked, [false, true, true])
+      } finally {
+        for (const child of [idle, busy, runner]) child.kill('SIGKILL')
+      }
+    }),
+  )
 
   it.effect('reads every process asked for from the machine, in one listing', () =>
     Effect.gen(function* () {

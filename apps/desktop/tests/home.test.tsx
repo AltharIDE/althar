@@ -92,6 +92,9 @@ const result: StepResult = {
   change: null,
   verdict: null,
   findings: [],
+  built: null,
+  evidence: [],
+  unverified: null,
   agentId: null,
 }
 
@@ -330,6 +333,51 @@ describe('the home', () => {
     expect(within(needs).getByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })).toBeTruthy()
   })
 
+  it('leaves out a plain task that finished: it waits on its board, and asks nothing of the person here', async () => {
+    const one = busy()
+    const finished = task({ taskId: 't20', threadId: 'th20', title: 'Which partners call v1?', slug: 'v1', phase: 'ready', kind: 'plain' })
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...one, tasks: [...one.tasks, finished] })) })
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
+    expect(within(needs).getByRole('article', { name: 'Name it better' })).toBeTruthy()
+    expect(screen.queryByText('Which partners call v1?')).toBeNull()
+  })
+
+  it('lists a drafted review by its pull request, whose it is and what it found, to review', async () => {
+    const one = busy()
+    const drafted = task({
+      taskId: 't21',
+      threadId: 'th21',
+      title: 'Review #1199',
+      slug: 'review-1199',
+      phase: 'ready',
+      kind: 'review',
+      branch: null,
+      reviewing: {
+        product: 'github',
+        repository: 'meridian/api',
+        number: 1199,
+        url: 'https://github.com/meridian/api/pull/1199',
+        title: 'Retry webhooks',
+        author: 'ninemate',
+        outside: true,
+        additions: 12,
+        deletions: 3,
+        findings: 3,
+        blocking: 1,
+        verdict: 'changes',
+        posted: null,
+      },
+    })
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...one, tasks: [...one.tasks, drafted] })) })
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
+    const line = within(needs).getByRole('article', { name: 'Review #1199' })
+    expect(within(line).getByText('Review drafted')).toBeTruthy()
+    expect(within(line).getByText('api #1199 · by ninemate · 3 findings')).toBeTruthy()
+    expect(within(line).getByRole('button', { name: 'Review' })).toBeTruthy()
+  })
+
   it('lists a task with a call on its line alone, not again in its project, until the call is answered', async () => {
     const one = busy()
     const { client } = fakeClient({
@@ -341,6 +389,27 @@ describe('the home', () => {
     expect(within(projects).getByText('1 stopped')).toBeTruthy()
     await userEvent.click(within(needs).getByRole('button', { name: 'Allow once' }))
     expect(await within(projects).findByText('1 stopped · 1 waiting')).toBeTruthy()
+  })
+
+  it('says under its project what tasks waiting for a free agent wait for, and doesn’t count them as moving', async () => {
+    const queued = { busy: 4, atOnce: 4 }
+    const { client } = fakeClient({
+      getHome: vi.fn(async () =>
+        home({
+          tasks: [
+            task({ taskId: 't1', threadId: 'th1', title: 'At work', phase: 'running', step: 'implement' }),
+            task({ taskId: 't2', threadId: 'th2', title: 'Next', phase: 'running', step: 'implement', projectId: 'p2', queued }),
+            task({ taskId: 't3', threadId: 'th3', title: 'After it', phase: 'running', step: 'implement', projectId: 'p2', queued }),
+          ],
+          projects: [project, halyard],
+        }),
+      ),
+    })
+    withServices(<Home />, client)
+    const projects = await screen.findByRole('complementary', { name: 'Projects' })
+    expect(within(projects).getByText('2 waiting: 4 of 4 agents busy')).toBeTruthy()
+    // Only the one at work moves.
+    expect(screen.getByText('1 task moving in 1 project.')).toBeTruthy()
   })
 
   it('gathers what needs you under its project, says what is off in each, and opens what the loop did', async () => {
@@ -676,6 +745,58 @@ describe('settings', () => {
     ])
   })
 
+  it('says how many agents work at once on this Mac and why, takes another number at once, and goes back to the default', async () => {
+    const { client } = fakeClient()
+    withServices(<Settings />, client)
+    const panel = await openModule(/^Keep awake/)
+    const count = await within(panel).findByRole('slider', { name: 'Agents at once' })
+    expect(count.getAttribute('aria-valuenow')).toBe('4')
+    expect(within(panel).getByText('4: this Mac has 16 GB and 10 cores. More tasks than that wait their turn.')).toBeTruthy()
+    // Settings stays calm: nothing in it says how many are busy now.
+    expect(within(panel).queryByText(/busy/)).toBeNull()
+    expect(within(panel).queryByRole('button', { name: 'Use the default' })).toBeNull()
+    count.focus()
+    await userEvent.keyboard('{ArrowRight}{ArrowRight}')
+    expect(client.setAgentsAtOnce).toHaveBeenLastCalledWith(6)
+    await waitFor(() => expect(count.getAttribute('aria-valuenow')).toBe('6'))
+    expect(within(panel).getByText(/^6: a little more than this Mac’s 16 GB suggests\. Tests may slow down\./)).toBeTruthy()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Use the default' }))
+    expect(client.setAgentsAtOnce).toHaveBeenLastCalledWith(null)
+    await waitFor(() => expect(count.getAttribute('aria-valuenow')).toBe('4'))
+  })
+
+  it('says when a number of agents at once can’t be kept, and shows what was kept', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.setAgentsAtOnce).mockRejectedValue(new Error('disk full'))
+    withServices(<Settings />, client)
+    const panel = await openModule(/^Keep awake/)
+    const count = await within(panel).findByRole('slider', { name: 'Agents at once' })
+    const reads = vi.mocked(client.getSettings).mock.calls.length
+    count.focus()
+    await userEvent.keyboard('{ArrowLeft}{ArrowLeft}')
+    expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(vi.mocked(client.getSettings).mock.calls.length).toBeGreaterThan(reads))
+    await waitFor(() => expect(count.getAttribute('aria-valuenow')).toBe('4'))
+  })
+
+  it('posts the team’s reviews without asking only once the person turns it on, and says when that can’t be kept', async () => {
+    const { client } = fakeClient()
+    withServices(<Settings />, client)
+    const panel = await openModule(/^Keep awake/)
+    const posts = await within(panel).findByRole('switch', { name: 'Post reviews of my team’s pull requests without asking' })
+    expect(posts.getAttribute('aria-checked')).toBe('false')
+    expect(within(panel).getByText(/A review of a pull request from outside the team always waits for you to post it\./)).toBeTruthy()
+    await userEvent.click(posts)
+    expect(client.setPostTeamReviews).toHaveBeenLastCalledWith(true)
+    await waitFor(() => expect(posts.getAttribute('aria-checked')).toBe('true'))
+    vi.mocked(client.setPostTeamReviews).mockRejectedValue(new Error('disk full'))
+    const reads = vi.mocked(client.getSettings).mock.calls.length
+    await userEvent.click(posts)
+    expect((await within(panel).findByRole('alert')).textContent).toBe('That couldn’t be kept. Try again.')
+    await waitFor(() => expect(vi.mocked(client.getSettings).mock.calls.length).toBeGreaterThan(reads))
+    await waitFor(() => expect(posts.getAttribute('aria-checked')).toBe('false'))
+  })
+
   it('has Althar as co-author of what it sends until the person turns it off, and then says once, large, why it would stay', async () => {
     const { client } = fakeClient({ listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection] })) })
     withServices(<Settings />, client)
@@ -949,6 +1070,12 @@ describe('the app’s own preferences in settings', () => {
     expect(host.setPreference).toHaveBeenLastCalledWith('keepAwake', true)
     await userEvent.click(battery)
     expect(host.setPreference).toHaveBeenLastCalledWith('awakeOnBattery', true)
+    // How hard the Mac works shows in the bar until it is turned off here, for every window.
+    const load = within(panel).getByRole('switch', { name: 'Show how hard this Mac works' })
+    expect(load.getAttribute('aria-checked')).toBe('true')
+    await userEvent.click(load)
+    expect(host.setPreference).toHaveBeenLastCalledWith('showLoad', false)
+    await waitFor(() => expect(load.getAttribute('aria-checked')).toBe('false'))
     // Each editor by its own icon; the first one found until one is chosen.
     const editors = within(panel).getByRole('radiogroup', { name: 'Open files in' })
     expect(within(editors).getByRole('radio', { name: 'Cursor' }).getAttribute('aria-checked')).toBe('true')
@@ -1007,6 +1134,38 @@ describe('the app’s own preferences in settings', () => {
     await waitFor(() =>
       expect(within(panel).getByRole('switch', { name: 'A task is ready for you' }).getAttribute('aria-checked')).toBe('true'),
     )
+  })
+})
+
+describe('usage data in settings', () => {
+  it('is on until the person turns it off, a quiet link in the foot, opening to its switch and one line', async () => {
+    const host = fakeHost()
+    withServices(<Settings />, fakeClient().client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await userEvent.click(await within(panel).findByRole('button', { name: 'Usage data' }))
+    expect(within(panel).getByRole('heading', { name: 'Usage data', level: 2 })).toBeTruthy()
+    const usage = within(panel).getByRole('switch', { name: 'Usage data' })
+    await waitFor(() => expect(usage.getAttribute('aria-checked')).toBe('true'))
+    expect(document.getElementById(usage.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      'Anonymous: steps such as a project made or a task settled. Never your code, what is written, or any name.',
+    )
+    await userEvent.click(usage)
+    expect(host.setPreference).toHaveBeenLastCalledWith('usageData', false)
+    await waitFor(() => expect(usage.getAttribute('aria-checked')).toBe('false'))
+    // Off, the link says so.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Back to all settings' }))
+    expect(within(panel).getByRole('button', { name: 'Usage data Off' })).toBeTruthy()
+  })
+
+  it('is off, and can’t be turned on, while DO_NOT_TRACK is set', async () => {
+    const host = fakeHost({ doNotTrack: true })
+    withServices(<Settings />, fakeClient().client, host)
+    const panel = await screen.findByRole('dialog', { name: 'Settings' })
+    await userEvent.click(await within(panel).findByRole('button', { name: 'Usage data Off' }))
+    const usage = within(panel).getByRole('switch', { name: 'Usage data' })
+    expect(usage.getAttribute('aria-checked')).toBe('false')
+    expect((usage as HTMLButtonElement).disabled).toBe(true)
+    expect(document.getElementById(usage.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Off while DO_NOT_TRACK is set.')
   })
 })
 

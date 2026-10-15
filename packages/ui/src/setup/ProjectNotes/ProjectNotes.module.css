@@ -1,0 +1,54 @@
+/* What they are, then each note a line of its own, its × at its end. */
+.notes {
+  display: grid;
+  gap: 12px;
+}
+.line {
+  margin: 0;
+  outline: none;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-2);
+}
+
+.list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: 0 0 0 1px var(--line-2);
+}
+.note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 8px 9px 14px;
+}
+.note + .note {
+  border-top: 1px solid var(--line-1);
+}
+.body {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--t-1);
+  overflow-wrap: anywhere;
+}
+
+/* The ×, quiet until the note is pointed at or has focus. */
+.remove {
+  flex: none;
+  color: var(--t-3);
+  opacity: 0.5;
+}
+.note:hover .remove,
+.remove:focus-visible {
+  opacity: 1;
+}
+.remove:hover {
+  color: var(--t-1);
+}

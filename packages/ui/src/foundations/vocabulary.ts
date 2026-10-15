@@ -144,6 +144,17 @@ export enum Verdict {
   Blocked = 'blocked',
 }
 
+/** What a piece of evidence is: what a lead shows to say its change does what it should. */
+export enum EvidenceKind {
+  Screenshot = 'screenshot',
+  Recording = 'recording',
+  Command = 'command',
+  TestRun = 'test_run',
+  Response = 'response',
+  Log = 'log',
+  Note = 'note',
+}
+
 /**
  * Where a review finding stands. The lead settles findings by default: it
  * fixes what holds and sets aside what does not. A finding reaches you when
@@ -202,6 +213,8 @@ export enum TaskStatus {
   Done = 'done',
   /** Held for a usage limit. */
   Paused = 'paused',
+  /** Waits for a free agent: every one this machine runs at once is busy. It starts on its own. */
+  Queued = 'queued',
   /** Stopped by you. */
   Stopped = 'stopped',
 }
@@ -214,6 +227,17 @@ export enum TaskActivity {
   Planned = 'planned',
   /** Nothing runs or waits to start. */
   Still = 'still',
+}
+
+/**
+ * What a task makes, read from what it has (DEV-96): a change ends in a pull
+ * request of its own, or has commits; a review reads someone else's; any
+ * other task is plain, and has no word on its card.
+ */
+export enum TaskKind {
+  Change = 'change',
+  Review = 'review',
+  Plain = 'plain',
 }
 
 /** What a task does with its work when it is done. */
@@ -305,6 +329,30 @@ export enum IssueDraftState {
   Discarded = 'discarded',
 }
 
+/** Where a review a lead drafted of someone else's pull request stands. */
+export enum ReviewDraftState {
+  Pending = 'pending',
+  Posting = 'posting',
+  Posted = 'posted',
+  Failed = 'failed',
+  /** Perhaps posted: the host's answer was lost, so the pull request is looked at before posting it again. */
+  Uncertain = 'uncertain',
+  Discarded = 'discarded',
+}
+
+/** What a review says of a pull request as a whole. */
+export enum ReviewVerdict {
+  Comment = 'comment',
+  Approve = 'approve',
+  Changes = 'changes',
+}
+
+/** Why a pull request counts as from outside the team: its branch is on a fork, or its author isn't one of the repository's people. */
+export enum Outside {
+  Fork = 'fork',
+  Author = 'author',
+}
+
 /** An entry of the agent's plan. */
 export enum PlanState {
   Done = 'done',
@@ -390,6 +438,22 @@ export enum Wait {
   You = 'you',
 }
 
+/** Where a task a search found stands, in a word. */
+export enum FoundState {
+  /** Its plan waits to start. */
+  Planned = 'planned',
+  Running = 'running',
+  /** A call in it waits on you. */
+  Yours = 'you',
+  /** Done, waiting for you to accept it. */
+  Ready = 'ready',
+  Stopped = 'stopped',
+  Merged = 'merged',
+  /** Settled without a merge to show for it. */
+  Done = 'done',
+  Abandoned = 'abandoned',
+}
+
 /** What a piece of settled work came to. */
 export enum Outcome {
   Merged = 'merged',
@@ -403,6 +467,27 @@ export enum Outcome {
   Knowledge = 'knowledge',
   /** Given up on; the reasoning kept. */
   Abandoned = 'abandoned',
+}
+
+/** Where a push the lead asked the person for stands. */
+export enum PushState {
+  /** Waiting for the person to push. */
+  Open = 'open',
+  Pushed = 'pushed',
+  /** The lead asked again, with more, further down. */
+  Replaced = 'replaced',
+  /** Its pull request was merged or closed first. */
+  Closed = 'closed',
+}
+
+/** Why what is on the branch now can't go up, where it changed since the lead asked. */
+export enum PushBlocked {
+  /** The branch no longer has what the pull request has: a push would need forcing. */
+  Rewritten = 'rewritten',
+  /** The pull request has commits the branch doesn't, pushed from elsewhere. */
+  Behind = 'behind',
+  /** Althar can't tell what the pull request has. */
+  Unknown = 'unknown',
 }
 
 /** Where a task's change stands. */
@@ -557,4 +642,13 @@ export enum EdgeSpot {
   LinuxTray = 'linuxTray',
   /** Nowhere but its own window: a desktop with no tray. */
   WindowOnly = 'windowOnly',
+}
+
+/** How hard the system works to find memory, as macOS says it: the honest sign memory is short, since a Mac keeps it full of cache on purpose. */
+export enum MemoryPressure {
+  Normal = 'normal',
+  /** It compresses memory to make room. */
+  Warning = 'warning',
+  /** It moves memory to disk, and everything runs slower. */
+  Critical = 'critical',
 }

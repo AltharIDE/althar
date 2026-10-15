@@ -116,6 +116,20 @@ describe('GitLab as a code host', () => {
     }),
   )
 
+  it.effect('refuses to review a merge request it didn’t open, in GitLab’s words, without asking GitLab', () =>
+    Effect.gen(function* () {
+      const { host, sent } = gitlab([])
+      assert.isFalse(host.capabilities.reviews)
+      assert.deepInclude(yield* Effect.flip(host.changeToReview(repository, 12)), {
+        reason: 'rejected',
+        message: 'Althar can’t review a merge request on this host yet.',
+      })
+      const posted = yield* Effect.flip(host.postReview(repository, 12, { event: 'comment', body: 'b', commit: null, comments: [] }))
+      assert.strictEqual(posted.reason, 'rejected')
+      assert.lengthOf(sent, 0)
+    }),
+  )
+
   it.effect('reads a project in nested groups, whether the account may push, and how it merges', () =>
     Effect.gen(function* () {
       const { host, sent } = gitlab([
@@ -239,6 +253,7 @@ describe('GitLab as a code host', () => {
         deletions: null,
         changedFiles: null,
         updatedAt: '2026-10-07T16:41:00.548Z',
+        conflicts: false,
       })
       assert.deepStrictEqual(sent[0]?.body, {
         source_branch: 'althar/mer-231',
@@ -280,6 +295,26 @@ describe('GitLab as a code host', () => {
       const error = yield* Effect.flip(host.openChange(repository, { title: 't', body: '', source: 'x', target: 'main', draft: false }))
       assert.deepStrictEqual([error.reason, error.status], ['rejected', 409])
       assert.isNull(yield* host.findChange(repository, 'x'))
+    }),
+  )
+
+  it.effect('says when a merge request conflicts with its target, once GitLab has worked it out', () =>
+    Effect.gen(function* () {
+      const answers = [
+        request({ detailed_merge_status: 'conflict', has_conflicts: true }),
+        request({ detailed_merge_status: 'mergeable', has_conflicts: false }),
+        // Blocked for another reason, it still says whether it conflicts.
+        request({ detailed_merge_status: 'not_approved', has_conflicts: true }),
+        // Still checking: what it said before the target moved isn't taken.
+        request({ detailed_merge_status: 'checking', has_conflicts: false }),
+        request({ detailed_merge_status: undefined, has_conflicts: undefined }),
+      ]
+      const { host } = gitlab([['GET', `${PROJECT}/merge_requests/12`, () => ({ json: answers.shift() })]])
+      assert.isTrue((yield* host.change(repository, 12)).conflicts)
+      assert.isFalse((yield* host.change(repository, 12)).conflicts)
+      assert.isTrue((yield* host.change(repository, 12)).conflicts)
+      assert.notProperty(yield* host.change(repository, 12), 'conflicts')
+      assert.notProperty(yield* host.change(repository, 12), 'conflicts')
     }),
   )
 
@@ -820,8 +855,11 @@ describe('GitLab as a tracker', () => {
       yield* host.comment(found, 'Picked up')
       assert.deepStrictEqual(sent[0]?.body, { body: 'Picked up' })
       yield* host.link(found, { url: 'https://gitlab.com/meridian/payments/api/-/merge_requests/12', title: 'MR !12' })
+      // An issue has no In Progress of its own: it is left open, as it is.
+      assert.deepStrictEqual(yield* host.start(found), { moved: false, status: { name: 'Open', category: 'todo' } })
       assert.strictEqual(sent.length, 1)
       assert.isFalse(host.capabilities.links)
+      assert.isFalse(host.capabilities.starts)
       assert.strictEqual((yield* Effect.flip(host.comment({ ...found, ref: 'MER-1' }, 'x'))).reason, 'not_found')
     }),
   )

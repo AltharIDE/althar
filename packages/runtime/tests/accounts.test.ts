@@ -9,7 +9,7 @@ import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { Accounts, SignOutFailed } from '../src/Accounts'
-import { Agents, RuntimeConfig } from '../src/Config'
+import { Agents, RuntimeConfig, type RuntimeOptions } from '../src/Config'
 import { Instance } from '../src/Instance'
 import { Limits } from '../src/Limits'
 import { Models } from '../src/Models'
@@ -30,8 +30,11 @@ import { fakeAgents, fakeConnectors, items, launches, repository, runtime, until
  * account out, so work goes on with the agent's next.
  */
 
-const withAccounts = (each: Readonly<Record<string, FakeAgentOptions>> = {}, signedOut: ReadonlyArray<string> = []) =>
-  Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { each, signedOut })))
+const withAccounts = (
+  each: Readonly<Record<string, FakeAgentOptions>> = {},
+  signedOut: ReadonlyArray<string> = [],
+  onDevice?: RuntimeOptions['onDevice'],
+) => Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { each, signedOut, ...(onDevice === undefined ? {} : { onDevice }) })))
 
 /** A folder named as given, as another tool would have made for an account. */
 const folder = (name: string) => {
@@ -86,6 +89,28 @@ const ranOnCodex = (projectId?: string) =>
   })
 
 describe('accounts', () => {
+  it.effect('gives the usual Claude account one persistent home when sessions run in a Flatpak', () =>
+    Effect.gen(function* () {
+      const accounts = yield* Accounts
+      const config = yield* RuntimeConfig
+      const definition = (yield* (yield* Agents).get('claude-code')).definition
+      const usual = definition.home.usual({}, '')
+      mkdirSync(usual, { recursive: true })
+      writeFileSync(join(usual, 'settings.json'), '{}')
+      const [account] = yield* accounts.of('claude-code')
+      if (account === undefined) return assert.fail('Claude Code has its usual account')
+
+      yield* accounts.prepare(account)
+      const home = join(config.accountsRoot ?? '', 'claude-usual')
+      assert.deepStrictEqual(accounts.env(account), { FAKE_HOME: home })
+      assert.isTrue(lstatSync(home).isDirectory())
+      assert.isTrue(lstatSync(join(home, 'settings.json')).isSymbolicLink())
+      // The line to sign in names that same home: what the person runs signs
+      // the account in where its sessions will read the sign-in.
+      assert.strictEqual(yield* accounts.login(account.id), `FAKE_HOME='${home}' fake-login claude-code`)
+    }).pipe(Effect.provide(withAccounts({}, [], { reachable: false, where: () => null, run: (spec) => spec }))),
+  )
+
   it.effect(
     'are the agent’s usual folder first, then homes Althar makes, with the person’s settings linked in, and folders other tools made',
     () =>

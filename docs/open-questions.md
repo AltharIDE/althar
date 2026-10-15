@@ -9,6 +9,24 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## Usage data, 12 October
+
+- [x] **Where usage data goes from, and what can.** The main process, with
+  posthog-node: named events and properties only, never a name, a path or
+  anything written; the window has no SDK
+  ([ADR-036](decisions/036-usage-data-from-the-main-process.md)).
+- [x] **On or off at first.** On, with the switch in Settings only, not on
+  the first screen; `DO_NOT_TRACK` keeps it off (settled with the person,
+  15 October; ADR-036).
+- [x] **US or EU.** US (`us.i.posthog.com`), where the project already is;
+  the ticket had leaned to the EU cloud (settled with the person, 12
+  October; ADR-036).
+- [ ] **Consent in the EU.** A random install id kept on the device may
+  need an explicit yes under ePrivacy; look again before the public launch.
+- [ ] **The dashboard.** The funnel from Althar opened to a task settled, and
+  day-1 and day-7 retention, are made in PostHog, with discarding client IP
+  addresses turned on in the project's settings.
+
 ## Questions agents ask, 10 October
 
 - [x] **What a question waits on.** The thread, not the session: it outlives
@@ -240,9 +258,11 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   (started, in review, done). Althar could move it; the tracker's own Git
   integration may already move it, by the key in the branch (Linear does,
   Jira's apps link it); or the person does. Two of them moving the same field
-  fight. A product question to try out before deciding. For now Althar
-  puts the key in the branch and the pull request's title and moves no
-  status.
+  fight. A product question to try out before deciding. Althar puts the key
+  in the branch and the pull request's title. Since 12 October it moves the
+  issue to In Progress as its task's first step starts, once, on Linear and
+  Jira, unless the project's rules turn it off; it never moves one back from
+  further along. In review and done are still open.
 - [ ] **What reaches the lead from a pull request.** Settled on 1 October,
   after review: failed checks, and what the person and the repository's own
   people (those who can write to it) say. Anyone else, as on a public
@@ -309,21 +329,22 @@ never under running work.
 - [ ] **Adapters over the air** (DEV-46). Today a new adapter means an app
   release. Shipping adapter bundles alone needs them verified before they
   run as Althar's identity.
-- [ ] **One entitlements file for every helper.** electron-builder gives all
+- [x] **One entitlements file for every helper.** electron-builder gives all
   of them the agents' entitlements (JIT, unsigned executable memory, no
-  library validation). Leaning: sign the agents' binaries apart once the
-  adapters leave Electron's binary (the runAsNode question below).
+  library validation). Decided in ADR-033: each executable is signed with
+  its own, and only Claude Code's binary may load any library.
 - [ ] **A download link that stays the same.** The site and the README link
   the Releases page. A fixed asset name (`Althar-arm64.dmg`) would let
   `releases/latest/download/…` start the download directly.
 
 ## The desktop app, 29 September
 
-- [ ] **Running the bundled adapters once the app is signed.** They run on
+- [x] **Running the bundled adapters once the app is signed.** They run on
   Electron's own binary as Node (`ELECTRON_RUN_AS_NODE`), so the RunAsNode
   fuse has to stay on, and then anything can run Althar's signed binary as
-  Node with the app's entitlements. Leaning: ship a separate Node for the
-  adapters and turn the fuse off. Decide before the first signed build.
+  Node with the app's entitlements. Decided in ADR-033: the app ships Node
+  for them and the fuse is off. A utility process per adapter was tried
+  and can't own the adapter's process group.
 
 - [ ] **Task numbers.** The kit's header and crumb show a task's number
   (#418); tasks have slugs, not numbers, so the app shows the title alone.
@@ -335,7 +356,8 @@ never under running work.
   short `PATH`, so agents installed on the user's own (OpenCode, the `claude`
   command Claude's status check runs) aren't found. Read the login shell's
   `PATH` once at start, as other Electron apps do, or ask for each agent's
-  location? Leaning: the login shell's.
+  location? Leaning: the login shell's. A worktree's setup already runs in
+  the person's login shell (ADR-023); a run of the project doesn't yet.
 
 ## The harness, 28 September
 
@@ -438,10 +460,14 @@ never under running work.
   reviewer is another provider's strongest model.
   [Architecture 05](architecture/05-workflow-engine.md). The demo runs them as
   one fixed graph ([MVP plan](plans/mvp.md)).
-- [ ] **Setup per worktree.** Where the setup command and the files to copy
-  are declared: in the project rules, or in a file in the repository? On 30
-  September 2026 the user took Verify out of the plan, since it would rebuild
-  CI; checking the work becomes a manual QA step later.
+- [x] **Setup per worktree.** Settled on 11 October 2026: each repository's
+  setup is the one a run of the project starts with, kept by agents with
+  `set_run_command`, else the install its lockfile names; Althar runs it in
+  each new worktree before the lead starts, outside the lead's sandbox.
+  Files to copy in, such as `.env`, are still undeclared.
+  [ADR-023](decisions/023-althar-runs-the-project.md). On 30 September 2026
+  the user took Verify out of the plan, since it would rebuild CI; checking
+  the work becomes a manual QA step later.
 - [ ] **An acceptance-criteria checker.** A step type that checks the change
   against the task's acceptance criteria, beside Review. When, and what does
   it return?
@@ -632,10 +658,15 @@ never under running work.
   removes the wait. Open: should the coordinator move an optional step to a
   free agent by itself, and only leave rule-pinned steps waiting?
   *Prototype:* Coordinator → "Plan, an agent is out".
-- [ ] **Effort in the plan.** Each step carries its own model and effort,
-  which the person sets on the plan's card; the coordinator proposes neither,
-  so a step starts on the agent's own. Does the coordinator recommend effort
-  per step, or always start at the model's default?
+- [x] **Effort in the plan.** Each step carries its own model and effort,
+  which the person sets on the plan's card. Does the coordinator recommend
+  effort per step, or always start at the model's default?
+  Settled on 12 October 2026: the coordinator may name an effort for each
+  step, from the ones `list_models` gives for its model, by what the step
+  needs and what the person has said they prefer; it shows on the card as
+  the person's own would, and they can change it. Left out, which its brief
+  asks when unsure, a step starts at the person's default for the model, or
+  else the model's own (docs/architecture/04).
 - [x] **Allow all, with always-ask items in the stack.** "Allow all 7"
   currently covers pushing to main too. Should items the rules keep for you
   be left out of Allow all?
@@ -705,7 +736,8 @@ never under running work.
   open: screen recordings of a UI flow, and generated PDFs. Do those get the
   file card, or their own viewers?
 - [ ] **How long what agents hand back is kept.** Pictures and command output
-  are kept in the artifact store, by digest, with nothing swept yet (ADR-020).
+  are kept in the artifact store, by digest, with nothing swept yet (ADR-020),
+  and so are the images the person sends with a message.
   How long does each kind stay: for the task's life, a set time, or until the
   profile is cleaned? Leaning: mark-and-sweep from the thread items, with
   logs going first, once a task is settled.

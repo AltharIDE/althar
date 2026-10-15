@@ -18,6 +18,7 @@ import type {
   Review,
   Verdict,
 } from './model'
+import { noReviews } from './model'
 import {
   answered,
   failedOf,
@@ -100,9 +101,21 @@ const PullAnswer = Schema.Struct({
   author: Schema.optional(Schema.NullOr(Schema.Struct({ user: UserAnswer }))),
   reviewers: Schema.optional(Schema.Array(Schema.Struct({ user: UserAnswer }))),
   links: Schema.optional(Schema.Struct({ self: Schema.optional(Schema.Array(Schema.Struct({ href: Schema.String }))) })),
+  // Whether it would merge cleanly, as Data Center last worked it out: `current` false is from before a branch moved.
+  properties: Schema.optional(
+    Schema.Struct({
+      mergeResult: Schema.optional(Schema.Struct({ outcome: Schema.String, current: Schema.optional(Schema.Boolean) })),
+    }),
+  ),
   updatedDate: Schema.Number,
 })
 type PullAnswer = typeof PullAnswer.Type
+
+/** Whether a pull request's merge result says it conflicts with its target: nothing where it is out of date or unknown. */
+const conflictsOf = (result: { readonly outcome: string; readonly current?: boolean | undefined } | undefined) =>
+  result === undefined || result.current === false || (result.outcome !== 'CONFLICTED' && result.outcome !== 'CLEAN')
+    ? {}
+    : { conflicts: result.outcome === 'CONFLICTED' }
 
 const Mergeability = Schema.Struct({
   canMerge: Schema.Boolean,
@@ -321,6 +334,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
     deletions: null,
     changedFiles: null,
     updatedAt: iso(answer.updatedDate),
+    ...conflictsOf(answer.properties?.mergeResult),
   })
 
   /** Whether this repository is the one a ref is in. */
@@ -381,7 +395,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: false, threads: true },
+    capabilities: { drafts: true, checkLogs: false, threads: true, reviews: false },
     account,
     repository: (path) =>
       Effect.gen(function* () {
@@ -564,6 +578,9 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
         // Althar's own reply: whether it counts as a member's doesn't matter, it is known by its receipt.
         (comment) => commentOf(repository, number, comment, { id: reply.threadId ?? String(comment.id), path: null, line: null }, true),
       ),
+    // Reviews of a change Althar didn't open are GitHub's alone, for now.
+    changeToReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
+    postReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
     pushTarget: (repository) =>
       Effect.map(options.credential, (credential) => ({
         url: `${web}/scm/${(repository.path[0] ?? '').toLowerCase()}/${repository.path[1] ?? ''}.git`,

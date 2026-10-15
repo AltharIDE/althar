@@ -1,7 +1,7 @@
 import { Ids, newId, type ProjectId, type ThreadItemKind } from '@althar/domain'
 import { Ledger } from '@althar/persistence-sqlite'
 import { answerWords, type FieldAnswer, type Handed, type QuestionField, type SessionEvent } from '@althar/provider-adapters'
-import { Clock, Effect } from 'effect'
+import { Cause, Clock, Duration, Effect, Exit, Fiber, Scope, Semaphore } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import {
@@ -17,8 +17,10 @@ import {
   printedIn,
   together,
 } from './handed'
+import { diagnosticIn, diagnosticOf } from './diagnostics'
 import { change, timestamp } from './records'
-import { essentials } from './rules'
+import { commandIn, essentials } from './rules'
+import { indexThread } from './Search'
 
 /*
  * The thread's items: what the person reads (docs/architecture/01). An
@@ -43,12 +45,13 @@ export const addItem = (
   place: ItemPlace,
   kind: ItemKind,
   content: unknown,
-  links: { readonly toolCallId?: string; readonly userInputId?: string } = {},
+  /** What it answers, and its id where the caller made it first, to keep what belongs to it before it is added. */
+  links: { readonly toolCallId?: string; readonly userInputId?: string; readonly id?: string } = {},
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const ledger = yield* Ledger
-    const id = yield* newId(Ids.threadItem)
+    const id = links.id ?? (yield* newId(Ids.threadItem))
     yield* sql.withTransaction(
       Effect.gen(function* () {
         yield* sql`
@@ -58,6 +61,8 @@ export const addItem = (
             ${kind}, ${links.userInputId ?? null}, ${place.deliveryId ?? null}, ${place.sessionId ?? null}, ${links.toolCallId ?? null},
             ${JSON.stringify(content)}, ${yield* timestamp})`
         yield* ledger.notify({ projectId: place.projectId, aggregateType: 'thread_item', aggregateId: id, aggregateRevision: 1 })
+        // What the person asks of a task, and what its lead reports, are what it is found by.
+        if (kind === 'user_message' || kind === 'step_result') yield* indexThread(place.threadId)
       }),
     )
     return id
@@ -129,6 +134,8 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
     | {
         readonly kind: 'agent_message' | 'agent_thought'
         readonly id: string
+        /** The id the agent gave this message, where it gives one. */
+        messageId: string | undefined
         text: string
         written: number
         writtenAt: number
@@ -144,22 +151,40 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const folders = place.folders ?? []
   const where = (itemId: string) => ({ projectId: place.projectId, itemId, folders })
 
-  /** Writes the message being gathered; its item was placed when its first chunk arrived. */
+  /**
+   * Writes the message being gathered; its item was placed when its first chunk arrived.
+   * It is let go once written, or failed; a write cut short by interruption leaves it
+   * to be written again, as when a session ends while one is under way.
+   */
   const flush = Effect.gen(function* () {
     const open = gathering
-    gathering = undefined
-    if (open !== undefined) yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed))
+    if (open === undefined) return
+    yield* updateItem(place.projectId, open.id, withHanded({ text: open.text }, open.handed)).pipe(
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)
+          ? Effect.void
+          : Effect.sync(() => {
+              if (gathering === open) gathering = undefined
+            }),
+      ),
+    )
   })
 
   /** The message being gathered, or a new one: what it hands back goes with its words. */
-  const gathered = (kind: 'agent_message' | 'agent_thought', text: string) =>
+  const gathered = (kind: 'agent_message' | 'agent_thought', text: string, messageId?: string) =>
     Effect.gen(function* () {
-      if (gathering !== undefined && gathering.kind !== kind) yield* flush
+      // A different kind, or a message id other than the open one's, starts a new item; without ids, chunks run on.
+      if (
+        gathering !== undefined &&
+        (gathering.kind !== kind || (messageId !== undefined && gathering.messageId !== undefined && messageId !== gathering.messageId))
+      )
+        yield* flush
       if (gathering !== undefined) return { open: gathering, fresh: false }
       // The item is placed when its first chunk arrives, so the thread keeps the order things happened in.
       const open = {
         kind,
         id: yield* addItem(place, kind, { text }),
+        messageId,
         text,
         written: text.length,
         writtenAt: yield* Clock.currentTimeMillis,
@@ -169,10 +194,11 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
       return { open, fresh: true }
     })
 
-  const gather = (kind: 'agent_message' | 'agent_thought', text: string) =>
+  const gather = (kind: 'agent_message' | 'agent_thought', text: string, messageId?: string) =>
     Effect.gen(function* () {
-      const { open, fresh } = yield* gathered(kind, text)
+      const { open, fresh } = yield* gathered(kind, text, messageId)
       if (fresh) return
+      if (open.messageId === undefined && messageId !== undefined) open.messageId = messageId
       const now = yield* Clock.currentTimeMillis
       open.text += text
       // A long message is written as it grows, so a crash loses only its last few seconds.
@@ -184,9 +210,9 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
     })
 
   /** A picture or a file in what the agent says: kept with the message it is in, and written at once. */
-  const handedInMessage = (content: Handed) =>
+  const handedInMessage = (content: Handed, messageId?: string) =>
     Effect.gen(function* () {
-      const { open } = yield* gathered('agent_message', '')
+      const { open } = yield* gathered('agent_message', '', messageId)
       const now = yield* handedNow(where(open.id), content)
       if (now.pictures.length === 0 && now.files.length === 0) return
       open.handed = together(open.handed, now)
@@ -233,17 +259,28 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
         // OpenCode says a command's output as the tool's own words, whole each time, and whole in its raw output's metadata where it has it.
         // Its error report is the error, not its output: what it printed stays, and the error is kept beside it.
         const words = content.flatMap((entry) => (entry._tag === 'Text' ? [entry.text] : []))
-        const raw = event._tag === 'ToolCallUpdate' ? event.rawOutput : undefined
+        const raw = event.rawOutput
         const whole = printedIn(raw)
         const failed = event.status === 'failed'
         if (whole !== null) output.replace(whole)
         else if (!failed && words.length > 0) output.replace(words.join('\n'))
         if (failed) output.error = errorIn(raw) ?? (words.length > 0 ? words.join('\n') : null)
       }
-      const exit = event.terminal?.exit?.code ?? (event._tag === 'ToolCallUpdate' ? exitIn(event.rawOutput) : null)
+      const exit = event.terminal?.exit?.code ?? exitIn(event.rawOutput)
       if (exit !== null) output.exit = exit
       if (event.status !== 'completed' && event.status !== 'failed') return extras
-      return { ...extras, ...(yield* ended(toolCallId, output)) }
+      // What a failed command printed goes on its item with its status, in short, before the agent says anything of it.
+      const diagnostic =
+        event.status === 'failed'
+          ? diagnosticOf({
+              command: commandIn(stored.rawInput),
+              printed: output.text,
+              error: output.error,
+              exit: output.exit,
+              rawOutput: event.rawOutput,
+            })
+          : undefined
+      return { ...extras, ...(yield* ended(toolCallId, output)), ...(diagnostic === undefined ? {} : { diagnostic }) }
     })
 
   /** Ends what the turn left open: a command's output, kept as far as it came, as when the turn was stopped. */
@@ -262,18 +299,18 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   const record = (event: SessionEvent) => {
     switch (event._tag) {
       case 'AgentMessage':
-        return gather('agent_message', event.text)
+        return gather('agent_message', event.text, event.messageId)
       case 'AgentThought':
         return gather('agent_thought', event.text)
       case 'AgentContent':
-        return handedInMessage(event.content)
+        return handedInMessage(event.content, event.messageId)
       case 'ToolCall':
       case 'ToolCallUpdate':
         return Effect.gen(function* () {
           yield* flush
           // The call's command and paths are kept, not what it writes or what came back (docs/architecture/07).
           const kept = event.rawInput === undefined ? undefined : essentials(event.rawInput)
-          const output = event._tag === 'ToolCallUpdate' && event.rawOutput !== undefined
+          const output = event.rawOutput !== undefined
           const content = defined({
             title: event.title,
             kind: event._tag === 'ToolCall' ? event.kind : undefined,
@@ -336,8 +373,83 @@ export const recorder = (place: ItemPlace & { readonly sessionId: string }) => {
   return { record, flush, end, current, outputsSoFar, outputOf }
 }
 
-/** The thread as text, oldest first: what a new agent reads when it takes over (ADR-005). */
-export const transcript = (threadId: string, budget: number) =>
+/** How long an agent has to be quiet between turns before the message it was saying is closed. */
+const QUIET_MILLIS = 3_000
+
+/**
+ * Records what an agent says on its own between turns, as a turn does: a
+ * message stays one item as it grows, and is closed once the agent goes quiet
+ * (there is no turn end to wait for), when something else arrives, or when
+ * `close` says the stream is handed on or ends: a prompted turn takes over, or
+ * the session does.
+ */
+export const betweenTurns = (
+  items: Pick<ReturnType<typeof recorder>, 'record' | 'flush'>,
+  scope: Scope.Scope,
+  quiet: Duration.Input = Duration.millis(QUIET_MILLIS),
+) =>
+  Effect.gen(function* () {
+    // Recording, the quiet close and `close` take turns, and the timer is only ever interrupted by one holding the lock, never mid-write.
+    const lock = yield* Semaphore.make(1)
+    let timer: Fiber.Fiber<void> | undefined
+    const stopTimer = Effect.suspend(() => {
+      const waiting = timer
+      timer = undefined
+      return waiting === undefined ? Effect.void : Fiber.interrupt(waiting)
+    })
+    const flush = items.flush.pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent message', cause)))
+    const record = (event: SessionEvent) =>
+      lock.withPermits(1)(
+        Effect.gen(function* () {
+          yield* stopTimer
+          yield* items.record(event)
+          timer = yield* Effect.forkIn(Effect.andThen(Effect.sleep(quiet), lock.withPermits(1)(flush)), scope)
+        }),
+      )
+    const close = lock.withPermits(1)(Effect.andThen(stopTimer, flush))
+    // What it was saying when the scope ends is kept: the timer that would close it goes with the scope first, so this goes after.
+    const services = yield* Effect.context<Effect.Services<typeof items.flush>>()
+    yield* Scope.addFinalizer(scope, Effect.provideContext(close, services))
+    return { record, close }
+  })
+
+/** Where a line longer than the budget is cut, so each part of it fits: `[…]` says it goes on. */
+const CUT = ' […]'
+const GOES_ON = '[…] '
+
+/** A line in parts that each fit the budget, marked where it was cut; one that fits as it is. */
+export const piecesOf = (line: string, budget: number): ReadonlyArray<string> => {
+  if (line.length <= budget) return [line]
+  const size = Math.max(1, budget - CUT.length - GOES_ON.length)
+  const pieces: Array<string> = []
+  for (let at = 0; at < line.length; at += size) {
+    const more = at + size < line.length
+    pieces.push(`${at === 0 ? '' : GOES_ON}${line.slice(at, at + size)}${more ? CUT : ''}`)
+  }
+  return pieces
+}
+
+/**
+ * The thread as text, oldest first: what a new agent reads when it takes over
+ * (ADR-005), its most recent part within the budget. A line longer than the
+ * budget comes in parts (`piecesOf`), so none of it is out of reach.
+ * `omitted` says how many lines came before what is kept; read again with
+ * that as `before`, it gives the ones before.
+ */
+export const transcript = (
+  threadId: string,
+  budget: number,
+  options: {
+    /** Only the lines before this one, counting from the first: an earlier part. */
+    readonly before?: number
+    /** Only items of these kinds. */
+    readonly kinds?: ReadonlyArray<ItemKind>
+    /** At most this many lines, the last. */
+    readonly last?: number
+    /** What the thread's agent is called, in place of its agent's id. */
+    readonly agent?: string
+  } = {},
+) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient
     const items = yield* sql<{
@@ -346,6 +458,7 @@ export const transcript = (threadId: string, budget: number) =>
       agentId: string | null
       task: string | null
       draft: string | null
+      review: string | null
       asked: string | null
       askedState: string | null
     }>`
@@ -353,21 +466,32 @@ export const transcript = (threadId: string, budget: number) =>
         (SELECT k.slug || ': ' || k.title FROM tasks k WHERE k.id = json_extract(i.content, '$.taskId')) AS task,
         (SELECT d.title || ' (' || d.state || CASE WHEN d.issue_key IS NULL THEN '' ELSE ', ' || d.issue_key || ' ' || d.issue_url END || ')'
           FROM issue_drafts d WHERE d.id = json_extract(i.content, '$.draftId')) AS draft,
+        (SELECT 'of #' || r.number || ', suggesting ' || r.suggested || ' (' || r.state || CASE WHEN r.review_url IS NULL THEN '' ELSE ', ' || r.review_url END || ')'
+          FROM review_drafts r WHERE i.kind = 'review_draft' AND r.id = json_extract(i.content, '$.draftId')) AS review,
         a.payload AS asked, a.state AS asked_state
       FROM thread_items i
       LEFT JOIN provider_sessions s ON s.id = i.provider_session_id
       LEFT JOIN attention_requests a ON i.kind = 'question' AND a.id = json_extract(i.content, '$.attentionId')
       WHERE i.thread_id = ${threadId} ORDER BY i.sequence`
     const lines = items.flatMap((item) => {
+      if (options.kinds !== undefined && !options.kinds.includes(item.kind)) return []
       const content = JSON.parse(item.content) as Record<string, unknown>
       const text = (key: string) => (typeof content[key] === 'string' ? (content[key] as string) : '')
+      const agent = options.agent ?? item.agentId ?? 'agent'
       switch (item.kind) {
-        case 'user_message':
-          return [`[person] ${text('text')}`]
+        case 'user_message': {
+          // Images the person sent are said, though only the agent they went to saw them.
+          const pictures = Array.isArray(content['pictures']) ? content['pictures'].length : 0
+          const sent = pictures === 0 ? '' : ` [sent ${pictures === 1 ? 'an image' : `${pictures} images`}]`
+          return [`[person] ${text('text')}${sent}`]
+        }
         case 'agent_message':
-          return [`[${item.agentId ?? 'agent'}] ${text('text')}`]
-        case 'tool_call':
-          return [`[tool] ${text('title')} (${text('status')})`]
+          return [`[${agent}] ${text('text')}`]
+        case 'tool_call': {
+          // What a failed command printed, in short: what the tool reported, not why it failed.
+          const printed = diagnosticIn(content['diagnostic'])
+          return [`[tool] ${text('title')} (${text('status')})${printed === null ? '' : `\n[it printed] ${printed.text}`}`]
+        }
         case 'notice':
           return [`[note] ${text('title')}${text('description') === '' ? '' : `: ${text('description')}`}`]
         case 'step_result':
@@ -376,28 +500,52 @@ export const transcript = (threadId: string, budget: number) =>
           return item.task === null ? [] : [`[task] ${item.task}`]
         case 'issue_draft':
           return item.draft === null ? [] : [`[issue draft] ${item.draft}`]
+        // The lead's review draft, and where it stands: an agent that takes the thread over doesn't draft again what was posted.
+        case 'review_draft':
+          return item.review === null ? [] : [`[review draft] ${item.review}`]
         case 'question': {
           // What was asked of the person, and what they answered: an agent that takes the thread over knows both.
           const fields = Array.isArray(content['fields']) ? (content['fields'] as ReadonlyArray<QuestionField>) : []
           const asked = fields.map((field) => field.question).filter((question) => question !== '')
-          const line = `[${item.agentId ?? 'agent'} asked the person] ${asked.length > 0 ? asked.join(' / ') : text('message')}`
+          const line = `[${agent} asked the person] ${asked.length > 0 ? asked.join(' / ') : text('message')}`
           const answers =
             item.asked === null ? undefined : (JSON.parse(item.asked) as { answers?: Readonly<Record<string, FieldAnswer>> }).answers
           if (item.askedState === 'answered' && answers !== undefined)
             return [line, `[person answered] ${answerWords(fields, answers).join(' / ')}`]
           return item.askedState === 'withdrawn' ? [line, '[not answered]'] : [line]
         }
+        case 'push_request': {
+          // What the lead asked the person to push, and how it stands: an agent that takes the thread over doesn't ask again for what went.
+          const count = typeof content['count'] === 'number' ? content['count'] : 0
+          const states: Readonly<Record<string, string>> = {
+            pushed: 'pushed',
+            replaced: 'asked again later',
+            closed: 'not pushed: the pull request closed',
+          }
+          const blocked: Readonly<Record<string, string>> = {
+            rewritten: 'not pushed yet: the branch no longer has what the pull request has',
+            behind: "not pushed yet: the pull request has commits the branch doesn't",
+            unknown: "not pushed yet: Althar can't tell what the pull request has",
+          }
+          const how = states[text('state')] ?? blocked[text('blocked')]
+          return [
+            `[the lead asked the person to push] ${count === 1 ? '1 commit' : `${count} commits`} to ${text('where')}: ${how ?? 'not pushed yet'}`,
+          ]
+        }
         default:
           return []
       }
     })
     // The most recent part is kept; what doesn't fit is left out from the start.
+    const pieces = lines.flatMap((line) => piecesOf(line, budget))
+    const read = pieces.slice(0, Math.max(0, Math.min(options.before ?? pieces.length, pieces.length)))
     const kept: Array<string> = []
     let used = 0
-    for (const line of lines.toReversed()) {
+    for (const line of read.toReversed()) {
+      if (kept.length === options.last) break
       if (used + line.length > budget) break
       kept.unshift(line)
       used += line.length + 1
     }
-    return { text: kept.join('\n'), omitted: lines.length - kept.length }
+    return { text: kept.join('\n'), omitted: read.length - kept.length }
   })
