@@ -4,9 +4,9 @@ import { Deferred, Effect, Fiber, Ref, Stream } from 'effect'
 import { answerFor, connect, type PermissionOption } from '../src/AgentConnection'
 import { type Question, type QuestionAnswer, questionContent } from '../src/questions'
 import { AgentRequestFailed, OptionUnavailable, TurnInProgress } from '../src/errors'
-import type { SessionEvent } from '../src/events'
+import { changeOf, type SessionEvent } from '../src/events'
 import type { Classified } from '../src/failures'
-import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, SCREENSHOT_PNG, scenarios, WHY } from '../src/testing'
+import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, HANDED_DOCUMENT, SCREENSHOT_PNG, scenarios, WHY } from '../src/testing'
 import { type ContractSubject, type Decide, text, withConnection } from './contract'
 
 const fake: ContractSubject = {
@@ -140,7 +140,9 @@ describe('AgentConnection', () => {
       const shot = updates.find((event) => event.toolCallId === 'shot')
       assert.strictEqual(shot?.content?.[1]?._tag, 'Image')
       const wrote = find(events, 'ToolCall').find((event) => event.toolCallId === 'write-doc')
-      assert.deepStrictEqual(wrote?.content, [{ _tag: 'Diff', path: '/tmp/docs/notes.md', created: true }])
+      assert.deepStrictEqual(wrote?.content, [
+        { _tag: 'Diff', path: '/tmp/docs/notes.md', created: true, change: changeOf(null, HANDED_DOCUMENT.body) },
+      ])
       const handed = find(events, 'AgentContent').map((event) => event.content._tag)
       assert.deepStrictEqual(handed, ['Link', 'Image'])
     }),
@@ -274,6 +276,34 @@ describe('AgentConnection', () => {
           yield* session.interrupt
           assert.deepStrictEqual((yield* Fiber.join(first)).at(-1), { _tag: 'TurnEnded', stopReason: 'cancelled' })
           assert.strictEqual(text(yield* Stream.runCollect(session.prompt(scenarios.hello))), 'Hello')
+        }),
+      ),
+    )
+
+    it.live('says a turn has started only once it can be interrupted', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+          // Stopped the moment it is said to have started, as a spent budget of turns does: the stop reaches it.
+          const events = yield* Stream.runCollect(session.prompt(scenarios.slow, [], Effect.ignore(session.interrupt)))
+          assert.strictEqual(stopReason(events), 'cancelled')
+          assert.strictEqual(text(yield* Stream.runCollect(session.prompt(scenarios.hello))), 'Hello')
+        }),
+      ),
+    )
+
+    it.live('does not say a turn has started when the agent is already in one', () =>
+      withConnection(fake, (connection) =>
+        Effect.gen(function* () {
+          const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+          const first = yield* Effect.forkChild(Stream.runCollect(session.prompt(scenarios.slow)))
+          yield* Effect.sleep('50 millis')
+          const started = yield* Ref.make(false)
+          const refused = yield* Effect.flip(Stream.runCollect(session.prompt(scenarios.hello, [], Ref.set(started, true))))
+          assert.instanceOf(refused, TurnInProgress)
+          assert.isFalse(yield* Ref.get(started))
+          yield* session.interrupt
+          yield* Fiber.join(first)
         }),
       ),
     )

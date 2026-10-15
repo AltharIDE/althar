@@ -56,6 +56,7 @@ import { dropNote, notesOf } from './notes'
 import { Questions } from './Questions'
 import { type ProjectRepository, Projects } from './Projects'
 import { Nudges } from './Nudges'
+import { UsageData } from './UsageData'
 import { Queries } from './Queries'
 import { Busy } from './Busy'
 import { timestamp } from './records'
@@ -617,6 +618,8 @@ export const handlers = Api.toLayer(
                 ...(model === undefined ? {} : { model }),
                 ...(effort === undefined ? {} : { effort }),
                 ...(message === undefined ? {} : { message }),
+                // The person's switch: its first turn goes on at once (ADR-037).
+                byPerson: true,
               })
               // Links in what the person said unfurl on their message, as when it is sent on its own.
               if (message !== undefined) yield* Effect.forkDetach(issues.unfurlInput(message.envelope.commandId))
@@ -654,6 +657,13 @@ export const handlers = Api.toLayer(
       // Interrupted by the person, a conflict its lead was resolving is theirs (ADR-030): handed over first, so the turn's end doesn't ask the lead again.
       Interrupt: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(pullRequests.leadStopped({ threadId }, 'interrupted'), sessions.interrupt(threadId)))),
+      CompactContext: ({ commandId, threadId }) =>
+        once(
+          commandId,
+          api(
+            Effect.flatMap(envelope('thread.compact', { threadId }, commandId), (made) => sessions.compact({ envelope: made, threadId })),
+          ),
+        ),
       // Stopped by the person, a conflict its lead was resolving is theirs (ADR-030): the lead isn't started again for it.
       StopSession: ({ commandId, threadId }) =>
         once(commandId, api(Effect.andThen(sessions.stop(threadId), pullRequests.leadStopped({ threadId })))),
@@ -1122,7 +1132,10 @@ export const isInside = (
 
 /** The runtime's services: the store, this launch, and everything the API calls. Built once per launch. */
 export const services = (options: Runtime.RuntimeLayerOptions) =>
-  Layer.mergeAll(Nudges.layer, Folders.layer).pipe(Layer.provideMerge(Queries.layer), Layer.provideMerge(Runtime.layer(options)))
+  Layer.mergeAll(Nudges.layer, UsageData.layer, Folders.layer).pipe(
+    Layer.provideMerge(Queries.layer),
+    Layer.provideMerge(Runtime.layer(options)),
+  )
 
 /** One client's connection: the API served over its port, until the port closes. Each window gets one. */
 export const connection = (port: PortLike) => RpcServer.layer(Api).pipe(Layer.provide(handlers), Layer.provide(serverProtocol(port)))

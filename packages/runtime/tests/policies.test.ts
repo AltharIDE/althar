@@ -40,7 +40,7 @@ describe('a project’s rules, as kept', () => {
     )
   })
 
-  it('allow everything over the mode (ADR-036): by the switch, or as an earlier revision said it, the first mode under it', () => {
+  it('allow everything over the mode (ADR-042): by the switch, or as an earlier revision said it, the first mode under it', () => {
     const base: ProjectRules = { source: 'person', permissions: 'coordinator', alwaysAsk: ['deploy'] }
     assert.strictEqual(ruleSetOf(base).mode, 'coordinator')
     assert.strictEqual(ruleSetOf({ ...base, allowEverything: true }).mode, 'allow')

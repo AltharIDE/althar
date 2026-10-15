@@ -7,6 +7,7 @@ import {
   CHANGE_PERMISSION,
   CHANGE_QUESTION,
   CHANGE_QUEUED,
+  CHANGE_QUEUED_MIDWAY,
   CHANGE_READY,
   CHANGE_RUNNING,
   CHANGE_RUNNING_PR,
@@ -131,8 +132,10 @@ export const PlainWithFiles: Story = {
     await expect(card.getByText('docs/releases/partners/')).toBeInTheDocument()
   },
 }
-/** Waiting for a free agent: still, with its own glyph. */
+/** Waiting for a free agent before any work: only its title, its status and why. */
 export const WaitingForAnAgent: Story = { args: CHANGE_QUEUED }
+/** Waiting for a free agent after real work: its done steps and branch stay, and the step it waits for is empty and still. */
+export const WaitingForAnAgentMidway: Story = { args: CHANGE_QUEUED_MIDWAY }
 export const Stopped: Story = { args: CHANGE_STOPPED }
 export const Current: Story = { args: { current: true } }
 export const LongTitle: Story = {

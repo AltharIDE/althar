@@ -54,6 +54,13 @@ export interface RuntimeOptions {
   readonly countdown?: Duration.Duration
   /** How often a task's pull requests are asked for news while it listens: 30 seconds unless a test says otherwise. */
   readonly listenEvery?: Duration.Duration
+  /**
+   * How long after a change's work comes back its pull request may show no checks before Althar takes it to have none: a
+   * host registers its checks a few seconds after a push. A minute unless a test says otherwise (ADR-040).
+   */
+  readonly checksAppear?: Duration.Duration
+  /** How long a change's checks may run, while Althar sees them through, before the change is the person's: 45 minutes unless a test says (ADR-041). */
+  readonly checksStuck?: Duration.Duration
   /** The public ids of Althar's apps registered with code hosts and trackers, for their browser sign-in. */
   readonly clientIds?: Partial<Record<Product, string>>
   /** Althar's GitHub App, by its slug, for where it is installed on an owner. */
@@ -103,6 +110,8 @@ export interface BusyOptions {
   readonly sample?: Duration.Duration
   /** How long what an agent left running must stay below real CPU before it stops taking a place: 30 seconds. */
   readonly quiet?: Duration.Duration
+  /** How long an agent waiting on the person's answer, to a question or a permission, keeps its place: five minutes. */
+  readonly askGrace?: Duration.Duration
   /**
    * The CPU time of each process in the tree of each of these agents (the agent's process and everything it started), by
    * process and in milliseconds, by thread; null where it can't be said, as for an agent that is no process of its own:
@@ -193,7 +202,9 @@ export class Agents extends Context.Service<
     Agents,
     Effect.gen(function* () {
       const installs = yield* Installs
-      return Agents.fromRegistry((definition) => usingLocated(definition, () => installs.locate(definition)))
+      // In a Flatpak a bundled copy lives inside the app's sandbox: the sign-in
+      // line the person runs names the app that carries it (`usingLocated`).
+      return Agents.fromRegistry((definition) => usingLocated(definition, () => installs.locate(definition), process.env.FLATPAK_ID))
     }),
   )
 

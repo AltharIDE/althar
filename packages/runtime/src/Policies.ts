@@ -32,7 +32,7 @@ export const ProjectRules = Schema.Struct({
    */
   permissions: Schema.optional(Schema.Literals(['rules', 'coordinator', 'ask', 'allow'])),
   /**
-   * Everything is allowed (ADR-036): nothing waits for the person, what always asks included, short of what is never allowed.
+   * Everything is allowed (ADR-042): nothing waits for the person, what always asks included, short of what is never allowed.
    * Off without it; turned off, `permissions` is what holds again.
    */
   allowEverything: Schema.optional(Schema.Boolean),

@@ -535,16 +535,22 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           })),
         ]
       }),
-    checkLog: (repository, check) => {
+    checkLog: (repository, check, whole = false) => {
       const match = /^job:(\d+):(\d+)$/.exec(check.id)
       if (match === null) return Effect.succeed(null)
       return http.text(`${api}/projects/${match[1]}/jobs/${match[2]}/trace`).pipe(
-        Effect.map(tail),
+        Effect.map((log) => (whole ? log : tail(log))),
         Effect.catchIf(
           (error) => error.reason === 'not_found' || error.reason === 'forbidden',
           () => Effect.succeed(null),
         ),
       )
+    },
+    rerun: (_repository, check) => {
+      // A pipeline's job runs again as a new job, on the same commit.
+      const match = /^job:(\d+):(\d+)$/.exec(check.id)
+      if (match === null) return Effect.succeed(false)
+      return http.json(Schema.Unknown, 'POST', `${api}/projects/${match[1]}/jobs/${match[2]}/retry`).pipe(Effect.as(true))
     },
     activity: (repository, number, cursor) =>
       Effect.gen(function* () {

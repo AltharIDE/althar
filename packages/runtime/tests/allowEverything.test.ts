@@ -15,7 +15,7 @@ import { Sessions } from '../src/Sessions'
 import { task, runtime, turns, until } from './support'
 
 /*
- * Allow everything on one task (ADR-036), with the fake agent running real
+ * Allow everything on one task (ADR-042), with the fake agent running real
  * commands: turned on, what waits on the person is decided again and goes
  * ahead, and so does what the task asks next, while the project's other
  * tasks still ask; what Althar can't read is refused rather than let
@@ -101,7 +101,7 @@ const allow = (taskId: string, on: boolean) =>
     })
   })
 
-describe('allow everything on a task (ADR-036)', () => {
+describe('allow everything on a task (ADR-042)', () => {
   it.live('lets through what waits and what the task asks next, while the project’s other tasks ask, and asks again once off', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions

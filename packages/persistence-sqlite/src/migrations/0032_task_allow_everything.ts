@@ -1,5 +1,5 @@
 /*
- * A task's own allow everything (ADR-036): the person turned it on from the
+ * A task's own allow everything (ADR-042): the person turned it on from the
  * task's menu, so nothing its agents ask waits for them, short of what its
  * project never allows. Off for every task until then; its project's rules
  * can allow everything for all of them.

@@ -257,6 +257,7 @@ describe('the client', () => {
           PasteAccountSignInCode: () => Effect.die('unused'),
           CancelAccountSignIn: () => Effect.die('unused'),
           // A refusal is an answer: it isn't tried again.
+          CompactContext: () => Effect.die('unused'),
           Interrupt: ({ commandId }) => {
             commands.push(commandId)
             return refuse()

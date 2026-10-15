@@ -81,6 +81,8 @@ const connected = (
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
         busy: { machine: options.machine ?? ROOMY },
+        // A pull request with no checks has none: no test waits for a host to show them.
+        checksAppear: Duration.zero,
       }),
     )
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
@@ -883,7 +885,7 @@ describe('project rules, through the API', () => {
           [null, null, true, ['force-push'], true],
         )
         assert.deepStrictEqual(yield* client.GetProjectRules({ projectId: project.id }), back)
-        // Allow everything is a switch over the mode (ADR-036): the mode is kept under it, and holds again once it is off.
+        // Allow everything is a switch over the mode (ADR-042): the mode is kept under it, and holds again once it is off.
         const allowing = yield* client.SetProjectRules({
           commandId: commandId(),
           projectId: project.id,
