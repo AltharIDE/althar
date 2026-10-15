@@ -7,7 +7,8 @@ import { SqlClient } from 'effect/sql'
 import { Accounts } from '../src/Accounts'
 import { Live } from '../src/Live'
 import { PlanUsage } from '../src/PlanUsage'
-import { runtime } from './support'
+import { type AgentEntry, Agents } from '../src/Config'
+import { fakeAgents, runtime } from './support'
 
 /*
  * Plan usage (docs/plans/plan-usage.md): where each account's windows come
@@ -38,7 +39,8 @@ const withUsage = (
   usage: {
     readonly readAgent?: () => Promise<UsageRead>
     readonly readCredentials?: () => Promise<CredentialsRead>
-    readonly readEndpoint?: (sourceId: string, provider: string) => Promise<EndpointRead>
+    readonly readEndpoint?: (sourceId: string, provider: string, agentMajor: number | undefined) => Promise<EndpointRead>
+    readonly readVersion?: () => Promise<string | null>
   },
   more: { readonly perUse?: ReadonlyArray<string>; readonly signedOut?: ReadonlyArray<string>; readonly database?: string } = {},
 ) =>
@@ -53,10 +55,39 @@ const withUsage = (
         kept: Duration.zero,
         ...(usage.readAgent === undefined ? {} : { readAgent: usage.readAgent }),
         ...(usage.readCredentials === undefined ? {} : { readCredentials: usage.readCredentials }),
-        ...(usage.readEndpoint === undefined ? {} : { readEndpoint: (id, account) => usage.readEndpoint!(id, account.provider) }),
+        ...(usage.readEndpoint === undefined
+          ? {}
+          : { readEndpoint: (id, account) => usage.readEndpoint!(id, account.provider, account.agentMajor) }),
+        ...(usage.readVersion === undefined ? {} : { readVersion: usage.readVersion }),
       },
     },
   )
+
+/** The fake agents, with OpenCode's commands run out on the device, as in a Flatpak. */
+const onDeviceOpenCode = Layer.effect(
+  Agents,
+  Effect.gen(function* () {
+    const inner = yield* Agents
+    const patch = (entry: AgentEntry): AgentEntry =>
+      entry.definition.id !== 'opencode'
+        ? entry
+        : {
+            ...entry,
+            definition: {
+              ...entry.definition,
+              signIn: {
+                ...entry.definition.signIn,
+                credentials: () => ({
+                  command: 'opencode',
+                  args: ['auth', 'list'],
+                  onDevice: () => ({ command: 'flatpak-spawn', args: [] }),
+                }),
+              },
+            },
+          }
+    return Agents.of({ list: inner.list.map(patch), get: (agentId) => Effect.map(inner.get(agentId), patch) })
+  }),
+).pipe(Layer.provide(fakeAgents()))
 
 const accountOf = (view: PlanUsageView, agentId: string) => view.accounts.find((account) => account.agentId === agentId)!
 
@@ -304,8 +335,9 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
       Effect.provide(
         withUsage({
           readCredentials: async () => credentials(['openai', 'plan']),
-          readEndpoint: async (id, provider) => {
-            assert.deepStrictEqual([id, provider], ['opencode-chatgpt', 'openai'])
+          readVersion: async () => '1.19.0',
+          readEndpoint: async (id, provider, major) => {
+            assert.deepStrictEqual([id, provider, major], ['opencode-chatgpt', 'openai', 1])
             return { kind: 'usage', stale: false, usage: { windows: [used(33)], source: 'endpoint', observedAt: NOW } }
           },
         }),
@@ -324,6 +356,79 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
           readCredentials: async () => credentials(['openai', 'plan']),
           readEndpoint: async () => ({ kind: 'fault', fault: 'sign_in_again', message: 'The provider refused this sign-in.' }),
         }),
+      ),
+    ),
+  )
+
+  it.effect('read the endpoint without a version when the agent’s is not known, which the reader then refuses', () =>
+    Effect.gen(function* () {
+      const view = openCode(yield* (yield* PlanUsage).now())
+      assert.strictEqual(view.fault?.kind, 'no_source')
+    }).pipe(
+      Effect.provide(
+        withUsage({
+          readCredentials: async () => credentials(['openai', 'plan']),
+          readVersion: async () => null,
+          readEndpoint: async (_id, _provider, major) => {
+            assert.isUndefined(major)
+            return {
+              kind: 'fault',
+              fault: 'no_source',
+              message: 'This usage source is for version 1 of the agent, and this one is not known to be.',
+            }
+          },
+        }),
+      ),
+    ),
+  )
+
+  it.effect('show a reading the reader kept as old as it is, and say unreachable for what cannot be reached', () =>
+    Effect.gen(function* () {
+      const usage = yield* PlanUsage
+      const first = openCode(yield* usage.now())
+      assert.strictEqual(first.observedAt, '2026-10-15T10:00:00.000Z')
+      assert.isNull(first.fault)
+      const second = openCode(yield* usage.now())
+      assert.strictEqual(second.fault?.kind, 'unreachable')
+      assert.strictEqual(second.observedAt, '2026-10-15T10:00:00.000Z')
+      assert.strictEqual(second.windows.length, 1)
+    }).pipe(
+      Effect.provide(
+        (() => {
+          let calls = 0
+          return withUsage({
+            readCredentials: async () => credentials(['openai', 'plan']),
+            readVersion: async () => '1.19.0',
+            readEndpoint: async () =>
+              ++calls === 1
+                ? { kind: 'usage', stale: true, usage: { windows: [used(33)], source: 'endpoint', observedAt: '2026-10-15T10:00:00.000Z' } }
+                : { kind: 'fault', fault: 'unreachable', message: 'The provider could not be reached.' },
+          })
+        })(),
+      ),
+    ),
+  )
+
+  it.effect('are not read from where the agent runs on the device, for the helper that would read there is not built', () =>
+    Effect.gen(function* () {
+      const view = openCode(yield* (yield* PlanUsage).now())
+      assert.strictEqual(view.fault?.kind, 'no_source')
+      assert.include(view.fault?.message ?? '', 'on the device')
+    }).pipe(
+      Effect.provide(
+        runtime(
+          ':memory:',
+          {},
+          {
+            agents: onDeviceOpenCode,
+            usage: {
+              every: Duration.zero,
+              kept: Duration.zero,
+              readCredentials: async () => credentials(['openai', 'plan']),
+              readEndpoint: async () => assert.fail('an agent on the device is never read in this process'),
+            },
+          },
+        ),
       ),
     ),
   )

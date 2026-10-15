@@ -18,8 +18,10 @@ export type UsageFault =
   | 'sign_in_again'
   /** The provider answered in another shape, or moved the URL. */
   | 'source_changed'
-  /** No answer: no network, a timeout, an error status, a rate limit, or a source not confirmed. */
+  /** No answer: no network, a timeout, an error status or a rate limit. */
   | 'unreachable'
+  /** There is no source to ask: none for this account, one not confirmed yet or not allowed, or one for another version of the agent. */
+  | 'no_source'
 
 export type EndpointRead =
   /** `stale`: these are the last windows, kept in memory while the provider can't be asked. */
@@ -161,13 +163,13 @@ export const buildUsageReader = (policy: UsagePolicy = {}): UsageReader => {
       .filter((pair) => pair.agent === account.agent && pair.provider === account.provider && pair.pays === 'plan')
       .flatMap((pair) => pair.sources)
       .find((candidate): candidate is EndpointSource => candidate.kind === 'endpoint' && candidate.id === sourceId)
-    if (source === undefined) return fault('unreachable', 'This account has no such usage source.')
+    if (source === undefined) return fault('no_source', 'This account has no such usage source.')
     const refused = endpointProblem(source, allowed)
-    if (refused !== null) return fault('unreachable', `The usage source is not allowed: ${refused}.`)
-    if (!source.confirmed) return fault('unreachable', 'This usage source has not been confirmed yet.')
+    if (refused !== null) return fault('no_source', `The usage source is not allowed: ${refused}.`)
+    if (!source.confirmed) return fault('no_source', 'This usage source has not been confirmed yet.')
     // A source for one version is read only for a version known to match.
     if (source.agentMajor !== undefined && account.agentMajor !== source.agentMajor)
-      return fault('unreachable', `This usage source is for version ${source.agentMajor} of the agent, and this one is not known to be.`)
+      return fault('no_source', `This usage source is for version ${source.agentMajor} of the agent, and this one is not known to be.`)
 
     const key = `${source.id}\n${account.home}`
     const going = inflight.get(key)

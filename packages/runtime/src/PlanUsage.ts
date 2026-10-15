@@ -5,6 +5,7 @@ import type { AccountUsage, PlanUsage as PlanUsageView, UsageFaultKind, UsageWar
 import {
   adapterNode,
   type AgentDefinition,
+  agentVersion,
   type CredentialsRead,
   type EndpointRead,
   nextWarning,
@@ -58,6 +59,8 @@ const LEAST = Duration.seconds(5)
 export interface PlanUsageOptions {
   /** How Codex's app-server is asked; as it is, unless a test says. */
   readonly readAgent?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<UsageRead>
+  /** An agent's version as its CLI says it; as it is, unless a test says. A source for one major version is read only for a version known to match. */
+  readonly readVersion?: (agent: AgentDefinition) => Promise<string | null>
   /** How an OpenCode account's sign-ins are listed. */
   readonly readCredentials?: (agent: AgentDefinition, home: Readonly<Record<string, string>>) => Promise<CredentialsRead>
   /** How a plan provider's endpoint is read (the usage read); the reader of the package, unless a test says. */
@@ -126,6 +129,18 @@ export class PlanUsage extends Context.Service<
           options.readCredentials ??
           ((agent: AgentDefinition, home: Readonly<Record<string, string>>) =>
             readOpenCodeCredentials(agent, { node: adapterNode(), home }))
+        const readVersion = options.readVersion ?? ((agent: AgentDefinition) => Effect.runPromise(agentVersion(agent, adapterNode())))
+        const majors = new Map<string, number | undefined>()
+        /* The agent's major version, asked once a launch; unknown stays unknown, which the usage read refuses. */
+        const majorOf = (definition: AgentDefinition) =>
+          Effect.gen(function* () {
+            if (majors.has(definition.id)) return majors.get(definition.id)
+            const version = yield* Effect.promise(() => readVersion(definition).catch(() => null))
+            const major = version === null ? undefined : Number.parseInt(version, 10)
+            const known = major === undefined || Number.isNaN(major) ? undefined : major
+            majors.set(definition.id, known)
+            return known
+          })
         const readEndpoint = options.readEndpoint ?? ((sourceId: string, account: UsageAccount) => usageReader.read(sourceId, account))
 
         const held = new Map<string, Held>()
@@ -209,7 +224,6 @@ export class PlanUsage extends Context.Service<
             const definition = entry.definition
             const check = yield* signIns.account(account)
             const before = held.get(account.id)
-            const at = yield* timestamp
             const home = accounts.env(account)
             const fault = (kind: UsageFaultKind, message: string): Held => ({
               agentId: definition.id,
@@ -253,6 +267,10 @@ export class PlanUsage extends Context.Service<
               return
             }
             if (definition.id === 'opencode') {
+              // The usage read opens the agent's credential file in this process. Where the agent lives out on the device (a Flatpak's host) the helper ADR-043 asks for is not built, so a plan's endpoint is refused there rather than read from the wrong place.
+              const onDevice =
+                definition.signIn.credentials?.(adapterNode()).onDevice !== undefined ||
+                definition.launch(adapterNode()).onDevice !== undefined
               const listed = yield* Effect.promise(() => readCredentials(definition, home))
               if (listed.kind === 'failed') return yield* keep(account.id, fault('cannot_classify', listed.message))
               // Each plan sign-in with the pair that covers it, or none where it is not declared; a key needs nothing.
@@ -273,6 +291,8 @@ export class PlanUsage extends Context.Service<
                   paidBy: 'key',
                 })
               const windows: UsageWindow[] = []
+              let observed: string | null = null
+              const agentMajor = yield* majorOf(definition)
               let failed: { kind: UsageFaultKind; message: string } | null = null
               for (const { credential, pair } of plans) {
                 if (pair === null) {
@@ -287,28 +307,33 @@ export class PlanUsage extends Context.Service<
                   failed ??= { kind: 'no_source', message: `OpenCode's ${credential.provider} sign-in has no usage source yet.` }
                   continue
                 }
+                if (onDevice) {
+                  failed ??= {
+                    kind: 'no_source',
+                    message: `${definition.name}'s ${credential.provider} usage cannot be read yet where it runs on the device (a Flatpak): the on-device read is not built.`,
+                  }
+                  continue
+                }
                 const read = yield* Effect.promise(() =>
                   readEndpoint(source.id, {
                     agent: 'opencode',
                     provider: credential.provider,
                     home: join(homeDirOf(definition, account), 'opencode'),
+                    ...(agentMajor === undefined ? {} : { agentMajor }),
                   }),
                 )
-                if (read.kind === 'usage')
+                if (read.kind === 'usage') {
                   windows.push(...read.usage.windows.map((window) => ({ ...window, label: window.label ?? credential.provider })))
-                else
-                  failed ??= {
-                    kind:
-                      read.fault === 'sign_in_again' ? 'sign_in_again' : read.fault === 'source_changed' ? 'source_changed' : 'no_source',
-                    message: read.message,
-                  }
+                  // As old as the reader says: a reading it kept is not newly fetched.
+                  if (observed === null || read.usage.observedAt < observed) observed = read.usage.observedAt
+                } else failed ??= { kind: read.fault, message: read.message }
               }
               yield* keep(account.id, {
                 agentId: definition.id,
                 source: windows.length > 0 ? 'endpoint' : null,
                 plan: null,
                 windows: windows.length > 0 ? windows : (before?.windows ?? []),
-                observedAt: windows.length > 0 ? at : (before?.observedAt ?? null),
+                observedAt: windows.length > 0 ? observed : (before?.observedAt ?? null),
                 fault: failed,
                 paidBy: 'plan',
               })

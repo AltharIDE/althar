@@ -347,11 +347,11 @@ describe('the usage reader', () => {
     const { seen, fetch } = server({})
     const home = fakeHome()
     expect(await buildUsageReader({ fetch }).read('codex-chatgpt', codex(home))).toMatchObject({
-      fault: 'unreachable',
+      fault: 'no_source',
       message: expect.stringContaining('not been confirmed'),
     })
     expect(await reader({ fetch }, { url: 'https://api.anthropic.com/api/oauth/usage' }).read('codex-chatgpt', codex(home))).toMatchObject({
-      fault: 'unreachable',
+      fault: 'no_source',
       message: expect.stringContaining('not allowed'),
     })
     expect(seen).toHaveLength(0)
@@ -368,11 +368,11 @@ describe('the usage reader', () => {
     const r = reader({ fetch })
     const home = fakeHome()
     expect(await r.read('opencode-chatgpt', opencode(home))).toMatchObject({
-      fault: 'unreachable',
+      fault: 'no_source',
       message: expect.stringContaining('version 1'),
     })
     expect(await r.read('opencode-chatgpt', opencode(home, 2))).toMatchObject({
-      fault: 'unreachable',
+      fault: 'no_source',
       message: expect.stringContaining('version 1'),
     })
     expect(seen).toHaveLength(0)
