@@ -285,6 +285,11 @@ before building on it):
 
 ## Stages
 
+**Started 15 October:** stage 1's model, warning rule and Codex source are in
+`packages/provider-adapters/src/usage.ts` (tests in `tests/usage.test.ts`).
+Not yet: the per-(agent, provider) usage-source registry and its contract
+test, and anything that reads a token (stage 0 is not approved).
+
 One pull request each. Stages 0 to 5 are Althar's; 6 to 8 are upstream and
 run in parallel.
 

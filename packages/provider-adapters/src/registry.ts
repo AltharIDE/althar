@@ -110,6 +110,11 @@ export interface AgentDefinition {
     }
   }
   /**
+   * The agent's own control channel for plan usage, run in an account's home
+   * (`usage.ts`). Without one, its usage comes from ACP or not at all.
+   */
+  readonly usage?: { readonly run: (node: string) => LaunchSpec }
+  /**
    * Where it keeps a sign-in (ADR-012): the environment variable that points
    * it at a folder of its own, a home, and its usual folder when that isn't
    * set. `shared` picks, from what is in the usual folder, what isn't the
@@ -395,7 +400,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       "Its sandbox denies writes to a repository's tracked `.claude/` files, so git can fail to check those out inside it.",
       // Not checked against a real session yet: what its sandbox does when the start folder holds worktrees rather than being one.
       "In a task of several repositories it starts in the folder that holds the worktrees, which isn't one, so its sandbox may not let git write the repositories' `.git`; a commit then runs outside the sandbox and asks, and Althar's rules answer it.",
-      'Usage limits reach the Agent SDK but are not forwarded over ACP; only errors show them.',
+      'The adapter forwards one plan window per event in usage_update `_meta["_claude/rateLimit"]`, but drops it before a turn’s first usage figure (claude-agent-acp #1127).',
     ],
   },
   codex: {
@@ -435,6 +440,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       },
       logout: { run: () => ({ command: 'codex', args: ['logout'] }), line: 'codex logout' },
     },
+    // Its app-server answers `account/rateLimits/read` about the account it is run for; nothing is read from the sign-in.
+    usage: { run: () => ({ command: 'codex', args: ['app-server'] }) },
     home: {
       variable: 'CODEX_HOME',
       usual: (env, homeDir) => env.CODEX_HOME || join(homeDir, '.codex'),
@@ -455,7 +462,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     knownGaps: [
       'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network.',
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply.",
-      'Usage limits are held by the adapter but only shown as /status text; only errors show them over ACP.',
+      'The adapter holds usage limits but sends them nowhere over ACP (/status prints text); Althar asks the Codex app-server for them (`usage.ts`).',
     ],
     cli: {
       name: 'codex',
