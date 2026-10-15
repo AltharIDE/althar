@@ -271,3 +271,40 @@ export const readAgentUsage = (agent: AgentDefinition, options: ReadUsageOptions
       })
     })
   })
+
+/* Claude Code: the Agent SDK's `rate_limit_event`, which claude-agent-acp puts in `usage_update` `_meta["_claude/rateLimit"]`. */
+
+const CLAUDE_WINDOWS: Readonly<Record<string, { readonly kind: WindowKind; readonly label?: string }>> = {
+  five_hour: { kind: 'five_hour' },
+  seven_day: { kind: 'weekly' },
+  seven_day_opus: { kind: 'weekly', label: 'Opus' },
+  seven_day_sonnet: { kind: 'weekly', label: 'Sonnet' },
+  seven_day_overage_included: { kind: 'weekly', label: 'With extra usage' },
+  overage: { kind: 'other', label: 'Extra usage' },
+}
+
+/**
+ * The window one `rate_limit_event` describes (SDK 0.3.296, `SDKRateLimitInfo`):
+ * each event is one window, named by `rateLimitType`. `utilization` is a
+ * fraction of 1 (the CLI rounds `utilization * 100` to show it, 0.3.293) and
+ * `resetsAt` is epoch seconds. An event without a type or a use, such as one
+ * that only says the limit is fine, carries no window: null.
+ */
+export const claudeRateLimitWindow = (info: unknown): UsageWindow | null => {
+  const event = record(info)
+  if (event === null || typeof event.rateLimitType !== 'string') return null
+  const named = CLAUDE_WINDOWS[event.rateLimitType]
+  if (named === undefined || typeof event.utilization !== 'number' || !Number.isFinite(event.utilization)) return null
+  let resetsAt: string | undefined
+  try {
+    resetsAt = isoSeconds(event.resetsAt)
+  } catch {
+    return null
+  }
+  return {
+    kind: named.kind,
+    ...(named.label === undefined ? {} : { label: named.label }),
+    usedPercent: Math.min(100, Math.max(0, Math.round(event.utilization * 1000) / 10)),
+    ...(resetsAt === undefined ? {} : { resetsAt }),
+  }
+}

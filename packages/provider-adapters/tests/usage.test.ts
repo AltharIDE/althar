@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { type AgentDefinition, agents } from '../src/registry'
-import { codexUsage, nextWarning, readAgentUsage, type WarningState, windowKind } from '../src/usage'
+import { normalize } from '../src/events'
+import { claudeRateLimitWindow, codexUsage, nextWarning, readAgentUsage, type WarningState, windowKind } from '../src/usage'
 
 const NOW = new Date('2026-10-15T12:00:00.000Z')
 
@@ -298,5 +299,65 @@ describe('asking Codex’s app-server', () => {
   it('is not asked of an agent with no usage channel', async () => {
     const read = await readAgentUsage(agents.opencode)
     expect(read).toEqual({ kind: 'failed', message: 'OpenCode has no usage channel.' })
+  })
+})
+
+describe('Claude Code’s rate-limit event', () => {
+  const info = (extra: Record<string, unknown>) => ({
+    status: 'allowed_warning',
+    rateLimitType: 'five_hour',
+    utilization: 0.42,
+    resetsAt: 1_760_540_400,
+    ...extra,
+  })
+
+  it('is one window, its use a fraction of 1 and its reset in epoch seconds', () => {
+    expect(claudeRateLimitWindow(info({}))).toEqual({
+      kind: 'five_hour',
+      usedPercent: 42,
+      resetsAt: new Date(1_760_540_400_000).toISOString(),
+    })
+    expect(claudeRateLimitWindow(info({ rateLimitType: 'seven_day', utilization: 0.071 }))).toMatchObject({
+      kind: 'weekly',
+      usedPercent: 7.1,
+    })
+  })
+
+  it('names a window of one model, and extra usage, by what it is', () => {
+    expect(claudeRateLimitWindow(info({ rateLimitType: 'seven_day_opus' }))).toMatchObject({ kind: 'weekly', label: 'Opus' })
+    expect(claudeRateLimitWindow(info({ rateLimitType: 'seven_day_sonnet' }))).toMatchObject({ kind: 'weekly', label: 'Sonnet' })
+    expect(claudeRateLimitWindow(info({ rateLimitType: 'overage' }))).toMatchObject({ kind: 'other', label: 'Extra usage' })
+  })
+
+  it('keeps a use to the plan and has no window for an event that does not name one', () => {
+    expect(claudeRateLimitWindow(info({ utilization: 1.4 }))).toMatchObject({ usedPercent: 100 })
+    expect(claudeRateLimitWindow(info({ utilization: -1 }))).toMatchObject({ usedPercent: 0 })
+    expect(claudeRateLimitWindow(info({ resetsAt: undefined }))).toEqual({ kind: 'five_hour', usedPercent: 42 })
+    for (const odd of [
+      null,
+      'x',
+      {},
+      info({ rateLimitType: undefined }),
+      info({ rateLimitType: 'new_kind' }),
+      info({ utilization: undefined }),
+      info({ utilization: 'a lot' }),
+      info({ resetsAt: 1e20 }),
+    ])
+      expect(claudeRateLimitWindow(odd), JSON.stringify(odd)).toBeNull()
+  })
+
+  it('rides on the context usage the adapter streams, where its _meta carries one', () => {
+    const update = { sessionUpdate: 'usage_update', used: 10, size: 100, _meta: { '_claude/rateLimit': info({}) } } as never
+    expect(normalize(update)).toMatchObject({
+      _tag: 'ContextUsage',
+      used: 10,
+      size: 100,
+      planWindow: { kind: 'five_hour', usedPercent: 42 },
+    })
+    expect(normalize({ sessionUpdate: 'usage_update', used: 10, size: 100, _meta: { other: 1 } } as never)).toEqual({
+      _tag: 'ContextUsage',
+      used: 10,
+      size: 100,
+    })
   })
 })
