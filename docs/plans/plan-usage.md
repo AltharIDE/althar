@@ -177,7 +177,7 @@ returns, so it shows when a source reports it; nothing else is built for it.
 
 ## The usage tab
 
-- **Entry**: a side-menu item, and Ctrl/Cmd+U. No existing binding for it
+- **Entry**: a button in the window's bar (the app has no side menu), with the count of warnings not yet seen, and Ctrl/Cmd+U. No existing binding for it
   was found in `apps/` or `packages/`. Check against the shortcut list when
   building.
 - **Content**: every `AgentAccount` ([03, Several accounts](../architecture/03-agent-runtime-and-auth.md#several-accounts))
@@ -339,7 +339,7 @@ run in parallel.
 3. **Notices.** The runtime holds `AccountStatus` per account and posts one
    notice per account, window and threshold into the open coordinator's
    Talk room; a badge when none is open.
-4. **The usage tab.** Ctrl/Cmd+U and the side-menu entry; every account, its
+4. **The usage tab.** Ctrl/Cmd+U and the bar's button; every account, its
    windows, its source and age.
 5. **OpenCode sources.** First, per-provider plan-or-key detection replacing
    `paidBy: () => 'key'`, with its contract test. Then one spike, then one
