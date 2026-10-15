@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -15,7 +15,7 @@ import { readAppPreferences, writeAppPreference } from '../src/main/preferences'
 const profile = () => mkdtempSync(join(tmpdir(), 'althar-preferences-'))
 
 describe('the app’s preferences kept in the profile', () => {
-  it('start awake while plugged in, every notification on, the count on, silent with no sound to go back to, the first editor found, and the load in the bar', async () => {
+  it('start awake while plugged in, every notification on, the count on, silent with no sound to go back to, the first editor found, the load in the bar, and usage data on', async () => {
     expect(await readAppPreferences(profile())).toEqual({
       keepAwake: true,
       awakeOnBattery: false,
@@ -27,6 +27,7 @@ describe('the app’s preferences kept in the profile', () => {
       sound: null,
       lastSound: null,
       showLoad: true,
+      usageData: true,
     })
   })
 
@@ -49,6 +50,23 @@ describe('the app’s preferences kept in the profile', () => {
     await writeAppPreference(at, 'sound', 'Glass')
     expect(await readAppPreferences(at)).toEqual({ ...DEFAULT_PREFERENCES, keepAwake: false, editor: 'cursor', sound: 'Glass' })
     expect(JSON.parse(readFileSync(join(at, 'desktop.json'), 'utf8'))).toMatchObject({ icon: 'ink', keepAwake: false })
+  })
+
+  it('keep usage data off, and say so in the file, when the file is there but can’t be read', async () => {
+    const at = profile()
+    writeFileSync(join(at, 'desktop.json'), '{"usageData": false, "keepAwa')
+    expect(await readAppPreferences(at)).toEqual({ ...DEFAULT_PREFERENCES, usageData: false })
+    expect(JSON.parse(readFileSync(join(at, 'desktop.json'), 'utf8'))).toEqual({ usageData: false })
+    writeFileSync(join(at, 'desktop.json'), '[1, 2]')
+    expect((await readAppPreferences(at)).usageData).toBe(false)
+    // None at all is a new profile: everything where it starts.
+    expect(await readAppPreferences(join(at, 'none'))).toEqual(DEFAULT_PREFERENCES)
+  })
+
+  it('write the file whole, leaving nothing beside it', async () => {
+    const at = profile()
+    await writeAppPreference(at, 'usageData', false)
+    expect(readdirSync(at)).toEqual(['desktop.json'])
   })
 
   it('refuse a value a key can’t hold, and know only their own keys', async () => {

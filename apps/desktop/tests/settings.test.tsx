@@ -550,6 +550,29 @@ describe('the Settings tab', () => {
         .getAttribute('href'),
     ).toBe('https://github.com/AltharIDE/althar/releases/tag/v0.0.0')
   })
+
+  it('sends anonymous usage data until the person turns it off under About Althar, with one line on what it sends', async () => {
+    const host = fakeHost()
+    withServices(<Settings at="about" />, fakeClient().client, host)
+    const usage = await screen.findByRole('switch', { name: 'Usage data' })
+    await waitFor(() => expect(usage.getAttribute('aria-checked')).toBe('true'))
+    expect(document.getElementById(usage.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      'Anonymous: steps such as a project made or a task settled. Never your code, what is written, or any name.',
+    )
+    await userEvent.click(usage)
+    expect(host.setPreference).toHaveBeenLastCalledWith('usageData', false)
+    await waitFor(() => expect(usage.getAttribute('aria-checked')).toBe('false'))
+    // Not among what is changed often.
+    expect(screen.queryByRole('button', { name: /^Usage data/ })).toBeNull()
+  })
+
+  it('keeps usage data off, and can’t turn it on, while DO_NOT_TRACK is set', async () => {
+    withServices(<Settings at="about" />, fakeClient().client, fakeHost({ doNotTrack: true }))
+    const usage = await screen.findByRole('switch', { name: 'Usage data' })
+    expect(usage.getAttribute('aria-checked')).toBe('false')
+    expect((usage as HTMLButtonElement).disabled).toBe(true)
+    expect(document.getElementById(usage.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Off while DO_NOT_TRACK is set.')
+  })
 })
 
 describe('how Althar looks, on the Settings tab', () => {

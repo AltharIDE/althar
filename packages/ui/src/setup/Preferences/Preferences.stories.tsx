@@ -18,6 +18,7 @@ import {
   type NotifyChoices,
   OpenFilesIn,
   SettingList,
+  UsageData,
 } from './Preferences'
 
 const EDITORS = [
@@ -41,6 +42,7 @@ const onAwake = fn()
 const onNotify = fn()
 const onPlay = fn()
 const onPlace = fn()
+const onUsage = fn()
 
 /* Stand-ins for what the app puts in the screen: the home layer's Island and EdgeSheet can't be drawn from here. */
 const island = (
@@ -136,6 +138,21 @@ function Notifications() {
   )
 }
 
+function Usage() {
+  const [on, setOn] = useState(true)
+  return (
+    <SettingList>
+      <UsageData
+        on={on}
+        onChange={(next) => {
+          setOn(next)
+          onUsage(next)
+        }}
+      />
+    </SettingList>
+  )
+}
+
 function Places() {
   const [place, setPlace] = useState<'island' | 'menu'>('island')
   return (
@@ -189,6 +206,21 @@ export const GeneralSettings: Story = {
     await expect(within(editors).getByRole('radio', { name: 'Cursor' })).toBeChecked()
     await userEvent.click(within(editors).getByRole('radio', { name: 'Zed' }))
     await expect(within(editors).getByRole('radio', { name: 'Zed' })).toBeChecked()
+  },
+}
+
+/** Anonymous usage data, on as it starts, with the line on what it sends and never sends; turned off at once. */
+export const UsageDataSwitch: Story = {
+  render: () => <Usage />,
+  play: async ({ canvasElement }) => {
+    const usage = within(canvasElement).getByRole('switch', { name: 'Usage data' })
+    await expect(usage).toBeChecked()
+    await expect(usage).toHaveAccessibleDescription(
+      'Anonymous: steps such as a project made or a task settled. Never your code, what is written, or any name.',
+    )
+    await userEvent.click(usage)
+    await expect(onUsage).toHaveBeenCalledWith(false)
+    await expect(usage).not.toBeChecked()
   },
 }
 
@@ -391,6 +423,22 @@ export const AllStates: Story = {
                 onPlay={fn()}
                 text={{ note: 'The system’s own sound, with each notification, or none.' }}
               />
+            </SettingList>
+          ),
+        },
+        {
+          state: 'usage data on',
+          node: (
+            <SettingList>
+              <UsageData on onChange={fn()} />
+            </SettingList>
+          ),
+        },
+        {
+          state: 'usage data with DO_NOT_TRACK set',
+          node: (
+            <SettingList>
+              <UsageData on onChange={fn()} doNotTrack />
             </SettingList>
           ),
         },

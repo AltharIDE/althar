@@ -52,5 +52,9 @@ export const sectionText: Readonly<Record<Section, { readonly title: string; rea
   notifications: { title: 'Notifications', lede: 'Only while Althar isn’t in front. Never for progress.', icon: 'bell' },
   appearance: { title: 'Appearance', lede: 'How Althar shows while you work in another app, and its icon.', icon: 'image' },
   editor: { title: 'Editor', lede: 'Which app a task’s files and folder open in.', icon: 'file' },
-  about: { title: 'About Althar', lede: 'Which Althar this is, and a newer one once it’s ready.', icon: 'down' },
+  about: {
+    title: 'About Althar',
+    lede: 'Which Althar this is, a newer one once it’s ready, and the anonymous usage data it sends.',
+    icon: 'down',
+  },
 }

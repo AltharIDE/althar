@@ -6,12 +6,11 @@ import { describe, expect, it } from 'vitest'
  * a state the component must support, so this is the component suite's
  * floor; behaviour a play cannot reach is tested beside it.
  */
-type StoryFile = Parameters<typeof composeStories>[0]
+export type StoryFile = Parameters<typeof composeStories>[0]
 /* What composeStories gives back, as far as this suite uses it; its own type is lost to Object.entries. */
 interface Runnable {
   run: () => Promise<void>
 }
-const files = import.meta.glob<StoryFile>('../src/**/*.stories.tsx', { eager: true })
 
 /*
  * Plays that need what only a browser has run in Storybook only. A closed
@@ -29,15 +28,22 @@ const BROWSER_ONLY = new Set<string>([
   'composer/Composer/Composer.stories.tsx#LongDictation',
 ])
 
-for (const [path, file] of Object.entries(files)) {
-  describe(path.replace('../src/', ''), () => {
-    const rel = path.replace('../src/', '')
-    for (const [name, Story] of Object.entries<Runnable>(composeStories(file))) {
-      const id = `${rel}#${name}`
-      it.skipIf(BROWSER_ONLY.has(id))(name, async () => {
-        await Story.run()
-        expect(document.body.childElementCount).toBeGreaterThan(0)
-      })
-    }
-  })
+/**
+ * Runs the stories of the files given. They are split across a few test files
+ * by folder, so their stories render on several workers at once; the last of
+ * them takes every folder the others don't name, so no story is left out.
+ */
+export const runStories = (files: Record<string, StoryFile>) => {
+  for (const [path, file] of Object.entries(files)) {
+    describe(path.replace('../src/', ''), () => {
+      const rel = path.replace('../src/', '')
+      for (const [name, Story] of Object.entries<Runnable>(composeStories(file))) {
+        const id = `${rel}#${name}`
+        it.skipIf(BROWSER_ONLY.has(id))(name, async () => {
+          await Story.run()
+          expect(document.body.childElementCount).toBeGreaterThan(0)
+        })
+      }
+    })
+  }
 }
