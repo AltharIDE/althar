@@ -25,18 +25,21 @@ export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void):
   // A change the monitor reports is newer than the snapshot read after it: the snapshot never overwrites one.
   let heard = false
 
-  // The snapshot is read once the monitor says it is listening (it prints a line then), or after a second without word, so a
-  // change between the two cannot be missed.
-  let read = false
-  const snapshot = () => {
-    if (read || stopped) return
-    read = true
+  // The snapshot is read once the monitor says it is listening (it prints a line then). A second without word reads it anyway,
+  // for a gdbus that prints nothing, and the monitor's first word reads it again: that one is taken after the subscription, so
+  // it is final, and the answer of an earlier read no longer counts.
+  let latest = 0
+  let confirmed = false
+  const snapshot = (afterSubscribing: boolean) => {
+    if (stopped || confirmed) return
+    confirmed = afterSubscribing
+    const mine = ++latest
     execFile(
       'gdbus',
       ['call', ...PORTAL, '--method', 'org.freedesktop.portal.Settings.ReadOne', 'org.freedesktop.appearance', 'color-scheme'],
       { timeout: 5000 },
       (error, out) => {
-        if (!stopped && !heard) changed(error === null ? parseScheme(out) : undefined)
+        if (!stopped && !heard && mine === latest) changed(error === null ? parseScheme(out) : undefined)
       },
     )
   }
@@ -44,7 +47,7 @@ export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void):
     monitor = spawn('gdbus', ['monitor', ...PORTAL], { stdio: ['ignore', 'pipe', 'ignore'] })
     let pending = ''
     monitor.stdout?.on('data', (chunk: Buffer) => {
-      snapshot()
+      snapshot(true)
       const lines = (pending + chunk.toString()).split('\n')
       pending = lines.pop() ?? ''
       for (const line of lines) {
@@ -55,13 +58,13 @@ export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void):
         changed(scheme)
       }
     })
-    monitor.on('error', snapshot)
+    monitor.on('error', () => snapshot(false))
     monitor.unref()
   } catch {
     // No gdbus: the default stands.
   }
 
-  const timer = setTimeout(snapshot, 1000)
+  const timer = setTimeout(() => snapshot(false), 1000)
   timer.unref()
 
   return () => {
