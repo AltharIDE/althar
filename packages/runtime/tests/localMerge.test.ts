@@ -10,7 +10,7 @@ import { SqlClient } from 'effect/sql'
 import { Changes } from '../src/Changes'
 import { coAuthorLine } from '../src/credit'
 import { NotFound } from '../src/errors'
-import { applyMerges, planMerge } from '../src/localMerge'
+import { applyMerges, checkedOut, planMerge, worktreeIn } from '../src/localMerge'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
@@ -401,6 +401,22 @@ describe('merging a task here', () => {
       assert.deepStrictEqual(cantOf(refused).slice(1), ['busy', realpathSync(root)])
       assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
       assert.strictEqual(yield* stateOf(task.taskId), 'open')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('finds the worktree that has a branch whatever its path, and never guesses where lines can’t tell', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      git(root, 'branch', 'side')
+      // A path git allows, with an empty line inside it when listed as lines.
+      const odd = join(realpathSync(mkdtempSync(join(tmpdir(), 'althar-odd-'))), 'two\n\nlines')
+      git(root, 'worktree', 'add', '-q', odd, 'side')
+      assert.strictEqual(yield* checkedOut(root, 'side'), odd)
+      assert.strictEqual(yield* checkedOut(root, 'main'), realpathSync(root))
+      // Where git can't list them with -z, the same listing as lines says nothing of which has the branch.
+      const lines = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: root }).toString()
+      assert.isUndefined(worktreeIn(lines, '\n', 'side'))
+      assert.isUndefined(worktreeIn(lines, '\n', 'main'))
     }).pipe(Effect.provide(runtime())),
   )
 
