@@ -286,6 +286,9 @@ export const FIX_ROUNDS = 3
 /** How long a change's checks may run, while Althar sees them through, before the change is the person's (ADR-041). */
 export const STUCK_AFTER = Duration.minutes(45)
 
+/** How long a check run again may take to show it runs before a failure is taken as its result (ADR-041). */
+const RERUN_SHOWS = Duration.minutes(3)
+
 /** How many lines of a check's log `read_check_log` gives at a time. */
 const LOG_PAGE = 300
 
@@ -1963,11 +1966,18 @@ export class Changes extends Context.Service<
       const handsOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const rows = yield* sql<{ outcome: string | null; endedAt: string; failed: number; hasChecks: number }>`
-            SELECT json_extract(l.snapshot, '$.checks.outcome') AS outcome, r.ended_at,
-              -- Whether the repository's pull requests have had checks before: one with none never will, and isn't kept waiting.
+          const rows = yield* sql<{ outcome: string | null; endedAt: string; pushedAt: string | null; failed: number; hasChecks: number }>`
+            SELECT
+              -- What the checks of its head say: those of a head before it, which a push has left behind, say nothing.
+              CASE WHEN json_extract(l.snapshot, '$.checks.sha') = json_extract(l.snapshot, '$.headSha')
+                THEN json_extract(l.snapshot, '$.checks.outcome') END AS outcome,
+              r.ended_at,
+              -- When Althar last pushed to it: its checks may take a moment to show after that too.
+              (SELECT max(c.updated_at) FROM repository_changes c WHERE c.pull_request_url = json_extract(l.snapshot, '$.url')) AS pushed_at,
+              -- Whether the repository's pull requests, this one included, have had checks before: one with none never will, and isn't
+              -- kept waiting.
               EXISTS (SELECT 1 FROM external_links e JOIN observations c ON c.subject_type = 'external_link' AND c.subject_id = e.id
-                AND c.kind = 'checks' WHERE e.project_id = l.project_id AND e.kind = 'change' AND e.id != l.id
+                AND c.kind = 'checks' WHERE e.project_id = l.project_id AND e.kind = 'change'
                 AND json_extract(e.snapshot, '$.repository') = json_extract(l.snapshot, '$.repository')) AS has_checks,
               -- By commit: one run again after it failed is still one failure.
               (SELECT count(DISTINCT json_extract(o.payload, '$.sha')) FROM observations o WHERE o.subject_type = 'external_link'
@@ -1989,7 +1999,9 @@ export class Changes extends Context.Service<
           const running = rows.some(
             (row) =>
               row.outcome === 'running' ||
-              ((row.outcome === null || row.outcome === 'none') && row.hasChecks === 1 && now - Date.parse(row.endedAt) < checksAppear),
+              ((row.outcome === null || row.outcome === 'none') &&
+                row.hasChecks === 1 &&
+                now - Math.max(Date.parse(row.endedAt), row.pushedAt === null ? 0 : Date.parse(row.pushedAt)) < checksAppear),
           )
           return { failed, running, given: failed > FIX_ROUNDS } satisfies Hands
         })
@@ -2016,10 +2028,15 @@ export class Changes extends Context.Service<
       const ranAgain = (link: LinkRow, sha: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const [row] = yield* sql<{ one: number }>`
-            SELECT 1 AS one FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
+          const [row] = yield* sql<{ at: string }>`
+            SELECT observed_at AS at FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
               AND kind = 'checks_rerun' AND json_extract(payload, '$.id') = ${`rerun:${sha}`} LIMIT 1`
-          return row !== undefined
+          if (row === undefined) return null
+          // Its run again is under way once the host has shown it running; a failure before that is the old one, still showing.
+          const [started] = yield* sql<{ one: number }>`
+            SELECT 1 AS one FROM observations WHERE subject_type = 'external_link' AND subject_id = ${link.id}
+              AND kind = 'checks_rerun_started' AND json_extract(payload, '$.id') = ${`rerun-started:${sha}`} LIMIT 1`
+          return { at: row.at, started: started !== undefined }
         })
 
       /**
@@ -2041,6 +2058,15 @@ export class Changes extends Context.Service<
           if (!(yield* heard(link, 'checks_stuck', `stuck:${sha}`, { sha }))) return
           yield* taken(link.taskId, 'stuck')
           yield* sayOn(link, `The checks on ${name} have run for ${spanOf(ran)}, so the change is yours now.`)
+        })
+
+      /** Whether the task's plan is still under way, as while it publishes, its pull request open already. */
+      const publishing = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const [run] = yield* sql<{ state: string }>`
+            SELECT state FROM runs WHERE task_id = ${taskId} AND plan_id IS NOT NULL ORDER BY created_at DESC LIMIT 1`
+          return run?.state === 'running'
         })
 
       /** Says in the task's thread that its checks still failed after FIX_ROUNDS fixes while Althar saw them through: the change is the person's now. */
@@ -2120,20 +2146,28 @@ export class Changes extends Context.Service<
           let rerunning = false
           let happened = false
           let checks = before.checks
-          // Checks the host won't show Althar don't stop it hearing the rest: the thread says so, once a commit (ADR-041).
+          // While its plan still publishes, how its checks end waits: once the run has ended, they are heard as the change's,
+          // and a failure goes where it should (ADR-040).
+          const held = now.headSha !== null && (yield* publishing(link.taskId))
+          if (held) happened = true
+          // Checks the host won't show Althar don't stop it hearing the rest: the thread says so, once a commit, and a change in
+          // Althar's hands is the person's, since Althar can't see its checks through (ADR-041).
           const ran =
-            now.headSha === null
+            now.headSha === null || held
               ? null
               : yield* host.checks(repository, now.headSha).pipe(
                   Effect.catchIf(
                     (error) => error.reason === 'forbidden' || error.reason === 'not_found',
                     (error) =>
                       Effect.gen(function* () {
-                        if (yield* heard(link, 'checks_unreadable', `unreadable:${now.headSha}`, { message: error.message }))
+                        if (yield* heard(link, 'checks_unreadable', `unreadable:${now.headSha}`, { message: error.message })) {
+                          const hands = yield* handsOf(link.taskId)
+                          if (hands !== null && !hands.given) yield* taken(link.taskId, 'unreadable')
                           yield* sayOn(
                             link,
-                            `Althar can't read the checks on ${name}: its host refused them (${error.message}). It still listens for what people say on it.`,
+                            `Althar can't read the checks on ${name}: its host refused them (${error.message}). It still listens for what people say on it${hands !== null && !hands.given ? ', and the change is yours now' : ''}.`,
                           )
+                        }
                         return null
                       }),
                   ),
@@ -2141,19 +2175,24 @@ export class Changes extends Context.Service<
           if (now.headSha !== null && ran !== null) {
             const sum = checksOf(now.headSha, ran)
             const finished = sum.outcome === 'passed' || sum.outcome === 'failed'
+            // A check run again after it failed is heard again when it ends: once the host has shown it running again, or, one too
+            // quick to be seen so, after RERUN_SHOWS. Until then a failure is the old one.
+            const reran = yield* ranAgain(link, sum.sha)
             // Checks still running keep the pull request worth asking about; too long, while Althar sees them through, and the change is
-            // the person's.
+            // the person's. Running again after a rerun, from when they show so.
             if (sum.outcome === 'running') {
               happened = true
               yield* heard(link, 'checks_running', `running:${sum.sha}`, { sha: sum.sha })
+              if (reran !== null && !reran.started) yield* heard(link, 'checks_rerun_started', `rerun-started:${sum.sha}`, { sha: sum.sha })
               yield* stuckOn(link, name, sum.sha)
             }
-            // A check run again after it failed is heard again when it ends.
-            const reran = yield* ranAgain(link, sum.sha)
+            const settled =
+              reran === null || reran.started || (yield* Clock.currentTimeMillis) - Date.parse(reran.at) > Duration.toMillis(RERUN_SHOWS)
             if (
               finished &&
+              settled &&
               (before.checks?.sha !== sum.sha || before.checks.outcome !== sum.outcome) &&
-              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}${reran ? ':again' : ''}`, { ...sum }))
+              (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}${reran !== null ? ':again' : ''}`, { ...sum }))
             ) {
               happened = true
               yield* arrive(link, {
@@ -2201,7 +2240,7 @@ export class Changes extends Context.Service<
               }
             }
             // Run again, they are running as far as Althar knows: how they end next is heard, however soon.
-            checks = rerunning ? { ...sum, outcome: 'running' } : sum
+            checks = rerunning || !settled ? { ...sum, outcome: 'running' } : sum
           }
           const activity = yield* host.activity(repository, before.number, link.cursor)
           const replies = activity.comments.length === 0 ? new Set<string>() : yield* repliesOf(link.id)
@@ -3136,7 +3175,7 @@ export class Changes extends Context.Service<
        * its lead, or pushed to it. It is no longer in Althar's (ADR-040): each
        * of its pull requests says so, for `handsOf` to read.
        */
-      const taken = (taskId: string, how: 'stopped' | 'interrupted' | 'pushed' | 'stuck') =>
+      const taken = (taskId: string, how: 'stopped' | 'interrupted' | 'pushed' | 'stuck' | 'unreadable') =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const at = yield* timestamp
@@ -3575,20 +3614,16 @@ export class Changes extends Context.Service<
           // It only reads, so a review's lead has it too.
           inReview: true,
         },
-        {
-          ...leadTool(
-            'read_check_log',
-            "Reads a check's whole log on the task's pull request, a page of lines at a time: by the check's name, as read_pull_request gives it, from from_line, or its last page without one. In a task of several repositories, pull_request names the one, as read_pull_request names it: web#3. For a failure whose cause isn't in the end of the log you were given.",
-            {
-              type: 'object',
-              properties: { check: { type: 'string' }, from_line: { type: 'integer', minimum: 1 }, pull_request: { type: 'string' } },
-              required: ['check'],
-            },
-            (taskId, input) => readCheckLog(taskId, input),
-          ),
-          // It only reads, so a review's lead has it too.
-          inReview: true,
-        },
+        leadTool(
+          'read_check_log',
+          "Reads a check's whole log on the task's pull request, a page of lines at a time: by the check's name, as read_pull_request gives it, from from_line, or its last page without one. In a task of several repositories, pull_request names the one, as read_pull_request names it: web#3. For a failure whose cause isn't in the end of the log you were given.",
+          {
+            type: 'object',
+            properties: { check: { type: 'string' }, from_line: { type: 'integer', minimum: 1 }, pull_request: { type: 'string' } },
+            required: ['check'],
+          },
+          (taskId, input) => readCheckLog(taskId, input),
+        ),
         leadTool(
           'reply_on_pull_request',
           "Replies on the task's pull request: in a line comment's thread, by its thread id, or in its conversation without one. In a task of several repositories, pull_request names the one to reply on, by its repository and number, as read_pull_request names it: web#3. For answering what people said; a change to the code is a commit, which the person pushes: ask them to with push_to_pull_request.",
@@ -3684,7 +3719,8 @@ export class Changes extends Context.Service<
                 // Before the person has seen the change, its checks are Althar's to see through: a fix for checks that failed goes up at
                 // once (ADR-040). Anything else waits for the person, as ever.
                 const hands = yield* handsOf(taskId)
-                if (hands !== null && !hands.given && hands.failed > 0) {
+                const failing = snapshot.checks?.outcome === 'failed' && snapshot.checks.sha === snapshot.headSha
+                if (hands !== null && !hands.given && failing) {
                   const pushed = yield* Effect.exit(push(taskId, ahead.head, snapshot.url))
                   if (pushed._tag === 'Success')
                     return [

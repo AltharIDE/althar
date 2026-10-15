@@ -158,6 +158,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
   const checks = new Map<number, Array<Check>>()
   const logs = new Map<string, string | null>()
   const reran: Array<string> = []
+  const starting = new Set<string>()
   const issues = new Map<string, Issue>()
   const assigned = new Set<string>()
   const issueComments = new Map<string, Array<string>>()
@@ -299,12 +300,21 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
           changes.find((candidate) => candidate.headSha === sha || options.headOf?.(candidate.number) === sha) ??
           changes.find((candidate) => `head-${candidate.number}` === sha)
         const ran = change === undefined ? undefined : options.checksFor?.(change.number, sha)
-        if (change === undefined || ran === undefined) return Effect.succeed(change === undefined ? [] : (checks.get(change.number) ?? []))
+        if (change === undefined || ran === undefined)
+          return Effect.succeed(
+            change === undefined
+              ? []
+              : (checks.get(change.number) ?? []).map((check) =>
+                  starting.delete(check.id) ? { ...check, state: 'running' as const } : check,
+                ),
+          )
         return Effect.succeed(
           ran.map((check, index): Check => {
             const id = `check-${change.number}-${sha}-${index}`
             logs.set(id, check.log ?? null)
-            return { id, name: check.name, state: check.state, url: null, summary: null }
+            // Run again, a check shows as running for a reading, as a host's does once it has started it again.
+            const again = starting.delete(id)
+            return { id, name: check.name, state: again ? 'running' : check.state, url: null, summary: null }
           }),
         )
       }),
@@ -316,6 +326,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
       Effect.andThen(called('rerun'), () => {
         if (options.reruns === false) return Effect.succeed(false)
         reran.push(check.id)
+        starting.add(check.id)
         return Effect.succeed(true)
       }),
     activity: (_repository, number, cursor) =>

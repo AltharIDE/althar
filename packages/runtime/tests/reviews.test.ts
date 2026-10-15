@@ -278,7 +278,7 @@ describe('reviewing someone else’s pull request', () => {
 
       // It is given only what reads, and draft_review; the rest is refused when called, listed or not: nothing it could change
       // the project with, such as how it runs, which Althar runs outside any sandbox, and nothing that reaches the host.
-      assert.deepStrictEqual(yield* listTools(access), ['draft_review', 'read_check_log', 'read_issue', 'read_pull_request'])
+      assert.deepStrictEqual(yield* listTools(access), ['draft_review', 'read_issue', 'read_pull_request'])
       const refusals = {
         finish_step: { summary: 'Done.' },
         set_run_command: { command: 'sh ./serve.sh', setup: 'sh ./setup.sh' },

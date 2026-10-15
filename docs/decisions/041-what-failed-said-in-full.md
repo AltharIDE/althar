@@ -17,17 +17,25 @@
     (`CodeHost.rerun`: a GitHub Actions job, a GitLab job; not Bitbucket's
     whole pipelines). The thread says "Running test on PR #1 again, once,
     in case it failed by chance." If it passes, the lead never hears of it;
-    if it fails again, the lead is told as before. A commit that failed
+    if it fails again, the lead is told as before. A failure counts as the
+    run again's only once the host has shown it running again, or three
+    minutes after it was asked for: the old failure can still show a moment
+    after. A commit that failed
     counts once toward the lead's fixes, however often it was run.
   - **The lead reads a check's whole log, a page at a time**
     (`read_check_log`, 300 lines): by the check's name, from a line, or its
     last page without one, told where the pages before and after start.
     Never more than a page in its context at once. The hosts' `checkLog`
-    gives the whole log when asked (`whole`), not only its end.
+    gives the whole log when asked (`whole`), not only its end. Not for a
+    review of someone else's pull request: its lead reads what the host shows.
   - **Checks Althar can't read don't stop the rest:** a host's refusal of
     the checks is said in the thread once a commit ("Althar can't read the
     checks on PR #1: its host refused them (…)"), and what people say on the
-    pull request, and its merge, are still heard.
+    pull request, and its merge, are still heard. A change in Althar's hands
+    is the person's then, since Althar can't see its checks through. GitHub
+    is the exception: a token without access to check runs reads only the
+    commit's statuses, with no refusal to hear, and Connect says so when the
+    person connects (ADR-026); the pull request doesn't say it again.
   - **Checks that run too long make the change the person's:** past 45
     minutes (`STUCK_AFTER`) on one commit, while Althar sees them through, the
     thread says "The checks on PR #1 have run for 45 minutes, so the change

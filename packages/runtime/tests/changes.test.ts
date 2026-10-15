@@ -1815,16 +1815,20 @@ describe('what failed, in full', () => {
       .filter((name) => name.startsWith('fixed-'))
   const AGAIN = 'Running test on PR #1 again, once, in case it failed by chance.'
 
-  it.live('runs a failed check again once, and tells its lead only if it fails again', () => {
+  it.live('runs a failed check again once, and tells its lead only if it fails again, not while the old failure still shows', () => {
     const { working, bare } = hosted()
     const first: Array<string> = []
+    let after = 0
     const github: FakeService = makeFakeService({
       pushUrl: () => bare,
       headOf: tipOf(bare),
       checksFor: (_, sha) => {
         if (first.length === 0) first.push(sha)
-        // The first commit fails, and fails again when run again; the lead's fix passes.
-        return sha === first[0] ? [failing] : [passing]
+        if (sha !== first[0]) return [passing]
+        if (github.reruns.length === 0) return [failing]
+        // Run again: the old failure still shows for a reading, then it runs, then it fails again. The lead's fix passes.
+        after += 1
+        return after <= 1 ? [failing] : after <= 3 ? [{ ...failing, state: 'running' }] : [failing]
       },
     })
     github.addRepository(['meridian', 'api'])
