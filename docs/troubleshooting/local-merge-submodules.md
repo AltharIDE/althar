@@ -10,7 +10,8 @@ submodule, the submodule stays where it was until you run
 
 Althar doesn't look inside it. Changes not committed there, a different
 commit checked out, or a submodule git can't read at all don't stop the merge,
-which leaves it exactly as it is.
+which leaves it exactly as it is. The same goes for a submodule the merge
+adds, where the checkout already has a folder of that name.
 
 ## A submodule the merge moves
 

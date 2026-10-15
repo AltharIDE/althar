@@ -396,6 +396,9 @@ describe('merging a task here', () => {
       const tip = git(root, 'rev-parse', 'main')
       const refusal = () => Effect.map(Effect.flip(mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }])), cantOf)
       const there = join(realpathSync(root), 'library')
+      // The person's git is told to ignore submodules: its diff leaves library out, the merge reads it all the same.
+      git(root, 'config', 'diff.ignoreSubmodules', 'all')
+      assert.strictEqual(git(root, 'diff', '--raw', tip, head), '')
       writeFileSync(join(library, 'README.md'), '# Not yet\n')
       assert.deepStrictEqual((yield* refusal()).slice(1), ['submodule', there])
       git(library, 'checkout', '-q', '--', 'README.md')
@@ -425,6 +428,29 @@ describe('merging a task here', () => {
       yield* mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }])
       assert.include(git(root, 'ls-tree', 'main', 'library'), next)
       assert.strictEqual(git(library, 'rev-parse', 'HEAD'), was)
+      assert.strictEqual(yield* stateOf(task.taskId), 'done')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('merges a submodule it adds where the checkout has a repository of its own, and leaves that as it is', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      const { task, worktrees } = yield* taskIn([root], root)
+      const worktree = worktrees[0]?.path ?? ''
+      // The person's own clone of library, at one commit with a change not committed; the task records another.
+      const library = join(root, 'library')
+      mkdirSync(library)
+      git(library, 'init', '-q', '-b', 'main')
+      const was = commit(library, 'README.md', '# Library\n')
+      const next = git(library, 'commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'Next')
+      writeFileSync(join(library, 'README.md'), '# Not yet\n')
+      git(worktree, 'update-index', '--add', '--cacheinfo', `160000,${next},library`)
+      git(worktree, 'commit', '-q', '-m', 'Add library')
+      const head = git(worktree, 'rev-parse', 'HEAD')
+      yield* mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }])
+      assert.include(git(root, 'ls-tree', 'main', 'library'), next)
+      assert.strictEqual(git(library, 'rev-parse', 'HEAD'), was)
+      assert.strictEqual(readFileSync(join(library, 'README.md'), 'utf8'), '# Not yet\n')
       assert.strictEqual(yield* stateOf(task.taskId), 'done')
     }).pipe(Effect.provide(runtime())),
   )

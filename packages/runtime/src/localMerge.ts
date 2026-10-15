@@ -69,7 +69,8 @@ const checkCheckout = (checkout: string) =>
 
 /** The paths of the submodules whose recorded commit moving from `from` to `to` changes, adds or removes: the only ones a merge touches. */
 const submodulesMoved = (root: string, from: string, to: string) =>
-  Effect.map(gitExactly(root, 'diff', '--raw', '--no-renames', '-z', from, to), (raw) => {
+  // Named outright: an `ignore` setting, the repository's or the person's, would leave a submodule out.
+  Effect.map(gitExactly(root, 'diff', '--raw', '--no-renames', '--ignore-submodules=none', '-z', from, to), (raw) => {
     const fields = raw.split('\0')
     const moved: Array<string> = []
     for (let at = 0; at + 1 < fields.length; at += 2) {
@@ -88,7 +89,8 @@ const recordedIn = (listing: string, column: number) => {
 /**
  * Whether the submodules moving `checkout` from `from` to `to` changes can
  * be left where they are: each checked out there must be at the commit
- * `from` and the index record for it, with nothing not committed.
+ * `from` and the index record for it, with nothing not committed. One the
+ * merge adds, which `from` has no commit for, is left alone.
  */
 const checkSubmodules = (root: string, checkout: string, from: string, to: string) =>
   Effect.gen(function* () {
@@ -97,6 +99,8 @@ const checkSubmodules = (root: string, checkout: string, from: string, to: strin
       // Not checked out here: there's nothing of it the merge could leave behind.
       if (!existsSync(join(submodule, '.git'))) continue
       const recorded = recordedIn(yield* gitExactly(root, '--literal-pathspecs', 'ls-tree', '-z', from, '--', path), 2)
+      // Added by the merge: the default branch has no commit it could be behind.
+      if (recorded === '') continue
       const indexed = recordedIn(yield* gitExactly(checkout, '--literal-pathspecs', 'ls-files', '-s', '-z', '--', path), 1)
       const problem = yield* Effect.all([git(submodule, 'rev-parse', 'HEAD'), trackedStatus(submodule, 'dirty')]).pipe(
         Effect.match({
@@ -182,11 +186,11 @@ export const applyMerge = (root: string, branch: string, plan: Move) =>
     ? git(root, 'update-ref', `refs/heads/${branch}`, plan.to, plan.from)
     : git(plan.checkout, '-c', 'submodule.recurse=false', 'merge', '--ff-only', '--quiet', plan.to)
 
-/** Whether `checkout` still has `branch` checked out, at `at`. */
+/** Whether `checkout` still has `branch` checked out, at `at`: not where its HEAD can't be read now. */
 const stillOn = (checkout: string, branch: string, at: string) =>
   Effect.gen(function* () {
     const on = yield* gitOutcome(checkout, 'symbolic-ref', '--quiet', 'HEAD')
-    return on.stdout.trim() === `refs/heads/${branch}` && (yield* commitOf(checkout, 'HEAD')) === at
+    return on.stdout.trim() === `refs/heads/${branch}` && (yield* commitOf(checkout, 'HEAD').pipe(Effect.orElseSucceed(() => ''))) === at
   })
 
 /** Puts `branch` back where `plan` found it, only while it's where the merge left it, and, in a checkout, nothing changed since. */
