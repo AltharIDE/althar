@@ -1,0 +1,164 @@
+[
+  { "id": "T1", "page": "today.html?s=one", "caption": "Today, project: one quiet “Run bun run dev”, the only thing it knows to run." },
+  {
+    "id": "T2",
+    "page": "today.html?s=one#/threads/th1",
+    "click": ["button[aria-label='More for this task']"],
+    "caption": "Today, task: Run hides in the task’s ⋯ menu, again one command."
+  },
+
+  {
+    "id": "A1",
+    "page": "a.html?s=many",
+    "caption": "A · Project, nothing running: the split button runs the default, “Run Pitch site”; the chevron holds the rest."
+  },
+  {
+    "id": "A2",
+    "page": "a.html?s=busy&open=menu",
+    "caption": "A · Project, several running: the chevron’s list, running ones on top and checked (Pitch site at its address, Storybook starting), the rest with how they last ended (finished, failed exit 1) or where they came from, then Add… and Edit the list…"
+  },
+  {
+    "id": "A3",
+    "page": "a.html?s=busy&open=menu#/threads/th1",
+    "caption": "A · Task: the same list, run in this task’s worktree (Storybook on :6007, the desktop app’s window), with the default noted as running on main; Probe stays on main."
+  },
+  {
+    "id": "A4",
+    "page": "a.html?s=one&open=menu",
+    "caption": "A · One runnable: as light as today, “Run bun run dev” plus a chevron for Add… and Edit the list…"
+  },
+  { "id": "A5", "page": "a.html?s=empty&open=menu", "caption": "A · Nothing known yet: “Run ⌄” offers the three ways to say what runs." },
+  {
+    "id": "A6",
+    "page": "a.html?s=many&open=add",
+    "caption": "A · Add, typing a command: command, name, and where it runs (where you are, or always on main). Shared by A, C and E."
+  },
+  {
+    "id": "A7",
+    "page": "a.html?s=many&open=scripts",
+    "caption": "A · Add, from package.json: this repository’s 89 real scripts, the ones that serve first, several at once."
+  },
+  { "id": "A8", "page": "a.html?s=one&open=ask", "caption": "A · Add, asking the coordinator: it reads package.json and DEVELOPMENT.md." },
+  {
+    "id": "A9",
+    "page": "a.html?s=one&open=asked",
+    "caption": "A · The coordinator’s findings, to keep or leave: the desktop app, Storybook, the checks."
+  },
+  {
+    "id": "A10",
+    "page": "a.html?s=many&open=manage",
+    "caption": "A · Edit the list: reorder, make one the default, edit, remove; each says where it runs and where it came from."
+  },
+  {
+    "id": "A11",
+    "page": "a.html?s=busy&open=edit",
+    "caption": "A · Editing one: name, command, where it runs, run it by default, remove."
+  },
+
+  {
+    "id": "B1",
+    "page": "b.html?s=busy",
+    "caption": "B · Project, several running: the default as today’s button, now saying where it answers, and “4 running ⌄” for the panel."
+  },
+  {
+    "id": "B2",
+    "page": "b.html?s=busy&open=menu",
+    "caption": "B · The Runs panel, made like Settings: each runnable a round switch with its state under it; what runs in tasks has its own module."
+  },
+  {
+    "id": "B3",
+    "page": "b.html?s=busy&open=detail",
+    "caption": "B · One opened out: command, where it runs, its state, where it came from, the default; its output live; Edit, Open, Remove."
+  },
+  {
+    "id": "B4",
+    "page": "b.html?s=busy&open=menu#/threads/th1",
+    "caption": "B · Task: the same panel in the task’s bar; the default shows it runs on main, Storybook and the desktop app run here, UI tests failed."
+  },
+  { "id": "B5", "page": "b.html?s=many&open=scripts", "caption": "B · Adding opens out in place: the three ways, from package.json here." },
+  {
+    "id": "B6",
+    "page": "b.html?s=one&open=menu",
+    "caption": "B · One runnable: today’s button, and “More” for the panel with one switch and Add."
+  },
+  {
+    "id": "B7",
+    "page": "b.html?s=empty&open=menu",
+    "caption": "B · Nothing known yet: the panel offers the coordinator first, then package.json or a command."
+  },
+
+  {
+    "id": "C1",
+    "page": "c.html?s=many",
+    "caption": "C · Project, nothing running: chips in the front’s bar, each its own toggle: press to run. The rest under “3 more”, and + to add."
+  },
+  {
+    "id": "C2",
+    "page": "c.html?s=busy",
+    "caption": "C · Several running: running chips raised with their port, Storybook starting, UI tests finished, E2E tests failed in red."
+  },
+  {
+    "id": "C3",
+    "page": "c.html?s=busy&open=menu",
+    "caption": "C · A running chip opens: command, where, how long, where it came from; Open, Edit, Stop."
+  },
+  {
+    "id": "C4",
+    "page": "c.html?s=busy&open=more",
+    "caption": "C · “3 more”: the rest as switches, the three ways to add, and Edit the list (which chips show, their order, the default)."
+  },
+  {
+    "id": "C5",
+    "page": "c.html?s=busy#/threads/th1",
+    "caption": "C · Task: fewer chips fit the task’s bar; this task’s Storybook and desktop app run, the rest under “4 more”."
+  },
+  { "id": "C6", "page": "c.html?s=one", "caption": "C · One runnable: a single chip and +, as light as today." },
+  { "id": "C7", "page": "c.html?s=empty&open=menu", "caption": "C · Nothing known yet: “+ Something to run”." },
+
+  {
+    "id": "D1",
+    "page": "d.html?s=many",
+    "caption": "D · Project: “Run Pitch site ⌘R” as today’s button, and a search glyph for the launcher, ⇧⌘R."
+  },
+  {
+    "id": "D2",
+    "page": "d.html?s=busy&open=palette",
+    "caption": "D · The launcher, the app’s own ⌘K finder: Stop what runs, Run what is kept (finished, failed), then any package.json script, then the coordinator."
+  },
+  { "id": "D3", "page": "d.html?s=busy&open=search", "caption": "D · Typing “story”: Storybook to stop, and the scripts that match." },
+  {
+    "id": "D4",
+    "page": "d.html?s=many",
+    "click": ["button:has-text('Settings')"],
+    "caption": "D · The list is kept in the project’s settings: a “What it runs” module, 7, Pitch site by default."
+  },
+  {
+    "id": "D5",
+    "page": "d.html?s=many&open=settings",
+    "caption": "D · “What it runs” opened out in Settings: reorder, default, edit, remove, add."
+  },
+  { "id": "D6", "page": "d.html?s=busy&open=palette#/threads/th1", "caption": "D · Task: the launcher runs in this task’s worktree." },
+  {
+    "id": "D7",
+    "page": "d.html?s=empty&open=palette",
+    "caption": "D · Nothing known yet: “Run… ⇧⌘R” opens on the repository’s scripts and the coordinator."
+  },
+
+  {
+    "id": "E1",
+    "page": "e.html?s=busy&open=rail",
+    "caption": "E · Project: a Runs dock beside the board and conversation, the thread’s run cards for main, then the output of one, the rest to run, and what runs in tasks."
+  },
+  {
+    "id": "E2",
+    "page": "e.html?s=busy&open=output#/threads/th1",
+    "caption": "E · Task: the dock beside the thread, on the failed UI tests’ output."
+  },
+  {
+    "id": "E3",
+    "page": "e.html?s=many&open=rail",
+    "caption": "E · Nothing running: everything to run as a list, Add, Ask the coordinator, Edit the list at its foot."
+  },
+  { "id": "E4", "page": "e.html?s=one", "caption": "E · One runnable: today’s button and “Runs”, the dock closed." },
+  { "id": "E5", "page": "e.html?s=empty&open=rail", "caption": "E · Nothing known yet: the dock asks the coordinator, or package.json." }
+]
