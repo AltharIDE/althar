@@ -271,6 +271,30 @@ describe('asking Codex’s app-server', () => {
     }
   })
 
+  it('starts a copy out on the device with what its wrapper asks to inherit', async () => {
+    process.env.DBUS_SESSION_BUS_ADDRESS = 'unix:path=/run/user/1000/bus'
+    try {
+      const probe = `process.stdin.on('data', (d) => { const m = JSON.parse(String(d).split('\\n')[0]); process.stdout.write(JSON.stringify({ id: m.id, error: { message: [process.env.DBUS_SESSION_BUS_ADDRESS, process.env.CODEX_HOME].join('|') } }) + '\\n') })`
+      const agent: AgentDefinition = {
+        ...agents.codex,
+        usage: {
+          run: () => ({
+            command: 'codex',
+            args: ['app-server'],
+            // The Flatpak's wrapper: runs on the host, and asks for the session bus.
+            onDevice: () => ({ command: 'bun', args: ['-e', probe], inheritEnv: ['DBUS_SESSION_BUS_ADDRESS'] }),
+          }),
+        },
+      }
+      expect(await readAgentUsage(agent, { home: { CODEX_HOME: '/accounts/work' } })).toEqual({
+        kind: 'failed',
+        message: 'unix:path=/run/user/1000/bus|/accounts/work',
+      })
+    } finally {
+      delete process.env.DBUS_SESSION_BUS_ADDRESS
+    }
+  })
+
   it('is not asked of an agent with no usage channel', async () => {
     const read = await readAgentUsage(agents.opencode)
     expect(read).toEqual({ kind: 'failed', message: 'OpenCode has no usage channel.' })

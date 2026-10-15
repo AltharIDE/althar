@@ -210,8 +210,11 @@ export const readAgentUsage = (agent: AgentDefinition, options: ReadUsageOptions
     const node = options.node ?? process.execPath
     const spec = usage.run(node)
     // Only what an agent may inherit (process.ts), and the account's home: never the whole environment.
-    const env = { ...childEnvironment(spec), ...options.home }
-    const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
+    const inherited = { ...childEnvironment(spec), ...options.home }
+    // A command that lives out on the device (a Flatpak's host) is run there, with what this assembled; the wrapper
+    // may inherit more of Althar's environment, as reaching the device needs (`spawnOwned` does the same).
+    const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env: inherited })
+    const env = launched === spec ? inherited : { ...childEnvironment(launched), ...options.home }
     const child = spawn(launched.command, [...launched.args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
     let over = false
     const end = (read: UsageRead) => {
