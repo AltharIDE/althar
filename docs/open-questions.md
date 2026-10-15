@@ -374,20 +374,26 @@ never under running work.
 - [ ] **Usage limits in ACP itself.** Researched 15 October 2026
   ([plan](plans/plan-usage.md#decision)). ACP has no plan windows yet: a
   quotas RFD is open as [PR #2316](https://github.com/agentclientprotocol/agent-client-protocol/pull/2316),
-  and ACP v2 is a Draft that leaves usage unchanged. Leaning, one rule for
-  all agents: ACP first; until an adapter speaks it, the agent's own channel
-  (Claude's `_meta` path, patched; Codex's app-server per account); errors
-  only for OpenCode; never a provider endpoint called with credentials taken
-  from an agent (architecture 03, rule 3). Don't write our own ACP proposal
+  and ACP v2 is a Draft that leaves usage unchanged. Settled with the person:
+  usage data is required for every agent and every subscription account.
+  The rule: ACP, then an adapter extension, then the agent's own channel,
+  then the provider's usage endpoint (read-only, under a narrow exception to
+  architecture 03 rule 3), errors only as the floor. Claude is the exception
+  to the endpoint step (Anthropic's terms). Don't write our own ACP proposal
   unless #2316 is declined. Open until #2316 is accepted or declined.
-- [ ] **Usage warnings and the usage tab.** Wanted: warnings at 50, 25, 10
-  and 5% remaining per account and window, shown once in the open
-  coordinator's Talk room (a notice Althar posts, not a model turn), and a
-  tab for every account on Ctrl/Cmd+U or in the side menu
+- [ ] **Amend rule 3 for a usage read.** The endpoint step reads an account's
+  token in memory for one call to the provider's usage URL. Needs the
+  person's word and an ADR before any code ([plan](plans/plan-usage.md#the-exception-to-rule-3)).
+- [ ] **Claude accounts with no session.** Can the Agent SDK's
+  `usage_EXPERIMENTAL…()` or a probe session read them within Anthropic's
+  terms? If not, they stay uncovered until Anthropic allows a read.
+- [ ] **Usage warnings and the usage tab.** Warnings at 50, 25, 10 and 5%
+  remaining per account and window, shown once in the open coordinator's
+  Talk room (a notice Althar posts, not a model turn), and a tab for every
+  account on Ctrl/Cmd+U or in the side menu
   ([plan](plans/plan-usage.md#warnings)). Still open: telling the
-  coordinator agent too, an operating-system notification, the 1-month
-  window (no source yet), and whether to amend rule 3 for endpoint calls
-  (not recommended).
+  coordinator agent too, an operating-system notification, and the 1-month
+  window (no source yet for Claude or Codex).
 - [x] **Agent settings that approve before Althar sees.** Settled: every
   session gets settings that make the agent ask, and they win over the user's
   and the repository's own. Claude gets ask rules per session (ask beats allow
