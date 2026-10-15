@@ -19,7 +19,9 @@
   min-width: 0;
 }
 .text {
+  display: inline-block;
   min-width: 0;
+  vertical-align: bottom;
   max-width: 22ch;
   overflow: hidden;
   text-overflow: ellipsis;
