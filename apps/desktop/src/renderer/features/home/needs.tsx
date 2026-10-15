@@ -223,6 +223,9 @@ export const needsOf = ({
   }),
 ]
 
+/** A permission's Allow once on its line: what Enter gives, where focus is put on it. */
+export const DEFAULT_ANSWER = '[data-default-answer]'
+
 /**
  * A need's line: its title opens its task; a permission's answers give it
  * there (Deny and Allow once, unless the place gives every answer the call
@@ -282,7 +285,8 @@ export function needLineOf(
             <Button size="small" onClick={() => onAnswer(permission, need.project, 'reject')}>
               {needText.deny}
             </Button>
-            <Button size="small" variant="signal" onClick={() => onAnswer(permission, need.project, 'allow')}>
+            {/* The answer Enter gives, where a place puts focus on it as it opens (`DEFAULT_ANSWER`). */}
+            <Button size="small" variant="signal" data-default-answer="" onClick={() => onAnswer(permission, need.project, 'allow')}>
               {needText.allow}
             </Button>
           </>

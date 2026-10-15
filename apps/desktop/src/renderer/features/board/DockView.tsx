@@ -126,7 +126,8 @@ export function DockView({
       <Dock label={label} name={callKindOf(call)} sub={`${whereOf(call)} · ${ago(call.createdAt, new Date(now))}`} call onClose={onClose}>
         {/* A question is answered where it was asked: the task opens to it. */}
         {call.kind === 'question' ? null : stuck === null ? (
-          <PermissionCall request={call} project={project} onAnswer={model.answer} />
+          // Opened on the call, to answer it: Enter does.
+          <PermissionCall request={call} project={project} onAnswer={model.answer} focusOnMount />
         ) : (
           <StuckCall
             request={call}
