@@ -153,14 +153,14 @@ describe('a task', () => {
     expect(screen.queryByRole('button', { name: 'Open a pull request' })).toBeNull()
     expect(screen.getByText('Idle')).toBeTruthy()
     expect(screen.getByText('it')).toBeTruthy()
-    // The turn is over: what it did before its last message is folded.
+    // The round is over: its work is one line, under what it said; Althar's news between rounds stands alone.
     expect(screen.queryByText('src/checkout.ts')).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: /^Worked for 0s/ }))
+    expect(screen.getByText('Codex took over from Claude Code.')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: /^Worked 0s/ }))
     expect(screen.getByText('src/checkout.ts')).toBeTruthy()
     expect(screen.getByText('Write the test')).toBeTruthy()
     expect(screen.getByText('Context is filling up')).toBeTruthy()
-    expect(screen.getByText('Codex took over from Claude Code.')).toBeTruthy()
-    // Its turns are named by model, the agent said on hover.
+    // Its rounds are named by model, the agent said on hover.
     expect(screen.getAllByText('gpt-5.2-codex').length).toBeGreaterThan(0)
     await userEvent.click(screen.getByRole('button', { name: 'Thought' }))
     expect(screen.getByText('Where is the call?')).toBeTruthy()
@@ -1964,7 +1964,8 @@ describe('a task', () => {
       getThread: vi.fn(async () => thread({ items: [items.tool({ title: 'python3', toolKind: 'execute', command: script })] })),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: /^Worked for/ }))
+    // A round that said nothing is its line alone, with who worked.
+    await userEvent.click(await screen.findByRole('button', { name: /worked 0s/ }))
     await userEvent.click(await screen.findByText("python3 - <<'EOF' …"))
     expect(await screen.findByText("print('hi')")).toBeTruthy()
   })
@@ -1983,14 +1984,14 @@ describe('a task', () => {
       ),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: /^Worked for/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /worked 0s/ }))
     await userEvent.click(await screen.findByText(pipeline))
     expect(await screen.findByRole('figure')).toBeTruthy()
     // A short one has nothing more to show, so its row doesn't open.
     expect(screen.getByText(short).closest('button')).toBeNull()
   })
 
-  it("folds the lead's work under what its step reported, and shows what the review found", async () => {
+  it("folds the lead's work under what its report says, and the reviewer says what it found in its own voice", async () => {
     const { client } = fakeClient({
       getThread: vi.fn(async () =>
         thread({
@@ -2017,13 +2018,15 @@ describe('a task', () => {
     withServices(<Task />, client)
     expect(await screen.findByText('Added the retry, and a test.')).toBeTruthy()
     expect(screen.queryByText('checkout.ts')).toBeNull()
+    expect(screen.getByRole('button', { name: /^Worked/ })).toBeTruthy()
     expect(screen.getByText('Capped the retries at three.')).toBeTruthy()
-    expect(screen.getByText('One thing to fix.')).toBeTruthy()
-    expect(screen.getByText(/round 2/)).toBeTruthy()
-    await userEvent.click(screen.getAllByRole('button', { name: /findings|Details/i })[0]!)
-    expect(await screen.findByText('The retry never stops.')).toBeTruthy()
+    // The reviewer: its verdict in a sentence, each finding how much it matters, where, and what; then what it said.
+    expect(screen.getByText('Needs changes: 3 findings.')).toBeTruthy()
+    expect(screen.getByText('The retry never stops.')).toBeTruthy()
     expect(screen.getByText('src/checkout.ts:12')).toBeTruthy()
     expect(screen.getByText('README.md')).toBeTruthy()
+    expect(screen.getByText('One thing to fix.')).toBeTruthy()
+    expect(screen.getByText('Looks good to me.')).toBeTruthy()
   })
 
   it('shows earlier items when asked', async () => {

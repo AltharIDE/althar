@@ -233,7 +233,19 @@ export const checksForLead = (sum: ChecksSum, name: string, logs: ReadonlyArray<
   [
     `Checks failed on ${name}: ${sum.failing.join(', ')}.`,
     ...logs,
-    'Fix what broke and commit it, then ask the person to push it with push_to_pull_request. Or, if it isn’t the task’s to fix, say why.',
+    'Fix what broke and commit it, then ask the person to push it with push_to_pull_request. Or, if it isn’t the task’s to fix, say why. read_check_log reads the whole of a check’s log, where its end doesn’t show the cause.',
+  ].join('\n\n')
+
+/**
+ * What the lead is told when the checks fail on a change the person hasn't
+ * seen yet (ADR-040): the checks are its to see through, its fix goes up as it
+ * pushes, and how many tries are left before the change is the person's.
+ */
+export const checksForLeadAlone = (sum: ChecksSum, name: string, logs: ReadonlyArray<string>, left: number) =>
+  [
+    `Checks failed on ${name}: ${sum.failing.join(', ')}.`,
+    ...logs,
+    `The person hasn't seen this change yet, so its checks are yours to see through: fix what broke and commit it, then call push_to_pull_request, which pushes it at once, and the checks run again. ${left <= 1 ? 'This is the last try before the change goes to the person.' : `You have ${left} tries before the change goes to the person.`} Or, if it isn't the task's to fix, say why. read_check_log reads the whole of a check's log, where its end doesn't show the cause.`,
   ].join('\n\n')
 
 /** What the lead is told of what it can't read: people outside the repository, whom the person passes on. */

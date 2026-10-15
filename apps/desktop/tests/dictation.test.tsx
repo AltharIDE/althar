@@ -1,6 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { Composer, DictationTray } from '@althar/ui'
@@ -9,7 +8,8 @@ import type { DictationHost, DictationState } from '../src/renderer/data/service
 import { microphonesOf, microphoneToUse } from '../src/renderer/shared/dictation/microphones'
 import type { Frame, Record } from '../src/renderer/shared/dictation/recorder'
 import { bytes, lengthOf, timeLeft, trayText } from '../src/renderer/shared/dictation/text'
-import { useDictation } from '../src/renderer/shared/dictation/useDictation'
+import { together, useDictation } from '../src/renderer/shared/dictation/useDictation'
+import { setDraftText, useDraft } from '../src/renderer/shared/drafts'
 import { fakeClient, fakeHost } from './fixtures'
 import { withServices } from './render'
 
@@ -71,9 +71,9 @@ const fakeRecord = (seconds = 2, fail?: DOMException) => {
   return { record, cancel, use, hear }
 }
 
-function Harness({ record, onSubmit, initial = '' }: { record: Record; onSubmit?: (text: string) => void; initial?: string }) {
-  const [draft, setDraft] = useState(initial)
-  const voice = useDictation(setDraft, { record, projectId: 'p1' })
+function Harness({ record, onSubmit, thread = 'thread:th1' }: { record: Record; onSubmit?: (text: string) => void; thread?: string }) {
+  const [draft, setDraft] = useDraft(thread)
+  const voice = useDictation(thread, { record, projectId: 'p1' })
   return (
     <Composer
       value={draft}
@@ -92,7 +92,14 @@ const show = (
   record: Record,
   props: { onSubmit?: (text: string) => void; initial?: string } = {},
   client = fakeClient().client,
-) => withServices(<Harness record={record} {...props} />, client, fakeHost({ dictation }))
+) => {
+  if (props.initial !== undefined) setDraftText('thread:th1', props.initial)
+  return withServices(
+    <Harness record={record} {...(props.onSubmit ? { onSubmit: props.onSubmit } : {})} />,
+    client,
+    fakeHost({ dictation }),
+  )
+}
 
 /** The faint words the composer draws where what is said will land. */
 const faint = () => document.querySelector('[aria-hidden="true"][class*="interim"]')?.textContent ?? ''
@@ -403,13 +410,18 @@ describe('dictation’s edges', () => {
     }
   })
 
-  it('throws away what it was hearing when the composer goes', async () => {
+  it('stops listening when the composer goes, and writes down what was said into its thread’s draft', async () => {
     const { record, cancel } = fakeRecord()
-    const { unmount } = show(fakeDictation(state({}, { ready: true })).dictation, record)
+    const host = fakeDictation(state({}, { ready: true }))
+    const { unmount } = show(host.dictation, record)
     await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
     await screen.findByRole('button', { name: /^Stop dictating/ })
     unmount()
-    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(cancel).not.toHaveBeenCalled()
+    await waitFor(() => expect(host.dictation.transcribe).toHaveBeenCalledTimes(1))
+    show(host.dictation, record)
+    await waitFor(() => expect(field()).toHaveProperty('value', 'check the retry path'))
+    expect(screen.getByText('What you said was written down while you were away.')).toBeTruthy()
   })
 })
 
@@ -500,8 +512,8 @@ describe('the shortcut', () => {
     const { client } = fakeClient()
     withServices(
       <>
-        <Harness record={first.record} />
-        <Harness record={second.record} />
+        <Harness record={first.record} thread="thread:th1" />
+        <Harness record={second.record} thread="thread:th2" />
       </>,
       client,
       fakeHost({ dictation: host.dictation }),
@@ -725,5 +737,21 @@ describe('dictation’s words', () => {
     expect(timeLeft(5_000_000, 1_000_000)).toBe('about 5 s')
     expect(timeLeft(600_000_000, 1_000_000)).toBe('about 10 min')
     expect(lengthOf(72)).toBe('1:12')
+  })
+})
+
+describe('what couldn’t be written down, twice', () => {
+  it('keeps both, as one to try again, even heard at different rates', () => {
+    const first = { samples: new Float32Array(48_000 * 2).fill(0.25), sampleRate: 48_000, seconds: 2 }
+    const second = { samples: new Float32Array(16_000 * 3).fill(0.5), sampleRate: 16_000, seconds: 3 }
+    const kept = together(first, second)
+    expect(kept.sampleRate).toBe(16_000)
+    expect(kept.seconds).toBe(5)
+    expect(kept.samples.length).toBe(16_000 * 5)
+    // The first, at the second's rate, then the second.
+    expect(kept.samples[0]).toBeCloseTo(0.25)
+    expect(kept.samples[16_000 * 2 - 1]).toBeCloseTo(0.25)
+    expect(kept.samples[16_000 * 2]).toBeCloseTo(0.5)
+    expect(together(null, second)).toBe(second)
   })
 })

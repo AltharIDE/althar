@@ -81,6 +81,8 @@ const connected = (
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
         busy: { machine: options.machine ?? ROOMY },
+        // A pull request with no checks has none: no test waits for a host to show them.
+        checksAppear: Duration.zero,
       }),
     )
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
@@ -302,19 +304,20 @@ describe('the API', () => {
         const [live] = (yield* Fiber.join(streamed)) as ReadonlyArray<WatchEvent>
         assert.strictEqual(live?._tag === 'Streaming' ? live.threadId : undefined, task.threadId)
 
-        // A page of the newest, then the one before it, and one item by id.
+        // A page of the newest, reaching back to the start of its round, what the person said; then the one before it, and one item by id.
         const newest = yield* client.GetThread({ threadId: task.threadId, limit: 1 })
-        assert.deepStrictEqual(texts(newest), ['Hello'])
+        assert.deepStrictEqual(texts(newest), ['hello', 'Hello'])
         assert.isTrue(newest.earlier)
         const before = yield* client.GetThread({ threadId: task.threadId, before: newest.items[0]?.sequence ?? 0, limit: 1 })
-        assert.deepStrictEqual(texts(before), ['hello'])
+        assert.isTrue(texts(before).every((text) => text?.startsWith('echo: You are working on a task') === true))
+        assert.isFalse(before.earlier)
         // What the agent already has can't be taken back.
         assert.strictEqual(
-          (yield* Effect.flip(client.TakeBack({ commandId: commandId(), itemId: before.items[0]?.id ?? '' }))).message,
+          (yield* Effect.flip(client.TakeBack({ commandId: commandId(), itemId: newest.items[0]?.id ?? '' }))).message,
           "The agent already has that message, so it can't be taken back.",
         )
         assert.isEmpty((yield* client.GetThread({ threadId: task.threadId, limit: 0 })).items)
-        const reply = yield* client.GetThreadItem({ threadId: task.threadId, itemId: newest.items[0]?.id ?? '' })
+        const reply = yield* client.GetThreadItem({ threadId: task.threadId, itemId: newest.items[1]?.id ?? '' })
         assert.deepStrictEqual(reply.content, { text: 'Hello', pictures: [], files: [] })
 
         // A tool call keeps what the thread shows: the files it touched, not its raw input and output.
