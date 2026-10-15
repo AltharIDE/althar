@@ -96,6 +96,12 @@ export interface AgentDefinition {
      */
     readonly paidBy?: (output: string) => PaidBy | undefined
     readonly login: string
+    /**
+     * What lists its sign-ins one by one with how each is paid for, as JSON
+     * (`usageSources.ts`'s `openCodeCredentials`), where it can. Run in an
+     * account's home, and a plain read: the same output a person sees.
+     */
+    readonly credentials?: (node: string) => LaunchSpec
     /** Its sign-in as Althar runs it, without a terminal (`signInFlow.ts`); without it, `login` in a terminal. */
     readonly inApp?: InAppSignIn
     /**
@@ -651,6 +657,8 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       /* It runs on the providers' keys it was given, whichever model a session picks: paid per use, as far as Althar can tell. */
       paidBy: () => 'key',
       login: 'opencode auth login',
+      // `--standalone` keeps the answer to this account's own home: without it, a user-wide background service answers for whichever home started it (OpenCode 2.x).
+      credentials: () => ({ command: 'opencode', args: ['auth', 'list', '--standalone', '--format', 'json'] }),
       // No sign-out: its sign-ins are `opencode/auth.json` in the home, gone with the folder; its own asks which to remove.
     },
     /*

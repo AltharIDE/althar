@@ -178,6 +178,7 @@ export const usingLocated = (
           : `${inATerminal(found, flatpakId)}${signIn.login.slice(cli.name.length)}`
       },
       status: pointed(signIn.status),
+      ...(signIn.credentials === undefined ? {} : { credentials: pointed(signIn.credentials) }),
       ...(signIn.inApp === undefined ? {} : { inApp: { ...signIn.inApp, run: pointed(signIn.inApp.run) } }),
       ...(signIn.logout === undefined ? {} : { logout: { ...signIn.logout, run: pointed(signIn.logout.run) } }),
     },

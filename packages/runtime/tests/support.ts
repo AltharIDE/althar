@@ -30,6 +30,7 @@ import * as Runtime from '../src/Runtime'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { Secrets } from '../src/Secrets'
 import type { LoadOptions } from '../src/MachineLoad'
+import type { PlanUsageOptions } from '../src/PlanUsage'
 import type { ModelFactsOptions } from '../src/ModelFacts'
 
 /** The repository every test starts from, made once per worker: copying it is much quicker than running git anew. */
@@ -230,6 +231,8 @@ export const runtime = (
     readonly setups?: SetupOptions
     /** How this computer's load is read. */
     readonly load?: LoadOptions
+    /** How plan usage is read from each agent. */
+    readonly usage?: PlanUsageOptions
     /** When a lead that ended its turn counts as done, and how long a round waits for one that isn't. */
     readonly idle?: IdleOptions
     /** The device outside a sandbox, as for a Flatpak. */
@@ -261,6 +264,7 @@ export const runtime = (
     ...(more.editors === undefined ? {} : { editors: more.editors }),
     setups: { shell: '/bin/sh', ...more.setups },
     ...(more.load === undefined ? {} : { load: more.load }),
+    ...(more.usage === undefined ? {} : { usage: more.usage }),
     ...(more.idle === undefined ? {} : { idle: more.idle }),
     ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
     busy: { machine: ROOMY, ...more.busy },

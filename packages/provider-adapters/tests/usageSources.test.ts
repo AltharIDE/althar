@@ -14,6 +14,7 @@ import {
   endpointProblem,
   endpointSources,
   openCodeCredentials,
+  readOpenCodeCredentials,
   chatGptUsageWindows,
   resolveOpenCodeCredential,
   type UsagePair,
@@ -546,5 +547,32 @@ describe('OpenCode: plan or key per provider, from auth list', () => {
     expect(openCodeCredentials('{"a":1}')).toBeNull()
     expect(openCodeCredentials('[{"id":1}]')).toBeNull()
     expect(openCodeCredentials('[{"id":"a"}]')).toBeNull()
+  })
+})
+
+describe('listing an OpenCode account’s sign-ins', () => {
+  const listing = (script: string) => ({
+    ...agents.opencode,
+    signIn: { ...agents.opencode.signIn, credentials: () => ({ command: 'bun', args: ['-e', script] }) },
+  })
+
+  it('reads what the listing prints, in the account’s home', async () => {
+    const script = `console.log(JSON.stringify([{ id: 'openai', name: process.env.XDG_DATA_HOME, connections: [{ type: 'credential', method: 'chatgpt-browser', label: 'x' }] }]))`
+    expect(await readOpenCodeCredentials(listing(script), { home: { XDG_DATA_HOME: '/accounts/a' } })).toEqual({
+      kind: 'credentials',
+      credentials: [{ provider: 'openai', pays: 'plan' }],
+    })
+  })
+
+  it('is a fault, never "no sign-ins", for a failing command, another shape, or no listing', async () => {
+    expect(await readOpenCodeCredentials(listing('process.exit(1)'))).toMatchObject({ kind: 'failed' })
+    expect(await readOpenCodeCredentials(listing(`console.log('└  2 credentials')`))).toMatchObject({ kind: 'failed' })
+    expect(await readOpenCodeCredentials(agents.codex)).toMatchObject({ kind: 'failed' })
+  })
+
+  it('is asked of OpenCode only, with the flag that keeps it to the account’s own home', () => {
+    expect(agents.opencode.signIn.credentials?.('node').args).toEqual(['auth', 'list', '--standalone', '--format', 'json'])
+    expect(agents['claude-code'].signIn.credentials).toBeUndefined()
+    expect(agents.codex.signIn.credentials).toBeUndefined()
   })
 })

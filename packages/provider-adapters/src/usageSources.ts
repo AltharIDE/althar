@@ -1,5 +1,8 @@
+import { execFile } from 'node:child_process'
+
 import type { TokenLocation } from './credentialStore'
-import type { AgentId } from './registry'
+import { childEnvironment } from './process'
+import type { AgentDefinition, AgentId } from './registry'
 import { isoSeconds, record, Unrecognized, type UsageWindow, windowKind } from './usage'
 
 /*
@@ -244,3 +247,37 @@ export const resolveOpenCodeCredential = (credential: OpenCodeCredential): Crede
   )
   return pair === undefined ? { kind: 'no_pair', provider: credential.provider } : { kind: 'covered', pair }
 }
+
+/* OpenCode: which of an account's sign-ins are plans and which are keys, from its own listing. */
+
+export type CredentialsRead =
+  | { readonly kind: 'credentials'; readonly credentials: ReadonlyArray<OpenCodeCredential> }
+  /** It could not be listed, or the listing is not the shape known (OpenCode 1.x prints a count only): a fault, never "no sign-ins". */
+  | { readonly kind: 'failed'; readonly message: string }
+
+/**
+ * Runs the agent's own listing of sign-ins in an account's home and reads it.
+ * It lists; it opens no credential file (ADR-043). A command that fails, or
+ * prints another shape, is a fault to show.
+ */
+export const readOpenCodeCredentials = (
+  agent: AgentDefinition,
+  options: { readonly node?: string; readonly home?: Readonly<Record<string, string>>; readonly timeout?: number } = {},
+): Promise<CredentialsRead> =>
+  new Promise((resolve) => {
+    const credentials = agent.signIn.credentials
+    if (credentials === undefined) return resolve({ kind: 'failed', message: `${agent.name} cannot list its sign-ins.` })
+    const spec = credentials(options.node ?? process.execPath)
+    const inherited = { ...childEnvironment(spec), ...options.home }
+    const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env: inherited })
+    const env = launched === spec ? inherited : { ...childEnvironment(launched), ...options.home }
+    execFile(launched.command, [...launched.args], { timeout: options.timeout ?? 15_000, env }, (error, stdout) => {
+      if (error !== null) return resolve({ kind: 'failed', message: `${agent.name} would not list its sign-ins.` })
+      const found = openCodeCredentials(stdout)
+      resolve(
+        found === null
+          ? { kind: 'failed', message: `${agent.name} listed its sign-ins in a form Althar does not know.` }
+          : { kind: 'credentials', credentials: found },
+      )
+    })
+  })
