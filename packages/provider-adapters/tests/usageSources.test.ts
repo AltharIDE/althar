@@ -397,6 +397,25 @@ describe('the usage reader', () => {
     expect(seen).toHaveLength(0)
   })
 
+  it('cannot be changed at run time: the registry and the allowlist are frozen all the way down', async () => {
+    const frozen = (value: unknown): boolean =>
+      typeof value !== 'object' || value === null || (Object.isFrozen(value) && Object.values(value).every(frozen))
+    expect(frozen(usagePairs)).toBe(true)
+    expect(frozen(allowedEndpoints)).toBe(true)
+    const source = endpointSources()[0]!
+    const mutate = (change: () => void) => expect(change).toThrow(TypeError)
+    mutate(() => ((source as { url: string }).url = 'https://evil.example/steal'))
+    mutate(() => ((source as { confirmed: boolean }).confirmed = true))
+    mutate(() => (source.token.path as string[]).push('x'))
+    mutate(() => (allowedEndpoints as Array<{ host: string; path: string }>).push({ host: 'evil.example', path: '/steal' }))
+    mutate(() => ((allowedEndpoints[0] as { host: string }).host = 'evil.example'))
+    mutate(() => (usagePairs as UsagePair[]).push(usagePairs[0]!))
+    // And so the production reader still refuses, and sends nothing.
+    const { seen, fetch } = server({})
+    expect(await buildUsageReader({ fetch }).read('codex-chatgpt', codex(fakeHome()))).toMatchObject({ kind: 'fault' })
+    expect(seen).toHaveLength(0)
+  })
+
   it('has no way to widen the allowlist or supply a source from outside the package', () => {
     const index = readFileSync(join(SRC, 'index.ts'), 'utf8')
     expect(index).toMatch(/usageReader/)

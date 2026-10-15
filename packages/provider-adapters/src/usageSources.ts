@@ -98,7 +98,20 @@ const chatGptEndpoint = (id: string, agentMajor?: number): EndpointSource => ({
   parse: (answer) => chatGptUsageWindows(answer),
 })
 
-export const usagePairs: ReadonlyArray<UsagePair> = [
+/**
+ * Frozen all the way down. These are the policy the usage reader runs on (which
+ * URL gets a token), and `readonly` is only the type: a consumer of the
+ * package could otherwise change a URL or the allowlist at run time.
+ */
+const deepFreeze = <T>(value: T): T => {
+  if (typeof value === 'object' && value !== null && !Object.isFrozen(value)) {
+    Object.freeze(value)
+    for (const inner of Object.values(value)) deepFreeze(inner)
+  }
+  return value
+}
+
+export const usagePairs: ReadonlyArray<UsagePair> = deepFreeze([
   {
     agent: 'claude-code',
     provider: 'anthropic',
@@ -142,7 +155,7 @@ export const usagePairs: ReadonlyArray<UsagePair> = [
     sources: [{ kind: 'spike', note: 'Gemini: retrieveUserQuota; Google no longer serves individual OAuth to Gemini CLI since June 2026' }],
   },
   { agent: 'opencode', provider: 'api-key', pays: 'key', classification: 'auth_list', sources: [] },
-]
+])
 
 export const endpointSources = (): ReadonlyArray<EndpointSource> =>
   usagePairs.flatMap((pair) => pair.sources.filter((source): source is EndpointSource => source.kind === 'endpoint'))
@@ -152,9 +165,9 @@ export const endpointSources = (): ReadonlyArray<EndpointSource> =>
  * Anthropic host is never on it: Anthropic's terms bar the endpoint for
  * Claude, and only its written clearance with an amendment to the ADR lets one in.
  */
-export const allowedEndpoints: ReadonlyArray<{ readonly host: string; readonly path: string }> = [
+export const allowedEndpoints: ReadonlyArray<{ readonly host: string; readonly path: string }> = deepFreeze([
   { host: 'chatgpt.com', path: '/backend-api/wham/usage' },
-]
+])
 
 const ANTHROPIC = /(^|\.)(anthropic\.com|claude\.ai|claude\.com)$/i
 
