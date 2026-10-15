@@ -257,7 +257,7 @@ const prepareWorktree = (
 type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | RuntimeConfig | Setups
 type Failure = SqlError.SqlError | Schema.SchemaError | CommandIdReused | RowNotFound | RevisionConflict
 
-/** A repository's own way to run, last in its project's list of what it runs (ADR-036), as the repository is bound. */
+/** A repository's own way to run, last in its project's list of what it runs (ADR-042), as the repository is bound. */
 const ownRunnable = (projectId: string, bindingId: string, createdAt: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient

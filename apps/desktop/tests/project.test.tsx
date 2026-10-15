@@ -374,6 +374,16 @@ describe('the Talk room', () => {
     )
   })
 
+  it('keeps a card’s steps and branch while a later step waits for a free agent, saying it waits and not that it runs', async () => {
+    const waitingCard = card({ phase: 'running', step: 'review', queued: { busy: 4, atOnce: 4 }, branch: 'althar/midway' })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
+    withServices(<Project />, client)
+    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
+    const track = screen.getByRole('list', { name: 'Steps' })
+    expect(track.getAttribute('data-status')).toBe('queued')
+    expect(screen.getByText('althar/midway')).toBeTruthy()
+  })
+
   it('shows the effort the coordinator picked for a step as one the person chose, keeps it, and lets the person change it', async () => {
     const plan = {
       ...card().plan!,

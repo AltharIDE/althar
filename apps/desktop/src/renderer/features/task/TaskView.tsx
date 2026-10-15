@@ -497,7 +497,7 @@ export function TaskView({
           onClick={() => changes.show()}
         />
       )}
-      {/* What it built runs with no agent, in its worktree (ADR-036); a review runs nothing of what it reads. */}
+      {/* What it built runs with no agent, in its worktree (ADR-042); a review runs nothing of what it reads. */}
       {snapshot.task.worktree !== null && snapshot.task.review == null && (
         <Runs
           projectId={snapshot.project.id}
@@ -594,7 +594,7 @@ export function TaskView({
         onEditQueued={(id) => void edit(id)}
         onUnqueue={(id) => void model.takeBack(id)}
         placeholder={busy ? text.placeholderBusy : text.placeholder(session?.agentName ?? agentName(chosen?.agentId ?? null))}
-        meter={contextMeter(session, named)}
+        meter={contextMeter(session, named, model.compact)}
         // Another agent's model hands the task to that agent.
         picker={
           model.agents.length > 0 &&

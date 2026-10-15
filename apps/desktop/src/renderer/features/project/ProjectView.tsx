@@ -314,7 +314,7 @@ export function ProjectView({
         onUnqueue={(id) => void model.takeBack(id)}
         text={{ queued: text.queue }}
         placeholder={busy ? text.placeholderBusy : text.placeholder}
-        meter={contextMeter(session, named)}
+        meter={contextMeter(session, named, model.compact)}
         picker={
           model.agents.length > 0 &&
           chosen !== null && (
@@ -360,7 +360,7 @@ export function ProjectView({
         trackers,
         open: (url) => window.open(url, '_blank'),
       })}
-      // What the project runs, with no agent, on its default branch (ADR-036).
+      // What the project runs, with no agent, on its default branch (ADR-042).
       {...(coordinator === null
         ? {}
         : {

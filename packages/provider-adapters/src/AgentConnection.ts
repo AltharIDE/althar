@@ -173,8 +173,14 @@ export interface AgentSession {
    * stopped early, so nothing it says reaches a later turn. Images go after
    * the text, in their order, only to an agent that takes them
    * (`AgentInfo.images`): the caller says what became of any it can't.
+   * `started` runs once the prompt is sent and the turn can be interrupted,
+   * so what it sets off may stop the turn at once.
    */
-  prompt(text: string, images?: ReadonlyArray<PromptImage>): Stream.Stream<SessionEvent, Failure | TurnInProgress>
+  prompt(
+    text: string,
+    images?: ReadonlyArray<PromptImage>,
+    started?: Effect.Effect<void>,
+  ): Stream.Stream<SessionEvent, Failure | TurnInProgress>
   /** Updates that arrive between turns, such as the agent changing its own mode. */
   readonly events: Stream.Stream<SessionEvent>
   /** Asks the agent to stop the current turn; the turn then ends with `cancelled`. */
@@ -781,7 +787,11 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           ),
         )
 
-        const prompt = (text: string, images?: ReadonlyArray<PromptImage>): Stream.Stream<SessionEvent, Failure | TurnInProgress> =>
+        const prompt = (
+          text: string,
+          images?: ReadonlyArray<PromptImage>,
+          started: Effect.Effect<void> = Effect.void,
+        ): Stream.Stream<SessionEvent, Failure | TurnInProgress> =>
           Stream.unwrap(
             Effect.gen(function* () {
               const turn: Turn = {
@@ -799,6 +809,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
               // A new turn: what it says before a question is of this turn only.
               said.delete(sessionId)
               yield* send(text, images)
+              yield* started
               return Stream.fromQueue(turn.queue)
             }),
           )

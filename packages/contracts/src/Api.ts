@@ -1215,7 +1215,7 @@ export const RunItem = Schema.Struct({
     launchId: Schema.String,
     /** What it runs: the task's, or null for a copy of the default branch. */
     taskId: Schema.NullOr(Schema.String),
-    /** Which of the project's runnables it runs (ADR-036), for running it again; absent on a card from before there were several. */
+    /** Which of the project's runnables it runs (ADR-042), for running it again; absent on a card from before there were several. */
     runnableId: Schema.optional(Schema.NullOr(Schema.String)),
     /** Where it runs, in words: the task's title, or the default branch. */
     where: Schema.String,
@@ -1437,7 +1437,7 @@ export type ContextUse = typeof ContextUse.Type
 export const Launch = Schema.Struct({
   ...BackgroundCommand.fields,
   taskId: Schema.NullOr(Schema.String),
-  /** Which of the project's runnables it runs (ADR-036). */
+  /** Which of the project's runnables it runs (ADR-042). */
   runnableId: Schema.NullOr(Schema.String),
   /** Where it runs, in words: the task's title, or the default branch. */
   where: Schema.String,
@@ -1445,7 +1445,7 @@ export const Launch = Schema.Struct({
 export type Launch = typeof Launch.Type
 
 /**
- * Something a project runs, with no agent (ADR-036): one of a list in the
+ * Something a project runs, with no agent (ADR-042): one of a list in the
  * person's order, the first its default, each in one of its repositories.
  * Its command is what it runs where it is shown: in a task's worktree on the
  * task, in the default branch's copy on the project. One that is its
@@ -1741,7 +1741,7 @@ export const ThreadSnapshot = Schema.Struct({
     actions: Schema.Array(TaskAction),
     /** Its plan still waiting to start, by id, for starting it now; null once started, or where it has none. */
     planId: Schema.NullOr(Schema.String),
-    /** What it can run in its worktree, in the project's order, the first its default (ADR-036); empty where nothing says how. */
+    /** What it can run in its worktree, in the project's order, the first its default (ADR-042); empty where nothing says how. */
     runnables: Schema.Array(Runnable),
     /** What Althar runs of it, in its worktree. */
     launches: Schema.Array(Launch),
@@ -1894,7 +1894,7 @@ export const CoordinatorSnapshot = Schema.Struct({
   earlier: Schema.Boolean,
   /** Where the project's repository is hosted, when its remote says, and whether Althar is connected to it there. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
-  /** What the project runs, in its order, the first its default (ADR-036), as run in the default branch's copy; empty where nothing says how. */
+  /** What the project runs, in its order, the first its default (ADR-042), as run in the default branch's copy; empty where nothing says how. */
   runnables: Schema.Array(Runnable),
   /** What Althar runs of the project's default branch. */
   launches: Schema.Array(Launch),
@@ -2281,6 +2281,11 @@ export const Api = RpcGroup.make(
    */
   command('SetAgentsAtOnce', { count: Schema.NullOr(AtOnceCount) }, Schema.Void),
   command('Interrupt', { threadId: Schema.String }, Schema.Void),
+  /**
+   * Asks the thread's agent to compact its context, as a turn of its own after
+   * what was said before; it never waits for a place among the agents at work.
+   */
+  command('CompactContext', { threadId: Schema.String }, Schema.Void),
   command('StopSession', { threadId: Schema.String }, Schema.Void),
   /** Stops a task: every agent on it stops, and the step it was on waits until the person resumes it. */
   command('StopTask', { taskId: Schema.String }, Schema.Void),
@@ -2569,7 +2574,7 @@ export const Api = RpcGroup.make(
     Launch,
   ),
   /**
-   * Keeps something for the project to run (ADR-036): a new one, at the end
+   * Keeps something for the project to run (ADR-042): a new one, at the end
    * of the list, or, by id, a change to one. A null command is the
    * repository's own way to run. In a project of several repositories, say
    * which; the first otherwise.

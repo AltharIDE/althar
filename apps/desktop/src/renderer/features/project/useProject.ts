@@ -62,8 +62,9 @@ export interface ProjectModel {
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
-  /** Runs the project with no agent: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
-  /** Runs one of the project's runnables, its default without one: in the task's worktree, or a copy of the default branch. */
+  /** Has the coordinator compact its context, after what it was told before. */
+  readonly compact: () => Promise<void>
+  /** Runs one of the project's runnables with no agent, its default without one: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
   readonly runProject: (taskId?: string | null, runnableId?: string | null) => Promise<void>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
@@ -315,6 +316,7 @@ export const useProject = (projectId: string): ProjectModel => {
       }
     },
     interrupt: () => act(async () => (threadId === null ? undefined : client.interrupt(threadId))),
+    compact: () => act(async () => (threadId === null ? undefined : client.compact(threadId))),
     runProject: (taskId = null, runnableId = null) =>
       act(() => client.runProject(projectId, taskId, threadId, ...(runnableId === null ? [] : [runnableId]))),
     stopLaunch: (id) => act(() => client.stopLaunch(id)),

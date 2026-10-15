@@ -6,7 +6,7 @@ import { SplitButton } from '../../primitives/SplitButton/SplitButton'
 import s from './RunButton.module.css'
 
 /*
- * What a project runs, from the top of its screen or a task's bar (ADR-036):
+ * What a project runs, from the top of its screen or a task's bar (ADR-042):
  * one press runs its default, the first of the list, as the one Run button
  * did; while that runs, the button says where it answers and opens it. The
  * chevron lists everything it runs, those running first, checked, each with

@@ -1,7 +1,7 @@
 import { at, id, index, project, ref, revision, sameProject, scoped, table } from './0001_initial/columns'
 
 /*
- * What a project runs (ADR-036): not one command but a list, in the
+ * What a project runs (ADR-042): not one command but a list, in the
  * person's order, the first its default, each run in one of its
  * repositories. One with no command of its own is that repository's own way
  * to run, kept for it with set_run_command or worked out from it (ADR-023);

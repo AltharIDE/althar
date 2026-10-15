@@ -1,4 +1,4 @@
-# ADR-036: A project runs many things, from a list with a default
+# ADR-042: A project runs many things, from a list with a default
 
 - **Status:** Accepted
 - **Date:** 2026-10-15

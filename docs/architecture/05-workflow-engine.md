@@ -410,8 +410,10 @@ every running turn instead, every 30 seconds.
 - **Going round in circles.** The same tool call to the same end, three times
   failing or four however it went, or two calls taking turns, gets the agent
   told to try another way; doing it again, the person is asked. A call is the
-  same as another by its command or its whole input, never by its title: an
-  agent titles every edit to a file alike.
+  same as another by its command, or by its whole input and what its diffs
+  change, never by its title: an agent titles every edit to a file alike, and
+  Claude Code leaves an edit's text out of its input for Althar, so only the
+  diff tells two edits apart. A diff's change is kept as a digest, not its text.
 - **A budget.** A step's agents may work 6 hours, or take 40 turns, since the
   person last said anything on the thread or the step began. Past that, the
   person is asked whether it carries on.

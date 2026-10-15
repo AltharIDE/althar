@@ -13,7 +13,7 @@ import { launch, openFirstProject } from './support'
  * project's front, a copy of the default branch runs its dev script; its card
  * in the coordinator's thread says where it answers, the pill over the
  * composer has it with where it runs, and the card stops it and runs it
- * again. Then more to run (ADR-036): Storybook, picked from its package.json,
+ * again. Then more to run (ADR-042): Storybook, picked from its package.json,
  * runs beside it from the Run button's list, and becomes the default.
  */
 

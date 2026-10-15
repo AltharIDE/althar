@@ -46,5 +46,6 @@ The agent adapter of [docs/architecture/03](../../docs/architecture/03-agent-run
 - **Account status side channels** (ADR-002): Claude's `rate_limit_event` and Codex's app-server rate limits are not read yet. Usage limits are recognised only from errors.
 - **Loading and resuming sessions** are advertised by all three agents but not used yet.
 - **Steering a turn in progress,** which Claude Code and Codex advertise, is not used yet; interrupt-and-continue is a cancel followed by a new prompt.
+- **A turn is said to have started only once it can be stopped.** `prompt` runs what the caller gives it to run at the start once the turn is the session's and its prompt is sent, so a stop that follows at once (a spent budget of turns) reaches the turn rather than finding none; a prompt refused because a turn is running runs nothing.
 - **Raw protocol capture** is handed to the caller frame by frame; writing it to its own bounded file (docs/architecture/07) is the runtime's.
 - **Claude hooks** in the user's or repository's settings can decide a tool call; that path is not checked yet.
