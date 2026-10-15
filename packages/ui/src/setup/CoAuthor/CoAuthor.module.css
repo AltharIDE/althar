@@ -22,9 +22,7 @@
   overflow: hidden;
   padding: 20px 20px 18px 22px;
   border-radius: 14px;
-  background:
-    radial-gradient(85% 120% at 100% 0%, var(--live-dim) 0%, transparent 62%),
-    var(--paper);
+  background: radial-gradient(85% 120% at 100% 0%, var(--live-dim) 0%, transparent 62%), var(--paper);
   box-shadow:
     0 0 0 1px var(--line-2),
     var(--lift-card);
