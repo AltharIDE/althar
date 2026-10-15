@@ -1,6 +1,8 @@
-import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+
+import { Room } from '@althar/ui'
 
 import type { DictationHost, DictationState } from '../src/renderer/data/services'
 import { useBoard } from '../src/renderer/features/board/useBoard'
@@ -9,8 +11,9 @@ import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
+import { record } from '../src/renderer/shared/dictation/recorder'
 import { forgetDrafts } from '../src/renderer/shared/drafts'
-import { fakeClient, fakeHost, snapshot } from './fixtures'
+import { fakeClient, fakeHost, items, snapshot } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -24,8 +27,16 @@ const PNG = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0,
 ])
 
-function Project() {
-  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onTask={vi.fn()} />
+function Project({ room }: { room?: Room }) {
+  return (
+    <ProjectView
+      model={useProject('p1')}
+      board={useBoard('p1')}
+      connections={useConnections()}
+      onTask={vi.fn()}
+      {...(room === undefined ? {} : { room })}
+    />
+  )
 }
 
 function Task({ threadId = 'th1' }: { threadId?: string }) {
@@ -136,6 +147,27 @@ describe('a draft', () => {
     expect((await coordinatorBox()).value).toBe('Before you go')
   })
 
+  it('keeps a queued message taken back to change, through going elsewhere and back', async () => {
+    const queued = items.you('Use the helper', { state: 'queued', interrupting: false })
+    const busy = snapshot()
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => ({
+        ...busy,
+        session: busy.session && { ...busy.session, turnRunning: true },
+        items: [items.you('Add a retry'), queued],
+      })),
+    })
+    const view = withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    expect(client.takeBack).toHaveBeenCalledWith(queued.id)
+    // Behind a running turn, the field adds to the queue.
+    const queueBox = () => screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Add to the queue, or interrupt the lead' })
+    await waitFor(async () => expect((await queueBox()).value).toBe('Use the helper'))
+    view.unmount()
+    withServices(<Task />, client)
+    expect((await queueBox()).value).toBe('Use the helper')
+  })
+
   it('is each thread’s own: the coordinator’s and each task’s never mix', async () => {
     const { client } = tasks()
     let view = withServices(<Project />, client)
@@ -237,5 +269,92 @@ describe('dictation, once the person leaves', () => {
     await speech.heard('Carry on with the tests.')
     expect((await taskBox()).value).toBe('Carry on with the tests.')
     expect(screen.queryByText('Couldn’t write that down')).toBeNull()
+  })
+})
+
+describe('dictation, once its composer goes from the screen while the view stays', () => {
+  it('stops listening as the project shows its board, and writes down what was said, saying so back in the conversation', async () => {
+    const speech = slowDictation()
+    const host = fakeHost({ dictation: speech.dictation })
+    const { client } = fakeClient()
+    withServices(<Project room={Room.Both} />, client, host)
+    await coordinatorBox()
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    const views = screen.getByRole('radiogroup', { name: 'View' })
+    await userEvent.click(within(views).getByRole('radio', { name: 'Board' }))
+    // The composer is off the screen: what was heard is written down, not still listened to.
+    await waitFor(() => expect(speech.dictation.transcribe).toHaveBeenCalledTimes(1))
+    await speech.heard('Why is checkout slow?')
+    await userEvent.click(within(views).getByRole('radio', { name: 'Conversation' }))
+    expect((await coordinatorBox()).value).toBe('Why is checkout slow?')
+    expect(screen.getByText(AWAY)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Dictate' })).toBeTruthy()
+  })
+
+  it('stops listening as a task shows its outputs, and writes down what was said', async () => {
+    const speech = slowDictation()
+    const host = fakeHost({ dictation: speech.dictation })
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot()) })
+    withServices(<Task />, client, host)
+    await taskBox()
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    // o for the outputs, from outside the field.
+    act(() => (document.activeElement as HTMLElement | null)?.blur())
+    await userEvent.keyboard('o')
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: /^Tell .* something$/ })).toBeNull())
+    await waitFor(() => expect(speech.dictation.transcribe).toHaveBeenCalledTimes(1))
+    await speech.heard('Carry on with the tests.')
+    await userEvent.keyboard('c')
+    expect((await taskBox()).value).toBe('Carry on with the tests.')
+    expect(screen.getByText(AWAY)).toBeTruthy()
+  })
+})
+
+describe('dictation started just as the person leaves', () => {
+  it('closes a microphone that opens once they have gone, so nothing listens where nobody sees', async () => {
+    const speech = slowDictation()
+    const host = fakeHost({ dictation: speech.dictation })
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot()) })
+    const cancel = vi.fn()
+    const stop = vi.fn(() => ({ samples: new Float32Array(32_000), sampleRate: 16_000 }))
+    let open: () => void = () => {}
+    vi.mocked(record).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          open = () => resolve({ peek: stop, stop, cancel, use: vi.fn(async () => {}) })
+        }),
+    )
+    const view = withServices(<Task />, client, host)
+    await taskBox()
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await waitFor(() => expect(record).toHaveBeenCalled())
+    // Gone before the system hands the microphone over.
+    view.unmount()
+    await act(async () => open())
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(speech.dictation.transcribe).not.toHaveBeenCalled()
+    withServices(<Task />, client, host)
+    await taskBox()
+    expect(screen.getByRole('button', { name: 'Dictate' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Stop dictating/ })).toBeNull()
+  })
+
+  it('opens no microphone once they have gone while the system asked for it', async () => {
+    const speech = slowDictation()
+    let allow: (allowed: boolean) => void = () => {}
+    vi.mocked(speech.dictation.state).mockResolvedValue({ ...READY, microphone: 'ask' })
+    vi.mocked(speech.dictation.allow).mockImplementationOnce(() => new Promise<boolean>((resolve) => (allow = resolve)))
+    const host = fakeHost({ dictation: speech.dictation })
+    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot()) })
+    vi.mocked(record).mockClear()
+    const view = withServices(<Task />, client, host)
+    await taskBox()
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await waitFor(() => expect(speech.dictation.allow).toHaveBeenCalled())
+    view.unmount()
+    await act(async () => allow(true))
+    expect(record).not.toHaveBeenCalled()
   })
 })

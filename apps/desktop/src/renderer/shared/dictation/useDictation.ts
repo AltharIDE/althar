@@ -117,13 +117,42 @@ export interface DictationOptions {
   readonly record?: Record
 }
 
-/** Two recordings that couldn't be written down, as one, to try again together; the later alone where they were heard at different rates. */
-const together = (kept: Said | null, said: Said): Said => {
-  if (kept === null || kept.sampleRate !== said.sampleRate) return said
-  const samples = new Float32Array(kept.samples.length + said.samples.length)
-  samples.set(kept.samples)
-  samples.set(said.samples, kept.samples.length)
+/** What was heard at one rate, as heard at another, each sample between the two nearest. */
+const atRate = (heard: Recorded, rate: number): Float32Array => {
+  if (heard.sampleRate === rate) return heard.samples
+  const step = heard.sampleRate / rate
+  const samples = new Float32Array(Math.round(heard.samples.length / step))
+  for (let i = 0; i < samples.length; i += 1) {
+    const x = i * step
+    const j = Math.floor(x)
+    const a = heard.samples[j] ?? 0
+    samples[i] = a + ((heard.samples[j + 1] ?? a) - a) * (x - j)
+  }
+  return samples
+}
+
+/** Two recordings that couldn't be written down, as one, to try again together: at the later's rate, where they were heard at different rates. */
+export const together = (kept: Said | null, said: Said): Said => {
+  if (kept === null) return said
+  const before = atRate(kept, said.sampleRate)
+  const samples = new Float32Array(before.length + said.samples.length)
+  samples.set(before)
+  samples.set(said.samples, before.length)
   return { samples, sampleRate: said.sampleRate, seconds: kept.seconds + said.seconds }
+}
+
+/** A ref for the composer's field that says whether the field is on screen: the composer shows, not just its view. */
+const fieldRef = (onField: (field: HTMLTextAreaElement | null) => void): RefObject<HTMLTextAreaElement | null> => {
+  let field: HTMLTextAreaElement | null = null
+  return {
+    get current() {
+      return field
+    },
+    set current(next) {
+      field = next
+      onField(next)
+    },
+  }
 }
 
 /** Dictation into the draft kept under `key` (`drafts.ts`): the thread's, which it outlives its composer for. */
@@ -131,7 +160,9 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
   const { record = recordMicrophone, projectId = null } = options
   const { host, client, cache } = useServices()
   const voice = host.dictation ?? NONE
-  const inputRef = useRef<HTMLTextAreaElement>(null)
+  /* Whether the composer's field is on screen: a view can keep its dictation while it shows something else, its board or a task's outputs. */
+  const [showing, setShowing] = useState(false)
+  const [inputRef] = useState(() => fieldRef((field) => setShowing(field !== null)))
   const [known, setKnown] = useState<DictationState | null>(null)
   const [download, setDownload] = useState<Download | null>(null)
   const [open, setOpen] = useState(false)
@@ -217,14 +248,16 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
   }
 
   const listen = async (state: DictationState) => {
+    const held = handlesOf(key)
     if (!(await microphone(state))) return
+    // The person left while the system asked: nothing to listen for.
+    if (held.shown === 0) return
     // The model loads while the person talks, so its first words don't wait for it; writing down waits if it must.
     if (!prepared.current) {
       prepared.current = true
       voice.prepare().catch(() => (prepared.current = false))
     }
     learn()
-    const held = handlesOf(key)
     const now = live(
       transcribe,
       (text) => changeSession(key, { interim: joined(text.settled, text.unsettled) }),
@@ -240,6 +273,13 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
         if (held.recording !== null) now.frame(frame, held.recording)
       }, input)
       held.hearing = input
+      // The person left while the microphone opened: it closes, having heard nothing yet, so nothing listens where nobody sees.
+      if (held.shown === 0) {
+        held.recording?.cancel()
+        held.recording = null
+        now.close()
+        return
+      }
     } catch (error) {
       const name = error instanceof DOMException ? error.name : ''
       setProblem(name === 'NotAllowedError' || name === 'SecurityError' ? { kind: 'denied' } : { kind: 'noMicrophone' })
@@ -250,7 +290,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
     // The system names its microphones once one may be used.
     refreshMicrophones()
     changeSession(key, {
-      at: inputRef.current?.selectionStart ?? inputRef.current?.value.length ?? 0,
+      at: held.field?.current?.selectionStart ?? held.field?.current?.value.length ?? 0,
       interim: '',
       seconds: 0,
       arrived: null,
@@ -384,9 +424,10 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
     return () => window.removeEventListener('keydown', onKey, true)
   }, [listening])
 
-  // The thread's composer shows: what is written down lands at its cursor. Leaving while listening stops, and writes down what was said; what is being written down goes on, into the thread's draft.
+  // The thread's composer shows: what is written down lands at its cursor. Leaving it, for another view or another face of this one, stops listening, and writes down what was said; what is being written down goes on, into the thread's draft.
   const leave = useEffectEvent((thread: string) => stopIn(thread))
   useEffect(() => {
+    if (!showing) return
     const held = handlesOf(key)
     held.shown += 1
     held.field = inputRef
@@ -395,7 +436,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
       if (held.field === inputRef) held.field = null
       if (held.shown === 0) leave(key)
     }
-  }, [key])
+  }, [key, showing, inputRef])
 
   // The shortcut: pressed, it starts or stops; held down, letting go stops. Only the composer shown last hears it.
   const pressedAt = useRef<number | null>(null)
@@ -413,7 +454,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
     if (held && phase === 'listening') stop()
   })
   useEffect(() => {
-    if (host.dictation === undefined) return
+    if (host.dictation === undefined || !showing) return
     const me = Symbol('dictation')
     claims.push(me)
     const mine = () => claims.at(-1) === me
@@ -433,7 +474,7 @@ export function useDictation(key: string, options: DictationOptions = {}): Voice
       window.removeEventListener('keydown', onDown)
       window.removeEventListener('keyup', onUp)
     }
-  }, [host.dictation])
+  }, [host.dictation, showing])
 
   if (host.dictation === undefined) return { dictation: undefined, tray: null, inputRef }
 

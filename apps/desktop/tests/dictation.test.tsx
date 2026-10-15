@@ -8,7 +8,7 @@ import type { DictationHost, DictationState } from '../src/renderer/data/service
 import { microphonesOf, microphoneToUse } from '../src/renderer/shared/dictation/microphones'
 import type { Frame, Record } from '../src/renderer/shared/dictation/recorder'
 import { bytes, lengthOf, timeLeft, trayText } from '../src/renderer/shared/dictation/text'
-import { useDictation } from '../src/renderer/shared/dictation/useDictation'
+import { together, useDictation } from '../src/renderer/shared/dictation/useDictation'
 import { setDraftText, useDraft } from '../src/renderer/shared/drafts'
 import { fakeClient, fakeHost } from './fixtures'
 import { withServices } from './render'
@@ -737,5 +737,21 @@ describe('dictation’s words', () => {
     expect(timeLeft(5_000_000, 1_000_000)).toBe('about 5 s')
     expect(timeLeft(600_000_000, 1_000_000)).toBe('about 10 min')
     expect(lengthOf(72)).toBe('1:12')
+  })
+})
+
+describe('what couldn’t be written down, twice', () => {
+  it('keeps both, as one to try again, even heard at different rates', () => {
+    const first = { samples: new Float32Array(48_000 * 2).fill(0.25), sampleRate: 48_000, seconds: 2 }
+    const second = { samples: new Float32Array(16_000 * 3).fill(0.5), sampleRate: 16_000, seconds: 3 }
+    const kept = together(first, second)
+    expect(kept.sampleRate).toBe(16_000)
+    expect(kept.seconds).toBe(5)
+    expect(kept.samples.length).toBe(16_000 * 5)
+    // The first, at the second's rate, then the second.
+    expect(kept.samples[0]).toBeCloseTo(0.25)
+    expect(kept.samples[16_000 * 2 - 1]).toBeCloseTo(0.25)
+    expect(kept.samples[16_000 * 2]).toBeCloseTo(0.5)
+    expect(together(null, second)).toBe(second)
   })
 })
