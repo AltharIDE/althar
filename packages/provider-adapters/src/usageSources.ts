@@ -250,6 +250,20 @@ export const resolveOpenCodeCredential = (credential: OpenCodeCredential): Crede
 
 /* OpenCode: which of an account's sign-ins are plans and which are keys, from its own listing. */
 
+/** The first major version of OpenCode whose `auth list` takes `--standalone --format json`: 1.x has neither, and exits 1. */
+export const OPENCODE_LISTS_SIGN_INS_FROM = 2
+
+/**
+ * Why an OpenCode at this major version can't say which sign-ins are plans,
+ * so its listing isn't run; null where it can. Unknown is not taken for 2.
+ */
+export const openCodeCannotList = (name: string, major: number | undefined): string | null =>
+  major === undefined
+    ? `Althar couldn’t tell which version of ${name} this is, so it can’t tell its plans from its API keys. Check that its --version answers.`
+    : major < OPENCODE_LISTS_SIGN_INS_FROM
+      ? `${name} ${major} can’t tell plans from API keys: it doesn’t list which of its sign-ins are which, so Althar can’t show a plan’s usage.`
+      : null
+
 export type CredentialsRead =
   | { readonly kind: 'credentials'; readonly credentials: ReadonlyArray<OpenCodeCredential> }
   /** It could not be listed, or the listing is not the shape known (OpenCode 1.x prints a count only): a fault, never "no sign-ins". */

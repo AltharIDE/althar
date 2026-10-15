@@ -8,7 +8,9 @@ import {
   agentVersion,
   type CredentialsRead,
   type EndpointRead,
+  majorOf,
   nextWarning,
+  openCodeCannotList,
   readAgentUsage,
   readOpenCodeCredentials,
   resolveOpenCodeCredential,
@@ -132,12 +134,11 @@ export class PlanUsage extends Context.Service<
         const readVersion = options.readVersion ?? ((agent: AgentDefinition) => Effect.runPromise(agentVersion(agent, adapterNode())))
         const majors = new Map<string, number | undefined>()
         /* The agent's major version, asked once a launch; unknown stays unknown, which the usage read refuses. */
-        const majorOf = (definition: AgentDefinition) =>
+        const agentMajorOf = (definition: AgentDefinition) =>
           Effect.gen(function* () {
             if (majors.has(definition.id)) return majors.get(definition.id)
             const version = yield* Effect.promise(() => readVersion(definition).catch(() => null))
-            const major = version === null ? undefined : Number.parseInt(version, 10)
-            const known = major === undefined || Number.isNaN(major) ? undefined : major
+            const known = (version === null ? null : majorOf(version)) ?? undefined
             majors.set(definition.id, known)
             return known
           })
@@ -271,6 +272,10 @@ export class PlanUsage extends Context.Service<
               const onDevice =
                 definition.signIn.credentials?.(adapterNode()).onDevice !== undefined ||
                 definition.launch(adapterNode()).onDevice !== undefined
+              // Its listing is OpenCode 2's: on 1.x the command fails with its help, and what it can list says no plan from a key.
+              const agentMajor = yield* agentMajorOf(definition)
+              const cannotList = openCodeCannotList(definition.name, agentMajor)
+              if (cannotList !== null) return yield* keep(account.id, fault('cannot_classify', cannotList))
               const listed = yield* Effect.promise(() => readCredentials(definition, home))
               if (listed.kind === 'failed') return yield* keep(account.id, fault('cannot_classify', listed.message))
               // Each plan sign-in with the pair that covers it, or none where it is not declared; a key needs nothing.
@@ -292,7 +297,6 @@ export class PlanUsage extends Context.Service<
                 })
               const windows: UsageWindow[] = []
               let observed: string | null = null
-              const agentMajor = yield* majorOf(definition)
               let failed: { kind: UsageFaultKind; message: string } | null = null
               for (const { credential, pair } of plans) {
                 if (pair === null) {

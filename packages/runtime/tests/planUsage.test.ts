@@ -58,7 +58,8 @@ const withUsage = (
         ...(usage.readEndpoint === undefined
           ? {}
           : { readEndpoint: (id, account) => usage.readEndpoint!(id, account.provider, account.agentMajor) }),
-        ...(usage.readVersion === undefined ? {} : { readVersion: usage.readVersion }),
+        // OpenCode 2, whose listing tells plans from keys, unless the test says another.
+        readVersion: usage.readVersion ?? (async () => '2.0.29'),
       },
     },
   )
@@ -307,7 +308,7 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
     }).pipe(Effect.provide(withUsage({ readCredentials: async () => credentials(['openai', 'key'], ['openrouter', 'key']) }))),
   )
 
-  it.effect('are a fault, not a key, when the listing fails, as OpenCode 1.x’s count does', () =>
+  it.effect('are a fault, not a key, when the listing fails', () =>
     Effect.gen(function* () {
       const view = openCode(yield* (yield* PlanUsage).now())
       assert.strictEqual(view.fault?.kind, 'cannot_classify')
@@ -335,9 +336,8 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
       Effect.provide(
         withUsage({
           readCredentials: async () => credentials(['openai', 'plan']),
-          readVersion: async () => '1.19.0',
           readEndpoint: async (id, provider, major) => {
-            assert.deepStrictEqual([id, provider, major], ['opencode-chatgpt', 'openai', 1])
+            assert.deepStrictEqual([id, provider, major], ['opencode-chatgpt', 'openai', 2])
             return { kind: 'usage', stale: false, usage: { windows: [used(33)], source: 'endpoint', observedAt: NOW } }
           },
         }),
@@ -360,23 +360,31 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
     ),
   )
 
-  it.effect('read the endpoint without a version when the agent’s is not known, which the reader then refuses', () =>
+  it.effect('are not listed on OpenCode 1, whose `auth list` has no such flags, and say it can’t tell plans from keys', () =>
     Effect.gen(function* () {
       const view = openCode(yield* (yield* PlanUsage).now())
-      assert.strictEqual(view.fault?.kind, 'no_source')
+      assert.strictEqual(view.fault?.kind, 'cannot_classify')
+      assert.include(view.fault?.message ?? '', ' 1 can’t tell plans from API keys')
     }).pipe(
       Effect.provide(
         withUsage({
-          readCredentials: async () => credentials(['openai', 'plan']),
+          readVersion: async () => '1.19.0',
+          readCredentials: async () => assert.fail('OpenCode 1 is not asked for its listing'),
+        }),
+      ),
+    ),
+  )
+
+  it.effect('are not listed where the agent’s version is not known, and say so', () =>
+    Effect.gen(function* () {
+      const view = openCode(yield* (yield* PlanUsage).now())
+      assert.strictEqual(view.fault?.kind, 'cannot_classify')
+      assert.include(view.fault?.message ?? '', 'couldn’t tell which version')
+    }).pipe(
+      Effect.provide(
+        withUsage({
           readVersion: async () => null,
-          readEndpoint: async (_id, _provider, major) => {
-            assert.isUndefined(major)
-            return {
-              kind: 'fault',
-              fault: 'no_source',
-              message: 'This usage source is for version 1 of the agent, and this one is not known to be.',
-            }
-          },
+          readCredentials: async () => assert.fail('an OpenCode of unknown version is not asked for its listing'),
         }),
       ),
     ),
@@ -398,7 +406,6 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
           let calls = 0
           return withUsage({
             readCredentials: async () => credentials(['openai', 'plan']),
-            readVersion: async () => '1.19.0',
             readEndpoint: async () =>
               ++calls === 1
                 ? { kind: 'usage', stale: true, usage: { windows: [used(33)], source: 'endpoint', observedAt: '2026-10-15T10:00:00.000Z' } }
@@ -425,6 +432,7 @@ describe('OpenCode’s accounts, by their own sign-ins', () => {
               every: Duration.zero,
               kept: Duration.zero,
               readCredentials: async () => credentials(['openai', 'plan']),
+              readVersion: async () => '2.0.29',
               readEndpoint: async () => assert.fail('an agent on the device is never read in this process'),
             },
           },

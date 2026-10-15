@@ -13,6 +13,7 @@ import {
   type EndpointSource,
   endpointProblem,
   endpointSources,
+  openCodeCannotList,
   openCodeCredentials,
   readOpenCodeCredentials,
   chatGptUsageWindows,
@@ -20,6 +21,7 @@ import {
   type UsagePair,
   usagePairs,
 } from '../src/usageSources'
+import { majorOf } from '../src/version'
 
 /*
  * The contract of the usage read (ADR-045): every subscription has a source and a
@@ -547,6 +549,16 @@ describe('OpenCode: plan or key per provider, from auth list', () => {
     expect(openCodeCredentials('{"a":1}')).toBeNull()
     expect(openCodeCredentials('[{"id":1}]')).toBeNull()
     expect(openCodeCredentials('[{"id":"a"}]')).toBeNull()
+  })
+
+  it('is asked only of OpenCode 2 and later, by the major its --version says', () => {
+    // OpenCode 1.19.0's `auth list` has no --standalone or --format: it exits 1 and prints its help.
+    expect(openCodeCannotList('OpenCode', majorOf('1.19.0') ?? undefined)).toBe(
+      'OpenCode 1 can’t tell plans from API keys: it doesn’t list which of its sign-ins are which, so Althar can’t show a plan’s usage.',
+    )
+    expect(openCodeCannotList('OpenCode', undefined)).toContain('couldn’t tell which version of OpenCode')
+    expect(openCodeCannotList('OpenCode', majorOf('2.0.29') ?? undefined)).toBeNull()
+    expect(openCodeCannotList('OpenCode', 3)).toBeNull()
   })
 })
 
