@@ -547,6 +547,61 @@ describe('a task that ends in a pull request', () => {
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
+  it.live('asks the person to sign in again, not to connect, when the host’s sign-in is lost, and carries on once they have', () => {
+    const { working, bare } = hosted()
+    const github = makeFakeService({ pushUrl: () => bare })
+    github.addRepository(['meridian', 'api'])
+    return Effect.gen(function* () {
+      const projects = yield* Projects
+      const plans = yield* Plans
+      const runs = yield* Runs
+      const instance = yield* Instance
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      // Connected, until the keychain lost the token and the connection said it needs signing in again.
+      const connection = yield* connect('github', HOST)
+      yield* sql`UPDATE connections SET state = 'reauth_required' WHERE id = ${connection.id}`
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: working })
+      const created = yield* projects.createTask({
+        envelope: yield* Runtime.envelope('task.create', {}),
+        projectId: project.projectId,
+        title: 'Add a retry',
+        description: '[lead:finish] [lead:edit]',
+        draft: true,
+      })
+      const planId = yield* plans.propose({
+        projectId: project.projectId as ProjectId,
+        taskId: created.taskId,
+        steps: [{ key: 'implement', agentId: 'claude-code', model: null, skipped: false }],
+        reason: null,
+        actorId: instance.personId,
+        startsIn: Duration.zero,
+        end: 'draft',
+      })
+      yield* plans.start(planId, instance.personId)
+      const [call] = yield* until(
+        Effect.map(queries.thread(created.threadId), (snapshot) => snapshot.attention),
+        (attention) => attention.length === 1,
+        Duration.seconds(20),
+      )
+      // It says the sign-in is lost, in the words for a refused one, not that nothing is connected, nor an error's name.
+      assert.deepInclude(call?.stuck, {
+        step: 'publish',
+        why: 'failed_to_start',
+        detail: "GitHub no longer takes Althar's sign-in. Sign in to it again.",
+      })
+      // Signed in again, and asked to try again, it opens the pull request.
+      yield* connect('github', HOST)
+      yield* runs.answerStuck({
+        envelope: yield* Runtime.envelope('attention.answer_stuck', {}),
+        attentionId: call?.id ?? '',
+        answer: { kind: 'retry', agentId: 'claude-code' },
+      })
+      const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
+      assert.strictEqual(ready?.change?.number, 1)
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
+
   it.live('asks the lead to commit or clear away what it left, before its step is done', () => {
     const { working, bare } = hosted()
     const github = makeFakeService({ pushUrl: () => bare })

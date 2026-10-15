@@ -381,6 +381,53 @@ describe('a connection', () => {
     }).pipe(Effect.provide(withGitHub(fetch, { secrets })))
   })
 
+  it.live(
+    'needs signing in again when the keychain can no longer open the sealed token, and says so rather than that it is unreachable',
+    () => {
+      const { fetch } = stub([user])
+      // The keychain answers, and the key it holds doesn't open what was sealed with another: main says the secret is unreadable.
+      let lost = false
+      const kept = new Map<string, string>()
+      const secrets = Layer.succeed(
+        Secrets,
+        Secrets.of({
+          set: (name, value) => Effect.sync(() => void kept.set(name, value)),
+          get: (name) =>
+            lost
+              ? Effect.fail(
+                  new SecretsUnavailable({
+                    reason: 'Error while decrypting the ciphertext provided to safeStorage.decryptString.',
+                    unreadable: true,
+                  }),
+                )
+              : Effect.sync(() => kept.get(name) ?? null),
+          remove: (name) => Effect.sync(() => void kept.delete(name)),
+        }),
+      )
+      return Effect.gen(function* () {
+        const connections = yield* Connections
+        const instance = yield* Instance
+        const sql = yield* SqlClient.SqlClient
+        const connection = yield* connections.connectToken({ product: 'github', token: 't', actorId: instance.personId })
+        lost = true
+        const { host } = yield* connections.adapters(connection.id)
+        const error = yield* Effect.flip(host?.account ?? Effect.void)
+        assert.deepInclude(error, { _tag: 'ConnectorFailed', reason: 'unauthorized' })
+        assert.notInclude(String((error as { message?: string }).message), 'safeStorage')
+        assert.strictEqual((yield* connections.list)[0]?.state, 'reauth_required')
+        const [fact] = yield* sql<{
+          type: string
+        }>`SELECT type FROM record_events WHERE aggregate_type = 'connection' ORDER BY sequence DESC LIMIT 1`
+        assert.strictEqual(fact?.type, 'connection.reauth_required')
+        // A repository there knows the sign-in stopped, and signing in again, with a key that opens, makes it ready.
+        assert.deepInclude((yield* connections.placeOf('git@github.com:meridian/api.git'))?.connection, { state: 'reauth_required' })
+        lost = false
+        yield* connections.connectToken({ product: 'github', token: 't2', actorId: instance.personId })
+        assert.strictEqual((yield* connections.list)[0]?.state, 'ready')
+      }).pipe(Effect.provide(withGitHub(fetch, { secrets })))
+    },
+  )
+
   it.live('offers the browser sign-in only where Althar’s app is registered', () => {
     const github = makeFakeService()
     return Effect.gen(function* () {
@@ -1018,13 +1065,15 @@ describe('where sign-ins are kept', () => {
     // The app, busy for as many asks as the test says, then answering; or with no keyring at all.
     let busy = 0
     let keyring = true
+    let unreadable = false
     let asked = 0
     const unanswered = () => Effect.fail(new SecretsUnavailable({ reason: 'Althar’s keychain didn’t answer.' }))
     const none = () => Effect.fail(new SecretsUnavailable({ reason: 'Install and start a keyring.', keyring: true }))
+    const gone = () => Effect.fail(new SecretsUnavailable({ reason: 'Error while decrypting the ciphertext.', unreadable: true }))
     const answer = <A>(then: () => Effect.Effect<A, SecretsUnavailable>) =>
       Effect.suspend(() => {
         asked += 1
-        return !keyring ? none() : busy-- > 0 ? unanswered() : then()
+        return !keyring ? none() : unreadable ? gone() : busy-- > 0 ? unanswered() : then()
       })
     const flaky: Sealer = {
       seal: (value) => answer(() => sealer().seal(value)),
@@ -1039,6 +1088,12 @@ describe('where sign-ins are kept', () => {
       // Busy for longer than that, it says so.
       busy = 3
       assert.strictEqual((yield* Effect.flip(secrets.get('conn_1'))).reason, 'Althar’s keychain didn’t answer.')
+      // A secret the keychain can't open any more is lost, not late: asked once, and said at once.
+      unreadable = true
+      asked = 0
+      assert.deepInclude(yield* Effect.flip(secrets.get('conn_1')), { unreadable: true })
+      assert.strictEqual(asked, 1)
+      unreadable = false
       // No keyring to keep it: asked once, and said at once.
       keyring = false
       asked = 0

@@ -19,7 +19,8 @@ import { Context, Duration, Effect, Layer, Schedule, Schema } from 'effect'
  * Under load a secret can fail to be kept or given back for a moment: the
  * main process too busy to answer in time, the keychain slow to hand over its
  * key, or the system out of open files. Each is tried again, a moment apart,
- * before Althar says it couldn't.
+ * before Althar says it couldn't. A secret the keychain answers it can no
+ * longer open is another matter: it is lost, not late.
  */
 
 /** Secrets couldn't be kept or given back. */
@@ -27,17 +28,22 @@ export class SecretsUnavailable extends Schema.TaggedError<SecretsUnavailable>()
   reason: Schema.String,
   /** The main process's own keyring refusal: its words are the person's, and only these are shown verbatim (words.ts). */
   keyring: Schema.optional(Schema.Boolean),
+  /**
+   * The secret is there, sealed, and the main process answered that it can't open it: sealed with a key the keychain no longer
+   * holds. No ask will change that, so it is not tried again; the sign-in it was is lost, and its person makes it again.
+   */
+  unreadable: Schema.optional(Schema.Boolean),
 }) {}
 
 /**
  * A secret that couldn't be kept or opened is tried this many times more, a
  * moment apart, then twice that; not where there is no keyring to keep it,
- * which a moment doesn't change.
+ * or where the key to open it is gone, which a moment doesn't change.
  */
 const AGAIN = {
   times: 2,
   schedule: Schedule.exponential(Duration.millis(200)),
-  while: (error: SecretsUnavailable) => error.keyring !== true,
+  while: (error: SecretsUnavailable) => error.keyring !== true && error.unreadable !== true,
 }
 
 /** What seals a secret so that only Althar can open it, and opens it again: in the app, its main process. */

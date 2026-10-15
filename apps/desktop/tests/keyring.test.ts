@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { keyringIsSafe, keyringUnavailable, passwordStore } from '../src/main/keyring'
+import { keyringIsSafe, keyringUnavailable, passwordStore, sealFailure } from '../src/main/keyring'
 
 describe('sealing secrets by keyring', () => {
   it('takes a real keyring on Linux, and nothing else', () => {
@@ -23,6 +23,15 @@ describe('sealing secrets by keyring', () => {
     expect(keyringUnavailable('linux')).toContain('gnome-keyring')
     expect(keyringUnavailable('linux')).toContain('KWallet')
     expect(keyringUnavailable('darwin')).toBe('The keychain Althar seals sign-ins with isn’t available.')
+  })
+})
+
+describe('what main answers when safeStorage throws', () => {
+  it('says a sealed secret it cannot open is unreadable, which the runtime does not ask again, and a seal that fails is not', () => {
+    const thrown = new Error('Error while decrypting the ciphertext provided to safeStorage.decryptString.')
+    expect(sealFailure('open', thrown)).toEqual({ error: thrown.message, unreadable: true })
+    expect(sealFailure('seal', new Error('Encryption is not available.'))).toEqual({ error: 'Encryption is not available.' })
+    expect(sealFailure('open', 'odd')).toEqual({ error: 'odd', unreadable: true })
   })
 })
 

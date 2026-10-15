@@ -68,7 +68,10 @@ const githubApp =
   process.env.ALTHAR_GITHUB_APP === undefined || process.env.ALTHAR_GITHUB_APP === '' ? undefined : process.env.ALTHAR_GITHUB_APP
 
 /* Secrets the main process is sealing or opening, by request. */
-const sealing = new Map<string, (answer: { readonly value?: string; readonly error?: string; readonly keyring?: boolean }) => void>()
+const sealing = new Map<
+  string,
+  (answer: { readonly value?: string; readonly error?: string; readonly keyring?: boolean; readonly unreadable?: boolean }) => void
+>()
 
 /** Asks the main process to seal a secret, or open one; it alone holds the key. */
 const askMain = (type: 'seal' | 'open', value: string) =>
@@ -81,6 +84,7 @@ const askMain = (type: 'seal' | 'open', value: string) =>
               new SecretsUnavailable({
                 reason: answer.error ?? 'Althar couldn’t open its keychain.',
                 ...(answer.keyring === true ? { keyring: true } : {}),
+                ...(answer.unreadable === true ? { unreadable: true } : {}),
               }),
             )
           : Effect.succeed(answer.value),
@@ -268,12 +272,16 @@ parent.on('message', (message) => {
     readonly path?: string
     readonly value?: string
     readonly error?: string
+    readonly keyring?: boolean
+    readonly unreadable?: boolean
   } | null
   const port = message.ports[0]
   if (data?.type === 'sealed' && data.requestId !== undefined) {
     sealing.get(data.requestId)?.({
       ...(data.value === undefined ? {} : { value: data.value }),
       ...(data.error === undefined ? {} : { error: data.error }),
+      ...(data.keyring === true ? { keyring: true } : {}),
+      ...(data.unreadable === true ? { unreadable: true } : {}),
     })
     sealing.delete(data.requestId)
   }

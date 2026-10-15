@@ -47,7 +47,7 @@ import {
 } from 'electron'
 
 import { appMenu, windowOptions } from './windowOptions'
-import { keyringIsSafe, keyringUnavailable, passwordStore } from './keyring'
+import { keyringIsSafe, keyringUnavailable, passwordStore, sealFailure } from './keyring'
 
 /*
  * Electron's main process (docs/architecture/02): windows, the app's
@@ -309,7 +309,7 @@ const seal = (child: UtilityProcess, message: RuntimeMessage) => {
           : safeStorage.decryptString(Buffer.from(value, 'base64')),
     })
   } catch (error) {
-    child.postMessage({ type: 'sealed', requestId, error: error instanceof Error ? error.message : String(error) })
+    child.postMessage({ type: 'sealed', requestId, ...sealFailure(message.type === 'seal' ? 'seal' : 'open', error) })
   }
 }
 
