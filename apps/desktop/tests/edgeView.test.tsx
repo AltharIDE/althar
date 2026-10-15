@@ -188,6 +188,24 @@ describe('the edge', () => {
     }
   })
 
+  it('under the menu bar, moves focus on to the next permission\u2019s Allow once after one is answered', async () => {
+    const seen = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => 'visible')
+    try {
+      const second: HomeCall = { ...permission, id: 'a2', title: 'Run npm test', command: 'npm test' }
+      const { client } = fakeClient({ getHome: vi.fn(async () => home({ calls: [permission, second], projects: [project, halyard] })) })
+      withServices(<Edge shown={{ place: 'menu' }} />, client)
+      const next = within(await screen.findByRole('article', { name: 'Run npm test' })).getByRole('button', { name: 'Allow once' })
+      await waitFor(() => expect(document.activeElement).not.toBe(document.body))
+      await userEvent.keyboard('{Enter}')
+      expect(client.answer).toHaveBeenCalledWith(expect.objectContaining({ attentionId: 'a1' }))
+      await waitFor(() => expect(next).toBe(document.activeElement))
+      await userEvent.keyboard('{Enter}')
+      expect(client.answer).toHaveBeenCalledWith(expect.objectContaining({ attentionId: 'a2' }))
+    } finally {
+      seen.mockRestore()
+    }
+  })
+
   it('under the menu bar, focuses an Allow once that comes in while the sheet is open, and ignores held Enter', async () => {
     let calls: ReadonlyArray<HomeCall> = []
     const seen = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => 'visible')
@@ -203,7 +221,8 @@ describe('the edge', () => {
         name: 'Allow once',
       })
       await waitFor(() => expect(allow).toBe(document.activeElement))
-      fireEvent.keyDown(allow, { key: 'Enter', repeat: true })
+      // Not answered, and its default (a button's native activation) is prevented.
+      expect(fireEvent.keyDown(allow, { key: 'Enter', repeat: true })).toBe(false)
       expect(client.answer).not.toHaveBeenCalled()
     } finally {
       seen.mockRestore()

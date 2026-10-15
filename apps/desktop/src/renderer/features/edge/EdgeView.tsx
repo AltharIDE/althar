@@ -161,8 +161,18 @@ function Measured({ children, onHeight, showing }: { children: ReactNode; onHeig
   useEffect(() => {
     const element = box.current
     if (!showing || element === null) return
-    if (document.activeElement !== null && document.activeElement !== document.body) return
-    element.querySelector<HTMLElement>(DEFAULT_ANSWER)?.focus({ preventScroll: true })
+    let live = true
+    const take = () => {
+      const on = document.activeElement
+      const free = on === null || on === document.body || (on instanceof HTMLElement && on.tagName === 'ARTICLE' && element.contains(on))
+      if (live && free) element.querySelector<HTMLElement>(DEFAULT_ANSWER)?.focus({ preventScroll: true })
+    }
+    take()
+    // And once the line of a call just answered here has taken focus after the commit, which it holds only until the next Allow.
+    queueMicrotask(take)
+    return () => {
+      live = false
+    }
   })
   useEffect(() => {
     const element = box.current
