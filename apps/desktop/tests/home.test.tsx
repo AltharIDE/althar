@@ -1138,7 +1138,7 @@ describe('the app’s own preferences in settings', () => {
 })
 
 describe('usage data in settings', () => {
-  it('is on until the person turns it off, a quiet link in the foot, saying what goes and what never does', async () => {
+  it('is on until the person turns it off, a quiet link in the foot, opening to its switch and one line', async () => {
     const host = fakeHost()
     withServices(<Settings />, fakeClient().client, host)
     const panel = await screen.findByRole('dialog', { name: 'Settings' })
@@ -1149,8 +1149,6 @@ describe('usage data in settings', () => {
     expect(document.getElementById(usage.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
       'Anonymous: steps such as a project made or a task settled. Never your code, what is written, or any name.',
     )
-    expect(within(panel).getByText(/^What goes: Althar opening, an agent signed in, a project made/)).toBeTruthy()
-    expect(within(panel).getByText(/Never your code, prompts, messages, names, paths or accounts\.$/)).toBeTruthy()
     await userEvent.click(usage)
     expect(host.setPreference).toHaveBeenLastCalledWith('usageData', false)
     await waitFor(() => expect(usage.getAttribute('aria-checked')).toBe('false'))

@@ -36,15 +36,13 @@
     in again. A task starts as planned, as a mini task, as a review, or when
     the person's first words reach its lead. The utility process hands each
     event to the main process, as it does nudges.
-  - **A switch the person sees before anything is sent.** "Usage data" is
-    an app preference (`usageData`), on by default, shown under the
-    repositories on the first screen with one line on what it sends and
-    never sends, and in Settings' foot, with the whole list. The main
+  - **On by default, turned off in Settings.** "Usage data" is an app
+    preference (`usageData`), on by default, in Settings' foot, opening to
+    its switch and one line on what it sends and never sends. The first screen
+    doesn't ask: setting up stays about agents and repositories. The main
     process waits for the preferences to be read before the first event, and
     asks the switch as each event comes and again before each request goes,
-    a try again included, so nothing leaves once it is off. On Althar's first
-    launch, events wait until the window has shown the switch, then go if it
-    is still on. `DO_NOT_TRACK` set where Althar started keeps it off, and
+    a try again included, so nothing leaves once it is off. `DO_NOT_TRACK` set where Althar started keeps it off, and
     the switch says so. A `desktop.json` that is there but can't be read
     keeps it off, and is written again so; the file is always written whole.
   - **Only a release sends.** PostHog's project key and host are given to a
@@ -70,8 +68,11 @@
     to the same outcome would need its own call; the record already says
     each outcome once.
   - **Opt-in.** The stricter choice. The events are anonymous and say
-    nothing anyone wrote, and the switch is on the first screen with what it
-    sends, so it starts on.
+    nothing anyone wrote, so it starts on.
+  - **Asking on the first screen** (a switch, a question, or a tick by Make
+    the project; prototyped 15 October). Each put a privacy choice in front
+    of someone who came to set up their agents; the person chose to keep the
+    first screen about that (settled with the person, 15 October).
 - **Trade-off:**
   - **A task's outcome is read after the fact**, half a second after it is
     recorded; an event in flight as Althar quits gets two seconds. What was
@@ -85,9 +86,10 @@
     its pull request opened isn't said again. A finished task that goes back
     to work (ADR-034) is reopened: its round is no new start, and shipping
     it again settles it again.
-  - **The switch is seen on the first screen only by a new install.** No
-    one had Althar with a project when this shipped; one that has a project
-    finds the switch in Settings.
+  - **Nothing is shown before the first event.** Althar opened goes as the
+    first launch starts; turning it off is for Settings. Before a public
+    launch in the EU, an install id kept on the device may need an explicit
+    yes.
   - **An agent signed in is said once a launch it is found signed in**,
     and again only when an account signs in after being signed out.
   - **The request still reaches PostHog from the person's address.** GeoIP

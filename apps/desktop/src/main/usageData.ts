@@ -104,20 +104,19 @@ export const usageEventOf = (said: unknown): UsageEvent | null => {
  * a random id, made the first time, and the version Althar last opened on,
  * kept whether or not anything is sent, so turning the switch on later
  * never reports an update from long ago. `updatedFrom` is that version when
- * this one differs: an update was installed. `fresh` when the id was made
- * now: Althar's first launch on this profile.
+ * this one differs: an update was installed.
  */
 export const installOf = async (
   profile: string,
   version: string,
-): Promise<{ readonly id: string; readonly updatedFrom: string | null; readonly fresh: boolean }> => {
+): Promise<{ readonly id: string; readonly updatedFrom: string | null }> => {
   const kept = (await readPreferences(profile)).usage
   const was = typeof kept === 'object' && kept !== null ? (kept as { readonly id?: unknown; readonly version?: unknown }) : {}
   const id = typeof was.id === 'string' && /^[0-9a-f-]{36}$/.test(was.id) ? was.id : randomUUID()
   const last = typeof was.version === 'string' ? was.version : null
   // One that can't be kept is made again next time: usage data is never worth a failure.
   if (id !== was.id || last !== version) await writePreference(profile, 'usage', { id, version }).catch(() => undefined)
-  return { id, updatedFrom: last !== null && last !== version ? last : null, fresh: id !== was.id }
+  return { id, updatedFrom: last !== null && last !== version ? last : null }
 }
 
 /** The system, as PostHog's own SDKs name it. */
@@ -135,12 +134,6 @@ export interface UsageDataOptions {
   readonly allowed: () => boolean
   /** How a request goes: the app's own network; in tests, one that records it. */
   readonly fetch: NonNullable<PostHogOptions['fetch']>
-  /**
-   * Events wait until the switch has been shown (`shown`), as on Althar's
-   * first launch, before the first screen has drawn it; then each goes, if
-   * it is still on. Any still waiting as Althar quits never go.
-   */
-  readonly held?: boolean
   /** How long PostHog's client waits before trying a request again; quicker in tests. */
   readonly retryDelay?: number
 }
@@ -148,8 +141,6 @@ export interface UsageDataOptions {
 export interface UsageData {
   /** Sends an event, if it is one Althar names and the person allows it; anything else is dropped. Never fails. */
   readonly record: (said: unknown) => void
-  /** The switch has been on screen: events held until it was go now, if it is on. */
-  readonly shown: () => void
   /** Lets what is on its way finish, briefly, as Althar quits. */
   readonly stop: () => Promise<void>
 }
@@ -164,8 +155,6 @@ export interface UsageData {
 export const usageData = (options: UsageDataOptions): UsageData => {
   let client: PostHog | undefined
   const sending = new Set<Promise<void>>()
-  /* Events said before the switch was shown, each with when, at most a launch's worth. */
-  let held: Array<{ readonly said: unknown; readonly at: Date }> | null = options.held === true ? [] : null
   const base = {
     $app_version: options.app.version,
     $os: SYSTEMS[options.app.platform] ?? options.app.platform,
@@ -203,15 +192,7 @@ export const usageData = (options: UsageDataOptions): UsageData => {
     sending.add(sent)
   }
   return {
-    record: (said) => {
-      if (held === null) send(said, new Date())
-      else if (held.length < 100) held.push({ said, at: new Date() })
-    },
-    shown: () => {
-      const waiting = held ?? []
-      held = null
-      for (const { said, at } of waiting) send(said, at)
-    },
+    record: (said) => send(said, new Date()),
     stop: async () => {
       await Promise.race([Promise.all(sending), new Promise((resolve) => setTimeout(resolve, 2_000).unref?.())])
       await client?.shutdown(1_000).catch(() => undefined)

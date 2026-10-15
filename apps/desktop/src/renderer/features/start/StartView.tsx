@@ -1,14 +1,12 @@
 import { type ReactNode, useEffect } from 'react'
 
 import type { AgentStatus } from '@althar/contracts'
-import { Button, type RuntimeEntry, RuntimeState, SettingList, UsageData } from '@althar/ui'
+import { Button, type RuntimeEntry, RuntimeState } from '@althar/ui'
 import { Start } from '@althar/ui/screens'
 
-import { useServices } from '../../data/services'
 import { brandOf } from '../../shared/agents'
 import { device, platform } from '../../shared/device'
 import { HomePending } from '../../shared/Pending'
-import { usePreferences } from '../../shared/usePreferences'
 import { AgentAccounts } from '../accounts/AgentAccounts'
 import type { AccountSignInModel } from '../accounts/useAccountSignIn'
 import { BareBar } from '../tabs/TabsFrame'
@@ -19,10 +17,8 @@ import type { StartModel } from './useStart'
 /*
  * Where the window starts. With no project yet, the kit's Start screen: the
  * agents answering round the mark, and the repositories found where people
- * keep code, ticked into the first project (useFirstProject), with the
- * usage data switch under them, so it is seen before anything is sent.
- * Once there are projects, the home, where a new project starts in a tab of
- * its own.
+ * keep code, ticked into the first project (useFirstProject). Once there are
+ * projects, the home, where a new project starts in a tab of its own.
  */
 
 export const text = {
@@ -136,10 +132,6 @@ function First({
   onProject: (projectId: string) => void
 }) {
   const project = useFirstProject()
-  const { preferences, set } = usePreferences()
-  const { host } = useServices()
-  // The switch is on screen now: on a first launch, usage data waited for it.
-  useEffect(() => host.usageShown?.(), [host])
   const make = () =>
     void project.make().then((made) => {
       if (made !== null) onProject(made.id)
@@ -183,11 +175,6 @@ function First({
         onCreate={make}
         creating={project.making}
         {...(error === null ? {} : { error })}
-        privacy={
-          <SettingList>
-            <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={host.doNotTrack === true} />
-          </SettingList>
-        }
         text={text.first()}
         runtimesText={{ missing: `Not installed on ${device.this}` }}
       />

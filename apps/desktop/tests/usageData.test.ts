@@ -163,36 +163,6 @@ describe('sending', () => {
     expect(failing).toHaveBeenCalledTimes(1)
   })
 
-  it('holds events until the switch has been shown, then sends them if it is still on', async () => {
-    const { fetch, requests } = posthog()
-    const usage = sender(() => true, fetch, 'phc_test', { held: true })
-    const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-    usage.record({ name: 'app_opened' })
-    await pause(5)
-    usage.record({ name: 'agent_signed_in', properties: { agent: 'codex', how: 'found' } })
-    await pause(50)
-    expect(fetch).not.toHaveBeenCalled()
-    const shown = Date.now()
-    usage.shown()
-    await pause(5)
-    usage.record({ name: 'project_made', properties: { repositories: 1 } })
-    await usage.stop()
-    // The requests go at once, in any order; each is stamped when it happened, not when it went, so PostHog reads them in order.
-    const events = sent(requests).map((event) => ({ name: event.event, at: Date.parse(String(event.timestamp)) }))
-    expect(events.toSorted((a, b) => a.at - b.at).map((event) => event.name)).toEqual(['app_opened', 'agent_signed_in', 'project_made'])
-    expect(events.find((event) => event.name === 'agent_signed_in')?.at).toBeLessThan(shown)
-
-    // Turned off before it was shown: nothing that waited goes.
-    const off = posthog()
-    let on = true
-    const declined = sender(() => on, off.fetch, 'phc_test', { held: true })
-    declined.record({ name: 'app_opened' })
-    on = false
-    declined.shown()
-    await declined.stop()
-    expect(off.fetch).not.toHaveBeenCalled()
-  })
-
   it('never fails, even when PostHog can’t be reached', async () => {
     const fetch = vi.fn<UsageDataOptions['fetch']>(async () => {
       throw new Error('offline')
@@ -210,8 +180,7 @@ describe('the install', () => {
     const first = await installOf(at, '0.1.0')
     expect(first.id).toMatch(/^[0-9a-f-]{36}$/)
     expect(first.updatedFrom).toBeNull()
-    expect(first.fresh).toBe(true)
-    expect(await installOf(at, '0.1.0')).toEqual({ id: first.id, updatedFrom: null, fresh: false })
+    expect(await installOf(at, '0.1.0')).toEqual({ id: first.id, updatedFrom: null })
     await expect(installOf(profile(), '0.1.0')).resolves.not.toMatchObject({ id: first.id })
     expect(JSON.parse(readFileSync(join(at, 'desktop.json'), 'utf8'))).toEqual({ usage: { id: first.id, version: '0.1.0' } })
   })

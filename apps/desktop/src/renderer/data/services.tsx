@@ -110,8 +110,6 @@ export interface Host {
   readonly platform: string
   /** DO_NOT_TRACK is set where Althar started: usage data is off, whatever its switch says. */
   readonly doNotTrack?: boolean
-  /** Says usage data's switch is on screen: on Althar's first launch, nothing is sent before it is. */
-  readonly usageShown?: () => void
   /** Closes, minimizes, or maximizes and restores the window itself. */
   readonly window: (action: WindowAction) => void
   /** Whether the window is maximized now, for the buttons' maximize or restore. */

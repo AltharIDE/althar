@@ -211,8 +211,7 @@ const preferencesRead = readAppPreferences(locations().profile).then((kept) => {
  * goes before the person's switch is known (and the install is read after
  * them, so its first write can't race a damaged file's), and once the app
  * is ready, as its network needs: from a release build, while the switch is
- * on and DO_NOT_TRACK isn't set. On Althar's first launch, events wait
- * until the window has shown the switch. Its first events: Althar opened,
+ * on and DO_NOT_TRACK isn't set. Its first events: Althar opened,
  * and an update installed when it opens on another version than last time.
  */
 const usage = Promise.all([preferencesRead.then(() => installOf(locations().profile, app.getVersion())), app.whenReady()]).then(
@@ -223,7 +222,6 @@ const usage = Promise.all([preferencesRead.then(() => installOf(locations().prof
       app: { version: app.getVersion(), platform: process.platform, arch: process.arch },
       allowed: () => preferences.usageData && !doNotTrack(process.env),
       fetch: (url, options) => net.fetch(url, options),
-      held: install.fresh,
     })
     sender.record({ name: 'app_opened' })
     if (install.updatedFrom !== null) sender.record({ name: 'update_installed', properties: { from: install.updatedFrom } })
@@ -547,9 +545,6 @@ ipcMain.handle('althar:set-app-icon', async (_event, icon: unknown) => {
   showIcon(icon)
   await writeAppIcon(locations().profile, icon)
 })
-
-// The window has shown usage data's switch: what waited for it may go, if it is on.
-ipcMain.on('althar:usage-shown', () => void usage.then((sender) => sender.shown()))
 
 // The app's own preferences, as kept; and a change to one, kept, then acted on at once. Anything a key can't hold fails, and the window says so.
 ipcMain.handle('althar:preferences', async () => {
