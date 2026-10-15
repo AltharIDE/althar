@@ -372,16 +372,22 @@ never under running work.
   user's Claude Code defaults to bypass, since their own use of it skips every
   check?
 - [ ] **Usage limits in ACP itself.** Researched 15 October 2026
-  ([plan](plans/plan-usage.md)): ACP has no plan windows yet; a quotas RFD is
-  open as [PR #2316](https://github.com/agentclientprotocol/agent-client-protocol/pull/2316)
-  and ACP v2 is a Draft that leaves usage unchanged. Leaning: don't write our
-  own proposal; read each agent's native channel behind one `AccountStatus`
-  (Claude's `_meta` path patched, Codex's app-server), skip the raw provider
-  endpoints, support #2316 upstream and switch agents as adapters advertise
-  it. Open until #2316 is accepted or declined.
-- [ ] **Where plan usage shows.** The home, an app notification or the
-  accounts panel, rather than every coordinator at once? Brainstorm with the
-  person before the surface step of the [plan](plans/plan-usage.md#where-the-person-sees-it).
+  ([plan](plans/plan-usage.md#decision)). ACP has no plan windows yet: a
+  quotas RFD is open as [PR #2316](https://github.com/agentclientprotocol/agent-client-protocol/pull/2316),
+  and ACP v2 is a Draft that leaves usage unchanged. Leaning, one rule for
+  all agents: ACP first; until an adapter speaks it, the agent's own channel
+  (Claude's `_meta` path, patched; Codex's app-server per account); errors
+  only for OpenCode; never a provider endpoint called with credentials taken
+  from an agent (architecture 03, rule 3). Don't write our own ACP proposal
+  unless #2316 is declined. Open until #2316 is accepted or declined.
+- [ ] **Usage warnings and the usage tab.** Wanted: warnings at 50, 25, 10
+  and 5% remaining per account and window, shown once in the open
+  coordinator's Talk room (a notice Althar posts, not a model turn), and a
+  tab for every account on Ctrl/Cmd+U or in the side menu
+  ([plan](plans/plan-usage.md#warnings)). Still open: telling the
+  coordinator agent too, an operating-system notification, the 1-month
+  window (no source yet), and whether to amend rule 3 for endpoint calls
+  (not recommended).
 - [x] **Agent settings that approve before Althar sees.** Settled: every
   session gets settings that make the agent ask, and they win over the user's
   and the repository's own. Claude gets ask rules per session (ask beats allow

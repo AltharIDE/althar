@@ -1,243 +1,272 @@
 # Plan usage plan
 
-> **Temporary.** Research and the plan for showing plan usage (use per window
-> and reset times) from every agent, not architecture: that is
+> **Temporary.** Research and the plan for warning about plan usage (use per
+> window and reset times) from every agent, and for a view of all accounts.
+> Not architecture: that is
 > [03, Usage limits](../architecture/03-agent-runtime-and-auth.md#usage-limits).
 > Delete this file when the last step ships, and move anything that lasted
 > into the architecture docs.
 
-Researched on 15 October 2026 against upstream `main` (`af3023a`). Sources
-are linked and dated; "acc." is the day a page without a date was read.
-Where it matters, a claim is checked against the current default branch of
-the project named, and the commit is given.
+Researched on 15 October 2026 against upstream `main` (`af3023a`). Design and
+decision only: nothing is implemented.
 
-## The questions
+## Goal
 
-1. Can plan usage come over ACP?
-2. Which harnesses support it?
-3. What is ACP v2, and who supports it?
-4. If only some do, should Althar read the providers' API endpoints until
-   every harness does?
+From the person (15 October 2026):
 
-Where the numbers then go (a notification, the coordinators, the settings
-tray) is a product question this plan only prepares for: see
-[Where the person sees it](#where-the-person-sees-it).
+- **Warnings like the harnesses give**, when 50%, 25%, 10% and 5% of a plan
+  window remains.
+- **Windows**: Claude Code 5 hours and 1 week; Codex and OpenCode 5 hours,
+  1 week and 1 month, where the provider has them.
+- **Reaching the person while they work**, through the coordinator that is
+  open, not every project's coordinator at once.
+- **A view of every signed-in account**: a usage tab, opened with Ctrl/Cmd+U
+  or a side-menu entry, listing each subscription and account.
 
-## Answers in short
+## Decision
 
-1. **Not in the protocol yet.** ACP's stable `usage_update` carries context
-   `used`/`size` and `cost`, and its RFD says "Rate limits and quotas are
-   separate concerns that could be addressed in a future RFD". That RFD is
-   open as a pull request, not accepted. Adapters can already send plan
-   windows as extensions (`_meta` or a `_`-prefixed method).
-2. **Claude Code, partly; Codex holds the data but does not send it;
-   OpenCode and Gemini CLI have none to send.** Claude's adapter puts the
-   SDK's rate-limit info in `_meta` on `usage_update`, with a bug that drops
-   it. Codex's adapter has the numbers and prints them as `/status` text.
-3. **v2 is a Draft** (announced 20 July 2026). It changes the turn lifecycle,
-   not usage: `usage_update` is "Unchanged". Claude's adapter serves it behind
-   an env var; Codex's adapter on `main` serves it, its latest release does
-   not; OpenCode and Gemini CLI are v1. **v2 is not what brings plan usage.**
-4. **No raw endpoints for now.** Both agents Althar ships with have a
-   documented native channel that returns the same numbers. The raw HTTP
-   endpoints are undocumented, have changed shape, and Anthropic's terms
-   forbid using Claude OAuth tokens outside its own apps. Use native channels
-   per agent behind one Althar interface, and move each agent to ACP when its
-   adapter ships the accepted extension.
+**ACP first, each agent's own native channel until its adapter speaks ACP,
+and no calls to provider endpoints with credentials Althar took from an
+agent. One rule for all three agents:**
+
+> An account's usage comes from the best source its agent serves **itself**,
+> in this order: (1) the ACP quota feature, once the adapter advertises it;
+> (2) an extension the adapter ships in ACP (today Claude's `_meta`, and
+> Codex's `_account/rate_limits_update` once merged); (3) the agent's
+> documented control channel, which Althar starts for the account with that
+> account's home (Codex's app-server; Claude's Agent SDK); (4) errors only.
+> Sources 1 to 3 give percentages and so warnings. Source 4 gives none: the
+> account shows "no usage data" and Althar warns only when the agent reports
+> the limit as reached, as today. Althar never reads an agent's credentials
+> to call a provider itself.
+
+Per agent, today:
+
+| Agent | Source today | Gives | Moves to ACP when |
+|---|---|---|---|
+| Claude Code | (2) `_meta["_claude/rateLimit"]` on `usage_update`, from sessions Althar runs (patched, see Stages); (3) Agent SDK `usage_EXPERIMENTAL…()` for an account with no session, once a spike shows it is safe | 5 hours, 1 week, per model | `claude-agent-acp` advertises ACP `quota` |
+| Codex | (3) `codex app-server` with the account's `CODEX_HOME`: `account/rateLimits/read` and `…/updated` | 5 hours, 1 week (`primary`/`secondary`), credits | `codex-acp` ships `_account/rate_limits_update` (#524) or `quota` |
+| OpenCode | (4) errors only | Nothing before the limit | OpenCode reports plan usage over ACP (#49693) |
+
+**Why not the API endpoints (the hybrid the person asked about).**
+
+- They are against Althar's own rule: architecture 03 rule 3, "Althar never
+  reads, scrapes, copies, decrypts, exports, uploads, or synchronizes the
+  CLI's credential cache", and the endpoints need the token from that cache.
+  (Verified: the rule is in the repo.)
+- Anthropic's terms say OAuth is "intended exclusively" for Claude Code and
+  native Anthropic apps and forbid intermediating Claude.ai credentials
+  ([legal and compliance](https://code.claude.com/docs/en/legal-and-compliance),
+  acc. 15 Oct).
+- They are undocumented and change: the Claude one moved its data from flat
+  `seven_day_*` keys to `limits[]`, and its 429s do not clear at one call a
+  minute (claims, below).
+- They add nothing for Claude and Codex: the native channels carry the same
+  numbers. For OpenCode they cannot work at all: its sign-in lives in
+  OpenCode's own home (`auth.json`, one entry per provider), which rule 3
+  keeps Althar out of, and OpenCode cannot use a Claude plan (architecture
+  03, "Claude plans in third-party apps").
+
+**What would change this.** If the person decides endpoint calls are worth
+it, that is an architecture decision to amend rule 3 first, and a separate
+read of each provider's terms. It would help OpenCode on a ChatGPT login
+only. Not recommended.
+
+**The 1-month window.** No source found offers one. Codex's snapshot has
+`primary`, `secondary` and `credits`, not a monthly window. OpenCode's own
+Go and Zen plans are said to have limits behind OpenCode's console API
+(claim: issue text). So 1 month ships when an agent reports it, through the
+same `windows` list; nothing is built for it now.
+
+## Warnings
+
+- **Thresholds**: on the share *remaining*: 50, 25, 10 and 5%. Per account
+  and window, each fires once per reset period.
+- **Crossing several at once** (50 → 8%): fire only the lowest crossed.
+- **Re-arming**: when the window's `resetsAt` changes, or use drops below a
+  threshold already fired.
+- **Fires only from a percentage source** (sources 1 to 3). An account on
+  source 4 never gets a threshold warning, and the usage tab says why.
+- **Reached**: a classified `usage_limit` (`failures.ts`) stays the signal
+  that the limit is hit, and keeps pausing and moving work as in
+  architecture 03 and 05.
+- **Own thresholds, not the vendor's.** Claude's SDK has `status:
+  'allowed_warning'` and `surpassedThreshold`, but their cut-offs are
+  Anthropic's. Althar computes its own from the reported use.
+- **Unit unchecked**: whether Claude's `utilization` is 0 to 1 or 0 to 100
+  is not in its type (`sdk.d.ts` 0.3.296), and Codex's `usedPercent` is a
+  whole percent (`account.rs`, `i32`). The first Claude spike settles it.
+
+## Where the person is told
+
+- **One notice per account, window and threshold**, never per coordinator. A
+  limit belongs to an account, so a warning is a fact about the account.
+- **Shown in the open coordinator's Talk room**, the one for the project the
+  person is looking at, as a notice Althar posts itself. It is not a model
+  turn: it costs no usage and the coordinator did not "say" it. Which
+  project is open comes from the window; the notice records which it was
+  shown in.
+- **Nothing open** (the home, the usage tab, another screen): the warning
+  waits and shows as a badge on the usage entry, and goes into the next
+  coordinator the person opens, unless the window has reset by then.
+- **Always findable**: the usage tab shows the same state, so a missed notice
+  is not lost.
+- **Left for later**: telling the coordinator *agent* (so it plans around a
+  nearly empty account), and an operating-system notification when the
+  window is not focused. Both are additions on the same notice.
+
+## The usage tab
+
+- **Entry**: a side-menu item, and Ctrl/Cmd+U. No existing binding for it
+  was found in `apps/` or `packages/`. Check against the shortcut list when
+  building.
+- **Content**: every `AgentAccount` ([03, Several accounts](../architecture/03-agent-runtime-and-auth.md#several-accounts))
+  across Claude Code, Codex and OpenCode, with its name, the plan it is on
+  (`paidBy`), each window's use and reset time, and the source: "reported by
+  Codex", "from Claude's last turn, 10 minutes ago", "no usage data".
+- **An account with no session**: Codex can be read on demand by starting
+  its app-server with the account's `CODEX_HOME`. Claude cannot until the
+  SDK spike; its row shows its last observed windows and their age.
+  OpenCode and API-key accounts show "no usage data" (API keys have no plan
+  windows).
+- **Where it lives**: next to the existing accounts feature
+  (`apps/desktop/src/renderer/features/accounts`). The system-load readout
+  designs in [#111](https://github.com/AltharIDE/althar/pull/111) are about
+  the Mac's CPU and memory, not plan usage; they inform the look, not the
+  content.
+
+## What is verified and what is claimed
+
+**Verified** here, by reading the code (this repository, or an installed or
+cloned copy at the named commit):
+
+| Fact | Evidence |
+|---|---|
+| Althar's rule against reading agents' credentials | `docs/architecture/03-agent-runtime-and-auth.md`, rule 3 |
+| Althar normalizes only context usage and token counts, not plan windows | `packages/provider-adapters/src/events.ts` (`ContextUsage`, `normalizeUsage`) |
+| Limits are recognized from errors, with reset times | `packages/provider-adapters/src/failures.ts` |
+| The pinned Claude adapter 0.88.0 already forwards `rate_limit_info` in `usage_update` `_meta["_claude/rateLimit"]`, only when `lastAssistantTotalUsage !== null` | installed `claude-agent-acp@0.88.0` `dist/acp-agent.js`; same code on `main` at `0c8de13` (14 Oct) `src/acp-agent.ts:7923` |
+| So `registry.ts` and architecture 03 are out of date on Claude ("not forwarded") | the same code |
+| Pinned Codex adapter 2.1.1 merges `account/rateLimits/updated` into session state and sends it nowhere; same on `main` at `aa02d43` (15 Oct) | installed `codex-acp@2.1.1` `dist/index.js` (`handleRateLimitsUpdated`); `src/CodexEventHandler.ts:1241` |
+| OpenCode's ACP code has no rate-limit or quota handling | grep of `packages/cli/src/acp` at `4397ee4` (15 Oct): no match |
+| The Agent SDK type for a window: `SDKRateLimitInfo` with `rateLimitType` five_hour / seven_day / seven_day_opus / seven_day_sonnet, `utilization`, `resetsAt`, `status`; `usage_EXPERIMENTAL…()` returns plan windows, null for API-key, Bedrock and Vertex | `sdk.d.ts` of `@anthropic-ai/claude-agent-sdk@0.3.296` (L5704, L3058) |
+| Codex's window type: `used_percent` (whole number), `window_duration_mins`, `resets_at` | `codex-rs/app-server-protocol/src/protocol/v2/account.rs` at openai/codex `e89b7c4` (15 Oct) |
+| ACP SDK 1.7.0 ships a v2 schema at `PROTOCOL_VERSION = 2`, pointing at `protocol/v2/draft` | a sibling worktree's installed SDK |
+| Accounts are separate homes (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_DATA_HOME`) | architecture 03, Several accounts |
+
+**Read from the ACP documentation** (dated; the page itself is the source):
+
+- v1 is stable; v2 is a Draft announced 20 July 2026 and `usage_update` is
+  "Unchanged" in it
+  ([announcement](https://agentclientprotocol.com/announcements/acp-v2-draft.md),
+  [migration](https://agentclientprotocol.com/protocol/v2/migration.md)).
+- `usage_update` (`used`, `size`, `cost`) is stable in v1 since 5 June
+  ([announcement](https://agentclientprotocol.com/announcements/session-usage-stabilized.md)).
+  Its RFD says "Rate limits and quotas are separate concerns that could be
+  addressed in a future RFD"
+  ([RFD](https://agentclientprotocol.com/rfds/session-usage)).
+- Extensions: `_meta` everywhere, `_`-prefixed methods, support advertised
+  under a namespaced `agentCapabilities._meta` key
+  ([v1](https://agentclientprotocol.com/protocol/v1/extensibility.md),
+  [v2](https://agentclientprotocol.com/protocol/v2/extensibility.md)).
+
+**Reported by research on upstream repositories, not re-checked by hand** (a
+named commit or issue date each; treat as probably right, and re-check
+before building on it):
+
+- Quotas RFD: [PR #2316](https://github.com/agentclientprotocol/agent-client-protocol/pull/2316),
+  opened 6 Oct, no review: a `quota_update`, `quota/read` and `quotaExceeded`
+  error, advertised by a `quota` capability. Also
+  [discussion #2235](https://github.com/agentclientprotocol/agent-client-protocol/discussions/2235)
+  (26 Sep).
+- Who negotiates v2: `claude-agent-acp` 0.90.0 (13 Oct) behind
+  `CLAUDE_AGENT_ACP_EXPERIMENTAL_V2=1`; `codex-acp` on `main` (re-landed
+  13 Oct in [#620](https://github.com/agentclientprotocol/codex-acp/pull/620)),
+  not in 2.2.2 (10 Oct); OpenCode `service.ts` and Gemini CLI: v1.
+  **v2 does not bring plan usage**, so v2 support is not a signal for it.
+- Claude adapter: [#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127)
+  (14 Sep, open), the fix [#1191](https://github.com/agentclientprotocol/claude-agent-acp/pull/1191)
+  closed unmerged 4 Oct; [#625](https://github.com/agentclientprotocol/claude-agent-acp/issues/625):
+  on 2 July a maintainer said they would wait on the gated
+  `usage_EXPERIMENTAL` API. It also renders `/usage` as markdown.
+- Codex adapter: [#227](https://github.com/agentclientprotocol/codex-acp/issues/227)
+  (23 Jun, open), PRs [#334](https://github.com/agentclientprotocol/codex-acp/pull/334),
+  [#426](https://github.com/agentclientprotocol/codex-acp/pull/426),
+  [#524](https://github.com/agentclientprotocol/codex-acp/pull/524) (18 Sep),
+  none merged. The moved repo is `agentclientprotocol/codex-acp`; Althar
+  pins 2.1.1 and 2.2.2 is out.
+- OpenCode: [#49693](https://github.com/anomalyco/opencode/issues/49693)
+  (18 Sep), open, unanswered. Gemini CLI reports no plan usage over ACP
+  (not shipped by Althar).
+- Raw endpoints: Claude `GET api.anthropic.com/api/oauth/usage`
+  (`anthropic-beta: oauth-2025-04-20`, scope `user:profile`), its shape
+  change and 429s ([CodexBar notes](https://raw.githubusercontent.com/steipete/CodexBar/main/docs/claude.md),
+  [claude-code #31637](https://claudeissues.com/issue/31637-bug-api-oauth-usage-endpoint-aggressively-rate-limits-making-usage-monitoring-un),
+  closed "not planned" 1 Jun); Codex `GET chatgpt.com/backend-api/wham/usage`
+  ([CodexBar notes](https://raw.githubusercontent.com/steipete/CodexBar/main/docs/codex.md)).
+  Header names (`anthropic-ratelimit-unified-*`, `x-codex-*`) come from user
+  reports and none are documented. API-key limits are per-minute only
+  ([Anthropic](https://platform.claude.com/docs/en/api/rate-limits),
+  [OpenAI](https://developers.openai.com/api/docs/guides/rate-limits)).
+
+**Only claimed, unverified anywhere:**
+
+- That Claude's `usage_EXPERIMENTAL…()` can run in a side process for an
+  account that has no session without cost to the plan or a visible session.
+- That Codex's app-server can be started per account for a read alone and
+  quit, and how often it may be asked.
+- That OpenCode's Go and Zen plan limits are reachable and wanted.
+- Any 1-month window for Claude or Codex.
 
 ## Matrix
 
-| | Claude Code | Codex | OpenCode | Gemini CLI (not shipped) |
-|---|---|---|---|---|
-| Adapter | `claude-agent-acp` 0.90.0 (Althar pins 0.88.0) | `agentclientprotocol/codex-acp` 2.2.2 (Althar pins 2.1.1) | OpenCode's own ACP, `packages/cli/src/acp/` | `gemini --acp` |
-| Plan windows over ACP today | Partly: `_meta["_claude/rateLimit"]` on `usage_update`, one window per event; dropped if it arrives before the turn's first usage figure ([#1127](https://github.com/agentclientprotocol/claude-agent-acp/issues/1127), open 14 Sep; fix [#1191](https://github.com/agentclientprotocol/claude-agent-acp/pull/1191) closed unmerged 4 Oct). Full windows only as `/usage` markdown | No. The adapter merges `account/rateLimits/updated` into state and sends nothing; `/status` renders text ([`CodexEventHandler.ts`](https://github.com/agentclientprotocol/codex-acp/blob/aa02d43/src/CodexEventHandler.ts#L613-L614), [`CodexCommands.ts`](https://github.com/agentclientprotocol/codex-acp/blob/aa02d43/src/CodexCommands.ts#L572-L615), `aa02d43`, 15 Oct). Open: [#227](https://github.com/agentclientprotocol/codex-acp/issues/227), PRs [#334](https://github.com/agentclientprotocol/codex-acp/pull/334), [#426](https://github.com/agentclientprotocol/codex-acp/pull/426), [#524](https://github.com/agentclientprotocol/codex-acp/pull/524) | No. Request [#49693](https://github.com/anomalyco/opencode/issues/49693) (18 Sep) open, unanswered | No: a 429 becomes ACP error 429 |
-| Context/cost `usage_update` | `used`, `size`, `cost` | `used`, `size`; no cost | `used`, `size`, `cost` | `used`, `size`; no cost |
-| ACP version | v1; v2 with `CLAUDE_AGENT_ACP_EXPERIMENTAL_V2=1` (0.90.0, 13 Oct) | v1 and v2 from the client's `initialize` on `main` ([#620](https://github.com/agentclientprotocol/codex-acp/pull/620), 13 Oct); 2.2.2 (10 Oct) has none | v1 | v1 |
-| Native channel | Agent SDK `rate_limit_event` / `SDKRateLimitInfo` ({`status`, `rateLimitType` five_hour, seven_day, …, `utilization`, `resetsAt`}), and `usage_EXPERIMENTAL_…()` with `rate_limits.limits[]` (all windows; `null` on API keys); statusline `rate_limits` ([docs](https://code.claude.com/docs/en/statusline), acc.) | App-server `account/rateLimits/read` and `account/rateLimits/updated`: `primary`/`secondary` {`usedPercent`, `windowDurationMins`, `resetsAt`}, `planType`, `credits` ([docs](https://learn.chatgpt.com/docs/app-server), acc.) | None for the upstream plans; only provider errors | Code Assist `retrieveUserQuota`, used by `/stats`, not in ACP |
-| API endpoint option | `GET api.anthropic.com/api/oauth/usage` (undocumented, scope `user:profile`, heavy 429s); `anthropic-ratelimit-unified-*` headers (undocumented); API keys: per-minute headers only | `GET chatgpt.com/backend-api/wham/usage` (undocumented); `x-codex-*` headers; API keys: per-minute `x-ratelimit-*` | Depends on the provider behind it | `retrieveUserQuota`; individual OAuth ended June 2026 |
+| | Claude Code | Codex | OpenCode |
+|---|---|---|---|
+| Adapter now / latest | `claude-agent-acp` 0.88.0 / 0.90.0 | `codex-acp` 2.1.1 / 2.2.2 | OpenCode's own |
+| Plan windows over ACP today | Partly: `_meta` on `usage_update`, one window per event, dropped before a turn's first usage | No: held, not sent | No |
+| Context and cost `usage_update` | `used`, `size`, `cost` | `used`, `size` | `used`, `size`, `cost` |
+| ACP version | v1 (v2 opt-in) | v1 and v2 on `main` | v1 |
+| Native channel | Agent SDK `rate_limit_event`; `usage_EXPERIMENTAL…()`; statusline `rate_limits` ([docs](https://code.claude.com/docs/en/statusline), acc.) | App-server `account/rateLimits/read` and `…/updated` ([docs](https://learn.chatgpt.com/docs/app-server), acc.) | None |
+| Raw endpoint | Undocumented; credentials rule and terms forbid | Undocumented; credentials rule forbids | None usable |
+| Windows | 5 hours, 1 week, per model | 5 hours, 1 week | none yet |
 
-Sources behind the rows:
+## Stages
 
-- Claude adapter: [`acp-agent.ts` at `0c8de13`](https://github.com/agentclientprotocol/claude-agent-acp/blob/0c8de13/src/acp-agent.ts#L7923-L7935) (14 Oct); issue [#625](https://github.com/agentclientprotocol/claude-agent-acp/issues/625), where a maintainer said on 2 Jul they would wait on the gated `usage_EXPERIMENTAL` API; an `_claude/usage` extension method (#915) was withdrawn on 25 Jul. SDK types: [`sdk.d.ts` 0.3.296](https://unpkg.com/@anthropic-ai/claude-agent-sdk@0.3.296/sdk.d.ts).
-- Codex native: `account/rateLimits/*` in `codex-rs/app-server-protocol/src/protocol/common.rs` of openai/codex at `e89b7c4` (15 Oct).
-- OpenCode: [`turn.ts` at `4397ee4`](https://github.com/anomalyco/opencode/blob/4397ee4/packages/cli/src/acp/turn.ts#L328-L345), [`service.ts`](https://github.com/anomalyco/opencode/blob/dev/packages/cli/src/acp/service.ts) (`protocolVersion: 1`).
-- Gemini CLI: [`acpSession.ts` at `06d3298`](https://github.com/google-gemini/gemini-cli/blob/06d3298/packages/cli/src/acp/acpSession.ts#L526-L531) (14 Oct).
-- Endpoints: [CodexBar docs for Claude](https://raw.githubusercontent.com/steipete/CodexBar/main/docs/claude.md) and [Codex](https://raw.githubusercontent.com/steipete/CodexBar/main/docs/codex.md) (acc.); [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance) (acc.); the 429 behaviour of the Claude endpoint, [claude-code #31637](https://claudeissues.com/issue/31637-bug-api-oauth-usage-endpoint-aggressively-rate-limits-making-usage-monitoring-un) (mirror; closed "not planned" 1 Jun); header names are from user reports ([claude-code #12829](https://github.com/anthropics/claude-code/issues/12829), [#55333](https://github.com/anthropics/claude-code/issues/55333)), and none are documented; the Codex headers, [multi-ai-router #184](https://github.com/developerz-ai/multi-ai-router/issues/184) (10 Oct); API-key limits, [Anthropic](https://platform.claude.com/docs/en/api/rate-limits) and [OpenAI](https://developers.openai.com/api/docs/guides/rate-limits) (acc.).
+One pull request each. Stages 1 to 4 are Althar's; 5 to 7 are upstream and
+run in parallel.
 
-## ACP, in detail
-
-### Revisions
-
-- **v1 is the only stable protocol version.**
-- **v2 is a Draft**, announced 20 July 2026: "various pieces can, and will,
-  change before stabilization… gate your implementation behind the version
-  negotiation AND feature flags"
-  ([announcement](https://agentclientprotocol.com/announcements/acp-v2-draft.md)).
-  Nothing since stabilizes it (latest posts 17 Sep and 12 Oct). Its tracking
-  RFD ([v2 proposal](https://agentclientprotocol.com/rfds/v2/overview.md)) is
-  Active since 2 July: a turn ends with `state_update` instead of the
-  `session/prompt` response, session updates become upserts, client fs and
-  terminal and session modes go, capabilities merge into one `capabilities`
-  object.
-- **Negotiation**: the client sends the highest `protocolVersion` it
-  supports; the agent echoes it or answers with its own latest. A client that
-  sends 2 to a v1 agent is answered 1
-  ([migration guide](https://agentclientprotocol.com/protocol/v2/migration.md),
-  undated). The migration guide lists `usage_update` as "Unchanged".
-- **Releases**: schema `v1.25.0` is stable; `v2.0.0-alpha.8` (9 Oct) is a
-  prerelease
-  ([releases](https://github.com/agentclientprotocol/agent-client-protocol/releases)).
-  The npm SDK ships v2 as `@agentclientprotocol/sdk/experimental/v2`
-  (`PROTOCOL_VERSION = 2`, from 1.3.0 on 21 Jul; root export still 1)
-  ([registry](https://registry.npmjs.org/@agentclientprotocol/sdk)). Althar
-  pins SDK 1.5.1 and speaks v1.
-
-### Usage in the protocol
-
-- `usage_update` is **stable in v1** since 5 June
-  ([announcement](https://agentclientprotocol.com/announcements/session-usage-stabilized.md),
-  [RFD](https://agentclientprotocol.com/rfds/session-usage)): `used`, `size`,
-  optional `cost` `{amount, currency}`. Althar normalizes it to
-  `ContextUsage` (`packages/provider-adapters/src/events.ts`).
-- `PromptResponse.usage` (per-turn tokens) is a separate **Draft**
-  ([End-Turn Token Usage](https://agentclientprotocol.com/rfds/end-turn-token-usage.md));
-  implementations disagree on whether it is per turn or cumulative
-  ([#1860](https://github.com/agentclientprotocol/agent-client-protocol/issues/1860),
-  open). `events.ts` already reads it as `TokenUsage`; it is context and token
-  accounting, not plan windows.
-- **Plan windows**, three open items:
-  - [PR #2316 "quotas & limits"](https://github.com/agentclientprotocol/agent-client-protocol/pull/2316)
-    (opened 6 Oct, updated 8 Oct, no comments, not in the RFD index): a
-    `quota_update` session update carrying a full snapshot, a `quota/read`
-    request, a structured `quotaExceeded` error, advertised by an agent
-    capability `quota: {}` (and `session.quota: {}` from the client in v1).
-    A snapshot holds pools of meters with `usedPercent`, `used`, `limit`,
-    `remaining`, `window`, `resetsAt`. It surveys 11 agents.
-  - [Discussion #2235](https://github.com/agentclientprotocol/agent-client-protocol/discussions/2235)
-    (26 Sep): a `limits[]` field on `usage_update`.
-  - [Issue #890](https://github.com/agentclientprotocol/agent-client-protocol/issues/890)
-    shows the risk of waiting: Gemini and Codex put token counts under
-    `_meta.quota`, which is not plan quota.
-
-### Extending without waiting
-
-([v1](https://agentclientprotocol.com/protocol/v1/extensibility.md) and
-[v2](https://agentclientprotocol.com/protocol/v2/extensibility.md)
-extensibility, undated.) `_meta` is allowed on every message, including
-capabilities. Method names starting with `_` are extension methods, and a
-receiver "SHOULD ignore unrecognized notifications". Support is advertised
-under a namespaced key of `agentCapabilities._meta` (v1) or
-`capabilities._meta` (v2). So a vendor notification is legal now, and
-Althar already relies on one extension (the JetBrains AIR `sessionFailure`).
-
-## What is possible today
-
-| Agent | Today, with no upstream change | Needs upstream or a patch |
-|---|---|---|
-| Claude Code | Read `_meta["_claude/rateLimit"]` from `usage_update`: works, unreliable (first-window drop, one window per event). Or run the Agent SDK's `usage_EXPERIMENTAL…()` in a side process: full windows, gated API | Fix of #1127 (or Althar's patch); structured forwarding of all windows |
-| Codex | A second `codex app-server` connection for `account/rateLimits/read` plus the `updated` notification; account is the user's own `~/.codex` login | PR #524 (`_account/rate_limits_update`) or the accepted ACP extension |
-| OpenCode | Nothing for the upstream plan; show provider errors as now | #49693; there is nothing to forward until OpenCode reads a plan |
-| API keys (all) | Per-minute headers only; no plan windows exist | Nothing |
-
-Two claims in the repo are stale or imprecise and should be corrected with
-the first follow-up:
-
-- `registry.ts` (Claude note) and architecture 03 (Claude row, and "ACP does
-  not report limits") say the adapter doesn't forward limits. Since the
-  adapter's `398f763` (5 Jun) it forwards one window per event in `_meta`;
-  check that against the pinned 0.88.0 before rewording.
-- Architecture 03 plans a Claude adapter patch that sends an ACP extension
-  notification, and a Codex app-server side connection. The research confirms
-  both are still needed; the patch can be much smaller than first thought,
-  because the `_meta` path exists and its drop condition is a one-line fix.
-
-## Recommendation
-
-**Where plan usage comes from now:** per-agent native channels behind one
-Althar interface, not raw endpoints.
-
-1. Define `AccountStatus` (already in architecture 03) as Althar's own
-   model and fill it from a **source** per agent: `acp-meta` (Claude, the
-   `_meta` path, patched), `app-server` (Codex), `none` (OpenCode, API keys).
-   The UI and the coordinator read only `AccountStatus`, never a source.
-2. **Do not read the raw provider endpoints by default.**
-   - Claude: Anthropic's terms say OAuth is "intended exclusively" for Claude
-     Code and native Anthropic apps and forbid intermediating Claude.ai
-     credentials; the endpoint also rate-limits hard (users see 429 at one
-     call a minute) and its shape already changed (`limits[]` replaced flat
-     `seven_day_*` keys, per the `ccusage` 0.3.1 package of 11 Oct).
-   - Codex: undocumented, a second path is in use, and `primary` is not
-     always the five-hour window. Reading it would add nothing over
-     app-server, which Codex documents.
-   - Keep an endpoint as a documented, off-by-default fallback only if a
-     native channel breaks; classify windows by duration, not slot.
-3. **Migration**: when the ACP quota RFD is accepted and an adapter
-   advertises it, switch that agent's source to `acp` and delete its side
-   channel. Until then each source is replaceable because only `AccountStatus`
-   leaves the adapter package.
-4. Keep error-based detection (`failures.ts`) as the floor for every agent:
-   it needs no channel and already yields `usage_limit` and a `resetsAt`.
-
-Why not wait for ACP: no adapter ships the extension, #2316 has no review,
-and v2 does not change usage, so v2 support is no signal for it. Why not use
-endpoints: the terms, the instability and the 429s above; the native channels
-carry the same numbers.
-
-## Staged follow-ups
-
-One pull request each, in order. The first three are Althar's; 4 to 6 are
-upstream and can run in parallel.
-
-1. **Model and Codex source.** `AccountStatus` and its windows in
-   `packages/provider-adapters`; a Codex source from app-server (`read` on
-   connect, `updated` notifications); correct the registry notes and
-   architecture 03 where they are stale. Tests with a fake app-server.
-2. **Claude source.** Read `_meta["_claude/rateLimit"]` in `events.ts` (a new
-   event beside `ContextUsage`); carry Althar's small adapter patch for the
-   #1127 drop; accumulate one window per `rateLimitType`. Bump the pinned
-   adapter after checking 0.88.0 against 0.90.0.
-3. **Surface.** Runtime keeps `AccountStatus` per `ProviderPrincipal` and
-   emits changes; a threshold (warning at the SDK's `allowed_warning`, or a
-   chosen percent; `limited` on `rejected` or a classified `usage_limit`).
-   Wiring to the pause and move-on logic in architecture 05 comes here.
-4. **Upstream: Claude.** Offer the #1127 fix again, and a structured
-   forwarding of all windows.
-5. **Upstream: Codex.** Review PR #524 (or its successor) with the
-   `AccountStatus` shape in mind; say what Althar needs: window duration,
-   `planType`, per-`limitId` data.
-6. **Upstream: ACP.** Comment on PR #2316 with the matrix above and the
-   `AccountStatus` fields we need; propose nothing new unless it is
-   rejected. Reconsider an Althar-authored RFD only then. Close the
-   open-questions item when #2316 is accepted or declined.
-7. **Switch to ACP** per agent, as adapters advertise `quota` (and v1 or v2,
-   whichever the adapter negotiates: the capability does not depend on the
-   version).
-
-## Where the person sees it
-
-Not decided; this plan produces the data only. The brainstorm to hold with
-the person before step 3:
-
-- **The coordinator.** One message per coordinator would repeat on every
-  project at once, since a limit belongs to an account. If it speaks, one
-  place should: the home, not each project's coordinator.
-- **An app notification** (operating-system) when a window crosses a
-  threshold or an account is limited, once per account and window.
-- **A readout** in the settings tray or accounts panel, always there and
-  calm, next to the accounts it belongs to
-  ([Connections panel](integrations.md) is the nearest existing shape; the
-  [usage readout prototypes](https://github.com/AltharIDE/althar/pull/111)
-  are the starting designs).
-- The deciding facts: the data is per account, arrives only after a turn
-  (Claude) or on demand (Codex), and is missing for OpenCode and API keys.
-  The surface must show "no data" without alarm.
+1. **Model and Codex source.** `AccountStatus` with its `windows`
+   (`provider-adapters`), a Codex source (app-server with the account's
+   home), the threshold rule above as a pure function with tests (each
+   threshold once, skipping, re-arming at reset), and a fake app-server.
+   Correct the stale notes in `registry.ts` and architecture 03.
+2. **Claude source.** Read `_meta["_claude/rateLimit"]` in `events.ts` as a
+   new event beside `ContextUsage`; keep a window per `rateLimitType`;
+   carry a patch for #1127 until upstream fixes it. Settle the `utilization`
+   unit. Spike `usage_EXPERIMENTAL…()` for accounts with no session.
+3. **Notices.** The runtime holds `AccountStatus` per account and posts one
+   notice per account, window and threshold into the open coordinator's
+   Talk room; a badge when none is open.
+4. **The usage tab.** Ctrl/Cmd+U and the side-menu entry; every account, its
+   windows, its source and age.
+5. **Upstream: Claude adapter.** Offer the #1127 fix again; ask for all
+   windows to be forwarded.
+6. **Upstream: Codex adapter.** Review PR #524 with `AccountStatus`'s needs
+   (window length, plan, per limit id).
+7. **Upstream: ACP and OpenCode.** Comment on PR #2316 with this matrix and
+   `AccountStatus`; ask OpenCode on #49693 for the same. Write our own
+   proposal only if #2316 is declined.
+8. **Move to ACP**, agent by agent, as adapters advertise `quota`. Drop that
+   agent's side channel. Because only `AccountStatus` leaves `provider-adapters`,
+   nothing above it changes.
 
 ## Risks
 
-- All adapter claims are of main at 15 October; ACP and the adapters move
-  weekly. Re-check before each step.
-- The Claude `_meta` key is a private convention (`_claude/rateLimit`); it
-  may change when #2316 lands.
-- Codex's second app-server connection reads the user's own login; it must not
-  refresh or write tokens.
-- Windows are not fixed slots; classify by duration and type.
+- Everything upstream moves weekly; re-check a claim before building on it.
+- `_claude/rateLimit` is a private key and may change when #2316 lands.
+- The Claude side query (stage 2) may be refused or cost usage; if so,
+  idle Claude accounts show their last observed windows and no more.
+- A Codex app-server started for a read must not refresh or write tokens
+  beyond what Codex itself does.
+- Windows are not fixed slots: classify by duration and type, not by
+  `primary` or `secondary`.
