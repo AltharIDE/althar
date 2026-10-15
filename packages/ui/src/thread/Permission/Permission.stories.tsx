@@ -5,6 +5,7 @@ import { ALLOWED, BY_RULE, MANY, PROJECT, REQUESTS, STAGING } from '../../fixtur
 import { SCRIPT } from '../../fixtures/longCommand'
 import { OPUS } from '../../fixtures/models'
 import { AllowedBy, Decision, PermissionScope } from '../../foundations/vocabulary'
+import { LinkButton } from '../../primitives/LinkButton/LinkButton'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Allowed, Permission, Permissions } from './Permission'
 import { States, statesOn } from '../../storybook/States'
@@ -85,17 +86,28 @@ export const AllowAlwaysByPrefix: Story = {
   },
 }
 
-/** Kept for you by the always-ask list: an allow rule wouldn't hold, so Allow always isn't offered. Never allow is, by each scope. */
+/**
+ * Kept for you by the always-ask list: an allow rule wouldn't hold, so Allow always isn't offered. Never allow is, by each scope.
+ * Under the answers, the consumer says why, with a way out.
+ */
 export const HeldForYou: Story = {
   args: {
     offers: [Decision.AllowOnce, Decision.AllowAlways, Decision.Deny, Decision.DenyAlways],
     scopes: { [Decision.AllowAlways]: [], [Decision.DenyAlways]: [PermissionScope.Exact, PermissionScope.Prefix, PermissionScope.Kind] },
     defaultDecision: Decision.DenyAlways,
+    held: (
+      <>
+        Meridian always asks you about this, so there’s no “always allow”.{' '}
+        <LinkButton onClick={fn()}>Allow everything on this task</LinkButton>
+      </>
+    ),
   },
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
     await expect(c.queryByRole('radio', { name: /Yes, and always allow/ })).toBeNull()
     await expect(c.getByRole('combobox', { name: 'What to never allow' })).toBeInTheDocument()
+    await expect(c.getByText(/so there’s no “always allow”/)).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'Allow everything on this task' })).toBeInTheDocument()
   },
 }
 

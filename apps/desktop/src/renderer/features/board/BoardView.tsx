@@ -70,6 +70,8 @@ export const text = {
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   stopped: 'No agent is working on it',
+  /** At a card's foot while everything its task asks is allowed, by its own switch or its project's. */
+  unrestricted: 'Unrestricted',
   /** A plain task at work: no steps worth showing, and nothing of its own yet. */
   working: 'Working',
   /** A plain task that finished, waiting to be seen. */
@@ -216,6 +218,27 @@ const findingsOf = (reviewing: ReviewBrief) => {
 
 /** The card's own props, without how it opens. */
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
+
+/** What a task that allows everything it asks says at its foot: on its card, and in line up next, where it will start so. */
+const unrestricted = (work: BoardTask): ReactNode => (work.allowEverything === true ? <Fact tone="warm">{text.unrestricted}</Fact> : null)
+
+/** A card whose task allows everything it asks says so at its foot, after what it says there already. */
+export const unrestrictedOf = (card: Card, work: BoardTask): Card => {
+  const fact = unrestricted(work)
+  if (fact === null) return card
+  return {
+    ...card,
+    foot:
+      card.foot == null ? (
+        fact
+      ) : (
+        <>
+          {card.foot}
+          {fact}
+        </>
+      ),
+  }
+}
 
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string): Card => {
@@ -454,6 +477,7 @@ export function BoardView({
                 reason={
                   startsAt === null ? text.held : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
                 }
+                foot={unrestricted(work)}
                 onOpen={() => onOpen(work.threadId)}
                 text={{ task: unnamed }}
               />
@@ -464,7 +488,7 @@ export function BoardView({
 
       <BoardColumn lane={BoardLane.Running} count={lanes.running.length}>
         {lanes.running.map((work) => (
-          <BoardCard key={work.taskId} {...runningCardOf(work, now, name)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard key={work.taskId} {...unrestrictedOf(runningCardOf(work, now, name), work)} onOpen={() => onOpen(work.threadId)} />
         ))}
       </BoardColumn>
 
@@ -473,7 +497,7 @@ export function BoardView({
           ask.waiting !== null ? (
             <BoardCard
               key={ask.waiting.task.taskId}
-              {...waitingCardOf(ask.waiting, name)}
+              {...unrestrictedOf(waitingCardOf(ask.waiting, name), ask.waiting.task)}
               onOpen={() => onOpen(ask.waiting.task.threadId)}
             />
           ) : (
@@ -481,7 +505,7 @@ export function BoardView({
           ),
         )}
         {lanes.ready.map((work) => (
-          <BoardCard key={work.taskId} {...readyCardOf(work)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard key={work.taskId} {...unrestrictedOf(readyCardOf(work), work)} onOpen={() => onOpen(work.threadId)} />
         ))}
       </BoardColumn>
 
