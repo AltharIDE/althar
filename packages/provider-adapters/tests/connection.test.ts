@@ -442,6 +442,26 @@ describe('AgentConnection', () => {
       ),
     )
 
+    it.live('runs several commands at once, each asking as a tool call of its own, and says what was chosen for each', () =>
+      withConnection(
+        fake,
+        (connection, permissions) =>
+          Effect.gen(function* () {
+            const session = yield* connection.newSession({ cwd: '/tmp', mode: 'ask' })
+            const events = yield* Stream.runCollect(session.prompt(`${scenarios.runEach}make deploy; ./deploy.sh`))
+            assert.strictEqual(text(events), 'chosen=allow_once,allow_once')
+            assert.deepStrictEqual(
+              (yield* Ref.get(permissions)).map((request) => [request.toolCallId, request.rawInput]),
+              [
+                ['run-1', { command: 'make deploy' }],
+                ['run-2', { command: './deploy.sh' }],
+              ],
+            )
+          }),
+        allow,
+      ),
+    )
+
     it.live("picks the rejection that carries on, by the agent's option meanings", () =>
       Effect.gen(function* () {
         const { events } = yield* turn(scenarios.commandChoices, reject)

@@ -1,8 +1,11 @@
+/* as the task's face holds its thread: the column centred in room that is measured, so what is wider than the words, a lead's screenshots, centres on them */
 .frame {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
   gap: 0;
   min-height: 120px;
+  container-type: inline-size;
 }
 .withPanel {
   grid-template-columns: minmax(0, 1fr) minmax(360px, 44%);

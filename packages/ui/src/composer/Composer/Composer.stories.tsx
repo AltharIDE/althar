@@ -427,6 +427,15 @@ export const DictationDownloadingHidden: Story = {
 export const DictationWriting: Story = {
   render: () => <Example dictation={{ elapsed: null, busy: true, onStart: () => {}, onStop: () => {} }} />,
 }
+/** Back to a composer whose dictation was written down while you were away: the words are there, with a quiet line saying so. */
+export const DictatedWhileAway: Story = {
+  render: () => (
+    <Example
+      initial="Keep the limiter where it is. Also check the webhook retry path."
+      dictation={{ elapsed: null, arrived: true, onStart: () => {}, onStop: () => {} }}
+    />
+  ),
+}
 /** What floats on the edge sits above the tray, not over it. */
 export const DictationTrayAndListening: Story = {
   render: () => (
