@@ -999,8 +999,9 @@ describe('a merged task with commits after its pull request', () => {
         assert.isTrue(
           (yield* notices(task.threadId)).some(
             (notice) =>
-              notice.title === 'Left out 1 commit after PR #1.' &&
-              notice.description === "It stays on althar/add-a-retry, in the task's worktree. What's committed after counts again.",
+              notice.title === 'Abandoned 1 commit after PR #1.' &&
+              notice.description ===
+                "The task stays merged. The commit stays on althar/add-a-retry, in the task's worktree; what's committed after counts again.",
           ),
         )
         // Pressed again, there is nothing to leave out.
@@ -1017,7 +1018,7 @@ describe('a merged task with commits after its pull request', () => {
   )
 
   it.live(
-    'settles an open one as done once the person leaves them out',
+    'settles an open one whose pull request merged as done once the person abandons it, leaving them out',
     () => {
       const { working, bare, github } = onGitHub()
       return Effect.gen(function* () {
@@ -1038,8 +1039,8 @@ describe('a merged task with commits after its pull request', () => {
         yield* until(cards(task.projectId), (all) => all[0]?.phase === 'ready')
         assert.strictEqual((yield* taskRow(task.taskId))?.state, 'open')
         const queries = yield* Queries
-        // Its lead's session is still there, between turns, so stopping it is offered as ever.
-        assert.deepStrictEqual((yield* queries.thread(task.threadId)).task.actions, ['stop', 'leaveOut', 'abandon'])
+        // Its lead's session is still there, between turns, so stopping it is offered as ever; abandoning it leaves the commit out.
+        assert.deepStrictEqual((yield* queries.thread(task.threadId)).task.actions, ['stop', 'leaveOut'])
 
         yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
         yield* until(cards(task.projectId), (all) => all[0]?.phase === 'settled')
@@ -1076,18 +1077,19 @@ describe('a merged task with commits after its pull request', () => {
         // The commit left out is still on the task's first branch.
         assert.strictEqual(git(task.path, 'log', '-1', '--format=%s', 'althar/add-a-retry^'), 'Left out')
 
-        // Closed without merging, its next has all of the closed one, and what came after what was left out.
+        // Closed without merging, it isn't merged: abandoning it abandons it, so nothing is left out.
         github.close(2)
         yield* (yield* Changes).refresh(task.taskId)
         yield* until(cards(task.projectId), (all) => all[0]?.change?.state === 'closed')
-        commitIn(task.path, 'left.txt', 'Left out again')
-        yield* until(cards(task.projectId), (all) => all[0]?.unshipped != null)
-        yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
-        yield* until(cards(task.projectId), (all) => all[0]?.unshipped == null)
         commitIn(task.path, 'kept.txt', 'Kept again')
+        yield* until(cards(task.projectId), (all) => all[0]?.unshipped?.commits === 1)
+        const actions = (yield* (yield* Queries).thread(task.threadId)).task.actions
+        assert.isTrue(actions.includes('abandon') && !actions.includes('leaveOut'))
+        yield* tasks.leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
         yield* until(cards(task.projectId), (all) => all[0]?.unshipped?.commits === 1)
         yield* runs.publish(task.taskId)
         assert.strictEqual(github.changes[2]?.source, 'althar/add-a-retry-3')
+        // Its next has all of the closed one, and what came after it, and still nothing left out before.
         assert.strictEqual(git(bare, 'log', '--format=%s', 'main..althar/add-a-retry-3'), 'Kept again\nKept')
         assert.strictEqual(git(bare, 'diff', '--name-only', 'main', 'althar/add-a-retry-3'), 'kept.txt')
       }).pipe(Effect.provide(runtimeWith(github)))

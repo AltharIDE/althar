@@ -442,9 +442,10 @@ export class Changes extends Context.Service<
      */
     settleIfMerged(taskId: string): Effect.Effect<void, unknown>
     /**
-     * Leaves out the commits after the task's last pull requests that are in
-     * none yet, as the person says (ADR-034): they stay on its branch, and it
-     * settles without them, done where every pull request merged.
+     * Leaves out the commits after a merged task's last pull requests that
+     * are in none yet, as the person abandoning it says (ADR-034): they stay
+     * on its branch, and it settles without them, done. Nothing for an open
+     * task with a pull request that didn't merge, or one abandoned.
      */
     leaveOut(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /**
@@ -2603,12 +2604,12 @@ export class Changes extends Context.Service<
         })
 
       /**
-       * The person leaves out the commits after the task's last pull requests
-       * that are in none yet (ADR-034): where each worktree is now is kept,
-       * so they are history and only what is committed after counts again.
-       * They stay on its branch, in its worktree, as abandoning keeps them.
-       * Then it settles as a merge does: done where every pull request of it
-       * merged, its settled time kept where it was done already.
+       * The person abandons a merged task, and so leaves out the commits
+       * after its last pull requests that are in none yet (ADR-034): where
+       * each worktree is now is kept, so they are history and only what is
+       * committed after counts again. They stay on its branch, in its
+       * worktree, as abandoning keeps them. Then it settles as a merge does:
+       * done, its settled time kept where it was done already.
        */
       const leaveOut = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         Effect.gen(function* () {
@@ -2619,6 +2620,14 @@ export class Changes extends Context.Service<
             SELECT k.project_id, t.id AS thread_id, k.state, k.revision FROM tasks k
             JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${input.taskId}`
           if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
+          // Open, it is merged only where each repository's latest pull request is: else abandoning it is abandoning, not this.
+          if (task.state === 'open') {
+            const seen = (yield* Effect.forEach(yield* linksOf(input.taskId), (link) =>
+              Effect.option(decodeSnapshot(link.snapshot)),
+            )).flatMap((one) => (Option.isSome(one) ? [one.value] : []))
+            const latest = latestOf(seen)
+            if (latest.length === 0 || latest.some((one) => one.state !== 'merged')) return
+          } else if (task.state !== 'done') return
           const left: Array<{ readonly repository: string; readonly branch: string; readonly at: string; readonly commits: number }> = []
           for (const one of after) {
             const at = yield* commitOf(one.path, 'HEAD')
@@ -2645,13 +2654,13 @@ export class Changes extends Context.Service<
           yield* addItem({ projectId: task.projectId, threadId: task.threadId }, 'notice', {
             source: 'runtime',
             severity: 'info',
-            title: `Left out ${after
+            title: `Abandoned ${after
               .map(
                 (one) =>
                   `${commitsWord(one.commits.length)} after ${one.change === null ? 'where its branch started' : nameOf(one.change)}${several ? ` in ${one.name}` : ''}`,
               )
               .join(', ')}.`,
-            description: `${commits === 1 ? 'It stays' : 'They stay'} on ${after.map((one) => one.branch).join(' and ')}, in the task's worktree. What's committed after counts again.`,
+            description: `The task stays merged. ${commits === 1 ? 'The commit stays' : 'They stay'} on ${after.map((one) => one.branch).join(' and ')}, in the task's worktree; what's committed after counts again.`,
           })
           if (task.state === 'open') yield* settleIfDone(input.taskId, { actorId: input.envelope.actorId })
           yield* touchCard(input.taskId)

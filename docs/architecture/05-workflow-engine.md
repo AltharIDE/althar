@@ -267,16 +267,18 @@ stateDiagram-v2
   draft again, its plan proposed anew and held. Nothing starts on its own.
   While a task is abandoned no agent starts on it; writing to it reopens it
   first, refused as Reopen is, and what was written is the lead's first word.
-- **Leave these commits out** applies while commits after a task's last
-  pull request are in none yet and no round of work or agent's turn may add
-  to them, a merged task's too, which they put in Needs you
+- **Abandon, on a merged task**, leaves out the commits after its last pull
+  request that are in none yet, which put it in Needs you, while no round
+  of work or agent's turn may add to them: `actionsOf` offers `leaveOut` in
+  place of `abandon` for a `done` task, and for an open one whose pull
+  requests all merged
   ([ADR-034](../decisions/034-a-task-goes-back-to-work-and-ships-again.md)).
+  The menu says Abandon for both, and the dialog that it stays merged.
   Where each worktree is is kept in a ref of Althar's, and only what is
-  committed after counts again; the task settles as a merge does, `done`
-  where every pull request merged, at the time it first settled where it
-  had one. The commits stay on its branch, in its worktree. Commits the
-  default branch has already, merged in or cherry-picked under another
-  hash, never count.
+  committed after counts again; the task settles as a merge does, `done`,
+  at the time it first settled where it had one. The commits stay on its
+  branch, in its worktree. Commits the default branch has already, merged
+  in or cherry-picked under another hash, never count.
 
 ### Rounds of work after the plan
 

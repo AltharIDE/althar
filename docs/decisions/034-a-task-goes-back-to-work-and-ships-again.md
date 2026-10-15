@@ -129,10 +129,14 @@
     pull request.
   - **Whatever puts a task before the person, the task offers a way out of.**
     Commits after its pull requests are what put a merged task in Needs you,
-    so its menu offers to **Leave these commits out**, beside the new pull
-    request (`actionsOf` says so, as for everything a task's menu offers). A
-    task stays `done`, or an open one whose pull requests all merged settles
-    as `done` as a merge does; its settled time is kept where it had one.
+    so its menu offers **Abandon**, beside the new pull request, as every
+    task's does: one way to take a task off the person's plate. Abandoning a
+    merged task leaves those commits out (`leaveOut`, which `actionsOf`
+    offers in place of `abandon`, as it says everything a task's menu
+    offers), and Abandon says so. A task stays `done`, or an open one whose
+    pull requests all merged, each repository's latest, settles as `done` as
+    a merge does; its settled time is kept where it had one. An open task
+    with a pull request open or closed abandons as ever.
     The commits stay on its branch, in its worktree, as abandoning keeps
     them: Althar keeps where each worktree was, in a ref of its own
     (`refs/althar/left-out/<worktree>`), and only what is committed after it
@@ -140,8 +144,8 @@
     starts from the default branch after a merge, else from the closed pull
     request's head, and takes the commits after it, cherry-picked, never
     the task's branch as it is. It isn't offered while a round of work or an
-    agent's turn may still add to them. Abandoning isn't the answer for a merged task:
-    its change is in.
+    agent's turn may still add to them. Marking a merged task `abandoned`
+    isn't the answer: its change is in, and its record would say otherwise.
   - **Commits the default branch has count for nothing.** Commits after a
     pull request that the default branch has already, as this Mac has it
     (as Althar last fetched it for a next pull request, as the worktree
@@ -152,8 +156,7 @@
     request that merged (by patch, as `git cherry` tells). DEV-58's count
     of three was its one slider commit and two of main's its lead merged
     in. A commit squashed into another pull request with changes of its
-    own has another patch, so it still counts, and the person leaves it
-    out.
+    own has another patch, so it still counts, and the person abandons it.
   - **A round counts as any turn does** toward the agents at work on this
     machine (ADR-032): its lead takes a place while it is in a turn, in the
     place its turn asked for, and none between turns, when it waits on the
@@ -188,7 +191,7 @@
       asking --> after: given up, from done, with commits in no pull request
       round --> after: finished with new commits, review passed
       after --> ready: Open a new pull request (a new branch, cherry-picked, pushed plainly)
-      after --> settled: Leave these commits out, every pull request merged (its settled time kept, where it had one)
+      after --> settled: Abandon, every pull request merged: the commits left out (its settled time kept, where it had one)
       ready --> settled: every pull request merged, nothing after them
       ready --> after: a pull request merged with commits after it
   ```
@@ -212,8 +215,9 @@
   | Passed, pull request open | Push | as before | Ready |
   | Every pull request merged, nothing after | (the host says so) | `done` | Settled |
   | A pull request merged, commits after it | (the host says so) | stays `open` | Ready, offering a new pull request |
-  | `done`, commits after its last pull request | (read for its card) | as it is | Ready, offering a new pull request, and to leave them out |
-  | `done` or `open`, commits after its last pull request, no turn under way | Leave these commits out | `done` where every pull request merged, its settled time kept; the commits stay on its branch | Settled |
+  | `done`, commits after its last pull request | (read for its card) | as it is | Ready, offering a new pull request, and Abandon |
+  | `done`, or `open` with every pull request merged, commits after its last pull request, no turn under way | Abandon | `done`, its settled time kept; the commits left out, on its branch still | Settled |
+  | `open`, a pull request open or closed | Abandon | `abandoned`, as ever | Settled |
   | Any, commits after its last pull request the default branch has (merged in, or cherry-picked) | (read for its card) | as it is | as if there were none |
 - **Alternatives considered:**
   - **A new task for follow-up work.** What the person asked not to be the

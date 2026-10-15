@@ -42,12 +42,14 @@ import { Setups } from './Setups'
  * stopped one, a run that passed is ready again, and a plan that never
  * started waits, held. A merged task is done for good, but for commits
  * after its pull requests that are in none yet (ADR-034): the person opens a
- * new pull request for them, from the task, or leaves them out, and it
- * settles without them. Their branch and worktree stay, as abandoning keeps
- * them, and only what is committed after counts again.
+ * new pull request for them, from the task, or abandons them, which leaves
+ * them out, and it settles without them, merged still. Their branch and
+ * worktree stay, as abandoning keeps them, and only what is committed after
+ * counts again. Its menu says Abandon for both: the person has one way to
+ * take a task off their plate, and Althar keeps a merged one merged.
  */
 
-/** What the person can do to a task as a whole, in its menu's order. */
+/** What the person can do to a task as a whole, in its menu's order. `leaveOut` is abandoning a merged task: its menu says Abandon. */
 export type TaskAction = 'start' | 'stop' | 'resume' | 'leaveOut' | 'abandon' | 'reopen'
 
 /** Where a task stands, as far as its course goes. */
@@ -70,18 +72,22 @@ export interface Standing {
    * (ADR-034): read from git, by the caller that has them.
    */
   readonly unshipped?: boolean
+  /** Every pull request of it merged, each repository's latest: read from its links, by the caller that has them. */
+  readonly merged?: boolean
 }
 
 /**
  * What applies where a task stands. Abandoned, reopening. Merged, nothing,
  * but leaving out commits after its pull requests that are in none yet,
- * which put it before the person again; open with them too, once nothing is
- * at work on it. Otherwise abandoning, always; starting its plan while it
- * waits to start; stopping while its run runs or an agent is on it; resuming
- * while its run is suspended.
+ * which put it before the person again, once nothing is at work on it; an
+ * open task whose pull requests all merged leaves them out the same way.
+ * Otherwise abandoning, always; starting its plan while it waits to start;
+ * stopping while its run runs or an agent is on it; resuming while its run is
+ * suspended. Leaving out stands in for abandoning, never beside it: the
+ * menu says Abandon for either.
  */
 export const actionsOf = (
-  standing: Pick<Standing, 'state' | 'planId' | 'runState' | 'working' | 'busy' | 'unshipped'>,
+  standing: Pick<Standing, 'state' | 'planId' | 'runState' | 'working' | 'busy' | 'unshipped' | 'merged'>,
 ): ReadonlyArray<TaskAction> => {
   // Not while a round of work, or an agent's turn, may still add to them.
   const leaves = standing.unshipped === true && standing.runState !== 'running' && !standing.busy
@@ -96,8 +102,8 @@ export const actionsOf = (
       if (standing.planId !== null) actions.push('start')
       if (standing.runState === 'running' || standing.working) actions.push('stop')
       if (standing.runState === 'suspended') actions.push('resume')
-      if (leaves) actions.push('leaveOut')
-      actions.push('abandon')
+      // Merged, with only commits after it to settle, it stays merged: abandoning would say its change never went in.
+      actions.push(leaves && standing.merged === true ? 'leaveOut' : 'abandon')
       return actions
     }
   }
@@ -152,10 +158,11 @@ export class Tasks extends Context.Service<
     /** Carries a stopped task on from the step it was on: with its last lead, or the one given. */
     resume(input: { readonly envelope: CommandEnvelope; readonly taskId: string; readonly lead?: Lead }): Effect.Effect<void, unknown>
     /**
-     * Leaves out the commits after the task's last pull requests that are in
-     * none yet: it settles without them, done where every pull request of it
-     * merged, and they stay on its branch, in its worktree. Nothing, where
-     * it has none or its lead may still add to them.
+     * Abandons a merged task's commits after its last pull requests that are
+     * in none yet, leaving them out: it settles without them, done, and they
+     * stay on its branch, in its worktree. Nothing, where it has none, its
+     * lead may still add to them, or an open task has a pull request that
+     * didn't merge.
      */
     leaveOut(input: { readonly envelope: CommandEnvelope; readonly taskId: string }): Effect.Effect<void, unknown>
     /** Settles the task without its change; its worktree and branch stay. Refused for a merged task. */
@@ -307,10 +314,11 @@ export class Tasks extends Context.Service<
           yield* runs.resume(input)
         })
 
-      // Whether there is anything to leave out is git's to say: Changes reads it again where it marks them, so a press is one.
+      // Whether there is anything to leave out, and whether an open task's pull requests all merged, are git's and its host's to say:
+      // Changes reads them again where it marks them, so a press is one.
       const leaveOut = (input: { readonly envelope: CommandEnvelope; readonly taskId: string }) =>
         Effect.gen(function* () {
-          if (!actionsOf({ ...(yield* standingOf(input.taskId)), unshipped: true }).includes('leaveOut')) return
+          if (!actionsOf({ ...(yield* standingOf(input.taskId)), unshipped: true, merged: true }).includes('leaveOut')) return
           yield* changes.leaveOut(input)
         })
 

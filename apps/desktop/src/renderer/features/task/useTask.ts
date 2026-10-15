@@ -29,7 +29,7 @@ import { useServices, useWatch } from '../../data/services'
  * streaming, and what the person can do: talk to the lead, interrupt it,
  * answer its calls, change its model and effort or hand the task to another
  * agent with one, and steer its course: start its plan now, stop it, resume
- * it, leave out commits after its last pull request, abandon it, reopen it. It reads the thread's newest page once, then only what changes: an item
+ * it, abandon it, reopen it. It reads the thread's newest page once, then only what changes: an item
  * that changed is read alone, and anything else about the thread (the agent
  * working, the calls waiting) reads the thread's head again, without its
  * items. Earlier items are read a page at a time, when asked for.
@@ -93,11 +93,12 @@ export interface TaskModel {
   readonly resume: () => Promise<void>
   /** Whether its lead resolves conflicts on its own, otherwise than its project says; null goes back to the project. */
   readonly setResolveConflicts: (on: boolean | null) => Promise<void>
-  /** Leaves out the commits after its last pull request that are in none yet: it settles without them, and they stay on its branch. */
-  readonly leaveOut: () => Promise<void>
   /** Allows everything its agents ask, short of what its project never allows, or takes it back: what waits goes ahead. */
   readonly setAllowEverything: (on: boolean) => Promise<void>
-  /** Settles it without its change; its worktree and branch stay. Whether it was abandoned. */
+  /**
+   * Settles it without its change; its worktree and branch stay. A merged one settles without the commits after its pull
+   * request, which stay on its branch, and stays merged. Whether it was abandoned.
+   */
   readonly abandon: () => Promise<boolean>
   /** Opens it again, once abandoned, on its worktree and branch. */
   readonly reopen: () => Promise<void>
@@ -467,13 +468,14 @@ export const useTask = (threadId: string): TaskModel => {
     setAllowEverything: (on) => onTask((taskId) => client.setTaskAllowEverything({ taskId, allowEverything: on })),
     abandon: async () => {
       let abandoned = false
+      // Merged, the runtime offers leaving out what came after in its place: the person abandons either way.
+      const merged = snapshot?.task.actions.includes('leaveOut') === true
       await onTask(async (taskId) => {
-        await client.abandonTask(taskId)
+        await (merged ? client.leaveOutCommits(taskId) : client.abandonTask(taskId))
         abandoned = true
       })
       return abandoned
     },
-    leaveOut: () => onTask((taskId) => client.leaveOutCommits(taskId)),
     reopen: () => onTask((taskId) => client.reopenTask(taskId)),
     rename: (title) => onTask((taskId) => client.renameTask(taskId, title)),
     startPlan: (planId) => act(() => client.startPlan(planId)),
