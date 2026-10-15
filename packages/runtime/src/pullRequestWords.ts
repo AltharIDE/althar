@@ -236,6 +236,18 @@ export const checksForLead = (sum: ChecksSum, name: string, logs: ReadonlyArray<
     'Fix what broke and commit it, then ask the person to push it with push_to_pull_request. Or, if it isn’t the task’s to fix, say why.',
   ].join('\n\n')
 
+/**
+ * What the lead is told when the checks fail on a change the person hasn't
+ * seen yet (ADR-040): the checks are its to see through, its fix goes up as it
+ * pushes, and how many tries are left before the change is the person's.
+ */
+export const checksForLeadAlone = (sum: ChecksSum, name: string, logs: ReadonlyArray<string>, left: number) =>
+  [
+    `Checks failed on ${name}: ${sum.failing.join(', ')}.`,
+    ...logs,
+    `The person hasn't seen this change yet, so its checks are yours to see through: fix what broke and commit it, then call push_to_pull_request, which pushes it at once, and the checks run again. ${left <= 1 ? 'This is the last try before the change goes to the person.' : `You have ${left} tries before the change goes to the person.`} Or, if it isn't the task's to fix, say why.`,
+  ].join('\n\n')
+
 /** What the lead is told of what it can't read: people outside the repository, whom the person passes on. */
 export const outsidersLine = (count: number) =>
   `${count === 1 ? 'One comment' : `${count} comments`} from people who can't write to the repository ${count === 1 ? 'is' : 'are'} left out. On a public repository anyone can comment; the person reads them and passes on what matters.`
