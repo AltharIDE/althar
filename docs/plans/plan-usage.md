@@ -292,15 +292,31 @@ before building on it):
 
 ## Stages
 
-**Built so far (15 October):** in `packages/provider-adapters`, the usage model,
-warning rule and Codex source (`usage.ts`); the per-(agent, provider)
-registry with its classification and allowlist (`usageSources.ts`); and the
-allowlisted usage reader and the only credential-store module
-(`usageRead.ts`, `credentialStore.ts`), with the contract test
-(`tests/usageSources.test.ts`) that enforces ADR-043. **No endpoint source is
-confirmed**, so the reader refuses all of them: each is enabled by its own
-spike and a read of the provider's terms. Not yet: the Claude source,
-the notices and the usage tab.
+**Built so far (15 October):**
+
+- `packages/provider-adapters`: the usage model, warning rule and Codex
+  reader (`usage.ts`); Claude Code's window from the usage update's `_meta`
+  (`ContextUsage.planWindow`); the per-(agent, provider) registry with its
+  classification and allowlist, OpenCode's sign-in listing (`usageSources.ts`);
+  the allowlisted usage reader (`usageRead.ts`) and the only credential-store
+  module (`credentialStore.ts`), with the contract test
+  (`tests/usageSources.test.ts`) that enforces ADR-043.
+- `packages/persistence-sqlite`: migration 0032, `plan_usage_readings` and
+  `plan_usage_warnings`.
+- `packages/runtime`: `PlanUsage.ts` keeps each account's windows (Codex read
+  through its app-server, Claude heard from its sessions, OpenCode by its own
+  listing then the provider's endpoint), raises the 50/25/10/5 warnings once
+  per reset, and tells the window; the API has `GetPlanUsage`,
+  `AcknowledgeUsageWarnings` and a `PlanUsage` watch event.
+- **No endpoint source is confirmed**, so the reader refuses all of them: each
+  is enabled by its own spike and a read of the provider's terms. Until then
+  an OpenCode account on a plan shows a fault, not a number.
+- **Claude Code's adapter drops a window that arrives before a turn's first
+  usage figure** (#1127); the plan's patch for it is not carried yet, so the
+  first reading can be late. Accounts with no session show a fault.
+
+The app side (usage overlay on Cmd/Ctrl+U, the bar badge, the Talk-room
+notice) is built in `apps/desktop` and `packages/ui`.
 
 One pull request each. Stages 0 to 5 are Althar's; 6 to 8 are upstream and
 run in parallel.
