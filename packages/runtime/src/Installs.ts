@@ -11,7 +11,10 @@ import {
   type LaunchSpec,
   locate,
   type Located,
+  majorOf,
   programName,
+  unsupportedAt,
+  versionIn,
 } from '@althar/provider-adapters'
 import { Context, Effect, Layer, Ref, Schema } from 'effect'
 
@@ -86,6 +89,27 @@ interface Release {
   readonly url: string
   readonly digest: string
 }
+
+/** A release as GitHub's API gives it. */
+interface GitHubRelease {
+  readonly tag_name?: unknown
+  readonly draft?: unknown
+  readonly prerelease?: unknown
+  readonly assets?: ReadonlyArray<{
+    readonly name?: unknown
+    readonly browser_download_url?: unknown
+    readonly digest?: unknown
+  }>
+}
+
+/** A published release of this major, by its tag (`v1.19.0`, `1.19.0`): no draft or prerelease. GitHub lists the newest first. */
+const ofMajor =
+  (major: number) =>
+  (release: GitHubRelease): boolean =>
+    release.draft !== true &&
+    release.prerelease !== true &&
+    typeof release.tag_name === 'string' &&
+    majorOf(release.tag_name.replace(/^v/, '')) === major
 
 const fail = (agentId: string, summary: string, reason: unknown = summary) =>
   new InstallFailed({ agentId, summary, reason: reason instanceof Error ? reason.message : String(reason) })
@@ -173,31 +197,34 @@ export class Installs extends Context.Service<
           return outThere(cli.name)
         }
 
-        /** The agent's latest release, and its file for this device with the digest GitHub gives it. */
+        /**
+         * The agent's latest release, and its file for this device with the
+         * digest GitHub gives it. Where the agent runs at one major only, the
+         * newest published release of that one, from the list of releases:
+         * GitHub's latest may be another.
+         */
         const latest = (definition: AgentDefinition, install: AgentDownload) =>
           Effect.gen(function* () {
             const asset = assetOf(install)
             if (asset === undefined) return yield* fail(definition.id, `There's no ${definition.name} for this computer to download.`)
+            const major = definition.supported?.major
             const response = yield* Effect.tryPromise({
               try: () =>
-                fetch(`https://api.github.com/repos/${install.repository}/releases/latest`, {
+                fetch(`https://api.github.com/repos/${install.repository}/releases${major === undefined ? '/latest' : '?per_page=100'}`, {
                   headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Althar' },
                 }),
               catch: (error) => fail(definition.id, `GitHub couldn't be reached to find ${definition.name}.`, error),
             })
             if (!response.ok)
               return yield* fail(definition.id, `GitHub didn't say where ${definition.name}'s latest release is.`, response.status)
-            const body = (yield* Effect.tryPromise({
+            const answer = yield* Effect.tryPromise({
               try: () => response.json() as Promise<unknown>,
               catch: (error) => fail(definition.id, `GitHub's answer about ${definition.name} couldn't be read.`, error),
-            })) as {
-              readonly tag_name?: unknown
-              readonly assets?: ReadonlyArray<{
-                readonly name?: unknown
-                readonly browser_download_url?: unknown
-                readonly digest?: unknown
-              }>
-            }
+            })
+            const body = (major === undefined ? answer : Array.isArray(answer) ? answer.find(ofMajor(major)) : undefined) as
+              | GitHubRelease
+              | undefined
+            if (body === undefined) return yield* fail(definition.id, `GitHub has no release of ${definition.name} ${major} to download.`)
             const found = body.assets?.find((each) => each.name === asset)
             const digest = typeof found?.digest === 'string' ? /^sha256:([0-9a-f]{64})$/.exec(found.digest)?.[1] : undefined
             if (typeof body.tag_name !== 'string' || !/^[\w.-]{1,40}$/.test(body.tag_name) || found === undefined)
@@ -236,9 +263,12 @@ export class Installs extends Context.Service<
             const command = findIn(unpacked, program)
             if (command === null) return yield* fail(definition.id, `${definition.name}'s download has no ${program} in it.`)
             chmodSync(command, 0o755)
-            yield* run(command, ['--version'], 30_000).pipe(
+            const said = yield* run(command, ['--version'], 30_000).pipe(
               Effect.mapError((error) => fail(definition.id, `The downloaded ${definition.name} wouldn't run on this computer.`, error)),
             )
+            // Whatever its tag said, a copy that says it is a version Althar doesn't run isn't kept.
+            const refused = unsupportedAt(definition, versionIn(said))
+            if (refused !== null) return yield* fail(definition.id, refused)
             return { release, command }
           })
 

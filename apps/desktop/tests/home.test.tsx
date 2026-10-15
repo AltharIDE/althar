@@ -26,6 +26,7 @@ import {
   fakeHost,
   githubConnection,
   home,
+  openCode2,
   project,
   usual,
   withoutOpenCode,
@@ -699,6 +700,8 @@ describe('settings', () => {
     const resting = { ...codex!, accounts: [{ ...usual('acc_codex', 'signed_in'), outUntil: '2026-10-03T14:00:00' }] }
     expect(agentGlanceOf(resting, now)).toMatchObject({ tone: 'quiet' })
     expect(agentGlanceOf(resting, now).line).toMatch(/^main out until /)
+    // A version no session starts on is the person's to change, whatever its accounts say.
+    expect(agentGlanceOf(openCode2, now)).toMatchObject({ line: '2.0.29 not supported yet', tone: 'yours' })
     // One mark for a service's Cloud and its own servers; faint where none is connected, a dot where one asks to sign in again.
     const [github, linear] = connectionList.products
     const marks = marksOf({

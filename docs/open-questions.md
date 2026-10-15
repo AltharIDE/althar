@@ -21,7 +21,8 @@ Researched in [the OpenCode 2 plan](plans/opencode-2.md).
     to it. On 2.x no OpenCode session starts, and Settings says why, until
     the person's MCP servers are shown to stay off there. A warning alone
     wouldn't hold that boundary. Then the adapter becomes version-aware in
-    stages.
+    stages. The gate and the pin are in (the registry's `supported`); what
+    is open is when to lift them.
 - [ ] **Carrying on after a rejection on 2.x.** It ignores
   `continue_loop_on_deny`, and no replacement is documented. Ask upstream,
   or treat a rejection as one that stops the turn and tell the lead in the

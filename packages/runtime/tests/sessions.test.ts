@@ -16,7 +16,7 @@ import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import * as Runtime from '../src/Runtime'
 import { errorClassOf, promptFor, Sessions } from '../src/Sessions'
-import { items, repository, runtime, task, turns, until } from './support'
+import { items, launches, notices, repository, runtime, task, TOO_NEW, turns, until } from './support'
 
 const say = (threadId: string, body: string, disposition: 'after_current' | 'interrupt_and_continue' = 'after_current') =>
   Effect.gen(function* () {
@@ -723,6 +723,29 @@ describe('sessions', () => {
         ])
         yield* say(created.threadId, scenarios.hello)
         assert.strictEqual((yield* ended(created.threadId, 1))[0]?.state, 'completed')
+      }).pipe(Effect.provide(runtime())),
+    )
+
+    it.live('starts no session on a version of its agent Althar doesn’t run yet, and says why in the thread', () =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const sql = yield* SqlClient.SqlClient
+        const { task: created } = yield* task()
+        const error = yield* Effect.flip(sessions.start({ threadId: created.threadId, agentId: 'too-new' }))
+        assert.instanceOf(error, SessionFailed)
+        assert.strictEqual(error.summary, TOO_NEW)
+        // Refused before anything of it is started: no process, and no transport asked for.
+        assert.isFalse(launches.some((launch) => launch.agentId === 'too-new'))
+        const [processes] = yield* sql<{ count: number }>`SELECT count(*) AS count FROM processes`
+        assert.strictEqual(processes?.count, 0)
+        const states = yield* sql<{ state: string }>`SELECT state FROM provider_sessions`
+        assert.deepStrictEqual(states, [{ state: 'failed' }])
+        assert.deepStrictEqual((yield* notices(created.threadId)).at(-1), {
+          source: 'runtime',
+          severity: 'error',
+          title: 'Fake too-new couldn’t start.'.replace('’', "'"),
+          description: TOO_NEW,
+        })
       }).pipe(Effect.provide(runtime())),
     )
 

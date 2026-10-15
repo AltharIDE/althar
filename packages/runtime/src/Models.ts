@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
 import type { Ledger } from '@althar/persistence-sqlite'
-import { type AgentDefinition, type AgentSession, type ConfigOption, connect } from '@althar/provider-adapters'
+import { type AgentDefinition, type AgentSession, type ConfigOption, connect, unsupportedNow } from '@althar/provider-adapters'
 import { Context, type Crypto, Duration, Effect, Exit, Layer } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 
@@ -221,6 +221,8 @@ export class Models extends Context.Service<
           (folder) =>
             Effect.gen(function* () {
               const { definition } = entry
+              // A version no session starts on isn't started to be asked either: its latest session says what it offers.
+              if ((yield* unsupportedNow(definition)) !== null) return null
               const transport = entry.transport(folder)
               const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
               if (transport._tag === 'Process' && processId !== undefined)

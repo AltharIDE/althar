@@ -13,6 +13,7 @@ import {
   type Question,
   type SessionEvent,
   type StopReport,
+  unsupportedNow,
 } from '@althar/provider-adapters'
 import {
   Cause,
@@ -1468,8 +1469,12 @@ export class Sessions extends Context.Service<
           const offline = thread.role === 'task' && thread.review?.outside === true
           // Only an agent its session holds to reading leads a review (the registry's `reviewing`): never one that runs what its
           // sandbox contains without asking, which could run the pull request's code, a team's too.
-          if (untrusted && definition.reviewing?.outside !== true) {
-            const summary = `${definition.name} can't be held to reading only: it runs commands its sandbox contains without asking, so it could run the pull request's code. Review it with another agent, such as Claude Code.`
+          // Nor one at a version Althar can't hold to what the registry says of it yet (its `supported`), asked of its copy now.
+          const summary =
+            untrusted && definition.reviewing?.outside !== true
+              ? `${definition.name} can't be held to reading only: it runs commands its sandbox contains without asking, so it could run the pull request's code. Review it with another agent, such as Claude Code.`
+              : yield* unsupportedNow(definition)
+          if (summary !== null) {
             yield* sql.withTransaction(
               Effect.gen(function* () {
                 const revision = yield* moveSession(sessionId, 'failed', { endedAt: yield* timestamp })

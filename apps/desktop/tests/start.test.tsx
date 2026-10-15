@@ -15,7 +15,7 @@ import { SettingsPanel } from '../src/renderer/features/settings/SettingsPanel'
 import { runtimeEntry, StartView } from '../src/renderer/features/start/StartView'
 import { type StartModel, useStart } from '../src/renderer/features/start/useStart'
 import { shortFolder } from '../src/renderer/shared/folders'
-import { agents, changed, fakeClient, fakeHost, project, streamed, usual, withoutOpenCode } from './fixtures'
+import { agents, changed, fakeClient, fakeHost, openCode2, project, streamed, usual, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 
 function Home({ start, onProject }: { start: StartModel; onProject: (id: string) => void }) {
@@ -751,6 +751,8 @@ describe('the start', () => {
       [RuntimeState.Ready, true],
       [RuntimeState.SignedOut, false],
     ])
+    // A version no session starts on says why, whoever it is signed in as.
+    expect(runtimeEntry(openCode2)).toMatchObject({ state: RuntimeState.Unsupported, version: '2.0.29', why: openCode2.unsupported })
   })
 
   it('needs its services', () => {

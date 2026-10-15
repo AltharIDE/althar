@@ -272,7 +272,14 @@ rejection, and the question asked in words.
 1. **Now, small.** Pin `Installs.ts` to 1.x. Gate 2.x: where the major is
    2 or more, start no OpenCode session, and say in Settings why (the
    person's MCP servers may load; rejections end the turn; sign-in can't
-   tell). Add the probe dates.
+   tell). Add the probe dates. *Done in this branch:* the registry's
+   `supported: { major: 1, why }`, read by `unsupportedNow` (`version.ts`)
+   from the copy that runs, at every session start (`Sessions.ts`) and
+   model probe (`Models.ts`); the agent's status carries the `why`, and
+   Settings and the first screen show it. The download takes the newest
+   published `v1.*` from the first 100 releases, and keeps no copy that
+   says it is another major. Once 1.x falls off that page, the download
+   says there is no OpenCode 1 to fetch: page through by then, or pin a tag.
 2. **Sign-in on 2.x.** `--standalone --format json` status, and a
    `--standalone` login line. Parse by version (`versionIn`, major ≥ 2).
    Unit tests on recorded output.

@@ -1,4 +1,4 @@
-import { agentVersion } from '@althar/provider-adapters'
+import { agentVersion, unsupportedAt } from '@althar/provider-adapters'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep } from 'node:path'
@@ -297,10 +297,10 @@ export const handlers = Api.toLayer(
         } satisfies AccountStatus
       })
 
-    /* Each agent's version, asked of its CLI once a launch. */
+    /* Each agent's version, asked of its CLI once a launch, and again when the person checks: they may have changed it. */
     const versions = new Map<string, string | null>()
-    const versionOf = (entry: AgentEntry) =>
-      versions.has(entry.definition.id)
+    const versionOf = (entry: AgentEntry, recheck: boolean) =>
+      !recheck && versions.has(entry.definition.id)
         ? Effect.succeed(versions.get(entry.definition.id) ?? null)
         : agentVersion(entry.definition).pipe(Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))))
 
@@ -311,6 +311,7 @@ export const handlers = Api.toLayer(
           concurrency: 'unbounded',
         })
         const install = yield* installs.state(entry.definition)
+        const version = yield* versionOf(entry, recheck)
         return {
           id: entry.definition.id,
           name: entry.definition.name,
@@ -319,7 +320,8 @@ export const handlers = Api.toLayer(
           download: install.downloadable && install.size !== null ? { size: install.size, installing: install.installing } : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
-          version: yield* versionOf(entry),
+          version,
+          unsupported: unsupportedAt(entry.definition, version),
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
         } satisfies AgentStatus

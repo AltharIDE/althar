@@ -106,6 +106,7 @@ export const text = {
   accounts: (n: number) => (n === 1 ? '1 account' : `${n} accounts`),
   signedOut: (account: string) => `${account} signed out`,
   notHere: `Not on ${device.this}`,
+  unsupported: (version: string | null) => (version === null ? 'Not supported yet' : `${version} not supported yet`),
   downloading: 'Downloading…',
   out: (account: string, back: string) => `${account} out until ${back}`,
   connecting: `Looking at the agents on ${device.this}…`,
@@ -178,6 +179,8 @@ export const agentGlanceOf = (agent: AgentStatus, now: Date = new Date()): Agent
   const base = { id: agent.id, name: agent.name, ...(brand === undefined ? {} : { brand }) }
   if (agent.download?.installing === true) return { ...base, line: text.downloading, tone: 'quiet' }
   if (!agent.installed) return { ...base, line: text.notHere, tone: 'quiet' }
+  // No session starts on the version it has: the person's to change.
+  if (agent.unsupported !== null) return { ...base, line: text.unsupported(agent.version), tone: 'yours' }
   const signedOut = agent.accounts.find((account) => account.signIn === 'signed_out')
   if (signedOut !== undefined) return { ...base, line: text.signedOut(signedOut.name), tone: 'yours' }
   const [resting] = agent.accounts.flatMap((account) => (account.outUntil === null ? [] : [{ name: account.name, back: account.outUntil }]))
@@ -194,7 +197,7 @@ const tabOf = (agent: AgentStatus): AgentTab => {
     name: agent.name,
     ...(brand === undefined ? {} : { brand }),
     ...(line === undefined ? {} : { line }),
-    ...(agent.accounts.some((account) => account.signIn === 'signed_out') ? { yours: true } : {}),
+    ...(agent.unsupported !== null || agent.accounts.some((account) => account.signIn === 'signed_out') ? { yours: true } : {}),
   }
 }
 
@@ -484,7 +487,14 @@ export function SettingsView({
               <StartError model={start} />
               <AgentTabPanel agent={tabOf(chosen)} aside={<ModelsView key={chosen.id} agent={chosen} />}>
                 {chosen.installed && chosen.download?.installing !== true ? (
-                  <AgentAccounts agent={chosen} start={start} signIn={accounts} />
+                  <>
+                    {chosen.unsupported !== null && (
+                      <p role="alert" className={s.failed}>
+                        {chosen.unsupported}
+                      </p>
+                    )}
+                    <AgentAccounts agent={chosen} start={start} signIn={accounts} />
+                  </>
                 ) : (
                   <AgentInstall
                     name={chosen.name}

@@ -68,6 +68,11 @@ export type RuntimeEntry = RuntimeBase &
         /** The oldest version Althar works with. */
         needs: string
       }
+    | {
+        state: RuntimeState.Unsupported
+        /** Why no session starts on the version it has, and what to do instead. */
+        why: string
+      }
   )
 
 export interface RuntimesText {
@@ -81,6 +86,7 @@ export interface RuntimesText {
   waits: string
   missing: string
   outdated: (version: string, needs: string) => string
+  unsupported: string
   signIn: string
   cancel: string
   check: string
@@ -104,6 +110,7 @@ export const runtimesText: RuntimesText = {
   waits: 'its work waits for the reset',
   missing: 'Not installed on this Mac',
   outdated: (version, needs) => `Version ${version} · Althar needs ${needs} or later`,
+  unsupported: 'Not supported yet',
   signIn: 'Sign in',
   cancel: 'Cancel',
   check: 'Check again',
@@ -270,6 +277,13 @@ function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers) {
             {check}
           </>
         ),
+      }
+    case RuntimeState.Unsupported:
+      return {
+        line: [t.unsupported, r.version && `v${r.version}`].filter(Boolean).join(' · '),
+        note: r.why,
+        calls: true,
+        actions: check,
       }
     default:
       return unreachable(r)
