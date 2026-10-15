@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -346,6 +346,31 @@ describe('merging a task here', () => {
       writeFileSync(join(root, 'README.md'), '# Not yet\n')
       const busy = yield* Effect.flip(mergeHere(task.taskId, [{ repository: slug, head: clean }]))
       assert.deepStrictEqual(cantOf(busy).slice(1), ['busy', realpathSync(root)])
+      assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
+      assert.strictEqual(yield* stateOf(task.taskId), 'open')
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('merges nothing where a submodule of the checkout can’t be read, and says where and what git said', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      // A repository already in place becomes the submodule, its git directory moved under the parent's.
+      mkdirSync(join(root, 'library'))
+      git(join(root, 'library'), 'init', '-q', '-b', 'main')
+      commit(join(root, 'library'), 'README.md', '# Library\n')
+      git(root, 'submodule', 'add', '-q', './library', 'library')
+      git(root, 'submodule', 'absorbgitdirs')
+      git(root, 'commit', '-q', '-m', 'Add library')
+      const { task, worktrees } = yield* taskIn([root], root)
+      const head = commit(worktrees[0]?.path ?? '', 'retry.ts', 'retry\n')
+      const tip = git(root, 'rev-parse', 'main')
+      // The submodule's repository is gone from under its checkout: git can't say whether it changed.
+      rmSync(join(root, '.git', 'modules', 'library'), { recursive: true, force: true })
+      const refused = yield* Effect.flip(mergeHere(task.taskId, [{ repository: worktrees[0]?.slug ?? '', head }]))
+      const [, why, detail] = cantOf(refused)
+      assert.strictEqual(why, 'unreadable')
+      assert.isTrue(detail?.startsWith(`${realpathSync(root)}\n`))
+      assert.include(detail, 'library')
       assert.strictEqual(git(root, 'rev-parse', 'main'), tip)
       assert.strictEqual(yield* stateOf(task.taskId), 'open')
     }).pipe(Effect.provide(runtime())),
