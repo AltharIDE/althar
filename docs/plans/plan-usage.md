@@ -207,7 +207,7 @@ cloned copy at the named commit):
 | Limits are recognized from errors, with reset times | `packages/provider-adapters/src/failures.ts` |
 | The pinned Claude adapter 0.88.0 already forwards `rate_limit_info` in `usage_update` `_meta["_claude/rateLimit"]`, only when `lastAssistantTotalUsage !== null` | installed `claude-agent-acp@0.88.0` `dist/acp-agent.js`; same code on `main` at `0c8de13` (14 Oct) `src/acp-agent.ts:7923` |
 | So `registry.ts` and architecture 03 are out of date on Claude ("not forwarded") | the same code |
-| Pinned Codex adapter 2.1.1 merges `account/rateLimits/updated` into session state and sends it nowhere; same on `main` at `aa02d43` (15 Oct) | installed `codex-acp@2.1.1` `dist/index.js` (`handleRateLimitsUpdated`); `src/CodexEventHandler.ts:1241` |
+| Pinned Codex adapter (2.1.1 when first checked, 2.2.2 now) merges `account/rateLimits/updated` into session state and sends it nowhere; same on `main` at `aa02d43` (15 Oct) | installed `codex-acp` `dist/index.js` (`handleRateLimitsUpdated`, same in 2.2.2); `src/CodexEventHandler.ts:1241` |
 | OpenCode's ACP code has no rate-limit or quota handling | grep of `packages/cli/src/acp` at `4397ee4` (15 Oct): no match |
 | The Agent SDK type for a window: `SDKRateLimitInfo` with `rateLimitType` five_hour / seven_day / seven_day_opus / seven_day_sonnet, `utilization`, `resetsAt`, `status`; `usage_EXPERIMENTAL…()` returns plan windows, null for API-key, Bedrock and Vertex | `sdk.d.ts` of `@anthropic-ai/claude-agent-sdk@0.3.296` (L5704, L3058) |
 | Codex's window type: `used_percent` (whole number), `window_duration_mins`, `resets_at` | `codex-rs/app-server-protocol/src/protocol/v2/account.rs` at openai/codex `e89b7c4` (15 Oct) |
@@ -254,7 +254,7 @@ before building on it):
   [#426](https://github.com/agentclientprotocol/codex-acp/pull/426),
   [#524](https://github.com/agentclientprotocol/codex-acp/pull/524) (18 Sep),
   none merged. The moved repo is `agentclientprotocol/codex-acp`; Althar
-  pins 2.1.1 and 2.2.2 is out.
+  pins 2.2.2, the latest.
 - OpenCode: [#49693](https://github.com/anomalyco/opencode/issues/49693)
   (18 Sep), open, unanswered. Gemini CLI reports no plan usage over ACP
   (not shipped by Althar).
@@ -282,7 +282,7 @@ before building on it):
 
 | | Claude Code | Codex | OpenCode |
 |---|---|---|---|
-| Adapter now / latest | `claude-agent-acp` 0.90.0 (Althar pins it, patched) / 0.90.0 | `codex-acp` 2.1.1 / 2.2.2 | OpenCode's own |
+| Adapter now / latest | `claude-agent-acp` 0.90.0 (Althar pins it, patched) / 0.90.0 | `codex-acp` 2.2.2 / 2.2.2 | OpenCode's own |
 | Plan windows over ACP today | Partly: `_meta` on `usage_update`, one window per event, dropped before a turn's first usage | No: held, not sent | No |
 | Context and cost `usage_update` | `used`, `size`, `cost` | `used`, `size` | `used`, `size`, `cost` |
 | ACP version | v1 (v2 opt-in) | v1 and v2 on `main` | v1 |
