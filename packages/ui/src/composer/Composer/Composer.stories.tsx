@@ -517,6 +517,11 @@ export const ListeningAndRunning: Story = {
 /** Nothing in the lower row but send: no picker, no meter, no dictation. */
 export const Minimal: Story = { render: () => <Example picker={undefined} meter={undefined} dictation={undefined} hint={undefined} /> }
 
+/** The context's detail open, as pointing at the ring opens it: the numbers, and Compact under them. */
+export const ContextDetail: Story = {
+  render: () => <Example meter={<ContextRing used={412} total={1000} model={model('claude-opus-5')} onCompact={() => {}} defaultOpen />} />,
+}
+
 /** Images to send with what you write, drawn small above the field, each with a way off. */
 export const WithImages: Story = {
   render: () => <Example takesImages pictures={SHOTS} initial="The refund button moved; put it back where it was." />,

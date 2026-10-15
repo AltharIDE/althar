@@ -18,7 +18,7 @@ import { Cause, Context, type Crypto, Duration, Effect, Layer, Option, Queue, Sc
 import { SqlClient, type SqlError } from 'effect/sql'
 
 import { thisDevice } from './device'
-import { Busy } from './Busy'
+import { Busy, type Order } from './Busy'
 import type { Artifacts } from './Artifacts'
 import { touchCard } from './cards'
 import { Agents, RuntimeConfig } from './Config'
@@ -322,6 +322,14 @@ interface Waiting {
   readonly place: Place
   readonly since: string
 }
+
+/**
+ * Where a waiting step stands (ADR-037): one the person resumed or answered starts at once; a plan's first step is new
+ * work; the rest (the step after another, one carried on after a restart or back from a usage limit) is a task's work
+ * under way.
+ */
+const orderOf = (place: Place): Order =>
+  place.how === 'start' ? 'new' : place.how === 'resume' || place.how === 'answered' ? 'person' : 'underway'
 
 /** A waiting step's output, read; one Althar can't read carries on as after a restart, from when it is read. */
 const waitingOf = (output: string | null, now: string): Waiting => {
@@ -1287,6 +1295,8 @@ export class Runs extends Context.Service<
         model?: string | null,
         accountId?: string,
         resumed?: Lead,
+        /** Where a review carried on stands: the person's, unless Althar carries it on, as for a usage limit (ADR-037). */
+        order: Order = 'person',
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1318,7 +1328,8 @@ export class Runs extends Context.Service<
                     return { ...admission, room }
                   }),
                 ),
-              { review: true, ...(resumed === undefined ? { after: 'lead' as const } : {}) },
+              // After the lead's step, in its place; as the person resumed or answered, at once.
+              { review: true, ...(resumed === undefined ? { after: 'lead' as const } : { order }) },
             ),
           )
           if (admitted === undefined) return undefined
@@ -2359,6 +2370,8 @@ export class Runs extends Context.Service<
               { step: 'implement', summary, ...builds, ...descriptions, ...(yield* shows) },
               { id: itemId },
             )
+            // A step done is a break in the lead's work, with a run or without: its next turn may start afresh (ADR-038).
+            yield* sessions.atBreak(access.threadId)
             return reply('Althar has your summary.')
           }
           // After its plan, the lead's report opens a round of work of its own, which it finishes (ADR-034).
@@ -2428,6 +2441,8 @@ export class Runs extends Context.Service<
             }),
           )
           if (!taken) return yield* dropped
+          // A step done is a break in the lead's work: its next turn may start afresh (ADR-038).
+          yield* sessions.atBreak(access.threadId)
           if (quiet) {
             yield* rest(current.taskId)
             // A pull request that merged while it ran settles the task now.
@@ -2774,7 +2789,7 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           if (attemptId === null || answer.kind === 'abandon' || (info.step !== 'implement' && info.step !== 'settle'))
-            return yield* carryOn(current, attemptId, info, answer, envelope)
+            return yield* carryOn(current, attemptId, info, answer, envelope, undefined, undefined, undefined, 'person')
           yield* busy.enter(
             current.taskId,
             (room) =>
@@ -2789,7 +2804,14 @@ export class Runs extends Context.Service<
                       return false
                     }),
                   ),
-            { next: (room) => (room ? provide(carryOn(current, attemptId, info, answer, envelope)) : Effect.void) },
+            // As the person answered: at once.
+            {
+              order: 'person',
+              next: (room) =>
+                room
+                  ? provide(carryOn(current, attemptId, info, answer, envelope, undefined, undefined, undefined, 'person'))
+                  : Effect.void,
+            },
           )
           yield* touchCard(current.taskId)
         })
@@ -2858,6 +2880,8 @@ export class Runs extends Context.Service<
         said?: string,
         /** How hard the agent it is handed to thinks, where the person picked. */
         effort?: string | null,
+        /** Whose doing it is: the person's (their answer, their resume), or Althar's own, as for a usage limit or a restart (ADR-037). */
+        by: Order = 'underway',
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -2930,8 +2954,9 @@ export class Runs extends Context.Service<
               answer.kind === 'retry' ? answer.agentId : undefined,
               on,
               accountId,
-              // As the person said: a place of its own, not the lead's.
+              // As the person said, or as Althar carries it on: a place of its own, not the lead's.
               yield* lastLead(current),
+              by,
             )
             if (answer.kind === 'tell') {
               const [thread] = yield* sql<{
@@ -3039,7 +3064,7 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const info: StuckInfo = { step: key, why: 'restarted', detail: null, agentId: lead.agentId, round: iteration, open: 0 }
           const carried = yield* Effect.exit(
-            carryOn(current, attemptId, info, { kind: 'retry', agentId: lead.agentId }, said, lead.model, undefined, lead.effort),
+            carryOn(current, attemptId, info, { kind: 'retry', agentId: lead.agentId }, said, lead.model, undefined, lead.effort, 'person'),
           )
           if (carried._tag === 'Failure')
             yield* stuck(current, { id: attemptId }, { ...info, why: 'failed_to_start', detail: summarize(carried.cause) || null })
@@ -3138,20 +3163,24 @@ export class Runs extends Context.Service<
             const key = own?.nodeKey === 'settle' ? 'settle' : 'implement'
             const iteration = own?.iteration ?? 0
             // It takes a place among the agents at work on this machine, or waits for one.
-            const admitted = yield* busy.enter(current.taskId, (room) =>
-              sql.withTransaction(
-                Effect.gen(function* () {
-                  const admission = yield* admit(
-                    current,
-                    key,
-                    iteration,
-                    JSON.parse(own?.config ?? JSON.stringify(implement ?? {})),
-                    JSON.parse(own?.input ?? '{}'),
-                  )
-                  if (!room) yield* waitForPlace(current, admission.attemptId, { how: 'resume', lead })
-                  return { ...admission, room }
-                }),
-              ),
+            // As the person resumed it: at once.
+            const admitted = yield* busy.enter(
+              current.taskId,
+              (room) =>
+                sql.withTransaction(
+                  Effect.gen(function* () {
+                    const admission = yield* admit(
+                      current,
+                      key,
+                      iteration,
+                      JSON.parse(own?.config ?? JSON.stringify(implement ?? {})),
+                      JSON.parse(own?.input ?? '{}'),
+                    )
+                    if (!room) yield* waitForPlace(current, admission.attemptId, { how: 'resume', lead })
+                    return { ...admission, room }
+                  }),
+                ),
+              { order: 'person' },
             )
             if (admitted.room) yield* resumeLead(current, admitted.attemptId, key, iteration, lead, input.envelope)
             return yield* touchCard(current.taskId)
@@ -3390,7 +3419,8 @@ export class Runs extends Context.Service<
                   return true
                 }),
               ),
-            { review: held.nodeKey === 'review' },
+            // Back from a usage limit: the work of a task under way.
+            { review: held.nodeKey === 'review', order: 'underway' },
           )
           if (!resumed) return yield* touchCard(held.taskId)
           const info: StuckInfo = {
@@ -3595,6 +3625,10 @@ export class Runs extends Context.Service<
                 place.info,
                 place.answer,
                 yield* envelope('thread.send', { placed: row.attemptId }),
+                undefined,
+                undefined,
+                undefined,
+                'person',
               )
             case 'next': {
               if (row.nodeKey === 'review') {
@@ -3621,7 +3655,13 @@ export class Runs extends Context.Service<
             AND k.state IN ('draft', 'open') AND p.archived_at IS NULL`
         return rows.map((row) => {
           const waited = waitingOf(row.output, at)
-          return { taskId: row.taskId, review: row.nodeKey === 'review', since: waited.since, start: provide(startPlaced(row, waited)) }
+          return {
+            taskId: row.taskId,
+            review: row.nodeKey === 'review',
+            order: orderOf(waited.place),
+            since: waited.since,
+            start: provide(startPlaced(row, waited)),
+          }
         })
       })
       yield* busy.queue(provide(placed))
@@ -3645,6 +3685,8 @@ export class Runs extends Context.Service<
         return rows.map((row) => ({
           taskId: row.taskId,
           review: row.kind === 'step',
+          // The person's answer: kept before what they did started at once (ADR-037), it starts now.
+          order: 'person' as const,
           since: row.since,
           start: provide(
             Effect.gen(function* () {
@@ -3911,7 +3953,7 @@ export class Runs extends Context.Service<
                     )
               const answering = (keep: boolean) => questions.answer({ ...input, keep })
               if (on?.taskId == null) return yield* Effect.flatMap(answering(false), onward)
-              yield* busy.enter(on.taskId, (room) => answering(!room), { review: on.kind === 'step', next: onward })
+              yield* busy.enter(on.taskId, (room) => answering(!room), { review: on.kind === 'step', order: 'person', next: onward })
             }),
           ),
       })

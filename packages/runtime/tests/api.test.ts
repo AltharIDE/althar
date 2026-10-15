@@ -82,6 +82,8 @@ const connected = (
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
         busy: { machine: options.machine ?? ROOMY },
+        // A pull request with no checks has none: no test waits for a host to show them.
+        checksAppear: Duration.zero,
       }),
     )
     // Each window's connection runs on a fiber of its own, as in the app: it ends when its client goes.
