@@ -1,5 +1,5 @@
 import { SqliteClient, SqliteMigrator } from '@effect/sql-sqlite-node'
-import { Cause, Effect, Layer, Schema } from 'effect'
+import { Cause, type Duration, Effect, Layer, Schema } from 'effect'
 import { SqlClient, type SqlError } from 'effect/sql'
 import { camelToSnake, snakeToCamel } from 'effect/String'
 
@@ -15,6 +15,8 @@ export interface DatabaseOptions {
   readonly migrations?: ReadonlyArray<Migration>
   /** Where the store copies itself before it migrates (the profile's `backups`); without it, no copy is made. */
   readonly backups?: string
+  /** How long a statement waits for a lock another connection holds before it gives up: the client's five seconds unless a test asks for less. */
+  readonly busyTimeout?: Duration.Duration
 }
 
 /** Another runtime has the database open. One runtime at a time writes a profile (docs/architecture/02). */
@@ -124,6 +126,7 @@ export const layer = (
         filename: options.filename,
         transformQueryNames: camelToSnake,
         transformResultNames: snakeToCamel,
+        ...(options.busyTimeout === undefined ? {} : { busyTimeout: options.busyTimeout }),
       }),
     ),
     // Opening a file another runtime holds fails as the client sets it up, before any statement of ours.

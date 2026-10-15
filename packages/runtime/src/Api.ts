@@ -607,6 +607,8 @@ export const handlers = Api.toLayer(
                 ...(model === undefined ? {} : { model }),
                 ...(effort === undefined ? {} : { effort }),
                 ...(message === undefined ? {} : { message }),
+                // The person's switch: its first turn goes on at once (ADR-037).
+                byPerson: true,
               })
               // Links in what the person said unfurl on their message, as when it is sent on its own.
               if (message !== undefined) yield* Effect.forkDetach(issues.unfurlInput(message.envelope.commandId))
