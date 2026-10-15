@@ -103,10 +103,15 @@ Zen sign-in under the API-key row and skip its source. So:
   (`auth.json`), and each is a plan (an OAuth sign-in to ChatGPT, Go, Zen,
   Copilot) or a key. An account is a subscription account if any of its
   credentials is a plan, and each plan credential has its own source and row.
-- How to tell a plan credential from a key in `opencode auth list` output (or
-  its `auth.json` entry type) is unverified; the OpenCode spike settles it.
-  Until it does, a credential Althar cannot classify counts as a fault, not
-  as a key.
+- Classification uses only what `opencode auth list` prints, as the sign-in
+  check does today. Whether that output tells a plan credential from a key
+  is unverified; the OpenCode spike settles it. Althar does not inspect
+  `auth.json` to classify: that is a read of the credential cache outside the
+  usage-read exception, which covers an access token for one usage call
+  only. If the output cannot tell, the credential is a fault ("can't tell
+  plan from key"), not a key. Reading entry types from `auth.json` would
+  need the exception widened to metadata, with the stage-0 ADR and the
+  person's word.
 - The contract test covers the classification as well: for each registry
   (agent, provider) pair that can be a plan, `paidBy` must say `plan` for a
   plan sign-in, and the pair must declare a usage source.
