@@ -329,6 +329,11 @@ describe('reviewing someone else’s pull request', () => {
         yield* Effect.forkChild(
           Stream.runForEach(nudges.events, (event) => Effect.sync(() => void (event._tag === 'Nudge' && told.push(event.body)))),
         )
+        // Drafted once its lead's turn has ended, so nothing after the draft but the draft itself tells the person.
+        const sql = yield* SqlClient.SqlClient
+        yield* until(sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId}`, (turns) =>
+          turns.some((turn) => turn.state === 'completed'),
+        )
 
         // Comments only where the change shows: a file it hasn't, or a line it doesn't touch, is refused before anything is kept.
         const astray = yield* callTool(access, 'draft_review', {
