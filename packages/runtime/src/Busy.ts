@@ -160,7 +160,7 @@ export class Busy extends Context.Service<
      * input waiting in its thread meanwhile. True where it ran now.
      */
     turn(
-      agent: Agent & { readonly threadId: string; readonly sessionId: string },
+      agent: Agent & { readonly threadId: string; readonly sessionId: string; readonly byPerson?: boolean },
       work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
     ): Effect.Effect<boolean>
     /** Adds where waiting work is read from: each time the queue is looked at, every source is read, and what waited longest starts first. */
@@ -540,13 +540,14 @@ export class Busy extends Context.Service<
         })
 
       const turn = (
-        agent: Agent & { readonly threadId: string; readonly sessionId: string },
+        agent: Agent & { readonly threadId: string; readonly sessionId: string; readonly byPerson?: boolean },
         work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
       ) =>
         Effect.gen(function* () {
           const key = keyOf(agent.taskId, agent.review)
-          // What the person says to an agent goes on at once; what Althar tells it is the work of a task under way.
-          const order: Order = (yield* personSaid(agent.threadId)) ? 'person' : 'underway'
+          // What the person says to an agent, or an agent they started or switched to, goes on at once; what Althar tells it is the
+          // work of a task under way.
+          const order: Order = agent.byPerson === true || (yield* personSaid(agent.threadId)) ? 'person' : 'underway'
           const room = yield* lock.withPermits(1)(
             Effect.gen(function* () {
               const room = yield* roomFor(key, (yield* atWork).at, order)

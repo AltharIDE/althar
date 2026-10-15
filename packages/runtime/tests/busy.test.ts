@@ -1068,6 +1068,28 @@ describe('Agents at once, across a restart', () => {
     }).pipe(Effect.provide(machine(1))),
   )
 
+  it.live('start the agent the person switched an idle lead to at once with nothing said, though every place is taken', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const { projectId } = yield* opened
+      const first = yield* started(projectId, 'First', 'Do it. [lead:finish]')
+      yield* until(attempts(first.taskId), (rows) => rows[0]?.state === 'succeeded')
+      yield* idle(first.threadId)
+      const second = yield* started(projectId, 'Second', 'Work on it. [lead:wait]')
+      yield* working(second.taskId)
+      // Switched from the model picker, with no word for it: its brief is its first turn, and the person's, so it goes on.
+      yield* sessions.switchAgent({ threadId: first.threadId, agentId: 'claude-code', byPerson: true })
+      const sql = yield* SqlClient.SqlClient
+      yield* until(
+        sql<{ agentId: string }>`
+          SELECT s.agent_id FROM turn_deliveries d JOIN provider_sessions s ON s.id = d.provider_session_id
+          WHERE d.thread_id = ${first.threadId} AND d.state != 'requested' ORDER BY d.requested_at DESC LIMIT 1`,
+        (rows) => rows[0]?.agentId === 'claude-code',
+      )
+      assert.isNull((yield* cardOf(projectId, first.taskId))?.queued)
+    }).pipe(Effect.provide(machine(1))),
+  )
+
   it.live('let the person change a plan whose first step waits, after a restart too, and start it as changed', () =>
     Effect.gen(function* () {
       const file = store()

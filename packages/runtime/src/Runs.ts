@@ -1294,6 +1294,8 @@ export class Runs extends Context.Service<
         model?: string | null,
         accountId?: string,
         resumed?: Lead,
+        /** Where a review carried on stands: the person's, unless Althar carries it on, as for a usage limit (ADR-037). */
+        order: Order = 'person',
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1326,7 +1328,7 @@ export class Runs extends Context.Service<
                   }),
                 ),
               // After the lead's step, in its place; as the person resumed or answered, at once.
-              { review: true, ...(resumed === undefined ? { after: 'lead' as const } : { order: 'person' as const }) },
+              { review: true, ...(resumed === undefined ? { after: 'lead' as const } : { order }) },
             ),
           )
           if (admitted === undefined) return undefined
@@ -2782,7 +2784,7 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           if (attemptId === null || answer.kind === 'abandon' || (info.step !== 'implement' && info.step !== 'settle'))
-            return yield* carryOn(current, attemptId, info, answer, envelope)
+            return yield* carryOn(current, attemptId, info, answer, envelope, undefined, undefined, undefined, 'person')
           yield* busy.enter(
             current.taskId,
             (room) =>
@@ -2798,7 +2800,13 @@ export class Runs extends Context.Service<
                     }),
                   ),
             // As the person answered: at once.
-            { order: 'person', next: (room) => (room ? provide(carryOn(current, attemptId, info, answer, envelope)) : Effect.void) },
+            {
+              order: 'person',
+              next: (room) =>
+                room
+                  ? provide(carryOn(current, attemptId, info, answer, envelope, undefined, undefined, undefined, 'person'))
+                  : Effect.void,
+            },
           )
           yield* touchCard(current.taskId)
         })
@@ -2867,6 +2875,8 @@ export class Runs extends Context.Service<
         said?: string,
         /** How hard the agent it is handed to thinks, where the person picked. */
         effort?: string | null,
+        /** Whose doing it is: the person's (their answer, their resume), or Althar's own, as for a usage limit or a restart (ADR-037). */
+        by: Order = 'underway',
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -2939,8 +2949,9 @@ export class Runs extends Context.Service<
               answer.kind === 'retry' ? answer.agentId : undefined,
               on,
               accountId,
-              // As the person said: a place of its own, not the lead's.
+              // As the person said, or as Althar carries it on: a place of its own, not the lead's.
               yield* lastLead(current),
+              by,
             )
             if (answer.kind === 'tell') {
               const [thread] = yield* sql<{
@@ -3048,7 +3059,7 @@ export class Runs extends Context.Service<
         Effect.gen(function* () {
           const info: StuckInfo = { step: key, why: 'restarted', detail: null, agentId: lead.agentId, round: iteration, open: 0 }
           const carried = yield* Effect.exit(
-            carryOn(current, attemptId, info, { kind: 'retry', agentId: lead.agentId }, said, lead.model, undefined, lead.effort),
+            carryOn(current, attemptId, info, { kind: 'retry', agentId: lead.agentId }, said, lead.model, undefined, lead.effort, 'person'),
           )
           if (carried._tag === 'Failure')
             yield* stuck(current, { id: attemptId }, { ...info, why: 'failed_to_start', detail: summarize(carried.cause) || null })
@@ -3609,6 +3620,10 @@ export class Runs extends Context.Service<
                 place.info,
                 place.answer,
                 yield* envelope('thread.send', { placed: row.attemptId }),
+                undefined,
+                undefined,
+                undefined,
+                'person',
               )
             case 'next': {
               if (row.nodeKey === 'review') {
