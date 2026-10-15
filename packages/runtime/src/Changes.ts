@@ -2557,38 +2557,42 @@ export class Changes extends Context.Service<
           const id = yield* newId(Ids.conflictResolution)
           const place = yield* placeOf(task.taskId, url)
           const body = noteFor(conflicts, place, null)
-          const room = yield* busy.enter(task.taskId, (room) =>
-            sql.withTransaction(
-              Effect.gen(function* () {
-                const at = yield* timestamp
-                yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
-                  id,
-                  projectId: task.projectId,
-                  taskId: task.taskId,
-                  pullRequestUrl: url,
-                  conflicts: JSON.stringify(conflicts),
-                  attempt: 1,
-                  state: 'resolving',
-                  waiting: room ? null : JSON.stringify({ attempt: 1, body, why: {}, since: at } satisfies RoundWaiting),
-                  createdAt: at,
-                  updatedAt: at,
-                })}`
-                yield* fact({
-                  projectId: task.projectId,
-                  aggregateType: 'conflict_resolution',
-                  aggregateId: id,
-                  revision: 1,
-                  type: 'conflict_resolution.started',
-                  payload: {
-                    url,
-                    conflicts: conflicts.map((one) => ({ repository: one.repository, branch: one.branch, files: one.files })),
-                    ...(room ? {} : { waiting: true }),
-                  },
-                  actorId: instance.systemId,
-                })
-                return room
-              }),
-            ),
+          const room = yield* busy.enter(
+            task.taskId,
+            (room) =>
+              sql.withTransaction(
+                Effect.gen(function* () {
+                  const at = yield* timestamp
+                  yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+                    id,
+                    projectId: task.projectId,
+                    taskId: task.taskId,
+                    pullRequestUrl: url,
+                    conflicts: JSON.stringify(conflicts),
+                    attempt: 1,
+                    state: 'resolving',
+                    waiting: room ? null : JSON.stringify({ attempt: 1, body, why: {}, since: at } satisfies RoundWaiting),
+                    createdAt: at,
+                    updatedAt: at,
+                  })}`
+                  yield* fact({
+                    projectId: task.projectId,
+                    aggregateType: 'conflict_resolution',
+                    aggregateId: id,
+                    revision: 1,
+                    type: 'conflict_resolution.started',
+                    payload: {
+                      url,
+                      conflicts: conflicts.map((one) => ({ repository: one.repository, branch: one.branch, files: one.files })),
+                      ...(room ? {} : { waiting: true }),
+                    },
+                    actorId: instance.systemId,
+                  })
+                  return room
+                }),
+              ),
+            // A conflict put to the lead: the work of a task under way.
+            { order: 'underway' },
           )
           const [own] = yield* sql<{ resolveConflicts: number | null }>`SELECT resolve_conflicts FROM tasks WHERE id = ${task.taskId}`
           const as = own?.resolveConflicts === 1 ? 'as you said for this task' : 'as the project’s rules say'
@@ -2614,6 +2618,7 @@ export class Changes extends Context.Service<
         return yield* Effect.forEach(rows, (round) =>
           Effect.map(decodeWaiting(round.waiting ?? ''), (waited) => ({
             taskId: round.taskId,
+            order: 'underway' as const,
             since: waited.since,
             start: provide(locked(round.taskId)(askWaiting(round.id))),
           })),
@@ -2996,15 +3001,19 @@ export class Changes extends Context.Service<
           // The lead takes a place among the agents at work on this machine to fix them, or the round keeps its ask and waits for one.
           const body = fixNoteFor(place, { failing: sum.failing, logs })
           const why = { failing: sum.failing }
-          const room = yield* busy.enter(round.taskId, (room) =>
-            Effect.gen(function* () {
-              const since = yield* timestamp
-              const waiting = room
-                ? {}
-                : { waiting: JSON.stringify({ attempt: round.attempt + 1, body, why, since } satisfies RoundWaiting) }
-              yield* reviseRound(round, 'conflict_resolution.checks_failed', { state: 'resolving', ...waiting }, why)
-              return room
-            }),
+          const room = yield* busy.enter(
+            round.taskId,
+            (room) =>
+              Effect.gen(function* () {
+                const since = yield* timestamp
+                const waiting = room
+                  ? {}
+                  : { waiting: JSON.stringify({ attempt: round.attempt + 1, body, why, since } satisfies RoundWaiting) }
+                yield* reviseRound(round, 'conflict_resolution.checks_failed', { state: 'resolving', ...waiting }, why)
+                return room
+              }),
+            // Checks to fix: the work of a task under way.
+            { order: 'underway' },
           )
           yield* addItem(thread, 'notice', {
             source: 'runtime',
