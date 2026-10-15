@@ -34,6 +34,11 @@
   font-weight: 550;
   color: var(--signal);
 }
+/* a title alone: its kind on its line, not above it */
+.alone .kind {
+  align-self: center;
+  padding-top: 0;
+}
 .main {
   grid-area: main;
   display: flex;

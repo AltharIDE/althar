@@ -5,8 +5,10 @@ import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { safeHref } from '../../lib/safeHref'
 import { Code } from '../../primitives/Code/Code'
+import { CopyButton, type CopyButtonText } from '../../primitives/CopyButton/CopyButton'
 import { Heading, type HeadingLevel } from '../../primitives/Heading/Heading'
 import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
+import { Table, type TableText } from '../Table/Table'
 import s from './Markdown.module.css'
 
 /*
@@ -44,6 +46,9 @@ const known = (t: Token): t is MarkedToken => KNOWN.has(t.type)
 
 const LEVELS: readonly HeadingLevel[] = [1, 2, 3, 4, 5, 6]
 
+/** How long a cell's text may be before a table's cells wrap rather than keep to one line. */
+const LONG_CELL = 48
+
 /** The blocks of a source, without the blank space between them. */
 export function markdownBlocks(source: string): number {
   return Lexer.lex(source).filter((t) => t.type !== 'space' && t.type !== 'def').length
@@ -55,6 +60,10 @@ export interface MarkdownText {
   /** A task list item's box, for a screen reader. */
   done: string
   notDone: string
+  /** A table's own copy, such as its name for a screen reader. */
+  table?: Partial<TableText>
+  /** A code block's copy button. */
+  copy?: Partial<CopyButtonText>
 }
 
 export const markdownText: MarkdownText = { newTab: '(opens in a new tab)', done: 'done', notDone: 'not done' }
@@ -117,10 +126,16 @@ function Block({ token, base, t }: { token: Token; base: HeadingLevel; t: Markdo
       )
     }
     case 'code':
+      /* the copy sits in the block's corner; the code keeps clear of it */
       return (
-        <pre>
-          <code>{token.text}</code>
-        </pre>
+        <div className={s.block}>
+          <pre>
+            <code>{token.text}</code>
+          </pre>
+          <span className={s.copy}>
+            <CopyButton value={token.text} text={t.copy} ghost />
+          </span>
+        </div>
       )
     case 'blockquote':
       return (
@@ -130,33 +145,20 @@ function Block({ token, base, t }: { token: Token; base: HeadingLevel; t: Markdo
           ))}
         </blockquote>
       )
-    case 'table':
+    case 'table': {
+      /* the kit's table: it scrolls sideways, and sentences in its cells wrap */
+      const long = [token.header, ...token.rows].some((row) => row.some((cell) => cell.text.length > LONG_CELL))
       return (
-        <div className={s.tableWrap}>
-          <table>
-            <thead>
-              <tr>
-                {token.header.map((c, j) => (
-                  <th key={j} scope="col" style={{ textAlign: token.align[j] ?? undefined }}>
-                    {inline(c.tokens, t)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {token.rows.map((row, r) => (
-                <tr key={r}>
-                  {row.map((c, j) => (
-                    <td key={j} style={{ textAlign: token.align[j] ?? undefined }}>
-                      {inline(c.tokens, t)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table
+          head={token.header.map((cell) => inline(cell.tokens, t))}
+          rows={token.rows.map((row) => row.map((cell) => inline(cell.tokens, t)))}
+          align={token.align}
+          rowHeaders={false}
+          wrap={long}
+          {...(t.table === undefined ? {} : { text: t.table })}
+        />
       )
+    }
     case 'hr':
       return <hr />
     case 'text':

@@ -1,5 +1,6 @@
 import { Effect, Schema } from 'effect'
 
+import { type Access, type AccessReason, line } from './access'
 import { type AdapterOptions, authorizationOf } from './credential'
 import { ConnectorFailed } from './errors'
 import { type Http, makeHttp } from './http'
@@ -17,6 +18,21 @@ import type {
   Review,
   Verdict,
 } from './model'
+import { noReviews } from './model'
+import {
+  answered,
+  failedOf,
+  probe,
+  type Reached,
+  reachLine,
+  readAs,
+  refusalOf,
+  seenOf,
+  serverLine,
+  stopped,
+  UNREADABLE,
+  UNSAID,
+} from './probe'
 
 /*
  * Bitbucket Data Center, on a company's own server: a code host of pull
@@ -85,9 +101,21 @@ const PullAnswer = Schema.Struct({
   author: Schema.optional(Schema.NullOr(Schema.Struct({ user: UserAnswer }))),
   reviewers: Schema.optional(Schema.Array(Schema.Struct({ user: UserAnswer }))),
   links: Schema.optional(Schema.Struct({ self: Schema.optional(Schema.Array(Schema.Struct({ href: Schema.String }))) })),
+  // Whether it would merge cleanly, as Data Center last worked it out: `current` false is from before a branch moved.
+  properties: Schema.optional(
+    Schema.Struct({
+      mergeResult: Schema.optional(Schema.Struct({ outcome: Schema.String, current: Schema.optional(Schema.Boolean) })),
+    }),
+  ),
   updatedDate: Schema.Number,
 })
 type PullAnswer = typeof PullAnswer.Type
+
+/** Whether a pull request's merge result says it conflicts with its target: nothing where it is out of date or unknown. */
+const conflictsOf = (result: { readonly outcome: string; readonly current?: boolean | undefined } | undefined) =>
+  result === undefined || result.current === false || (result.outcome !== 'CONFLICTED' && result.outcome !== 'CLEAN')
+    ? {}
+    : { conflicts: result.outcome === 'CONFLICTED' }
 
 const Mergeability = Schema.Struct({
   canMerge: Schema.Boolean,
@@ -306,6 +334,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
     deletions: null,
     changedFiles: null,
     updatedAt: iso(answer.updatedDate),
+    ...conflictsOf(answer.properties?.mergeResult),
   })
 
   /** Whether this repository is the one a ref is in. */
@@ -366,7 +395,7 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
   return {
     product,
     words: { noun: 'pull request', short: 'PR', prefix: '#' },
-    capabilities: { drafts: true, checkLogs: false, threads: true },
+    capabilities: { drafts: true, checkLogs: false, threads: true, reviews: false },
     account,
     repository: (path) =>
       Effect.gen(function* () {
@@ -549,6 +578,9 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
         // Althar's own reply: whether it counts as a member's doesn't matter, it is known by its receipt.
         (comment) => commentOf(repository, number, comment, { id: reply.threadId ?? String(comment.id), path: null, line: null }, true),
       ),
+    // Reviews of a change Althar didn't open are GitHub's alone, for now.
+    changeToReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
+    postReview: () => Effect.fail(noReviews(product, { noun: 'pull request', short: 'PR', prefix: '#' })),
     pushTarget: (repository) =>
       Effect.map(options.credential, (credential) => ({
         url: `${web}/scm/${(repository.path[0] ?? '').toLowerCase()}/${repository.path[1] ?? ''}.git`,
@@ -557,3 +589,79 @@ export const makeBitbucketDataCenter = (options: AdapterOptions): CodeHost => {
       })),
   }
 }
+
+/*
+ * What a Bitbucket Data Center connection can do. Its server answers
+ * first, and says who the token signs in as in a header. What an HTTP access
+ * token itself may do can't be read: only an account that can't write to a
+ * repository, which no token of it then can, is certain.
+ */
+
+export const accessBitbucketDataCenter: Access = (input) =>
+  Effect.gen(function* () {
+    const api = input.apiUrl.replace(/\/+$/, '')
+    const ask = (url: string) => probe(input, url)
+
+    const properties = yield* ask(`${api}/application-properties`)
+    const server = serverLine('server', input.webUrl, properties)
+    if (properties.status === 0) return stopped([server])
+    const name = properties.headers.get('x-ausername')
+    // The properties answer anyone: no one named in the header is a token the server didn't take.
+    if (!answered(properties) || name === null)
+      return stopped([server, line('account', 'no', { reason: answered(properties) ? { kind: 'refused' } : refusalOf(properties) })])
+    const users = yield* ask(`${api}/users?filter=${encodeURIComponent(name)}&limit=100`)
+    const user = (answered(users) ? readAs(Page(UserAnswer), users) : undefined)?.values.find(
+      (found) => found.name.toLowerCase() === name.toLowerCase(),
+    )
+    const account =
+      user === undefined
+        ? { id: properties.headers.get('x-auserid') ?? name, login: name, name: null }
+        : { id: String(user.id), login: user.name, name: user.displayName ?? null }
+
+    const reached = yield* Effect.forEach(
+      input.repositories,
+      (path) =>
+        Effect.gen(function* () {
+          // A remote's path may say more than `PROJECT/repo`: the last two are the repository.
+          const [project = '', slug = ''] = path.slice(-2)
+          const answer = yield* ask(`${api}/projects/${encodeURIComponent(project)}/repos/${encodeURIComponent(slug)}`)
+          if (!answered(answer))
+            return {
+              path,
+              // Data Center's 401 is also its word for a repository the account may not see.
+              missed:
+                answer.status === 404 || answer.status === 401 || answer.status === 403
+                  ? { kind: 'unseen', names: [path.join('/')], url: null }
+                  : failedOf(answer),
+            } satisfies Reached<boolean | null>
+          const found = readAs(RepositoryAnswer, answer)
+          if (found === undefined) return { path, missed: UNREADABLE } satisfies Reached<boolean | null>
+          // Whether the account may write there, as the adapter asks: the repositories it may write to, by this one's name.
+          const writable = yield* ask(
+            `${api}/repos?projectkey=${encodeURIComponent(found.project.key)}&name=${encodeURIComponent(found.name)}&permission=REPO_WRITE&limit=100`,
+          )
+          const listed = answered(writable) ? readAs(Page(Schema.Struct({ id: Schema.Number })), writable) : undefined
+          return { path, seen: listed === undefined ? null : listed.values.some((one) => one.id === found.id) } satisfies Reached<
+            boolean | null
+          >
+        }),
+      { concurrency: 4 },
+    )
+    const writes = seenOf(reached)
+    const role: AccessReason = { kind: 'role', role: null }
+    // The account can't write to one: neither can its token. Where it can, the token's own permission isn't said.
+    const cannot = writes.includes(false)
+
+    return {
+      account,
+      lines: [
+        server,
+        line('account', 'ok', { fact: account.login }),
+        ...(reached.length > 0 ? [reachLine(reached, null)] : []),
+        cannot ? line('push', 'no', { reason: role }) : line('push', 'unknown', { reason: UNSAID }),
+        cannot ? line('changes', 'no', { reason: role }) : line('changes', 'unknown', { reason: UNSAID }),
+      ],
+      expiresAt: null,
+      scopes: null,
+    }
+  })

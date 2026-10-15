@@ -103,6 +103,26 @@ describe('the edge', () => {
     expect(within(screen.getByRole('article', { name: 'Run npm publish' })).queryByRole('button', { name: 'Allow once' })).toBeNull()
   })
 
+  it('neither lists nor counts a plain task that finished: it waits on its board', async () => {
+    const finished = task({
+      taskId: 't9',
+      threadId: 'th9',
+      title: 'Which partners call v1?',
+      phase: 'ready',
+      kind: 'plain',
+      projectId: 'p2',
+    })
+    const { client } = fakeClient({
+      getHome: vi.fn(async () => home({ tasks: [running, ready, finished], calls: [permission], projects: [project, halyard] })),
+    })
+    withServices(<Edge />, client)
+    await userEvent.click(await screen.findByRole('button', { name: '2 need you' }))
+    expect(screen.getByRole('article', { name: 'Name the limits better' })).toBeTruthy()
+    expect(screen.queryByText('Which partners call v1?')).toBeNull()
+    // Nor is it work in progress.
+    expect(screen.getByText('1 in progress')).toBeTruthy()
+  })
+
   it('says why a stuck task waits and what a change is, and counts the work held and stopped', async () => {
     const host = fakeHost()
     const stuck: HomeCall = {
@@ -219,7 +239,7 @@ describe('the edge’s reads', () => {
     vi.useFakeTimers()
     try {
       const listeners: Array<(event: WatchEvent) => void> = []
-      const feed: Feed = { listen: (listener) => (listeners.push(listener), () => {}), stop: () => {} }
+      const feed: Feed = { listen: (listener) => (listeners.push(listener), () => {}), rewatched: () => () => {}, stop: () => {} }
       const cache = new QueryClient()
       const invalidate = vi.spyOn(cache, 'invalidateQueries')
       followEdge(feed, cache)

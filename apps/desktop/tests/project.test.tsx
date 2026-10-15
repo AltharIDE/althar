@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -7,9 +7,10 @@ import { Room } from '@althar/ui'
 
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
+import { useProjectSettings } from '../src/renderer/features/project/useProjectSettings'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { useBoard } from '../src/renderer/features/board/useBoard'
-import { agents, card, changed, coordinatorSnapshot, efforts, fakeClient, items, models, status, streamed } from './fixtures'
+import { agents, card, changed, coordinatorSnapshot, efforts, fakeClient, items, models, project, status, streamed } from './fixtures'
 import { clock } from '../src/renderer/shared/time'
 import { withServices } from './render'
 
@@ -48,6 +49,7 @@ const session = {
   models: [],
   turnRunning: false,
   context: null,
+  background: [],
 }
 
 /** The coordinator's thread with a conversation and two cards: one running, one planned. */
@@ -64,8 +66,88 @@ const talk = (overrides: Partial<CoordinatorSnapshot> = {}) =>
     ...overrides,
   })
 
+/** The project with its settings, as its route gives it. */
+function WithSettings() {
+  return (
+    <ProjectView
+      model={useProject('p1')}
+      board={useBoard('p1')}
+      connections={useConnections()}
+      onTask={vi.fn()}
+      settings={{ model: useProjectSettings('p1', vi.fn()), onRepositories: vi.fn(), onRules: vi.fn() }}
+    />
+  )
+}
+
+describe('running the project, with no agent', () => {
+  it('runs its default branch from the project’s front, shows it over the coordinator’s composer, and stops and clears it there', async () => {
+    const { client, emit } = fakeClient({
+      listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
+      getCoordinator: vi.fn(async () => coordinatorSnapshot({ runCommand: 'npm run dev' })),
+    })
+    withServices(<WithSettings />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'Run npm run dev' }))
+    expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc')
+    const launch = {
+      id: 'proc_1',
+      taskId: null,
+      where: 'main',
+      command: 'npm run dev',
+      url: 'http://localhost:5199/',
+      startedAt: '2026-10-10T09:00:00.000Z',
+      ended: null,
+    }
+    // Every run in the project shows here, a task's too, each saying where it runs.
+    act(() =>
+      emit({
+        _tag: 'Launches',
+        projectId: 'p1',
+        launches: [launch, { ...launch, id: 'proc_2', taskId: 't1', where: 'Fix the login timeout', command: 'bun run dev' }],
+      }),
+    )
+    const pill = await screen.findByRole('button', { name: /^Running/ })
+    await waitFor(() => expect(pill.textContent).toContain('2 processes'))
+    await userEvent.click(pill)
+    const list = within(await screen.findByRole('dialog', { name: 'Running' }))
+    expect(list.getByText(/^main/)).toBeTruthy()
+    expect(list.getByText(/^Fix the login timeout/)).toBeTruthy()
+    await userEvent.click(list.getByRole('button', { name: 'Stop npm run dev' }))
+    expect(client.stopLaunch).toHaveBeenCalledWith('proc_1')
+    await userEvent.keyboard('{Escape}')
+    // One that ended by itself says how, and clears.
+    act(() => emit({ _tag: 'Launches', projectId: 'p1', launches: [{ ...launch, ended: { at: '2026-10-10T09:01:00.000Z', code: 1 } }] }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Ran/ }))
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Ran' })).getByRole('button', { name: 'Clear npm run dev' }))
+    expect(client.clearLaunch).toHaveBeenCalledWith('proc_1')
+  })
+
+  it('leaves each run’s card in the coordinator’s thread: open the one that is up, stop it, run again a task’s that ended', async () => {
+    const up = items.run({ launchId: 'proc_1', taskId: null, where: 'main', command: 'npm run dev', url: 'http://localhost:5199/' })
+    const ended = items.run({
+      launchId: 'proc_2',
+      ended: { at: '2026-10-10T09:01:00.000Z', code: null, stopped: true, last: null },
+    })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [up, ended] })) })
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => null)
+    withServices(<WithSettings />, client)
+    const main = within(await screen.findByRole('article', { name: 'Run of main' }))
+    // Nothing says how the project runs: its front offers no run.
+    expect(screen.queryByRole('button', { name: 'Run npm run dev' })).toBeNull()
+    await userEvent.click(main.getByRole('button', { name: 'Open localhost:5199' }))
+    expect(opened).toHaveBeenCalledWith('http://localhost:5199/', '_blank')
+    await userEvent.click(main.getByRole('button', { name: 'Stop npm run dev' }))
+    expect(client.stopLaunch).toHaveBeenCalledWith('proc_1')
+    // A task's run, stopped: it runs again in the task's worktree, its card here.
+    const task = within(screen.getByRole('article', { name: 'Run of Fix the login timeout' }))
+    expect(task.queryByRole('button', { name: 'Stop bun run dev' })).toBeNull()
+    await userEvent.click(task.getByRole('button', { name: 'Run bun run dev again' }))
+    expect(client.runProject).toHaveBeenCalledWith('p1', 't1', 'thc')
+    opened.mockRestore()
+  })
+})
+
 describe('the project’s bar', () => {
-  it('steps through the views by b, never while typing, and opens on the view or the new task a task’s bar asked for', async () => {
+  it('steps through the views by b, never while typing, and has no button to start a task', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     const view = withServices(<Project />, client)
     const checked = () => screen.getAllByRole('radio').find((radio) => radio.getAttribute('aria-checked') === 'true')?.textContent
@@ -79,12 +161,9 @@ describe('the project’s bar', () => {
     expect(checked()).toMatch(/^Conversation/)
     await userEvent.type(screen.getByRole('textbox', { name: /Tell the coordinator/ }), 'b')
     expect(checked()).toMatch(/^Conversation/)
+    // A task starts by telling the coordinator; nothing else starts one.
+    expect(screen.queryByRole('button', { name: 'New task' })).toBeNull()
     view.unmount()
-
-    withServices(<Project room={Room.Board} newTask />, client)
-    // Planning a task opens beside the conversation, so the board is shown with it.
-    await waitFor(() => expect(checked()).toMatch(/^Both/))
-    expect(await screen.findByRole('complementary', { name: 'New task' })).toBeTruthy()
   })
 
   it('says which view it is on, to open on it again, and has only its views to choose from', async () => {
@@ -109,7 +188,16 @@ describe('the Talk room', () => {
     const { client, watching } = fakeClient({ getCoordinator: vi.fn(async () => talk()) })
     withServices(<Project onTask={onTask} />, client)
     await screen.findByRole('heading', { name: 'meridian', level: 1 })
-    expect(screen.getByText('/code/meridian')).toBeTruthy()
+    // Its front page says what it is made of, never where it is on this Mac.
+    const made = await screen.findByRole('list', { name: 'Made of' })
+    await waitFor(() =>
+      expect(
+        within(made)
+          .getAllByRole('listitem')
+          .map((part) => part.textContent),
+      ).toEqual(['meridian-api', 'meridian-web', 'meridian-infra']),
+    )
+    expect(screen.queryByText(/\/code\/meridian/)).toBeNull()
     expect(screen.getByText('The call has no retry. I planned a task.')).toBeTruthy()
     expect(screen.queryByText('checkout.ts')).toBeNull()
     expect(screen.getByRole('button', { name: /^Worked for/ })).toBeTruthy()
@@ -160,6 +248,59 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledWith('pln5')
   })
 
+  it('files, changes and discards an issue the coordinator drafted, and shows it filed or why it wasn’t', async () => {
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          items: [
+            items.draft(),
+            items.draft({ draftId: 'idr_2', title: 'Flaky checkout test', state: 'failed', error: 'Linear didn’t answer.' }),
+            items.draft({
+              draftId: 'idr_3',
+              title: 'Retry webhooks',
+              state: 'filed',
+              issue: { key: 'MER-240', url: 'https://linear.app/m/issue/MER-240' },
+            }),
+            items.draft({ draftId: 'idr_4', title: 'Rename the env var', state: 'discarded' }),
+          ],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    const pending = (await screen.findByRole('heading', { name: 'Refunds skip the rate limiter' })).closest('article')
+    expect(pending).toBeTruthy()
+    const card = within(pending as HTMLElement)
+    expect(card.getByText('Issue draft · Linear · Meridian')).toBeTruthy()
+    // Its description is drawn as Markdown.
+    expect(card.getByText('refunds').tagName).toBe('STRONG')
+    expect(card.getByText('Labels: payments')).toBeTruthy()
+    await userEvent.click(card.getByRole('button', { name: 'File issue' }))
+    expect(client.fileIssueDraft).toHaveBeenCalledWith('idr_1')
+    await userEvent.click(card.getByRole('button', { name: 'Edit' }))
+    const title = card.getByRole('textbox', { name: 'Title' })
+    await userEvent.clear(title)
+    await userEvent.type(title, 'Refunds bypass the limiter')
+    await userEvent.type(card.getByRole('textbox', { name: /Labels/ }), ', billing')
+    await userEvent.click(card.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(client.changeIssueDraft).toHaveBeenCalledWith('idr_1', {
+        title: 'Refunds bypass the limiter',
+        body: 'Charges go through it; **refunds** don’t.',
+        labels: ['payments', 'billing'],
+      }),
+    )
+    await userEvent.click(card.getByRole('button', { name: 'Discard' }))
+    expect(client.discardIssueDraft).toHaveBeenCalledWith('idr_1')
+
+    // Not filed: why, and filing it again.
+    expect(screen.getByText(/Couldn’t file it on Linear\. Linear didn’t answer\./)).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'File again' }))
+    expect(client.fileIssueDraft).toHaveBeenCalledWith('idr_2')
+    // Filed: its key, as a link to it; discarded: said so.
+    expect(screen.getByRole('link', { name: /MER-240/ }).getAttribute('href')).toBe('https://linear.app/m/issue/MER-240')
+    expect(screen.getByText('Issue draft discarded')).toBeTruthy()
+  })
+
   it('holds, changes and starts a plan before it starts on its own', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(card())] })) })
     withServices(<Project />, client)
@@ -204,14 +345,108 @@ describe('the Talk room', () => {
     expect(client.startPlan).toHaveBeenCalledWith('pln1')
   })
 
+  it('lets the person change a started plan while its first step waits for a free agent, saying what it waits for', async () => {
+    const waitingCard = card({ phase: 'running', step: 'implement', queued: { busy: 4, atOnce: 4 }, planWaits: true })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
+    withServices(<Project />, client)
+    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
+    // Nothing to start or hold: it starts on its own once an agent is free.
+    expect(screen.queryByRole('button', { name: 'Start now' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Hold' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    await waitFor(() =>
+      expect(client.changePlan).toHaveBeenLastCalledWith(
+        'pln1',
+        [
+          { key: 'implement', agentId: 'claude-code', model: null, skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        null,
+      ),
+    )
+  })
+
+  it('keeps a card’s steps and branch while a later step waits for a free agent, saying it waits and not that it runs', async () => {
+    const waitingCard = card({ phase: 'running', step: 'review', queued: { busy: 4, atOnce: 4 }, branch: 'althar/midway' })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
+    withServices(<Project />, client)
+    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
+    const track = screen.getByRole('list', { name: 'Steps' })
+    expect(track.getAttribute('data-status')).toBe('queued')
+    expect(screen.getByText('althar/midway')).toBeTruthy()
+  })
+
+  it('shows the effort the coordinator picked for a step as one the person chose, keeps it, and lets the person change it', async () => {
+    const plan = {
+      ...card().plan!,
+      steps: [
+        { key: 'implement' as const, agentId: 'claude-code', model: 'opus', effort: 'high', skipped: false },
+        { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+      ],
+    }
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(card({ plan }))] })) })
+    withServices(<Project />, client)
+    // The lead at the coordinator's effort; the review, which it left out, at the model's own.
+    expect(await screen.findByRole('button', { name: 'Lead for this task: Claude Opus High' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Review: gpt-5.2-codex Medium' })).toBeTruthy()
+    // Skipping the review keeps it.
+    await userEvent.click(screen.getByRole('button', { name: 'Skip' }))
+    await waitFor(() =>
+      expect(client.changePlan).toHaveBeenLastCalledWith(
+        'pln1',
+        [
+          { key: 'implement', agentId: 'claude-code', model: 'opus', effort: 'high', skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        null,
+      ),
+    )
+    // The person changes it as they would their own.
+    await userEvent.click(screen.getByRole('button', { name: 'Lead for this task: Claude Opus High' }))
+    await userEvent.click(await screen.findByRole('radio', { name: 'Low' }))
+    await waitFor(() =>
+      expect(client.changePlan).toHaveBeenLastCalledWith(
+        'pln1',
+        [
+          { key: 'implement', agentId: 'claude-code', model: 'opus', effort: 'low', skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        null,
+      ),
+    )
+  })
+
+  it('says beside a running task’s lead how hard it thinks, and nothing where that isn’t known', async () => {
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          items: [
+            // A mini task, which has no plan's card to show it.
+            items.card(card({ phase: 'running', step: 'implement', plan: null, leadModel: 'opus', leadEffort: 'high' })),
+            items.card(card({ taskId: 't2', slug: 'tidy', title: 'Tidy', phase: 'running', step: 'review', leadModel: 'sonnet' })),
+          ],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    const running = await screen.findByRole('article', { name: 'Add a retry' })
+    expect(within(running).getByText('Claude Opus')).toBeTruthy()
+    expect(within(running).getByText('High')).toBeTruthy()
+    const tidy = screen.getByRole('article', { name: 'Tidy' })
+    expect(within(tidy).getByText('Claude Sonnet')).toBeTruthy()
+    expect(within(tidy).queryByText(/^(Low|Medium|High)$/)).toBeNull()
+  })
+
   it('talks to the coordinator on the agent last used, or on another the person picks', async () => {
     const { client } = fakeClient()
     withServices(<Project />, client)
-    expect(await screen.findByText('Ask the coordinator about the project, or say what should change.')).toBeTruthy()
+    expect(await screen.findByText('Ask the coordinator about meridian, or say what should change.')).toBeTruthy()
     const box = screen.getByRole('textbox', { name: 'Tell the coordinator something' })
     await userEvent.type(box, 'Add a retry{Enter}')
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Add a retry', disposition: 'after_current' }))
-    expect(client.startSession).not.toHaveBeenCalled()
+    // Started first, as it ran last, so a send that fails was never queued.
+    expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code' })
+    expect(vi.mocked(client.startSession).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.send).mock.invocationCallOrder[0] ?? 0)
 
     await userEvent.click(screen.getByRole('button', { name: 'Coordinator: Claude Code default Medium' }))
     await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
@@ -250,6 +485,61 @@ describe('the Talk room', () => {
     expect(await screen.findByRole('button', { name: 'Coordinator: Claude Sonnet Medium' })).toBeTruthy()
     await userEvent.type(screen.getByRole('textbox', { name: 'Tell the coordinator something' }), 'Hello{Enter}')
     await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code', model: 'sonnet' }))
+  })
+
+  it('sends images dropped on its composer with what the person says to it', async () => {
+    const { client } = fakeClient()
+    withServices(<Project />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 2,
+    ])
+    fireEvent.paste(box, { clipboardData: { files: [new File([png], '', { type: 'image/png' })], types: ['Files'] } })
+    expect(await screen.findByRole('img', { name: 'Pasted image' })).toBeTruthy()
+    await userEvent.type(box, 'This is the bug{Enter}')
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({
+        threadId: 'thc',
+        body: 'This is the bug',
+        disposition: 'after_current',
+        images: [{ data: Buffer.from(png).toString('base64'), name: 'Pasted image' }],
+      }),
+    )
+    expect(screen.getByRole('button', { name: 'View Pasted image' })).toBeTruthy()
+  })
+
+  it('puts what the person said, and its images, back in its composer when Althar didn’t take it', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.send).mockRejectedValueOnce(new Error('Althar is restarting.'))
+    withServices(<Project />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 2,
+    ])
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([png], 'bug.png', { type: 'image/png' })] } })
+    expect(await screen.findByRole('img', { name: 'bug.png' })).toBeTruthy()
+    await userEvent.type(box, 'This is the bug{Enter}')
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('This is the bug'))
+    expect(screen.getByRole('list', { name: '1 image to send' })).toBeTruthy()
+    expect(screen.getByRole('img', { name: 'bug.png' })).toBeTruthy()
+  })
+
+  it('puts what was said back when the coordinator didn’t start, since nothing was queued, and sends on past one already starting', async () => {
+    const { client } = fakeClient()
+    vi.mocked(client.startSession).mockRejectedValueOnce(new ApiError({ reason: 'SessionFailed', message: "Claude Code couldn't start." }))
+    withServices(<Project />, client)
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    await userEvent.type(box, 'Plan it{Enter}')
+    expect(await screen.findByText("Claude Code couldn't start.")).toBeTruthy()
+    expect(client.send).not.toHaveBeenCalled()
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('Plan it'))
+    // One already starting, as from a message just before, takes this one next.
+    vi.mocked(client.startSession).mockRejectedValueOnce(
+      new ApiError({ reason: 'SessionRunning', message: 'An agent is already working on this task.' }),
+    )
+    await userEvent.type(box, '{Enter}')
+    await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Plan it', disposition: 'after_current' }))
+    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe(''))
   })
 
   it("says when the agent it last ran on isn't signed in, and starts it on one that is", async () => {
@@ -415,71 +705,6 @@ describe('the Talk room', () => {
   })
 })
 
-describe('a task the person plans', () => {
-  it('starts beside the conversation: what should change, its lead and its review', async () => {
-    const { client } = fakeClient()
-    withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    const panel = await screen.findByRole('complementary', { name: 'New task' })
-
-    // Nothing written: it says what is missing rather than refuse the button.
-    await userEvent.click(within(panel).getByRole('button', { name: 'Start the task' }))
-    expect(within(panel).getByText('Say what the task is.')).toBeTruthy()
-    expect(client.startTask).not.toHaveBeenCalled()
-
-    await userEvent.type(within(panel).getByLabelText('What should change'), '  Add a retry  ')
-    await userEvent.type(within(panel).getByLabelText('Anything the lead should know'), ' Only the checkout call. ')
-    // Another agent reviews by default.
-    expect(await within(panel).findByRole('button', { name: 'Review: gpt-5.2-codex Medium' })).toBeTruthy()
-    await userEvent.click(within(panel).getByRole('button', { name: 'Start the task' }))
-    await waitFor(() =>
-      expect(client.startTask).toHaveBeenCalledWith({
-        projectId: 'p1',
-        title: 'Add a retry',
-        description: 'Only the checkout call.',
-        steps: [
-          { key: 'implement', agentId: 'claude-code', model: null, effort: null, skipped: false },
-          { key: 'review', agentId: 'codex', model: null, effort: null, skipped: false },
-        ],
-        // The repository's host isn't connected here: the task ends on its branch.
-        end: null,
-      }),
-    )
-    await waitFor(() => expect(screen.queryByRole('complementary', { name: 'New task' })).toBeNull())
-  })
-
-  it('can go without a review, with another lead; and says what went wrong', async () => {
-    const { client } = fakeClient({
-      startTask: vi.fn(async () => Promise.reject(new ApiError({ reason: 'GitFailed', message: "git worktree didn't work." }))),
-    })
-    withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'New task' }))
-    const panel = await screen.findByRole('complementary', { name: 'New task' })
-    await userEvent.type(within(panel).getByLabelText('What should change'), 'Bump the version')
-    await userEvent.click(await within(panel).findByRole('button', { name: 'Lead: Claude Code default Medium' }))
-    await userEvent.click(await screen.findByRole('radio', { name: /gpt-5\.2-codex/ }))
-    // The review goes to another agent than the lead's; without one, it can be added back.
-    await userEvent.click(await within(panel).findByRole('button', { name: 'Review: Claude Code default Medium' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'No review' }))
-    await userEvent.click(within(panel).getByRole('button', { name: 'Add a review' }))
-    await userEvent.click(await within(panel).findByRole('button', { name: 'Review: Claude Code default Medium' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'No review' }))
-    await userEvent.click(within(panel).getByRole('button', { name: 'Start the task' }))
-    expect(await screen.findByText("git worktree didn't work.")).toBeTruthy()
-    expect(client.startTask).toHaveBeenCalledWith({
-      projectId: 'p1',
-      title: 'Bump the version',
-      steps: [{ key: 'implement', agentId: 'codex', model: 'gpt-5.2-codex', effort: null, skipped: false }],
-      end: null,
-    })
-    // It stays open, to try again; Close puts it away, and Dismiss the message.
-    await userEvent.click(within(panel).getByRole('button', { name: 'Close the panel' }))
-    expect(screen.queryByRole('complementary', { name: 'New task' })).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
-    expect(screen.queryByText("git worktree didn't work.")).toBeNull()
-  })
-})
-
 describe('what can go wrong', () => {
   it('asks for an agent to be signed in when none is', async () => {
     const { client } = fakeClient({
@@ -521,12 +746,14 @@ describe('what can go wrong', () => {
 })
 
 describe('a send to the coordinator that fails', () => {
-  it('takes its copy out of the conversation again, and says why', async () => {
+  it('takes its copy out of the conversation again, says why, and puts what was said back in the composer', async () => {
     const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot()) })
     vi.mocked(client.send).mockRejectedValueOnce(new ApiError({ reason: 'NotFound', message: 'The project went away.' }))
     withServices(<Project />, client)
-    await userEvent.type(await screen.findByRole('textbox', { name: 'Tell the coordinator something' }), 'Plan it{Enter}')
+    const box = await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
+    await userEvent.type(box, 'Plan it{Enter}')
     expect(await screen.findByText('The project went away.')).toBeTruthy()
-    expect(screen.queryByText('Plan it')).toBeNull()
+    expect(screen.queryByText('Plan it', { selector: 'p' })).toBeNull()
+    expect((box as HTMLTextAreaElement).value).toBe('Plan it')
   })
 })

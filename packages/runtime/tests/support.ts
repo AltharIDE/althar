@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 
-import type { AgentDefinition, AgentId } from '@althar/provider-adapters'
+import type { AgentDefinition, AgentId, SessionOptions } from '@althar/provider-adapters'
 import { codexLikeMeanings, fakeAgent, type FakeAgentOptions, fakeAgentMain } from '@althar/provider-adapters/testing'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -14,31 +14,49 @@ import type { FakeService } from '@althar/connectors/testing'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
-import { Agents, type AgentEntry, Connectors, type RuntimeOptions, type StallOptions } from '../src/Config'
+import {
+  Agents,
+  type AgentEntry,
+  type BusyOptions,
+  Connectors,
+  type IdleOptions,
+  type RuntimeOptions,
+  type SetupOptions,
+  type StallOptions,
+} from '../src/Config'
+import type { CliUnanswered } from '../src/errors'
 import { Projects } from '../src/Projects'
 import * as Runtime from '../src/Runtime'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { Secrets } from '../src/Secrets'
+import type { LoadOptions } from '../src/MachineLoad'
 import type { ModelFactsOptions } from '../src/ModelFacts'
+
+/** The repository every test starts from, made once per worker: copying it is much quicker than running git anew. */
+let template: string | undefined
 
 /** A git repository with one commit on `main`. */
 export const repository = () => {
+  if (template === undefined) {
+    template = mkdtempSync(join(tmpdir(), 'althar-template-'))
+    const run = (...args: Array<string>) =>
+      execFileSync('git', args, {
+        cwd: template,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 'Test',
+          GIT_AUTHOR_EMAIL: 'test@althar.test',
+          GIT_COMMITTER_NAME: 'Test',
+          GIT_COMMITTER_EMAIL: 'test@althar.test',
+        },
+      })
+    run('init', '-q', '-b', 'main')
+    writeFileSync(join(template, 'README.md'), '# Meridian\n')
+    run('add', '.')
+    run('commit', '-q', '-m', 'Start')
+  }
   const path = mkdtempSync(join(tmpdir(), 'althar-repo-'))
-  const run = (...args: Array<string>) =>
-    execFileSync('git', args, {
-      cwd: path,
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: 'Test',
-        GIT_AUTHOR_EMAIL: 'test@althar.test',
-        GIT_COMMITTER_NAME: 'Test',
-        GIT_COMMITTER_EMAIL: 'test@althar.test',
-      },
-    })
-  run('init', '-q', '-b', 'main')
-  writeFileSync(join(path, 'README.md'), '# Meridian\n')
-  run('add', '.')
-  run('commit', '-q', '-m', 'Start')
+  cpSync(template, path, { recursive: true })
   return path
 }
 
@@ -48,8 +66,20 @@ const fakeHomes = mkdtempSync(join(tmpdir(), 'althar-fake-homes-'))
 /** Lines the runtime would have opened in a terminal, such as an account's sign-in. */
 export const opened: Array<string> = []
 
-/** Every fake agent started, where it started, and with the environment its account gave it: its home, or nothing for its usual folder. */
-export const launches: Array<{ readonly agentId: string; readonly cwd: string; readonly env: Readonly<Record<string, string>> }> = []
+/**
+ * Every fake agent started, where it started, with the environment its
+ * account gave it (its home, or nothing for its usual folder), and how its
+ * session was started beyond its role: as a review's lead, untrusted.
+ */
+export const launches: Array<{
+  readonly agentId: string
+  readonly cwd: string
+  readonly env: Readonly<Record<string, string>>
+  readonly options?: SessionOptions | undefined
+}> = []
+
+/** What each session of the fake agent with session options (`claude-code`) was started as: its role, and its options. */
+export const sessionMetas: Array<{ readonly role: 'lead' | 'reader' | undefined; readonly options: SessionOptions | undefined }> = []
 
 export const definition = (id: string, signedOut: ReadonlyArray<string> = [], perUse: ReadonlyArray<string> = []): AgentDefinition => ({
   id: id as AgentId,
@@ -80,7 +110,16 @@ export const definition = (id: string, signedOut: ReadonlyArray<string> = [], pe
   permissions: codexLikeMeanings,
   permissionJudge: { sessionMeta: { fake: { tools: [] } } },
   // One fake agent passes session options, as Claude Code's entry does.
-  ...(id === 'claude-code' ? { sessionMeta: () => ({ fake: { asks: true } }) } : {}),
+  ...(id === 'claude-code'
+    ? {
+        sessionMeta: (role?: 'lead' | 'reader', options?: SessionOptions) => {
+          sessionMetas.push({ role, options })
+          return { fake: { asks: true } }
+        },
+      }
+    : {}),
+  // Each may lead a review of a pull request from outside but `codex`, as the registry's Codex may not.
+  reviewing: { outside: id !== 'codex' },
   knownGaps: [],
 })
 
@@ -98,8 +137,8 @@ export const fakeAgents = (
 ) => {
   const entry = (agentId: string): AgentEntry => ({
     definition: definition(agentId, signedOut, perUse),
-    transport: (cwd, env = {}) => {
-      launches.push({ agentId, cwd, env })
+    transport: (cwd, env = {}, session) => {
+      launches.push({ agentId, cwd, env, options: session })
       return agentId === 'process'
         ? { _tag: 'Process', spec: { command: 'bun', args: [fakeAgentMain] }, cwd }
         : agentId === 'missing'
@@ -127,7 +166,12 @@ export const fakeAgents = (
  */
 export const fakeConnectors = (
   services: { readonly github?: FakeService; readonly linear?: FakeService; readonly trello?: FakeService },
-  more: { readonly fetch?: Fetch; readonly clientIds?: Readonly<Record<string, string>>; readonly callbackPort?: number } = {},
+  more: {
+    readonly fetch?: Fetch
+    readonly clientIds?: Readonly<Record<string, string>>
+    readonly callbackPort?: number
+    readonly cliToken?: (tool: 'gh' | 'glab', host: string) => Effect.Effect<string | null, CliUnanswered>
+  } = {},
 ) =>
   Layer.succeed(
     Connectors,
@@ -136,13 +180,23 @@ export const fakeConnectors = (
         {
           ...products.github,
           make: () => (services.github === undefined ? {} : { host: services.github, tracker: services.github }),
+          access: services.github?.access ?? null,
         },
-        { ...products.linear, make: () => (services.linear === undefined ? {} : { tracker: services.linear }) },
-        { ...products.trello, make: () => (services.trello === undefined ? {} : { tracker: services.trello }) },
+        {
+          ...products.linear,
+          make: () => (services.linear === undefined ? {} : { tracker: services.linear }),
+          access: services.linear?.access ?? null,
+        },
+        {
+          ...products.trello,
+          make: () => (services.trello === undefined ? {} : { tracker: services.trello }),
+          access: services.trello?.access ?? null,
+        },
       ],
       fetch: more.fetch ?? (() => Promise.reject(new Error('No network in tests'))),
       clientIds: more.clientIds ?? {},
       callbackPort: more.callbackPort ?? 0,
+      cliToken: more.cliToken ?? (() => Effect.succeed(null)),
     }),
   )
 
@@ -166,12 +220,25 @@ export const runtime = (
     readonly modelFacts?: ModelFactsOptions
     /** The editors a task's files open in, and what opening one does. */
     readonly editors?: RuntimeOptions['editors']
+    /** Where the artifact store keeps bytes; a folder of its own unless a test says (null: nowhere). */
+    readonly artifactsRoot?: string | null
+    /** How worktrees are set up: in sh, rather than the person's own shell and its profile, unless a test says. */
+    readonly setups?: SetupOptions
+    /** How this computer's load is read. */
+    readonly load?: LoadOptions
+    /** When a lead that ended its turn counts as done, and how long a round waits for one that isn't. */
+    readonly idle?: IdleOptions
+    /** The device outside a sandbox, as for a Flatpak. */
+    readonly onDevice?: RuntimeOptions['onDevice']
+    /** The machine how many agents are at work at once comes from; a large one unless a test says, so no test waits on the Mac it runs on. */
+    readonly busy?: BusyOptions
   } = {},
 ) =>
   Runtime.layer({
     database,
     worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
     accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
+    ...(more.artifactsRoot === null ? {} : { artifactsRoot: more.artifactsRoot ?? mkdtempSync(join(tmpdir(), 'althar-artifacts-')) }),
     // Nothing opens on the Mac running the tests: what would have is kept.
     openTerminal: (line) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(false)),
     appVersion: '0.0.0-test',
@@ -186,7 +253,15 @@ export const runtime = (
     ...(more.permissionJudgeTimeout === undefined ? {} : { permissionJudgeTimeout: more.permissionJudgeTimeout }),
     ...(more.modelFacts === undefined ? {} : { modelFacts: more.modelFacts }),
     ...(more.editors === undefined ? {} : { editors: more.editors }),
+    setups: { shell: '/bin/sh', ...more.setups },
+    ...(more.load === undefined ? {} : { load: more.load }),
+    ...(more.idle === undefined ? {} : { idle: more.idle }),
+    ...(more.onDevice === undefined ? {} : { onDevice: more.onDevice }),
+    busy: { machine: ROOMY, ...more.busy },
   })
+
+/** A machine with room for as many agents at once as Althar runs: 64 cores and 256 GB. */
+export const ROOMY = { cores: 64, memory: 256 * 1024 ** 3 }
 
 /** A GitHub instance that never answers: `.test` names nothing, so git's fetches fail at once, and the fake service stands in for its API. */
 export const HOST = 'https://github.test'
@@ -274,21 +349,47 @@ export const notices = (threadId: string) =>
     return rows.map((row) => JSON.parse(row.content) as Readonly<Record<string, string>>)
   })
 
-/** Calls one of Althar's tools as an agent with this access would: over MCP, with the session's token. */
-export const callTool = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>
+/** The names of the tools a session is given, as its agent lists them. */
+export const listTools = (access: ToolAccess) =>
   Effect.gen(function* () {
-    const toolServer = yield* ToolServer
-    const granted = yield* toolServer.grant(access)
+    const granted = yield* (yield* ToolServer).grant(access)
     const server = granted.server
-    if (server.type !== 'http') return ''
+    if (server.type !== 'http') return []
     return yield* Effect.promise(async () => {
       const client = new Client({ name: 'test', version: '1.0.0' })
       const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: server.headers } })
       await client.connect(transport as Parameters<typeof client.connect>[0])
       try {
-        const result = await client.callTool(args === undefined ? { name } : { name, arguments: args })
-        const content = Array.isArray(result.content) ? result.content : []
-        return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
+        return (await client.listTools()).tools.map((tool) => tool.name).toSorted()
+      } finally {
+        await client.close()
+      }
+    })
+  })
+
+/** Calls one of Althar's tools as an agent with this access would: over MCP, with the session's token. */
+export const callTool = (access: ToolAccess, name: string, args?: Record<string, unknown>) =>
+  Effect.map(callToolAtOnce(access, name, [args]), (said) => said[0] ?? '')
+
+/** Calls one of Althar's tools several times at once over one connection, as an agent's parallel calls reach it: what each said. */
+export const callToolAtOnce = (access: ToolAccess, name: string, calls: ReadonlyArray<Record<string, unknown> | undefined>) =>
+  Effect.gen(function* () {
+    const toolServer = yield* ToolServer
+    const granted = yield* toolServer.grant(access)
+    const server = granted.server
+    if (server.type !== 'http') return calls.map(() => '')
+    return yield* Effect.promise(async () => {
+      const client = new Client({ name: 'test', version: '1.0.0' })
+      const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: server.headers } })
+      await client.connect(transport as Parameters<typeof client.connect>[0])
+      try {
+        return await Promise.all(
+          calls.map(async (args) => {
+            const result = await client.callTool(args === undefined ? { name } : { name, arguments: args })
+            const content = Array.isArray(result.content) ? result.content : []
+            return content.map((part) => (typeof part === 'object' && part !== null && 'text' in part ? String(part.text) : '')).join('')
+          }),
+        )
       } finally {
         await client.close()
       }

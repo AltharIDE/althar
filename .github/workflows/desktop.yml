@@ -3,18 +3,45 @@ name: desktop
 on:
   push:
     branches: [main]
-    tags: ['v*']
-    paths: ['apps/desktop/**', 'packages/connectors/**', 'packages/contracts/**', 'packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/desktop.yml']
+    paths:
+      [
+        'apps/desktop/**',
+        'packages/connectors/**',
+        'packages/contracts/**',
+        'packages/domain/**',
+        'packages/persistence-sqlite/**',
+        'packages/provider-adapters/**',
+        'packages/runtime/**',
+        'packages/ui/**',
+        'package.json',
+        'bun.lock',
+        'vite.config.ts',
+        '.github/workflows/desktop.yml',
+      ]
   pull_request:
-    paths: ['apps/desktop/**', 'packages/connectors/**', 'packages/contracts/**', 'packages/domain/**', 'packages/persistence-sqlite/**', 'packages/provider-adapters/**', 'packages/runtime/**', 'packages/ui/**', 'package.json', 'bun.lock', 'vite.config.ts', '.github/workflows/desktop.yml']
+    paths:
+      [
+        'apps/desktop/**',
+        'packages/connectors/**',
+        'packages/contracts/**',
+        'packages/domain/**',
+        'packages/persistence-sqlite/**',
+        'packages/provider-adapters/**',
+        'packages/runtime/**',
+        'packages/ui/**',
+        'package.json',
+        'bun.lock',
+        'vite.config.ts',
+        '.github/workflows/desktop.yml',
+      ]
 
 permissions:
   contents: read
 
 concurrency:
   group: desktop-${{ github.ref }}
-  # A run for main or a version tag runs to the end; everywhere else a newer push takes over.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+  # A run for main runs to the end; everywhere else a newer push takes over.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   verify:
@@ -49,7 +76,7 @@ jobs:
           path: apps/desktop/test-results
           retention-days: 7
 
-  # The packages as a build test on every branch: a broken package shows on the pull request. A version tag publishes this very build.
+  # The packages as a build test on every branch: a broken package shows on the pull request.
   package:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -75,35 +102,3 @@ jobs:
             apps/desktop/out/dist/althar_*.deb
             apps/desktop/out/dist/althar-*.rpm
           if-no-files-found: error
-
-  # A version tag releases the checked work: the tag must be v<apps/desktop's version>, and what is released is the package job's own build.
-  publish:
-    needs: [verify, package]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v5
-      - name: The tag and the version agree
-        working-directory: .
-        run: |
-          version="v$(node -p "require('./apps/desktop/package.json').version")"
-          if [ "$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::The tag $GITHUB_REF_NAME and apps/desktop/package.json's version ($version) disagree. Bump the version, then tag again."
-            exit 1
-          fi
-      - uses: actions/download-artifact@v6
-        with:
-          name: desktop-packages
-          path: apps/desktop/out/dist
-      - name: The packages on the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "A release for $GITHUB_REF_NAME is already there; nothing to do."
-            exit 0
-          fi
-          gh release create "$GITHUB_REF_NAME" apps/desktop/out/dist/Althar-*.AppImage apps/desktop/out/dist/althar_*.deb apps/desktop/out/dist/althar-*.rpm --generate-notes --title "$GITHUB_REF_NAME"

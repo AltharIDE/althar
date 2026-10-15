@@ -11,8 +11,11 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 | Module | What it does |
 | --- | --- |
 | `model.ts` | The two models: code host and tracker, their data and their capabilities |
-| `products.ts` | Every product: its name, hosted service, whether it runs self-hosted, how a person signs in, and its adapter once built |
-| `github.ts` | GitHub and GitHub Enterprise Server: a code host over REST (GraphQL where REST can't), and a tracker of its issues |
+| `products.ts` | Every product: its name, hosted service, whether it runs self-hosted, how a person signs in, where its tokens are made, its adapter and its check |
+| `access.ts` | What a connection can do, as its service says: the check's lines, each ok, no or unknown, with why and where it is put right |
+| `probe.ts` | How a check asks: reads with the connection's credential, bounded in time, an answer kept whatever its status, never failing |
+| `servers.ts` | Which product answers at a company's own address, asked without signing in |
+| `github.ts` | GitHub and GitHub Enterprise Server: a code host over REST (GraphQL where REST can't), and a tracker of its issues. Each adapter's file holds its product's check too |
 | `gitlab.ts` | GitLab, on gitlab.com or a company's own server: a code host of merge requests over REST, and a tracker of its issues |
 | `bitbucketCloud.ts` | Bitbucket Cloud: a code host of pull requests over REST, with Pipelines' step logs |
 | `bitbucketDataCenter.ts` | Bitbucket Data Center, on a company's own server: a code host of pull requests over REST |
@@ -33,6 +36,7 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 - **Cheap "anything new?".** A GET can be cached by its ETag, so polling an unchanged pull request costs GitHub's rate limit nothing; activity reads from a cursor.
 - **No secret of Althar's.** Sign-in is the device flow or PKCE, which need none; anything else is a token the person pastes (on Trello, with their own Power-Up's API key). Credentials are asked for per call, never logged, and never put in a URL.
 - **Idempotent where the service isn't.** Opening a change first finds one already open from its branch; a link is attached to a Trello card once.
+- **A check only reads.** What a connection can do is asked with GETs and GraphQL queries, and a refusal is itself an answer. What only a write would show is said to be unknown, never guessed.
 
 ## Checks
 
@@ -44,6 +48,7 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 
 - **GitLab's checks** are its own pipelines' jobs, and a child or downstream pipeline as one check: a status an outside CI posts to a commit isn't read.
 - **GitLab's issues** are open or closed: the statuses of its paid tiers aren't read.
+- **Moving an issue to In Progress** (`start`) is Linear's and Jira's alone. Linear takes the team's `started` state with the lowest position; Jira takes the first transition available now into the In Progress category, and one whose screen requires a field is refused by Jira, and fails. GitHub's and GitLab's issues are open or closed, and Trello's lists are the board's own, so their `start` leaves the issue as it is (`capabilities.starts` is false). An issue already started, done or cancelled is never moved, and nothing is asked of the service for it. Linear's sign-in already asks for `write`, and a Jira token carries the person's own permissions (the check reads `TRANSITION_ISSUES`), so no connection needs signing in again.
 - **Trello's statuses** are read from its lists' names (Done, Doing, Backlog, Won't do and the like). A board whose lists are named otherwise reads as to do until its lists can be mapped.
 - **Jira's text** converts what issues and Althar's comments hold. Anything rarer (an attachment, a colour, a smart link's card) keeps its text, or its name, and no more. Quotes, lists and emphasis nested more than sixteen deep are read as text, so that converting takes time in proportion to the text, however odd it is.
 - **Bitbucket Cloud merges what the branch holds:** its API takes no head to merge at, so the adapter checks the head the person saw just before, and a push in the moment between would be merged. Data Center's pull request version closes that gap.
@@ -52,5 +57,14 @@ The code host and tracker connectors of [docs/architecture/06](../../docs/archit
 - **Bitbucket Data Center before 8.18** has no drafts: a draft opens ready.
 - **Listening to Bitbucket Cloud** asks several things a turn, each by ETag; whether an unchanged answer counts against its hourly limit isn't documented.
 - **A Bitbucket Cloud API token is made with scopes** (`read:user`, `read:workspace`, `read:repository`, `write:repository`, `read:pullrequest`, `write:pullrequest` and `read:pipeline`, all `:bitbucket`); the Connections panel links to where it is made but doesn't list them.
+- **Where issues can be filed** is read page by page, up to ten pages: GitHub's and GitLab's repositories, Jira Cloud's projects and Linear's teams (Data Center's projects and Trello's boards come whole). An issue the tracker took is never reported as not filed: where reading it back fails (Jira, Trello), `create` returns what it knows.
 - **Pagination** stops at the first hundred on GitHub: of comments since a cursor, of reviews, of checks. Bitbucket reads ten pages of comments, activity and a diff's stat, and Cloud the first hundred statuses.
+- **Reviewing a change Althar didn't open** is GitHub's alone (`capabilities.reviews`): its pull request is read with whether GitHub names its author one of the repository's people (owner, member, collaborator) and the fork it comes from, and a review is posted with its verdict, summary and comments on lines of the change's new side, of the commit its reviewer read. GitLab and Bitbucket refuse both as `rejected`, without asking the service.
 - **Webhooks** aren't here: listening polls until Althar has a cloud.
+- **A fine-grained GitHub token's writes** can't be read: pushing, opening pull requests and commenting read as unknown, and only a refused read of the same permission says no. GitHub gives such tokens no check runs: the adapter reads a commit's statuses alone, and the check links to a classic token's page. A classic token needs `repo`: `public_repo` isn't taken for it, and `workflow`, which a push changing a workflow needs, isn't checked.
+- **Bitbucket Cloud says a token's scopes only as it refuses one.** Where nothing Althar needs was refused, the check reads them from a refusal of a workspace's webhooks; a token given every scope, or a workspace that refuses for another reason, leaves them unsaid, and opening pull requests unknown.
+- **Bitbucket Data Center's HTTP access tokens** don't say their own permission: only an account that can't write to a repository, and so no token of it, is certain. Pushing and merging otherwise read as unknown.
+- **A Linear API key's permissions** aren't said: commenting and moving issues read as unknown, except with Althar's own sign-in, which asks to read and write.
+- **Filing an issue isn't checked before it is asked for.** A Jira account's Create Issues permission, a fine-grained GitHub token's Issues permission, and the GitHub App's Issues: Read and write (set on the app, not here) are found out when an issue is filed, and a refusal reaches the card in the service's words. Labels a tracker has no name for are left off, except where the host makes them itself (GitHub, GitLab).
+- **Trello's tokens** are read together by their name, Althar: where several differ in what they may write, which is this one isn't said, and writing reads as unknown.
+- **Jira's permissions** are the account's in any project, not in the one Althar works in.

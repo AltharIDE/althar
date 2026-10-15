@@ -74,7 +74,7 @@ connect(options: {
   transport: Transport // a process Althar owns, or an in-process agent in tests
   onPermission: (request: PermissionRequest) => Effect<PermissionDecision> // from the project's rules
   permissions?: PermissionMeanings // what the agent's option ids mean: the registry's
-  onQuestion?: (question: Question) => Effect<QuestionAnswer> // for the person
+  onQuestion?: (question: Question) => Effect<QuestionAnswer> // for the person; without it, no way to ask is offered
 }): Effect<AgentConnection, AgentStartFailed | AgentExited | AgentRequestFailed, Scope>
 
 interface AgentConnection {
@@ -118,7 +118,9 @@ What it guarantees:
   failure report is an `AgentFailure` event, and a turn it ended carries it on
   `TurnEnded`.
 - **Questions** the agent asks the person (ACP elicitation, such as Claude's
-  AskUserQuestion) go to `onQuestion`, or are cancelled.
+  AskUserQuestion) are read into Althar's own fields and go to `onQuestion`
+  (see Questions to the person). Without `onQuestion` the client advertises
+  no form elicitation, so the agent is offered no way to ask.
 - **Nothing is dropped.** An update this version doesn't know is an `Other`
   event with its raw payload.
 
@@ -227,7 +229,9 @@ supported versions of the agent and its adapter:
 14. a permission request still waiting when the turn is interrupted is
     withdrawn;
 15. a repository's own agent settings, allowing everything, don't stop the
-    agent asking.
+    agent asking;
+16. a question to the person: in a form Althar answers, carrying on with the
+    answer, or in the agent's own words, as each agent asks.
 
 The suite runs against a scripted fake agent in CI and against the real agents
 on demand (`bun run test:agents`), in a repository whose own settings allow
@@ -256,8 +260,9 @@ type AgentDefinition = {
 
 - Adapters Althar ships, `claude-agent-acp` and `codex-acp`, are bundled at
   pinned versions. Nothing is fetched with `npx` or a similar tool at run
-  time. Adapters written for Node run on Electron's own Node
-  ([02](02-desktop-runtime.md)).
+  time. Adapters written for Node run on a Node the packaged app ships, and
+  on Electron's own Node in development ([02](02-desktop-runtime.md),
+  ADR-033).
 - Agents the user installs, such as OpenCode, are found by probe, and their
   version is checked against the support matrix.
 - Adding an ACP agent means adding an entry and passing the contract suite.
@@ -293,7 +298,8 @@ A brief contains, as the role needs:
 - the task, its plan, and where the graph stands;
 - the workspace: base, branch, and the diff so far;
 - the conversation record: the user's messages verbatim, earlier agents'
-  turns, decisions, what was tried and failed, and open items;
+  turns, decisions, what was tried and failed (for a command that failed, a
+  bounded excerpt of what it printed), and open items;
 - step results and artifacts the role needs;
 - for a later review round, the earlier rounds' findings and how each was
   settled, with the lead's response and any person's decision
@@ -770,13 +776,27 @@ What keeps each agent asking, whatever its own settings say:
 command carries only its text, and no rule can tell what a script will write.
 So where an agent has a sandbox, it keeps commands inside the worktree:
 
-- Codex's, in `workspace-write`, with the network off.
+- Codex's, in `workspace-write`, with the network off. Its only network
+  setting (`network_access`) is all or nothing, with no localhost-only form, so
+  it stays off.
 - Claude Code's, switched on for every session. A command that stays inside
   runs without asking. One that needs the network asks per host. A write
   outside is blocked, and Claude reports it instead of retrying outside the
-  sandbox unless asked to.
+  sandbox unless asked to. A lead's sandbox also lets commands bind and
+  listen on localhost (`sandbox.network.allowLocalBinding`), so tests that
+  start a server, and a prototype's throwaway showcase server that the person
+  opens from the Running pill, don't have to leave it. The setting is broader
+  than listening (macOS, per Claude's sandbox docs): sandboxed commands can
+  also connect to any localhost port, including an unauthenticated local
+  service outside the sandbox such as a debugger or proxy, and can listen on
+  non-loopback addresses that other machines may reach. We accept that for
+  leads. It adds no hosts to the network allowlist and no writable paths, and
+  readers don't get it.
 - OpenCode has none yet. Wrapping it in the same sandbox-runtime Claude uses
   is next.
+
+Installing a worktree's dependencies would have to leave it, and needn't:
+Althar does it before the lead starts ([below](#setting-up-a-worktree)).
 
 A command that has to leave its sandbox reaches Althar as a request, and
 the rules read it as a shell would, into commands and words. They ask about:
@@ -809,6 +829,82 @@ Known gaps:
 - If ask rules ever stop winning, the fallback is to leave the project and
   local setting sources out of Claude sessions. In the Agent SDK that also
   stops the repository's `CLAUDE.md` loading.
+
+### Setting up a worktree
+
+A lead starts in a fresh worktree with nothing installed, and its sandbox
+refuses an install: the package manager writes to its cache and temporary
+folders outside the worktree (Bun's `~/.bun`, npm's `~/.npm`). The lead
+would then ask to install outside the sandbox, a permission request for
+something no one doubts. So Althar sets the worktree up itself, as Superset,
+Conductor and Codex do, and the lead's sandbox stays as strict as it is
+([ADR-023](../decisions/023-althar-runs-the-project.md)):
+
+- **What runs** is the setup kept for the repository (`set_run_command`'s
+  `setup`, the same one a run of the project starts with), else the install
+  its lockfile names: `bun install --frozen-lockfile`, `pnpm install
+  --frozen-lockfile`, `yarn install --frozen-lockfile`, `npm ci`. It never
+  changes the lockfile. Its packages are its package.json's own, or, at the
+  root of a monorepo, its workspaces' (or those a `pnpm-workspace.yaml`
+  names). A repository with no packages has nothing run. Before a run, the
+  install is skipped where `node_modules` is there; in a worktree it runs
+  whatever `node_modules` holds, since an install Althar quitting cut short
+  leaves one, and whether the worktree is set up is kept on its workspace.
+- **When:** as the task's worktrees are made (a draft's too, so it is ready
+  by the time its plan starts), and again for a worktree a reopened task
+  puts back, as soon as it is back. How it went is kept on the workspace, so
+  a lead that starts again, or a task that resumes, doesn't set it up again,
+  and one Althar quit during is set up again before its lead's first turn.
+- **Where and how:** in the worktree (the folder in it the project is
+  about, where there is one), in the person's login shell, interactive, so
+  it finds their tools as their terminal would. It is Althar's own process
+  (purpose `setup`), in a process group of its own, with nothing to read
+  from the person, for ten minutes at most, and stops if Althar quits.
+- **The lead waits for it, but not on it:** its agent starts as before, and
+  its first turn, with what the person said meanwhile, waits until each of
+  its worktrees is set up; stopping the lead meanwhile stops it at once, and
+  the setup goes on. The brief says what ran, and for one that failed, how
+  it ended and the end of what it printed, so the lead can deal with it.
+  A setup that fails never holds the task up.
+- **The thread shows it,** as Althar's own line: "Installing dependencies
+  in meridian…", then "Installed dependencies in meridian"; failed, the end
+  of what it printed stands under the line, with its exit code.
+
+It runs repository code on the Mac outside any sandbox (the project's own
+install scripts, and those of its dependencies where the package manager
+runs them): the trusted-host execution of
+[07](07-persistence-security-and-cloud.md), as a run of the project is.
+
+## Questions to the person
+
+An agent sometimes needs the person to choose: Claude Code's AskUserQuestion,
+Codex's request_user_input. Both arrive as an ACP form elicitation, each
+shaped its own way, and the adapter reads them into the same fields: what
+each asks, a short name for it, its options (one or several picks), and where
+the person's own words go. A question waits for the person as a permission
+the rules keep for them does ([ADR-021](../decisions/021-a-question-outlives-its-session.md)):
+
+- It is a call (an attention request of the kind `question`) and an item of
+  its thread, shown where it was asked, in place of the agent's tool call for
+  it, each option with what it means. The home, the edge and the board list
+  it, a coordinator's question under its project; it is answered in the
+  thread, where Answer on the home takes the person.
+- While the agent that asked waits, the answer goes straight back to it, in
+  its own fields.
+- It is the thread's, not the session's. If the session goes first (Althar
+  restarts, the agent exits, another agent takes the thread over), the
+  question stays open, and a run's step waits on it rather than being stuck.
+  Its answer is told quietly to the agent on the thread next, started for it.
+- It is withdrawn when the agent takes it back, its turn is stopped, or its
+  task is stopped or abandoned.
+- Only the lead and the coordinator are offered a way to ask. A reviewer, a
+  permission judge and a model probe are given none, so they decide for
+  themselves or say what they would ask in their result.
+
+As of 10 October 2026, Claude Code asks in a form. Codex offers
+request_user_input only in its Plan mode, which a lead isn't in, and OpenCode
+keeps its question tool off over ACP; both ask in their own words, and a lead
+that stops to wait is reminded to report its step (05).
 
 ## Approval boundary
 

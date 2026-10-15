@@ -1,7 +1,7 @@
 import type { Effect } from 'effect'
 import { Schema } from 'effect'
 
-import type { ConnectorFailed } from './errors'
+import { ConnectorFailed } from './errors'
 
 /*
  * The two models (docs/architecture/06, "Code hosts and trackers"): what
@@ -15,6 +15,10 @@ import type { ConnectorFailed } from './errors'
 /** Every product Althar has, or will have, an adapter for. Cloud and Data Center are separate products. */
 export const Product = Schema.Literals(['github', 'gitlab', 'bitbucket_cloud', 'bitbucket_dc', 'linear', 'jira_cloud', 'jira_dc', 'trello'])
 export type Product = typeof Product.Type
+
+/** A service as a person connects it: a product's Cloud and Data Center editions are one service. */
+export const Service = Schema.Literals(['github', 'gitlab', 'bitbucket', 'linear', 'jira', 'trello'])
+export type Service = typeof Service.Type
 
 /** Someone on the service: a person, or a bot such as CI. */
 export const Person = Schema.Struct({
@@ -68,6 +72,12 @@ export const ChangeRequest = Schema.Struct({
   deletions: Schema.NullOr(Schema.Number),
   changedFiles: Schema.NullOr(Schema.Number),
   updatedAt: Schema.String,
+  /**
+   * Whether the host says it conflicts with its target branch, so it can't
+   * merge until its branch is brought up to date. Absent where the host
+   * hasn't worked it out yet, or doesn't say.
+   */
+  conflicts: Schema.optional(Schema.Boolean),
 })
 export type ChangeRequest = typeof ChangeRequest.Type
 
@@ -117,6 +127,49 @@ export const Comment = Schema.Struct({
 })
 export type Comment = typeof Comment.Type
 
+/**
+ * A change to review: someone else's pull request, as Althar reads it before
+ * it reviews one it didn't open. Beside what any change says: whether its
+ * author is one of the repository's people, the fork its branch is on, and
+ * where its target branch is.
+ */
+export const ChangeToReview = Schema.Struct({
+  ...ChangeRequest.fields,
+  /** Its author is one of the repository's people, as the host says: GitHub's owner, a member of its organisation, or a collaborator. */
+  member: Schema.Boolean,
+  /** The repository its branch is on, where that isn't the one it goes into: a fork's path, or none where the fork is gone. Null for a branch of the repository's own. */
+  fork: Schema.NullOr(Schema.Array(Schema.String)),
+  /** The commit its target branch is on, as the host says; null where it doesn't. */
+  baseSha: Schema.NullOr(Schema.String),
+})
+export type ChangeToReview = typeof ChangeToReview.Type
+
+/**
+ * Whether a change comes from outside the repository's people: from a fork,
+ * or by an author the host doesn't name one of them. What it brings is then
+ * read with less trust: its words may try to steer whoever reads them.
+ */
+export const fromOutside = (change: Pick<ChangeToReview, 'member' | 'fork'>): boolean => !change.member || change.fork !== null
+
+/** What a review says of a change as a whole: approve it, ask for changes, or only comment. */
+export const ReviewEvent = Schema.Literals(['approve', 'request_changes', 'comment'])
+export type ReviewEvent = typeof ReviewEvent.Type
+
+/** A review to post: what it says of the change, its summary, the commit it was of, and its comments on the change's lines. */
+export interface NewReview {
+  readonly event: ReviewEvent
+  /** Markdown. */
+  readonly body: string
+  /** The commit the review is of, as its reviewer read it; null for the change's head as the host has it now. */
+  readonly commit: string | null
+  /** Comments on lines of the change as it now reads (its new side), by path and line. */
+  readonly comments: ReadonlyArray<{ readonly path: string; readonly line: number; readonly body: string }>
+}
+
+/** A review the host took: its id, and its link where the host gives one. */
+export const PostedReview = Schema.Struct({ id: Schema.String, url: Schema.NullOr(Schema.String) })
+export type PostedReview = typeof PostedReview.Type
+
 /** What happened on a change since a cursor: comments and reviews, oldest first, and the cursor to ask from next. */
 export interface Activity {
   readonly comments: ReadonlyArray<Comment>
@@ -139,6 +192,12 @@ export interface HostCapabilities {
   readonly checkLogs: boolean
   /** Comments on lines sit in threads a reply can join. */
   readonly threads: boolean
+  /**
+   * A change Althar didn't open can be read for review, with whether its
+   * author is one of the repository's people and the fork it comes from, and
+   * a review posted on it with comments on its lines. Only GitHub's, for now.
+   */
+  readonly reviews: boolean
 }
 
 /** How git pushes to a repository: its URL, and the header that signs the push in. */
@@ -194,7 +253,25 @@ export interface CodeHost {
     reply: { readonly body: string; readonly threadId: string | null },
   ): Effect.Effect<Comment, ConnectorFailed>
   pushTarget(repository: Repository): Effect.Effect<PushTarget, ConnectorFailed>
+  /**
+   * A change to review, whoever opened it: what it is, whether its author is
+   * one of the repository's people, and the fork it comes from. Where the
+   * host has `capabilities.reviews`; refused elsewhere, as `rejected`.
+   */
+  changeToReview(repository: Repository, number: number): Effect.Effect<ChangeToReview, ConnectorFailed>
+  /**
+   * Posts a review of a change, because the person said to, or their own
+   * setting does for their team's changes: never on an agent's word alone.
+   * Where the host has `capabilities.reviews`; refused elsewhere, as
+   * `rejected`. A comment on a line the change doesn't touch is refused by
+   * the host, with its words.
+   */
+  postReview(repository: Repository, number: number, review: NewReview): Effect.Effect<PostedReview, ConnectorFailed>
 }
+
+/** A host's refusal of a review, where it has no `capabilities.reviews`: said in its words for a change. */
+export const noReviews = (product: Product, words: ChangeWords): ConnectorFailed =>
+  new ConnectorFailed({ product, reason: 'rejected', message: `Althar can’t review a ${words.noun} on this host yet.` })
 
 // ---- Trackers -------------------------------------------------------------
 
@@ -225,11 +302,46 @@ export const Issue = Schema.Struct({
 })
 export type Issue = typeof Issue.Type
 
+/**
+ * Where an issue can be filed, by the tracker's name for it: a Linear team,
+ * a Jira project, a list on a Trello board, a repository.
+ */
+export const Container = Schema.Struct({
+  /** What `Tracker.create` takes: the tracker's own id for it. */
+  id: Schema.String,
+  /** A short name a person may type for it, where the tracker has one: a team's or a project's key (MER, PAY), a repository's path. */
+  key: Schema.NullOr(Schema.String),
+  /** Its name, as the tracker shows it: Meridian, Payments, `Roadmap / To do`, `acme/api`. */
+  name: Schema.String,
+})
+export type Container = typeof Container.Type
+
+/** An issue to file: its title, its body in Markdown, and the labels to put on it. */
+export interface NewIssue {
+  readonly title: string
+  readonly body: string
+  readonly labels: ReadonlyArray<string>
+}
+
 /** What a tracker can do beyond the model's floor. */
 export interface TrackerCapabilities {
   /** A link can be attached to an issue, as a pull request's is. */
   readonly links: boolean
+  /** An issue can be moved to the tracker's own "in progress": a Linear team's started state, a Jira transition into In Progress. */
+  readonly starts: boolean
 }
+
+/** What `Tracker.start` did: moved the issue, or left it as it was; and the status it is in now. */
+export interface Started {
+  readonly moved: boolean
+  readonly status: Issue['status']
+}
+
+/** Whether an issue's work hasn't started: what `Tracker.start` may move on, and nothing else. */
+export const unstarted = (category: StatusCategory): boolean => category === 'triage' || category === 'backlog' || category === 'todo'
+
+/** An issue left as it is, by a tracker that has no "in progress" to move it to, or as it is past one. */
+export const leftAsItIs = (issue: Issue): Started => ({ moved: false, status: issue.status })
 
 /** What a tracker offers Althar (docs/architecture/06). */
 export interface Tracker {
@@ -243,4 +355,22 @@ export interface Tracker {
   comment(issue: Issue, body: string): Effect.Effect<void, ConnectorFailed>
   /** Attaches a link to an issue, where the tracker has links. */
   link(issue: Issue, link: { readonly url: string; readonly title: string }): Effect.Effect<void, ConnectorFailed>
+  /**
+   * Moves an issue to the tracker's "in progress", where the tracker has one
+   * (`capabilities.starts`), as its task starts. Only from triage, the
+   * backlog or to do: one started, done or cancelled is left as it is, never
+   * moved back. A tracker without one leaves every issue as it is.
+   */
+  start(issue: Issue): Effect.Effect<Started, ConnectorFailed>
+  /** Where the account can file issues, most recently active first where the tracker says; page after page, to a bound. */
+  containers(): Effect.Effect<ReadonlyArray<Container>, ConnectorFailed>
+  /**
+   * Files an issue in a container, by its `Container.id`, because the person
+   * approved it: never on an agent's word. Labels the tracker can't take as
+   * they are (it has none by that name, and makes none) are left off.
+   * Once the tracker has taken the issue, create succeeds: a failed read
+   * afterwards falls back to what is known. A failure before it, nothing
+   * was filed.
+   */
+  create(container: string, issue: NewIssue): Effect.Effect<Issue, ConnectorFailed>
 }

@@ -124,9 +124,9 @@ describe('downloading an agent', () => {
       ),
     )
     assert.include(JSON.stringify(cant), "can't download OpenCode")
-    // An agent without a command of its own to find is never downloaded, nor looked for.
+    // Codex has a bundled CLI for sign-in, but it is not downloadable as an agent.
     const bundled = await none.run(Effect.flatMap(Installs, (installs) => installs.state(agents.codex)))
-    assert.isTrue(Exit.isSuccess(bundled) && !bundled.value.downloadable && bundled.value.located === null)
+    assert.isTrue(Exit.isSuccess(bundled) && !bundled.value.downloadable)
   })
 
   it('runs the person’s own copy over Althar’s: on their PATH, or where an installer put it', async () => {

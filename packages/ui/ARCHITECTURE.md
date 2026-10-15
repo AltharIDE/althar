@@ -11,17 +11,17 @@ This package holds Althar's interface components: the primitives (buttons, menus
 | Layer | What it holds |
 | --- | --- |
 | `foundations` | Tokens, icons, brand marks, project marks, Althar's light and its halftone mark, and the domain vocabularies. |
-| `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), `Model` (a model's mark and name, and how it is reached on hover), and Ask, which every part that asks a person shares. |
-| `thread` | What appears in a conversation: turns, tool calls, steps, permissions (a card, a stack with Allow all, their answers in small for a call on the home, and what a rule allowed), questions, Stuck, documents. |
+| `primitives` | General parts: buttons, menus, popovers, fields, panels, Heading, SidePanel, Skeleton (the shape of what is still being read), `Model` (a model's mark and name, and how it is reached on hover), InkSwatches (the inks a project's mark can be drawn in), and Ask, which every part that asks a person shares. |
+| `thread` | What appears in a conversation: turns, tool calls, steps, permissions (a card, a stack with Allow all, their answers in small for a call on the home, and what a rule allowed), questions, Stuck, documents, Evidence (what the task built, what a lead showed of its change working, and what it couldn't), Finished (the task's closing card, which holds them), and ReviewDraft (a review the lead drafted of someone else's pull request, posted only from the card). |
 | `composer` | What writes into a conversation: Composer, DictationTray, ModelPick, ContextRing, Listening, Running. |
-| `coordinator` | What the coordinator shows about tasks: Issue, TaskLaunch, TaskCard, TaskMark, TaskHeld. |
-| `board` | The project's work in lanes: Board, BoardColumn, and a card or row for each lane. |
+| `coordinator` | What the coordinator shows about tasks: Issue, IssueDraft (an issue it drafted on a tracker, filed only from the card), TaskLaunch, TaskCard, TaskMark, TaskHeld. |
+| `board` | The project's work in lanes: Board, BoardColumn, and a card or row for each lane: BoardCard (any task's card, with nothing to press) and its chips (PullChip, BranchChip, FileChips, Thumbs, CommandChip, Fact, Findings). |
 | `dock` | What opens beside the board: Dock and a peek for each kind of card. |
 | `home` | Work across every project, as the home shows it: NeedLine, ProjectList, WorkTicks, SinceRow, HomeRest, ProjectWord; and what needs you at the edge of the screen: Island, EdgeSheet. |
 | `outputs` | What a task made: ChangeSet, ArtifactCard, ChangeView, and NoOutputs (where its lead has looked, before it has made anything). |
-| `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, RoomSwitch, TaskHeader, TaskMenu. |
-| `setup` | What comes before a project, what sets one up, and Settings: Runtimes, AgentInstall (an agent not on this device, and downloading it), SourceMap, Accounts and AccountSignIn, Connections, AgentTabs, ModelSwitches, ControlCenter, Preferences (the app's own: KeepAwake, OpenFilesIn, NotificationSettings, as rows of a SettingList that sit in any frame), and Conventions (NamingRule, TemplateSources). |
-| `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), Start (the first screen: the agents answering round the mark, and picking the first project's repositories), Home, NewProject, ProjectRules. |
+| `chrome` | The window's own furniture: ProjectTabs, TitleBar, AgentMarks, ProjectSwitcher, Finder (finding a task by what it was about, ⌘K), RoomSwitch, ProjectFront (the top of a project's screen), TaskHeader, ReachLine (what a task's lead can reach, a sentence under its header whose phrases open what they mean), TaskMenu, the questions they ask first: RemoveProject, AbandonTask, UpdateReady (a newer Althar in place, and restarting into it), and LoadMeter (how hard the computer works, in steps held still, and Althar's work's part of it; it opens LoadPeek, each piece of work's share). |
+| `setup` | What comes before a project, what sets one up, and Settings: Runtimes, AgentInstall (an agent not on this device, and downloading it), SourceMap, RepositoryMap (a project's folders wired to where their work goes), Accounts and AccountSignIn, Connections, ConnectCard and its parts (a walk in to a code host or tracker, as a sign-in card: the ways in, a step at a time, and what the connection can do), AgentTabs (its tabs and the chosen agent's sheet, placed apart), ModelSwitches, CoAuthor, ControlCenter (modules placed in a grid of columns and rows by how much each matters, a quiet link in its foot, and as wide as what is open in it: a card for a walk in), AppVersion (which Althar this is, and its release notes, for Settings' foot), ProjectIdentity (a project's name and ink, changed in place in its settings), ProjectNotes (the decisions its coordinator keeps, each removed with its ×, in its settings), Preferences (the app's own: KeepAwake, OpenFilesIn, NotificationSettings, as rows of a SettingList that sit in any frame; where Althar shows in other apps, chosen or said), EdgeMini (that place, in small), Conventions (NamingRule, TemplateSources), and the Charter, a project's rules read as sentences: each a Clause with its word in the margin, a built-in setting as an underlined RuleWord or ChoiceWord, a command as a CommandToken, and a command being added as NewCommand with its NewCommandHint. |
+| `screens` | Whole screens made from the layers above: Welcome, Launch (the window opening), DataNotMoved (an update that couldn't move the person's data: it is safe, where the copy from before is, and Report this), Start (the first screen: the agents answering round the mark, and picking the first project's repositories), Home, NewProject (a project before it is made, in a tab of its own: its name and mark, its colour, its folders as read, what this computer has named like it, and what reading them found), ProjectRules (the Charter, with how a task ends and its accounts), ProjectRepositories. |
 
 The rules between them:
 
@@ -48,7 +48,7 @@ A component renders what it is given and reports what happened. It does not fetc
 - **Say what is wrong rather than disable.** A submit button stays pressable. Pressed with something missing, it says what, beside the field, and focus goes to the field.
 - **Build on what exists.** Where a primitive or another component already does the job, use it and compose from it. Don't draw it again in the component's own markup and CSS. A component styles what it uses only to place it in its context. If the existing piece doesn't quite fit, extend it rather than copying it.
 - **Composition over configuration.** Prefer `children` and slots (`above`, `trigger`, `card`) to growing lists of flags. For example, the Composer does not know about models: its `picker` and `meter` slots take a ModelPick and a ContextRing, which the consumer wires to its own state. A component that needs a new variant for one caller usually needs a slot instead.
-- **Context only for host services.** Examples are opening a document, an image or a step's thread beside the thread (`ThreadShellProvider`). Every service is optional, and a control that needs one is left out when the host has not given it, so every component renders alone in a story.
+- **Context only for host services.** Examples are opening a document, an image (with the set it belongs to, which the Lightbox moves through) or a step's thread beside the thread (`ThreadShellProvider`). Every service is optional, and a control that needs one is left out when the host has not given it, so every component renders alone in a story.
 
 ### No raw strings inside components
 
@@ -117,12 +117,12 @@ Widgets with real behaviour are built on Radix primitives (`radix-ui`), styled t
 | Radix primitive | Ours |
 | --- | --- |
 | Popover | Popover, ControlCenter |
-| DropdownMenu | Menu, TaskMenu, ProjectMenu |
+| DropdownMenu | Menu, TaskMenu |
 | Tooltip | HoverCard, and Tooltip for a name or a shortcut that only shows on hover. Both open for keyboard focus too. |
-| Dialog | Dialog (a short question: RenameProject, RemoveProject), ModelBrowser, Lightbox. The title sits in `VisuallyHidden` when it isn't shown. |
+| Dialog | Dialog (a short question: RemoveProject, AbandonTask; or pages of its own, with a way back before its title that Escape takes first), ModelBrowser, Finder (a combobox over a listbox, as a searchable Select's), Lightbox. The title sits in `VisuallyHidden` when it isn't shown. |
 | (none) | SidePanel, which is ours: see below. |
 | Select | Select (`position="popper"`) |
-| RadioGroup | Segmented, Choices, ModelPick's list, ModelBrowser's filters |
+| RadioGroup | Segmented, Choices, ModelPick's list, ModelBrowser's filters, ProjectIdentity's inks |
 | Checkbox | CheckList |
 | Tabs | StepPanel, AgentTabs |
 | Collapsible | Disclosure / Fold. Content is force-mounted so it can animate, and `inert` while closed. |
@@ -132,7 +132,7 @@ Widgets with real behaviour are built on Radix primitives (`radix-ui`), styled t
 
 Plain semantic elements stay plain. A button is a `<button>`, and a list is a `<ul>`.
 
-**SidePanel** is not modal. It sits beside the thread or the board, takes focus when it opens, and gives it back when it closes.
+**SidePanel** is not modal. It sits beside the thread or the board, takes focus when it opens, and gives it back when it closes. One that steps through pages of its own, as a walk in does, has a way back first in its head.
 
 **Escape goes to the innermost thing first.** Radix hears Escape on the document before anything inside can stop it, so a Popover takes `onEscapeKeyDown` to let something inside go first, and a field marked `data-own-escape` gets the same without a handler. SidePanel hears Escape last.
 
@@ -154,13 +154,15 @@ A pattern that appears in two components becomes one part, so the two cannot dri
 | FileChanges, Delta, DiffStat | Files a change touched, with lines added and removed | ChangeSet, AcceptPeek, and a tool call's meta |
 | Checks | A change's checks and reviews | ChangeSet, AcceptPeek |
 | NoteForm | A one-line note sent with an action | ChangeSet, AcceptPeek, Review, Stuck |
-| Field | One line of text to type | NoteForm, SourceMap, NewProject, and every other typed answer |
-| Panel, FormRow | A sheet of settings, and its label-beside-control rows | ProjectRules, NewProject |
+| Field, FieldArea | One line of text to type, or several | NoteForm, SourceMap, IssueDraft, and every other typed answer |
+| Panel, FormRow | A sheet of settings, and its label-beside-control rows (FormRow also names the control inside it) | Welcome; Select, Choices, Segmented and CheckList take their names from FormRow |
 | KeyValues | A small definition list | External, GraphProposal |
 | StepRow | A step's row, its track and its thread link | Step, Review |
-| StepTrack | A task's steps as a row of bars | TaskCard, WorkCard, TaskHeader |
+| StepTrack | A task's steps as a row of bars | TaskCard, WorkCard, BoardCard, TaskHeader |
+| Chips (PullChip, BranchChip, FileChips, Thumbs, CommandChip, Fact, Findings) | What a board card holds under its title: a card in the card, and one fact | BoardCard, AcceptCard |
 | Heading | A heading at the level the consumer gives | everything with a title |
-| Markdown | Markdown drawn as our own elements, never as HTML | Document, DocPanel, FileArtifact |
+| Markdown | Markdown drawn as our own elements, never as HTML; its tables are the kit's Table | Document, DocPanel, FileArtifact |
+| ImageView | A picture at its src or its smaller copy, decoded lazily in a box that keeps its shape, saying when it couldn't be shown | Shots, Lightbox |
 
 The helpers, in `src/lib`:
 
@@ -168,6 +170,7 @@ The helpers, in `src/lib`:
 - `useOnScreen`: a clock that runs only while someone can see it.
 - `useStickToBottom`: a thread that follows new content until you scroll away.
 - `useRefocus`: focus back on the button a form replaced, when the form closes.
+- `useDragOver`: files held over a part of the page and dropped on it: folders, for the first screen, a new project and a project's repositories; images, for the composer.
 - `safeHref`: the one test for whether an address becomes a link.
 
 ### Accessibility is part of the component
@@ -219,6 +222,6 @@ These are known departures from the principles above, with the way back:
 - **The workbench** is not yet in the package, so neither is `bun run workbench`. The prototype's specimen, once migrated to these components, is the catalogue it should hold.
 - **Plays that need a browser.** Testing Library in jsdom does not know `inert`, and cannot click a label that forwards a pointer event. Five plays run in Storybook only; they are listed in `tests/stories.test.tsx`.
 - **The marks generator is not in the repository.** `brands.ts` says to regenerate rather than edit by hand, but the script that writes it lives outside the repo. It should move to `packages/ui/scripts/marks` as a Bun script that reads `simple-icons` and `@lobehub/icons-static-svg`.
-- **Accessibility lint warnings.** `vp check` warns about some deliberate patterns: forms and panels that listen for their own keys (number keys, Escape), focusable scroll regions, a `role="status"` where the rule prefers `<output>`, `role="group"` on a group that is not a form's fieldset, and a searchable Select's combobox, whose options its field reaches by `aria-activedescendant` rather than focus. Each one has been reviewed. The warnings stay visible rather than being disabled.
+- **Accessibility lint warnings.** `vp check` warns about some deliberate patterns: forms and panels that listen for their own keys (number keys, Escape), focusable scroll regions, a `role="status"` where the rule prefers `<output>`, `role="group"` on a group that is not a form's fieldset, and the combobox of a searchable Select and of the Finder, whose options the field reaches by `aria-activedescendant` rather than focus. Each one has been reviewed. The warnings stay visible rather than being disabled.
 - **Code colouring is built in only for TypeScript and JavaScript.** Other languages show plain unless the consumer passes a highlighter to CodeBlock. A real grammar-based highlighter belongs to the consumer until one is chosen for the package.
 - **Images in markdown are shown as their words.** Markdown does not fetch images from a message; a consumer that wants them has no way in yet.

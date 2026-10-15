@@ -3,6 +3,31 @@
   flex-direction: column;
   gap: 8px;
 }
+/* a walk in, in place of the list, under the way back to it */
+.here {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+.card {
+  justify-self: stretch;
+  max-width: 440px;
+  width: 100%;
+  margin: 0 auto;
+}
+/* while the ways in are found: their shapes */
+.reading {
+  display: grid;
+  gap: 8px;
+}
+/* beside a project's work: the card at a sign-in's width, in the panel's middle */
+.sideBody {
+  padding-top: 18px;
+}
+.side {
+  max-width: 420px;
+  margin: 8px auto 0;
+}
 .error {
   margin: 0;
   font-size: 12.5px;
@@ -48,4 +73,10 @@
   .column + .column {
     box-shadow: none;
   }
+}
+
+/* Opened over a project's view, its repositories or a new project: the services' two columns, or a walk in at a card's width. */
+.dialog {
+  top: 10vh;
+  max-height: 80vh;
 }

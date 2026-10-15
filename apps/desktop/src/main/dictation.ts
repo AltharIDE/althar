@@ -24,7 +24,8 @@ import {
  * all of them. Nothing goes over the network but the model's download.
  *
  * It also holds the window's web permissions: the microphone, for audio
- * alone, for Althar's own windows, and nothing else for anyone.
+ * alone, and writing to the clipboard, for Althar's own windows, and nothing
+ * else for anyone.
  */
 
 /** Whether the system lets Althar use the microphone: yes, it would ask (macOS, the first time), or it said no. */
@@ -145,15 +146,20 @@ export function startDictation(options: DictationOptions) {
     return 'granted'
   }
 
-  // The window's web permissions: the microphone, for audio alone, in Althar's own windows. Nothing else, for anyone.
+  // The window's web permissions: the microphone, for audio alone, and writing what the person copies to the clipboard (Copy, never
+  // reading it), in Althar's own windows. Nothing else, for anyone.
   const audioOnly = (types: ReadonlyArray<string> | undefined) =>
     types !== undefined && types.length > 0 && types.every((type) => type === 'audio')
+  const copying = (permission: string) => permission === 'clipboard-sanitized-write'
   session.defaultSession.setPermissionRequestHandler((contents, permission, done, details) =>
-    done(permission === 'media' && 'mediaTypes' in details && audioOnly(details.mediaTypes) && options.mine(contents)),
+    done(
+      options.mine(contents) &&
+        ((permission === 'media' && 'mediaTypes' in details && audioOnly(details.mediaTypes)) || copying(permission)),
+    ),
   )
   session.defaultSession.setPermissionCheckHandler(
     (contents, permission, _origin, details) =>
-      permission === 'media' && details.mediaType === 'audio' && contents !== null && options.mine(contents),
+      contents !== null && options.mine(contents) && ((permission === 'media' && details.mediaType === 'audio') || copying(permission)),
   )
 
   /** Only Althar's own windows dictate. */

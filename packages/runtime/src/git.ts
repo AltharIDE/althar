@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
-import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
 import { Effect } from 'effect'
@@ -14,21 +14,54 @@ import { GitFailed } from './errors'
  * with the repository's hooks off (docs/architecture/07): adding a worktree
  * would otherwise run its `post-checkout` hook, code from the repository, on
  * the person's machine. A picked folder's path is the document portal's FUSE
- * mount inside a Flatpak, where a process cwd makes getcwd fail — a worktree
- * couldn't be added there — so exactly there the repository is given with
- * `-C`; everywhere else the process starts in it, as it always has.
+ * mount inside a Flatpak, where git's own getcwd fails — `git -C <portal>
+ * status` answers "unable to get current working directory" — so exactly
+ * there the git directory and work tree are named outright, and the child is
+ * given the app home as a known-existing cwd. Inheriting the app's cwd is not
+ * safe: it may itself be a document-portal path whose grant has gone away.
+ * Everywhere else the process starts in the folder, as it always has. In a
+ * copy made to read someone else's code (`addReadCopy`), they run without
+ * the person's config or the system's.
  */
 
 /** Where a picked folder is inside a Flatpak: the document portal's FUSE mount, where a cwd makes getcwd fail. */
 const PORTAL = '/run/flatpak/doc'
 
 /**
- * How a git command runs in `cwd`: with `-C` rather than as the process's own
- * working directory for the portal's FUSE mount, and as the process's own
- * working directory everywhere else.
+ * How a git command runs in `cwd`: for the portal's FUSE mount, its git
+ * directory and work tree are named, and the child starts in the app home,
+ * never inheriting a possibly stale portal cwd; everywhere else it starts in
+ * the folder itself.
  */
 export const gitIn = (cwd: string, args: ReadonlyArray<string>): { readonly args: ReadonlyArray<string>; readonly cwd?: string } =>
-  cwd === PORTAL || cwd.startsWith(`${PORTAL}/`) ? { args: ['-C', cwd, ...args] } : { args, cwd }
+  cwd === PORTAL || cwd.startsWith(`${PORTAL}/`)
+    ? { args: ['--git-dir', join(cwd, '.git'), '--work-tree', cwd, ...args], cwd: homedir() }
+    : { args, cwd }
+
+/** What marks a copy made to read someone else's code, in its git folder (`addReadCopy`). */
+const READ_COPY = 'althar-read-copy'
+
+/** Whether a folder is a copy Althar made to read someone else's code: its git folder says so. */
+export const isReadCopy = (cwd: string) => existsSync(join(cwd, '.git', READ_COPY))
+
+/**
+ * The environment git runs with in `cwd`: never prompting, in English, with
+ * `env` over it. In a copy made to read someone else's code, with no config
+ * but the copy's own: not the person's, not the system's, nor any the
+ * environment carries (`GIT_CONFIG_*`).
+ */
+const environmentIn = (cwd: string, env: Readonly<Record<string, string>>): NodeJS.ProcessEnv => ({
+  ...(isReadCopy(cwd)
+    ? {
+        ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_CONFIG'))),
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+      }
+    : process.env),
+  GIT_TERMINAL_PROMPT: '0',
+  LC_ALL: 'C',
+  ...env,
+})
 
 export const git = (cwd: string, ...args: ReadonlyArray<string>): Effect.Effect<string, GitFailed> => gitWithin(60_000, cwd, ...args)
 
@@ -50,7 +83,7 @@ export const gitOutcome = (
         ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
         timeout: 60_000,
         maxBuffer: 16 * 1024 * 1024,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' },
+        env: environmentIn(cwd, {}),
       },
       (error, stdout) =>
         resume(Effect.succeed({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 128, stdout: stdout.trim() })),
@@ -79,7 +112,7 @@ const run = (
         ...(at.cwd === undefined ? {} : { cwd: at.cwd }),
         timeout,
         maxBuffer: 16 * 1024 * 1024,
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C', ...env },
+        env: environmentIn(cwd, env),
       },
       (error, stdout, stderr) =>
         resume(
@@ -206,16 +239,50 @@ export const recommit = (cwd: string, record: CommitRecord, parents: ReadonlyArr
     message,
   )
 
+/** The environment that signs git in to a remote by URL: the header goes through it, so it is in no process's arguments. */
+const signedIn = (target: { readonly header: string | null }): Record<string, string> =>
+  target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header }
+
 /** The commit a remote's branch is on, asked of the remote by URL, as a push would be: null where it has no such branch, or can't be asked. */
 export const remoteTip = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string) =>
-  run(
-    60_000,
-    cwd,
-    ['ls-remote', '--heads', target.url, `refs/heads/${branch}`],
-    target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
-  ).pipe(
+  run(60_000, cwd, ['ls-remote', '--heads', target.url, `refs/heads/${branch}`], signedIn(target)).pipe(
     Effect.map((listed) => /^[0-9a-f]{40,64}/.exec(listed)?.[0] ?? null),
     Effect.orElseSucceed(() => null),
+  )
+
+/**
+ * Fetches a remote's branch by URL into a ref here, as a push is signed in:
+ * the commit it is at, or null where it can't be fetched.
+ */
+export const fetchInto = (cwd: string, target: { readonly url: string; readonly header: string | null }, branch: string, ref: string) =>
+  run(
+    120_000,
+    cwd,
+    ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', target.url, `+refs/heads/${branch}:${ref}`],
+    target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
+  ).pipe(
+    Effect.andThen(commitOf(cwd, ref)),
+    Effect.orElseSucceed(() => null),
+  )
+
+/**
+ * Fetches refs from a remote by URL into refs here, as a push is signed in,
+ * each `from` into its `into`, forced: whether git could. Tags aren't
+ * fetched, and nothing is written to FETCH_HEAD.
+ */
+export const fetchRefs = (
+  cwd: string,
+  target: { readonly url: string; readonly header: string | null },
+  refs: ReadonlyArray<{ readonly from: string; readonly into: string }>,
+) =>
+  run(
+    120_000,
+    cwd,
+    ['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', target.url, ...refs.map((ref) => `+${ref.from}:${ref.into}`)],
+    signedIn(target),
+  ).pipe(
+    Effect.as(true),
+    Effect.orElseSucceed(() => false),
   )
 
 /** The top of the repository a path is in. */
@@ -351,6 +418,51 @@ export const namedRemotes = (cwd: string, which: 'fetch' | 'push' = 'fetch') =>
 export const addWorktree = (repository: string, path: string, branch: string, base: string) =>
   git(repository, 'worktree', 'add', '-b', branch, path, base)
 
+/** Adds a worktree with no branch, detached at a commit: a plain task's, until its lead first changes the repository. */
+export const addDetachedWorktree = (repository: string, path: string, commit: string) =>
+  git(repository, 'worktree', 'add', '--detach', path, commit)
+
+/** Puts back a worktree whose folder is gone, on the branch it had: git forgets the missing one first. */
+export const restoreWorktree = (repository: string, path: string, branch: string) =>
+  Effect.andThen(git(repository, 'worktree', 'prune'), git(repository, 'worktree', 'add', path, branch))
+
+/** Puts back a worktree whose folder is gone that never had a branch, detached where it started. */
+export const restoreDetachedWorktree = (repository: string, path: string, commit: string) =>
+  Effect.andThen(git(repository, 'worktree', 'prune'), addDetachedWorktree(repository, path, commit))
+
+/**
+ * Makes a copy to read someone else's code in a new folder, `path`, checked
+ * out detached at `commit`, with `refs` of its own: a repository of its own
+ * that borrows the person's repository's objects (`objects/info/alternates`),
+ * never a worktree of it, so none of its config applies. It is marked a copy
+ * before git first runs in it, and git runs there without the person's
+ * config or the system's (`isReadCopy`): no filter, diff or merge driver is
+ * defined, so none that the code's `.gitattributes` chooses runs, as checking
+ * it out, reading its status or its diff would otherwise run it, in the copy,
+ * where a program it starts finds the code's own modules first. A copy git
+ * couldn't finish is removed.
+ */
+export const addReadCopy = (repository: string, path: string, commit: string, refs: Readonly<Record<string, string>> = {}) =>
+  Effect.gen(function* () {
+    if (existsSync(path)) return yield* new GitFailed({ args: ['init'], cwd: path, stderr: 'The copy’s folder is taken.' })
+    const objects = resolve(repository, yield* git(repository, 'rev-parse', '--git-path', 'objects'))
+    const write = (file: string, text: string) =>
+      Effect.try({
+        try: () => {
+          mkdirSync(dirname(file), { recursive: true })
+          writeFileSync(file, text)
+        },
+        catch: (error) => new GitFailed({ args: ['init'], cwd: path, stderr: String(error) }),
+      })
+    return yield* Effect.gen(function* () {
+      yield* write(join(path, '.git', READ_COPY), '')
+      yield* git(path, 'init', '--quiet', ...(commit.length === 64 ? ['--object-format=sha256'] : []))
+      yield* write(join(path, '.git', 'objects', 'info', 'alternates'), `${objects}\n`)
+      for (const [ref, at] of Object.entries(refs)) yield* git(path, 'update-ref', ref, at)
+      yield* git(path, 'checkout', '--quiet', '--detach', commit)
+    }).pipe(Effect.tapError(() => Effect.sync(() => rmSync(path, { recursive: true, force: true }))))
+  })
+
 /** The files the worktree hasn't committed, changed, new or deleted, ignored files aside; by path, sorted. */
 export const uncommittedFiles = (cwd: string) =>
   Effect.gen(function* () {
@@ -367,10 +479,16 @@ export const commitsAhead = (cwd: string, base: string, head = 'HEAD') =>
 export const onHead = (cwd: string, commit: string) =>
   Effect.match(git(cwd, 'merge-base', '--is-ancestor', commit, 'HEAD'), { onFailure: () => false, onSuccess: () => true })
 
+/** Where Althar keeps, by branch, the commit it last pushed of it: evidence the branch is published that git's own refs don't have. */
+export const PUSHED = 'refs/althar/pushed/'
+
 /**
- * Pushes HEAD to a branch of a remote by URL, never forced. The header that
- * signs the push in goes to git through its environment, so it is in no
- * process's arguments.
+ * Pushes HEAD to a branch of a remote by URL, never forced, unless `lease`
+ * names the commit the branch must still be on there: then it replaces what
+ * the branch has, and only that (`--force-with-lease`), so commits someone
+ * else pushed meanwhile are never lost. Pushed, the branch is kept under
+ * `PUSHED`. The header that signs the push in goes to git through its
+ * environment, so it is in no process's arguments.
  */
 export const pushTo = (
   cwd: string,
@@ -378,12 +496,23 @@ export const pushTo = (
   branch: string,
   /** What is pushed: the worktree's head, or a commit the person saw. */
   commit = 'HEAD',
+  lease?: string,
 ) =>
   run(
     120_000,
     cwd,
-    ['push', '--quiet', '--no-verify', target.url, `${commit}:refs/heads/${branch}`],
-    target.header === null ? {} : { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'http.extraHeader', GIT_CONFIG_VALUE_0: target.header },
+    [
+      'push',
+      '--quiet',
+      '--no-verify',
+      ...(lease === undefined ? [] : [`--force-with-lease=refs/heads/${branch}:${lease}`]),
+      target.url,
+      `${commit}:refs/heads/${branch}`,
+    ],
+    signedIn(target),
+  ).pipe(
+    // A push by URL moves no remote-tracking ref: Althar keeps its own, so the branch is known here to be published.
+    Effect.tap(() => Effect.ignore(git(cwd, 'update-ref', `${PUSHED}${branch}`, commit))),
   )
 
 /**

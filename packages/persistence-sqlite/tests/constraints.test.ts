@@ -159,6 +159,33 @@ describe('constraints', () => {
     }).pipe(Effect.provide(Env)),
   )
 
+  it.effect('name a message’s images in order, each an artifact of the message’s own project', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, threadId, actorId, createdAt } = yield* seedRun
+      const other = yield* seed
+      const inputId = yield* Domain.newId(Domain.Ids.userInput)
+      const commandId = yield* Domain.newId(Domain.Ids.command)
+      yield* sql`INSERT INTO user_inputs ${sql.insert({ id: inputId, projectId, threadId, sequence: 1, commandId, disposition: 'after_current', body: '', authorActorId: actorId, state: 'queued', acceptedAt: createdAt })}`
+      const artifact = (project: string) =>
+        Effect.gen(function* () {
+          const id = yield* Domain.newId(Domain.Ids.artifact)
+          yield* sql`INSERT INTO artifacts ${sql.insert({ id, projectId: project, sha256: 'b'.repeat(64), size: 68, mediaType: 'image/png', kind: 'image', sensitivity: 'may_contain_secrets', createdAt })}`
+          return id
+        })
+      const mine = yield* artifact(projectId)
+      const theirs = yield* artifact(other.projectId)
+      const image = (position: number, artifactId: string) =>
+        succeeds(sql`INSERT INTO user_input_images ${sql.insert({ projectId, userInputId: inputId, position, artifactId })}`)
+      assert.isTrue(yield* image(1, mine))
+      // The same image twice is two places in the message.
+      assert.isTrue(yield* image(2, mine))
+      assert.isFalse(yield* image(2, mine), 'one image a place')
+      assert.isFalse(yield* image(0, mine), 'places count from one')
+      assert.isFalse(yield* image(3, theirs), 'no image from another project')
+    }).pipe(Effect.provide(Env)),
+  )
+
   it.effect('allow one unfinished attempt per node, and say why an attempt is held', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -259,6 +286,31 @@ describe('constraints', () => {
       assert.isTrue(yield* workItem({ state: 'pending' }))
       assert.isFalse(yield* workItem({ state: 'claimed' }))
       assert.isTrue(yield* workItem({ state: 'claimed', claimedByInstanceId: instanceId, leaseExpiresAt: createdAt }))
+    }).pipe(Effect.provide(Env)),
+  )
+
+  it.effect('post a review draft only with its review and a verdict, and fail one only with why', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, taskId, threadId, deviceId, actorId, createdAt } = yield* seedRun
+      const connectionId = yield* Domain.newId(Domain.Ids.connection)
+      yield* sql`INSERT INTO connections ${sql.insert({ id: connectionId, deviceId, product: 'github', webUrl: 'https://github.com', apiUrl: 'https://api.github.com', accountId: '1', accountLogin: 'ada', auth: 'device_flow', credentialRef: 'ref', state: 'ready', createdAt, updatedAt: createdAt })}`
+      const draft = (fields: Record<string, unknown>) =>
+        Effect.flatMap(Domain.newId(Domain.Ids.reviewDraft), (id) =>
+          succeeds(
+            sql`INSERT INTO review_drafts ${sql.insert({ id, projectId, taskId, threadId, connectionId, product: 'github', repository: 'meridian/api', number: 123, url: 'https://github.com/meridian/api/pull/123', title: 'Send back', author: 'ninemate', outside: 1, headCommit: 'd'.repeat(40), suggested: 'changes', summary: 'Needs a test.', draftedByActorId: actorId, createdAt, updatedAt: createdAt, state: 'pending', ...fields })}`,
+          ),
+        )
+      assert.isTrue(yield* draft({}))
+      // An outside pull request's draft may wait with no verdict chosen; it posts with one, its review and when.
+      assert.isTrue(yield* draft({ verdict: null }))
+      assert.isFalse(yield* draft({ state: 'posted', verdict: null, reviewRef: '801', decidedAt: createdAt }))
+      assert.isFalse(yield* draft({ state: 'posted', verdict: 'changes', decidedAt: createdAt }))
+      assert.isTrue(yield* draft({ state: 'posted', verdict: 'changes', reviewRef: '801', decidedAt: createdAt }))
+      assert.isFalse(yield* draft({ state: 'failed' }))
+      assert.isTrue(yield* draft({ state: 'uncertain', error: 'Its answer was lost.' }))
+      assert.isFalse(yield* draft({ suggested: 'merge' }))
+      assert.isFalse(yield* draft({ headCommit: 'd4c8ae4' }))
     }).pipe(Effect.provide(Env)),
   )
 })

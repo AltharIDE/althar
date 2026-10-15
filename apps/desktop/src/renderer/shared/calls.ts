@@ -9,9 +9,42 @@ export const kindWords = {
   permission: 'Permission',
   /** A call for a step that can't go on without the person. */
   stuck: 'Stuck',
+  /** A question an agent asks the person. */
+  question: 'Question',
+  /** A call for a step a usage limit stopped, which the person moves on or holds for the reset. */
+  limit: 'Out of usage',
   /** Work done, waiting to be accepted. */
   ready: 'Ready to accept',
+  /** A review of someone else's pull request, drafted, waiting to be posted. */
+  drafted: 'Review drafted',
 } as const
 
-/** A call's kind, in its word: stuck if it is about a step, else a permission. */
-export const callKindOf = (call: { readonly stuck: unknown }): string => (call.stuck === null ? kindWords.permission : kindWords.stuck)
+/**
+ * The word for work that is ready: ready to accept; a review, drafted; or,
+ * where its lead couldn't resolve a conflict, or fix the checks on the merge,
+ * and it is the person's now, stuck, as any step that can't go on without
+ * them is.
+ */
+export const readyKindOf = (task: { readonly handedBack?: string | null | undefined; readonly kind?: string | undefined }): string =>
+  task.kind === 'review' ? kindWords.drafted : task.handedBack == null ? kindWords.ready : kindWords.stuck
+
+/** A call's kind, in its word: an agent's question; out of usage or stuck if it is about a step; else a permission. */
+export const callKindOf = (call: { readonly kind: string; readonly stuck: { readonly why: string } | null }): string =>
+  call.kind === 'question'
+    ? kindWords.question
+    : call.stuck === null
+      ? kindWords.permission
+      : call.stuck.why === 'usage_limit'
+        ? kindWords.limit
+        : kindWords.stuck
+
+/** Where a call waits, in words: its task, or the conversation with the coordinator, for a question the coordinator asks. */
+export const whereOf = (call: { readonly taskTitle: string | null }): string => call.taskTitle ?? 'Coordinator'
+
+/**
+ * A plain task that finished (DEV-96): it waits on its board, as Finished,
+ * until the person opens it, and asks nothing of them, so nothing else
+ * lists or counts it: not the home, the edge, the tabs or the Dock.
+ */
+export const isFinished = (task: { readonly kind: string; readonly phase: string }): boolean =>
+  task.kind === 'plain' && task.phase === 'ready'

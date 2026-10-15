@@ -50,7 +50,10 @@ export const useHome = (): HomeModel => {
     }
   }, [client, cache])
 
-  const board = useMemo(() => (home === null ? null : { cursor: home.cursor, tasks: home.tasks, calls: home.calls }), [home])
+  const board = useMemo(
+    () => (home === null ? null : { cursor: home.cursor, tasks: home.tasks, calls: home.calls, settledTotal: 0 }),
+    [home],
+  )
   useEffect(() => readHeadsAhead(client, cache, board), [client, cache, board])
 
   return {

@@ -7,6 +7,8 @@ import { refOf, text as homeText } from '../home/HomeView'
 import { needLineOf, needsOf, workOf } from '../home/needs'
 import s from './Edge.module.css'
 import type { EdgeModel } from './useEdge'
+import { isFinished } from '../../shared/calls'
+import { useModelNames } from '../../shared/modelNames'
 
 /*
  * Althar at the edge of the screen, while the person works in another app:
@@ -44,20 +46,27 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
     if (away) onAway()
   }, [away])
   const home = model.home
+  const named = useModelNames()
   const name = (id: string | null) => model.agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   const refs = new Map((home?.projects ?? []).map((project) => [project.id, refOf(project)]))
   const tasks = home?.tasks ?? []
   const calls = (home?.calls ?? []).filter((call) => !model.answered.some((one) => one.call.id === call.id))
-  const ready = tasks.filter((task) => task.phase === 'ready')
+  // Ready to accept: a plain task that finished waits on its board instead.
+  const ready = tasks.filter((task) => task.phase === 'ready' && !isFinished(task))
   // What has a call above isn't counted again in the work.
   const called = new Set((home?.calls ?? []).map((call) => call.threadId))
   const working = tasks.filter((task) => task.phase !== 'ready' && !called.has(task.threadId) && refs.has(task.projectId))
   const waiting = calls.length + ready.length
   const openThread = (threadId: string) => host.openInWindow(threadId)
 
-  const needs: ReadonlyArray<ReactNode> = needsOf({ calls: home?.calls ?? [], answered: model.answered, ready, refs, agentName: name }).map(
-    (need) => needLineOf(need, { onOpen: openThread, onAnswer: (call, _project, decision) => model.answer(call, decision) }),
-  )
+  const needs: ReadonlyArray<ReactNode> = needsOf({
+    calls: home?.calls ?? [],
+    answered: model.answered,
+    ready,
+    refs,
+    agentName: name,
+    modelName: (agentId, model) => named(agentId, model).name,
+  }).map((need) => needLineOf(need, { onOpen: openThread, onAnswer: (call, _project, decision) => model.answer(call, decision) }))
 
   const sheet = (
     <EdgeSheet

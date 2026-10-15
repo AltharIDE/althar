@@ -13,7 +13,7 @@ The shared vocabulary of the runtime side: what Althar's identities, states and 
 | `ids.ts` | One branded id per identity, and `newId` |
 | `time.ts` | `Timestamp`, and `now` from the Effect clock |
 | `vocabulary.ts` | Every state and kind the store records |
-| `lifecycles.ts` | The node-attempt and provider-session lifecycles as data, and `transition` |
+| `lifecycles.ts` | The node-attempt, provider-session, run and task lifecycles as data, and `transition` |
 | `commands.ts` | `CommandEnvelope`, the shape of every request to change state |
 
 ## Principles

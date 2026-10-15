@@ -10,12 +10,17 @@ import {
   nodeAttemptLifecycle,
   ProviderSessionState,
   providerSessionLifecycle,
+  runLifecycle,
+  taskLifecycle,
   transition,
 } from '../src/lifecycles'
+import { RunState, TaskState } from '../src/vocabulary'
 
 const lifecycles = [
   { lifecycle: nodeAttemptLifecycle as Lifecycle<string>, states: NodeAttemptState.literals as ReadonlyArray<string> },
   { lifecycle: providerSessionLifecycle as Lifecycle<string>, states: ProviderSessionState.literals as ReadonlyArray<string> },
+  { lifecycle: taskLifecycle as Lifecycle<string>, states: TaskState.literals as ReadonlyArray<string> },
+  { lifecycle: runLifecycle as Lifecycle<string>, states: RunState.literals as ReadonlyArray<string> },
 ]
 
 describe('lifecycles', () => {
@@ -66,6 +71,26 @@ describe('lifecycles', () => {
     assert.isTrue(canTransition(nodeAttemptLifecycle, 'held', 'running'))
     assert.isTrue(canTransition(nodeAttemptLifecycle, 'held', 'superseded'))
     assert.isFalse(canTransition(nodeAttemptLifecycle, 'held', 'succeeded'))
+  })
+
+  it('reopens an abandoned task, and a merged one only for more work, never as a draft', () => {
+    assert.isTrue(canTransition(taskLifecycle, 'open', 'abandoned'))
+    assert.isTrue(canTransition(taskLifecycle, 'abandoned', 'open'))
+    // Its pull request merged on the host after all, it is done.
+    assert.isTrue(canTransition(taskLifecycle, 'abandoned', 'done'))
+    // A merged task goes back to work when its lead does (ADR-034), and is done again once that is.
+    assert.isFalse(isTerminal(taskLifecycle, 'done'))
+    assert.isTrue(canTransition(taskLifecycle, 'done', 'open'))
+    assert.isTrue(canTransition(taskLifecycle, 'open', 'done'))
+    assert.isFalse(canTransition(taskLifecycle, 'done', 'abandoned'))
+    assert.isFalse(canTransition(taskLifecycle, 'done', 'draft'))
+  })
+
+  it('suspends a stopped run until it runs again or is cancelled', () => {
+    assert.isTrue(canTransition(runLifecycle, 'running', 'suspended'))
+    assert.isTrue(canTransition(runLifecycle, 'suspended', 'running'))
+    assert.isFalse(canTransition(runLifecycle, 'suspended', 'succeeded'))
+    assert.isFalse(canTransition(runLifecycle, 'cancelled', 'running'))
   })
 
   it('reconciles an uncertain attempt before deciding its outcome', () => {

@@ -8,6 +8,11 @@ import { useRules } from './useRules'
 
 function Rules() {
   const { projectId } = rulesRoute.useParams()
+  // Another project's rules are a page of their own: nothing half typed or on its way carries over.
+  return <ProjectRulesPage key={projectId} projectId={projectId} />
+}
+
+function ProjectRulesPage({ projectId }: { projectId: string }) {
   const navigate = useNavigate()
   return <RulesView model={useRules(projectId)} onBack={() => void navigate({ to: '/projects/$projectId', params: { projectId } })} />
 }

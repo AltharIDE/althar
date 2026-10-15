@@ -114,8 +114,8 @@ describe('generated files', () => {
 
 describe('this computer, as each system calls it', () => {
   it('is a Mac with a Dock, a PC with no count on its icon, or a computer with a launcher', () => {
-    expect(deviceWords('darwin')).toEqual({ this: 'this Mac', This: 'This Mac', the: 'the Mac', count: 'the Dock icon' })
-    expect(deviceWords('win32')).toEqual({ this: 'this PC', This: 'This PC', the: 'the PC', count: null })
+    expect(deviceWords('darwin')).toEqual({ this: 'this Mac', This: 'This Mac', the: 'the Mac', count: 'the Dock icon', files: 'Finder' })
+    expect(deviceWords('win32')).toEqual({ this: 'this PC', This: 'This PC', the: 'the PC', count: null, files: 'File Explorer' })
     expect(deviceWords('linux')).toMatchObject({ this: 'this computer', count: 'the launcher icon' })
   })
 })

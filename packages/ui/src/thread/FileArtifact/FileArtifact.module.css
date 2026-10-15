@@ -8,6 +8,7 @@
 }
 .head {
   display: flex;
+  margin-bottom: -1px;
   align-items: center;
   gap: 11px;
   padding: 10px 8px 10px 12px;
@@ -105,4 +106,18 @@
 .more:focus-visible .pill {
   opacity: 1;
   transform: none;
+}
+/* its contents, still being read */
+.reading {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 16px;
+}
+/* what the file says of itself in place of a preview: nothing in it, or it couldn't be read */
+.said {
+  margin: 0;
+  padding: 12px 16px 13px;
+  font-size: 12px;
+  color: var(--t-3);
 }

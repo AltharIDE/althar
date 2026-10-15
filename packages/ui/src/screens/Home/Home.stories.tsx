@@ -43,7 +43,7 @@ const meta = {
     onOpenEvent: fn(),
     onOpenProject: fn(),
     onTalk: fn(),
-    onOpenFolder: fn(),
+    onNewProject: fn(),
   },
 } satisfies Meta<typeof Home>
 export default meta
@@ -272,6 +272,41 @@ export const Quiet: Story = {
   ),
 }
 
+/* Four tasks at work, the four this Mac runs at once, and two more waiting their turn in Halyard. */
+const AT_WORK: HomeRun[] = [
+  { id: 't88', project: TESSERA, title: 'Tokens for the project inks' },
+  { id: 'm418', project: MERIDIAN, title: 'Repair token refresh on privilege change' },
+  { id: 'm424', project: MERIDIAN, title: 'Find a shape for webhook queue sharding' },
+  { id: 'h207', project: HALYARD, title: 'Rate-limit the admin routes per token' },
+  { id: 'h209', project: HALYARD, title: 'Retry failed upstream calls with backoff', status: TaskStatus.Queued },
+  { id: 'h211', project: HALYARD, title: 'Log the retries', status: TaskStatus.Queued },
+]
+
+/** Every agent this Mac runs at once is busy: the next tasks wait their turn, and their project says why. They start on their own. */
+export const WaitingForAFreeAgent: Story = {
+  args: {
+    needs: [],
+    running: AT_WORK,
+    since: SINCE_QUIET,
+    looked: 'an hour ago',
+    projects: PROJECTS_QUIET,
+    text: {
+      projects: { queued: (n) => `${n === 1 ? 'Waiting' : `${n} waiting`}: 4 of 4 agents busy` },
+    },
+  },
+  render: (args) => (
+    <Window waiting={0}>
+      <Home {...args} waiting={0} />
+    </Window>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('2 waiting: 4 of 4 agents busy')).toBeInTheDocument()
+    // Waiting isn't moving: the four at work are.
+    await expect(canvas.getByText('4 tasks moving in 3 projects.')).toBeInTheDocument()
+  },
+}
+
 /** Something's wrong: a task stuck and another held for a sign-in. What needs a person comes first. */
 export const SomethingWrong: Story = {
   args: {
@@ -314,9 +349,9 @@ export const HeavyDay: Story = {
   render: (args) => <Day {...args} troubled />,
 }
 
-/** Without a way to open a folder, the projects' head has no button. */
+/** Without a way to start a project, the projects' head has no button. */
 export const WithoutOpeningAFolder: Story = {
-  args: { onOpenFolder: undefined, waiting: 0, running: RUNNING_QUIET, since: SINCE_QUIET, projects: PROJECTS_QUIET },
+  args: { onNewProject: undefined, waiting: 0, running: RUNNING_QUIET, since: SINCE_QUIET, projects: PROJECTS_QUIET },
 }
 
 /* ---- at rest: nothing waits on you and nothing is in progress ---- */

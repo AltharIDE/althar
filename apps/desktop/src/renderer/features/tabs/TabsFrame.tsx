@@ -1,26 +1,49 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 
-import { ProjectTabs, TitleBar, type Room } from '@althar/ui'
+import { LoadMeter, ProjectTabs, TitleBar, type Room, UpdateReady } from '@althar/ui'
 
 import { useServices } from '../../data/services'
+import { FinderView } from '../finder/FinderView'
 import { useWindowChrome } from '../../shared/useWindowChrome'
+import { useUpdate } from '../../shared/useUpdate'
 import { tabsStoreOf } from './store'
 import { beside, byNumber } from './tabs'
 import s from './Tabs.module.css'
+import { SLOTS, text as loadText, useLoad } from './useLoad'
 import { useTabs } from './useTabs'
 
 /*
  * Every screen under the window's tabs: the home's, then each open
  * project's. ⌘1 goes to the home, ⌘2 to ⌘8 to the projects in order, ⌘9 to
  * the last, and Control-Tab to the next tab (with Shift, the one before),
- * as in a browser. The tabs are the window's one bar: a screen puts its own
- * controls at the bar's end with BarEnd, and its way back, where it has one,
- * at the top of its page. Before there is any project there are no tabs:
- * the first screen has the whole window.
+ * as in a browser. ⌘N starts a new project in a tab of its own, as the +
+ * does. ⌘K finds a task: in the project whose tab has the window, or, on the
+ * home, in every project. The tabs are the window's one bar: a screen puts its own controls at
+ * the bar's end with BarEnd, and its way back, where it has one, at the top
+ * of its page. Before it, on every screen, how hard the computer works, in
+ * two short meters the person may turn off (`useLoad`), and a newer Althar
+ * ready to install, in one quiet line. Before there is any project there are
+ * no tabs: the first screen has the whole window.
  */
 
 const VisitContext = createContext<(threadId: string, projectId: string) => void>(() => undefined)
+
+/** A new project's tab, as the screens under the tabs reach it. */
+export interface NewTab {
+  /** Starts one, or goes to the one being made; folders dropped are added to it. */
+  readonly start: (files?: ReadonlyArray<File>) => void
+  /** It was made: its tab becomes the project's, open on its conversation. */
+  readonly made: (projectId: string) => void
+  /** It closes, and nothing is made. */
+  readonly close: () => void
+}
+
+/** Outside the tabs, as a screen is in a test, there is no new project's tab to start. */
+export const NewTabContext = createContext<NewTab>({ start: () => undefined, made: () => undefined, close: () => undefined })
+
+/** The new project's tab: starting one, and its end, made or closed. */
+export const useNewTab = (): NewTab => useContext(NewTabContext)
 
 /** The end of the window's bar: undefined outside the tabs, null until the bar is drawn. */
 const EndContext = createContext<HTMLElement | null | undefined>(undefined)
@@ -63,6 +86,8 @@ export const useLastRoom = (projectId: string): readonly [Room | null, (room: Ro
 function TabsBar({ tabs, endRef }: { tabs: ReturnType<typeof useTabs>; endRef: (element: HTMLElement | null) => void }) {
   const { host } = useServices()
   const chrome = useWindowChrome()
+  const update = useUpdate()
+  const load = useLoad(tabs.tabs.length > 0 || tabs.others.length > 0)
   const { select, current } = tabs
   return (
     <ProjectTabs
@@ -73,8 +98,16 @@ function TabsBar({ tabs, endRef }: { tabs: ReturnType<typeof useTabs>; endRef: (
       onSelect={select}
       onClose={tabs.close}
       onOpen={tabs.open}
-      onOpenFolder={tabs.openFolder}
-      end={<div ref={endRef} className={s.end} />}
+      onNewProject={tabs.newProject}
+      end={
+        <>
+          {load.glance !== null && (
+            <LoadMeter load={load.glance} slots={SLOTS} onOpen={load.open} onHide={load.hide} text={loadText.meter} />
+          )}
+          {update.ready !== null && <UpdateReady {...update.ready} />}
+          <div ref={endRef} className={s.end} />
+        </>
+      }
       // macOS draws its traffic lights over the bar; elsewhere the bar draws the window's own buttons.
       lights={host.platform === 'darwin' ? 'space' : 'drawn'}
       maximized={chrome.window?.maximized === true}
@@ -107,13 +140,30 @@ function BareTitleBar({ className }: { className?: string }) {
 
 export function TabsFrame({ children }: { children: ReactNode }) {
   const tabs = useTabs()
+  const { host } = useServices()
   const [end, setEnd] = useState<HTMLElement | null>(null)
-  const { select, current } = tabs
+  // Finding a task, in the project with the window or on the home in every one; from a composer too.
+  const [finding, setFinding] = useState(false)
+  const { select, current, newProject, none } = tabs
   const open = tabs.tabs.map((tab) => tab.id)
   const order = open.join(' ')
+  const newTab: NewTab = { start: tabs.newProject, made: tabs.made, close: tabs.closeNew }
   useEffect(() => {
     const ids = order === '' ? [] : order.split(' ')
     const onKey = (event: KeyboardEvent) => {
+      // ⌘K, Control-K off a Mac: once there is a project, a task to find.
+      const command = host.platform === 'darwin' ? event.metaKey : event.ctrlKey
+      if (command && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k' && !none) {
+        event.preventDefault()
+        setFinding(true)
+        return
+      }
+      // Before there is a project, the first screen has ⌘N for a folder of its own.
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n' && !none) {
+        event.preventDefault()
+        newProject()
+        return
+      }
       if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
         const id = byNumber(ids, Number(event.key))
         if (id === undefined) return
@@ -128,17 +178,20 @@ export function TabsFrame({ children }: { children: ReactNode }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [order, current, select])
+  }, [order, current, select, newProject, none, host.platform])
   return (
     <VisitContext.Provider value={tabs.visit}>
-      <EndContext.Provider value={end}>
-        <TabBarContext.Provider value={!tabs.none}>
-          <div className={s.frame}>
-            {!tabs.none && <TabsBar tabs={tabs} endRef={setEnd} />}
-            <div className={s.screen}>{children}</div>
-          </div>
-        </TabBarContext.Provider>
-      </EndContext.Provider>
+      <NewTabContext.Provider value={newTab}>
+        <EndContext.Provider value={end}>
+          <TabBarContext.Provider value={!tabs.none}>
+            <div className={s.frame}>
+              {!tabs.none && <TabsBar tabs={tabs} endRef={setEnd} />}
+              <div className={s.screen}>{children}</div>
+            </div>
+            {finding && <FinderView projectId={current} onClose={() => setFinding(false)} />}
+          </TabBarContext.Provider>
+        </EndContext.Provider>
+      </NewTabContext.Provider>
     </VisitContext.Provider>
   )
 }

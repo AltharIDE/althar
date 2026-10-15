@@ -13,19 +13,21 @@ import s from './SplitButton.module.css'
  */
 
 export interface SplitButtonProps extends Omit<ButtonProps, 'variant'> {
+  /** Signal for the one way on an ask offers first; both halves take it. */
+  variant?: 'default' | 'signal'
   /** The chevron's accessible name: what choosing does, such as "Choose another model". */
   moreLabel: string
   /** Renders the menu of alternatives around the given trigger, usually a Menu. */
   menu: (trigger: ReactElement) => ReactNode
 }
 
-export function SplitButton({ moreLabel, menu, size = 'medium', className, ...main }: SplitButtonProps) {
+export function SplitButton({ moreLabel, menu, variant = 'default', size = 'medium', className, ...main }: SplitButtonProps) {
   return (
-    <span role="group" className={cx(s.split, size === 'small' && s.small, className)}>
-      <Button {...main} size={size} className={s.main} />
+    <span role="group" className={cx(s.split, size === 'small' && s.small, variant === 'signal' && s.signal, className)}>
+      <Button {...main} variant={variant} size={size} className={s.main} />
       {menu(
         /* while the main action works, its alternatives wait too */
-        <Button size={size} className={s.more} aria-label={moreLabel} disabled={main.disabled || main.busy}>
+        <Button variant={variant} size={size} className={s.more} aria-label={moreLabel} disabled={main.disabled || main.busy}>
           <Icon name="chevronD" size={10} />
         </Button>,
       )}

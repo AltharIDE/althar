@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { States, statesParameters } from '../../storybook/States'
 import { Select, type SelectProps } from './Select'
@@ -48,6 +48,36 @@ export const Choosing: Story = {
     await expect(await c.findByRole('combobox', { name: 'Default effort' })).toHaveTextContent('Low')
   },
 }
+/** Beside a field being typed in: once a value is chosen, focus goes back to the field, not the list's button. */
+export const BackToTheField: Story = {
+  render: function Render() {
+    const [value, setValue] = useState('High')
+    return (
+      <>
+        <input aria-label="Note" />
+        <Select
+          label="Default effort"
+          options={EFFORT}
+          value={value}
+          onChange={(next) => {
+            setValue(next)
+            setTimeout(() => document.querySelector<HTMLInputElement>('input[aria-label="Note"]')?.focus(), 0)
+          }}
+          returnFocus={() => false}
+          width={104}
+        />
+      </>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    const page = within(document.body)
+    await userEvent.click(c.getByRole('combobox', { name: 'Default effort' }))
+    await userEvent.click(await page.findByRole('option', { name: 'Low' }))
+    await waitFor(() => expect(c.getByRole('textbox', { name: 'Note' })).toHaveFocus())
+  },
+}
+
 export const Filled: Story = { render: () => <Example variant="filled" width={220} /> }
 export const Open: Story = { render: () => <Example defaultOpen /> }
 

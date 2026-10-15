@@ -3,20 +3,26 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
-import { scenarios } from '@althar/provider-adapters/testing'
+import { BUILT, BUILT_SETTLED, scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { RuntimeConfig, type StallOptions } from '../src/Config'
 import { Coordinator, CoordinatorUnavailable } from '../src/Coordinator'
+import { coordinatorNews, modelNamer } from '../src/coordinatorNews'
 import { NotFound } from '../src/errors'
+import { builtAsk } from '../src/evidence'
+import { Instance } from '../src/Instance'
+import { Models } from '../src/Models'
 import { Plans } from '../src/Plans'
 import { Projects } from '../src/Projects'
 import { Queries } from '../src/Queries'
 import { Runs } from '../src/Runs'
 import * as Runtime from '../src/Runtime'
 import { Sessions } from '../src/Sessions'
+import { Tasks } from '../src/Tasks'
+import { addItem } from '../src/threads'
 import { ToolServer, type ToolAccess } from '../src/ToolServer'
 import { callTool, notices, repository, runtime, task as newTask, turns, until } from './support'
 
@@ -59,7 +65,7 @@ const results = (threadId: string) =>
     const rows = yield* sql<{
       content: string
     }>`SELECT content FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result' ORDER BY sequence`
-    return rows.map((row) => JSON.parse(row.content) as { step: string; verdict?: string; summary: string })
+    return rows.map((row) => JSON.parse(row.content) as { step: string; verdict?: string; summary: string; built?: string })
   })
 
 describe('the coordinator loop', () => {
@@ -106,6 +112,8 @@ describe('the coordinator loop', () => {
         Effect.map(touches, (revision) => (revision >= before + 2 ? [revision] : [])),
         (rows) => rows.length === 1,
       )
+      // What the person said opened a round of work after the plan, which made nothing new: the task is ready as it was (ADR-034).
+      yield* until(sql<{ state: string }>`SELECT state FROM runs WHERE plan_id IS NULL`, (rows) => rows[0]?.state === 'succeeded')
       assert.strictEqual((yield* cardsOf(projectId))[0]?.phase, 'ready')
 
       // Implement, a review with a finding, the lead settling it, and a second review that passes.
@@ -119,6 +127,14 @@ describe('the coordinator loop', () => {
           ['review', 'pass', 'The change holds.'],
         ],
       )
+      // What the task built, said finishing, and said again by the settling that changed the work.
+      assert.deepStrictEqual(
+        steps.flatMap((step) => (step.built === undefined ? [] : [[step.step, step.built]])),
+        [
+          ['implement', BUILT],
+          ['settle', BUILT_SETTLED],
+        ],
+      )
       const nodes = yield* sql<{ nodeKey: string; iteration: number; state: string }>`
         SELECT node_key, iteration, state FROM nodes ORDER BY created_at, iteration`
       assert.deepStrictEqual(
@@ -128,13 +144,15 @@ describe('the coordinator loop', () => {
           ['review', 0, 'succeeded'],
           ['settle', 0, 'succeeded'],
           ['review', 1, 'succeeded'],
+          // The round "hello" opened.
+          ['implement', 0, 'succeeded'],
         ],
       )
       // The lead said what became of the finding, and the record keeps it with the settling that did it.
       const [finding] = yield* sql<{ severity: string; claim: string; state: string; settled: number }>`
         SELECT severity, claim, state, settled_in_attempt_id IS NOT NULL AS settled FROM findings`
       assert.deepStrictEqual({ ...finding }, { severity: 'major', claim: 'The heading is wrong.', state: 'fixed', settled: 1 })
-      const [run] = yield* sql<{ state: string }>`SELECT state FROM runs`
+      const [run] = yield* sql<{ state: string }>`SELECT state FROM runs WHERE plan_id IS NOT NULL`
       assert.strictEqual(run?.state, 'succeeded')
       // Each round read a copy of the work as it stood, and the record keeps which code that was; the lead's branch is untouched.
       const snapshots = yield* sql<{ commitSha: string; nodeKey: string }>`
@@ -168,25 +186,91 @@ describe('the coordinator loop', () => {
       const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
       assert.strictEqual(yield* callTool(access, 'list_tasks', {}), '- add-a-retry: Add a retry (ready, led by Fake claude-code)')
       const task = yield* callTool(access, 'read_task', { task: 'add-a-retry' })
+      // Its pull request, as last seen: a merged one finishes a done task, whatever its last run said; an open one on no known host says so.
+      const [taskRow] = yield* sql<{ id: string; projectId: string }>`SELECT id, project_id FROM tasks WHERE slug = 'add-a-retry'`
+      const at = new Date().toISOString()
+      const change = (state: string, snapshot: Record<string, unknown> = {}) =>
+        sql`UPDATE external_links SET snapshot = ${JSON.stringify({ number: 106, title: 'Add a retry', url: 'https://github.com/acme/app/pull/106', state, draft: false, words: {}, repository: ['acme', 'app'], ...snapshot })} WHERE task_id = ${taskRow?.id ?? ''}`
+      yield* sql`INSERT INTO external_links ${sql.insert({
+        id: `xlink_${'2'.repeat(32)}`,
+        projectId: taskRow?.projectId ?? '',
+        taskId: taskRow?.id ?? '',
+        connectionId: null,
+        product: 'github',
+        kind: 'change',
+        externalId: '106',
+        ref: '106',
+        key: '106',
+        url: 'https://github.com/acme/app/pull/106',
+        snapshot: '{}',
+        createdAt: at,
+        updatedAt: at,
+      })}`
+      yield* change('open', { draft: true })
+      assert.match(
+        yield* callTool(access, 'list_tasks', {}),
+        /\(ready, led by Fake claude-code\) — PR #106 draft, as last seen \(its host is not known\)/,
+      )
+      yield* change('merged')
+      yield* sql`UPDATE tasks SET state = 'done' WHERE id = ${taskRow?.id ?? ''}`
+      assert.strictEqual(
+        yield* callTool(access, 'list_tasks', {}),
+        '- add-a-retry: Add a retry (finished, merged, led by Fake claude-code) — PR #106 merged',
+      )
+      const finished = yield* callTool(access, 'read_task', { task: 'add-a-retry' })
+      assert.match(finished, /Pull request:\nPR #106 merged: Add a retry\nURL: https:\/\/github\.com\/acme\/app\/pull\/106\nMerged/)
+      assert.match(finished, /The task is finished \(merged\): nothing waits on the person\./)
+      yield* change('closed')
+      yield* sql`UPDATE tasks SET state = 'open' WHERE id = ${taskRow?.id ?? ''}`
+      // Closed on a host Althar can't tell, it may have been reopened: not finished.
+      assert.match(
+        yield* callTool(access, 'list_tasks', {}),
+        /\(ready, led by .*\) — PR #106 closed, as last seen \(its host is not known\)/,
+      )
+      yield* sql`DELETE FROM external_links WHERE task_id = ${taskRow?.id ?? ''}`
       assert.match(task, /Branch \S+, in \S+\./)
+      // What it built, as it now stands, before the rounds that got it there.
+      assert.include(task, `What it built, as its lead says it now stands:\n${BUILT_SETTLED}`)
+      assert.isBelow(task.indexOf(BUILT_SETTLED), task.indexOf('implement: Did the task.'))
       assert.match(task, /review \(changes_requested\): The heading needs fixing\.\n\nsettle: Fixed the heading\./)
       assert.match(yield* callTool(access, 'read_thread', { task: 'add-a-retry' }), /\[review, pass\] The change holds\./)
       assert.match(yield* callTool(access, 'propose_plan', { task: 'add-a-retry', lead: { agent: 'codex' } }), /has started already/)
       assert.match(yield* callTool(access, 'message_lead', { task: 'add-a-retry', message: 'Stop.', now: true }), /^Passed on/)
-      // With no step waiting, a lead's summary isn't kept.
+      // Its plan done, a lead that changes the work after reports a round of its own (ADR-034), and says again what the task
+      // built: without it, Althar asks.
+      const [leadSession] = yield* sql<{ id: string }>`
+        SELECT id FROM provider_sessions WHERE thread_id = ${ready?.threadId ?? ''} ORDER BY started_at DESC, rowid DESC LIMIT 1`
+      const [worktree] = yield* sql<{ path: string }>`SELECT path FROM workspaces WHERE task_id = ${ready?.taskId ?? ''} LIMIT 1`
+      writeFileSync(join(worktree?.path ?? '', 'AGAIN.md'), 'Again.\n')
+      execFileSync('git', ['-C', worktree?.path ?? '', 'add', 'AGAIN.md'])
+      execFileSync('git', [
+        '-C',
+        worktree?.path ?? '',
+        '-c',
+        'user.name=Lead',
+        '-c',
+        'user.email=lead@example.com',
+        'commit',
+        '-qm',
+        'Again',
+      ])
       const lead: ToolAccess = {
         role: 'lead',
         projectId,
         threadId: ready?.threadId ?? '',
-        sessionId: 'none',
+        sessionId: leadSession?.id ?? 'none',
         taskId: ready?.taskId ?? null,
       }
-      assert.strictEqual(
-        yield* callTool(lead, 'finish_step', { summary: 'Again.' }),
-        'No step is waiting on you, so Althar keeps no summary now.',
-      )
+      assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Again.' }), builtAsk(false))
       // What the person says to a task goes to its lead, not the coordinator.
       assert.instanceOf(yield* Effect.flip(say(ready?.threadId ?? '', 'Hello')), NotFound)
+      // Where its pull requests can't be read just now, the list says nothing of them and the task says so, rather than guessing.
+      yield* (yield* Coordinator).reading(() => Effect.succeed(undefined))
+      assert.match(yield* callTool(access, 'list_tasks', {}), /^- add-a-retry: Add a retry \([^)]*\)$/)
+      assert.match(
+        yield* callTool(access, 'read_task', { task: 'add-a-retry' }),
+        /\n\nPull request: Althar could not read its state just now\.$/,
+      )
     }).pipe(Effect.provide(withQueries())),
   )
 
@@ -404,6 +488,29 @@ describe('the coordinator loop', () => {
     }).pipe(Effect.provide(withQueries())),
   )
 
+  it.live('plans a step at the effort the coordinator picks, which its card shows and its lead starts at', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const models = yield* Models
+      const { projectId, threadId } = yield* opened
+      // Once each agent has said what its models offer.
+      yield* models.catalog
+      yield* until(models.catalog, (all) => all.every((agent) => !agent.probing))
+      yield* say(threadId, 'Rework the cache. [coordinator:plan-effort] [coordinator:plan-no-review] [lead:finish]')
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards.length === 1)
+      assert.deepStrictEqual(card?.plan?.steps, [
+        { key: 'implement', agentId: 'claude-code', model: 'large', effort: 'high', skipped: false },
+      ])
+      // Its countdown over, its lead starts at it: what it is on is recorded once it has started.
+      const [lead] = yield* until(
+        sql<{ effort: string | null }>`
+          SELECT s.effort FROM provider_sessions s JOIN threads t ON t.id = s.thread_id WHERE t.kind = 'task' AND s.state <> 'starting'`,
+        (rows) => rows.length === 1,
+      )
+      assert.strictEqual(lead?.effort, 'high')
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('holds, changes and starts a plan when the person says', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -444,6 +551,56 @@ describe('the coordinator loop', () => {
       // With no review, the lead's summary makes it ready.
       const [ready] = yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'ready')
       assert.strictEqual(ready?.summary, 'Did the task.')
+
+      // The coordinator hears what became of its plan before the person's next words, once, and speaks of it as it is.
+      const told = (body: string) =>
+        until(
+          sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${threadId} AND prompt LIKE ${`%${body}%`}`,
+          (rows) => rows.length === 1,
+        )
+      yield* say(threadId, 'How did it go?')
+      const [heard] = yield* told('How did it go?')
+      assert.match(heard?.prompt ?? '', /^Since you last spoke, in Althar:\n- something-small \(Something small\): /)
+      assert.match(
+        heard?.prompt ?? '',
+        /The person changed its plan: you proposed .+ leads, no review\. Now Large leads, no review\. It has started\./,
+      )
+      assert.match(heard?.prompt ?? '', /\n\nHow did it go\?$/)
+      yield* say(threadId, 'Thanks.')
+      const [after] = yield* told('Thanks.')
+      assert.notInclude(after?.prompt, 'Since you last spoke')
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.seconds(30) }))),
+  )
+
+  it.live('tells the coordinator of a change recorded after its last turn, by the record’s order, whatever its clock says', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const plans = yield* Plans
+      const { projectId, threadId } = yield* opened
+      const [person] = yield* sql<{ id: string }>`SELECT id FROM actors WHERE kind = 'person'`
+      const actor = (person?.id ?? '') as Parameters<typeof plans.hold>[1]
+      yield* say(threadId, 'Something small. [coordinator:plan-no-review] [lead:finish]')
+      const [card] = yield* until(cardsOf(projectId), (cards) => cards.length === 1)
+      const planId = card?.plan?.id ?? ''
+      yield* plans.hold(planId, actor)
+      yield* until(cardsOf(projectId), (cards) => cards[0]?.phase === 'held')
+      // Wait until its turn is over, so the change comes after it in the record.
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId} AND state IN ('pending', 'delivered')`,
+        (rows) => rows.length === 0,
+      )
+      yield* plans.change(planId, [{ key: 'implement', agentId: 'codex', model: 'large', skipped: false }], actor)
+      // Recorded after the turn, but stamped before it: as when a change lands while the turn is being recorded.
+      yield* sql`UPDATE record_events SET occurred_at = '2020-01-01T00:00:00.000Z' WHERE type IN ('task_plan.changed', 'task_plan.held')`
+      yield* say(threadId, 'Where is it?')
+      const [heard] = yield* until(
+        sql<{ prompt: string }>`SELECT prompt FROM turn_deliveries WHERE thread_id = ${threadId} AND prompt LIKE '%Where is it?%'`,
+        (rows) => rows.length === 1,
+      )
+      assert.match(
+        heard?.prompt ?? '',
+        /The person changed its plan: you proposed .+ leads, no review\. Now Large leads, no review\. The person is holding it/,
+      )
     }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.seconds(30) }))),
   )
 
@@ -538,6 +695,196 @@ const answer = (
     yield* runs.answerStuck({ envelope: yield* Runtime.envelope('attention.answer', {}), attentionId, answer: reply })
   })
 
+describe('what the coordinator hears of its plans', () => {
+  it.live('says, once each, what the person changed, held, started or declined, and how each plan stands now', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const plans = yield* Plans
+      const projects = yield* Projects
+      const tasks = yield* Tasks
+      const instance = yield* Instance
+      const { projectId, threadId } = yield* opened
+      const person = instance.personId
+      const coordinator = instance.coordinatorId
+      // It has spoken once: what it hears is what came after. Its turn is over, not only not yet begun.
+      yield* say(threadId, 'Hello.')
+      yield* until(
+        sql<{ state: string }>`SELECT state FROM turn_deliveries WHERE thread_id = ${threadId}`,
+        (rows) => rows.length > 0 && rows.every((row) => row.state !== 'pending' && row.state !== 'delivered'),
+      )
+      const draft = (title: string) =>
+        Effect.map(
+          Effect.flatMap(Runtime.envelope('task.create', { title }), (envelope) =>
+            projects.createTask({ envelope, projectId, title, draft: true }),
+          ),
+          (created) => created.taskId,
+        )
+      const propose = (taskId: string, input: Partial<Parameters<typeof plans.propose>[0]>) =>
+        plans.propose({
+          projectId: projectId as Parameters<typeof plans.propose>[0]['projectId'],
+          taskId,
+          steps: [{ key: 'implement', agentId: 'claude-code', model: 'small', effort: 'high', skipped: false }],
+          reason: null,
+          actorId: coordinator,
+          held: true,
+          ...input,
+        })
+
+      // Proposed by the coordinator with a review and a draft pull request; the person makes it Codex alone, ready for review, and holds it.
+      const retry = yield* draft('Retry the checkout call')
+      const retryPlan = yield* propose(retry, {
+        steps: [
+          { key: 'implement', agentId: 'claude-code', model: 'small', effort: 'high', skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: false },
+        ],
+        end: 'draft',
+      })
+      yield* plans.change(
+        retryPlan,
+        [
+          { key: 'implement', agentId: 'codex', model: 'large', skipped: false },
+          { key: 'review', agentId: 'codex', model: null, skipped: true },
+        ],
+        person,
+        'ready',
+      )
+      // The person's own plan, its branch pushed, changed to end on its branch, and started.
+      const docs = yield* draft('Fix the docs')
+      const docsPlan = yield* propose(docs, { actorId: person, end: 'none' })
+      yield* plans.change(docsPlan, [{ key: 'implement', agentId: 'claude-code', model: 'small', skipped: false }], person, null)
+      yield* plans.start(docsPlan, person)
+      // Declined, its task abandoned before it started.
+      const bump = yield* draft('Bump the SDK')
+      yield* propose(bump, {})
+      yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', { bump }), taskId: bump })
+      // Held, then proposed again: the plan it replaced says nothing.
+      const tidy = yield* draft('Tidy the logs')
+      const replaced = yield* propose(tidy, {})
+      yield* plans.change(replaced, [{ key: 'implement', agentId: 'codex', model: null, skipped: false }], person)
+      yield* propose(tidy, {})
+      // Waiting out its countdown: changed by the coordinator alone, nothing to say; by the person, a model its agent doesn't name, and no word of a hold.
+      const quiet = yield* draft('Quiet one')
+      const quietPlan = yield* propose(quiet, { held: false, startsIn: Duration.minutes(5) })
+      yield* plans.change(quietPlan, [{ key: 'implement', agentId: 'codex', model: 'large', skipped: false }], coordinator)
+      const counting = yield* draft('Counting down')
+      const countingPlan = yield* propose(counting, { held: false, startsIn: Duration.minutes(5) })
+      yield* plans.change(countingPlan, [{ key: 'implement', agentId: 'codex', model: 'mystery-9', skipped: false }], person)
+      // Only its effort changed: said, before and now. Only its ending changed: the effort, the same, isn't.
+      const harder = yield* draft('Think less')
+      const harderPlan = yield* propose(harder, {})
+      yield* plans.change(harderPlan, [{ key: 'implement', agentId: 'claude-code', model: 'small', effort: 'low', skipped: false }], person)
+      const pushed = yield* draft('Push it')
+      const pushedPlan = yield* propose(pushed, { end: 'draft' })
+      yield* plans.change(
+        pushedPlan,
+        [{ key: 'implement', agentId: 'claude-code', model: 'small', effort: 'high', skipped: false }],
+        person,
+        'none',
+      )
+      // Started, then abandoned; and started, its work since merged.
+      const spike = yield* draft('Spike the cache')
+      const spikePlan = yield* propose(spike, {})
+      yield* plans.start(spikePlan, person)
+      yield* until(sql<{ id: string }>`SELECT id FROM runs WHERE plan_id = ${spikePlan}`, (rows) => rows.length === 1)
+      yield* tasks.abandon({ envelope: yield* Runtime.envelope('task.abandon', { spike }), taskId: spike })
+      const merged = yield* draft('Ship the banner')
+      const mergedPlan = yield* propose(merged, {})
+      yield* plans.start(mergedPlan, person)
+      yield* sql`UPDATE tasks SET state = 'done' WHERE id = ${merged}`
+
+      const news = (yield* coordinatorNews(threadId, projectId, yield* modelNamer)) ?? ''
+      assert.match(news, /^Since you last spoke, in Althar:\n/)
+      assert.match(
+        news,
+        /- retry-the-checkout-call \(Retry the checkout call\): The person changed its plan: you proposed Claude Small \(effort high\) leads, .+ reviews, and it ends as a draft pull request\. Now Large \(default effort\) leads, no review, and it ends as a pull request ready for review\. The person is holding it: it waits until they start it\./,
+      )
+      assert.match(
+        news,
+        /- fix-the-docs \(Fix the docs\): The person changed its plan: it was Claude Small \(effort high\) leads, no review, and it ends with its branch pushed\. Now Claude Small \(default effort\) leads, no review, and it ends on its branch, with nothing sent to the host\. It has started\./,
+      )
+      assert.include(news, '- bump-the-sdk (Bump the SDK): It was declined: it won’t run.')
+      assert.notInclude(news, 'Tidy the logs')
+      assert.notInclude(news, 'Quiet one')
+      assert.match(
+        news,
+        /- counting-down \(Counting down\): The person changed its plan: you proposed .+\. Now mystery-9 \(default effort\) leads, no review\.\n/,
+      )
+      assert.include(
+        news,
+        '- think-less (Think less): The person changed its plan: you proposed Claude Small (effort high) leads, no review. Now Claude Small (effort low) leads, no review. The person is holding it: it waits until they start it.',
+      )
+      assert.include(
+        news,
+        '- push-it (Push it): The person changed its plan: you proposed Claude Small leads, no review, and it ends as a draft pull request. Now Claude Small leads, no review, and it ends with its branch pushed.',
+      )
+      assert.include(news, '- spike-the-cache (Spike the cache): It started, and the person abandoned it.')
+      assert.include(news, '- ship-the-banner (Ship the banner): It has started and is done.')
+      assert.match(news, /Speak of these plans as they are now, not as they were proposed\.$/)
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { countdown: Duration.seconds(30) }))),
+  )
+
+  it.live('has nothing to say before it has spoken, or when nothing changed', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened
+      const named = yield* modelNamer
+      assert.isNull(yield* coordinatorNews(threadId, projectId, named))
+    }).pipe(Effect.provide(withQueries())),
+  )
+})
+
+describe('the coordinator’s edges', () => {
+  it.live('has no thread for a project that isn’t there', () =>
+    Effect.gen(function* () {
+      const coordinator = yield* Coordinator
+      assert.instanceOf(yield* Effect.flip(coordinator.thread('prj_none')), NotFound)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('says so where it can’t read how a task’s pull request stands, and reads a step that reported little', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const coordinator = yield* Coordinator
+      const { projectId, threadId } = yield* opened
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      yield* coordinator.reading(() => Effect.succeed(undefined))
+      yield* callTool(access, 'draft_task', { title: 'Add a retry' })
+      assert.strictEqual(yield* callTool(access, 'list_tasks', {}), '- add-a-retry: Add a retry (planned)')
+      const [thread] = yield* sql<{ id: string }>`
+        SELECT t.id FROM threads t JOIN tasks k ON k.id = t.task_id WHERE k.slug = 'add-a-retry' AND t.kind = 'task'`
+      yield* addItem({ projectId: projectId as Parameters<typeof addItem>[0]['projectId'], threadId: thread?.id ?? '' }, 'step_result', {})
+      const read = yield* callTool(access, 'read_task', { task: 'add-a-retry' })
+      assert.include(read, '\n\nstep: \n\n')
+      assert.match(read, /Pull request: Althar could not read its state just now\.$/)
+    }).pipe(Effect.provide(runtime())),
+  )
+
+  it.live('keeps what Althar tells it quietly while its agent can’t start', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const coordinator = yield* Coordinator
+      const { threadId } = yield* opened
+      const body = 'The person answered: yes.'
+      const envelope = yield* Runtime.envelope('thread.send', { body })
+      const refused = yield* Effect.flip(coordinator.say({ envelope, threadId, body, disposition: 'after_current', quiet: true }))
+      assert.instanceOf(refused, CoordinatorUnavailable)
+      assert.lengthOf(yield* sql`SELECT id FROM user_inputs WHERE thread_id = ${threadId} AND body = ${body}`, 1)
+    }).pipe(Effect.provide(withQueries(undefined, undefined, { signedOut: ['claude-code'] }))),
+  )
+
+  it.live('starts on what Althar tells it quietly, once', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const coordinator = yield* Coordinator
+      const { threadId } = yield* opened
+      const body = 'The person answered: yes.'
+      const envelope = yield* Runtime.envelope('thread.send', { body })
+      yield* coordinator.say({ envelope, threadId, body, disposition: 'after_current', quiet: true })
+      yield* until(sql<{ id: string }>`SELECT id FROM provider_sessions WHERE thread_id = ${threadId}`, (rows) => rows.length === 1)
+      assert.lengthOf(yield* sql`SELECT id FROM user_inputs WHERE thread_id = ${threadId} AND body = ${body}`, 1)
+    }).pipe(Effect.provide(withQueries())),
+  )
+})
+
 describe('a step that needs the person', () => {
   it.live('reminds a lead that ends its turn without reporting once, then needs the person, and carries on when told', () =>
     Effect.gen(function* () {
@@ -581,23 +928,6 @@ describe('a step that needs the person', () => {
       const [run] = yield* sql<{ state: string }>`SELECT state FROM runs`
       assert.strictEqual(run?.state, 'cancelled')
     }).pipe(Effect.provide(withQueries())),
-  )
-
-  it.live('needs the person for a step a restart stopped', () =>
-    Effect.gen(function* () {
-      const file = join(mkdtempSync(join(tmpdir(), 'althar-steps-')), 'althar.sqlite')
-      const taskId = yield* Effect.gen(function* () {
-        const sessions = yield* Sessions
-        const { task } = yield* planned('Interrupted', '[lead:wait]', [{ key: 'implement', agentId: 'codex' }])
-        yield* until(
-          Effect.map(sessions.running(task.threadId), (running) => (running._tag === 'Some' && running.value.turnRunning ? [running] : [])),
-          (rows) => rows.length === 1,
-        )
-        return task.taskId
-      }).pipe(Effect.provide(withQueries(file)))
-      const call = yield* stuckCall(taskId).pipe(Effect.provide(withQueries(file)))
-      assert.deepStrictEqual([call.step, call.why, call.agentId], ['implement', 'restarted', 'codex'])
-    }),
   )
 
   it.live("reminds a reviewer that doesn't report, then needs the person, who tells it to", () =>
@@ -797,6 +1127,47 @@ describe('the coordinator', () => {
 })
 
 describe("the coordinator's tools", () => {
+  it.live('start a mini task at once: one lead, no review, nothing outside the project, no countdown', () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+      const { projectId, threadId } = yield* opened
+      const access: ToolAccess = { role: 'coordinator', projectId, threadId, sessionId: 'none', taskId: null }
+      // Without its lead, or with one nobody can run, nothing is made.
+      assert.match(yield* callTool(access, 'start_task', { title: 'Try the double jump' }), /couldn't read that/)
+      assert.match(yield* callTool(access, 'start_task', { title: 'Try the double jump', lead: { agent: 'gemini' } }), /no agent gemini/)
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM tasks`)[0]?.n, 0)
+      const asked = {
+        title: 'Try the double jump',
+        description: 'Jump twice from the hall stairs and say whether the second jump lands.',
+        lead: { agent: 'claude-code', model: 'small' },
+      }
+      assert.match(yield* callTool(access, 'start_task', asked), /^Started try-the-double-jump: /)
+      // Its card: running at once, its lead the only step, and nothing outside the project when it is done.
+      const [card] = yield* until(cardsOf(projectId), (all) => all[0]?.phase === 'running')
+      assert.strictEqual(card?.slug, 'try-the-double-jump')
+      assert.deepStrictEqual(
+        card?.plan?.steps.map((step) => [step.key, step.agentId, step.model]),
+        [['implement', 'claude-code', 'small']],
+      )
+      assert.isNull(card?.plan?.startsAt)
+      assert.isNull(card?.plan?.end)
+      // Called again, unsure the first worked, it starts nothing more.
+      assert.strictEqual(yield* callTool(access, 'start_task', asked), 'try-the-double-jump has started already.')
+      assert.strictEqual((yield* sql<{ n: number }>`SELECT count(*) AS n FROM tasks`)[0]?.n, 1)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
+  it.live('start one when the person asks for something to be tried, its lead told what the person said', () =>
+    Effect.gen(function* () {
+      const { projectId, threadId } = yield* opened
+      yield* say(threadId, 'Try the double jump. [coordinator:start]')
+      const [card] = yield* until(cardsOf(projectId), (all) => all[0]?.phase === 'running', Duration.seconds(10))
+      assert.strictEqual(card?.title, 'Try the double jump')
+      assert.isNull(card?.plan?.startsAt)
+      assert.lengthOf(card?.plan?.steps ?? [], 1)
+    }).pipe(Effect.provide(withQueries())),
+  )
+
   it.live('read the project and its tasks, pass messages on, and refuse what they cannot do', () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient
@@ -850,7 +1221,7 @@ describe("the coordinator's tools", () => {
       // A lead has its own tools, not the coordinator's; with no step waiting, its summary is still kept.
       const lead: ToolAccess = { role: 'lead', projectId, threadId, sessionId: 'none', taskId: null }
       assert.strictEqual(yield* callTool(lead, 'draft_task', { title: 'x' }), 'Althar has no tool called draft_task.')
-      assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Did it.' }), 'Althar has your summary.')
+      assert.strictEqual(yield* callTool(lead, 'finish_step', { summary: 'Did it.', built: 'A hello.' }), 'Althar has your summary.')
       const reviewer: ToolAccess = { role: 'reviewer', projectId, threadId, sessionId: 'none', taskId: null }
       assert.strictEqual(yield* callTool(reviewer, 'report_review', { verdict: 'pass', summary: 'Fine.' }), 'No review is waiting on you.')
       // What goes wrong inside Althar is told as such, not as the agent's mistake.
@@ -860,7 +1231,7 @@ describe("the coordinator's tools", () => {
         'Althar could not do that. Try again, or tell the person.',
       )
       assert.strictEqual(
-        yield* callTool({ ...lead, threadId: 'thr_missing' }, 'finish_step', { summary: 'Did it.' }),
+        yield* callTool({ ...lead, threadId: 'thr_missing' }, 'finish_step', { summary: 'Did it.', built: 'A hello.' }),
         'Althar could not record that. Try again.',
       )
     }).pipe(Effect.provide(withQueries())),

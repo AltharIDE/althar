@@ -8,5 +8,6 @@ contract({
   modes: { ask: 'ask', readOnly: 'read-only' },
   permissions: codexLikeMeanings,
   model: { optionId: 'model', switchTo: 'large' },
-  prompts: { short: scenarios.hello, long: scenarios.slow, command: scenarios.commandChoices },
+  prompts: { short: scenarios.hello, long: scenarios.slow, command: scenarios.commandChoices, question: scenarios.questions },
+  asks: 'form',
 })

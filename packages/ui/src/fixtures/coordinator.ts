@@ -112,36 +112,6 @@ export const STAGES = [
   },
 ] as const
 
-/** A project's "always ask me" list, and which of it is on. */
-export const ALWAYS_ASK = [
-  { id: 'prod', label: 'Deploys, and anything that reaches production' },
-  { id: 'staging', label: 'Commands that reach staging' },
-  { id: 'main', label: 'Pushing to main' },
-  { id: 'spend', label: 'Spending more than $5 on one task' },
-  { id: 'outside', label: 'Deleting files outside the task’s workspace' },
-  { id: 'people', label: 'Messages to people: email, Slack, issue comments' },
-] as const
-export const ALWAYS_ON = ['prod', 'staging', 'main', 'spend', 'outside'] as const
-
-/** A project's "never" list: refused outright, whatever the policy. */
-export const NEVER = [
-  { id: 'secrets', label: 'Reading .env files, keys and other secrets' },
-  { id: 'force', label: 'Force-pushing, or rewriting pushed history' },
-  { id: 'proddb', label: 'Writing to the production database' },
-  { id: 'install', label: 'Installing packages from outside the lockfile’s registries' },
-] as const
-export const NEVER_ON = ['secrets', 'force', 'proddb'] as const
-
-/** What Meridian lets through without asking: what permissions answered with "always allow" kept. */
-export const ALWAYS_ALLOWED = [
-  { id: 'command:prefix:bun test', label: 'Commands starting “bun test”' },
-  { id: 'command:prefix:git status', label: 'Commands starting “git status”' },
-  {
-    id: 'command:exact:pnpm replay --env staging --from 2026-09-25 refunds',
-    label: 'Exactly “pnpm replay --env staging --from 2026-09-25 refunds”',
-  },
-]
-
 /** Who could lead task 432, and why the coordinator picked Opus. */
 export const LEAD_OPTIONS: LeadOption[] = [
   { model: OPUS, note: 'Recommended · led 8 tasks on Meridian, 7 merged after one review round' },
@@ -153,3 +123,52 @@ export const LEAD_REASONS = [
   'Opus led 8 of the last 10 tasks in src/refunds; 7 merged after one review round',
   'Claude Code has 60% of this week left; tasks this size used about 9%',
 ]
+
+/** Issues the coordinator drafted on the person's trackers, before they file them. */
+export const DRAFT_LINEAR = {
+  mark: Brand.Linear,
+  source: 'Linear',
+  container: 'Meridian',
+  title: 'Refund webhooks retry too fast after a 429',
+  body: 'The partner webhook retries a refund notice after 2s, 4s and 8s, whatever the partner says. Stripe answers 429 with a Retry-After of 30s, so all three retries fail and the refund is marked undelivered.\n\nHonour Retry-After, and cap the wait at 5 minutes.',
+  labels: ['refunds', 'webhooks', 'bug'],
+}
+
+export const DRAFT_JIRA = {
+  mark: Brand.Jira,
+  source: 'Jira',
+  container: 'Payments',
+  title: 'Nightly partner export takes 40 minutes',
+  body: 'The export scans every refund since launch. It could start from the last export’s cursor.',
+  labels: [],
+}
+
+export const DRAFT_GITHUB = {
+  mark: Brand.GitHub,
+  source: 'GitHub',
+  container: 'meridian/refunds',
+  title: 'Document the idempotency key on POST /refunds',
+  body: '',
+  labels: ['docs'],
+}
+
+/** A draft with a body long enough to fold: the coordinator's notes on what it found. */
+export const DRAFT_LONG = {
+  ...DRAFT_LINEAR,
+  title: 'Backfill idempotency keys on refunds created before PR 1184',
+  body: [
+    'Refunds created before PR 1184 have no idempotency key, so a retried request can refund twice.',
+    '',
+    'What I found:',
+    '- 18,402 refunds have no key; the oldest is from March 2023.',
+    '- 41 of them were refunded twice; the partner reconciled 39 by hand.',
+    '- The key is derived from the charge and the amount since PR 1184, so the old rows can take the same.',
+    '',
+    'What the backfill should do:',
+    '- Derive each missing key the way PR 1184 does.',
+    '- Dry-run on last night’s snapshot first, and report collisions instead of writing them.',
+    '- Write in batches of 500, so the table stays readable during the run.',
+  ].join('\n'),
+}
+
+export const FILED_LINEAR = { key: 'MER-244', href: 'https://linear.app/meridian/issue/MER-244' }

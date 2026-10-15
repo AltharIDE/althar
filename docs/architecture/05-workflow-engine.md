@@ -179,6 +179,151 @@ Failure policy is node-specific:
 - fallback provider/tool;
 - verification and compensation requirements.
 
+## Task and run lifecycle
+
+A task's course is the person's to steer, from its menu. Each action is
+offered only where it applies, and the runtime works that out in one place
+(`Tasks.actionsOf`), for the menu and for the commands alike, so a command
+that no longer applies does nothing and two presses are one. A task's
+commands run one at a time, through stopping its agents and starting them,
+so a Resume pressed while a Stop waits for its agents runs once they have
+gone, and an agent on its way out is never carried on with. Both lifecycles
+are data in `@althar/domain` (`taskLifecycle`, `runLifecycle`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> draft
+    draft --> open: its run starts
+    draft --> abandoned
+    open --> done: every repository merged
+    open --> abandoned
+    abandoned --> open: reopened
+    abandoned --> draft: reopened, its plan never started
+    abandoned --> done: its pull requests merged on the host after all
+    done --> open: its lead goes back to work on it
+    open --> done: a round of work made nothing new, or its next pull request merged
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> admitted
+    admitted --> running
+    admitted --> cancelled
+    running --> suspended: stopped, or its task abandoned
+    suspended --> running: resumed
+    suspended --> cancelled: its project removed
+    running --> succeeded
+    running --> failed
+    running --> cancelled
+    succeeded --> [*]
+    failed --> [*]
+    cancelled --> [*]
+```
+
+- **Start now** applies while the task's plan waits to start, counting down
+  or held.
+- **Stop** applies while the task's run runs or an agent is on any of its
+  threads. It suspends the run in one transaction: each node attempt it was
+  on ends `cancelled`, marked as stopped; its run attempt ends `interrupted`;
+  the call a step waited on is withdrawn. Then every agent on the task stops,
+  its lead's and its steps', so no step takes an agent going as one that
+  went. Nothing new is admitted on a suspended run, an agent a step was
+  starting as it stopped is stopped once it is up, a step's report that
+  arrives from before the stop (and a resume) is dropped and said in the
+  record, since what may write to a run is fenced by its run attempt, and
+  publishing Althar had
+  begun on the host says what it did there when it ends, without ending the
+  run or asking the person anything. Nothing runs, and nothing waits on the
+  person, until it is resumed; publishing again then adopts what is there.
+- **Resume** applies while the run is suspended. The run runs again on a new
+  run attempt, from the step stopping cut short: the lead's step (Implement,
+  or settling a review) on a new attempt, on its last lead or the agent the
+  person picked, told to carry on; a review's round again, on its reviewer;
+  publishing, tried again. A step handed to another agent resumes on that
+  agent. Stopped between two steps, the lead carries its
+  own step on. Writing to a stopped task resumes it the same way, with what
+  the person wrote as the lead's first word; beside a review, the lead
+  starts too, so it is read now. Resume never starts an agent with nothing
+  to do: there is always the step to carry on.
+- **Abandon** applies to any task not yet settled, and asks first. In one
+  transaction its plan, if still waiting, or accepted with no run made of
+  it yet, is declined; its calls are
+  withdrawn; its run, if it runs, is suspended as by Stop; the task becomes
+  `abandoned` and settles. Then every agent on it stops. Its worktree and its
+  branch stay where they are: Althar never removes the person's worktrees
+  for them ([01](01-concepts-and-project-model.md)), and nothing is pushed,
+  deleted or closed on the host. A pull request it opened stays open there,
+  and should every one merge there after all, the task is done.
+- **Reopen** applies only to an abandoned task, never to a merged one: a task
+  is `done` once every repository is merged, and nothing after its pull
+  requests is left out of them, abandoned or not. A merged task opens again
+  only as its lead goes back to work on it, below. Reopen opens the task
+  again, on the same worktree and branch, without replaying the plan: a
+  worktree whose folder went is put back from its branch first (and with the
+  branch gone too, it can't be reopened); a plain task's that never had a
+  branch is put back with none, where it started. Where its run was cut short, the
+  run is still suspended, so it resumes like a stopped one; a run that had
+  passed is ready again; a task abandoned before its plan started is a
+  draft again, its plan proposed anew and held. Nothing starts on its own.
+  While a task is abandoned no agent starts on it; writing to it reopens it
+  first, refused as Reopen is, and what was written is the lead's first word.
+
+### Rounds of work after the plan
+
+A task is a conversation that outlives its plan
+([ADR-034](../decisions/034-a-task-goes-back-to-work-and-ships-again.md)).
+When a turn of its lead delivers the person's own words and its latest run is
+over, Althar opens a **round**: a run with no plan, whose steps and ending
+are the plan's run's, its Implement step under way on the lead's session as
+the turn begins; a merged task is open again for it. Althar's own messages to
+the lead (what its pull request heard, a conflict to resolve) open none. A
+round ends as any of the lead's steps does, with `finish_step`, its review
+where the plan has one (the person can skip it from the menu); with nothing
+new, when the lead finishes or its turn ends, it closes and the task is back
+where it was, a merged one done at the time it first settled. A round never
+publishes by itself (but for the one a quick task is made a change in,
+below): what it commits goes to the task's open pull request when the person
+pushes it, or, once the last merged or closed, into a **new pull request**
+the person opens from the task, on a new branch from the default branch as
+the host has it, its new commits cherry-picked onto it, never forced. A
+quick task's round offers none. Between turns a round takes no place among the agents at work
+([ADR-032](../decisions/032-agents-at-once-on-this-machine.md)). Whenever an
+agent on a task is in a turn, starting, or waiting for a place, its card says
+Running, whatever the task was.
+
+### A quick task's first write, and making it a change
+
+A task the coordinator starts with `start_task` is a quick task: its plan
+stays on this Mac (`here`) and ends in nothing, and its worktree has no
+branch, detached where it started
+([ADR-035](../decisions/035-a-task-s-kind-is-read-from-what-it-has.md)).
+Whenever its lead's turn ends, or its session goes, and when it calls
+`finish_step`, Althar looks at what it has: new commits, or changes not
+committed that aren't evidence it handed (its scratch folder git ignores).
+With either, it makes the task's branch there (`git switch -c` in each of its
+worktrees, the first free of the planned name), so commits made with no
+branch and changes not committed are on it; under the task's lock, one at a
+time with publishing it. It records `workspace.branched` (`from: null`),
+says so in the thread, and reads the task's card and search row again.
+Nothing else changes: the step, the lead's session and its folder are the
+same, the task is still plain, and its run ends without publishing anything,
+nor offering to, as does a follow-up round of it. With no branch, its lead's
+report needs only its summary.
+
+It becomes a change only when the person asks its lead to make it one, and
+the lead calls `make_it_a_change`: a title, a reviewer, and a draft pull
+request or one ready for review. Its branch is made then where it has none.
+In one transaction the task is renamed, and its plan, the run of its plan
+(which a later round copies) and the run under way take the review and the
+ending and no longer stay here, with a patch to the run's graph; its thread
+and the coordinator's news say so. A round under way then publishes when it
+is done, as its plan's run would (`publishes`), its start moved back to where
+the task's worktrees started, so all the quick task's work is the round's,
+reviewed whole and in the pull request. Where the last run had ended and no
+round is under way, one opens on the lead's session with that ending. The
+lead's next `finish_step` goes through the review, and the run publishes as
+any change does.
+
 ## Dynamic graph evolution
 
 Dynamic work is necessary: an agent may discover another repository, a new
@@ -265,8 +410,10 @@ every running turn instead, every 30 seconds.
 - **Going round in circles.** The same tool call to the same end, three times
   failing or four however it went, or two calls taking turns, gets the agent
   told to try another way; doing it again, the person is asked. A call is the
-  same as another by its command or its whole input, never by its title: an
-  agent titles every edit to a file alike.
+  same as another by its command, or by its whole input and what its diffs
+  change, never by its title: an agent titles every edit to a file alike, and
+  Claude Code leaves an edit's text out of its input for Althar, so only the
+  diff tells two edits apart. A diff's change is kept as a digest, not its text.
 - **A budget.** A step's agents may work 6 hours, or take 40 turns, since the
   person last said anything on the thread or the step began. Past that, the
   person is asked whether it carries on.
@@ -461,8 +608,13 @@ Under the default project rule, the paused work moves on, in this order:
 
 Either way the new session takes the work over from a brief in the same
 workspace (03, Switching model or agent), and the thread shows one line per
-move. Otherwise a single attention request names everything paused and moves
-it together.
+move. Under the wait rule the work is held until the reset. Under the ask
+rule, or when the agent didn't say when it resets, the work needs the person:
+an attention request names whose limit it is, when it resets, and each
+account that could take the work over, with the model it would run. The
+window marks which of them are free as it asks. The person moves the work to
+one, waits for the reset, or, where the reset isn't known, tries the agent
+again. Each task the limit paused asks once.
 
 **Typed step results.** Each step type declares its output schema, for example:
 

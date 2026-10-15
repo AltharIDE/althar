@@ -49,12 +49,32 @@ home="$(printf '%s\n' "$session" | sed -n 1p)"
 path="$(printf '%s\n' "$session" | sed -n 2p)"
 # The working directory the adapter started in, as the device sees it.
 cwd="$(portal_path "$(pwd -P)")"
+# A linked worktree's .git file points to its common repository on the
+# sandbox-side portal path. Give Git the host-visible paths explicitly; the
+# host process must not try to resolve the portal's sandbox-only spelling.
+git_dir=''
+if [ -f .git ]; then
+  IFS= read -r git_pointer < .git || true
+  case "$git_pointer" in
+    'gitdir: '*)
+      git_pointer=${git_pointer#gitdir: }
+      case "$git_pointer" in
+        /*) git_dir="$git_pointer" ;;
+        *) git_dir="$(pwd -P)/$git_pointer" ;;
+      esac
+      git_dir="$(portal_path "$git_dir")"
+      ;;
+  esac
+fi
 set -- "$codex" "$@"
 # What the account and Althar set for the agent, by name, whether or not the value is empty:
 # an empty GIT_CONFIG_VALUE_0 is what unsets git's credential helper.
 for name in CODEX_HOME CODEX_CONFIG GH_CONFIG_DIR GLAB_CONFIG_DIR GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_TERMINAL_PROMPT; do
   if value="$(printenv "$name" 2>/dev/null)"; then set -- "--env=$name=$value" "$@"; fi
 done
+if [ -n "$git_dir" ]; then
+  set -- "--env=GIT_DIR=$git_dir" "--env=GIT_WORK_TREE=$cwd" "$@"
+fi
 set -- --directory="$cwd" --unset-env=SSH_AUTH_SOCK --env="XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}" \
   --env="PATH=${path:-/usr/bin:/bin}" --env="HOME=${home:-/home/$(id -un)}" --clear-env --host --watch-bus "$@"
 exec flatpak-spawn "$@"

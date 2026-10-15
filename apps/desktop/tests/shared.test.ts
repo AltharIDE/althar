@@ -1,11 +1,14 @@
+import { act, renderHook } from '@testing-library/react'
 import { Brand } from '@althar/ui'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { agentLineOf, brandOf } from '../src/renderer/shared/agents'
 import { knownModelName, standsFor } from '@althar/contracts'
 import { isSending, mergeItems, newestReads, queueShown, sending, unsent, waiting } from '../src/renderer/shared/items'
-import { items } from './fixtures'
-import { ago, clock, took } from '../src/renderer/shared/time'
+import { change, items } from './fixtures'
+import { latestOf } from '../src/renderer/features/task/Outputs'
+import { stepIndex, stepNames, trackFor } from '../src/renderer/shared/steps'
+import { ago, clock, took, useNow } from '../src/renderer/shared/time'
 
 describe('agents', () => {
   it('draws each agent with its maker’s mark, when it has one', () => {
@@ -117,6 +120,29 @@ describe('a clock', () => {
   })
 })
 
+describe('the time now', () => {
+  it('moves on each second while it ticks, or as slowly as asked', () => {
+    vi.useFakeTimers({ now: new Date('2026-10-03T12:00:00.000Z') })
+    try {
+      const seconds = renderHook(() => useNow(true))
+      const minutes = renderHook(() => useNow(true, 60_000))
+      const still = renderHook(() => useNow(false))
+      act(() => {
+        vi.advanceTimersByTime(30_000)
+      })
+      expect(seconds.result.current).toBe('2026-10-03T12:00:30.000Z')
+      expect(minutes.result.current).toBe('2026-10-03T12:00:00.000Z')
+      act(() => {
+        vi.advanceTimersByTime(30_000)
+      })
+      expect(minutes.result.current).toBe('2026-10-03T12:01:00.000Z')
+      expect(still.result.current).toBe('2026-10-03T12:00:00.000Z')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('what the person sends', () => {
   it('shows at once as the window’s copy, after what is there, until the store’s copy of it arrives, or the send fails', () => {
     const held = [{ ...items.you('Add a retry'), sequence: 4 }]
@@ -161,5 +187,31 @@ describe('the composer queue', () => {
     expect(queueShown({ turnRunning: false }, false)).toBe(false)
     expect(queueShown(null, false)).toBe(true)
     expect(queueShown(null, true)).toBe(false)
+  })
+})
+
+describe('a task’s rounds of work after its plan (ADR-034)', () => {
+  it('names its follow-up in place of Implement, and its track and step as they stand', () => {
+    const steps = [
+      { key: 'implement' as const, agentId: 'claude-code', model: null, skipped: false },
+      { key: 'review' as const, agentId: 'codex', model: null, skipped: false },
+    ]
+    expect(stepNames(steps)).toEqual(['Implement', 'Review'])
+    expect(stepNames(steps, true)).toEqual(['Follow-up', 'Review'])
+    expect(stepIndex(stepNames(steps, true), 'implement')).toBe(0)
+    expect(stepIndex(stepNames(steps, true), 'settle')).toBe(1)
+    expect(trackFor(steps, 'review', false, true).map((step) => step.label)).toEqual(['Follow-up', 'Review'])
+  })
+
+  it('shows its latest pull request in each repository, and the earlier ones newest first', () => {
+    const first = change({ number: 1, state: 'merged', url: 'https://github.test/meridian/api/pull/1' })
+    const second = change({ number: 2, state: 'closed', url: 'https://github.test/meridian/api/pull/2' })
+    const third = change({ number: 3, state: 'open', url: 'https://github.test/meridian/api/pull/3' })
+    expect(latestOf([first, second, third])).toEqual({ latest: [third], earlier: [second, first] })
+    // With none open, the newest is the latest.
+    expect(latestOf([first, second])).toEqual({ latest: [second], earlier: [first] })
+    // In a task of several repositories, each has its own.
+    const web = change({ number: 7, slug: 'web', url: 'https://github.test/meridian/web/pull/7' })
+    expect(latestOf([first, web]).latest).toEqual([first, web])
   })
 })

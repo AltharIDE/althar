@@ -3,9 +3,25 @@ import type { ToolKind } from '@althar/domain'
 import { Cause, Data, DateTime, Deferred, Duration, Effect, Exit, Option, PubSub, Queue, Ref, Scope, Stream } from 'effect'
 
 import { AgentExited, AgentRequestFailed, type AgentStartFailed, OptionUnavailable, TurnInProgress } from './errors'
-import { type ConfigOption, normalize, normalizeOptions, normalizeUsage, type PermissionScope, type SessionEvent } from './events'
+import {
+  type ConfigOption,
+  normalize,
+  normalizeOptions,
+  normalizeUsage,
+  type PermissionScope,
+  type SessionEvent,
+  terminalOutputCapability,
+} from './events'
 import { type Classified, classify, structuredFailure, structuredFailureCapability } from './failures'
+import {
+  asyncTasksCapability,
+  type BackgroundEvent,
+  stopBackgroundMethod,
+  type StopBackgroundResponse,
+  takingBackground,
+} from './background'
 import { type CapturedFrame, type OwnedProcess, type ProcessExit, spawnOwned, type StopReport } from './process'
+import { type Question, type QuestionAnswer, questionFields } from './questions'
 import type { LaunchSpec, PermissionMeanings } from './registry'
 
 /*
@@ -99,19 +115,6 @@ export const answerFor = (
     : { optionId: chosen.optionId, scope: 'once', stopsTurn: chosen === stopping }
 }
 
-/** A question the agent asks the person, such as Claude's AskUserQuestion, with the fields of the answer it wants. */
-export interface Question {
-  readonly sessionId?: string
-  readonly message: string
-  readonly fields: Readonly<Record<string, unknown>>
-  readonly required: ReadonlyArray<string>
-}
-
-export type QuestionAnswer =
-  | { readonly action: 'accept'; readonly content: Readonly<Record<string, string | number | boolean | ReadonlyArray<string>>> }
-  | { readonly action: 'decline' }
-  | { readonly action: 'cancel' }
-
 export interface AgentInfo {
   readonly name: string
   readonly version?: string
@@ -122,6 +125,14 @@ export interface AgentInfo {
   readonly steering: boolean
   readonly mcp: { readonly http: boolean; readonly sse: boolean }
   readonly authMethods: ReadonlyArray<string>
+  /** It takes images in a prompt (ACP's `promptCapabilities.image`); without it, a prompt is text only. */
+  readonly images: boolean
+}
+
+/** An image sent in a prompt, after its text: its bytes in base64, and what they are. */
+export interface PromptImage {
+  readonly data: string
+  readonly mimeType: string
 }
 
 /** An MCP server a session may use. Althar gives every session its own tools this way. */
@@ -159,9 +170,17 @@ export interface AgentSession {
    * Sends a prompt and streams the turn, ending with `TurnEnded`. One turn
    * runs at a time: a prompt while one is running fails with
    * `TurnInProgress`. A turn reads to its own end even if the stream is
-   * stopped early, so nothing it says reaches a later turn.
+   * stopped early, so nothing it says reaches a later turn. Images go after
+   * the text, in their order, only to an agent that takes them
+   * (`AgentInfo.images`): the caller says what became of any it can't.
+   * `started` runs once the prompt is sent and the turn can be interrupted,
+   * so what it sets off may stop the turn at once.
    */
-  prompt(text: string): Stream.Stream<SessionEvent, Failure | TurnInProgress>
+  prompt(
+    text: string,
+    images?: ReadonlyArray<PromptImage>,
+    started?: Effect.Effect<void>,
+  ): Stream.Stream<SessionEvent, Failure | TurnInProgress>
   /** Updates that arrive between turns, such as the agent changing its own mode. */
   readonly events: Stream.Stream<SessionEvent>
   /** Asks the agent to stop the current turn; the turn then ends with `cancelled`. */
@@ -170,6 +189,8 @@ export interface AgentSession {
   readonly interrupt: Effect.Effect<void, Failure>
   /** Sets a config option, such as the model, and returns every option as the agent now reports it. */
   setOption(configId: string, value: string): Effect.Effect<ReadonlyArray<ConfigOption>, Failure | OptionUnavailable>
+  /** Stops a command it left running (background.ts); whether there was one to stop. Closing the session stops them all. */
+  stopBackground(id: string): Effect.Effect<boolean, Failure>
 }
 
 export interface ProcessInfo {
@@ -196,7 +217,12 @@ export interface ConnectOptions {
   readonly onPermission: (request: PermissionRequest) => Effect.Effect<PermissionDecision>
   /** What the agent's permission options mean: the registry's `permissions`. */
   readonly permissions?: PermissionMeanings
-  /** Answers a question the agent asks the person. Without it, questions are cancelled. */
+  /**
+   * Answers a question the agent asks the person. Without it the agent is
+   * offered no way to ask (no form elicitation), so it asks in what it says
+   * or decides for itself. It is interrupted if the agent withdraws the
+   * question or Althar cancels the turn.
+   */
   readonly onQuestion?: (question: Question) => Effect.Effect<QuestionAnswer>
 }
 
@@ -282,7 +308,17 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       else if (starting > 0) early.set(sessionId, [...(early.get(sessionId) ?? []), inbound])
     }
 
-    /** Permission requests waiting for a decision, by session: each entry drops its request. */
+    /** The commands each session left running, as the agent last said, so closing it can stop them. */
+    const leftRunning = new Map<string, Set<string>>()
+    const heardBackground = (sessionId: string, event: BackgroundEvent) => {
+      const running = leftRunning.get(sessionId) ?? new Set<string>()
+      leftRunning.set(sessionId, running)
+      if (event._tag === 'BackgroundStarted') running.add(event.id)
+      if (event._tag === 'BackgroundEnded') running.delete(event.id)
+      receive(sessionId, { _tag: 'Event', event })
+    }
+
+    /** Permission requests and questions waiting for an answer, by session: each entry drops its request. */
     const waiting = new Map<string, Set<() => void>>()
     const waitingIn = (sessionId: string) => {
       const found = waiting.get(sessionId) ?? new Set<() => void>()
@@ -339,26 +375,51 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         })
     }
 
-    const askQuestion = (params: acp.CreateElicitationRequest): Promise<acp.CreateElicitationResponse> => {
-      if (options.onQuestion === undefined || params.mode !== 'form' || !('requestedSchema' in params))
-        return Promise.resolve({ action: 'cancel' })
-      const schema = params.requestedSchema as {
-        readonly properties?: Record<string, unknown>
-        readonly required?: ReadonlyArray<string> | null
-      }
+    /**
+     * Asks the person through the caller. The question is dropped, and
+     * answered `cancel`, when the agent withdraws it or Althar cancels the
+     * turn, as a permission request is. The agent going is not the agent
+     * withdrawing it: the question still waits, and the caller lets it go
+     * when the session ends (ADR-021).
+     */
+    const askQuestion = (params: acp.CreateElicitationRequest, fromAgent: AbortSignal): Promise<acp.CreateElicitationResponse> => {
+      const ask = options.onQuestion
+      if (ask === undefined || params.mode !== 'form' || !('requestedSchema' in params)) return Promise.resolve({ action: 'cancel' })
+      const sessionId = 'sessionId' in params && typeof params.sessionId === 'string' ? params.sessionId : undefined
+      const toolCallId = 'toolCallId' in params && typeof params.toolCallId === 'string' ? params.toolCallId : undefined
+      // What it said just before: since its last tool call, or else the last it said before that, in this turn.
+      const heard = sessionId === undefined ? undefined : said.get(sessionId)
+      const before = heard?.current.trim() || heard?.last.trim() || ''
       const question: Question = {
-        ...('sessionId' in params && typeof params.sessionId === 'string' ? { sessionId: params.sessionId } : {}),
+        ...(sessionId === undefined ? {} : { sessionId }),
+        ...(toolCallId === undefined ? {} : { toolCallId }),
         message: params.message,
-        fields: schema.properties ?? {},
-        required: schema.required ?? [],
+        fields: questionFields(params.requestedSchema, params.message),
+        ...(before === '' ? {} : { said: before }),
       }
-      return Effect.runPromiseWith(context)(options.onQuestion(question)).then(
-        (answer): acp.CreateElicitationResponse =>
-          answer.action === 'accept'
-            ? { action: 'accept', content: answer.content as Record<string, string | number | boolean | Array<string>> }
-            : { action: answer.action },
-        (): acp.CreateElicitationResponse => ({ action: 'cancel' }),
-      )
+      const dropped = new AbortController()
+      const drop = () => dropped.abort()
+      // The connection closing aborts every request still open on it, before the agent could say anything.
+      const withdrawn = () => {
+        if (!connection.signal.aborted) drop()
+      }
+      const pending = sessionId === undefined ? undefined : waitingIn(sessionId)
+      pending?.add(drop)
+      fromAgent.addEventListener('abort', withdrawn, { once: true })
+      return Effect.runPromiseWith(context)(ask(question), { signal: dropped.signal })
+        .then(
+          (answer): acp.CreateElicitationResponse =>
+            dropped.signal.aborted
+              ? { action: 'cancel' }
+              : answer.action === 'accept'
+                ? { action: 'accept', content: { ...answer.content } as Record<string, string | number | boolean | Array<string>> }
+                : { action: answer.action },
+          (): acp.CreateElicitationResponse => ({ action: 'cancel' }),
+        )
+        .finally(() => {
+          pending?.delete(drop)
+          fromAgent.removeEventListener('abort', withdrawn)
+        })
     }
 
     /*
@@ -367,6 +428,22 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
      * it asks about said both when it began, so the request takes them from it.
      */
     const calls = new Map<string, { title?: string; kind?: string; rawInput?: unknown }>()
+    /**
+     * What the agent has said in its turn, by session: its words since its
+     * last tool call, and the last it said before that. A question it asks
+     * carries them, as what it said before asking.
+     */
+    const said = new Map<string, { current: string; last: string }>()
+    const hear = (sessionId: string, update: acp.SessionUpdate) => {
+      const heard = said.get(sessionId) ?? { current: '', last: '' }
+      if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') heard.current += update.content.text
+      else if (update.sessionUpdate === 'tool_call' && heard.current.trim() !== '') {
+        heard.last = heard.current
+        heard.current = ''
+      } else if (update.sessionUpdate === 'tool_call') heard.current = ''
+      said.set(sessionId, heard)
+    }
+
     const remember = (sessionId: string, update: acp.SessionUpdate) => {
       if (update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') return
       const key = `${sessionId}\u0000${update.toolCallId}`
@@ -398,10 +475,11 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       .client({ name: 'althar' })
       .onNotification(acp.methods.client.session.update, ({ params }) => {
         remember(params.sessionId, params.update)
+        hear(params.sessionId, params.update)
         receive(params.sessionId, { _tag: 'Update', update: params.update })
       })
       .onRequest(acp.methods.client.session.requestPermission, (request) => answerPermission(described(request.params), request.signal))
-      .onRequest(acp.methods.client.elicitation.create, (request) => askQuestion(request.params))
+      .onRequest(acp.methods.client.elicitation.create, (request) => askQuestion(request.params, request.signal))
 
     let owned: OwnedProcess | undefined
     let connection: acp.ClientConnection
@@ -411,9 +489,16 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
         options.transport.cwd,
         options.transport.capture === undefined ? {} : { capture: options.transport.capture },
       )
-      connection = app.connect(acp.ndJsonStream(owned.stdin, owned.stdout))
+      connection = app.connect(takingBackground(acp.ndJsonStream(owned.stdin, owned.stdout), heardBackground))
     } else {
-      connection = app.connect(options.transport.agent.app)
+      // In process, over a pair of streams, so what it leaves running is taken off them as a process's would be.
+      const toAgent = new TransformStream<acp.AnyMessage, acp.AnyMessage>()
+      const toClient = new TransformStream<acp.AnyMessage, acp.AnyMessage>()
+      const peer = options.transport.agent.app.connect({ readable: toAgent.readable, writable: toClient.writable })
+      const client = app.connect(takingBackground({ readable: toClient.readable, writable: toAgent.writable }, heardBackground))
+      void client.closed.then(() => peer.close())
+      void peer.closed.then(() => client.close())
+      connection = client
     }
     yield* Effect.addFinalizer(() => Effect.sync(() => connection.close()))
 
@@ -451,7 +536,21 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
     const init = yield* call('initialize', () =>
       connection.agent.request(acp.methods.agent.initialize, {
         protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: { elicitation: { form: {} }, _meta: structuredFailureCapability },
+        clientCapabilities: {
+          // A way to ask only where someone answers: without it Claude Code turns AskUserQuestion off.
+          ...(options.onQuestion === undefined ? {} : { elicitation: { form: {} } }),
+          // What the agent says of itself, such as a command stopped, as a notice rather than in its own words.
+          session: { notices: {} },
+          _meta: {
+            jetbrains: {
+              air: {
+                ...structuredFailureCapability.jetbrains.air,
+                capabilities: [...structuredFailureCapability.jetbrains.air.capabilities, asyncTasksCapability],
+              },
+            },
+            ...terminalOutputCapability,
+          },
+        },
       }),
     )
     const capabilities = init.agentCapabilities ?? {}
@@ -466,7 +565,17 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
       steering,
       mcp: { http: capabilities.mcpCapabilities?.http === true, sse: capabilities.mcpCapabilities?.sse === true },
       authMethods: (init.authMethods ?? []).map((method) => method.id),
+      images: capabilities.promptCapabilities?.image === true,
     }
+
+    /** Asks the agent to stop a command a session left running; whether it did. */
+    const stopBackground = (sessionId: string, id: string) =>
+      Effect.map(
+        call(stopBackgroundMethod, () =>
+          connection.agent.request<StopBackgroundResponse>(stopBackgroundMethod, { sessionId, asyncTaskId: id }),
+        ),
+        (response) => response.stopped === true,
+      )
 
     const startSession = (sessionOptions: NewSessionOptions): Effect.Effect<AgentSession, Failure | OptionUnavailable, Scope.Scope> =>
       Effect.gen(function* () {
@@ -502,6 +611,12 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           ),
           (response) =>
             Effect.gen(function* () {
+              // What it left running is stopped first: it runs in a process group of its own, which stopping the agent's misses.
+              for (const id of leftRunning.get(response.sessionId) ?? []) {
+                if (connection.signal.aborted) break
+                yield* Effect.ignore(stopBackground(response.sessionId, id).pipe(Effect.timeout(Duration.seconds(2))))
+              }
+              leftRunning.delete(response.sessionId)
               sessions.delete(response.sessionId)
               waiting.delete(response.sessionId)
               yield* Queue.shutdown(state.inbox)
@@ -601,9 +716,16 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           })
 
         /** Sends a prompt; how it ends arrives in the inbox, after every update it produced. */
-        const send = (text: string) =>
+        const send = (text: string, images: ReadonlyArray<PromptImage> = []) =>
           Effect.sync(() => {
-            connection.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt: [{ type: 'text', text }] }).then(
+            const prompt: Array<acp.ContentBlock> = [
+              { type: 'text', text },
+              // An agent that doesn't say it takes images is never sent one: ACP's baseline is text.
+              ...(info.images
+                ? images.map((image): acp.ContentBlock => ({ type: 'image', data: image.data, mimeType: image.mimeType }))
+                : []),
+            ]
+            connection.agent.request(acp.methods.agent.session.prompt, { sessionId, prompt }).then(
               (response) => receive(sessionId, { _tag: 'Stopped', response }),
               (cause: unknown) => receive(sessionId, { _tag: 'PromptFailed', cause }),
             )
@@ -665,7 +787,11 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           ),
         )
 
-        const prompt = (text: string): Stream.Stream<SessionEvent, Failure | TurnInProgress> =>
+        const prompt = (
+          text: string,
+          images?: ReadonlyArray<PromptImage>,
+          started: Effect.Effect<void> = Effect.void,
+        ): Stream.Stream<SessionEvent, Failure | TurnInProgress> =>
           Stream.unwrap(
             Effect.gen(function* () {
               const turn: Turn = {
@@ -680,7 +806,10 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                 Option.isSome(running) ? [false, running] : [true, Option.some(turn)],
               )
               if (!idle) return yield* new TurnInProgress({ sessionId })
-              yield* send(text)
+              // A new turn: what it says before a question is of this turn only.
+              said.delete(sessionId)
+              yield* send(text, images)
+              yield* started
               return Stream.fromQueue(turn.queue)
             }),
           )
@@ -708,6 +837,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
           cancel,
           interrupt,
           setOption,
+          stopBackground: (id) => stopBackground(sessionId, id),
         } satisfies AgentSession
       })
 

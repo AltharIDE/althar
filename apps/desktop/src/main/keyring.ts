@@ -18,14 +18,12 @@ export const keyringIsSafe = (platform: NodeJS.Platform, backend: string): boole
 
 /**
  * Which password store to ask Electron for, off a Mac. Electron picks
- * gnome_libsecret only for the desktops it recognises (GNOME, XFCE, KDE and
- * a few more) and plain text for everything else — sway, i3, Hyprland, niri,
- * COSMIC, LXQt — even where a keyring runs. Asking for gnome_libsecret there
- * is safe: it is libsecret, which speaks the Secret Service API that
- * gnome-keyring, KeePassXC and KWallet all serve. In a Flatpak it is asked
- * for whatever the desktop is: the sandbox reaches the host's secret service,
- * not KWallet's own socket, so KDE there needs it too. A `--password-store`
- * the person chose themselves is left alone.
+ * gnome_libsecret only for desktops it recognises and plain text for others.
+ * Asking for gnome_libsecret on an unrecognised desktop or KDE is safe:
+ * libsecret speaks the Secret Service API that gnome-keyring, KeePassXC and
+ * KWallet all serve. In a Flatpak it is asked for every desktop because the
+ * sandbox reaches the host's secret service, not KWallet's own socket. A
+ * `--password-store` the person chose themselves is left alone.
  */
 export const passwordStore = (
   args: ReadonlyArray<string>,
@@ -35,10 +33,10 @@ export const passwordStore = (
 ): 'gnome-libsecret' | null => {
   // A Linux switch: macOS and Windows keep their own keychain, which Electron knows without being told.
   if (platform !== 'linux') return null
-  if (args.some((arg) => arg.startsWith('--password-store='))) return null
+  if (args.some((arg) => arg === '--password-store' || arg.startsWith('--password-store='))) return null
   const names = (desktop ?? '').toLowerCase().split(':')
-  const recognised = ['x-cinnamon', 'deepin', 'gnome', 'pantheon', 'xfce', 'ukui', 'unity', 'kde']
-  return flatpak || !names.some((name) => recognised.includes(name)) ? 'gnome-libsecret' : null
+  const recognised = ['x-cinnamon', 'deepin', 'gnome', 'pantheon', 'xfce', 'ukui', 'unity']
+  return flatpak || names.includes('kde') || !names.some((name) => recognised.includes(name)) ? 'gnome-libsecret' : null
 }
 
 /** What the window says when secrets can't be sealed here: on Linux, what to install; elsewhere, that the keychain is missing. */

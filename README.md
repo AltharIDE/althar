@@ -1,11 +1,11 @@
 <img src="brand/export/banner/readme-header.png" width="100%" alt="Althar. The project should persist. The agents should not have to." />
 
-<h1 align="center">Every coding agent. One crew. No babysitting.</h1>
+<h1 align="center">Every coding agent. One crew. Become your 10x self.</h1>
 
 <p align="center">
   Althar runs Claude Code, Codex and OpenCode as one team, on the plans you already pay for.<br />
   A coordinator plans the work, one agent builds it, another reviews it, and when one runs out the next takes over.<br />
-  <b>You come back to pull requests, not prompts.</b>
+  <b>Never has software engineering felt so good.</b>
 </p>
 
 <p align="center">
@@ -244,23 +244,7 @@ opencode auth login
 
 Then [download Althar](https://github.com/AltharIDE/althar/releases/latest) for your system, open it, and pick the repositories your first project works in. The first screen shows which agents are ready.
 
-### From source
-
-You need git, [Bun](https://bun.sh) 1.3.5 and Node 24.
-
-```bash
-git clone https://github.com/AltharIDE/althar.git && cd althar
-```
-
-```bash
-bun install --frozen-lockfile
-```
-
-```bash
-bun --filter @althar/desktop dev
-```
-
-That builds the app and opens it. [DEVELOPMENT.md](DEVELOPMENT.md) has the rest.
+To build it from source instead, see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## The thesis
 

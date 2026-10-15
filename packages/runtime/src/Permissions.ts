@@ -63,8 +63,12 @@ export interface RequestContext {
   /** The provider session's row id. */
   readonly sessionId: string
   readonly meanings: PermissionMeanings
-  /** A task's lead works under the project rules; a role that only reads, under the reader's rules, which never ask. */
-  readonly rules: { readonly role: 'task'; readonly context: RuleContext } | { readonly role: 'reader' }
+  /**
+   * A task's lead works under the project rules; a role that only reads,
+   * under the reader's rules, which never ask: `offline`, as the lead of a
+   * review of a pull request from outside is, with no fetch allowed either.
+   */
+  readonly rules: { readonly role: 'task'; readonly context: RuleContext } | { readonly role: 'reader'; readonly offline?: boolean }
 }
 
 interface Waiting {
@@ -122,6 +126,23 @@ export const moveSession = (sessionId: string, to: ProviderSessionState, set: Re
     if (row === undefined) return yield* Effect.die(new NotFound({ kind: 'provider_session', id: sessionId }))
     yield* Effect.orDie(transition(providerSessionLifecycle, row.state, to))
     return yield* change('provider_sessions', sessionId, { ...set, state: to })
+  })
+
+/**
+ * A session waiting on the person goes back to work once nothing it asked
+ * still waits, permission or question; one already at work stays as it is.
+ */
+export const releaseSession = (sessionId: string, options: { readonly questions: boolean } = { questions: true }) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const [session] = yield* sql<{ state: string }>`SELECT state FROM provider_sessions WHERE id = ${sessionId}`
+    if (session?.state !== 'waiting_approval') return
+    // Without its questions, where they no longer wait on this session: they wait on the thread.
+    const [open] = yield* sql<{ count: number }>`
+      SELECT count(*) AS count FROM attention_requests a LEFT JOIN permission_requests r ON r.id = a.permission_request_id
+      WHERE a.state = 'open' AND (r.provider_session_id = ${sessionId}
+        OR (${options.questions ? 1 : 0} = 1 AND a.kind = 'question' AND json_extract(a.payload, '$.sessionId') = ${sessionId}))`
+    if ((open?.count ?? 0) === 0) yield* moveSession(sessionId, 'active')
   })
 
 type Store = SqlClient.SqlClient | Ledger | Commands | Crypto.Crypto | Instance | Live | Policies | PermissionJudge
@@ -216,20 +237,7 @@ export class Permissions extends Context.Service<
           })
         })
 
-      /**
-       * A session waiting on the person goes back to work once nothing it
-       * asked still waits; one already at work stays as it is.
-       */
-      const release = (sessionId: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient
-          const [session] = yield* sql<{ state: string }>`SELECT state FROM provider_sessions WHERE id = ${sessionId}`
-          if (session?.state !== 'waiting_approval') return
-          const [open] = yield* sql<{ count: number }>`
-            SELECT count(*) AS count FROM attention_requests a JOIN permission_requests r ON r.id = a.permission_request_id
-            WHERE r.provider_session_id = ${sessionId} AND a.state = 'open'`
-          if ((open?.count ?? 0) === 0) yield* moveSession(sessionId, 'active')
-        })
+      const release = releaseSession
 
       /** Ends a wait without a decision: the turn was cancelled or the session ended. Only the first call does anything. */
       const withdraw = (attentionId: string, waiter: Waiting) =>
@@ -470,7 +478,7 @@ export class Permissions extends Context.Service<
             )
             // A role that only reads is answered at once: allowed, or refused with a reason it reads.
             if (requestContext.rules.role === 'reader') {
-              const read = decideReader(request)
+              const read = decideReader(request, { offline: requestContext.rules.offline === true })
               const decision: PermissionDecision =
                 read.verdict === 'allow'
                   ? { decision: 'allow', reason: 'This role may do this.' }

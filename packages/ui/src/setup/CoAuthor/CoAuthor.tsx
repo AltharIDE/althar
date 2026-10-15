@@ -1,38 +1,64 @@
-import { type ReactNode, useId, useState } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { Logo } from '../../foundations/Logo/Logo'
 import { cx } from '../../lib/cx'
-import { LinkButton } from '../../primitives/LinkButton/LinkButton'
-import { Switch } from '../../primitives/Switch/Switch'
+import { useRefocus } from '../../lib/refocus'
+import { Button } from '../../primitives/Button/Button'
 import s from './CoAuthor.module.css'
+import { identicon } from './identicon'
 
 /*
- * Whether Althar signs the work it sends to the code host: a co-author line
- * on each commit, under the person's own name as author, and its line at the
- * foot of a pull request. The agents' own credit lines are taken out either
- * way; this is only about Althar's. On by default. While it is off, a line
- * under it says, quietly, why it would be kept: Althar is free and this is
- * how people find it. The line it adds can be seen, for anyone who wants to
- * know exactly.
+ * Whether Althar signs the work it sends to the code host, shown on a commit
+ * as the host shows one: the message with the co-author line at its end, and
+ * under it the person's face with Althar's beside it. The person stays the
+ * author; the agents' own credit lines are taken out either way. Turned off,
+ * the line is struck through and Althar's face leaves the commit; and as it
+ * is turned off, once, set large over the commit, why it would be kept:
+ * Althar is free, and this line is how most developers hear of it, with a
+ * way to put it back. Opened again while off, it shows only what goes out.
+ * The switch is the consumer's, in the head of what holds this.
  */
 
 export interface CoAuthorText {
-  title: string
+  /** What it does, while it is on. */
   line: string
-  /** Under it while it is off. */
+  /** The ask, set large, as it is turned off. */
   ask: string
+  why: string
   again: string
-  show: string
-  hide: string
+  /** The commit, for a screen reader. */
+  commit: string
+  /** Between the person's name and Althar's, under the commit. */
+  and: string
+  althar: string
+  /** Under the commit: what a pull request ends with while it is on, and what goes out while it is off. */
+  opened: string
+  openedBy: string
+  alone: string
 }
 
 export const coAuthorText: CoAuthorText = {
-  title: 'Althar as co-author',
   line: 'On your commits and pull requests, in place of the agents’ own. You stay the author.',
-  ask: 'Althar is free, and we have no marketing budget. This line on your commits is how most developers hear about it, so if you can, we’d be grateful if you left it on.',
-  again: 'Turn it back on',
-  show: 'See the line',
-  hide: 'Hide the line',
+  ask: 'Althar is free, and we have no marketing budget.',
+  why: 'This line on your commits is how most developers hear about it. If you can, we’d be grateful if you left it on.',
+  again: 'Put Althar back on your commits',
+  commit: 'A commit as GitHub shows it',
+  and: 'and',
+  althar: 'Althar',
+  opened: 'Pull requests end with',
+  openedBy: 'Opened by',
+  alone: 'Your commits and pull requests go out with only your name.',
+}
+
+/** A commit to show it on, as the code host would. */
+export interface CoAuthorCommit {
+  subject: string
+  /** Its message's body, a line or two. */
+  body?: string
+  /** Its short hash. */
+  sha: string
+  /** When, as the host says it: committed 12 minutes ago. */
+  when: string
 }
 
 export interface CoAuthorProps {
@@ -40,46 +66,116 @@ export interface CoAuthorProps {
   onChange: (on: boolean) => void
   /** The trailer each commit gets: Co-authored-by: Althar <…@users.noreply.github.com>. */
   trailer: string
-  /** The co-author's picture as the code host shows it. Althar's mark on ink, without it. */
+  /** The person, as the code host names them: dana-k. */
+  author: string
+  commit: CoAuthorCommit
+  /** Althar's face as the code host shows it, the AltharAi account's picture. The mark on ink, without it. */
   picture?: ReactNode
+  /** Whether it says, large, why it would stay. Without it, once it is turned off while it shows, until it is turned on again. */
+  asking?: boolean
   text?: Partial<CoAuthorText>
   className?: string
 }
 
-export function CoAuthor({ on, onChange, trailer, picture, text, className }: CoAuthorProps) {
+/** Althar as co-author, on a commit as the code host shows it; turned off, it says once, large, why it would stay. */
+export function CoAuthor({ on, onChange, trailer, author, commit, picture, asking: driven, text, className }: CoAuthorProps) {
   const t = { ...coAuthorText, ...text }
-  const id = useId()
-  const [seeing, setSeeing] = useState(false)
+  // Turned off while this shows: the ask, until it is turned on again or opened afresh.
+  const [turnedOff, setTurnedOff] = useState(false)
+  const [was, setWas] = useState(on)
+  if (on !== was) {
+    setWas(on)
+    setTurnedOff(!on)
+  }
+  const asking = !on && (driven ?? turnedOff)
+  // Put back from the ask, which went with the focus: it lands on the line that says what it does now.
+  const line = useRefocus<HTMLParagraphElement>(asking)
   return (
     <div className={cx(s.coAuthor, className)}>
-      <span className={s.picture} aria-hidden="true">
-        {picture ?? <Logo size={15} />}
-      </span>
-      <span className={s.words}>
-        <span id={`${id}-t`} className={s.title}>
-          {t.title}
-        </span>
-        <span id={`${id}-l`} className={s.line}>
-          {t.line}{' '}
-          <LinkButton aria-expanded={seeing} aria-controls={`${id}-x`} onClick={() => setSeeing((x) => !x)}>
-            {seeing ? t.hide : t.show}
-          </LinkButton>
-        </span>
-      </span>
-      <Switch checked={on} onChange={onChange} labelledBy={`${id}-t`} describedBy={`${id}-l`} className={s.switch} />
-      {seeing && (
-        <code id={`${id}-x`} className={cx(s.trailer, !on && s.trailerOff)}>
-          {trailer}
-        </code>
-      )}
-      {!on && (
-        <p className={s.ask}>
-          {t.ask}{' '}
-          <LinkButton className={s.again} onClick={() => onChange(true)}>
-            {t.again}
-          </LinkButton>
+      {on && (
+        <p ref={line} tabIndex={-1} className={s.line}>
+          {t.line}
         </p>
       )}
+      {asking && (
+        <div className={s.ask}>
+          <p className={s.big}>{t.ask}</p>
+          <p className={s.why}>{t.why}</p>
+          <Button variant="ink" onClick={() => onChange(true)}>
+            {t.again}
+          </Button>
+        </div>
+      )}
+      <figure className={cx(s.commit, !on && s.off)} aria-label={t.commit}>
+        <div className={s.message}>
+          <span className={s.subject}>{commit.subject}</span>
+          {commit.body !== undefined && <span className={s.body}>{commit.body}</span>}
+          <code className={s.trailer}>{trailer}</code>
+        </div>
+        <figcaption className={s.foot}>
+          <span className={s.faces} aria-hidden="true">
+            <PersonFace name={author} />
+            <CoAuthorFace picture={picture} ghost={!on} className={s.althar} />
+          </span>
+          <span className={s.who}>
+            <b>{author}</b>
+            {on && (
+              <>
+                {' '}
+                {t.and} <b>{t.althar}</b>
+              </>
+            )}{' '}
+            {commit.when}
+          </span>
+          <code className={s.sha}>{commit.sha}</code>
+        </figcaption>
+      </figure>
+      <p className={s.after}>
+        {on ? (
+          <>
+            {t.opened}{' '}
+            <span className={s.sub}>
+              {t.openedBy}{' '}
+              <a href="https://github.com/AltharIDE/althar" target="_blank" rel="noreferrer">
+                {t.althar}
+              </a>
+              .
+            </span>
+          </>
+        ) : (
+          t.alone
+        )}
+      </p>
     </div>
+  )
+}
+
+export interface CoAuthorFaceProps {
+  /** The AltharAi account's picture. The mark on ink, without it. */
+  picture?: ReactNode
+  /** How large, in px. */
+  size?: number
+  /** Not there: only its outline, dashed, where it would be. */
+  ghost?: boolean
+  className?: string
+}
+
+/** Althar's face as a code host shows it beside a commit: round. */
+export function CoAuthorFace({ picture, size = 20, ghost = false, className }: CoAuthorFaceProps) {
+  return (
+    <span className={cx(s.face, ghost ? s.ghost : s.mark, className)} style={{ width: size, height: size }} aria-hidden="true">
+      {!ghost && (picture ?? <Logo size={Math.round(size * 0.6)} />)}
+    </span>
+  )
+}
+
+/** The person's face, as the host draws one for an account with no picture of its own. */
+function PersonFace({ name, size = 20 }: { name: string; size?: number }) {
+  return (
+    <svg className={cx(s.face, s.person)} width={size} height={size} viewBox="0 0 6 6" aria-hidden="true">
+      {identicon(name).flatMap((row, y) =>
+        row.map((filled, x) => (filled ? <rect key={`${x}-${y}`} x={0.5 + x} y={0.5 + y} width="1" height="1" /> : null)),
+      )}
+    </svg>
   )
 }

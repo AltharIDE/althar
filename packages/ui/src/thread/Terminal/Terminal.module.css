@@ -33,6 +33,19 @@
 .live {
   color: var(--live);
 }
+/* what the output says of itself: nothing printed, or it couldn't be read */
+.said {
+  font-family: var(--font);
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+/* the output's lines, still being read */
+.reading {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 5px 0 4px;
+}
 .cursor {
   display: inline-block;
   width: 7px;
@@ -87,6 +100,9 @@
 }
 :global([data-term='dark']) .live {
   color: var(--term-live);
+}
+:global([data-term='dark']) .said {
+  color: var(--term-t4);
 }
 :global([data-term='dark']) .earlier button {
   color: var(--on-ink-2);

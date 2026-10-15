@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
+import { doNotTrack } from '../main/appPreferences'
 import type { WindowAction } from '../renderer/data/services'
 
 /*
@@ -11,8 +12,13 @@ import type { WindowAction } from '../renderer/data/services'
  * (close, minimize, maximize). The edge's own pages say through it where they draw, and what to
  * open in the window, and hear whether the pointer is on the island. And
  * dictation: where the speech model and the microphone stand, the model's
- * download, and what was said, sent to be written down. The page never sees or sends a
- * path. It gets no Node, no file system, no shell.
+ * download, and what was said, sent to be written down. A token on the
+ * clipboard, while connecting a service asks for one. An update ready to
+ * install, and restarting into it. And an update that couldn't move the
+ * store, with where its copy is as the person knows the place, which main
+ * shows in the file manager when asked. Whether DO_NOT_TRACK is set, which
+ * keeps usage data off. The page never sees or sends a path. It gets no
+ * Node, no file system, no shell.
  */
 
 ipcRenderer.on('althar:port', (event) => {
@@ -40,6 +46,14 @@ ipcRenderer.on('althar:open', (_event, threadId: unknown) => {
   for (const listener of opening) listener(threadId)
 })
 
+/* An update that couldn't move the store, as the main process says: held for a page that listens later. */
+let storeFailure: unknown
+const storeFailed = new Set<(failure: unknown) => void>()
+ipcRenderer.on('althar:store-failed', (_event, failure: unknown) => {
+  storeFailure = failure
+  for (const listener of storeFailed) listener(failure)
+})
+
 /* Where dictation's speech engine (sherpa-onnx) has a binary; elsewhere the page gets no dictation, and shows no microphone. */
 const SPEECH = new Set(['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'win32-x64', 'win32-ia32'])
 
@@ -49,9 +63,17 @@ ipcRenderer.on('althar:dictation', (_event, message: unknown) => {
   for (const listener of dictating) listener(message)
 })
 
+/* An update ready to install, as the main process says it changes. */
+const updating = new Set<(glance: unknown) => void>()
+ipcRenderer.on('althar:update', (_event, glance: unknown) => {
+  for (const listener of updating) listener(glance)
+})
+
 contextBridge.exposeInMainWorld('althar', {
   // Which system it is, for the words the window uses (this Mac, this PC, this computer) and for its own chrome: on macOS the system draws the lights.
   platform: process.platform,
+  // Usage data stays off while it is set, whatever its switch says; the switch shows so.
+  doNotTrack: doNotTrack(process.env),
   window: (action: WindowAction): void => ipcRenderer.send('althar:window', action),
   maximized: (): Promise<boolean> => ipcRenderer.invoke('althar:maximized'),
   onMaximized: (listener: (maximized: boolean) => void): (() => void) => {
@@ -59,6 +81,7 @@ contextBridge.exposeInMainWorld('althar', {
     return () => void maximized.delete(listener)
   },
   pickFolder: (purpose: 'project' | 'account' = 'project'): Promise<string | null> => ipcRenderer.invoke('althar:pick-folder', purpose),
+  pickFolders: (): Promise<ReadonlyArray<string>> => ipcRenderer.invoke('althar:pick-folders'),
   // Only a file the person dropped has a path; one the page made has none.
   grantDropped: (file: File): Promise<string | null> => {
     const path = webUtils.getPathForFile(file)
@@ -73,7 +96,7 @@ contextBridge.exposeInMainWorld('althar', {
   findRepositories: (): Promise<unknown> => ipcRenderer.invoke('althar:find-repositories'),
   grantFound: (id: string): Promise<string | null> => ipcRenderer.invoke('althar:grant-found', id),
   playSound: (name: string): Promise<void> => ipcRenderer.invoke('althar:play-sound', name),
-  edge: (): Promise<{ place: string; notch: boolean } | null> => ipcRenderer.invoke('althar:edge'),
+  edge: (): Promise<{ place: string; notch: boolean; platform: string; tray: boolean } | null> => ipcRenderer.invoke('althar:edge'),
   setEdge: (place: string): Promise<void> => ipcRenderer.invoke('althar:set-edge', place),
   edgeDrawn: (rect: { x: number; y: number; width: number; height: number }): void => ipcRenderer.send('althar:edge-drawn', rect),
   onEdgePointed: (listener: (on: boolean) => void): (() => void) => {
@@ -82,6 +105,16 @@ contextBridge.exposeInMainWorld('althar', {
   },
   edgeSize: (height: number): void => ipcRenderer.send('althar:edge-size', height),
   openInWindow: (threadId?: string): void => ipcRenderer.send('althar:edge-open', threadId ?? null),
+  // Only text that looks like a token; anything else the person copied never reaches the page.
+  clipboardToken: (): Promise<string | null> => ipcRenderer.invoke('althar:clipboard-token'),
+  update: {
+    glance: (): Promise<unknown> => ipcRenderer.invoke('althar:update'),
+    restart: (): Promise<boolean> => ipcRenderer.invoke('althar:update-restart'),
+    onChange: (listener: (glance: unknown) => void): (() => void) => {
+      updating.add(listener)
+      return () => void updating.delete(listener)
+    },
+  },
   ...(SPEECH.has(`${process.platform}-${process.arch}`)
     ? {
         dictation: {
@@ -100,6 +133,12 @@ contextBridge.exposeInMainWorld('althar', {
         },
       }
     : {}),
+  onStoreFailed: (listener: (failure: unknown) => void): (() => void) => {
+    storeFailed.add(listener)
+    if (storeFailure !== undefined) listener(storeFailure)
+    return () => void storeFailed.delete(listener)
+  },
+  showBackup: (): Promise<void> => ipcRenderer.invoke('althar:show-backup'),
   onOpen: (listener: (threadId: string) => void): (() => void) => {
     opening.add(listener)
     if (pending !== undefined) {
