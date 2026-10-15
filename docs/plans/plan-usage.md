@@ -84,8 +84,9 @@ same `windows` list; nothing is built for it now.
 - **Thresholds**: on the share *remaining*: 50, 25, 10 and 5%. Per account
   and window, each fires once per reset period.
 - **Crossing several at once** (50 → 8%): fire only the lowest crossed.
-- **Re-arming**: when the window's `resetsAt` changes, or use drops below a
-  threshold already fired.
+- **Re-arming**: only when the window's `resetsAt` changes. Use that dips
+  back above a threshold and falls again in the same period does not fire
+  it twice.
 - **Fires only from a percentage source** (sources 1 to 3). An account on
   source 4 never gets a threshold warning, and the usage tab says why.
 - **Reached**: a classified `usage_limit` (`failures.ts`) stays the signal
