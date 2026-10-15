@@ -34,5 +34,11 @@ git -C /path/to/checkout/path/to/submodule rev-parse HEAD
 git -C /path/to/checkout/path/to/submodule status --porcelain --untracked-files=no --ignore-submodules=dirty
 ```
 
+In Althar's Flatpak, a folder you picked shows in the refusal as
+`/run/flatpak/doc/<id>/<folder>`, a path that exists only inside Althar. In
+your own terminal, put the folder's path on your machine in its place: for
+`/run/flatpak/doc/<id>/althar/vendor/library`, the project you picked
+followed by `/vendor/library`.
+
 What to repair depends on what they say, and on any uncommitted work there.
 Merge again once both succeed.
