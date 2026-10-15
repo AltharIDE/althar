@@ -37,6 +37,7 @@ import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { Holders } from '../../shared/Holders'
 import { useDictation } from '../../shared/dictation/useDictation'
+import { draftKey, useDraft } from '../../shared/drafts'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
@@ -257,10 +258,12 @@ export function TaskView({
   /** Back to the project, on Escape. */
   onBack: () => void
 }) {
-  const [draft, setDraft] = useState('')
-  const voice = useDictation(setDraft, { projectId: model.snapshot?.project.id ?? null })
+  // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
+  const kept = draftKey.task(model.snapshot?.threadId ?? '')
+  const [draft, setDraft] = useDraft(kept)
+  const voice = useDictation(kept, { projectId: model.snapshot?.project.id ?? null })
   // Images to send with what the person says, and which agents take them.
-  const images = useImages()
+  const images = useImages(kept)
   const models = useModels()
   // Whether the person has their team's reviews posted once drafted: what a review's reach says it posts.
   const postsTeamReviews = usePostTeamReviews()?.on === true

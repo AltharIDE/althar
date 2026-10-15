@@ -1,8 +1,9 @@
 import { type AgentModels, MESSAGE_IMAGES, type Picture, type SentImage } from '@althar/contracts'
 import type { ComposerImage } from '@althar/ui'
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 
 import { pictureUrl } from '../../main/pictureAddress'
+import { nextImageId as next, setDraftImages, useDraftOf } from './drafts'
 import { pictureOf, previewOf, readImage, remember, type Shrink, sentOf, shrinkInWindow, text } from './images'
 
 /*
@@ -35,7 +36,8 @@ export interface Outgoing {
 export const sentWith = (images: Outgoing | undefined): { readonly images?: ReadonlyArray<SentImage> } =>
   images === undefined || images.sent.length === 0 ? {} : { images: images.sent }
 
-interface Waiting {
+/** An image waiting in a thread's draft. */
+export interface Waiting {
   readonly id: string
   readonly name: string
   /** Null while it is read. */
@@ -62,14 +64,11 @@ export interface Images {
   readonly restore: (pictures: ReadonlyArray<Picture>) => void
 }
 
-export function useImages(shrink: Shrink = shrinkInWindow): Images {
-  const [waiting, setWaiting] = useState<ReadonlyArray<Waiting>>([])
+/** The images waiting in the draft kept under `key` (`drafts.ts`). */
+export function useImages(key: string, shrink: Shrink = shrinkInWindow): Images {
+  const waiting = useDraftOf<Waiting>(key).images
+  const setWaiting = (change: (now: ReadonlyArray<Waiting>) => ReadonlyArray<Waiting>) => setDraftImages(key, change)
   const [note, setNote] = useState<string | null>(null)
-  const made = useRef(0)
-  const next = () => {
-    made.current += 1
-    return `image-${made.current}`
-  }
 
   const add = (files: ReadonlyArray<File>, receiver: Receiver) => {
     if (receiver.takes === false) return setNote(text.refused(receiver.name))
@@ -147,7 +146,7 @@ export function useImages(shrink: Shrink = shrinkInWindow): Images {
     take,
     clear: () => {
       setNote(null)
-      setWaiting([])
+      setWaiting(() => [])
     },
     giveBack: (outgoing) => {
       const given = outgoing.pictures.flatMap((picture, index): ReadonlyArray<Waiting> => {
