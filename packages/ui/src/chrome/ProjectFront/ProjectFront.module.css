@@ -108,7 +108,8 @@
 
 /* the way to its settings, top right; pressed while they are open */
 .end {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   align-self: flex-start;
   display: flex;
   align-items: center;
