@@ -415,10 +415,20 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
         // Its branch is where its head is: a fork's, for one from a fork; a fork that is gone took it along.
         const on = now.head.repo?.full_name
         if (on == null) return
-        yield* http.json(Schema.Unknown, 'DELETE', `${repo(on.split('/'))}/git/refs/heads/${branchPath(now.head.ref)}`).pipe(
+        const branch = branchPath(now.head.ref)
+        yield* http.json(Schema.Unknown, 'DELETE', `${repo(on.split('/'))}/git/refs/heads/${branch}`).pipe(
+          // GitHub answers 422 for a branch already gone, but for the default branch, a validation or throttling too: only one
+          // GitHub then says isn't there is gone, and any other refusal is said.
           Effect.catchIf(
             (error) => error.status === 422,
-            () => Effect.void,
+            (refused) =>
+              http.json(Schema.Unknown, 'GET', `${repo(on.split('/'))}/git/ref/heads/${branch}`).pipe(
+                Effect.andThen(Effect.fail(refused)),
+                Effect.catchIf(
+                  (error) => error.reason === 'not_found',
+                  () => Effect.void,
+                ),
+              ),
           ),
         )
       }),

@@ -147,13 +147,22 @@ describe('GitHub as a code host', () => {
         sent.map((request) => `${request.method} ${request.url}`),
         [`GET ${REPO}/pulls/12`, `GET ${REPO}/pulls/12`, `DELETE ${REPO}/git/refs/heads/althar/mer-231`],
       )
-      // From a fork, the fork's branch goes; one already gone is nothing to do.
+      // From a fork, the fork's branch goes; one already gone, as GitHub says when asked after, is nothing to do.
       const fork = github([
         ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', head: { ...head, repo: { full_name: 'you/api' } } }) }],
         ['DELETE', `${API}/repos/you/api/git/refs/heads/althar/mer-231`, { status: 422, json: { message: 'Reference does not exist' } }],
+        ['GET', `${API}/repos/you/api/git/ref/heads/althar/mer-231`, { status: 404, json: { message: 'Not Found' } }],
       ])
       yield* fork.host.deleteBranch(repository, change)
       assert.isTrue(fork.sent.some((request) => request.method === 'DELETE' && request.url.startsWith(`${API}/repos/you/api/`)))
+      // A 422 for a branch still there (its default branch, a validation, throttling) is GitHub refusing, said in its words.
+      const kept = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', head }) }],
+        ['DELETE', `${REPO}/git/refs/heads/althar/mer-231`, { status: 422, json: { message: 'Cannot delete the default branch' } }],
+        ['GET', `${REPO}/git/ref/heads/althar/mer-231`, { json: { ref: 'refs/heads/althar/mer-231', object: { sha: 'abc' } } }],
+      ])
+      const stays = yield* Effect.flip(kept.host.deleteBranch(repository, change))
+      assert.deepInclude(stays, { reason: 'rejected', status: 422, message: 'Cannot delete the default branch' })
       // Still open, its branch stays: deleting it would close the pull request behind the person's back.
       const open = github([['GET', `${REPO}/pulls/12`, { json: pull({ head }) }]])
       const refused = yield* Effect.flip(open.host.deleteBranch(repository, change))
