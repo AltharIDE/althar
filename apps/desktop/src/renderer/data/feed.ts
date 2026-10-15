@@ -196,7 +196,11 @@ export const follow = (client: Client, cache: QueryClient, since?: number): Feed
     for (const listener of listeners) listener(event)
   }
 
+  let watched = false
   const unwatch = client.watch(heard, since, () => {
+    // A watch that broke may have missed a plan usage, which only the feed says changed: read again if it shows.
+    if (watched) void cache.invalidateQueries({ queryKey: keys.planUsage, exact: true })
+    watched = true
     for (const listener of rewatching) listener()
   })
   return {

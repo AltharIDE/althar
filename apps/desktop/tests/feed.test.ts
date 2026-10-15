@@ -63,6 +63,17 @@ describe('the window’s watch', () => {
     expect(client.getPlanUsage).not.toHaveBeenCalled()
   })
 
+  it('reads plan usage again when the watch starts listening again, not the first time', async () => {
+    const { client, cache, rewatch, read } = opened()
+    await cache.fetchQuery(read.planUsage())
+    expect(client.getPlanUsage).toHaveBeenCalledTimes(1)
+    rewatch()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(client.getPlanUsage).toHaveBeenCalledTimes(1)
+    // Off screen it is only marked, for its next visit.
+    expect(cache.getQueryState(keys.planUsage)?.isInvalidated).toBe(true)
+  })
+
   it('reads again what a change ends, gathered, on screen or not; and nothing else', async () => {
     const { client, cache, emit, read } = opened()
     await Promise.all([

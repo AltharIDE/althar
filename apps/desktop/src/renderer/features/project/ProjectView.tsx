@@ -46,6 +46,7 @@ import { inkOf, ProjectSettings } from './ProjectSettings'
 import s from './Project.module.css'
 import type { ProjectModel } from './useProject'
 import type { ProjectSettingsModel } from './useProjectSettings'
+import { UsageNotices } from '../usage/UsageNotices'
 
 /*
  * A project: its front page across the top, then the conversation with its
@@ -438,6 +439,8 @@ export function ProjectView({
                       onAnswerQuestion={model.answerQuestion}
                     />
                   </ThreadShellProvider>
+                  {/* Plan usage warnings not yet seen: Althar's own notices, in the room the person is looking at. */}
+                  <UsageNotices />
                 </Thread>
               </TaskFace>
             )}

@@ -1,10 +1,12 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 
-import { LoadMeter, ProjectTabs, TitleBar, type Room, UpdateReady } from '@althar/ui'
+import { LoadMeter, ProjectTabs, TitleBar, type Room, UpdateReady, UsageButton } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { FinderView } from '../finder/FinderView'
+import { UsageView } from '../usage/UsageView'
+import { UsageOpenContext, usePlanUsage } from '../usage/useUsage'
 import { useWindowChrome } from '../../shared/useWindowChrome'
 import { useUpdate } from '../../shared/useUpdate'
 import { tabsStoreOf } from './store'
@@ -19,7 +21,8 @@ import { useTabs } from './useTabs'
  * the last, and Control-Tab to the next tab (with Shift, the one before),
  * as in a browser. ⌘N starts a new project in a tab of its own, as the +
  * does. ⌘K finds a task: in the project whose tab has the window, or, on the
- * home, in every project. The tabs are the window's one bar: a screen puts its own controls at
+ * home, in every project. ⌘U opens plan usage, and again closes it; the bar
+ * also always has a way to it, with the count of warnings not yet seen. The tabs are the window's one bar: a screen puts its own controls at
  * the bar's end with BarEnd, and its way back, where it has one, at the top
  * of its page. Before it, on every screen, how hard the computer works, in
  * two short meters the person may turn off (`useLoad`), and a newer Althar
@@ -83,11 +86,20 @@ export const useLastRoom = (projectId: string): readonly [Room | null, (room: Ro
  * end, and the window's own buttons where the system draws none. Its own
  * component, so the maximized-state subscription lives only while it is here.
  */
-function TabsBar({ tabs, endRef }: { tabs: ReturnType<typeof useTabs>; endRef: (element: HTMLElement | null) => void }) {
+function TabsBar({
+  tabs,
+  usage,
+  endRef,
+}: {
+  tabs: ReturnType<typeof useTabs>
+  usage: { readonly open: boolean; readonly toggle: () => void }
+  endRef: (element: HTMLElement | null) => void
+}) {
   const { host } = useServices()
   const chrome = useWindowChrome()
   const update = useUpdate()
   const load = useLoad(tabs.tabs.length > 0 || tabs.others.length > 0)
+  const waiting = usePlanUsage()?.warnings.length ?? 0
   const { select, current } = tabs
   return (
     <ProjectTabs
@@ -105,6 +117,7 @@ function TabsBar({ tabs, endRef }: { tabs: ReturnType<typeof useTabs>; endRef: (
             <LoadMeter load={load.glance} slots={SLOTS} onOpen={load.open} onHide={load.hide} text={loadText.meter} />
           )}
           {update.ready !== null && <UpdateReady {...update.ready} />}
+          <UsageButton waiting={waiting} expanded={usage.open} onClick={usage.toggle} />
           <div ref={endRef} className={s.end} />
         </>
       }
@@ -144,6 +157,9 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   const [end, setEnd] = useState<HTMLElement | null>(null)
   // Finding a task, in the project with the window or on the home in every one; from a composer too.
   const [finding, setFinding] = useState(false)
+  // Plan usage, over the window, from any screen.
+  const [usage, setUsage] = useState(false)
+  const openUsage = useCallback(() => setUsage(true), [])
   const { select, current, newProject, none } = tabs
   const open = tabs.tabs.map((tab) => tab.id)
   const order = open.join(' ')
@@ -156,6 +172,12 @@ export function TabsFrame({ children }: { children: ReactNode }) {
       if (command && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'k' && !none) {
         event.preventDefault()
         setFinding(true)
+        return
+      }
+      // ⌘U, Control-U off a Mac: plan usage, opened and closed again by the same key.
+      if (command && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'u') {
+        event.preventDefault()
+        setUsage((open) => !open)
         return
       }
       // Before there is a project, the first screen has ⌘N for a folder of its own.
@@ -182,15 +204,18 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   return (
     <VisitContext.Provider value={tabs.visit}>
       <NewTabContext.Provider value={newTab}>
-        <EndContext.Provider value={end}>
-          <TabBarContext.Provider value={!tabs.none}>
-            <div className={s.frame}>
-              {!tabs.none && <TabsBar tabs={tabs} endRef={setEnd} />}
-              <div className={s.screen}>{children}</div>
-            </div>
-            {finding && <FinderView projectId={current} onClose={() => setFinding(false)} />}
-          </TabBarContext.Provider>
-        </EndContext.Provider>
+        <UsageOpenContext.Provider value={openUsage}>
+          <EndContext.Provider value={end}>
+            <TabBarContext.Provider value={!tabs.none}>
+              <div className={s.frame}>
+                {!tabs.none && <TabsBar tabs={tabs} usage={{ open: usage, toggle: () => setUsage((open) => !open) }} endRef={setEnd} />}
+                <div className={s.screen}>{children}</div>
+              </div>
+              {finding && <FinderView projectId={current} onClose={() => setFinding(false)} />}
+              {usage && <UsageView onClose={() => setUsage(false)} />}
+            </TabBarContext.Provider>
+          </EndContext.Provider>
+        </UsageOpenContext.Provider>
       </NewTabContext.Provider>
     </VisitContext.Provider>
   )
