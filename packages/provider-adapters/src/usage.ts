@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 
-import { asNode } from './process'
+import { childEnvironment } from './process'
 import type { AgentDefinition } from './registry'
 
 /*
@@ -84,15 +84,32 @@ export const nextWarning = (usedPercent: number, resetsAt: string | undefined, b
 
 /* Codex: `account/rateLimits/read` of its app-server (codex-rs/app-server-protocol, v2/account.rs). */
 
+export type UsageRead =
+  | { readonly kind: 'usage'; readonly usage: AccountUsage }
+  /** The agent answered, with no plan window: an API key, or a plan it gives none for. */
+  | { readonly kind: 'none' }
+  /** The agent couldn't be asked, or its answer wasn't one Althar knows: a fault to show, in words. */
+  | { readonly kind: 'failed'; readonly message: string }
+
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null
 
-const iso = (seconds: unknown) =>
-  typeof seconds === 'number' && Number.isFinite(seconds) ? new Date(seconds * 1000).toISOString() : undefined
+/** An answer that isn't the shape Codex documents: a fault, not "no windows". */
+class Unrecognized extends Error {}
+
+/** A time given in epoch seconds, absent as undefined; one that is no date at all is unrecognized. */
+const iso = (seconds: unknown) => {
+  if (seconds === null || seconds === undefined) return undefined
+  const date = typeof seconds === 'number' ? new Date(seconds * 1000) : null
+  if (date === null || Number.isNaN(date.getTime())) throw new Unrecognized('a reset time that is no date')
+  return date.toISOString()
+}
 
 const codexWindow = (raw: unknown, label: string | undefined): UsageWindow | null => {
+  if (raw === null || raw === undefined) return null
   const window = record(raw)
-  if (window === null || typeof window.usedPercent !== 'number') return null
+  if (window === null || typeof window.usedPercent !== 'number' || !Number.isFinite(window.usedPercent))
+    throw new Unrecognized('a window without a use')
   const minutes = typeof window.windowDurationMins === 'number' ? window.windowDurationMins : undefined
   const resetsAt = iso(window.resetsAt)
   return {
@@ -117,7 +134,10 @@ const codexSnapshotWindows = (snapshot: Record<string, unknown>, extra: boolean)
   const label = extra ? name : undefined
   const windows = [codexWindow(snapshot.primary, label), codexWindow(snapshot.secondary, label)].filter((w): w is UsageWindow => w !== null)
   const spend = record(snapshot.individualLimit)
-  if (spend !== null && typeof spend.remainingPercent === 'number') {
+  if (snapshot.individualLimit !== null && snapshot.individualLimit !== undefined && spend === null)
+    throw new Unrecognized('a spend limit that is no object')
+  if (spend !== null) {
+    if (typeof spend.remainingPercent !== 'number') throw new Unrecognized('a spend limit without a remaining share')
     const resetsAt = iso(spend.resetsAt)
     windows.push({
       kind: 'other',
@@ -129,21 +149,41 @@ const codexSnapshotWindows = (snapshot: Record<string, unknown>, extra: boolean)
   return windows
 }
 
-/** What `account/rateLimits/read` answered, as the account's usage; null where it carries no window. */
-export const codexUsage = (result: unknown, now: Date): AccountUsage | null => {
-  const answer = record(result)
-  if (answer === null) return null
-  const byId = record(answer.rateLimitsByLimitId)
-  const buckets = byId === null ? [] : Object.entries(byId).map(([id, bucket]) => [id, record(bucket)] as const)
-  const main = record(answer.rateLimits)
-  const windows: UsageWindow[] = []
-  // The multi-bucket view when there is one ("codex" is the ordinary bucket); else the single historical one.
-  if (buckets.length > 0) {
-    for (const [id, bucket] of buckets) if (bucket !== null) windows.push(...codexSnapshotWindows(bucket, id !== 'codex'))
-  } else if (main !== null) windows.push(...codexSnapshotWindows(main, false))
-  if (windows.length === 0) return null
-  const plan = typeof main?.planType === 'string' ? main.planType : undefined
-  return { windows, source: 'agent', observedAt: now.toISOString(), ...(plan === undefined ? {} : { plan }) }
+/**
+ * What `account/rateLimits/read` answered, as the account's usage. No window
+ * is `none` (a key, or a plan Codex gives no limits for); an answer that is
+ * not the documented shape, or has a window that does not read, is a fault
+ * that says so, so a change on Codex's side shows rather than looking like a
+ * plan with no limits.
+ */
+export const codexUsage = (result: unknown, now: Date): UsageRead => {
+  try {
+    const answer = record(result)
+    const main = record(answer?.rateLimits)
+    if (answer === null || main === null) throw new Unrecognized('no rate limits')
+    const raw = answer.rateLimitsByLimitId
+    if (raw !== null && raw !== undefined && record(raw) === null) throw new Unrecognized('buckets that are no object')
+    const buckets = Object.entries(record(raw) ?? {})
+    const windows: UsageWindow[] = []
+    // The multi-bucket view when there is one ("codex" is the ordinary bucket); else the single historical one.
+    if (buckets.length > 0) {
+      for (const [id, bucket] of buckets) {
+        const snapshot = record(bucket)
+        if (snapshot === null) throw new Unrecognized('a bucket that is no object')
+        windows.push(...codexSnapshotWindows(snapshot, id !== 'codex'))
+      }
+    } else windows.push(...codexSnapshotWindows(main, false))
+    if (windows.length === 0) return { kind: 'none' }
+    const plan = typeof main.planType === 'string' ? main.planType : undefined
+    return {
+      kind: 'usage',
+      usage: { windows, source: 'agent', observedAt: now.toISOString(), ...(plan === undefined ? {} : { plan }) },
+    }
+  } catch (error) {
+    if (error instanceof Unrecognized)
+      return { kind: 'failed', message: `Codex answered with something Althar does not know (${error.message}).` }
+    throw error
+  }
 }
 
 export interface ReadUsageOptions {
@@ -154,13 +194,6 @@ export interface ReadUsageOptions {
   readonly timeout?: number
   readonly now?: () => Date
 }
-
-export type UsageRead =
-  | { readonly kind: 'usage'; readonly usage: AccountUsage }
-  /** The agent answered, with no plan window: an API key, or a plan it gives none for. */
-  | { readonly kind: 'none' }
-  /** The agent couldn't be asked, or turned the question down, in its words. */
-  | { readonly kind: 'failed'; readonly message: string }
 
 const FIFTEEN_SECONDS = 15_000
 
@@ -176,7 +209,8 @@ export const readAgentUsage = (agent: AgentDefinition, options: ReadUsageOptions
     if (usage === undefined) return resolve({ kind: 'failed', message: `${agent.name} has no usage channel.` })
     const node = options.node ?? process.execPath
     const spec = usage.run(node)
-    const env = { ...process.env, ...asNode({ command: spec.command, args: spec.args }), ...options.home }
+    // Only what an agent may inherit (process.ts), and the account's home: never the whole environment.
+    const env = { ...childEnvironment(spec), ...options.home }
     const launched = spec.onDevice === undefined ? spec : spec.onDevice({ env })
     const child = spawn(launched.command, [...launched.args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
     let over = false
@@ -230,8 +264,7 @@ export const readAgentUsage = (agent: AgentDefinition, options: ReadUsageOptions
       write({ jsonrpc: '2.0', method: 'initialized', params: {} })
       send('account/rateLimits/read', undefined, (result, failed) => {
         if (failed !== null) return end({ kind: 'failed', message: failed })
-        const read = codexUsage(result, (options.now ?? (() => new Date()))())
-        end(read === null ? { kind: 'none' } : { kind: 'usage', usage: read })
+        end(codexUsage(result, (options.now ?? (() => new Date()))()))
       })
     })
   })

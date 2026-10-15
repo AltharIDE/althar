@@ -41,45 +41,71 @@ describe('the length of a plan window', () => {
 })
 
 describe('Codex’s rate limits as an account’s usage', () => {
+  const windowsOf = (result: unknown) => {
+    const read = codexUsage(result, NOW)
+    return read.kind === 'usage' ? read.usage.windows : read
+  }
+
   it('reads each bucket’s windows by length, naming the ones that are not the ordinary limit', () => {
-    const usage = codexUsage(SNAPSHOT, NOW)
-    expect(usage).toEqual({
-      source: 'agent',
-      observedAt: '2026-10-15T12:00:00.000Z',
-      plan: 'plus',
-      windows: [
-        { kind: 'five_hour', minutes: 300, usedPercent: 40, resetsAt: new Date(1_760_540_400_000).toISOString() },
-        { kind: 'weekly', minutes: 10_080, usedPercent: 12, resetsAt: new Date(1_761_000_000_000).toISOString() },
-        { kind: 'five_hour', label: 'Spark', minutes: 300, usedPercent: 3, resetsAt: new Date(1_760_540_400_000).toISOString() },
-      ],
+    expect(codexUsage(SNAPSHOT, NOW)).toEqual({
+      kind: 'usage',
+      usage: {
+        source: 'agent',
+        observedAt: '2026-10-15T12:00:00.000Z',
+        plan: 'plus',
+        windows: [
+          { kind: 'five_hour', minutes: 300, usedPercent: 40, resetsAt: new Date(1_760_540_400_000).toISOString() },
+          { kind: 'weekly', minutes: 10_080, usedPercent: 12, resetsAt: new Date(1_761_000_000_000).toISOString() },
+          { kind: 'five_hour', label: 'Spark', minutes: 300, usedPercent: 3, resetsAt: new Date(1_760_540_400_000).toISOString() },
+        ],
+      },
     })
   })
 
   it('classifies a weekly window that arrives as primary', () => {
-    const usage = codexUsage({ rateLimits: { primary: { usedPercent: 80, windowDurationMins: 10_080, resetsAt: 1_761_000_000 } } }, NOW)
-    expect(usage?.windows.map((w) => w.kind)).toEqual(['weekly'])
+    const windows = windowsOf({ rateLimits: { primary: { usedPercent: 80, windowDurationMins: 10_080, resetsAt: 1_761_000_000 } } })
+    expect(windows).toMatchObject([{ kind: 'weekly' }])
   })
 
   it('keeps a window without a length or a reset, as other', () => {
-    const usage = codexUsage({ rateLimits: { primary: { usedPercent: 10 } } }, NOW)
-    expect(usage?.windows).toEqual([{ kind: 'other', usedPercent: 10 }])
-  })
-
-  it('reads a spend limit as a window of no stated length', () => {
-    const usage = codexUsage(
-      { rateLimits: { individualLimit: { limit: '100', used: '70', remainingPercent: 30, resetsAt: 1_761_000_000 } } },
-      NOW,
-    )
-    expect(usage?.windows).toEqual([
-      { kind: 'other', label: 'Spend limit', usedPercent: 70, resetsAt: new Date(1_761_000_000_000).toISOString() },
+    expect(windowsOf({ rateLimits: { primary: { usedPercent: 10, windowDurationMins: null, resetsAt: null } } })).toEqual([
+      { kind: 'other', usedPercent: 10 },
     ])
   })
 
-  it('has nothing for an answer without a window, or a shape it does not know', () => {
-    expect(codexUsage({ rateLimits: { credits: { hasCredits: true, unlimited: false, balance: '5' } } }, NOW)).toBeNull()
-    expect(codexUsage(null, NOW)).toBeNull()
-    expect(codexUsage('nope', NOW)).toBeNull()
-    expect(codexUsage({ rateLimits: { primary: { usedPercent: 'a lot' } } }, NOW)).toBeNull()
+  it('reads a spend limit as a window of no stated length', () => {
+    expect(
+      windowsOf({ rateLimits: { individualLimit: { limit: '100', used: '70', remainingPercent: 30, resetsAt: 1_761_000_000 } } }),
+    ).toEqual([{ kind: 'other', label: 'Spend limit', usedPercent: 70, resetsAt: new Date(1_761_000_000_000).toISOString() }])
+  })
+
+  it('has no window for a plan or key that gives none, which is not a fault', () => {
+    expect(codexUsage({ rateLimits: { credits: { hasCredits: true, unlimited: false, balance: '5' } } }, NOW)).toEqual({ kind: 'none' })
+    expect(codexUsage({ rateLimits: { primary: null, secondary: null } }, NOW)).toEqual({ kind: 'none' })
+  })
+
+  it('makes a fault of an answer that is not the shape Codex documents', () => {
+    for (const answer of [
+      null,
+      'nope',
+      {},
+      { rateLimits: 'x' },
+      { rateLimits: {}, rateLimitsByLimitId: 'x' },
+      { rateLimits: {}, rateLimitsByLimitId: { codex: 5 } },
+      { rateLimits: { primary: { usedPercent: 'a lot' } } },
+      { rateLimits: { primary: 'x' } },
+      { rateLimits: { individualLimit: 'x' } },
+      { rateLimits: { individualLimit: { limit: '1' } } },
+    ]) {
+      const read = codexUsage(answer, NOW)
+      expect(read.kind, JSON.stringify(answer)).toBe('failed')
+    }
+  })
+
+  it('makes a fault of a reset time that is no date, instead of throwing', () => {
+    const read = codexUsage({ rateLimits: { primary: { usedPercent: 10, windowDurationMins: 300, resetsAt: 1e20 } } }, NOW)
+    expect(read).toEqual({ kind: 'failed', message: expect.stringContaining('a reset time that is no date') })
+    expect(codexUsage({ rateLimits: { primary: { usedPercent: 10, resetsAt: 'soon' } } }, NOW).kind).toBe('failed')
   })
 })
 
@@ -201,6 +227,48 @@ describe('asking Codex’s app-server', () => {
       },
     }
     expect(await readAgentUsage(agent, { home: { CODEX_HOME: '/accounts/work' } })).toEqual({ kind: 'failed', message: '/accounts/work' })
+  })
+
+  it('says a fault, not "no limits", when the answer is not the documented shape', async () => {
+    const odd: AgentDefinition = {
+      ...agents.codex,
+      usage: {
+        run: () => ({
+          command: 'bun',
+          args: [
+            '-e',
+            `process.stdin.on('data', (d) => { for (const l of String(d).split('\\n').filter(Boolean)) { const m = JSON.parse(l); if (m.id) process.stdout.write(JSON.stringify({ id: m.id, result: m.method === 'initialize' ? {} : { rateLimits: { primary: { usedPercent: 5, resetsAt: 1e20 } } } }) + '\\n') } })`,
+          ],
+        }),
+      },
+    }
+    expect((await readAgentUsage(odd)).kind).toBe('failed')
+  })
+
+  it('starts the agent with the allowed environment and the account’s home, not the whole one', async () => {
+    process.env.ALTHAR_TEST_PROVIDER_KEY = 'sk-secret'
+    process.env.SSH_AUTH_SOCK = '/tmp/agent.sock'
+    try {
+      const agent: AgentDefinition = {
+        ...agents.codex,
+        usage: {
+          run: () => ({
+            command: 'bun',
+            args: [
+              '-e',
+              `process.stdin.on('data', (d) => { const m = JSON.parse(String(d).split('\\n')[0]); process.stdout.write(JSON.stringify({ id: m.id, error: { message: [process.env.ALTHAR_TEST_PROVIDER_KEY, process.env.SSH_AUTH_SOCK, process.env.CODEX_HOME, typeof process.env.PATH].join('|') } }) + '\\n') })`,
+            ],
+          }),
+        },
+      }
+      expect(await readAgentUsage(agent, { home: { CODEX_HOME: '/accounts/work' } })).toEqual({
+        kind: 'failed',
+        message: '||/accounts/work|string',
+      })
+    } finally {
+      delete process.env.ALTHAR_TEST_PROVIDER_KEY
+      delete process.env.SSH_AUTH_SOCK
+    }
   })
 
   it('is not asked of an agent with no usage channel', async () => {

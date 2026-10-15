@@ -108,6 +108,7 @@ describe('finding an agent’s command', () => {
     expect(codex.signIn.inApp?.run('node')).toMatchObject({ command: '/device/codex', args: ['app-server'] })
     expect(codex.signIn.logout?.run('node')).toMatchObject({ command: '/device/codex', args: ['logout'] })
     expect(codex.version?.('node')).toMatchObject({ command: '/device/codex', args: ['--version'] })
+    expect(codex.usage?.run('node')).toMatchObject({ command: '/device/codex', args: ['app-server'] })
     expect(codex.signIn.login).toBe('/device/codex login')
   })
 
@@ -128,6 +129,13 @@ describe('finding an agent’s command', () => {
     expect(seen).toEqual([{ command: '/device/opencode', args: ['acp'] }])
     // What the person runs to sign in names the same copy, where their shell finds it.
     expect(pointed.signIn.login).toBe('/device/opencode auth login')
+    // Codex's usage read runs on the device with the copy that is there, like its sign-in.
+    const codexOut = usingLocated(agents.codex, () => ({ command: '/device/codex', whose: 'theirs', out })).usage?.run('node')
+    expect(codexOut?.command).toBe('/device/codex')
+    expect(codexOut?.onDevice?.({ cwd: '/w', env: {} })).toMatchObject({
+      command: 'flatpak-spawn',
+      args: ['--host', '/device/codex', 'app-server'],
+    })
     // A copy here is as it was: no carrying anywhere.
     expect(usingLocated(agents.opencode, () => ({ command: '/kept/opencode', whose: 'althar' })).launch('node').onDevice).toBeUndefined()
   })

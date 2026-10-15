@@ -165,5 +165,6 @@ export const usingLocated = (definition: AgentDefinition, find: () => Located | 
       ...(signIn.logout === undefined ? {} : { logout: { ...signIn.logout, run: pointed(signIn.logout.run) } }),
     },
     ...(definition.version === undefined ? {} : { version: pointed(definition.version) }),
+    ...(definition.usage === undefined ? {} : { usage: { ...definition.usage, run: pointed(definition.usage.run) } }),
   }
 }
