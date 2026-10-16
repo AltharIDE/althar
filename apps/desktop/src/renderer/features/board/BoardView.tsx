@@ -397,7 +397,8 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
   const standing = standingOf(change)
   const next = standing.next
   const here = actions !== undefined && next !== null && doneHere(next) ? next : null
-  const failed = actions?.failed?.taskId === work.taskId && actions.failed.action === here?.kind ? actions.failed.message : null
+  const failure = actions?.failed[work.taskId]
+  const failed = failure !== undefined && failure.action === here?.kind ? failure.message : null
   const facts = factsOf(change, standing).map((one, i) => (
     <Fact key={one.words} {...(i === 0 && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
       {one.words}
@@ -419,7 +420,7 @@ const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions 
         ) : (
           <NextStep
             signal
-            busy={(here.kind === 'push' ? actions.pushing : actions.merging) === work.taskId}
+            busy={(here.kind === 'push' ? actions.pushing : actions.merging).has(work.taskId)}
             doing={doingWords(here)}
             label={labelWords(here, `${change.prefix}${change.number}`, failed !== null)}
             onPress={() =>

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { type Dispatch, type SetStateAction, useCallback, useState } from 'react'
 
 import { ApiError, type AlwaysScope, type BoardTask } from '@althar/contracts'
 
@@ -13,18 +13,24 @@ import { headsOf } from '../../shared/mergeHere'
  * work back to its lead with a note. Each says what went wrong, if it did.
  */
 
+/** What went wrong with a task's last push or merge. */
+export interface ActionFailure {
+  readonly action: 'push' | 'merge' | 'other'
+  readonly message: string
+}
+
 export interface WorkActions {
   readonly error: string | null
-  /** The task whose last action failed, which it was, and why, for its own card to say; cleared when one is tried again. */
-  readonly failed: { readonly taskId: string; readonly action: 'push' | 'merge' | 'other'; readonly message: string } | null
-  /** The task whose pull request is being merged. */
-  readonly merging: string | null
-  /** The task a note is on its way back to. */
-  readonly sending: string | null
-  /** The task whose pull request is being opened. */
-  readonly opening: string | null
-  /** The task whose commits are being pushed. */
-  readonly pushing: string | null
+  /** What last failed for each task, which action it was, and why, for its own card to say; a task's is cleared when it is tried again, and no other's. */
+  readonly failed: Readonly<Record<string, ActionFailure>>
+  /** The tasks whose pull requests are being merged. */
+  readonly merging: ReadonlySet<string>
+  /** The tasks a note is on its way back to. */
+  readonly sending: ReadonlySet<string>
+  /** The tasks whose pull requests are being opened. */
+  readonly opening: ReadonlySet<string>
+  /** The tasks whose commits are being pushed. */
+  readonly pushing: ReadonlySet<string>
   /** Merges a ready task's pull request at the head the person saw; whether it went through. */
   readonly merge: (taskId: string, head: string, url?: string) => Promise<boolean>
   /** Merges a ready task's repositories without a pull request into their default branches here, up to the heads the dock showed; whether it went through. */
@@ -46,33 +52,40 @@ export interface WorkActions {
 export const useWorkActions = (): WorkActions => {
   const { client } = useServices()
   const [error, setError] = useState<string | null>(null)
-  const [failed, setFailed] = useState<WorkActions['failed']>(null)
-  const [merging, setMerging] = useState<string | null>(null)
-  const [sending, setSending] = useState<string | null>(null)
-  const [opening, setOpening] = useState<string | null>(null)
-  const [pushing, setPushing] = useState<string | null>(null)
+  const [failed, setFailed] = useState<WorkActions['failed']>({})
+  const [merging, setMerging] = useState<ReadonlySet<string>>(new Set())
+  const [sending, setSending] = useState<ReadonlySet<string>>(new Set())
+  const [opening, setOpening] = useState<ReadonlySet<string>>(new Set())
+  const [pushing, setPushing] = useState<ReadonlySet<string>>(new Set())
   const fail = useCallback((failure: unknown) => setError(messageOf(failure)), [])
 
-  /** Runs an action, marking the task busy with it meanwhile; whether it went through. */
+  /** Runs an action, marking the task busy with it meanwhile (each task on its own, so cards act side by side); whether it went through. */
   const busy = useCallback(
     async (
-      mark: (taskId: string | null) => void,
+      mark: Dispatch<SetStateAction<ReadonlySet<string>>>,
       taskId: string,
       act: () => Promise<unknown>,
       action: 'push' | 'merge' | 'other' = 'other',
     ) => {
-      mark(taskId)
+      const set = (on: boolean) =>
+        mark((now) => {
+          const next = new Set(now)
+          if (on) next.add(taskId)
+          else next.delete(taskId)
+          return next
+        })
+      set(true)
       setError(null)
-      setFailed(null)
+      setFailed(({ [taskId]: _, ...rest }) => rest)
       try {
         await act()
         return true
       } catch (failure) {
         fail(failure)
-        setFailed({ taskId, action, message: messageOf(failure) })
+        setFailed((now) => ({ ...now, [taskId]: { action, message: messageOf(failure) } }))
         return false
       } finally {
-        mark(null)
+        set(false)
       }
     },
     [fail],

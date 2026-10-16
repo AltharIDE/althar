@@ -75,16 +75,6 @@ export const standingText = {
     mergeAgain: (where: string) => `Try merging ${where} again`,
     pushAgain: (n: number, where: string) => `Try pushing ${n === 1 ? '1 commit' : `${n} commits`} to ${where} again`,
   },
-  /** What asking the lead to fix the checks says to it. */
-  fixNote: (where: string, failing: ReadonlyArray<string>) =>
-    failing.length === 0
-      ? `The checks on ${where} failed. Fix what made them fail, then ask to push.`
-      : `${failing.length === 1 ? 'A check' : 'Checks'} on ${where} failed: ${failing.join(', ')}. Fix what made ${failing.length === 1 ? 'it' : 'them'} fail, then ask to push.`,
-  /** What asking the lead to resolve a conflict says to it, as the task's own Resolve does. */
-  resolveNote: (where: string, target: string | null) => {
-    const branch = target ?? 'the branch it merges into'
-    return `${where} conflicts with ${branch}. Bring the branch up to date: merge ${branch} into it, settle each conflict so both sides' changes hold, run the checks, and commit the merge. Merge, don't rebase: a branch that was pushed can't be rewritten. Then say it's ready to merge again.`
-  },
 }
 
 export const standingOf = (change: ChangeSummary): Standing => {
@@ -159,7 +149,9 @@ export const factsOf = (change: ChangeSummary, standing: Standing = standingOf(c
   standing.blockers.length === 0 ? [clearOf(change)] : standing.blockers.map((one) => saidOf(one, change))
 
 /** Whether the next thing is the person's own, done from where it is shown: pushing and merging. The others are the lead's, and open the task. */
-export const doneHere = (next: Next): next is Extract<Next, { kind: 'merge' | 'push' }> => next.kind === 'merge' || next.kind === 'push'
+export type DoneHere = Extract<Next, { kind: 'merge' | 'push' }>
+
+export const doneHere = (next: Next): next is DoneHere => next.kind === 'merge' || next.kind === 'push'
 
 /** The next thing while it is under way. */
 export const doingWords = (next: Extract<Next, { kind: 'merge' | 'push' }>): string =>
