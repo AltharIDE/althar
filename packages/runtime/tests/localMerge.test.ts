@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -611,6 +611,15 @@ describe('merging a task here', () => {
         moves.map((move) => move.before),
       )
       assert.strictEqual(git(open ?? '', 'status', '--porcelain'), '')
+      // In the order given, web's checkout moves before docs' refuses: it is put back too, its files as they were.
+      const undone = yield* applyMerges(moves)
+      assert.strictEqual(undone?.root, other)
+      assert.deepStrictEqual(
+        moves.map((move) => git(move.root, 'rev-parse', 'main')),
+        moves.map((move) => move.before),
+      )
+      assert.strictEqual(git(open ?? '', 'status', '--porcelain'), '')
+      assert.isFalse(existsSync(join(open ?? '', 'retry.ts')))
       // A ref that moved since the plan refuses as well, and nothing else moves.
       git(other ?? '', 'clean', '-q', '-f')
       git(bare ?? '', 'update-ref', 'refs/heads/main', git(bare ?? '', 'rev-parse', 'task'))
@@ -641,6 +650,17 @@ describe('merging a task here', () => {
         moves.map((move) => move.before),
       )
       git(bare ?? '', 'checkout', '-q', 'mine')
+      // A checkout whose status can't be read now: nothing moves, and it says why.
+      writeFileSync(join(open ?? '', '.git', 'index'), 'not an index')
+      const unreadable = yield* applyMerges(moves)
+      assert.strictEqual(unreadable?.root, open)
+      assert.strictEqual(unreadable?.problem?.kind, 'unreadable')
+      assert.deepStrictEqual(
+        moves.map((move) => git(move.root, 'rev-parse', 'main')),
+        moves.map((move) => move.before),
+      )
+      rmSync(join(open ?? '', '.git', 'index'))
+      git(open ?? '', 'reset', '-q')
       // Nothing in the way, every one moves.
       assert.isNull(yield* applyMerges(moves))
       assert.deepStrictEqual(
