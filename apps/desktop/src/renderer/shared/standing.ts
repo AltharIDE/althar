@@ -10,7 +10,9 @@ import type { IconName } from '@althar/ui'
  * a failure). A draft isn't in the way: merging marks it ready first.
  * Then the one next thing to do. The board's card says them as one line with
  * that thing at its end; the home's line, as its brief with that thing as
- * its button. Both say them in the same words.
+ * its button. Both say them in the same words, and both do the person's own
+ * (push, merge) right there; the lead's (resolve, fix) the card leaves to its
+ * task.
  */
 
 export type Blocker =
@@ -54,6 +56,24 @@ export const standingText = {
     push: (n: number) => (n === 1 ? 'Push 1 commit' : `Push ${n} commits`),
     resolve: 'Ask the lead to resolve it',
     fix: 'Ask the lead to fix it',
+  },
+  /** While a next thing done from where it is shown is under way. */
+  doing: {
+    merge: 'Merging',
+    push: (n: number) => (n === 1 ? 'Pushing 1 commit' : `Pushing ${n} commits`),
+  },
+  /** After one failed: what happened, and the button that tries it again. */
+  nextFailed: {
+    merge: (why: string) => `Merge failed: ${why}`,
+    push: (why: string) => `Push failed: ${why}`,
+    again: 'Try again',
+  },
+  /** What a screen reader hears of the button for a next thing, naming the pull request it acts on. */
+  label: {
+    merge: (where: string) => `Accept and merge ${where}`,
+    push: (n: number, where: string) => `${n === 1 ? 'Push 1 commit' : `Push ${n} commits`} to ${where}`,
+    mergeAgain: (where: string) => `Try merging ${where} again`,
+    pushAgain: (n: number, where: string) => `Try pushing ${n === 1 ? '1 commit' : `${n} commits`} to ${where} again`,
   },
   /** What asking the lead to fix the checks says to it. */
   fixNote: (where: string, failing: ReadonlyArray<string>) =>
@@ -137,6 +157,25 @@ export const clearOf = (change: Pick<ChangeSummary, 'checks'>): Said => {
 /** What stands, as facts: each thing in the way, or how its checks went where nothing is. */
 export const factsOf = (change: ChangeSummary, standing: Standing = standingOf(change)): ReadonlyArray<Said> =>
   standing.blockers.length === 0 ? [clearOf(change)] : standing.blockers.map((one) => saidOf(one, change))
+
+/** Whether the next thing is the person's own, done from where it is shown: pushing and merging. The others are the lead's, and open the task. */
+export const doneHere = (next: Next): next is Extract<Next, { kind: 'merge' | 'push' }> => next.kind === 'merge' || next.kind === 'push'
+
+/** The next thing while it is under way. */
+export const doingWords = (next: Extract<Next, { kind: 'merge' | 'push' }>): string =>
+  next.kind === 'merge' ? standingText.doing.merge : standingText.doing.push(next.commits)
+
+/** The next thing's button, for a screen reader: what it does and to which pull request; or, after it failed, that it tries again. */
+export const labelWords = (next: Extract<Next, { kind: 'merge' | 'push' }>, where: string, failed = false): string => {
+  const t = standingText.label
+  return next.kind === 'merge'
+    ? failed
+      ? t.mergeAgain(where)
+      : t.merge(where)
+    : failed
+      ? t.pushAgain(next.commits, where)
+      : t.push(next.commits, where)
+}
 
 /** The next thing, in its words. */
 export const nextWords = (next: Next): string => {

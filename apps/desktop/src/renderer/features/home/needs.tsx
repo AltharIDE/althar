@@ -7,7 +7,7 @@ import { commandOf, titleOf } from '../../shared/callCommand'
 import { callKindOf, isFinished, kindWords, readyKindOf, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
-import { factsOf, type Next, nextWords, standingOf } from '../../shared/standing'
+import { doingWords, doneHere, factsOf, labelWords, type Next, nextWords, standingOf } from '../../shared/standing'
 import { text as stuckText } from '../task/StuckCall'
 
 /*
@@ -275,11 +275,15 @@ export function needLineOf(
           <Button
             size="small"
             // Merging and pushing are the person's own to do, so they're violet; asking the lead isn't.
-            {...(ready.next.kind === 'merge' || ready.next.kind === 'push' ? { variant: 'signal' as const } : {})}
+            {...(doneHere(ready.next) ? { variant: 'signal' as const } : {})}
+            // The pull request it acts on, for a screen reader: the line's own words don't name it.
+            {...(doneHere(ready.next) && ready.task.change !== null
+              ? { 'aria-label': labelWords(ready.next, `${ready.task.change.prefix}${ready.task.change.number}`) }
+              : {})}
             busy={doing?.(ready.task.taskId) === true}
             onClick={() => onNext(ready.task, ready.next)}
           >
-            {nextWords(ready.next)}
+            {doing?.(ready.task.taskId) === true && doneHere(ready.next) ? doingWords(ready.next) : nextWords(ready.next)}
           </Button>
         ) : permission === undefined ? (
           <Button size="small" {...(need.kind === kindWords.question ? { variant: 'signal' as const } : {})} onClick={open}>

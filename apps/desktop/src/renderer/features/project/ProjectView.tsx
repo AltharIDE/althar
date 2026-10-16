@@ -489,6 +489,7 @@ export function ProjectView({
                   agents={model.agents}
                   now={now}
                   onOpen={onTask}
+                  actions={board}
                   {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                 />
               </>

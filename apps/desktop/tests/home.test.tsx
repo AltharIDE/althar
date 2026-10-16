@@ -270,9 +270,9 @@ describe('the home', () => {
     expect(line('Checks still running').getByText('api #25 · Checks running, 3 of 5 passed · +12 −3')).toBeTruthy()
 
     // The person's own to do, done at once, at the heads they saw.
-    await userEvent.click(line('Good to merge').getByRole('button', { name: 'Accept and merge' }))
+    await userEvent.click(line('Good to merge').getByRole('button', { name: 'Accept and merge #21' }))
     expect(client.merge).toHaveBeenCalledWith('r21', 'abc123', 'https://github.com/meridian/api/pull/12')
-    await userEvent.click(line('Commits to push').getByRole('button', { name: 'Push 3 commits' }))
+    await userEvent.click(line('Commits to push').getByRole('button', { name: 'Push 3 commits to #22' }))
     expect(client.push).toHaveBeenCalledWith('r22', 'def456', 'https://github.com/meridian/api/pull/12')
     // The lead's, as a note to it.
     await userEvent.click(line('In conflict').getByRole('button', { name: 'Ask the lead to resolve it' }))

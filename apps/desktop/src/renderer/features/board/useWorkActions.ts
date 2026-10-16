@@ -15,6 +15,8 @@ import { headsOf } from '../../shared/mergeHere'
 
 export interface WorkActions {
   readonly error: string | null
+  /** The task whose last action failed, which it was, and why, for its own card to say; cleared when one is tried again. */
+  readonly failed: { readonly taskId: string; readonly action: 'push' | 'merge' | 'other'; readonly message: string } | null
   /** The task whose pull request is being merged. */
   readonly merging: string | null
   /** The task a note is on its way back to. */
@@ -44,6 +46,7 @@ export interface WorkActions {
 export const useWorkActions = (): WorkActions => {
   const { client } = useServices()
   const [error, setError] = useState<string | null>(null)
+  const [failed, setFailed] = useState<WorkActions['failed']>(null)
   const [merging, setMerging] = useState<string | null>(null)
   const [sending, setSending] = useState<string | null>(null)
   const [opening, setOpening] = useState<string | null>(null)
@@ -52,14 +55,21 @@ export const useWorkActions = (): WorkActions => {
 
   /** Runs an action, marking the task busy with it meanwhile; whether it went through. */
   const busy = useCallback(
-    async (mark: (taskId: string | null) => void, taskId: string, act: () => Promise<unknown>) => {
+    async (
+      mark: (taskId: string | null) => void,
+      taskId: string,
+      act: () => Promise<unknown>,
+      action: 'push' | 'merge' | 'other' = 'other',
+    ) => {
       mark(taskId)
       setError(null)
+      setFailed(null)
       try {
         await act()
         return true
       } catch (failure) {
         fail(failure)
+        setFailed({ taskId, action, message: messageOf(failure) })
         return false
       } finally {
         mark(null)
@@ -70,6 +80,7 @@ export const useWorkActions = (): WorkActions => {
 
   return {
     error,
+    failed,
     merging,
     sending,
     opening,
@@ -78,8 +89,8 @@ export const useWorkActions = (): WorkActions => {
       (task) => busy(setMerging, task.taskId, () => client.mergeHere(task.taskId, headsOf(task.here))),
       [busy, client],
     ),
-    push: useCallback((taskId, head, url) => busy(setPushing, taskId, () => client.push(taskId, head, url)), [busy, client]),
-    merge: useCallback((taskId, head, url) => busy(setMerging, taskId, () => client.merge(taskId, head, url)), [busy, client]),
+    push: useCallback((taskId, head, url) => busy(setPushing, taskId, () => client.push(taskId, head, url), 'push'), [busy, client]),
+    merge: useCallback((taskId, head, url) => busy(setMerging, taskId, () => client.merge(taskId, head, url), 'merge'), [busy, client]),
     sendBack: useCallback(
       (task, note) =>
         busy(setSending, task.taskId, async () => {

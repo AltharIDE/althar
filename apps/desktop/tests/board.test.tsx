@@ -1185,6 +1185,88 @@ describe('what stands between a ready change and merging', () => {
   })
 })
 
+describe('a ready card’s next step, done from the card', () => {
+  const NOW = '2026-10-01T10:00:00.000Z'
+  const passed = { outcome: 'passed' as const, passed: 5, failed: 0, running: 0, total: 5, failing: [], list: [] }
+  const ready = (taskId: string, title: string, overrides: Parameters<typeof change>[0]) =>
+    task({ taskId, threadId: `th-${taskId}`, title, phase: 'ready', change: change({ draft: false, checks: passed, ...overrides }) })
+  const lanes = lanesOf(
+    board({
+      tasks: [
+        ready('s1', 'Good to merge', {}),
+        ready('s4', 'In conflict', { conflicts: true, target: 'main' }),
+        ready('s5', 'Commits to push', { localHead: 'def456', unpushed: 3 }),
+        ready('s11', 'Checks failed', { checks: change().checks }),
+      ],
+      calls: [],
+    }),
+  )
+  function Board({ onOpen }: { onOpen: (threadId: string) => void }) {
+    return <BoardView lanes={lanes} agents={agents} now={NOW} onOpen={onOpen} actions={useBoard('p1')} />
+  }
+  const cardOf = (title: string) => screen.getByRole('button', { name: title }).closest('article') as HTMLElement
+
+  it('pushes right there, and does not open the task', async () => {
+    const onOpen = vi.fn()
+    let finish = () => {}
+    const push = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)))
+    withServices(<Board onOpen={onOpen} />, fakeClient({ push, getBoard: vi.fn(async () => board()) }).client)
+    const card = within(cardOf('Commits to push'))
+    // A button of its own, named for what it does and to which pull request.
+    await userEvent.click(card.getByRole('button', { name: 'Push 3 commits to #12' }))
+    expect(push).toHaveBeenCalledWith('s5', 'def456', 'https://github.com/meridian/api/pull/12')
+    expect(onOpen).not.toHaveBeenCalled()
+    // While it runs, it says so, and presses are ignored.
+    const busy = await card.findByRole('button', { name: 'Push 3 commits to #12' })
+    expect(busy.getAttribute('aria-busy')).toBe('true')
+    expect(busy.textContent).toBe('Pushing 3 commits')
+    await userEvent.click(busy)
+    expect(push).toHaveBeenCalledTimes(1)
+    finish()
+    await waitFor(() => expect(card.getByRole('button', { name: 'Push 3 commits to #12' }).getAttribute('aria-busy')).toBeNull())
+    expect(onOpen).not.toHaveBeenCalled()
+    // The rest of the card still opens its task.
+    await userEvent.click(screen.getByRole('button', { name: 'Commits to push' }))
+    expect(onOpen).toHaveBeenCalledWith('th-s5')
+  })
+
+  it('says why a push failed, in a line, and offers to try again', async () => {
+    const onOpen = vi.fn()
+    const push = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError({ reason: 'ConnectorFailed', message: 'GitHub says: the branch is protected' }))
+      .mockResolvedValue(undefined)
+    withServices(<Board onOpen={onOpen} />, fakeClient({ push, getBoard: vi.fn(async () => board()) }).client)
+    const card = within(cardOf('Commits to push'))
+    await userEvent.click(card.getByRole('button', { name: 'Push 3 commits to #12' }))
+    expect((await card.findByRole('alert')).textContent).toContain('Push failed: GitHub says: the branch is protected')
+    // The commits are still not on it, and the button now tries again.
+    expect(card.getByText(/3 commits not on the PR/)).toBeTruthy()
+    await userEvent.click(card.getByRole('button', { name: 'Try pushing 3 commits to #12 again' }))
+    await waitFor(() => expect(push).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(card.queryByRole('alert')).toBeNull())
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('merges right there, at the head the card showed', async () => {
+    const onOpen = vi.fn()
+    const merge = vi.fn(async () => {})
+    withServices(<Board onOpen={onOpen} />, fakeClient({ merge, getBoard: vi.fn(async () => board()) }).client)
+    await userEvent.click(within(cardOf('Good to merge')).getByRole('button', { name: 'Accept and merge #12' }))
+    expect(merge).toHaveBeenCalledWith('s1', 'abc123', 'https://github.com/meridian/api/pull/12')
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('leaves what needs the lead to the task: words that open it, not a button of their own', async () => {
+    const onOpen = vi.fn()
+    withServices(<Board onOpen={onOpen} />, fakeClient({ getBoard: vi.fn(async () => board()) }).client)
+    for (const title of ['In conflict', 'Checks failed']) expect(within(cardOf(title)).getAllByRole('button')).toHaveLength(1)
+    expect(within(cardOf('In conflict')).getByText('Ask the lead to resolve it')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: 'In conflict' }))
+    expect(onOpen).toHaveBeenCalledWith('th-s4')
+  })
+})
+
 describe('the bar and the dock, on the rest of the board', () => {
   it('opens work ready to accept when no call waits', async () => {
     const onTask = vi.fn()
