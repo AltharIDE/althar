@@ -1675,7 +1675,7 @@ describe('a task', () => {
     const again = withServices(<Task />, client)
     expect(
       await screen.findByText(
-        "Codex couldn't start. It isn’t signed in. Check that it's installed and signed in, or hand the step to another agent.",
+        "Codex couldn't start. It isn’t signed in. Check that it's installed and signed in, or review with another agent.",
       ),
     ).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
@@ -1705,6 +1705,14 @@ describe('a task', () => {
       "Codex couldn't start. Check that it's installed and signed in, or hand the step to another agent.",
       "The work has been reviewed three times, and the lead's last changes haven't been reviewed yet. One finding is still open. Review it again, or accept it as it is.",
       "Codex reached its usage limit and didn't say when it resets.",
+    ])
+    // A review has no lead to tell: it advises the buttons it has.
+    const inReview = (why: StuckStep['why']) =>
+      stuckWords.what({ step: 'review', why, detail: null, agentId: null, round: 0, open: 0 }, 'Codex')
+    expect([inReview('session_ended'), inReview('restarted'), inReview('refused')]).toEqual([
+      'Codex closed before finishing the step. This is usually harmless: review again, or skip the review.',
+      'Althar restarted twice while this step was running, so it paused the step in case the step caused it. If you restarted Althar yourself, review again.',
+      'Codex refused to go on with this step. Review again with another agent, or skip the review.',
     ])
     const back = '2026-09-29T14:00:00.000Z'
     expect(

@@ -16,15 +16,17 @@ import { LimitCall, limitText } from './LimitCall'
 export const text = {
   step: { implement: 'Implement', review: 'Review', settle: 'Settle', publish: 'Pull request' } satisfies Record<StuckStep['step'], string>,
   what: (stuck: StuckStep, agent: string): string => {
+    // A review has no lead to tell or carry on: it runs again, on this agent or another, or is skipped.
+    const review = stuck.step === 'review'
     switch (stuck.why) {
       case 'no_report':
-        return `${agent} stopped twice without saying whether the step is done, even after Althar reminded it. Tell it what to do next, or hand the step to another agent.`
+        return `${agent} stopped twice without saying whether the step is done, even after Althar reminded it. ${review ? 'Review again, or skip the review.' : 'Tell it what to do next, or hand the step to another agent.'}`
       case 'session_ended':
-        return `${agent} closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.`
+        return `${agent} closed before finishing the step. This is usually harmless: ${review ? 'review again, or skip the review.' : 'tell it to carry on, or hand the step to another agent.'}`
       case 'failed_to_start':
-        return `${agent} couldn't start.${stuck.detail === null ? '' : ` ${stuck.detail}`} Check that it's installed and signed in, or hand the step to another agent.`
+        return `${agent} couldn't start.${stuck.detail === null ? '' : ` ${stuck.detail}`} Check that it's installed and signed in, or ${review ? 'review with another agent.' : 'hand the step to another agent.'}`
       case 'restarted':
-        return `Althar restarted twice while this step was running, so it paused the step in case the step caused it. If you restarted Althar yourself, start ${agent} again.`
+        return `Althar restarted twice while this step was running, so it paused the step in case the step caused it. If you restarted Althar yourself, ${review ? 'review again.' : `start ${agent} again.`}`
       case 'round_limit':
         return `The work has been reviewed three times, and the lead's last changes haven't been reviewed yet.${
           stuck.open === 0 ? '' : stuck.open === 1 ? ' One finding is still open.' : ` ${stuck.open} findings are still open.`
@@ -34,13 +36,13 @@ export const text = {
       case 'usage_limit':
         return limitText.what(agent, stuck.limit?.resetsAt == null ? null : clock(stuck.limit.resetsAt))
       case 'stalled':
-        return `${agent} has gone quiet: there has been no sign of work on this step for a while. Start it again, or hand the step to another agent.`
+        return `${agent} has gone quiet: there has been no sign of work on this step for a while. ${review ? 'Review again, or skip the review.' : 'Start it again, or hand the step to another agent.'}`
       case 'looping':
-        return `${agent} kept running ${stuck.detail === null ? 'the same thing' : `\`${stuck.detail}\``} and got the same result each time. Tell it to try something else, or hand the step to another agent.`
+        return `${agent} kept running ${stuck.detail === null ? 'the same thing' : `\`${stuck.detail}\``} and got the same result each time. ${review ? 'Review again, or skip the review.' : 'Tell it to try something else, or hand the step to another agent.'}`
       case 'over_budget':
-        return `${agent} has worked on this step for ${stuck.detail ?? 'a long time'} since you last said anything, and isn't done. Let it carry on if it seems to be getting somewhere, or hand the step to another agent.`
+        return `${agent} has worked on this step for ${stuck.detail ?? 'a long time'} since you last said anything, and isn't done. ${review ? 'Review again, or skip the review.' : 'Let it carry on if it seems to be getting somewhere, or hand the step to another agent.'}`
       case 'refused':
-        return `${agent} refused to go on with this step. Tell it what to do differently, or hand the step to another agent.`
+        return `${agent} refused to go on with this step. ${review ? 'Review again with another agent, or skip the review.' : 'Tell it what to do differently, or hand the step to another agent.'}`
     }
   },
   /** What Althar did before it asked. */

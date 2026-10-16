@@ -196,7 +196,10 @@ export const needsOf = ({
             kind: callKindOf(call),
             project,
             title: whereOf(call),
-            brief: stuckText.what(stuck, agentName(stuck.agentId) || 'The agent'),
+            brief:
+              stuck.step === 'publish' && stuck.why !== 'not_connected'
+                ? stuckText.publishing(stuck)
+                : stuckText.what(stuck, agentName(stuck.agentId) || 'The agent'),
           },
     ]
   }),

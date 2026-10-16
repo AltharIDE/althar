@@ -316,6 +316,22 @@ describe('the home', () => {
     expect(await within(needs).findByRole('article', { name: 'Run npm publish', description: 'Denied Once · in halyard' })).toBeTruthy()
   })
 
+  it('says a stuck pull request in its own words, not the agent’s', async () => {
+    const publish: HomeCall = {
+      ...stuck,
+      id: 'a9',
+      stuck: { step: 'publish', why: 'restarted', detail: null, agentId: null, round: 0, open: 0 },
+    }
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...busy(), calls: [publish] })) })
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
+    expect(
+      within(needs).getByText(
+        'Althar restarted twice while opening the pull request, so it paused in case that caused it. If you restarted Althar yourself, try again.',
+      ),
+    ).toBeTruthy()
+  })
+
   it('offers on a permission’s card what its task’s card offers: always allow, never allow, and deny with a note', async () => {
     const offered: HomeCall = {
       ...permission,
