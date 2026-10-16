@@ -536,6 +536,8 @@ export enum RuntimeState {
   Installing = 'installing',
   /** Older than the versions Althar works with. */
   Outdated = 'outdated',
+  /** A version Althar doesn't run yet, such as a new major: no session starts on it, and it says why. */
+  Unsupported = 'unsupported',
 }
 
 /** How this device gets at a project's source. */

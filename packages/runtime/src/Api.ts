@@ -1,4 +1,4 @@
-import { agentVersion } from '@althar/provider-adapters'
+import { agentVersion, unsupportedAt } from '@althar/provider-adapters'
 import { lstatSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, type posix, relative, resolve, sep } from 'node:path'
@@ -308,29 +308,36 @@ export const handlers = Api.toLayer(
         } satisfies AccountStatus
       })
 
-    /* Each agent's version, asked of its CLI once a launch. */
+    /* Each agent's version, asked of its CLI once a launch, and again when the person checks: they may have changed it. */
     const versions = new Map<string, string | null>()
-    const versionOf = (entry: AgentEntry) =>
-      versions.has(entry.definition.id)
+    const versionOf = (entry: AgentEntry, recheck: boolean) =>
+      !recheck && versions.has(entry.definition.id)
         ? Effect.succeed(versions.get(entry.definition.id) ?? null)
         : agentVersion(entry.definition).pipe(Effect.tap((found) => Effect.sync(() => versions.set(entry.definition.id, found))))
 
-    /* An agent, with its accounts: each check starts the agent's own status command, in the account's home. */
+    /*
+     * An agent, with its accounts: each check starts the agent's own status command, in the account's home, but at a
+     * version no session starts on, which says why instead (SignIns asks its copy again before any status command).
+     */
     const signIn = (entry: AgentEntry, recheck: boolean) =>
       Effect.gen(function* () {
+        const install = yield* installs.state(entry.definition)
+        const installed = entry.definition.cli === undefined || install.located !== null
+        const version = yield* versionOf(entry, recheck)
         const statuses = yield* Effect.forEach(yield* accounts.of(entry.definition.id), (account) => accountStatus(account, recheck), {
           concurrency: 'unbounded',
         })
-        const install = yield* installs.state(entry.definition)
         return {
           id: entry.definition.id,
           name: entry.definition.name,
-          installed: entry.definition.cli === undefined || install.located !== null,
+          installed,
           kept: install.located?.whose === 'althar',
           download: install.downloadable && install.size !== null ? { size: install.size, installing: install.installing } : null,
           signIn: anyOf(statuses.map((account) => account.signIn)),
           login: entry.definition.signIn.login,
-          version: yield* versionOf(entry),
+          version,
+          // One that isn't here says so instead.
+          unsupported: installed ? unsupportedAt(entry.definition, version) : null,
           ways: entry.definition.signIn.inApp?.ways ?? [],
           accounts: statuses,
         } satisfies AgentStatus

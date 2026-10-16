@@ -13,7 +13,7 @@ import { isSection, type Section, SECTIONS } from '../src/renderer/features/sett
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { edgeSpotOf, edgeWords } from '../src/renderer/shared/edge'
-import { connectionList, fakeClient, fakeHost, githubConnection, models, withoutOpenCode } from './fixtures'
+import { agents, connectionList, fakeClient, fakeHost, githubConnection, models, openCode2, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -344,6 +344,16 @@ describe('the Settings tab', () => {
     expect(within(install).getByText(/from GitHub, about 45 MB, check it against the release/)).toBeTruthy()
     await userEvent.click(within(install).getByRole('button', { name: 'Download OpenCode' }))
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
+  })
+
+  it('opens on an agent at a version no session starts on, and says why above its accounts', async () => {
+    const atTwo = agents.map((agent) => (agent.id === 'opencode' ? openCode2 : agent))
+    const { client } = fakeClient({ status: vi.fn(async () => ({ apiVersion: 1, appVersion: '0.0.0', agents: atTwo })) })
+    withServices(<Settings />, client)
+    // Signed in, yet the person's to put right.
+    expect((await screen.findByRole('tab', { name: 'OpenCode, needs you' })).getAttribute('aria-selected')).toBe('true')
+    expect(await alert()).toBe(openCode2.unsupported)
+    expect(screen.getByRole('list', { name: 'OpenCode accounts' })).toBeTruthy()
   })
 
   it('has the code hosts beside the trackers, and connects one in place of the list', async () => {

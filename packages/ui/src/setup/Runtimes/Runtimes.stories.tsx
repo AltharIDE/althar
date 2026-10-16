@@ -41,7 +41,7 @@ export const WithAccounts: Story = {
   },
 }
 
-/** Once work runs on them: out of usage with the work moved, signed out with tasks waiting (a call of yours), too old, being checked. */
+/** Once work runs on them: out of usage with the work moved, signed out with tasks waiting (a call of yours), too old, too new to run yet, being checked. */
 export const EveryState: Story = { args: { runtimes: EVERY_STATE } }
 
 /* Signing in, and changing your mind: the row follows. */

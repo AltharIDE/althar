@@ -31,6 +31,7 @@ export const agentMarksText: AgentMarksText = {
     [RuntimeState.Missing]: 'not installed',
     [RuntimeState.Installing]: 'downloading',
     [RuntimeState.Outdated]: 'needs an update',
+    [RuntimeState.Unsupported]: 'not supported yet',
   },
   out: (back) => (back ? `out until ${back}` : 'out of usage'),
 }
@@ -55,7 +56,9 @@ function say(agent: AgentMark, t: AgentMarksText): { words: string; shown: boole
     case RuntimeState.OutOfUsage:
       return { words: t.out(agent.back), shown: true, tone: s.out }
     case RuntimeState.SignedOut:
-      return { words: t.state[RuntimeState.SignedOut], shown: true, tone: s.you }
+    // A version no session starts on is the person's to change, as a sign-in is.
+    case RuntimeState.Unsupported:
+      return { words: t.state[agent.state], shown: true, tone: s.you }
     case RuntimeState.Checking:
     case RuntimeState.SigningIn:
     case RuntimeState.Missing:

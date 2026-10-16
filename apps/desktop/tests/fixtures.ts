@@ -73,6 +73,7 @@ export const agents: ReadonlyArray<AgentStatus> = [
     signIn: 'signed_in',
     login: 'claude auth login',
     version: '2.1.263',
+    unsupported: null,
     ways: ['browser'],
     accounts: [usual('acc_claude', 'signed_in')],
     installed: true,
@@ -85,6 +86,7 @@ export const agents: ReadonlyArray<AgentStatus> = [
     signIn: 'unknown',
     login: 'codex login',
     version: '0.159.3',
+    unsupported: null,
     ways: ['browser', 'device'],
     accounts: [usual('acc_codex', 'unknown')],
     installed: true,
@@ -97,6 +99,7 @@ export const agents: ReadonlyArray<AgentStatus> = [
     signIn: 'signed_out',
     login: 'opencode auth login',
     version: null,
+    unsupported: null,
     ways: [],
     accounts: [usual('acc_opencode', 'signed_out')],
     installed: true,
@@ -104,6 +107,15 @@ export const agents: ReadonlyArray<AgentStatus> = [
     download: { size: '45 MB', installing: false },
   },
 ]
+
+/** OpenCode 2, which no session starts on yet, signed in or not: Settings says why. */
+export const openCode2: AgentStatus = {
+  ...agents.find((agent) => agent.id === 'opencode')!,
+  version: '2.0.29',
+  unsupported: 'OpenCode 2 isn’t supported yet: Althar can’t yet keep your own MCP servers out of its sessions.',
+  signIn: 'signed_in',
+  accounts: [usual('acc_opencode', 'signed_in')],
+}
 
 /** OpenCode not on this Mac, which Althar can download. */
 export const withoutOpenCode: ReadonlyArray<AgentStatus> = agents.map((agent) =>

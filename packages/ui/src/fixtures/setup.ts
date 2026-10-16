@@ -17,6 +17,7 @@ const CLAUDE_CODE = { id: 'claude-code', name: 'Claude Code', brand: Brand.Claud
 const CODEX = { id: 'codex', name: 'Codex', brand: Brand.Codex }
 const GEMINI_CLI = { id: 'gemini-cli', name: 'Gemini CLI', brand: Brand.GeminiCli }
 const OLLAMA = { id: 'ollama', name: 'Ollama', brand: Brand.Ollama }
+const OPENCODE = { id: 'opencode', name: 'OpenCode', brand: Brand.OpenCode }
 
 /* What a first run finds on a typical Mac: one signed in, one signed out, one not installed. */
 export const FIRST_RUN: RuntimeEntry[] = [
@@ -37,6 +38,12 @@ export const EVERY_STATE: RuntimeEntry[] = [
   { ...CODEX, state: RuntimeState.Ready, account: 'you@meridian.dev · Pro', version: '0.52.0' },
   { ...GEMINI_CLI, state: RuntimeState.SignedOut, waiting: 2 },
   { ...OLLAMA, state: RuntimeState.Outdated, version: '0.3.2', needs: '0.5' },
+  {
+    ...OPENCODE,
+    state: RuntimeState.Unsupported,
+    version: '2.0.29',
+    why: 'OpenCode 2 isn’t supported yet: Althar can’t yet keep your own MCP servers out of its sessions, and a rejected command would end the whole turn. Use OpenCode 1 with Althar for now, or another agent.',
+  },
   { id: 'aider', name: 'Aider', state: RuntimeState.Checking },
 ]
 

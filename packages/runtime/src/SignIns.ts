@@ -1,4 +1,4 @@
-import { adapterNode, type SignInCheck, signInCheck, type SignInStatus } from '@althar/provider-adapters'
+import { adapterNode, type SignInCheck, signInCheck, type SignInStatus, unsupportedNow } from '@althar/provider-adapters'
 import { Context, Duration, Effect, Layer, PubSub, Stream } from 'effect'
 import type { SqlError } from 'effect/sql'
 
@@ -57,6 +57,12 @@ export class SignIns extends Context.Service<
           if (!recheck && last !== undefined && Date.now() - last.at < Duration.toMillis(TTL)) return last.check
           const entry = agents.list.find((candidate) => candidate.definition.id === of.agentId)
           if (entry === undefined) return UNKNOWN
+          // An agent at a version no session starts on isn't asked either: OpenCode 2's status goes through a service the
+          // whole user shares, which answers for whichever account started it and keeps running after.
+          if ((yield* unsupportedNow(entry.definition)) !== null) {
+            known.set(of.id, { check: UNKNOWN, at: Date.now() })
+            return UNKNOWN
+          }
           yield* accounts.prepare(of)
           const checked = yield* signInCheck(entry.definition, adapterNode(), accounts.env(of))
           // As it stands now, not as it stood when this check began: another may have finished meanwhile and said it.

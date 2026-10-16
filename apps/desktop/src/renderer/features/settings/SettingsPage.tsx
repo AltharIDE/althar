@@ -91,9 +91,9 @@ export function SettingsPage({ start, section, onSection }: SettingsPageProps) {
   // Here too, so a choice still being kept outlasts a look at another section; where Althar shows is asked again as its section opens.
   const looks: Looks = { appIcon: useAppIcon(), edge: useEdgePlace(section === 'appearance') }
   const agents = start.status?.agents ?? []
-  // A section where something waits on the person has a dot: an account to sign in again.
+  // A section where something waits on the person has a dot: an account to sign in again, an agent at a version Althar doesn't run.
   const yours: Partial<Record<Section, boolean>> = {
-    agents: agents.some((agent) => agent.accounts.some((account) => account.signIn === 'signed_out')),
+    agents: agents.some(needsYou),
     'code-hosts': connections.list?.connections.some((connection) => connection.state === 'reauth_required') === true,
   }
   const open = sectionText[section]
@@ -181,7 +181,11 @@ function Failed({ when, children = text.failed }: { when: boolean; children?: st
 
 /* ---- the agents ------------------------------------------------------------------- */
 
-/** An agent as a tab: a dot on one with an account signed out. */
+/** An agent only the person can put right: an account signed out, or a version no session starts on. */
+const needsYou = (agent: AgentStatus): boolean =>
+  agent.unsupported !== null || agent.accounts.some((account) => account.signIn === 'signed_out')
+
+/** An agent as a tab: a dot on one that needs the person. */
 const tabOf = (agent: AgentStatus): AgentTab => {
   const brand = brandOf(agent.id)
   const line = agentLineOf(agent)
@@ -190,7 +194,7 @@ const tabOf = (agent: AgentStatus): AgentTab => {
     name: agent.name,
     ...(brand === undefined ? {} : { brand }),
     ...(line === undefined ? {} : { line }),
-    ...(agent.accounts.some((account) => account.signIn === 'signed_out') ? { yours: true } : {}),
+    ...(needsYou(agent) ? { yours: true } : {}),
   }
 }
 
@@ -202,7 +206,7 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
   const chosen =
     agents.find((agent) => agent.id === agentId) ??
     agents.find((agent) => agent.id === accounts.signingIn?.agentId) ??
-    agents.find((agent) => agent.accounts.some((account) => account.signIn === 'signed_out')) ??
+    agents.find(needsYou) ??
     agents[0]
   if (chosen === undefined)
     return (
@@ -218,7 +222,11 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
       <StartError model={start} />
       <AgentTabPanel agent={tabOf(chosen)} headingLevel={2} aside={<ModelsView key={chosen.id} agent={chosen} />}>
         {chosen.installed && chosen.download?.installing !== true ? (
-          <AgentAccounts agent={chosen} start={start} signIn={accounts} />
+          <>
+            {/* Why no session starts on the version it has, above its accounts, which still stand. */}
+            <Failed when={chosen.unsupported !== null}>{chosen.unsupported ?? ''}</Failed>
+            <AgentAccounts agent={chosen} start={start} signIn={accounts} />
+          </>
         ) : (
           <AgentInstall
             name={chosen.name}

@@ -81,6 +81,9 @@ export const launches: Array<{
 /** What each session of the fake agent with session options (`claude-code`) was started as: its role, and its options. */
 export const sessionMetas: Array<{ readonly role: 'lead' | 'reader' | undefined; readonly options: SessionOptions | undefined }> = []
 
+/** Why the fake agent `too-new` starts no session: its version is a major Althar doesn't run yet. */
+export const TOO_NEW = 'Fake too-new 2 isn’t supported yet. Use Fake too-new 1 with Althar for now.'
+
 export const definition = (id: string, signedOut: ReadonlyArray<string> = [], perUse: ReadonlyArray<string> = []): AgentDefinition => ({
   id: id as AgentId,
   name: `Fake ${id}`,
@@ -120,6 +123,10 @@ export const definition = (id: string, signedOut: ReadonlyArray<string> = [], pe
     : {}),
   // Each may lead a review of a pull request from outside but `codex`, as the registry's Codex may not.
   reviewing: { outside: id !== 'codex' },
+  // One is a version Althar doesn't run yet, as OpenCode 2 is: it says so as OpenCode 2 does.
+  ...(id === 'too-new'
+    ? { version: () => ({ command: 'sh', args: ['-c', 'echo opencode v2.0.29'] }), supported: { major: 1, why: TOO_NEW } }
+    : {}),
   knownGaps: [],
 })
 
