@@ -1,0 +1,124 @@
+.stack {
+  display: grid;
+  gap: 14px;
+}
+
+/* Form rows sit flush with the dialog's edges, as settings rows do. */
+.rows {
+  margin-inline: -22px;
+}
+
+.wide {
+  width: 100%;
+}
+
+.quiet {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+
+.scroll {
+  max-height: 300px;
+  overflow: auto;
+}
+
+.error {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--danger);
+}
+
+/* The one that removes, or adds, at the far start of the buttons. */
+.remove {
+  margin-inline-end: auto;
+}
+
+.list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  /* Picked up by its words as by its grip. */
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.grip {
+  margin-inline-start: -6px;
+  cursor: grab;
+}
+
+/* While one is dragged, the rest make way for it. */
+.sorting,
+.sorting .item,
+.sorting .grip {
+  cursor: grabbing;
+}
+
+.sorting > .item {
+  transition: transform var(--base) var(--ease);
+}
+
+/* The one dragged, raised off the dialog, follows the pointer at once. */
+.sorting > .lifted {
+  position: relative;
+  z-index: 1;
+  border-bottom-color: transparent;
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow:
+    0 0 0 6px var(--paper),
+    var(--lift-pop);
+  transition: none;
+}
+
+.words {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--t-1);
+}
+
+.command {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.about {
+  overflow: hidden;
+  font-size: 11.5px;
+  color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.default {
+  padding-inline: 6px;
+  font-size: 11.5px;
+  color: var(--t-3);
+}

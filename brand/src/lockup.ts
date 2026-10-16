@@ -8,7 +8,7 @@ import { type Box, num, svgDocument } from './svg'
 /*
  * The mark and the name, as one drawing with the name's letters turned to
  * outlines, so it looks the same wherever it is opened. The name is Inter at
- * weight 650, set tight, as the site and the pitch set it; the mark's section
+ * weight 650, set tight, as the site sets it; the mark's section
  * stands on the baseline beside it, as it does in the interface.
  */
 

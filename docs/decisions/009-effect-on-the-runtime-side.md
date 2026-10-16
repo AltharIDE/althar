@@ -24,7 +24,7 @@
     `MessagePort`), and the CLI.
   - Where not: nowhere in `@althar/ui`, whose components take props and
     report through callbacks. In the desktop app, only in its data layer
-    ([ADR-010](010-desktop-app-mvvm.md)). Not in the pitch or landing sites.
+    ([ADR-010](010-desktop-app-mvvm.md)). Not in the public site.
   - Promise-based APIs (the ACP SDK, Electron, `gh`) are wrapped at the edge.
   - Conventions:
     - `Effect.gen`, which reads like async/await, rather than long pipes.

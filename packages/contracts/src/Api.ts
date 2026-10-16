@@ -1238,6 +1238,8 @@ export const RunItem = Schema.Struct({
     launchId: Schema.String,
     /** What it runs: the task's, or null for a copy of the default branch. */
     taskId: Schema.NullOr(Schema.String),
+    /** Which of the project's runnables it runs (ADR-044), for running it again; absent on a card from before there were several. */
+    runnableId: Schema.optional(Schema.NullOr(Schema.String)),
     /** Where it runs, in words: the task's title, or the default branch. */
     where: Schema.String,
     command: Schema.String,
@@ -1458,10 +1460,49 @@ export type ContextUse = typeof ContextUse.Type
 export const Launch = Schema.Struct({
   ...BackgroundCommand.fields,
   taskId: Schema.NullOr(Schema.String),
+  /** Which of the project's runnables it runs (ADR-044). */
+  runnableId: Schema.NullOr(Schema.String),
   /** Where it runs, in words: the task's title, or the default branch. */
   where: Schema.String,
 })
 export type Launch = typeof Launch.Type
+
+/**
+ * Something a project runs, with no agent (ADR-044): one of a list in the
+ * person's order, the first its default, each in one of its repositories.
+ * Its command is what it runs where it is shown: in a task's worktree on the
+ * task, in the default branch's copy on the project. One that is its
+ * repository's own way (`own`) runs what is kept for the repository with
+ * set_run_command, or worked out from it (ADR-023).
+ */
+export const Runnable = Schema.Struct({
+  id: Schema.String,
+  /** What it is, in a word or two, where someone named it: Storybook. */
+  name: Schema.NullOr(Schema.String),
+  /** What it runs: `bun --filter @althar/ui storybook`. */
+  command: Schema.String,
+  /** The repository it runs in, by name. */
+  repository: Schema.String,
+  /** It is its repository's own way to run, kept for it or worked out: no command of its own. */
+  own: Schema.Boolean,
+  /** Who said how it runs: worked out from the repository, or kept by the person, the coordinator or another agent. */
+  from: Schema.Literals(['repository', 'person', 'coordinator', 'agent']),
+})
+export type Runnable = typeof Runnable.Type
+
+/** A script in one of a project's package.json files, as Althar would run it from its repository's root. */
+export const RepositoryScript = Schema.Struct({
+  /** The repository it is in, by name. */
+  repository: Schema.String,
+  /** The package it is in: `althar` at the root, `@althar/ui` in a workspace. */
+  package: Schema.String,
+  name: Schema.String,
+  /** What the script itself says: `storybook dev --port 6006 --no-open`. */
+  body: Schema.String,
+  /** The command that runs it: `bun --filter @althar/ui storybook`. */
+  command: Schema.String,
+})
+export type RepositoryScript = typeof RepositoryScript.Type
 
 export const SessionSummary = Schema.Struct({
   id: Schema.String,
@@ -1476,6 +1517,15 @@ export const SessionSummary = Schema.Struct({
   /** The models the agent offers for this session. */
   models: Schema.Array(Schema.String),
   turnRunning: Schema.Boolean,
+  /**
+   * Whether the runtime still holds a session on this thread: the one that
+   * takes a note, and that makes starting another refuse. A recorded session
+   * it no longer has — left by a crash, or by a start that never took — looks
+   * the same as a live one here, but can take neither a note nor a choice:
+   * sending one back to such a lead has to start it afresh. While the thread
+   * is held, a note waits its turn there, running or between turns.
+   */
+  held: Schema.Boolean,
   /** How full its context is, in tokens, as the agent last said while it runs; null until it says, or where it doesn't. */
   context: Schema.NullOr(ContextUse),
   /** What it left running in the background, while it runs, in the order it started them. */
@@ -1729,8 +1779,8 @@ export const ThreadSnapshot = Schema.Struct({
     actions: Schema.Array(TaskAction),
     /** Its plan still waiting to start, by id, for starting it now; null once started, or where it has none. */
     planId: Schema.NullOr(Schema.String),
-    /** What running what it built would run, as its repository says or keeps: `bun run dev`; null where nothing says. */
-    runCommand: Schema.NullOr(Schema.String),
+    /** What it can run in its worktree, in the project's order, the first its default (ADR-044); empty where nothing says how. */
+    runnables: Schema.Array(Runnable),
     /** What Althar runs of it, in its worktree. */
     launches: Schema.Array(Launch),
     /**
@@ -1769,8 +1819,6 @@ export const BoardTask = Schema.Struct({
   changed: Schema.NullOr(Schema.Struct({ files: Schema.Number, add: Schema.Number, del: Schema.Number })),
   /** A ready task's repositories with no pull request, not merged yet, which merge here. */
   here: Schema.Array(TaskRepositoryHere),
-  /** Not settled, everything its agents ask is allowed, by the task's own switch or its project's (ADR-043). Not without it. */
-  allowEverything: Schema.optional(Schema.Boolean),
 })
 export type BoardTask = typeof BoardTask.Type
 
@@ -1890,8 +1938,8 @@ export const CoordinatorSnapshot = Schema.Struct({
   earlier: Schema.Boolean,
   /** Where the project's repository is hosted, when its remote says, and whether Althar is connected to it there. */
   host: Schema.NullOr(Schema.Struct({ product: Product, name: Schema.String, webUrl: Schema.String, connected: Schema.Boolean })),
-  /** What running the project would run, as its repository says or keeps; null where nothing says. */
-  runCommand: Schema.NullOr(Schema.String),
+  /** What the project runs, in its order, the first its default (ADR-044), as run in the default branch's copy; empty where nothing says how. */
+  runnables: Schema.Array(Runnable),
   /** What Althar runs of the project's default branch. */
   launches: Schema.Array(Launch),
 })
@@ -2557,7 +2605,11 @@ export const Api = RpcGroup.make(
   command('StopBackground', { threadId: Schema.String, id: Schema.String }, Schema.Void),
   /** Clears one that ended by itself from the list. */
   command('ClearBackground', { threadId: Schema.String, id: Schema.String }, Schema.Void),
-  /** Runs the project with no agent: what the task built, in its worktree, or, with no task, a copy of the default branch. One already running there is the one returned. */
+  /**
+   * Runs one of the project's runnables with no agent, its default without
+   * one: what the task built, in its worktree, or, with no task, a copy of the
+   * default branch. One already running there is the one returned.
+   */
   command(
     'RunProject',
     {
@@ -2565,9 +2617,33 @@ export const Api = RpcGroup.make(
       taskId: Schema.NullOr(Schema.String),
       /** The thread it was asked for in, where its card goes; null for none. */
       threadId: Schema.NullOr(Schema.String),
+      runnableId: Schema.optional(Schema.String),
     },
     Launch,
   ),
+  /**
+   * Keeps something for the project to run (ADR-044): a new one, at the end
+   * of the list, or, by id, a change to one. A null command is the
+   * repository's own way to run. In a project of several repositories, say
+   * which; the first otherwise.
+   */
+  command(
+    'KeepRunnable',
+    {
+      projectId: Schema.String,
+      id: Schema.optional(Schema.String),
+      name: Schema.NullOr(Schema.String),
+      command: Schema.NullOr(Schema.String),
+      repository: Schema.optional(Schema.String),
+    },
+    Schema.Struct({ id: Schema.String }),
+  ),
+  /** Drops one of the project's runnables; one running goes on until stopped. */
+  command('DropRunnable', { projectId: Schema.String, id: Schema.String }, Schema.Void),
+  /** Puts the project's runnables in the person's order: the first is its default. */
+  command('OrderRunnables', { projectId: Schema.String, ids: Schema.Array(Schema.String) }, Schema.Void),
+  /** The scripts in the project's package.json files, to pick something to run from; its repositories as they are here. */
+  call('GetRepositoryScripts', { projectId: Schema.String }, Schema.Array(RepositoryScript)),
   /** Stops a run of the project; it goes from the list. */
   command('StopLaunch', { id: Schema.String }, Schema.Void),
   /** Clears a run that ended by itself from the list. */

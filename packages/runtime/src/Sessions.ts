@@ -10,6 +10,8 @@ import {
   type AgentSession,
   connect,
   type ConfigOption,
+  type PermissionDecision,
+  type PermissionRequest,
   type Question,
   type SessionEvent,
   type StopReport,
@@ -232,6 +234,8 @@ interface Running {
   brief: Brief | undefined
   /** Takes back the session's Althar tools. */
   readonly revokeTools: Effect.Effect<void>
+  /** What its permission requests are decided by: its thread, task and rules. */
+  readonly requestContext: RequestContext
   turnRunning: boolean
   stopping: boolean
   /** How full the agent's context is, in tokens, as it last said; null until it says (ACP's usage updates). */
@@ -510,6 +514,13 @@ export class Sessions extends Context.Service<
         readonly background: ReadonlyArray<ShownLeftRunning>
       }>
     >
+    /**
+     * Decides something Althar does for the thread's session as one of its
+     * own requests would be (ADR-013): by the rules, the coordinator or the
+     * person, who sees it in the thread as any other. The session waits on it
+     * as it would on its own.
+     */
+    askPermission(threadId: string, request: PermissionRequest): Effect.Effect<PermissionDecision, NoSession>
     /** What a command on a thread has printed so far, while it runs: its last lines, and how many came before them. */
     outputSoFar(threadId: string, itemId: string): Effect.Effect<Option.Option<OutputSoFar>>
     /**
@@ -1673,14 +1684,14 @@ export class Sessions extends Context.Service<
               state: 'running',
             })
           }
-          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke }
+          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext }
         })
 
       /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
       const activate = (connected: Effect.Success<ReturnType<typeof connectSession>>, brief: Brief) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { sessionId, entry, account, thread, connection, agent, scope, revokeTools } = connected
+          const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext } = connected
           const { definition } = entry
           const options = yield* agent.options
           yield* sql.withTransaction(
@@ -1711,6 +1722,7 @@ export class Sessions extends Context.Service<
             ended: yield* Deferred.make<void>(),
             brief,
             revokeTools,
+            requestContext,
             turnRunning: false,
             stopping: false,
             context: null,
@@ -2263,7 +2275,7 @@ export class Sessions extends Context.Service<
             // What the task built, which ends it: the person reads it before the proof, and it is said again when the work changes.
             "When you finish the task, say in finish_step's `built` what it has built, as it stands now, the way you would wrap up a session for the person: what it does for them now, the main changes and where they are, anything left open or decided along the way (\"the images aren't in the pull request because…\"), and what they should do next (try it at its local address, push, check it on a real device). A few lines or a short list, in plain words, about where it ended rather than how it got there: a review finding you fixed belongs only if it changed what was built. For a prototype or anything to look at, say how to see it. Settling a review that changes the work, say it again, so it never describes an earlier version; and once the plan's steps are done, when you change the work after (a failed check, what people said on the pull request), call finish_step again with `built` as it now stands.",
             // Althar reaches the code host for the task (ADR-011).
-            `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks on a change the person hasn't seen yet, which push_to_pull_request pushes at once. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. read_issue reads the issue the task came from, or any other.`,
+            `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks on a change the person hasn't seen yet, which push_to_pull_request pushes at once. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. A tag, such as a release's, you make with git tag and push with push_tag, once the person allows it. read_issue reads the issue the task came from, or any other.`,
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
             [
               ...published.filter((said) => said !== ''),
@@ -2275,7 +2287,7 @@ export class Sessions extends Context.Service<
                 ]
               : []),
             // Althar runs the project for the person itself (ADR-023): the lead keeps how, when it changes it.
-            'Althar runs the project for the person, with no agent, from a command it works out from the repository or keeps for it. If you change how the project runs, such as its dev script, its port or what it needs installed first, keep it with set_run_command.',
+            'Althar runs the project for the person, with no agent, from a command it works out from the repository or keeps for it, and the more things it keeps to run beside it, such as Storybook. If you change how the project runs, such as its dev script, its port or what it needs installed first, keep it with set_run_command; if you add something worth running by hand, keep it with keep_run.',
             ...(entries.length === 0 ? [] : [`The plan:\n${entries.map((entry) => `- [${entry.status}] ${entry.content}`).join('\n')}`]),
             ...(changed === '' ? [] : [`Changed since the start:\n${cap(changed)}`]),
             ...(status === '' ? [] : [`Not yet committed:\n${cap(status)}`]),
@@ -2304,7 +2316,7 @@ export class Sessions extends Context.Service<
             `- draft_task, with a title that says what should change in a few words, at most 60 characters, and a description with what the lead needs: the context, where to look, constraints, and what done looks like.${repositories.length > 1 ? ' Name the repositories it changes, as repositories; its lead can still read the others.' : ''}`,
             '- list_models, for the models you can give work to now, with how each scores, whether a plan pays for it, and the efforts it takes.',
             '- propose_plan, for the task you drafted: the model that implements it (its lead) and why, in a sentence, and the model that reviews it, or no review for something trivial; each with an effort where it matters. The reviewer only reads; the lead then settles what it finds. The plan starts on its own after 25 seconds, unless the person changes or holds it.',
-            "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built. It shows over the composer with where it answers. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command.",
+            "- run_project, when the person wants to see the project running: Althar runs it itself, with no agent, in a fresh copy of the default branch, or with task in that task's worktree to see what it built; its default, or with run another of the things it runs. It shows over the composer with where it answers. When Althar can't tell how the project runs, or tells wrong, read the repository and keep how with set_run_command. When the person wants more to run than its default (Storybook, the app itself, tests in watch mode), read the repository and keep each worth running by hand with keep_run.",
             "- start_task, for something small to do now, with no plan: trying something out, checking how something behaves, a quick look that needs the project's tools. One lead, a quick model is enough; no review, nothing published, and it starts at once, with no branch. To try what a task has built, ask its lead with message_lead: its branch is in its worktree.",
             "- rename_task, when a task's work became a change (a task started with start_task whose lead began changing the repository, which your news says) and its title no longer says what it does: give it one that does, in a few words. What the person asked stays in its thread.",
             '- list_tasks, read_task and read_thread, to see what is under way and how it went; read_task says what a finished task built. read_thread without a task reads your conversation with the person, back to its start.',
@@ -2582,6 +2594,11 @@ export class Sessions extends Context.Service<
                   stopping: running.stopping,
                   background: [...running.background.values()].map(shownOf),
                 })
+          }),
+        askPermission: (threadId, request) =>
+          Effect.suspend(() => {
+            const running = threads.get(threadId)
+            return running === undefined ? Effect.fail(new NoSession({ threadId })) : permissions.decide(running.requestContext, request)
           }),
         stopBackground: (threadId, id) =>
           Effect.gen(function* () {

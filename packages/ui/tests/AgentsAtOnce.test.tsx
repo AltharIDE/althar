@@ -76,6 +76,30 @@ describe('AgentsAtOnce kept at the default’s own number', () => {
   })
 })
 
+describe('AgentsAtOnce, compact', () => {
+  it('says one plain line whatever the number, a step for each number, and no scale', () => {
+    const { container } = render(<AgentsAtOnce compact count={9} machine={MACHINE} onChange={vi.fn()} />)
+    expect(screen.getByText('More tasks than this wait their turn.')).toBeTruthy()
+    expect(screen.queryByText(/well past|a little more/)).toBeNull()
+    expect(screen.queryByText('4 · this Mac')).toBeNull()
+    expect(container.querySelectorAll('[class*="step"]:not([class*="steps"])')).toHaveLength(16)
+    // The steps filled are the ones up to the number.
+    expect(container.querySelectorAll('[class*="stepIn"]')).toHaveLength(9)
+  })
+
+  it('still says which number is the default, to a screen reader', () => {
+    render(<AgentsAtOnce compact count={4} machine={MACHINE} onChange={vi.fn()} />)
+    expect(screen.getByRole('slider', { name: 'Agents at once' }).getAttribute('aria-valuetext')).toBe('4, this Mac’s default')
+  })
+
+  it('offers the way back to the default, after its line', () => {
+    const onChange = vi.fn()
+    render(<AgentsAtOnce compact count={7} machine={MACHINE} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Use the default' }))
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(null)
+  })
+})
+
 describe('AgentsAtOnce scale', () => {
   it.each([
     [1, 16],

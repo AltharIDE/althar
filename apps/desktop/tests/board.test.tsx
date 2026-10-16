@@ -475,6 +475,7 @@ describe('the board', () => {
           task: {
             ...snapshot().task,
             id: 't4',
+            lead: { agentId: 'claude-code', model: null, account: null },
             files: [{ path: 'src/limit.ts', from: null, status: 'modified', add: 12, del: 3, binary: false, uncommitted: false }],
           },
         }),
@@ -498,6 +499,106 @@ describe('the board', () => {
     await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
     // The note is queued first, so the lead reads it in its first turn.
     expect(send.mock.invocationCallOrder[0]).toBeLessThan(startSession.mock.invocationCallOrder[0] ?? 0)
+  })
+
+  it.each([
+    ['a stale session summary', false, true],
+    ['a held session', true, false],
+  ] as const)('sends back with a note when %s', async (_description, held, starts) => {
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
+    const base = snapshot()
+    const { client } = fakeClient({
+      send,
+      startSession,
+      getBoard: vi.fn(async () => board()),
+      getThread: vi.fn(async () =>
+        snapshot({
+          session: base.session === null ? null : { ...base.session, held },
+          task: { ...base.task, id: 't4', lead: { agentId: 'claude-code', model: null, account: null } },
+        }),
+      ),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ threadId: 'th4', body: 'Please rename it.', disposition: 'after_current' }))
+    if (starts) {
+      await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
+      expect(send.mock.invocationCallOrder[0]).toBeLessThan(startSession.mock.invocationCallOrder[0] ?? 0)
+    } else expect(startSession).not.toHaveBeenCalled()
+  })
+
+  it('starts the lead the thread has now, not the one the board card was read with', async () => {
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
+    const { client } = fakeClient({
+      send,
+      startSession,
+      getBoard: vi.fn(async () => board()),
+      getThread: vi.fn(async () =>
+        snapshot({ session: null, task: { ...snapshot().task, id: 't4', lead: { agentId: 'codex', model: null, account: null } } }),
+      ),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
+    await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'codex' }))
+  })
+
+  it('reports that Send back has no lead to start without queuing the note', async () => {
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
+    const { client } = fakeClient({
+      send,
+      startSession,
+      getBoard: vi.fn(async () => board()),
+      getThread: vi.fn(async () => snapshot({ session: null, task: { ...snapshot().task, id: 't4', lead: null } })),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
+    expect(await screen.findByText('This task has no lead to start. Pick an agent for it first.')).toBeTruthy()
+    expect(send).not.toHaveBeenCalled()
+    expect(startSession).not.toHaveBeenCalled()
+  })
+
+  it('shows the queued note status when the lead fails before a session exists', async () => {
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => {
+      throw new ApiError({ reason: 'NoAccount', message: 'No signed-in account is available.' })
+    })
+    const base = snapshot()
+    const { client } = fakeClient({
+      send,
+      startSession,
+      getBoard: vi.fn(async () => board()),
+      getThread: vi.fn(async () =>
+        snapshot({
+          session: base.session === null ? null : { ...base.session, held: false },
+          task: { ...base.task, id: 't4', lead: { agentId: 'claude-code', model: null, account: null } },
+        }),
+      ),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
+
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
+    const status = await screen.findByRole('alert')
+    expect(status.textContent).toContain('Note queued, but the lead could not start.')
+    expect(status.textContent).toContain('No signed-in account is available.')
+    expect(status.textContent).toContain("The note is already queued; don't send it again.")
+    expect(screen.queryByRole('textbox')).toBeNull()
   })
 
   it('pushes what the lead committed since before the pull request can be accepted, up to what the dock showed', async () => {
@@ -791,30 +892,6 @@ describe('every state the board shows', () => {
     expect(screen.getByText('Merge conflict')).toBeTruthy()
     expect(screen.getByText(why)).toBeTruthy()
     expect(screen.getAllByText('Ready to accept')).toHaveLength(1)
-  })
-
-  it('says Unrestricted at the foot of each card whose task allows everything, after what it says there already', () => {
-    const lanes = lanesOf(
-      board({
-        tasks: [
-          task({ taskId: 'u1', threadId: 'thu1', title: 'Allowed at work', phase: 'running', allowEverything: true }),
-          task({ taskId: 'u2', threadId: 'thu2', title: 'Handed back', phase: 'ready', handedBack: 'A conflict', allowEverything: true }),
-          task({ taskId: 'u3', threadId: 'thu3', title: 'Asks as ever', phase: 'running' }),
-          // Up next, it will start allowing everything.
-          task({ taskId: 'u4', threadId: 'thu4', title: 'Held, allowed', phase: 'held', allowEverything: true }),
-          task({ taskId: 'u5', threadId: 'thu5', title: 'Held, asks', phase: 'held' }),
-        ],
-        calls: [],
-      }),
-    )
-    withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
-    const cardOf = (title: string) => screen.getByRole('button', { name: title }).closest('article') as HTMLElement
-    expect(within(cardOf('Allowed at work')).getByText('Unrestricted')).toBeTruthy()
-    expect(within(cardOf('Handed back')).getByText('A conflict')).toBeTruthy()
-    expect(within(cardOf('Handed back')).getByText('Unrestricted')).toBeTruthy()
-    expect(within(cardOf('Asks as ever')).queryByText('Unrestricted')).toBeNull()
-    expect(within(cardOf('Held, allowed')).getByText('Unrestricted')).toBeTruthy()
-    expect(within(cardOf('Held, asks')).queryByText('Unrestricted')).toBeNull()
   })
 
   it('says how long work has run', () => {

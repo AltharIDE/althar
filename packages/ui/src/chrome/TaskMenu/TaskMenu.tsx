@@ -37,9 +37,6 @@ export interface TaskMenuText {
   /** Opening the folder, in the editor named. */
   open: (editor: string) => string
   openAbout: string
-  /** Running what it built, with the command it runs. */
-  run: (command: string) => string
-  runAbout: string
   rename: string
   renameAbout: string
   startNow: string
@@ -71,8 +68,6 @@ export interface TaskMenuText {
   allowAllAbout: string
   allowAllProject: string
   /** Beside the button while everything on the task is allowed: the word, and what it means, by its project's switch or its own. */
-  unrestricted: string
-  unrestrictedAbout: (byProject: boolean) => string
 }
 
 export const taskMenuText: TaskMenuText = {
@@ -80,8 +75,6 @@ export const taskMenuText: TaskMenuText = {
   label: 'This task',
   open: (editor) => `Open in ${editor}`,
   openAbout: 'The task’s folder, on its branch.',
-  run: (command) => `Run ${command}`,
-  runAbout: 'Althar runs what it built, in its worktree. It shows over the composer.',
   rename: 'Rename',
   renameAbout: 'Give it another title. Its branch and folder keep their names.',
   startNow: 'Start now',
@@ -109,11 +102,6 @@ export const taskMenuText: TaskMenuText = {
   allowAll: 'Allow everything on this task',
   allowAllAbout: 'Nothing its agents ask waits for you. Never still holds.',
   allowAllProject: 'On for every task in this project, from its Rules.',
-  unrestricted: 'Unrestricted',
-  unrestrictedAbout: (byProject) =>
-    byProject
-      ? 'Its project allows everything: nothing its agents ask waits for you. Never still holds.'
-      : 'Everything is allowed on this task: nothing its agents ask waits for you. Never still holds.',
 }
 
 export interface TaskMenuProps {
@@ -123,8 +111,6 @@ export interface TaskMenuProps {
   onOpen?: () => void
   /** The editor it opens in, by name. */
   editor?: string
-  /** Runs what it built, with no agent: what the run command is, and running it. */
-  run?: { readonly command: string; readonly onRun: () => void }
   /** Starts its plan now, while it waits to start. */
   onStartNow?: () => void
   /** Marks its draft pull request ready for review. */
@@ -157,7 +143,6 @@ export function TaskMenu({
   onRename,
   onOpen,
   editor,
-  run,
   onStartNow,
   onMarkReady,
   onSkipReview,
@@ -176,8 +161,8 @@ export function TaskMenu({
   // Renaming puts the cursor in the title's field: the menu closing doesn't take focus back to its button.
   const renaming = useRef(false)
   const opener = onOpen !== undefined && editor !== undefined ? { onOpen, editor } : null
-  // Ways to look at what it made: in the editor, and running.
-  const opens = opener !== null || run !== undefined || onRename !== undefined
+  // Ways to look at what it made, in the editor, and to name it.
+  const opens = opener !== null || onRename !== undefined
   // Forward first, then what holds or brings it back, then what settles it, set apart.
   const course = [
     onStartNow && (
@@ -214,8 +199,6 @@ export function TaskMenu({
   if (!opens && course.length === 0 && !onAbandon && !conflicts && !allowEverything) return null
   // Said beside the button only where the task goes otherwise than its project.
   const differs = conflicts !== undefined && conflicts.choice !== 'project' && (conflicts.choice === 'on') !== conflicts.project
-  // Said beside it whenever everything on the task is allowed, by its own switch or its project's.
-  const unrestricted = allowEverything !== undefined && (allowEverything.on || allowEverything.project)
   const menu = (
     <Menu
       label={t.label}
@@ -246,11 +229,6 @@ export function TaskMenu({
       {opener && (
         <MenuItem icon="external" description={t.openAbout} onSelect={opener.onOpen}>
           {t.open(opener.editor)}
-        </MenuItem>
-      )}
-      {run && (
-        <MenuItem icon="terminal" description={t.runAbout} onSelect={run.onRun}>
-          {t.run(run.command)}
         </MenuItem>
       )}
       {opens && course.length > 0 && <MenuSeparator />}
@@ -295,17 +273,9 @@ export function TaskMenu({
       )}
     </Menu>
   )
-  if (!differs && !unrestricted) return menu
+  if (!differs) return menu
   return (
     <>
-      {unrestricted && (
-        <Tooltip label={t.unrestrictedAbout(!allowEverything.on)} placement="below">
-          <span className={s.unrestricted}>
-            {t.unrestricted}
-            <VisuallyHidden>, {t.unrestrictedAbout(!allowEverything.on)}</VisuallyHidden>
-          </span>
-        </Tooltip>
-      )}
       {differs && <span className={s.hint}>{t.conflictsHint(conflicts.choice === 'on')}</span>}
       {menu}
     </>

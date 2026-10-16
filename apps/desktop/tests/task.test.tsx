@@ -1120,46 +1120,10 @@ describe('a task', () => {
     expect(await shownFor(true, true)).toEqual([false, false])
   })
 
-  it('allows everything on it from its menu, and says Unrestricted beside the menu while it does, by its own switch or its project’s', async () => {
-    const { client, view } = await taskMenu({})
-    expect(screen.queryByText('Unrestricted')).toBeNull()
+  it('allows everything on it from its menu', async () => {
+    const { client } = await taskMenu({})
     await userEvent.click(screen.getByRole('menuitemcheckbox', { name: /Allow everything on this task/ }))
     await waitFor(() => expect(client.setTaskAllowEverything).toHaveBeenCalledWith({ taskId: 't1', allowEverything: true }))
-    view.unmount()
-    const shownFor = async (own: boolean, project: boolean) => {
-      const { client } = fakeClient({
-        getThread: vi.fn(async () => thread({ task: { ...thread().task, allowEverything: { task: own, project } } })),
-      })
-      const shown = withServices(<Task />, client)
-      await screen.findByRole('button', { name: 'More for this task' })
-      const said = screen.queryByText('Unrestricted') !== null
-      shown.unmount()
-      return said
-    }
-    expect(await shownFor(true, false)).toBe(true)
-    expect(await shownFor(false, true)).toBe(true)
-    expect(await shownFor(false, false)).toBe(false)
-  })
-
-  it('says Unrestricted as its project’s switch turns on, and no longer as it turns off, with nothing else changing on it', async () => {
-    let project = false
-    const { client, emit } = fakeClient({
-      getThread: vi.fn(async () => thread({ task: { ...thread().task, allowEverything: { task: false, project } } })),
-    })
-    withServices(<Task />, client)
-    await screen.findByRole('button', { name: 'More for this task' })
-    expect(screen.queryByText('Unrestricted')).toBeNull()
-    project = true
-    act(() => emit(changed('policy', 'pol2', null, 'p1')))
-    expect(await screen.findByText('Unrestricted')).toBeTruthy()
-    // Another project's rules read nothing here.
-    const reads = vi.mocked(client.getThread).mock.calls.length
-    act(() => emit(changed('policy', 'pol3', null, 'p2')))
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    expect(client.getThread).toHaveBeenCalledTimes(reads)
-    project = false
-    act(() => emit(changed('policy', 'pol4', null, 'p1')))
-    await waitFor(() => expect(screen.queryByText('Unrestricted')).toBeNull())
   })
 
   it('says why a call the project always asks about has no always allow, and allows everything on the task from it', async () => {
@@ -1974,6 +1938,26 @@ describe('a task', () => {
     await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'default' }))
     expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Carry on with the retry.', disposition: 'after_current' })
     // Queued before the lead starts, so it reads it in its first turn.
+    expect(vi.mocked(client.send).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.startSession).mock.invocationCallOrder[0] ?? 0)
+  })
+
+  it('uses the picked agent for a stale session summary and queues the note before starting it', async () => {
+    const base = thread()
+    const stale = thread({
+      session: base.session === null ? null : { ...base.session, held: false },
+      task: { ...base.task, phase: 'stopped', actions: ['abandon'], lead: { agentId: 'codex', model: 'gpt-5.2-codex', account: null } },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => stale) })
+    withServices(<Task />, client)
+    await waitFor(() => expect(client.status).toHaveBeenCalled())
+    expect(await screen.findByText('Stopped')).toBeTruthy()
+    const box = await screen.findByRole('textbox', { name: 'Tell Codex something' })
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await screen.findByText('Codex doesn’t take images, so they can’t be sent to it.')).toBeTruthy()
+    expect(screen.queryByRole('img', { name: 'shot.png' })).toBeNull()
+    await userEvent.type(box, 'Carry on{Enter}')
+    await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2-codex' }))
+    expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Carry on', disposition: 'after_current' })
     expect(vi.mocked(client.send).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.startSession).mock.invocationCallOrder[0] ?? 0)
   })
 
