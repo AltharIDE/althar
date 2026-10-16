@@ -1,0 +1,102 @@
+[
+  {
+    "id": "T1",
+    "page": "?d=Today&open=open",
+    "caption": "Today: the panel from the front page's Settings, on althar with Linear, all connected, 9 notes"
+  },
+  {
+    "id": "T2",
+    "page": "?d=Today&open=open&tracker=none",
+    "caption": "Today without a tracker: Repositories goes across and the switches move to fill the grid"
+  },
+  {
+    "id": "T3",
+    "page": "?d=Today&open=open&conn=tracker",
+    "caption": "Today with Linear not connected: only a small grey Connect beside its name says so"
+  },
+  { "id": "T4", "page": "?d=Today&open=notes", "caption": "Today: Notes opened, in place of the grid" },
+  {
+    "id": "A1",
+    "page": "?d=A&open=open",
+    "caption": "A · Calm panel: the project's row, then groups under plain headers, every switch at its row's end"
+  },
+  {
+    "id": "A2",
+    "page": "?d=A&open=open&conn=tracker",
+    "caption": "A with Linear not connected: a violet line and a Connect button in its row, and one more Needs you on the front"
+  },
+  {
+    "id": "A3",
+    "page": "?d=A&open=open&tracker=none",
+    "caption": "A without a tracker: Move issues and the Linear row go; nothing else moves"
+  },
+  { "id": "A4", "page": "?d=A&open=notes", "caption": "A: Notes opened in the panel" },
+  {
+    "id": "B1",
+    "page": "?d=B&open=open",
+    "caption": "B · Settings view: Settings is the fourth of the project's views; the page is laid out like the app's Settings tab, with the project's switches down the side"
+  },
+  {
+    "id": "B2",
+    "page": "?d=B&open=open&conn=host",
+    "click": ["text:Repositories and connections"],
+    "caption": "B with GitHub signed out: a violet dot on the section, and Sign in again in its row"
+  },
+  {
+    "id": "B3",
+    "page": "?d=B&open=open",
+    "click": ["text:Rules and access"],
+    "caption": "B: Rules and access holds the switches and the real rules screen itself, no longer a page of its own"
+  },
+  { "id": "B4", "page": "?d=B&open=notes&notes=few", "caption": "B: Notes, two of them" },
+  {
+    "id": "C1",
+    "page": "?d=C&open=open",
+    "caption": "C · One sheet: Settings opens a sheet beside the project, its index held at the top, the switches first"
+  },
+  {
+    "id": "C2",
+    "page": "?d=C&open=open&conn=tracker",
+    "click": ["[role=radio]:has-text('Connections')"],
+    "caption": "C with Linear not connected: the index has a dot on Connections, and its row says why"
+  },
+  { "id": "C3", "page": "?d=C&open=notes", "caption": "C: scrolled down to Notes, the index following" },
+  {
+    "id": "D1",
+    "page": "?d=D&conn=tracker",
+    "caption": "D · In place: the front page as it is, with an access word beside Run, a ⋯ menu, and a violet dot on DEV issues"
+  },
+  {
+    "id": "D2",
+    "page": "?d=D&conn=tracker",
+    "click": ["[aria-label='Linear: DEV issues']"],
+    "caption": "D: DEV issues opened in place: who Althar is on Linear, Connect, and Move issues"
+  },
+  {
+    "id": "D3",
+    "page": "?d=D",
+    "click": ["text:The coordinator decides"],
+    "caption": "D: the access word opened: Allow everything, Resolve conflicts and the way to the rules"
+  },
+  {
+    "id": "D4",
+    "page": "?d=D",
+    "click": ["[aria-label='Change its name and colour']"],
+    "caption": "D: the name and mark opened: its name and colour, changed in place"
+  },
+  {
+    "id": "D5",
+    "page": "?d=D&open=notes",
+    "caption": "D: the ⋯ menu keeps what has no place on the front: runs, notes (open here), Remove"
+  },
+  {
+    "id": "E1",
+    "page": "?d=E&open=open&conn=tracker",
+    "caption": "E · One gear: no project button; on a project's screen the bar's gear leads with its switches, Linear's trouble across them, then the app's"
+  },
+  {
+    "id": "E2",
+    "page": "?d=E&open=notes",
+    "caption": "E: 'althar settings' opens the Settings tab at althar, among the app's sections; every part one under another"
+  }
+]
