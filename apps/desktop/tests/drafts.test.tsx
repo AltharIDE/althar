@@ -493,6 +493,37 @@ describe('dictation carried with the person', () => {
     expect(screen.queryByRole('region', { name: 'To the coordinator · meridian' })).toBeNull()
   })
 
+  it('keeps what couldn’t be written down, to try again from the pill', async () => {
+    const { speech, pill } = await toTheTask()
+    await userEvent.click(within(pill).getByRole('button', { name: /^Stop and write it down/ }))
+    await speech.fails()
+    const card = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
+    expect(within(card).getByText(/of what you said couldn't be written down/)).toBeTruthy()
+    await userEvent.click(within(card).getByRole('button', { name: 'Try again' }))
+    await speech.heard('Why is checkout slow?')
+    const written = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
+    expect(within(written).getByRole<HTMLTextAreaElement>('textbox', { name: 'What you said' }).value).toBe('Why is checkout slow?')
+  })
+
+  it('throws away what couldn’t be written down, from the pill', async () => {
+    const { speech, pill } = await toTheTask()
+    await userEvent.click(within(pill).getByRole('button', { name: /^Stop and write it down/ }))
+    await speech.fails()
+    const card = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
+    await userEvent.click(within(card).getByRole('button', { name: 'Throw it away' }))
+    expect(screen.queryByRole('region', { name: 'To the coordinator · meridian' })).toBeNull()
+  })
+
+  it('keeps what was written for later, and goes back to its composer', async () => {
+    const { speech, pill } = await toTheTask()
+    await userEvent.click(within(pill).getByRole('button', { name: /^Stop and write it down/ }))
+    await speech.heard('Why is checkout slow?')
+    const card = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
+    await userEvent.click(within(card).getByRole('button', { name: 'Back to it' }))
+    await userEvent.click(within(card).getByRole('button', { name: 'Keep it for later' }))
+    expect(screen.queryByRole('region', { name: 'To the coordinator · meridian' })).toBeNull()
+  })
+
   it('is thrown away from the pill, and never written down', async () => {
     const { speech, pill } = await toTheTask()
     await userEvent.click(within(pill).getByRole('button', { name: 'Show all of what you said' }))
