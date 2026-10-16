@@ -415,6 +415,29 @@ describe('dictation carried with the person', () => {
     expect(client.send).toHaveBeenCalledTimes(1)
   })
 
+  it('goes on carrying what they started saying while it was sent', async () => {
+    const { speech, client, host, pill, task } = await toTheTask()
+    let arrive = () => {}
+    vi.mocked(client.send).mockImplementationOnce(() => new Promise<void>((resolve) => void (arrive = resolve)))
+    await userEvent.click(within(pill).getByRole('button', { name: /^Stop and write it down/ }))
+    await speech.heard('Why is checkout slow?')
+    const card = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
+    await userEvent.click(within(card).getByRole('button', { name: 'Send to the coordinator' }))
+    // Back at the coordinator, they start saying more, and are off to the task again while it listens.
+    task.unmount()
+    const project = withServices(<Project />, client, host)
+    await coordinatorBox()
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    project.unmount()
+    withServices(<Task />, client, host)
+    await taskBox()
+    // The first arrives: the second is still carried, listening.
+    await act(async () => arrive())
+    const again = screen.getByRole('group', { name: 'To the coordinator · meridian' })
+    expect(within(again).getByRole('button', { name: /^Stop and write it down/ })).toBeTruthy()
+  })
+
   it('is back in its composer, before what they wrote meanwhile, where it didn’t go', async () => {
     const { speech, client, host, pill, task } = await toTheTask()
     let fail = () => {}

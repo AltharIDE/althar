@@ -82,14 +82,17 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
   // Sent once, however often the pill is drawn again meanwhile. It leaves the draft as it goes, so its composer has nothing of it to send again, and what the person writes there meanwhile is theirs: untouched once it is there, after it if it didn't go.
   const send = (threadId: string) => {
     const body = draftOf(thread).text.trim()
-    if (body === '' || sessionOf(thread).sending !== null) return
+    const sent = sessionOf(thread)
+    if (body === '' || sent.sending !== null) return
     changeSession(thread, { sending: body })
     setDraftText(thread, '')
     setError(null)
     client.send({ threadId, body, disposition: 'after_current' }).then(
       () => {
         changeSession(thread, { sending: null })
-        if (draftOf(thread).text.trim() === '') done()
+        // Only what was carried as it went is dealt with: dictation started since, and carried in turn, goes on.
+        const now = sessionOf(thread)
+        if (now.away === sent.away && now.phase === sent.phase && now.failed === null && draftOf(thread).text.trim() === '') done()
       },
       () => {
         setDraftText(thread, (now) => (now.trim() === '' ? body : `${body}\n\n${now.trimStart()}`))
