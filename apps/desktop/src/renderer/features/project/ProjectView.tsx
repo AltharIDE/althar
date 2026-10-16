@@ -28,6 +28,7 @@ import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
+import { Runs } from '../runs/Runs'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
@@ -210,10 +211,10 @@ export function ProjectView({
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Whatever it ran on last, while that agent can; otherwise the first that can.
   const first = model.agents[0]
-  const waiting = session === null || handover?.agentId === session.agentId ? null : handover
+  const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
   const chosen: Choice | null =
     waiting ??
-    (session === null ? null : runningOn(session)) ??
+    (session === null || !session.held ? null : runningOn(session)) ??
     pick ??
     (suggested?.available === true ? { agentId: suggested.agentId, model: suggested.model, effort: suggested.effort } : null) ??
     (first === undefined ? null : { agentId: first.id, model: null, effort: null })
@@ -257,7 +258,7 @@ export function ProjectView({
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {
-    if (session === null) return setPick(next)
+    if (session === null || !session.held) return setPick(next)
     if (next.agentId !== session.agentId) return setHandover(next)
     setHandover(null)
     void model.choose(next)
@@ -286,8 +287,8 @@ export function ProjectView({
           <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
         </p>
       )}
-      {session === null && model.agents.length === 0 && <p className={s.quiet}>{text.needsAgent}</p>}
-      {session === null && suggested !== null && !suggested.available && chosen !== null && (
+      {(session === null || !session.held) && model.agents.length === 0 && <p className={s.quiet}>{text.needsAgent}</p>}
+      {(session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null && (
         <p className={s.quiet}>{text.signedOut(suggested.agentName, agentName(chosen.agentId))}</p>
       )}
       <Composer
@@ -330,7 +331,7 @@ export function ProjectView({
               value={chosen}
               onChange={choose}
               // Another agent's model hands the conversation over, once the person says something.
-              {...(session === null ? {} : { handover: { note: text.handsOver, ask: null } })}
+              {...(session === null || !session.held ? {} : { handover: { note: text.handsOver, ask: null } })}
             />
           )
         }
@@ -366,8 +367,23 @@ export function ProjectView({
         trackers,
         open: (url) => window.open(url, '_blank'),
       })}
-      // The default branch runs with no agent, where its repository says how.
-      {...(coordinator?.runCommand == null ? {} : { run: { command: coordinator.runCommand, onRun: () => void model.runProject() } })}
+      // What the project runs, with no agent, on its default branch (ADR-044).
+      {...(coordinator === null
+        ? {}
+        : {
+            run: (
+              <Runs
+                projectId={projectId}
+                project={kept?.name ?? name}
+                taskId={null}
+                runnables={coordinator.runnables}
+                launches={coordinator.launches}
+                now={now}
+                onRun={(id) => void model.runProject(null, id)}
+                onStop={(id) => void model.stopLaunch(id)}
+              />
+            ),
+          })}
       {...(settings === undefined
         ? {}
         : {
@@ -438,7 +454,7 @@ export function ProjectView({
                           run={run}
                           now={now}
                           onStop={(id) => void model.stopLaunch(id)}
-                          onRunAgain={(taskId) => void model.runProject(taskId)}
+                          onRunAgain={(taskId, runnableId) => void model.runProject(taskId, runnableId)}
                         />
                       )}
                       queued={text.queued}

@@ -12,6 +12,7 @@ export const revisionedTables = [
   'projects',
   'project_settings',
   'project_notes',
+  'runnables',
   'tasks',
   'task_repository_requirements',
   'task_plans',

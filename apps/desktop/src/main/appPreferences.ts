@@ -47,6 +47,8 @@ export const PREFERENCES = {
   badge: onOff(true),
   /** The sound each notification plays, one of the Mac's alert sounds; none, silent. */
   sound,
+  /** The sound there was before Settings' Sound card silenced them, which turning it on again puts back; none before it ever did. */
+  lastSound: sound,
   /** How hard the computer works, and Althar's work's part, in the window's bar; read only while it shows. */
   showLoad: onOff(true),
   /** Anonymous usage data: the steps people take, never what they write (usageData.ts). */

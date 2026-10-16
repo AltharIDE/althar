@@ -48,8 +48,9 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
     await expect(page.getByRole('columnheader', { name: 'Budget' }).last()).toBeVisible()
     // The screenshot, from the artifact store at its address, drawn large with what the lead said.
     const open = page.getByRole('button', { name: /full size$/ }).last()
-    // A picture loads as it nears the screen.
-    await open.scrollIntoViewIfNeeded()
+    // A picture loads as it nears the screen. The message may still be drawn again as it settles, putting a new button in the old
+    // one's place, so it is scrolled to once one stays.
+    await expect(() => open.scrollIntoViewIfNeeded({ timeout: 1_000 })).toPass()
     const shot = open.getByRole('img')
     await expect.poll(() => shot.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
     expect(await shot.getAttribute('src')).toMatch(/^althar-picture:\/\/shot\/[0-9a-f]{64}\?w=1120$/)

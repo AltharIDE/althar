@@ -1,7 +1,7 @@
-import { type DragEvent, useEffect, useState } from 'react'
+import { type DragEvent, useState } from 'react'
 
-import type { HomeCall, HomeEvent, HomeTask, ProjectSummary } from '@althar/contracts'
-import { type IconName, PermissionAnswers, ProjectInk, type ProjectRef, TaskStatus } from '@althar/ui'
+import type { HomeCall, HomeEvent, HomeTask } from '@althar/contracts'
+import { type IconName, PermissionAnswers, type ProjectRef, TaskStatus } from '@althar/ui'
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
 import { queuedOfWords } from '../../shared/agents'
@@ -9,13 +9,12 @@ import { isFinished } from '../../shared/calls'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import { type Next, standingText } from '../../shared/standing'
 import { ago, clock, useNow } from '../../shared/time'
-import { BarEnd, useNewTab } from '../tabs/TabsFrame'
-import type { EdgeGlance } from '../settings/EdgePicture'
-import { SettingsPanel } from '../settings/SettingsPanel'
+import { useNewTab } from '../tabs/TabsFrame'
 import type { StartModel } from '../start/useStart'
+import { homeGlanceOf, refOf } from './glance'
 import s from './Home.module.css'
 import type { HomeModel } from './useHome'
-import { type AnsweredCall, needLineOf, needsOf, needText, workOf } from './needs'
+import { type AnsweredCall, needLineOf, needText } from './needs'
 import { useModelNames } from '../../shared/modelNames'
 
 /*
@@ -23,9 +22,10 @@ import { useModelNames } from '../../shared/modelNames'
  * Across every project, what waits on you, answered where it is when a click
  * will do and opened as its task when it needs reading; what is in progress;
  * and what the loop did since you last left. Beside them, the projects, each
- * with its mark. The window's bar has only settings, as a panel from its
- * gear: how much needs you is the stream's first word, and which agents are
- * signed in is for settings, not the home. A task that waits on you is in
+ * with its mark. The window's bar has nothing of the home's own, only
+ * Althar's settings, as every screen has them: how much needs you is the
+ * stream's first word, and which agents are signed in is for settings, not
+ * the home. A task that waits on you is in
  * what needs you, not again in what is in progress; one that waits for a
  * free agent stands still in its project's row, which says what it waits
  * for. There is no composer: coordinators belong to projects. A new project
@@ -53,11 +53,7 @@ export const text = {
   },
 }
 
-/** A project's ink as the kit has it. */
-const inkOf = (ink: ProjectSummary['ink']): ProjectInk => ink as ProjectInk
-
-/** A project as the home draws it: its mark, from its id, which outlives its name; its ink; its name. */
-export const refOf = (project: ProjectSummary): ProjectRef => ({ seed: project.id, ink: inkOf(project.ink), name: project.name })
+export { refOf }
 
 /** How a task that isn't ready stands: running, waiting on a call, or stopped with no agent on it. */
 const statusOf = (phase: HomeTask['phase']) =>
@@ -119,45 +115,21 @@ export function HomeView({
   const now = useNow(true)
   // Calls answered here: each stays its line, quiet, where it was, until the person leaves.
   const [answered, setAnswered] = useState<ReadonlyArray<AnsweredCall>>([])
-  const [settings, setSettings] = useState(false)
   const agents = start.status?.agents ?? []
   const named = useModelNames()
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
 
   const projects = home?.projects ?? []
-  const refs = new Map(projects.map((project) => [project.id, refOf(project)]))
   const tasks = home?.tasks ?? []
-  // In progress is every task not ready to accept; only those with an agent on them, or held for a reset, are running.
-  // A plain task that finished waits on its board, not here (the runtime leaves it out too).
-  const ready = tasks.filter((task) => task.phase === 'ready' && !isFinished(task))
-  const calls = (home?.calls ?? []).filter((call) => !answered.some((one) => one.call.id === call.id))
-  // What has a card above isn't listed again under it.
-  const carded = new Set(calls.map((call) => call.threadId))
-  const working = tasks.filter((task) => task.phase !== 'ready' && !carded.has(task.threadId))
-  const waiting = calls.length + ready.length
-
-  const needs = needsOf({
-    calls: home?.calls ?? [],
+  const refs = new Map(projects.map((project) => [project.id, refOf(project)]))
+  // Only tasks with an agent on them, or held for a reset, are running; a plain task that finished waits on its board.
+  const { calls, working, waiting, needs } = homeGlanceOf(home, {
     answered,
-    ready,
-    refs,
     agentName: name,
     modelName: (agentId, model) => named(agentId, model).name,
   })
-  // What waits now, and how much is in progress, for Settings' pictures of the edge of the screen.
-  const glance: EdgeGlance = { waiting, needs: needs.filter((need) => need.answer === undefined).slice(0, 3), work: workOf(working) }
 
   const newTab = useNewTab()
-  // ⌘, opens and closes settings. ⌘N and ⌘ and a number belong to the window's tabs.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key !== ',') return
-      setSettings((now) => !now)
-      event.preventDefault()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  })
 
   const answer = (call: HomeCall, reply: Reply) => {
     setAnswered((now) => [...now, { call, reply }])
@@ -239,9 +211,6 @@ export function HomeView({
 
   return (
     <div className={s.window} {...drop}>
-      <BarEnd>
-        <SettingsPanel start={start} open={settings} onOpenChange={setSettings} glance={glance} />
-      </BarEnd>
       {error !== null && (
         <p className={s.failure} role="alert">
           {error}
