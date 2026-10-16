@@ -383,7 +383,7 @@ describe('dictation carried with the person', () => {
     expect(speech.dictation.transcribe).not.toHaveBeenCalled()
   })
 
-  it('sends once while the person goes on elsewhere, and keeps what they wrote meanwhile', async () => {
+  it('sends once while the person goes on elsewhere, and leaves what they write meanwhile as it is', async () => {
     const { speech, client, host, pill, task } = await toTheTask()
     let arrive = () => {}
     vi.mocked(client.send).mockImplementationOnce(() => new Promise<void>((resolve) => void (arrive = resolve)))
@@ -400,13 +400,35 @@ describe('dictation carried with the person', () => {
     const again = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
     await userEvent.click(within(again).getByRole('button', { name: 'Send to the coordinator' }))
     expect(client.send).toHaveBeenCalledTimes(1)
-    // Back at the coordinator, they write more before it is there.
+    // Back at the coordinator before it is there: nothing of it to send again from its composer.
     next.unmount()
     withServices(<Project />, client, host)
     const box = await coordinatorBox()
-    await userEvent.type(box, ' On mobile too.')
+    expect(box.value).toBe('')
+    await userEvent.type(box, '{Enter}')
+    expect(client.send).toHaveBeenCalledTimes(1)
+    // What they write there, even starting the same, is theirs once it is there.
+    await userEvent.type(box, 'Why is checkout slow? On mobile')
     await act(async () => arrive())
-    await waitFor(() => expect(box.value).toBe('On mobile too.'))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'To the coordinator · meridian' })).toBeNull())
+    expect(box.value).toBe('Why is checkout slow? On mobile')
+    expect(client.send).toHaveBeenCalledTimes(1)
+  })
+
+  it('is back in its composer, before what they wrote meanwhile, where it didn’t go', async () => {
+    const { speech, client, host, pill, task } = await toTheTask()
+    let fail = () => {}
+    vi.mocked(client.send).mockImplementationOnce(() => new Promise<void>((_, reject) => void (fail = () => reject(new Error('offline')))))
+    await userEvent.click(within(pill).getByRole('button', { name: /^Stop and write it down/ }))
+    await speech.heard('Use Redis')
+    const card = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
+    await userEvent.click(within(card).getByRole('button', { name: 'Send to the coordinator' }))
+    task.unmount()
+    withServices(<Project />, client, host)
+    const box = await coordinatorBox()
+    await userEvent.type(box, 'Use Redisson')
+    await act(async () => fail())
+    await waitFor(() => expect(box.value).toBe('Use Redis\n\nUse Redisson'))
   })
 
   it('sends what was written to the thread it was said in, and is gone', async () => {

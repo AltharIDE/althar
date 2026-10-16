@@ -42,8 +42,8 @@ export interface Session {
   readonly arrived: string | null
   /** When the person left its composer while it listened or was written down: it is carried with them since. Null while its composer shows, or once dealt with. */
   readonly away: number | null
-  /** What was written is being sent from the pill that carries it: once at a time, wherever the person goes meanwhile. */
-  readonly sending: boolean
+  /** What is being sent from the pill that carries it, wherever the person goes meanwhile. Out of the draft while it goes, so its composer can't send it again, and back in front of what is there if it didn't go. */
+  readonly sending: string | null
 }
 
 /** Whose a thread's dictation is, and how to get it there from elsewhere. */
@@ -92,7 +92,7 @@ const IDLE: Session = {
   failed: null,
   arrived: null,
   away: null,
-  sending: false,
+  sending: null,
 }
 
 const sessions = new Map<string, Session>()

@@ -79,23 +79,21 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
   // Dealt with: nothing carried, and no note in its composer that it came while the person was away.
   const done = () => changeSession(thread, { away: null, arrived: null })
 
-  // Sent once, however often the pill is drawn again meanwhile; only what went leaves the draft, so what the person wrote in its composer since stays.
+  // Sent once, however often the pill is drawn again meanwhile. It leaves the draft as it goes, so its composer has nothing of it to send again, and what the person writes there meanwhile is theirs: untouched once it is there, after it if it didn't go.
   const send = (threadId: string) => {
     const body = draftOf(thread).text.trim()
-    if (body === '' || sessionOf(thread).sending) return
-    changeSession(thread, { sending: true })
+    if (body === '' || sessionOf(thread).sending !== null) return
+    changeSession(thread, { sending: body })
+    setDraftText(thread, '')
     setError(null)
     client.send({ threadId, body, disposition: 'after_current' }).then(
       () => {
-        setDraftText(thread, (now) => {
-          const left = now.trim()
-          return left === body ? '' : left.startsWith(body) ? left.slice(body.length).trimStart() : now
-        })
-        changeSession(thread, { sending: false })
+        changeSession(thread, { sending: null })
         if (draftOf(thread).text.trim() === '') done()
       },
       () => {
-        changeSession(thread, { sending: false })
+        setDraftText(thread, (now) => (now.trim() === '' ? body : `${body}\n\n${now.trimStart()}`))
+        changeSession(thread, { sending: null })
         setError(carriedText.didntSend)
       },
     )
@@ -119,7 +117,7 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
       to={to.to}
       elapsed={listening ? lengthOf(session.seconds) : null}
       levels={session.levels}
-      words={phase === 'written' ? draft.text : session.interim}
+      words={phase === 'written' ? (sending ?? draft.text) : session.interim}
       onChange={(text) => setDraftText(thread, text)}
       said={failed === null ? '' : lengthOf(failed.seconds)}
       kbd={SHORTCUT}
@@ -133,8 +131,10 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
         changeSession(thread, { failed: null })
         void writeIn(thread, failed, null)
       }}
-      {...(target !== null && draft.images.length === 0 ? { send: { label: to.send, busy: sending, onSend: () => send(target) } } : {})}
-      {...(there !== null && here !== null && !sending ? { move: { label: there.take, onMove: move } } : {})}
+      {...(target !== null && draft.images.length === 0
+        ? { send: { label: to.send, busy: sending !== null, onSend: () => send(target) } }
+        : {})}
+      {...(there !== null && here !== null && sending === null ? { move: { label: there.take, onMove: move } } : {})}
       error={error}
     />
   )
