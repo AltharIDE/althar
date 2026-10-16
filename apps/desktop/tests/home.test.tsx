@@ -230,6 +230,40 @@ describe('the home', () => {
     expect(onTask).toHaveBeenLastCalledWith('th5')
   })
 
+  it('says why a push from a line failed, and offers to try again', async () => {
+    const push = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError({ reason: 'ConnectorFailed', message: 'GitHub says: the branch is protected' }))
+      .mockResolvedValue(undefined)
+    const { client } = fakeClient({
+      push,
+      getHome: vi.fn(async () =>
+        home({
+          looked: null,
+          tasks: [
+            task({
+              taskId: 'r22',
+              threadId: 'thr22',
+              title: 'Commits to push',
+              phase: 'ready',
+              change: change({ number: 22, draft: false, localHead: 'def456', unpushed: 3 }),
+            }),
+          ],
+          calls: [],
+          events: [],
+          projects: [project],
+        }),
+      ),
+    })
+    withServices(<Home onTask={vi.fn()} />, client)
+    const line = within(await screen.findByRole('article', { name: 'Commits to push' }))
+    await userEvent.click(line.getByRole('button', { name: 'Push 3 commits to #22' }))
+    expect((await line.findByRole('alert')).textContent).toContain('Push failed: GitHub says: the branch is protected')
+    await userEvent.click(line.getByRole('button', { name: 'Try pushing 3 commits to #22 again' }))
+    await waitFor(() => expect(push).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(line.queryByRole('alert')).toBeNull())
+  })
+
   it('says what stands between a ready change and merging, and does the next thing from its line', async () => {
     const passed = { outcome: 'passed' as const, passed: 5, failed: 0, running: 0, total: 5, failing: [], list: [] }
     const ready = (n: number, title: string, overrides: Parameters<typeof change>[0]) =>
@@ -278,26 +312,16 @@ describe('the home', () => {
     expect(line('Checks still running').getByText('api #25 · Checks running, 3 of 5 passed · +12 −3')).toBeTruthy()
 
     // The person's own to do, done at once, at the heads they saw.
-    await userEvent.click(line('Good to merge').getByRole('button', { name: 'Accept and merge' }))
+    await userEvent.click(line('Good to merge').getByRole('button', { name: 'Accept and merge #21' }))
     expect(client.merge).toHaveBeenCalledWith('r21', 'abc123', 'https://github.com/meridian/api/pull/12')
-    await userEvent.click(line('Commits to push').getByRole('button', { name: 'Push 3 commits' }))
+    await userEvent.click(line('Commits to push').getByRole('button', { name: 'Push 3 commits to #22' }))
     expect(client.push).toHaveBeenCalledWith('r22', 'def456', 'https://github.com/meridian/api/pull/12')
-    // The lead's, as a note to it.
+    // The lead's, a link into the task, where it is told: nothing is sent from here.
     await userEvent.click(line('In conflict').getByRole('button', { name: 'Ask the lead to resolve it' }))
-    await waitFor(() =>
-      expect(client.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          threadId: 'thr23',
-          body: expect.stringMatching(/^PR #23 conflicts with main\. Bring the branch up to date: merge main into it/),
-        }),
-      ),
-    )
+    expect(onTask).toHaveBeenLastCalledWith('thr23')
     await userEvent.click(line('A check failed').getByRole('button', { name: 'Ask the lead to fix it' }))
-    await waitFor(() =>
-      expect(client.send).toHaveBeenCalledWith(
-        expect.objectContaining({ threadId: 'thr24', body: 'A check on PR #24 failed: test. Fix what made it fail, then ask to push.' }),
-      ),
-    )
+    expect(onTask).toHaveBeenLastCalledWith('thr24')
+    expect(client.send).not.toHaveBeenCalled()
     // While checks run there's nothing to do but wait: its button opens it.
     await userEvent.click(line('Checks still running').getByRole('button', { name: 'Review' }))
     expect(onTask).toHaveBeenLastCalledWith('thr25')
