@@ -34,18 +34,20 @@ import { busyWords, waitsWords } from '../../shared/agents'
 import { callKindOf, kindWords, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
-import { factsOf, nextWords, standingOf } from '../../shared/standing'
+import { doingWords, doneHere, factsOf, labelWords, nextWords, standingOf, standingText } from '../../shared/standing'
 import { afterSteps, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import s from './Board.module.css'
 import { type Lanes, type Waiting } from './lanes'
+import type { WorkActions } from './useWorkActions'
 
 /*
  * The project's work, as the kit's board lays it out: up next, running,
- * needs you, settled. A card has nothing to press: the whole of it opens
+ * needs you, settled. A card has little to press: the whole of it opens
  * its task, where a call is answered, work is accepted and the lead is told
- * what's next. Its top line says where the task stands in a word, then its
+ * what's next. The exception is a ready change's Push and Accept and merge,
+ * which do it right there. Its top line says where the task stands in a word, then its
  * kind's word (Change, Review; nothing for a plain task), then how long;
  * under its title, at most one card in the card (its branch, its pull
  * request, what it handed back) and one fact.
@@ -71,7 +73,6 @@ export const text = {
   } satisfies Record<TaskStatus, string>,
   stopped: 'No agent is working on it',
   /** At a card's foot while everything its task asks is allowed, by its own switch or its project's. */
-  unrestricted: 'Unrestricted',
   /** A plain task at work: no steps worth showing, and nothing of its own yet. */
   working: 'Working',
   /** A plain task that finished, waiting to be seen. */
@@ -209,27 +210,6 @@ const findingsOf = (reviewing: ReviewBrief) => {
 /** The card's own props, without how it opens. */
 type Card = Omit<BoardCardProps, 'onOpen' | 'current' | 'text'>
 
-/** What a task that allows everything it asks says at its foot: on its card, and in line up next, where it will start so. */
-const unrestricted = (work: BoardTask): ReactNode => (work.allowEverything === true ? <Fact tone="warm">{text.unrestricted}</Fact> : null)
-
-/** A card whose task allows everything it asks says so at its foot, after what it says there already. */
-export const unrestrictedOf = (card: Card, work: BoardTask): Card => {
-  const fact = unrestricted(work)
-  if (fact === null) return card
-  return {
-    ...card,
-    foot:
-      card.foot == null ? (
-        fact
-      ) : (
-        <>
-          {card.foot}
-          {fact}
-        </>
-      ),
-  }
-}
-
 /** A running task's card: its step and its track, or Working; its branch or pull request; and why it stands still, where it does. */
 export const runningCardOf = (work: BoardTask, now: string, name: (id: string | null) => string): Card => {
   // Waiting for a free agent, held for a usage limit, or stopped, it says so rather than that it runs.
@@ -325,7 +305,7 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
  * A ready task's card: a change to accept, with its pull request and checks; a review drafted; or a plain task that finished, with
  * what it handed back, or else its branch, where its lead wrote in the repository: on this Mac, as no pull request is coming.
  */
-export const readyCardOf = (work: BoardTask): Card => {
+export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
   const base = { status: TaskStatus.Yours, kind: kindOf(work), title: work.title }
   switch (work.kind) {
     case 'plain': {
@@ -393,7 +373,7 @@ export const readyCardOf = (work: BoardTask): Card => {
           : // One merged or closed has nothing in its way, and nothing to do to it.
             change === null || change.state !== 'open'
             ? {}
-            : { foot: readyFoot(change) }),
+            : { foot: readyFoot(work, change, actions) }),
       }
     }
     default:
@@ -401,24 +381,59 @@ export const readyCardOf = (work: BoardTask): Card => {
   }
 }
 
+/** What a ready card does without opening its task: push, and merge, and how they stand. */
+export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merging' | 'failed'>
+
 /**
  * A ready pull request's foot: what stands between it and merging, as one
  * line, the most pressing first in its colour (only it with its glyph), or
- * how its checks went where nothing does; then the one next thing to do,
- * which its task does.
+ * how its checks went where nothing does; then the one next thing to do. Push
+ * and Accept and merge are buttons that do it right there, as the task
+ * does, and say so while they run; one that failed says why in the line and
+ * offers to try again. Asking the lead to resolve or fix is words, a link:
+ * the card opens its task, where it is told.
  */
-const readyFoot = (change: ChangeSummary): ReactNode => {
+const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions | undefined): ReactNode => {
   const standing = standingOf(change)
+  const next = standing.next
+  const here = actions !== undefined && next !== null && doneHere(next) ? next : null
+  const failure = actions?.failed[work.taskId]
+  const failed = failure !== undefined && failure.action === here?.kind ? failure.message : null
+  const facts = factsOf(change, standing).map((one, i) => (
+    <Fact key={one.words} {...(i === 0 && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
+      {one.words}
+    </Fact>
+  ))
   return (
     <>
       <FactLine>
-        {factsOf(change, standing).map((one, i) => (
-          <Fact key={one.words} {...(i === 0 && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
-            {one.words}
+        {failed !== null && here !== null && (
+          <Fact key="failed" icon="close" tone="danger" role="alert">
+            {standingText.nextFailed[here.kind](failed)}
           </Fact>
-        ))}
+        )}
+        {facts}
       </FactLine>
-      {standing.next !== null && <NextStep>{nextWords(standing.next)}</NextStep>}
+      {next !== null &&
+        (here === null || actions === undefined ? (
+          <NextStep>{nextWords(next)}</NextStep>
+        ) : (
+          <NextStep
+            signal
+            busy={(here.kind === 'push' ? actions.pushing : actions.merging).has(work.taskId)}
+            doing={doingWords(here)}
+            label={labelWords(here, `${change.prefix}${change.number}`, failed !== null)}
+            onPress={() =>
+              void (here.kind === 'push' ? actions.push : actions.merge)(
+                work.taskId,
+                here.kind === 'push' ? (change.localHead ?? '') : (change.head ?? ''),
+                change.url,
+              )
+            }
+          >
+            {failed === null ? nextWords(here) : standingText.nextFailed.again}
+          </NextStep>
+        ))}
     </>
   )
 }
@@ -429,6 +444,7 @@ export function BoardView({
   now,
   onOpen,
   onShowOlder,
+  actions,
 }: {
   lanes: Lanes
   agents: ReadonlyArray<AgentStatus>
@@ -438,6 +454,8 @@ export function BoardView({
   onOpen: (threadId: string) => void
   /** Loads the next page of settled work; absent where every settled task is already shown. */
   onShowOlder?: () => void
+  /** What a ready card does without opening its task, pushing and merging; without it, its next step is words and the card opens the task. */
+  actions?: CardActions
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   // Each needs-you card in when its call came: tasks waiting on a call and calls no task waits on together.
@@ -464,7 +482,6 @@ export function BoardView({
                 reason={
                   startsAt === null ? text.held : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
                 }
-                foot={unrestricted(work)}
                 onOpen={() => onOpen(work.threadId)}
                 text={{ task: unnamed }}
               />
@@ -475,7 +492,7 @@ export function BoardView({
 
       <BoardColumn lane={BoardLane.Running} count={lanes.running.length}>
         {lanes.running.map((work) => (
-          <BoardCard key={work.taskId} {...unrestrictedOf(runningCardOf(work, now, name), work)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard key={work.taskId} {...runningCardOf(work, now, name)} onOpen={() => onOpen(work.threadId)} />
         ))}
       </BoardColumn>
 
@@ -484,7 +501,7 @@ export function BoardView({
           ask.waiting !== null ? (
             <BoardCard
               key={ask.waiting.task.taskId}
-              {...unrestrictedOf(waitingCardOf(ask.waiting, name), ask.waiting.task)}
+              {...waitingCardOf(ask.waiting, name)}
               onOpen={() => onOpen(ask.waiting.task.threadId)}
             />
           ) : (
@@ -492,7 +509,7 @@ export function BoardView({
           ),
         )}
         {lanes.ready.map((work) => (
-          <BoardCard key={work.taskId} {...unrestrictedOf(readyCardOf(work), work)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard key={work.taskId} {...readyCardOf(work, actions)} onOpen={() => onOpen(work.threadId)} />
         ))}
       </BoardColumn>
 
