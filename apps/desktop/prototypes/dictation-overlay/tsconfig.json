@@ -1,6 +1,0 @@
-{
-  "extends": "../../tsconfig.json",
-  "compilerOptions": { "resolveJsonModule": true },
-  "include": [".", "../../src/renderer/global.d.ts"],
-  "exclude": ["shots"]
-}

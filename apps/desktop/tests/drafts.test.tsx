@@ -234,19 +234,32 @@ describe('dictation, once the person leaves', () => {
     expect(screen.queryByText(AWAY)).toBeNull()
   })
 
-  it('stops listening as they leave, and writes down what they said up to then', async () => {
+  it('goes on listening as they leave, carried over the next composer, and writes it down in its own thread once stopped', async () => {
     const speech = slowDictation()
     const host = fakeHost({ dictation: speech.dictation })
-    const { client } = fakeClient({ getThread: vi.fn(async () => snapshot()) })
+    const { client } = tasks()
     const view = withServices(<Task />, client, host)
     await taskBox()
     await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
     await screen.findByRole('button', { name: /^Stop dictating/ })
     view.unmount()
+    // Another task: nothing is written down yet; the pill says whose it is, still listening.
+    const next = withServices(<Task threadId="th2" />, client, host)
+    await taskBox()
+    const pill = await screen.findByRole('group', { name: 'To the lead · Add a retry' })
+    expect(speech.dictation.transcribe).not.toHaveBeenCalled()
+    await userEvent.click(within(pill).getByRole('button', { name: /^Stop and write it down/ }))
     await speech.heard('Carry on with the tests.')
+    // Written: to read, change and send, there or here.
+    const card = await screen.findByRole('region', { name: 'To the lead · Add a retry' })
+    expect(within(card).getByRole<HTMLTextAreaElement>('textbox', { name: 'What you said' }).value).toBe('Carry on with the tests.')
+    expect((await taskBox()).value).toBe('')
+    next.unmount()
+    // Back at its own composer, the words are in its draft, and nothing is carried.
     withServices(<Task />, client, host)
     expect((await taskBox()).value).toBe('Carry on with the tests.')
-    expect(screen.getByRole('button', { name: 'Dictate' })).toBeTruthy()
+    expect(screen.getByText(AWAY)).toBeTruthy()
+    expect(screen.queryByRole('region', { name: /^To the lead/ })).toBeNull()
   })
 
   it('keeps what was said when it couldn’t be written down while they were away, to try again', async () => {
@@ -273,7 +286,7 @@ describe('dictation, once the person leaves', () => {
 })
 
 describe('dictation, once its composer goes from the screen while the view stays', () => {
-  it('stops listening as the project shows its board, and writes down what was said, saying so back in the conversation', async () => {
+  it('goes on listening as the project shows its board, and is still listening back in the conversation', async () => {
     const speech = slowDictation()
     const host = fakeHost({ dictation: speech.dictation })
     const { client } = fakeClient()
@@ -283,16 +296,17 @@ describe('dictation, once its composer goes from the screen while the view stays
     await screen.findByRole('button', { name: /^Stop dictating/ })
     const views = screen.getByRole('radiogroup', { name: 'View' })
     await userEvent.click(within(views).getByRole('radio', { name: 'Board' }))
-    // The composer is off the screen: what was heard is written down, not still listened to.
-    await waitFor(() => expect(speech.dictation.transcribe).toHaveBeenCalledTimes(1))
-    await speech.heard('Why is checkout slow?')
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Tell the coordinator something' })).toBeNull())
+    expect(speech.dictation.transcribe).not.toHaveBeenCalled()
     await userEvent.click(within(views).getByRole('radio', { name: 'Conversation' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Stop dictating/ }))
+    await speech.heard('Why is checkout slow?')
     expect((await coordinatorBox()).value).toBe('Why is checkout slow?')
-    expect(screen.getByText(AWAY)).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Dictate' })).toBeTruthy()
+    // They were back before it was written: nothing to say.
+    expect(screen.queryByText(AWAY)).toBeNull()
   })
 
-  it('stops listening as a task shows its outputs, and writes down what was said', async () => {
+  it('goes on listening as a task shows its outputs', async () => {
     const speech = slowDictation()
     const host = fakeHost({ dictation: speech.dictation })
     const { client } = fakeClient({ getThread: vi.fn(async () => snapshot()) })
@@ -304,11 +318,101 @@ describe('dictation, once its composer goes from the screen while the view stays
     act(() => (document.activeElement as HTMLElement | null)?.blur())
     await userEvent.keyboard('o')
     await waitFor(() => expect(screen.queryByRole('textbox', { name: /^Tell .* something$/ })).toBeNull())
-    await waitFor(() => expect(speech.dictation.transcribe).toHaveBeenCalledTimes(1))
-    await speech.heard('Carry on with the tests.')
+    expect(speech.dictation.transcribe).not.toHaveBeenCalled()
     await userEvent.keyboard('c')
+    await userEvent.click(await screen.findByRole('button', { name: /^Stop dictating/ }))
+    await speech.heard('Carry on with the tests.')
     expect((await taskBox()).value).toBe('Carry on with the tests.')
-    expect(screen.getByText(AWAY)).toBeTruthy()
+  })
+})
+
+describe('dictation carried with the person', () => {
+  /** Talking to the coordinator, then off to a task while it listens. */
+  const toTheTask = async () => {
+    const speech = slowDictation()
+    const host = fakeHost({ dictation: speech.dictation })
+    const { client } = tasks()
+    const view = withServices(<Project />, client, host)
+    await coordinatorBox()
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    view.unmount()
+    withServices(<Task />, client, host)
+    await taskBox()
+    const pill = await screen.findByRole('group', { name: 'To the coordinator · meridian' })
+    return { speech, client, pill }
+  }
+
+  it('sends what was written to the thread it was said in, and is gone', async () => {
+    const { speech, client, pill } = await toTheTask()
+    await userEvent.click(within(pill).getByRole('button', { name: /^Stop and write it down/ }))
+    await speech.heard('Why is checkout slow?')
+    const card = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
+    const field = within(card).getByRole('textbox', { name: 'What you said' })
+    // Changed before it goes.
+    await userEvent.type(field, ' On mobile.')
+    await userEvent.click(within(card).getByRole('button', { name: 'Send to the coordinator' }))
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Why is checkout slow? On mobile.', disposition: 'after_current' }),
+    )
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'To the coordinator · meridian' })).toBeNull())
+    // Nothing went to the task.
+    expect((await taskBox()).value).toBe('')
+  })
+
+  it('keeps it, to send again, where it didn’t send', async () => {
+    const { speech, client, pill } = await toTheTask()
+    vi.mocked(client.send).mockRejectedValueOnce(new Error('offline'))
+    await userEvent.click(within(pill).getByRole('button', { name: /^Stop and write it down/ }))
+    await speech.heard('Why is checkout slow?')
+    const card = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
+    await userEvent.click(within(card).getByRole('button', { name: 'Send to the coordinator' }))
+    expect(await within(card).findByRole('alert')).toBeTruthy()
+    expect(within(card).getByRole<HTMLTextAreaElement>('textbox', { name: 'What you said' }).value).toBe('Why is checkout slow?')
+  })
+
+  it('moves into the composer on screen instead, after what is there', async () => {
+    const { speech, pill } = await toTheTask()
+    await userEvent.type(await taskBox(), 'First,')
+    await userEvent.click(within(pill).getByRole('button', { name: /^Stop and write it down/ }))
+    await speech.heard('check the retry path.')
+    const card = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
+    await userEvent.click(within(card).getByRole('button', { name: 'Move it to this task' }))
+    expect((await taskBox()).value).toBe('First,\n\ncheck the retry path.')
+    expect(screen.queryByRole('region', { name: 'To the coordinator · meridian' })).toBeNull()
+  })
+
+  it('is thrown away from the pill, and never written down', async () => {
+    const { speech, pill } = await toTheTask()
+    await userEvent.click(within(pill).getByRole('button', { name: 'Show all of what you said' }))
+    const card = screen.getByRole('region', { name: 'To the coordinator · meridian' })
+    await userEvent.click(within(card).getByRole('button', { name: 'Throw it away' }))
+    expect(screen.queryByRole('region', { name: 'To the coordinator · meridian' })).toBeNull()
+    expect(speech.dictation.transcribe).not.toHaveBeenCalled()
+  })
+
+  it('isn’t lost by Escape, which goes back from a task', async () => {
+    const { speech } = await toTheTask()
+    act(() => (document.activeElement as HTMLElement | null)?.blur())
+    await userEvent.keyboard('{Escape}')
+    expect(screen.getByRole('group', { name: 'To the coordinator · meridian' })).toBeTruthy()
+    expect(speech.dictation.transcribe).not.toHaveBeenCalled()
+  })
+
+  it('stops with the shortcut, rather than the composer on screen starting its own', async () => {
+    const { speech } = await toTheTask()
+    fireEvent.keyDown(window, { key: 'd', metaKey: true, shiftKey: true })
+    await waitFor(() => expect(speech.dictation.transcribe).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('button', { name: /^Stop dictating/ })).toBeNull()
+  })
+
+  it('is written down as the person starts talking to another thread, so only one listens', async () => {
+    const { speech } = await toTheTask()
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    await speech.heard('Why is checkout slow?')
+    const card = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
+    expect(within(card).getByRole<HTMLTextAreaElement>('textbox', { name: 'What you said' }).value).toBe('Why is checkout slow?')
   })
 })
 
