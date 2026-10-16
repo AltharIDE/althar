@@ -509,6 +509,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
         content: {
           launchId: text(content, 'launchId'),
           taskId: text(content, 'taskId') || null,
+          runnableId: text(content, 'runnableId') || null,
           where: text(content, 'where'),
           command: text(content, 'command'),
           url: text(content, 'url') || null,
@@ -768,7 +769,7 @@ export class Queries extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
           const agents = yield* Agents
-          const [session] = yield* sql<{
+          const rows = yield* sql<{
             id: string
             agentId: string
             state: string
@@ -779,9 +780,11 @@ export class Queries extends Context.Service<
           }>`
             SELECT s.id, s.agent_id, s.state, s.model, s.effort, s.config, a.name AS account FROM provider_sessions s
             LEFT JOIN agent_accounts a ON a.id = s.account_id
-            WHERE s.thread_id = ${threadId} AND s.state IN (${sql.unsafe(live)}) ORDER BY s.started_at DESC LIMIT 1`
-          if (session === undefined) return null
+            WHERE s.thread_id = ${threadId} AND s.state IN (${sql.unsafe(live)}) ORDER BY s.started_at DESC`
           const running = yield* sessions.running(threadId)
+          // The runtime's own session when it holds one, which a switch's newer, still-starting row is not; else the newest recorded one.
+          const session = Option.isSome(running) ? (rows.find((row) => row.id === running.value.sessionId) ?? rows[0]) : rows[0]
+          if (session === undefined) return null
           const definition = Option.getOrUndefined(yield* Effect.option(agents.get(session.agentId)))
           const options = field(parse(session.config), 'options')
           const modelOption = Array.isArray(options)
@@ -798,6 +801,9 @@ export class Queries extends Context.Service<
             effort: session.effort,
             models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
             turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
+            // Whether the runtime holds a session on this thread, which takes a note and makes a start refuse. The summary describes that held
+            // session, not a newer row a switch is still starting, so a model or effort pick is compared with what the runtime runs.
+            held: Option.isSome(running),
             context: Option.isSome(running) && running.value.sessionId === session.id ? running.value.context : null,
             background: Option.isSome(running) && running.value.sessionId === session.id ? running.value.background : [],
           }
@@ -2019,7 +2025,7 @@ export class Queries extends Context.Service<
               merged: said.merged,
               actions: [...actionsOf(standing)],
               planId: standing.planId,
-              runCommand: yield* launches.commandFor(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => null)),
+              runnables: yield* launches.runnables(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => [])),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
               resolveConflicts: {
                 task: head.resolveConflicts === null ? null : head.resolveConflicts === 1,
@@ -2070,7 +2076,7 @@ export class Queries extends Context.Service<
             items,
             earlier,
             host,
-            runCommand: yield* launches.commandFor(projectId, null).pipe(Effect.orElseSucceed(() => null)),
+            runnables: yield* launches.runnables(projectId, null).pipe(Effect.orElseSucceed(() => [])),
             // Every run in the project, the tasks' too: the coordinator's screen is the project's.
             launches: yield* launches.ofProject(projectId),
           } satisfies CoordinatorSnapshot
