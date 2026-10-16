@@ -9,6 +9,19 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## The Flatpak's keyring, 15 October
+
+- [ ] **Where the sealing key lives in the Flatpak, so it survives a restart.**
+  Found with the person's own Flatpak on KDE (Electron 44, `gnome-libsecret`):
+  inside the sandbox libsecret keeps its keyring in a file of the app's own,
+  but Chromium looks the key up in the host's secret service, finds none, and
+  logs "OSCrypt generated a new password" at every start. A sign-in sealed in
+  one run is then unreadable in the next (`safeStorage.decryptString` fails).
+  Althar now says so ("sign in again", the connection goes to
+  `reauth_required`) rather than "unreachable", but the key itself is decided
+  elsewhere: KDE (KWallet) on PR #201, GNOME on PR #207. Settled when a whole
+  task has survived a restart under both (ADR-028).
+
 ## Usage data, 12 October
 
 - [x] **Where usage data goes from, and what can.** The main process, with
