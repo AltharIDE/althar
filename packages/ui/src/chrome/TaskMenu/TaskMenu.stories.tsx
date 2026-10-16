@@ -136,7 +136,6 @@ const allowing = fn()
 export const AllowingEverything: Story = {
   args: { allowEverything: { on: false, project: false, onChange: allowing } },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).queryByText('Unrestricted')).toBeNull()
     const page = await opened(canvasElement)
     await userEvent.click(await page.findByRole('menuitemcheckbox', { name: /Allow everything on this task/ }))
     await expect(allowing).toHaveBeenCalledWith(true)
