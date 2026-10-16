@@ -87,7 +87,6 @@ export interface ComposerText {
   stop: string
   /** The host's shortcut for stopping, shown in the button's tooltip. */
   stopKey: string
-  queueNote: string
   /** Sends while the agent works, instead of queueing: it stops at a safe point and carries on with both. */
   sendNow: string
   /** What Send now does, in its tooltip. */
@@ -132,7 +131,6 @@ export const composerText: ComposerText = {
   queue: 'Queue',
   stop: 'Interrupt the lead',
   stopKey: '⌘.',
-  queueNote: 'Enter queues it; the lead reads it next',
   sendNow: 'Send now',
   sendNowNote: 'Interrupt the lead with this; it carries on with both',
   sendNowKey: '⌘↵',
@@ -329,7 +327,6 @@ export function Composer({
   })()
 
   const note = (() => {
-    if (busy && drafted) return t.queueNote
     if (value.includes('\n')) return t.newlineNote
     return null
   })()
@@ -473,8 +470,8 @@ export function Composer({
           )}
           {canSendNow && (
             <Tooltip label={t.sendNowNote}>
-              <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey}>
-                {t.sendNow}
+              <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey} aria-label={t.sendNow}>
+                <span className={s.sendNowLabel}>{t.sendNow}</span>
               </ActionButton>
             </Tooltip>
           )}
