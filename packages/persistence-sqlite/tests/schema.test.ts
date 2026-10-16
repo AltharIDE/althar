@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { Ids, newId } from '@althar/domain'
 import { assert, describe, expect, it } from '@effect/vitest'
-import { Effect, Layer } from 'effect'
+import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { canonicalJson, sha256Hex } from '../src/canonicalJson'
@@ -92,28 +92,27 @@ describe('schema', () => {
     ),
   )
 
-  it.effect(
-    'lets one runtime at a time open a file',
-    () =>
-      withFile((filename) =>
-        Effect.gen(function* () {
-          const open = Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient
-            yield* sql`SELECT 1`
-          })
-          yield* Effect.scoped(
-            Effect.gen(function* () {
-              yield* Layer.build(Layer.fresh(Database.layer({ filename })))
-              const second = yield* Effect.flip(Effect.provide(open, Layer.fresh(Database.layer({ filename }))))
-              assert.instanceOf(second, Database.DatabaseInUse)
-            }),
-          )
-          // Once the first has closed, the next can open it.
-          yield* Effect.provide(open, Layer.fresh(Database.layer({ filename })))
-        }),
-      ),
-    // The second opener waits out SQLite's busy timeout, five seconds, before it gives up.
-    15_000,
+  it.effect('lets one runtime at a time open a file', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const open = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          yield* sql`SELECT 1`
+        })
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* Layer.build(Layer.fresh(Database.layer({ filename })))
+            // It gives up on the lock at once, rather than after the five seconds a runtime waits.
+            const second = yield* Effect.flip(
+              Effect.provide(open, Layer.fresh(Database.layer({ filename, busyTimeout: Duration.millis(50) }))),
+            )
+            assert.instanceOf(second, Database.DatabaseInUse)
+          }),
+        )
+        // Once the first has closed, the next can open it.
+        yield* Effect.provide(open, Layer.fresh(Database.layer({ filename })))
+      }),
+    ),
   )
 
   it.effect('lets a later migration rebuild a table that others reference', () =>
@@ -268,6 +267,52 @@ describe('schema', () => {
         const read = Effect.flatMap(SqlClient.SqlClient, (sql) => sql<{ branchedAt: string | null }>`SELECT branched_at FROM workspaces`)
         const after = yield* Effect.provide(read, Layer.fresh(Database.layer({ filename })))
         assert.deepStrictEqual(after, [{ branchedAt: createdAt }])
+      }),
+    ),
+  )
+
+  it.effect('gives each repository bound before runnables its own way to run, in the order they were bound', () =>
+    withFile((filename) =>
+      Effect.gen(function* () {
+        const before = migrations.findIndex((migration) => migration.key === '0033_runnables')
+        const made = Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const { projectId, createdAt } = yield* seed
+          const bound: Array<string> = []
+          // Two repositories bound in the same millisecond, and a third left out of the project since.
+          for (const [slug, detachedAt] of [
+            ['api', null],
+            ['web', null],
+            ['infra', createdAt],
+          ] as const) {
+            const bindingId = yield* newId(Ids.repositoryBinding)
+            bound.push(bindingId)
+            yield* sql`INSERT INTO repository_bindings ${sql.insert({ id: bindingId, projectId, slug, role: 'other', displayName: slug, createdAt, detachedAt })}`
+          }
+          return bound
+        }).pipe(Effect.provide(WebCrypto))
+        const bound = yield* Effect.provide(made, Layer.fresh(Database.layer({ filename, migrations: migrations.slice(0, before) })))
+        const read = Effect.flatMap(
+          SqlClient.SqlClient,
+          (sql) =>
+            sql<{
+              id: string
+              bindingId: string
+              name: string | null
+              command: string | null
+              position: number
+              keptByActorId: string | null
+            }>`SELECT id, binding_id, name, command, position, kept_by_actor_id FROM runnables ORDER BY position`,
+        )
+        const after = yield* Effect.provide(read, Layer.fresh(Database.layer({ filename })))
+        assert.deepStrictEqual(
+          after.map(({ id: _id, ...rest }) => rest),
+          [
+            { bindingId: bound[0]!, name: null, command: null, position: 0, keptByActorId: null },
+            { bindingId: bound[1]!, name: null, command: null, position: 1, keptByActorId: null },
+          ],
+        )
+        for (const row of after) assert.match(row.id, /^rnbl_[0-9a-f]{32}$/)
       }),
     ),
   )

@@ -26,22 +26,28 @@ From the repository root:
 
 | Command | What it does |
 | --- | --- |
-| `bun run dev` | The pitch site, at `http://localhost:5290` |
+| `bun run dev` | The public site, at `http://localhost:5320` |
 | `bun --filter @althar/desktop dev` | Builds the desktop app and opens it |
 | `bun --filter @althar/ui storybook` | The UI package's Storybook, at `http://localhost:6006` (see [Showing a change works](#showing-a-change-works) for a port of a task's own) |
 | `bun run check` | Format, type-aware lint and type checks, in every package |
 | `bun run fix` | The same, fixing what can be fixed |
 | `bun run test` | Unit and component tests, in every package |
-| `bun run verify` | Checks, tests with coverage and builds, in every package, and the pitch site's end-to-end tests |
-| `bun run test:e2e` | The end-to-end tests: the pitch site's, and the desktop app's, which run quietly on a Mac, at most three runs at once on the computer ([apps/desktop](apps/desktop#work-on-it)) |
+| `bun run verify` | Checks, tests with coverage and builds, in every package |
+| `bun run test:e2e` | The end-to-end tests: the desktop app's, which run quietly on a Mac, at most three runs at once on the computer ([apps/desktop](apps/desktop#work-on-it)) |
 
 Each app and package has its own README with its own commands.
+
+The full suites are heavy: the desktop app's end-to-end run takes much of a
+Mac for its length. While you work, run what your change touches (the checks
+and tests of the packages you changed and of those that build on them, and
+the end-to-end specs for what you changed), and leave the rest to CI, which
+runs the checks and unit tests on the pull request and the heavy suites after
+merge.
 
 ## The repository
 
 | Path | What's there |
 | --- | --- |
-| [`apps/pitch`](apps/pitch) | The brief and research note, as a static site |
 | [`apps/site`](apps/site) | The public site: the developer page, the shifts and the thesis |
 | [`packages/ui`](packages/ui) | `@althar/ui`, the interface components, with a Storybook |
 | [`packages/domain`](packages/domain) | `@althar/domain`: identifiers, vocabularies, lifecycles and commands, as Effect schemas |
@@ -118,6 +124,16 @@ There are two ways to screenshot this repository's interface, both headless:
   `apps/desktop/e2e/evidence.spec.ts` does; `bun run test:e2e e2e/your.spec.ts`
   builds the app and runs it.
 
+Shoot at 1×, and only what changed where you can. The command above shoots a
+story at 1× already, and a story's frame is just the component. In a spec, the
+app's window on a Retina Mac shoots at 2× unless told otherwise: pass
+`scale: 'css'` to `page.screenshot` and to an element's `screenshot`, and take
+one element (`page.getByRole(…).screenshot({ scale: 'css' })`) rather than the
+window. An agent reads each shot it looks at into its
+context, where it stays: a Retina shot of the whole window costs it as much as
+a few thousand words, and one cropped at 1× a tenth of that. Look at each shot
+once.
+
 Shots go in `test-results/`, which git ignores. In an agent's sandbox on a
 Mac, Chromium and Electron can't start (Chromium exits with `SIGTRAP`), so run
 the shooting command outside the sandbox; Storybook itself runs inside it,
@@ -145,7 +161,8 @@ change promises.
 
 Work on a branch and open a pull request to `main`. On a pull request:
 
-- **GitHub Actions** runs a package's workflow when its files change: `pitch` for `apps/pitch`, `site` for `apps/site` and the UI kit it uses, `ui` for `packages/ui`, `harness` for `packages/contracts`, `packages/domain`, `packages/persistence-sqlite`, `packages/provider-adapters`, `packages/runtime` and `apps/cli`, and `desktop` for `apps/desktop` and everything it builds on. The desktop app's end-to-end tests run in CI with the fake agent, under a virtual display. The agent adapter's contract runs in CI against a scripted fake agent; the real agents run only on demand (`bun run test:agents` in `packages/provider-adapters`, and `e2e/real.spec.ts` in `apps/desktop`), since they need sign-in and cost usage. Every workflow also runs when the root `package.json`, `bun.lock` or `vite.config.ts` changes.
-- **Cloudflare Workers Builds** builds the pitch site. A branch gets a preview deployment (`wrangler preview`), and `main` deploys to production. The preview build fails without the `previews` block in `apps/pitch/wrangler.jsonc`, so keep it.
+- **GitHub Actions** runs a package's workflow when its files change: `site` for `apps/site` and the UI kit it uses, `ui` for `packages/ui`, `harness` for `packages/contracts`, `packages/domain`, `packages/persistence-sqlite`, `packages/provider-adapters`, `packages/runtime` and `apps/cli`, and `desktop` for `apps/desktop` and everything it builds on. For `ui`, `harness` and `desktop` that is the fast part only: checks and unit tests (and the Storybook build). The agent adapter's contract runs in CI against a scripted fake agent; the real agents run only on demand (`bun run test:agents` in `packages/provider-adapters`, and `e2e/real.spec.ts` in `apps/desktop`), since they need sign-in and cost usage. Every workflow also runs when the root `package.json`, `bun.lock` or `vite.config.ts` changes.
 
-Merge only when every check is green, the Cloudflare one included.
+Merge only when every check is green.
+
+After merge, `post-merge` runs the heavy part of `ui`, `harness` and `desktop` on `main`: their checks again, the coverage gates, the Storybook build, the desktop app's end-to-end tests (with the fake agent, under a virtual display) and its Linux packages. `site` and `brand` still run in full on their own. Merges in quick succession share a run. When it fails, an issue titled "Main is red" links the run and the merges since the last green one; fix or revert, and it closes itself when `main` is green again. `main` may be red for a while; a release may not: `release` cuts only a commit `post-merge` passed on. To run the heavy suites on a branch before merging, `gh workflow run post-merge.yml --ref <branch>`.

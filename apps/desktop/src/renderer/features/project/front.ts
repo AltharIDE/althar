@@ -179,7 +179,6 @@ const POLICY = {
   rules: PermissionPolicy.Rules,
   coordinator: PermissionPolicy.Coordinator,
   ask: PermissionPolicy.Ask,
-  allow: PermissionPolicy.AllowAll,
 } as const satisfies Record<ProjectRulesView['permissions'], PermissionPolicy>
 
 /** The project's rules in a line: who answers what agents ask, and what always asks you whoever would. */
@@ -192,13 +191,12 @@ export const rulesLineOf = (rules: ProjectRulesView): { readonly policy: string;
     ...rules.commands.filter((rule) => rule.decision === 'ask').map((rule) => `“${rule.pattern}”`),
   ]
   return {
-    policy: permissionPolicyText[POLICY[rules.permissions]].title,
+    policy: permissionPolicyText[rules.allowEverything ? PermissionPolicy.AllowAll : POLICY[rules.permissions]].title,
     // With everything allowed, what always asks is kept for later, but asks nothing now.
-    asks:
-      rules.permissions === 'allow'
-        ? text.nothingWaits
-        : asking.length === 0
-          ? text.nothingAsks
-          : text.alwaysAsks(asking.map((what, i) => (i === 0 ? what : what.charAt(0).toLowerCase() + what.slice(1))).join(', ')),
+    asks: rules.allowEverything
+      ? text.nothingWaits
+      : asking.length === 0
+        ? text.nothingAsks
+        : text.alwaysAsks(asking.map((what, i) => (i === 0 ? what : what.charAt(0).toLowerCase() + what.slice(1))).join(', ')),
   }
 }

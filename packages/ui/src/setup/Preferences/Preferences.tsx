@@ -151,8 +151,12 @@ export interface AgentsAtOnceText {
   title: string
   /** What the number means as it moves: at the default, why; under it or past it, what that does to this Mac. */
   note: (count: number, machine: AtOnceMachine) => string
+  /** Compact, one plain line whatever the number. */
+  short: string
   /** The default's mark on the scale. */
   mark: (machine: AtOnceMachine) => string
+  /** The number as a screen reader says it: the default's, said to be. */
+  value: (count: number, machine: AtOnceMachine) => string
   /** Goes back to the default. */
   reset: string
 }
@@ -166,7 +170,9 @@ export const agentsAtOnceText: AgentsAtOnceText = {
     if (n <= count + 2) return `${n}: a little more than this Mac’s ${memory} GB suggests. Tests may slow down.`
     return `${n}: well past what this Mac’s ${memory} GB suggests. Expect it to run hot.`
   },
+  short: 'More tasks than this wait their turn.',
   mark: ({ count }) => `${count} · this Mac`,
+  value: (n, { count }) => (n === count ? `${n}, this Mac’s default` : String(n)),
   reset: 'Use the default',
 }
 
@@ -181,6 +187,12 @@ export interface AgentsAtOnceProps {
   most?: number
   /** A number of their own; null goes back to the default, as does the default's own number. */
   onChange: (count: number | null) => void
+  /**
+   * Alone on a sheet of its own, as the quick settings have it: one plain
+   * line under its name, a step on the track for each number, and no scale
+   * under it, the default only its mark. The sheet's padding is its own.
+   */
+  compact?: boolean
   text?: Partial<AgentsAtOnceText>
 }
 
@@ -192,7 +204,7 @@ export interface AgentsAtOnceProps {
  * further it goes. A drag goes out once it is let go. It says nothing of
  * what runs now: Settings stays calm.
  */
-export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, text }: AgentsAtOnceProps) {
+export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, compact = false, text }: AgentsAtOnceProps) {
   const t = { ...agentsAtOnceText, ...text }
   // While the thumb is held, the number it is on; it goes out once let go.
   const [held, setHeld] = useState<number | null>(null)
@@ -225,9 +237,10 @@ export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, t
   return (
     <SettingRow
       title={t.title}
+      {...(compact ? { className: s.compact } : {})}
       note={
         <>
-          {t.note(n, machine)}
+          {compact ? t.short : t.note(n, machine)}
           {own && held === null && (
             <>
               {' '}
@@ -260,6 +273,7 @@ export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, t
             aria-valuemin={1}
             aria-valuemax={most}
             aria-valuenow={n}
+            aria-valuetext={t.value(n, machine)}
             onPointerDown={(e: PointerEvent<HTMLDivElement>) => {
               e.currentTarget.setPointerCapture?.(e.pointerId)
               hold(from(e.clientX))
@@ -292,20 +306,29 @@ export function AgentsAtOnce({ count, own: kept, machine, most = 16, onChange, t
             <div className={s.rail}>
               <div className={s.fill} style={{ width: at(n) }} />
             </div>
+            {compact && (
+              <span className={s.steps} aria-hidden="true">
+                {Array.from({ length: most }, (_, i) => i + 1).map((step) => (
+                  <i key={step} className={cx(s.step, step <= n && s.stepIn)} style={{ left: at(step) }} />
+                ))}
+              </span>
+            )}
             <span className={s.atDefault} style={{ left: at(machine.count) }} />
             <span key={clicks} className={cx(s.thumb, held !== null && s.held, !own && clicks > 0 && s.clicked)} style={{ left: at(n) }} />
           </div>
-          <div className={s.scale} aria-hidden="true">
-            {/* The default at an end of the scale stands for that end's number. */}
-            <span>{machine.count === 1 ? '' : 1}</span>
-            <span
-              className={cx(s.mark, machine.count === 1 && s.markStart, machine.count === most && s.markEnd)}
-              style={{ left: at(machine.count) }}
-            >
-              {t.mark(machine)}
-            </span>
-            <span>{machine.count === most ? '' : most}</span>
-          </div>
+          {!compact && (
+            <div className={s.scale} aria-hidden="true">
+              {/* The default at an end of the scale stands for that end's number. */}
+              <span>{machine.count === 1 ? '' : 1}</span>
+              <span
+                className={cx(s.mark, machine.count === 1 && s.markStart, machine.count === most && s.markEnd)}
+                style={{ left: at(machine.count) }}
+              >
+                {t.mark(machine)}
+              </span>
+              <span>{machine.count === most ? '' : most}</span>
+            </div>
+          )}
         </div>
       }
     >
@@ -479,6 +502,43 @@ export function NotificationSound({ sounds, value, onChange, onPlay, system, tex
         </span>
       )}
     </SettingRow>
+  )
+}
+
+/* ---- usage data ------------------------------------------------------------------ */
+
+export interface UsageDataText {
+  title: string
+  note: string
+  /** Why it is off, whatever was chosen. */
+  doNotTrack: string
+}
+
+export const usageDataText: UsageDataText = {
+  title: 'Usage data',
+  note: 'Anonymous: steps such as a project made or a task settled. Never your code, what is written, or any name.',
+  doNotTrack: 'Off while DO_NOT_TRACK is set.',
+}
+
+export interface UsageDataProps {
+  on: boolean
+  onChange: (on: boolean) => void
+  /** DO_NOT_TRACK is set where Althar started: off, whatever was chosen, and not turned on here. */
+  doNotTrack?: boolean
+  text?: Partial<UsageDataText>
+}
+
+/** Whether Althar sends anonymous usage data, with the one line on what it sends. */
+export function UsageData({ on, onChange, doNotTrack = false, text }: UsageDataProps) {
+  const t = { ...usageDataText, ...text }
+  return (
+    <SettingSwitch
+      title={t.title}
+      note={doNotTrack ? t.doNotTrack : t.note}
+      checked={on && !doNotTrack}
+      onChange={onChange}
+      disabled={doNotTrack}
+    />
   )
 }
 

@@ -48,6 +48,7 @@ const session = {
   effort: null,
   models: [],
   turnRunning: false,
+  held: true,
   context: null,
   background: [],
 }
@@ -83,14 +84,21 @@ describe('running the project, with no agent', () => {
   it('runs its default branch from the project’s front, shows it over the coordinator’s composer, and stops and clears it there', async () => {
     const { client, emit } = fakeClient({
       listProjects: vi.fn(async () => ({ cursor: 3, projects: [project] })),
-      getCoordinator: vi.fn(async () => coordinatorSnapshot({ runCommand: 'npm run dev' })),
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          runnables: [{ id: 'rnbl_dev', name: null, command: 'npm run dev', repository: 'meridian', own: true, from: 'repository' }],
+        }),
+      ),
     })
     withServices(<WithSettings />, client)
+    // Once the conversation is read, its front offers what the project runs.
+    await screen.findByText(/^Ask the coordinator about/)
     await userEvent.click(await screen.findByRole('button', { name: 'Run npm run dev' }))
-    expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc')
+    expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc', 'rnbl_dev')
     const launch = {
       id: 'proc_1',
       taskId: null,
+      runnableId: 'rnbl_dev',
       where: 'main',
       command: 'npm run dev',
       url: 'http://localhost:5199/',
@@ -131,8 +139,9 @@ describe('running the project, with no agent', () => {
     const opened = vi.spyOn(window, 'open').mockImplementation(() => null)
     withServices(<WithSettings />, client)
     const main = within(await screen.findByRole('article', { name: 'Run of main' }))
-    // Nothing says how the project runs: its front offers no run.
+    // Nothing says how the project runs: its front offers the ways to say what runs, and nothing to run.
     expect(screen.queryByRole('button', { name: 'Run npm run dev' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Run' })).toBeTruthy()
     await userEvent.click(main.getByRole('button', { name: 'Open localhost:5199' }))
     expect(opened).toHaveBeenCalledWith('http://localhost:5199/', '_blank')
     await userEvent.click(main.getByRole('button', { name: 'Stop npm run dev' }))
@@ -366,6 +375,16 @@ describe('the Talk room', () => {
     )
   })
 
+  it('keeps a card’s steps and branch while a later step waits for a free agent, saying it waits and not that it runs', async () => {
+    const waitingCard = card({ phase: 'running', step: 'review', queued: { busy: 4, atOnce: 4 }, branch: 'althar/midway' })
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ items: [items.card(waitingCard)] })) })
+    withServices(<Project />, client)
+    expect(await screen.findByText('Waiting: 4 of 4 agents busy on this Mac')).toBeTruthy()
+    const track = screen.getByRole('list', { name: 'Steps' })
+    expect(track.getAttribute('data-status')).toBe('queued')
+    expect(screen.getByText('althar/midway')).toBeTruthy()
+  })
+
   it('shows the effort the coordinator picked for a step as one the person chose, keeps it, and lets the person change it', async () => {
     const plan = {
       ...card().plan!,
@@ -428,13 +447,13 @@ describe('the Talk room', () => {
   })
 
   it('talks to the coordinator on the agent last used, or on another the person picks', async () => {
-    const { client } = fakeClient()
+    const { client } = fakeClient({ getCoordinator: vi.fn(async () => coordinatorSnapshot({ session: { ...session, held: false } })) })
     withServices(<Project />, client)
     expect(await screen.findByText('Ask the coordinator about meridian, or say what should change.')).toBeTruthy()
     const box = screen.getByRole('textbox', { name: 'Tell the coordinator something' })
     await userEvent.type(box, 'Add a retry{Enter}')
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Add a retry', disposition: 'after_current' }))
-    // Started first, as it ran last, so a send that fails was never queued.
+    // A stale session summary is not held: start the coordinator on the picked agent before sending.
     expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code' })
     expect(vi.mocked(client.startSession).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.send).mock.invocationCallOrder[0] ?? 0)
 
@@ -514,7 +533,7 @@ describe('the Talk room', () => {
     expect(screen.getByRole('img', { name: 'bug.png' })).toBeTruthy()
   })
 
-  it('puts what was said back when the coordinator didn’t start, since nothing was queued, and sends on past one already starting', async () => {
+  it('keeps the note unsent when the coordinator cannot start, and accepts one already starting', async () => {
     const { client } = fakeClient()
     vi.mocked(client.startSession).mockRejectedValueOnce(new ApiError({ reason: 'SessionFailed', message: "Claude Code couldn't start." }))
     withServices(<Project />, client)
@@ -522,14 +541,15 @@ describe('the Talk room', () => {
     await userEvent.type(box, 'Plan it{Enter}')
     expect(await screen.findByText("Claude Code couldn't start.")).toBeTruthy()
     expect(client.send).not.toHaveBeenCalled()
-    await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe('Plan it'))
-    // One already starting, as from a message just before, takes this one next.
+    expect((box as HTMLTextAreaElement).value).toBe('Plan it')
+    // A session that started between the read and start attempt takes this note next.
     vi.mocked(client.startSession).mockRejectedValueOnce(
       new ApiError({ reason: 'SessionRunning', message: 'An agent is already working on this task.' }),
     )
     await userEvent.type(box, '{Enter}')
     await waitFor(() => expect(client.send).toHaveBeenCalledWith({ threadId: 'thc', body: 'Plan it', disposition: 'after_current' }))
     await waitFor(() => expect((box as HTMLTextAreaElement).value).toBe(''))
+    expect(vi.mocked(client.startSession).mock.invocationCallOrder[1]).toBeLessThan(vi.mocked(client.send).mock.invocationCallOrder[0] ?? 0)
   })
 
   it("says when the agent it last ran on isn't signed in, and starts it on one that is", async () => {

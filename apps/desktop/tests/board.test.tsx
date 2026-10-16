@@ -432,6 +432,7 @@ describe('the board', () => {
           task: {
             ...snapshot().task,
             id: 't4',
+            lead: { agentId: 'claude-code', model: null, account: null },
             files: [{ path: 'src/limit.ts', from: null, status: 'modified', add: 12, del: 3, binary: false, uncommitted: false }],
           },
         }),
@@ -455,6 +456,106 @@ describe('the board', () => {
     await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
     // The note is queued first, so the lead reads it in its first turn.
     expect(send.mock.invocationCallOrder[0]).toBeLessThan(startSession.mock.invocationCallOrder[0] ?? 0)
+  })
+
+  it.each([
+    ['a stale session summary', false, true],
+    ['a held session', true, false],
+  ] as const)('sends back with a note when %s', async (_description, held, starts) => {
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
+    const base = snapshot()
+    const { client } = fakeClient({
+      send,
+      startSession,
+      getBoard: vi.fn(async () => board()),
+      getThread: vi.fn(async () =>
+        snapshot({
+          session: base.session === null ? null : { ...base.session, held },
+          task: { ...base.task, id: 't4', lead: { agentId: 'claude-code', model: null, account: null } },
+        }),
+      ),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
+    await waitFor(() => expect(send).toHaveBeenCalledWith({ threadId: 'th4', body: 'Please rename it.', disposition: 'after_current' }))
+    if (starts) {
+      await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
+      expect(send.mock.invocationCallOrder[0]).toBeLessThan(startSession.mock.invocationCallOrder[0] ?? 0)
+    } else expect(startSession).not.toHaveBeenCalled()
+  })
+
+  it('starts the lead the thread has now, not the one the board card was read with', async () => {
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
+    const { client } = fakeClient({
+      send,
+      startSession,
+      getBoard: vi.fn(async () => board()),
+      getThread: vi.fn(async () =>
+        snapshot({ session: null, task: { ...snapshot().task, id: 't4', lead: { agentId: 'codex', model: null, account: null } } }),
+      ),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
+    await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'codex' }))
+  })
+
+  it('reports that Send back has no lead to start without queuing the note', async () => {
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => 's1')
+    const { client } = fakeClient({
+      send,
+      startSession,
+      getBoard: vi.fn(async () => board()),
+      getThread: vi.fn(async () => snapshot({ session: null, task: { ...snapshot().task, id: 't4', lead: null } })),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
+    expect(await screen.findByText('This task has no lead to start. Pick an agent for it first.')).toBeTruthy()
+    expect(send).not.toHaveBeenCalled()
+    expect(startSession).not.toHaveBeenCalled()
+  })
+
+  it('shows the queued note status when the lead fails before a session exists', async () => {
+    const send = vi.fn(async () => {})
+    const startSession = vi.fn(async () => {
+      throw new ApiError({ reason: 'NoAccount', message: 'No signed-in account is available.' })
+    })
+    const base = snapshot()
+    const { client } = fakeClient({
+      send,
+      startSession,
+      getBoard: vi.fn(async () => board()),
+      getThread: vi.fn(async () =>
+        snapshot({
+          session: base.session === null ? null : { ...base.session, held: false },
+          task: { ...base.task, id: 't4', lead: { agentId: 'claude-code', model: null, account: null } },
+        }),
+      ),
+    })
+    withServices(<Docked target={{ kind: 'task', id: 't4' }} />, client)
+    const dock = await screen.findByRole('complementary', { name: 'Beside the board' })
+    await userEvent.click(within(dock).getByRole('button', { name: 'Ask for changes' }))
+    await userEvent.type(within(dock).getByRole('textbox'), 'Please rename it.')
+    await userEvent.click(within(dock).getByRole('button', { name: 'Send to the lead' }))
+
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(startSession).toHaveBeenCalledWith({ threadId: 'th4', agentId: 'claude-code' }))
+    const status = await screen.findByRole('alert')
+    expect(status.textContent).toContain('Note queued, but the lead could not start.')
+    expect(status.textContent).toContain('No signed-in account is available.')
+    expect(status.textContent).toContain("The note is already queued; don't send it again.")
+    expect(screen.queryByRole('textbox')).toBeNull()
   })
 
   it('pushes what the lead committed since before the pull request can be accepted, up to what the dock showed', async () => {
@@ -649,6 +750,69 @@ describe('every state the board shows', () => {
     return userEvent.click(screen.getByRole('button', { name: 'Held plan' })).then(() => expect(onOpen).toHaveBeenCalledWith('th1'))
   })
 
+  describe('a task waiting for a free agent', () => {
+    const waiting = { phase: 'running' as const, step: 'implement', queued: { busy: 4, atOnce: 4 }, startedAt: '2026-10-01T10:00:00.000Z' }
+    const draw = (...tasks: BoardTask[]) =>
+      withServices(
+        <BoardView lanes={lanesOf(board({ tasks, calls: [] }))} agents={agents} now={NOW} onOpen={vi.fn()} />,
+        fakeClient().client,
+      )
+
+    it('shows nothing of progress before its first step has had an agent: no steps, branch or clock', () => {
+      draw(task({ ...waiting, title: 'Not yet', branch: 'althar/not-yet', changed: { files: 0, add: 0, del: 0 }, planWaits: true }))
+      expect(screen.getByText('Waiting')).toBeTruthy()
+      expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
+      expect(screen.queryByRole('list', { name: 'Steps' })).toBeNull()
+      expect(screen.queryByText('althar/not-yet')).toBeNull()
+      expect(screen.queryByText('0s')).toBeNull()
+    })
+
+    it('keeps the steps done so far and its real branch once work was done, with no step shown as under way', () => {
+      draw(
+        task({
+          ...waiting,
+          title: 'Midway',
+          branch: 'althar/midway',
+          changed: { files: 2, add: 14, del: 3 },
+          step: 'review',
+          startedAt: '2026-10-01T09:30:00.000Z',
+        }),
+      )
+      expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
+      const track = screen.getByRole('list', { name: 'Steps' })
+      expect(within(track).getByText('Implement').closest('li')?.className).toMatch(/done/)
+      // The step it waits on isn't drawn as running: the kit's track stands still and empty for a waiting task.
+      expect(track.getAttribute('data-status')).toBe('queued')
+      expect(screen.getByText('althar/midway')).toBeTruthy()
+      expect(screen.getByText('+14')).toBeTruthy()
+      expect(screen.getByText('30m')).toBeTruthy()
+    })
+
+    it('shows no branch chip for an empty diff on a running or a ready card, and still one whose size is unknown', () => {
+      draw(
+        task({
+          taskId: 'r',
+          title: 'Running, nothing yet',
+          phase: 'running',
+          step: 'implement',
+          branch: 'althar/running-empty',
+          changed: { files: 0, add: 0, del: 0 },
+        }),
+        task({
+          taskId: 'k',
+          title: 'Ready, nothing changed',
+          phase: 'ready',
+          branch: 'althar/ready-empty',
+          changed: { files: 0, add: 0, del: 0 },
+        }),
+        task({ taskId: 'u', title: 'Running, unknown', phase: 'running', step: 'implement', branch: 'althar/unknown-size', changed: null }),
+      )
+      expect(screen.queryByText('althar/running-empty')).toBeNull()
+      expect(screen.queryByText('althar/ready-empty')).toBeNull()
+      expect(screen.getByText('althar/unknown-size')).toBeTruthy()
+    })
+  })
+
   it('shows work its lead is resolving a conflict for at work, and what it couldn’t resolve as stuck, with why', () => {
     const why = 'The lead couldn’t resolve the conflict with main, in README.md. The merge of origin/main isn’t committed.'
     const lanes = lanesOf(
@@ -684,6 +848,30 @@ describe('every state the board shows', () => {
     expect(screen.getByText('Merge conflict')).toBeTruthy()
     expect(screen.getByText(why)).toBeTruthy()
     expect(screen.getAllByText('Ready to accept')).toHaveLength(1)
+  })
+
+  it('says Unrestricted at the foot of each card whose task allows everything, after what it says there already', () => {
+    const lanes = lanesOf(
+      board({
+        tasks: [
+          task({ taskId: 'u1', threadId: 'thu1', title: 'Allowed at work', phase: 'running', allowEverything: true }),
+          task({ taskId: 'u2', threadId: 'thu2', title: 'Handed back', phase: 'ready', handedBack: 'A conflict', allowEverything: true }),
+          task({ taskId: 'u3', threadId: 'thu3', title: 'Asks as ever', phase: 'running' }),
+          // Up next, it will start allowing everything.
+          task({ taskId: 'u4', threadId: 'thu4', title: 'Held, allowed', phase: 'held', allowEverything: true }),
+          task({ taskId: 'u5', threadId: 'thu5', title: 'Held, asks', phase: 'held' }),
+        ],
+        calls: [],
+      }),
+    )
+    withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+    const cardOf = (title: string) => screen.getByRole('button', { name: title }).closest('article') as HTMLElement
+    expect(within(cardOf('Allowed at work')).getByText('Unrestricted')).toBeTruthy()
+    expect(within(cardOf('Handed back')).getByText('A conflict')).toBeTruthy()
+    expect(within(cardOf('Handed back')).getByText('Unrestricted')).toBeTruthy()
+    expect(within(cardOf('Asks as ever')).queryByText('Unrestricted')).toBeNull()
+    expect(within(cardOf('Held, allowed')).getByText('Unrestricted')).toBeTruthy()
+    expect(within(cardOf('Held, asks')).queryByText('Unrestricted')).toBeNull()
   })
 
   it('says how long work has run', () => {
@@ -903,9 +1091,11 @@ describe('each kind’s card', () => {
     expect(reading.getByText('Review')).toBeTruthy()
     expect(reading.getByText('ninemate')).toBeTruthy()
     expect(reading.getByText('1 finding so far')).toBeTruthy()
-    // Ready to accept, and how its checks went.
+    // Ready to accept: how its checks went, or which failed, and the next thing to do. A draft isn't in the way: accepting marks it ready.
     expect(within(cardOf('Ready with checks')).getByText('All 8 checks passed')).toBeTruthy()
-    expect(within(cardOf('Checks failed')).getByText('1 check failed')).toBeTruthy()
+    expect(within(cardOf('Ready with checks')).getByText('Accept and merge')).toBeTruthy()
+    expect(within(cardOf('Checks failed')).getByText('test failed')).toBeTruthy()
+    expect(within(cardOf('Checks failed')).getByText('Ask the lead to fix it')).toBeTruthy()
     expect(within(cardOf('Unchecked')).getByText('No checks ran')).toBeTruthy()
     // A review drafted: its findings, louder, then what they come to.
     const drafted = within(cardOf('Review #1199'))
@@ -960,6 +1150,62 @@ describe('each kind’s card', () => {
     expect(within(settled).getByText('althar/add-a-retry')).toBeTruthy()
     const next = screen.getByRole('button', { name: 'Up next, a change' }).closest('li') as HTMLElement
     expect(within(next).getByText('Change')).toBeTruthy()
+  })
+})
+
+describe('what stands between a ready change and merging', () => {
+  const NOW = '2026-10-01T10:00:00.000Z'
+  const passed = { outcome: 'passed' as const, passed: 5, failed: 0, running: 0, total: 5, failing: [], list: [] }
+  /** Checks named check 1, check 2… each in the state given. */
+  const listOf = (...states: ReadonlyArray<'passed' | 'skipped' | 'cancelled'>) =>
+    states.map((state, i) => ({ name: `check ${i + 1}`, state, summary: null }))
+  const ready = (taskId: string, title: string, overrides: Parameters<typeof change>[0]) =>
+    task({ taskId, title, phase: 'ready', change: change({ draft: false, checks: passed, ...overrides }) })
+  const lanes = lanesOf(
+    board({
+      tasks: [
+        ready('s1', 'Good to merge', {}),
+        ready('s2', 'Still a draft', { draft: true }),
+        ready('s3', 'Checks still running', { checks: { ...passed, outcome: 'running', passed: 3, running: 2 } }),
+        ready('s4', 'In conflict', { conflicts: true, target: 'main' }),
+        ready('s5', 'Commits to push', { localHead: 'def456', unpushed: 3 }),
+        // Commits here and a check that failed on what is pushed: the push first, as it runs the checks again.
+        ready('s6', 'Two at once', { localHead: 'def456', unpushed: 2, checks: change().checks }),
+        // Commits counted before the branch's head here is known aren't said.
+        ready('s7', 'Head not read yet', { unpushed: 2 }),
+        // Done, but one was cancelled: not all passed, and a host holds the merge on it.
+        ready('s8', 'A check cancelled', {
+          checks: { ...passed, passed: 3, list: listOf('passed', 'passed', 'passed', 'cancelled', 'skipped') },
+        }),
+        // One skipped: not every one passed, but nothing is in the way.
+        ready('s9', 'A check skipped', {
+          checks: { ...passed, passed: 4, list: listOf('passed', 'passed', 'passed', 'passed', 'skipped') },
+        }),
+        // Closed after it was ready: nothing is in its way, and nothing to do to it.
+        ready('s10', 'Closed since', { state: 'closed' }),
+      ],
+      calls: [],
+    }),
+  )
+  const cardOf = (title: string) => screen.getByRole('button', { name: title }).closest('article') as HTMLElement
+
+  it('says it in one line, the most pressing first, with the one next thing to do at its end', () => {
+    withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+    const said = (title: string) => cardOf(title).textContent ?? ''
+    expect(said('Good to merge')).toMatch(/All 5 checks passed\s*Accept and merge/)
+    expect(said('Still a draft')).toMatch(/All 5 checks passed\s*Accept and merge/)
+    // Checks running: nothing to do but wait.
+    expect(said('Checks still running')).toContain('Checks running, 3 of 5 passed')
+    expect(within(cardOf('Checks still running')).queryByText(/Accept and merge|Push/)).toBeNull()
+    expect(said('In conflict')).toMatch(/Conflicts with main\s*Ask the lead to resolve it/)
+    expect(said('Commits to push')).toMatch(/3 commits not on the PR\s*Push 3 commits/)
+    expect(said('Two at once')).toMatch(/2 commits not on the PR\s*·\s*test failed\s*Push 2 commits/)
+    expect(said('Head not read yet')).toMatch(/All 5 checks passed\s*Accept and merge/)
+    // Cancelled: said in place of a pass, and nothing to do from here but open the task.
+    expect(said('A check cancelled')).toContain('check 4 cancelled')
+    expect(said('A check cancelled')).not.toMatch(/checks passed|Accept and merge/)
+    expect(said('A check skipped')).toMatch(/4 of 5 checks passed\s*Accept and merge/)
+    expect(said('Closed since')).not.toMatch(/checks passed|Accept and merge/)
   })
 })
 

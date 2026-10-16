@@ -1,0 +1,25 @@
+.line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.name {
+  flex: none;
+  font-weight: 600;
+  color: var(--t-2);
+}
+.warning .name {
+  color: var(--warm);
+}
+.line a {
+  color: var(--t-2);
+  font-weight: 550;
+  text-decoration: none;
+}
+.line a:hover {
+  text-decoration: underline;
+}

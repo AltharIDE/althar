@@ -5,7 +5,7 @@ import { GITHUB } from '../../fixtures/outputs'
 import { SHOT_AFTER, SHOT_BEFORE } from '../../fixtures/shots'
 import { States } from '../../storybook/States'
 import { laneDecorator } from '../../storybook/lane'
-import { BranchChip, CommandChip, Fact, FileChips, Findings, PullChip, Thumbs } from './Chips'
+import { BranchChip, CommandChip, Fact, FactLine, FileChips, Findings, NextStep, PullChip, Thumbs } from './Chips'
 
 /* The chips a board card holds, each at a card's width, and narrow, where what gives way first shows. */
 
@@ -96,8 +96,45 @@ export const Facts: Story = {
       <Fact icon="close" tone="danger">
         2 checks failed
       </Fact>
+      <Fact tone="live">Checks running, 2 of 5 passed</Fact>
     </div>
   ),
+}
+/** What stands between a ready change and merging, as one line, the most pressing first; then the one next thing, at the foot's end. */
+export const FactsInALine: Story = {
+  render: () => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 10px', fontSize: 11.5 }}>
+      <FactLine>
+        <Fact key="push" icon="up" tone="warm">
+          2 commits not on the PR
+        </Fact>
+        <Fact key="checks" tone="danger">
+          harness / verify failed
+        </Fact>
+      </FactLine>
+      <NextStep>Push 2 commits</NextStep>
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const line = within(canvasElement)
+    await expect(line.getByText('2 commits not on the PR')).toBeInTheDocument()
+    await expect(line.getByText('harness / verify failed')).toBeInTheDocument()
+    // One middot between two facts, and none before the first.
+    await expect(line.getAllByText('·')).toHaveLength(1)
+    await expect(line.getByText('Push 2 commits')).toBeInTheDocument()
+  },
+}
+/** A live fact has its cobalt dot, not a glyph, even given one. */
+export const LiveFact: Story = {
+  render: () => (
+    <Fact tone="live" icon="check">
+      Checks running, 2 of 5 passed
+    </Fact>
+  ),
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByText('Checks running, 2 of 5 passed')).toBeInTheDocument()
+    await expect(canvasElement.querySelector('svg')).toBeNull()
+  },
 }
 export const FindingsCount: Story = {
   render: () => <Findings count={3} detail="1 blocking · request changes" />,
@@ -164,6 +201,23 @@ export const AllStates: Story = {
             </Fact>
           ),
         },
+        { state: 'fact, live', node: <Fact tone="live">Checks running, 2 of 5 passed</Fact> },
+        {
+          state: 'facts in a line, narrow',
+          node: (
+            <div style={{ ...narrow, fontSize: 11.5 }}>
+              <FactLine>
+                <Fact key="push" icon="up" tone="warm">
+                  2 commits not on the PR
+                </Fact>
+                <Fact key="checks" tone="danger">
+                  harness / verify failed
+                </Fact>
+              </FactLine>
+            </div>
+          ),
+        },
+        { state: 'next', node: <NextStep>Accept and merge</NextStep> },
         { state: 'findings', node: <Findings count={3} detail="1 blocking · request changes" /> },
       ]}
     />

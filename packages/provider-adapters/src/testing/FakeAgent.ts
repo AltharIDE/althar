@@ -113,6 +113,13 @@ export const scenarios = {
    * says what was chosen (`chosen=allow_once`).
    */
   run: 'run ',
+  /**
+   * Followed by commands apart by `; `, `run each make deploy; ./deploy.sh`:
+   * asks to run them all at once, as an agent's parallel tool calls do, so
+   * they wait together; says what was chosen for each, in order
+   * (`chosen=allow_once,allow_once`).
+   */
+  runEach: 'run each ',
 } as const
 
 /** A 480 × 300 PNG of a page, as a screenshot tool hands it back. */
@@ -241,6 +248,8 @@ interface SessionState {
   background: Map<string, { readonly toolCallId: string; readonly outputPath?: string }>
   /** How many commands it has left running, so each has an id of its own. */
   served: number
+  /** How large it last said its context is, in tokens. */
+  contextSize: number
 }
 
 /** What `bun dev` prints, coloured as Vite colours it. */
@@ -439,7 +448,7 @@ const playStall = async (
  * says again what the task built, `[lead:fix-more]` commits other work after it,
  * `[lead:fix-late]` leaves the full tests running and commits it once they
  * end, and `[lead:fix-hold]` works on after it until it is interrupted. Asked to "push pls" once its pull request is open,
- * `[lead:push]` commits what it has and asks the person to push it. Asked to bring its branch up to date, `[lead:resolve]`
+ * `[lead:push]` commits what it has and asks the person to push it. Told its checks failed, `[lead:fix-push]` commits a fix and calls push_to_pull_request itself. Asked to bring its branch up to date, `[lead:resolve]`
  * merges what it was told to, keeps both sides of each conflict and commits
  * the merge; `[lead:resolve-more]` does too, then commits other work on top
  * of it in two commits; `[lead:resolve-fix]` commits one fix on top of the
@@ -776,6 +785,14 @@ const playRole = async (
         const text = template.replace(/^(#+ .*)$/m, '$1\n\nDid the task, in the template.').replace('[ ]', '[x]')
         return await call('finish_step', { summary: 'Did the task.', built: BUILT, descriptions: [{ text }] })
       }
+      // Fixes and pushes it itself, as a lead may while the person hasn't seen the change yet: each fix a commit of its own.
+      // Started again for it, it reads its brief first: the failure is in what it is told, not always at the start.
+      if (session.markers.has('[lead:fix-push]') && /(^|\n\n)Checks failed on /.test(text)) {
+        commitIn(session.cwd, `fixed-${Date.now()}.txt`, 'Fix the failing check')
+        await call('push_to_pull_request', {})
+        await call('finish_step', { summary: 'Fixed the failing check, and pushed it.', built: BUILT_FIXED })
+        return 'Fixed the failing check, and pushed it.'
+      }
       // Asked to resolve a conflict, as a fresh session is with its brief after a restart, it does that rather than finish.
       const resolving = /Bring the branch up to date: merge \S+ into it/.test(text)
       if (!resolving && (text.includes('[lead:finish]') || (toldToGoOn && session.markers.has('[lead:finish]')))) {
@@ -1079,6 +1096,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         })(),
         markers: new Set(),
         played: new Set(),
+        contextSize: CONTEXT_SIZE,
         coordinator: false,
         runs: 0,
         background: new Map(),
@@ -1164,8 +1182,27 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
+      // Asked to compact, as Claude Code, Codex and OpenCode take `/compact`, it says its context holds a tenth of what it may.
+      // With `[lead:compact-fails]`, it says so in a call of its own and ends its turn as usual, as Claude Code does.
+      if (text === '/compact') {
+        if (session.markers.has('[lead:compact-fails]')) {
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'compact',
+            title: 'Compact conversation',
+            kind: 'think',
+            status: 'in_progress',
+          })
+          await update({ sessionUpdate: 'tool_call_update', toolCallId: 'compact', status: 'failed' })
+          return ended()
+        }
+        await update({ sessionUpdate: 'usage_update', used: Math.round(session.contextSize / 10), size: session.contextSize })
+        await say('Compacted the conversation.')
+        return ended()
+      }
       if (filled !== null) {
         const size = filled[3] === undefined ? CONTEXT_SIZE : Number(filled[3])
+        session.contextSize = size
         const usage = { sessionUpdate: 'usage_update' as const, used: Math.round((size * Number(filled[2])) / 100), size }
         if (filled[1] === undefined) await update(usage)
         else setTimeout(() => void update(usage), 300)
@@ -1176,17 +1213,21 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       if (images.length > 0)
         await say(`saw images: ${images.map((image) => `${image.mimeType} ${Buffer.from(image.data, 'base64').length} B`).join(', ')}\n\n`)
 
-      /** Asks permission; cancelling the turn withdraws the request. */
+      // How many asks wait at once, as several do from `run each`: they share one abort, let go as the last is answered.
+      let asking = 0
+      /** Asks permission; cancelling the turn withdraws the request, and any asked with it. */
       const ask = async (toolCall: acp.ToolCallUpdate, offered: Array<acp.PermissionOption>) => {
-        session.abort = new AbortController()
+        const abort = (session.abort ??= new AbortController())
+        asking += 1
         const answer = await client
           .request<acp.RequestPermissionResponse, acp.RequestPermissionRequest>(
             acp.methods.client.session.requestPermission,
             { sessionId: params.sessionId, toolCall, options: offered },
-            { cancellationSignal: session.abort.signal },
+            { cancellationSignal: abort.signal },
           )
           .catch(() => undefined)
-        session.abort = undefined
+        asking -= 1
+        if (asking === 0) session.abort = undefined
         if (answer === undefined) return 'withdrawn'
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
@@ -1344,7 +1385,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return ended()
       }
       if (text === scenarios.stubborn) session.stubborn = true
-      const scenario = resumed ? scenarios.stubborn : text.startsWith(scenarios.run) ? scenarios.commandChoices : text
+      const scenario = resumed
+        ? scenarios.stubborn
+        : text.startsWith(scenarios.runEach)
+          ? scenarios.runEach
+          : text.startsWith(scenarios.run)
+            ? scenarios.commandChoices
+            : text
 
       switch (scenario) {
         case scenarios.commandChoices:
@@ -1373,6 +1420,31 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say(`chosen=${chosen}`)
           if (scenario === scenarios.deniedThenWait) while (!session.cancelled) await pause(10)
           return session.cancelled || chosen === 'cancel' || chosen === 'cancelled' ? { stopReason: 'cancelled' } : ended()
+        }
+        case scenarios.runEach: {
+          const calls = text
+            .slice(scenarios.runEach.length)
+            .split('; ')
+            .map((line) => {
+              session.runs += 1
+              return { toolCallId: `run-${session.runs}`, title: `Run ${line}`, kind: 'execute' as const, rawInput: { command: line } }
+            })
+          for (const toolCall of calls) await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
+          const chosen = await Promise.all(
+            calls.map(async (toolCall) => {
+              const answer = await ask(toolCall, commandOptions)
+              await update({
+                sessionUpdate: 'tool_call_update',
+                toolCallId: toolCall.toolCallId,
+                status: answer.startsWith('allow') ? 'completed' : 'failed',
+              })
+              return answer
+            }),
+          )
+          await say(`chosen=${chosen.join(',')}`)
+          return session.cancelled || chosen.some((answer) => answer === 'cancel' || answer === 'cancelled')
+            ? { stopReason: 'cancelled' }
+            : ended()
         }
         case scenarios.question:
         case scenarios.questions: {

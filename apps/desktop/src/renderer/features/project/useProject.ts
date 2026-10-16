@@ -62,8 +62,10 @@ export interface ProjectModel {
   /** Takes back a message still waiting its turn; false, having said why, when the agent already has it. */
   readonly takeBack: (itemId: string) => Promise<boolean>
   readonly interrupt: () => Promise<void>
-  /** Runs the project with no agent: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
-  readonly runProject: (taskId?: string | null) => Promise<void>
+  /** Has the coordinator compact its context, after what it was told before. */
+  readonly compact: () => Promise<void>
+  /** Runs one of the project's runnables with no agent, its default without one: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
+  readonly runProject: (taskId?: string | null, runnableId?: string | null) => Promise<void>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   /** Moves the running coordinator to another agent. */
@@ -283,16 +285,12 @@ export const useProject = (projectId: string): ProjectModel => {
         body,
         'after_current',
         async () => {
-          /*
-           * Not running, it starts first, as it ran last or as the person picked, and its brief waits
-           * for what they say. Started in the same call as the send, an agent that didn't start would
-           * fail a message the queue has already, which would then go back in the composer to be sent
-           * twice; started first, a send that fails was never queued. One already starting, as for a
-           * message just before, reads this one next.
-           */
-          if (threadId !== null && coordinator?.session === null && choice !== null)
+          // The picked agent must be the one the coordinator starts on. A failed start must leave the note in the composer, not queue it and restore it for a duplicate send.
+          if (threadId !== null && coordinator !== null && (coordinator.session === null || !coordinator.session.held) && choice !== null)
             await client.startSession(startOf(threadId, choice)).catch((failure: unknown) => {
-              if (!(failure instanceof ApiError && failure.reason === 'SessionRunning')) throw failure
+              if (failure instanceof ApiError && failure.reason === 'SessionRunning') return
+              fail(failure)
+              throw failure
             })
           await send(body, 'after_current', images)
         },
@@ -314,13 +312,16 @@ export const useProject = (projectId: string): ProjectModel => {
       }
     },
     interrupt: () => act(async () => (threadId === null ? undefined : client.interrupt(threadId))),
-    runProject: (taskId = null) => act(() => client.runProject(projectId, taskId, threadId)),
+    compact: () => act(async () => (threadId === null ? undefined : client.compact(threadId))),
+    runProject: (taskId = null, runnableId = null) =>
+      act(() => client.runProject(projectId, taskId, threadId, ...(runnableId === null ? [] : [runnableId]))),
     stopLaunch: (id) => act(() => client.stopLaunch(id)),
     clearLaunch: (id) => act(() => client.clearLaunch(id)),
     choose: (choice) =>
       act(async () => {
         const session = coordinator?.session
-        if (threadId !== null && session != null) await moveTo(client, threadId, runningOn(session), choice)
+        // A session the runtime no longer holds can't be moved; the pick is applied when the person next says something.
+        if (threadId !== null && session != null && session.held) await moveTo(client, threadId, runningOn(session), choice)
       }),
     handOver: (choice, body, images) =>
       shown(

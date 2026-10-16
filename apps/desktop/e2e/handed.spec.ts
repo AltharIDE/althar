@@ -28,29 +28,30 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: /Open task/ }).click()
     await toConversation(page)
-    await expect(page.getByText('Did the task.')).toBeVisible()
-    // Its turn over, what it built said, as a person would read it before writing.
-    await expect(page.getByText('What it built')).toBeVisible()
+    // Its round over, what it built is what it said last, as a person would read it before writing.
+    await expect(page.getByText(/Checkout retries once when the payment call fails/).first()).toBeVisible()
 
     // A command whose output streams until it is stopped: open in its tool call as it comes.
     await say(page, 'streams')
-    await page.getByRole('button', { name: /^Working for/ }).click()
+    await page.getByRole('button', { name: /^Working · / }).click()
     await expect(page.getByText(/ready in \d+ ms/).first()).toBeVisible()
-    await expect(page.getByRole('button', { name: /^Working for/ })).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.getByRole('button', { name: /^Working · / })).toHaveAttribute('aria-expanded', 'true')
     await expect(page.getByRole('button', { name: /^Running npm run dev/ })).toHaveAttribute('aria-expanded', 'true')
     // Once the fold has opened.
     await page.waitForTimeout(500)
     await page.screenshot({ path: 'test-results/handed-streaming.png' })
     await page.getByRole('button', { name: 'Interrupt the lead', exact: true }).click()
-    await expect(page.getByRole('button', { name: /^Working for/ })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /^Working · / })).toHaveCount(0)
 
     await say(page, 'hands-back')
     // The table in what it said, the kit's own.
     await expect(page.getByRole('columnheader', { name: 'Budget' }).last()).toBeVisible()
-    // The screenshot, from the artifact store at its address, drawn.
-    const shots = page.getByRole('list', { name: 'Screenshots' }).last()
-    await expect(shots.getByRole('listitem')).toHaveCount(1)
-    const shot = shots.getByRole('img')
+    // The screenshot, from the artifact store at its address, drawn large with what the lead said.
+    const open = page.getByRole('button', { name: /full size$/ }).last()
+    // A picture loads as it nears the screen. The message may still be drawn again as it settles, putting a new button in the old
+    // one's place, so it is scrolled to once one stays.
+    await expect(() => open.scrollIntoViewIfNeeded({ timeout: 1_000 })).toPass()
+    const shot = open.getByRole('img')
     await expect.poll(() => shot.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
     expect(await shot.getAttribute('src')).toMatch(/^althar-picture:\/\/shot\/[0-9a-f]{64}\?w=1120$/)
     // The document it wrote, read from the worktree, and the file it pointed at.
@@ -60,7 +61,7 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
     await page.screenshot({ path: 'test-results/handed-back.png', fullPage: true })
 
     // The screenshot opens full size, and Escape gives focus back.
-    await shots.getByRole('button', { name: /full size/ }).click()
+    await open.click()
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('img')).toBeVisible()
     await expect.poll(() => dialog.getByRole('img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(480)
@@ -82,7 +83,7 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
 
     // Each command's output, in its tool call: what passed, and what failed with its exit.
     await page
-      .getByRole('button', { name: /^Worked for/ })
+      .getByRole('button', { name: /[Ww]orked \d/ })
       .last()
       .click()
     await page.getByRole('button', { name: /Ran npm test/ }).click()
@@ -92,15 +93,15 @@ test('shows what the lead hands back: output, a screenshot, a document, a file a
     await expect(page.getByText('exit 1')).toBeVisible()
     await page.screenshot({ path: 'test-results/handed-output.png', fullPage: true })
 
-    // Copy, on what it said: the window may write to the clipboard, and only that. Its turn goes on with Althar's reminder to
-    // report what it changed, as a round's does (ADR-034); Copy takes the turn's last words, whichever they are.
+    // Copy, on what it said: the window may write to the clipboard, and only that. Copy takes what the lead said last in its
+    // round, as it wrote it (ADR-042).
     const turn = page.getByRole('article').filter({ hasText: 'Here is what I found.' }).last()
     await turn.hover()
     await turn.getByRole('button', { name: 'Copy' }).last().click()
     await expect(turn.getByRole('button', { name: 'Copied' })).toBeVisible()
     const copied = await electronApp.evaluate(({ clipboard }) => clipboard.readText())
     expect(copied.length).toBeGreaterThan(0)
-    await expect(turn.getByText(copied.slice(0, 40)).first()).toBeVisible()
+    await expect(turn.getByText(copied.split('\n')[0]?.trim() ?? '').first()).toBeVisible()
   } finally {
     await electronApp.close()
   }
