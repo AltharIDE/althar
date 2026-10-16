@@ -1,15 +1,18 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from '@tanstack/react-router'
 
-import { LoadMeter, ProjectTabs, TitleBar, type Room, UpdateReady, UsageButton } from '@althar/ui'
+import { LoadMeter, ProjectTabs, Room, TitleBar, UpdateReady, UsageButton } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { FinderView } from '../finder/FinderView'
 import { QuickSettings } from '../settings/QuickSettings'
 import { UsageView } from '../usage/UsageView'
 import { UsageOpenContext, usePlanUsage } from '../usage/useUsage'
+import { CarriedAtFoot, CarriedBack } from '../../shared/dictation/Carried'
 import { useWindowChrome } from '../../shared/useWindowChrome'
 import { useUpdate } from '../../shared/useUpdate'
+import type { Destination } from '../../shared/dictation/sessions'
 import { tabsStoreOf } from './store'
 import { beside, byNumber } from './tabs'
 import s from './Tabs.module.css'
@@ -184,6 +187,15 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   const open = tabs.tabs.map((tab) => tab.id)
   const order = open.join(' ')
   const newTab: NewTab = { start: tabs.newProject, made: tabs.made, close: tabs.closeNew }
+  // Back to the composer dictation was carried from: the coordinator's conversation, or the task.
+  const navigate = useNavigate()
+  const back = useCallback(
+    (to: Destination['back']) =>
+      void (to.kind === 'coordinator'
+        ? navigate({ to: '/projects/$projectId', params: { projectId: to.projectId }, search: { room: Room.Talk } })
+        : navigate({ to: '/threads/$threadId', params: { threadId: to.threadId } })),
+    [navigate],
+  )
   useEffect(() => {
     const ids = order === '' ? [] : order.split(' ')
     const onKey = (event: KeyboardEvent) => {
@@ -234,29 +246,33 @@ export function TabsFrame({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none, host.platform])
   return (
-    <VisitContext.Provider value={tabs.visit}>
-      <NewTabContext.Provider value={newTab}>
-        <UsageOpenContext.Provider value={openUsage}>
-          <EndContext.Provider value={end}>
-            <TabBarContext.Provider value={!tabs.none}>
-              <div className={s.frame}>
-                {!tabs.none && (
-                  <TabsBar
-                    tabs={tabs}
-                    usage={{ open: usage, toggle: () => setUsage((open) => !open) }}
-                    endRef={setEnd}
-                    quick={quick}
-                    onQuick={setQuick}
-                  />
-                )}
-                <div className={s.screen}>{children}</div>
-              </div>
-              {finding && <FinderView projectId={current} onClose={() => setFinding(false)} />}
-              {usage && <UsageView onClose={() => setUsage(false)} />}
-            </TabBarContext.Provider>
-          </EndContext.Provider>
-        </UsageOpenContext.Provider>
-      </NewTabContext.Provider>
-    </VisitContext.Provider>
+    <CarriedBack.Provider value={back}>
+      <VisitContext.Provider value={tabs.visit}>
+        <NewTabContext.Provider value={newTab}>
+          <UsageOpenContext.Provider value={openUsage}>
+            <EndContext.Provider value={end}>
+              <TabBarContext.Provider value={!tabs.none}>
+                <div className={s.frame}>
+                  {!tabs.none && (
+                    <TabsBar
+                      tabs={tabs}
+                      usage={{ open: usage, toggle: () => setUsage((open) => !open) }}
+                      endRef={setEnd}
+                      quick={quick}
+                      onQuick={setQuick}
+                    />
+                  )}
+                  <div className={s.screen}>{children}</div>
+                </div>
+                {finding && <FinderView projectId={current} onClose={() => setFinding(false)} />}
+                {usage && <UsageView onClose={() => setUsage(false)} />}
+                {/* Dictation carried from its composer, at the window's foot where no composer shows. */}
+                <CarriedAtFoot />
+              </TabBarContext.Provider>
+            </EndContext.Provider>
+          </UsageOpenContext.Provider>
+        </NewTabContext.Provider>
+      </VisitContext.Provider>
+    </CarriedBack.Provider>
   )
 }

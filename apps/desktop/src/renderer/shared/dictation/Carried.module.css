@@ -1,0 +1,11 @@
+/* Where no composer shows: centred at the window's foot, as wide as the pill keeps itself. */
+.foot {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  z-index: var(--z-float);
+  display: flex;
+  justify-content: center;
+  width: min(440px, calc(100vw - 32px));
+  transform: translateX(-50%);
+}

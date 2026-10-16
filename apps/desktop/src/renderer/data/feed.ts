@@ -106,13 +106,8 @@ const wholeReads = (cache: QueryClient, event: Changed): ReadonlyArray<Due> => [
         .findAll({ queryKey: ['repositories'] })
         .map((query) => ({ key: query.queryKey, offScreen: false }))
     : []),
-  // Its rules, which an answer can change too (Allow always, Deny always), only while they show; and its board, whose tasks say Unrestricted by the rules' switch.
-  ...(event.projectId !== null && event.aggregateType === 'policy'
-    ? [
-        { key: keys.rules(event.projectId), offScreen: false },
-        { key: keys.board(event.projectId), offScreen: true },
-      ]
-    : []),
+  // Its rules, which an answer can change too (Allow always, Deny always), only while they show.
+  ...(event.projectId !== null && event.aggregateType === 'policy' ? [{ key: keys.rules(event.projectId), offScreen: false }] : []),
   // Its notes, which the coordinator keeps as the person decides, only while they show.
   ...(event.projectId !== null && event.aggregateType === 'project_note' ? [{ key: keys.notes(event.projectId), offScreen: false }] : []),
 ]

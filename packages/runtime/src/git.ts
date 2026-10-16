@@ -426,6 +426,18 @@ export const addDetachedWorktree = (repository: string, path: string, commit: st
 export const restoreWorktree = (repository: string, path: string, branch: string) =>
   Effect.andThen(git(repository, 'worktree', 'prune'), git(repository, 'worktree', 'add', path, branch))
 
+/**
+ * Changes not committed in a checkout, its own files only: a submodule's
+ * state is left out (`all`), or only whether it is at the commit recorded for
+ * it (`dirty`), so git never runs a status inside one. That one runs from the
+ * submodule's folder, where in the document portal getcwd fails, and a
+ * submodule the merge leaves alone never needs reading. A failed read stays a
+ * failure, even when git wrote no status. Untracked files are checked
+ * separately by the merge.
+ */
+export const trackedStatus = (cwd: string, submodules: 'all' | 'dirty' = 'all'): Effect.Effect<string, GitFailed> =>
+  git(cwd, 'status', '--porcelain', '--untracked-files=no', `--ignore-submodules=${submodules}`)
+
 /** Puts back a worktree whose folder is gone that never had a branch, detached where it started. */
 export const restoreDetachedWorktree = (repository: string, path: string, commit: string) =>
   Effect.andThen(git(repository, 'worktree', 'prune'), addDetachedWorktree(repository, path, commit))
