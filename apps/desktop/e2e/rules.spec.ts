@@ -107,7 +107,7 @@ test('the coordinator answers a task permission, leaves always-ask items to the 
     // Deploying is still reserved for the person, even though the judge would allow it.
     await say(page, 'command-choices')
     await expect(page.getByText('Needs your permission')).toBeVisible()
-    await page.getByRole('button', { name: /^Allow/ }).click()
+    await page.getByRole('button', { name: /^Allow(?! everything)/ }).click()
     await expect(page.getByText('chosen=allow_once')).toHaveCount(2)
     await page.getByRole('navigation', { name: 'Projects' }).getByRole('button', { name: /^Home/ }).click()
     await page.getByRole('button', { name: /since you looked/ }).click()

@@ -10,6 +10,8 @@ import {
   type AgentSession,
   connect,
   type ConfigOption,
+  type PermissionDecision,
+  type PermissionRequest,
   type Question,
   type SessionEvent,
   type StopReport,
@@ -232,6 +234,8 @@ interface Running {
   brief: Brief | undefined
   /** Takes back the session's Althar tools. */
   readonly revokeTools: Effect.Effect<void>
+  /** What its permission requests are decided by: its thread, task and rules. */
+  readonly requestContext: RequestContext
   turnRunning: boolean
   stopping: boolean
   /** How full the agent's context is, in tokens, as it last said; null until it says (ACP's usage updates). */
@@ -510,6 +514,13 @@ export class Sessions extends Context.Service<
         readonly background: ReadonlyArray<ShownLeftRunning>
       }>
     >
+    /**
+     * Decides something Althar does for the thread's session as one of its
+     * own requests would be (ADR-013): by the rules, the coordinator or the
+     * person, who sees it in the thread as any other. The session waits on it
+     * as it would on its own.
+     */
+    askPermission(threadId: string, request: PermissionRequest): Effect.Effect<PermissionDecision, NoSession>
     /** What a command on a thread has printed so far, while it runs: its last lines, and how many came before them. */
     outputSoFar(threadId: string, itemId: string): Effect.Effect<Option.Option<OutputSoFar>>
     /**
@@ -1673,14 +1684,14 @@ export class Sessions extends Context.Service<
               state: 'running',
             })
           }
-          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke }
+          return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext }
         })
 
       /** The session takes over the thread: it is recorded as active, and delivers the brief and any waiting input. */
       const activate = (connected: Effect.Success<ReturnType<typeof connectSession>>, brief: Brief) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const { sessionId, entry, account, thread, connection, agent, scope, revokeTools } = connected
+          const { sessionId, entry, account, thread, connection, agent, scope, revokeTools, requestContext } = connected
           const { definition } = entry
           const options = yield* agent.options
           yield* sql.withTransaction(
@@ -1711,6 +1722,7 @@ export class Sessions extends Context.Service<
             ended: yield* Deferred.make<void>(),
             brief,
             revokeTools,
+            requestContext,
             turnRunning: false,
             stopping: false,
             context: null,
@@ -2265,7 +2277,7 @@ export class Sessions extends Context.Service<
             // A prototype is for clicking through and comparing in place, as a page left running, not as pictures (DEV-92).
             "For a prototype, or anything else the person should look at, serve it live, as one page: the direction shown fills it, and a slim bar at the bottom switches between the directions, A, B, C…, and the states they show, in place, keeping the same screen and state, with what is shown in the address (?d=B&s=pushing). Not an index page linking to a page per direction. Where the repository has a prototype workbench, as its docs say, build on it. Start its server in the background and leave it running when you finish: it shows in the task's Running pill, where the person opens it, and once idle it holds no agent's place. Give its address in `built`. Screenshots are secondary: take them from the live page, as evidence.",
             // Althar reaches the code host for the task (ADR-011).
-            `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks on a change the person hasn't seen yet, which push_to_pull_request pushes at once. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. read_issue reads the issue the task came from, or any other.`,
+            `Commit your work on the task's branch as you go. Don't push, or open or change pull requests, or use gh or glab to change anything on the code host: ${quick?.quick === 1 ? 'once the task is made a change and its steps are done' : "when the plan's steps are done"}, Althar pushes the branch and opens the task's pull request, where the repository's host is connected to Althar. Where it isn't, the task ends on its branch, and the person opens its pull request from Althar once they connect the host. After that, read it with Althar's read_pull_request tool, and answer what people say on it with reply_on_pull_request. Commit what you change after: it goes up only when the person pushes it, except a fix for failing checks on a change the person hasn't seen yet, which push_to_pull_request pushes at once. When they ask you to push, or what you committed should go up, call push_to_pull_request: it shows them the commits with a Push button, and you're told once they've pushed. Never say Althar will push it by itself, or that it's up before you're told. A tag, such as a release's, you make with git tag and push with push_tag, once the person allows it. read_issue reads the issue the task came from, or any other.`,
             // Rewriting what was pushed leaves the pull request unable to take a plain push: Althar says whether it was, so the lead doesn't guess.
             [
               ...published.filter((said) => said !== ''),
@@ -2586,6 +2598,11 @@ export class Sessions extends Context.Service<
                   stopping: running.stopping,
                   background: [...running.background.values()].map(shownOf),
                 })
+          }),
+        askPermission: (threadId, request) =>
+          Effect.suspend(() => {
+            const running = threads.get(threadId)
+            return running === undefined ? Effect.fail(new NoSession({ threadId })) : permissions.decide(running.requestContext, request)
           }),
         stopBackground: (threadId, id) =>
           Effect.gen(function* () {

@@ -237,8 +237,8 @@ export class Nudges extends Context.Service<
       /**
        * Whether a change after `cursor` bears on what needs the person: a call,
        * a task, its plan or run, a step, a session starting, a turn ending, a
-       * review drafted or posted. A thread's items, most of what is recorded,
-       * never do.
+       * review drafted, posted or dropped. A thread's items, most of what is
+       * recorded, never do.
        */
       const movedSince = (cursor: number) =>
         Effect.map(

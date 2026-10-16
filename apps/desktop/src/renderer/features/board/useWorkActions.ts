@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 
-import type { AlwaysScope, BoardTask } from '@althar/contracts'
+import { ApiError, type AlwaysScope, type BoardTask } from '@althar/contracts'
 
 import { messageOf, type StuckAnswer } from '../../data/client'
 import { useServices } from '../../data/services'
@@ -83,10 +83,25 @@ export const useWorkActions = (): WorkActions => {
     sendBack: useCallback(
       (task, note) =>
         busy(setSending, task.taskId, async () => {
-          // A lead that stopped starts again, on the agent that led it, with the note as its first turn: queued first, so it reads it then.
           const head = await client.getThread(task.threadId, { limit: 0 })
+          const restarting = head.session === null || !head.session.held
+          // The lead as the thread has it now, not as the card was read: it may have changed since.
+          const lead = head.task.lead?.agentId ?? null
+          // A thread the runtime no longer holds can't take it — its recorded session may be stale or dead — so the lead starts again on the agent that led it.
+          // A held thread takes the note itself: running, after the current turn; between turns, now. With no lead to start, the person is told why.
+          if (restarting && lead === null)
+            throw new ApiError({
+              reason: 'NoLead',
+              message: 'This task has no lead to start. Pick an agent for it first.',
+            })
           await client.send({ threadId: task.threadId, body: note, disposition: 'after_current' })
-          if (head.session === null && task.lead !== null) await client.startSession({ threadId: task.threadId, agentId: task.lead })
+          if (restarting && lead !== null)
+            await client.startSession({ threadId: task.threadId, agentId: lead }).catch((failure: unknown) => {
+              // Another start took over after the read: the queued note will go to that session.
+              if (failure instanceof ApiError && failure.reason === 'SessionRunning') return
+              // Keep the queued note, and say not to send it again while making the startup failure clear.
+              setError(`Note queued, but the lead could not start. ${messageOf(failure)} The note is already queued; don't send it again.`)
+            })
         }),
       [busy, client],
     ),
