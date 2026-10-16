@@ -42,6 +42,8 @@ export interface Session {
   readonly arrived: string | null
   /** When the person left its composer while it listened or was written down: it is carried with them since. Null while its composer shows, or once dealt with. */
   readonly away: number | null
+  /** What was written is being sent from the pill that carries it: once at a time, wherever the person goes meanwhile. */
+  readonly sending: boolean
 }
 
 /** Whose a thread's dictation is, and how to get it there from elsewhere. */
@@ -81,7 +83,17 @@ export const BARS = 12
 
 const QUIET: ReadonlyArray<number> = Array.from({ length: BARS }, () => 0)
 
-const IDLE: Session = { phase: 'idle', seconds: 0, levels: QUIET, interim: '', at: 0, failed: null, arrived: null, away: null }
+const IDLE: Session = {
+  phase: 'idle',
+  seconds: 0,
+  levels: QUIET,
+  interim: '',
+  at: 0,
+  failed: null,
+  arrived: null,
+  away: null,
+  sending: false,
+}
 
 const sessions = new Map<string, Session>()
 const handles = new Map<string, Handles>()

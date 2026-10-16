@@ -350,7 +350,7 @@ export function Composer({
   return (
     <div className={s.stack} data-tray-host="" {...drop.handlers}>
       {(above || carried) && (
-        <div className={s.over}>
+        <div className={s.floats}>
           {carried && <div className={s.carried}>{carried}</div>}
           {above && <div className={s.above}>{above}</div>}
         </div>

@@ -101,6 +101,7 @@ export const OverAComposer: Story = {
       onChange={() => {}}
       onSubmit={() => {}}
       placeholder="Message the lead"
+      onAddImages={() => {}}
       carried={<DictationPill {...args} />}
       above={
         <>

@@ -233,7 +233,7 @@
 }
 
 /* what floats on the top edge, over the end of the thread: carried dictation, then the pills nearest the field */
-.over {
+.floats {
   position: absolute;
   left: 0;
   right: 0;

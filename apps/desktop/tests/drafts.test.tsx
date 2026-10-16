@@ -12,6 +12,7 @@ import { useProject } from '../src/renderer/features/project/useProject'
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { record } from '../src/renderer/shared/dictation/recorder'
+import { changeSession, listeningIn } from '../src/renderer/shared/dictation/sessions'
 import { forgetDrafts } from '../src/renderer/shared/drafts'
 import { fakeClient, fakeHost, items, snapshot } from './fixtures'
 import { withServices } from './render'
@@ -326,6 +327,31 @@ describe('dictation, once its composer goes from the screen while the view stays
   })
 })
 
+describe('dictation carried from a task', () => {
+  it('is sent to the task’s lead from the coordinator', async () => {
+    const speech = slowDictation()
+    const host = fakeHost({ dictation: speech.dictation })
+    const { client } = tasks()
+    const view = withServices(<Task />, client, host)
+    await taskBox()
+    await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
+    await screen.findByRole('button', { name: /^Stop dictating/ })
+    view.unmount()
+    withServices(<Project />, client, host)
+    await coordinatorBox()
+    const pill = await screen.findByRole('group', { name: 'To the lead · Add a retry' })
+    await userEvent.click(within(pill).getByRole('button', { name: /^Stop and write it down/ }))
+    await speech.heard('Carry on with the tests.')
+    const card = await screen.findByRole('region', { name: 'To the lead · Add a retry' })
+    await userEvent.click(within(card).getByRole('button', { name: 'Send to the lead' }))
+    await waitFor(() =>
+      expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Carry on with the tests.', disposition: 'after_current' }),
+    )
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'To the lead · Add a retry' })).toBeNull())
+    expect((await coordinatorBox()).value).toBe('')
+  })
+})
+
 describe('dictation carried with the person', () => {
   /** Talking to the coordinator, then off to a task while it listens. */
   const toTheTask = async () => {
@@ -337,11 +363,51 @@ describe('dictation carried with the person', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Dictate' }))
     await screen.findByRole('button', { name: /^Stop dictating/ })
     view.unmount()
-    withServices(<Task />, client, host)
+    const task = withServices(<Task />, client, host)
     await taskBox()
     const pill = await screen.findByRole('group', { name: 'To the coordinator · meridian' })
-    return { speech, client, pill }
+    return { speech, client, host, pill, task }
   }
+
+  it('shows the words as they are said over the task, and still over the next one', async () => {
+    const { speech, client, host, pill, task } = await toTheTask()
+    const [thread] = listeningIn()
+    act(() => changeSession(thread!, { interim: 'Why is checkout' }))
+    expect(within(pill).getByText(/Why is checkout/)).toBeTruthy()
+    task.unmount()
+    withServices(<Task threadId="th2" />, client, host)
+    await taskBox()
+    const again = await screen.findByRole('group', { name: 'To the coordinator · meridian' })
+    act(() => changeSession(thread!, { interim: 'Why is checkout slow on mobile' }))
+    expect(within(again).getByText(/slow on mobile/)).toBeTruthy()
+    expect(speech.dictation.transcribe).not.toHaveBeenCalled()
+  })
+
+  it('sends once while the person goes on elsewhere, and keeps what they wrote meanwhile', async () => {
+    const { speech, client, host, pill, task } = await toTheTask()
+    let arrive = () => {}
+    vi.mocked(client.send).mockImplementationOnce(() => new Promise<void>((resolve) => void (arrive = resolve)))
+    await userEvent.click(within(pill).getByRole('button', { name: /^Stop and write it down/ }))
+    await speech.heard('Why is checkout slow?')
+    const card = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
+    await userEvent.click(within(card).getByRole('button', { name: 'Send to the coordinator' }))
+    // What is being sent stays as it went.
+    expect(within(card).getByRole<HTMLTextAreaElement>('textbox', { name: 'What you said' }).readOnly).toBe(true)
+    // Another task meanwhile: still being sent, and not sent again.
+    task.unmount()
+    const next = withServices(<Task threadId="th2" />, client, host)
+    await taskBox()
+    const again = await screen.findByRole('region', { name: 'To the coordinator · meridian' })
+    await userEvent.click(within(again).getByRole('button', { name: 'Send to the coordinator' }))
+    expect(client.send).toHaveBeenCalledTimes(1)
+    // Back at the coordinator, they write more before it is there.
+    next.unmount()
+    withServices(<Project />, client, host)
+    const box = await coordinatorBox()
+    await userEvent.type(box, ' On mobile too.')
+    await act(async () => arrive())
+    await waitFor(() => expect(box.value).toBe('On mobile too.'))
+  })
 
   it('sends what was written to the thread it was said in, and is gone', async () => {
     const { speech, client, pill } = await toTheTask()

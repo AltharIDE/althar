@@ -5,7 +5,7 @@ import { DictationPill, type DictationPillPhase } from '@althar/ui'
 import { useServices } from '../../data/services'
 import { draftOf, setDraftText, useDraftOf } from '../drafts'
 import s from './Carried.module.css'
-import { changeSession, type Destination, handlesOf, useCarrying, useSession } from './sessions'
+import { changeSession, type Destination, handlesOf, sessionOf, useCarrying, useSession } from './sessions'
 import { lengthOf } from './text'
 import { cancelIn, SHORTCUT, stopIn, writeIn } from './useDictation'
 
@@ -53,8 +53,8 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
   const { client } = useServices()
   const session = useSession(thread)
   const draft = useDraftOf(thread)
-  const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const sending = session.sending
 
   // The shortcut stops what is carried, before the composer on screen would start its own.
   const listening = session.phase === 'listening'
@@ -79,21 +79,26 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
   // Dealt with: nothing carried, and no note in its composer that it came while the person was away.
   const done = () => changeSession(thread, { away: null, arrived: null })
 
+  // Sent once, however often the pill is drawn again meanwhile; only what went leaves the draft, so what the person wrote in its composer since stays.
   const send = (threadId: string) => {
     const body = draftOf(thread).text.trim()
-    if (body === '') return
-    setSending(true)
+    if (body === '' || sessionOf(thread).sending) return
+    changeSession(thread, { sending: true })
     setError(null)
-    client
-      .send({ threadId, body, disposition: 'after_current' })
-      .then(
-        () => {
-          setDraftText(thread, '')
-          done()
-        },
-        () => setError(carriedText.didntSend),
-      )
-      .finally(() => setSending(false))
+    client.send({ threadId, body, disposition: 'after_current' }).then(
+      () => {
+        setDraftText(thread, (now) => {
+          const left = now.trim()
+          return left === body ? '' : left.startsWith(body) ? left.slice(body.length).trimStart() : now
+        })
+        changeSession(thread, { sending: false })
+        if (draftOf(thread).text.trim() === '') done()
+      },
+      () => {
+        changeSession(thread, { sending: false })
+        setError(carriedText.didntSend)
+      },
+    )
   }
 
   // Into the composer on screen instead, after what is there, and its field takes the cursor.
@@ -129,7 +134,7 @@ function Carried({ thread, here }: { thread: string; here: string | null }) {
         void writeIn(thread, failed, null)
       }}
       {...(target !== null && draft.images.length === 0 ? { send: { label: to.send, busy: sending, onSend: () => send(target) } } : {})}
-      {...(there !== null && here !== null ? { move: { label: there.take, onMove: move } } : {})}
+      {...(there !== null && here !== null && !sending ? { move: { label: there.take, onMove: move } } : {})}
       error={error}
     />
   )

@@ -173,7 +173,15 @@ export function DictationPill({
         {!settled && <IconButton icon="chevronD" size="small" label={t.close} onClick={() => setOpened(false)} />}
       </header>
       {phase === 'written' ? (
-        <textarea className={s.edit} aria-label={t.edit} value={words} rows={4} onChange={(event) => onChange?.(event.target.value)} />
+        <textarea
+          className={s.edit}
+          aria-label={t.edit}
+          value={words}
+          rows={4}
+          // What is being sent stays as it went, until it is there or didn't go.
+          readOnly={send?.busy === true}
+          onChange={(event) => onChange?.(event.target.value)}
+        />
       ) : phase === 'failed' ? (
         <p className={s.failed}>
           <Icon name="stop" size={12} />
