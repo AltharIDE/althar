@@ -282,7 +282,7 @@ const firstPreset = presetFrom(params.get('state'))
 
 let live: Live = {
   crowd: CROWDS.find((one) => one.value === params.get('crowd'))?.value ?? 'none',
-  place: A_PLACES.find((one) => one.value === params.get('place'))?.value ?? 'centre',
+  place: A_PLACES.find((one) => one.value === params.get('place'))?.value ?? 'above',
   idea: ideaOf(params.get('idea')),
   preset: firstPreset,
   still: params.has('still'),

@@ -65,7 +65,9 @@ A composer already has a row of pills over it, at its left: Running (what the le
 
 In all but Centre, the card (opened, or written and waiting) opens above the whole stack, so the pills stay in sight (P7); a pill's list opened then goes over the card (P8).
 
-What it showed: at this width, Running and Listening already take a row each, so with the dictation it is three rows. I'd take **In their row**: it is the row's own way of saying something runs beside the conversation, it never covers a pill, and the dictation's pill stays nearest the field, where the person's eye already is. Above them is the fallback if the dictation must stay the full pill with more of its words.
+What it showed: at this width, Running and Listening already take a row each, so with the dictation it is three rows.
+
+**Picked: Above them (P4).** The dictation stays the full pill with more of its words, centred over the whole stack and never mixed into the pills' row. It is now the default for A; the page opens on it, and the other places stay in the switch.
 
 ## Which I'd pick
 

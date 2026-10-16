@@ -107,7 +107,7 @@
   {
     "id": "P1",
     "caption": "A among the pills, Centre (as first drawn), crowded: it sits on Listening, which is saying what the reviewer just wrote, and on Running.",
-    "page": "?idea=A&state=listening&crowd=crowded&at=/threads/th-scroll&still",
+    "page": "?idea=A&state=listening&crowd=crowded&place=centre&at=/threads/th-scroll&still",
     "steps": ["wait:1500"],
     "clip": [300, 560, 840, 270]
   },

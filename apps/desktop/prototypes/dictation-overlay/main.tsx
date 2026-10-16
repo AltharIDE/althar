@@ -77,7 +77,7 @@ store.subscribe(() => {
 let shown = ''
 store.subscribe(() => {
   const { idea, preset, path, still, crowd, place } = store.get()
-  const extra = `${crowd === 'none' ? '' : `&crowd=${crowd}`}${idea === 'A' && place !== 'centre' ? `&place=${place}` : ''}`
+  const extra = `${crowd === 'none' ? '' : `&crowd=${crowd}`}${idea === 'A' && place !== 'above' ? `&place=${place}` : ''}`
   const address = `?idea=${idea}&state=${preset}${extra}&at=${path.replace(/&/g, '%26')}${still ? '&still' : ''}`
   if (address === shown) return
   shown = address
