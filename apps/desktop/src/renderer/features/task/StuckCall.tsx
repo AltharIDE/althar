@@ -18,36 +18,36 @@ export const text = {
   what: (stuck: StuckStep, agent: string): string => {
     switch (stuck.why) {
       case 'no_report':
-        return `${agent} ended its turn twice without saying the step is done.`
+        return `${agent} stopped twice without saying whether the step is done, even after Althar reminded it. Tell it what to do next, or hand the step to another agent.`
       case 'session_ended':
-        return `${agent} stopped before the step was done.`
+        return `${agent} closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.`
       case 'failed_to_start':
-        return `${agent} couldn't start.${stuck.detail === null ? '' : ` ${stuck.detail}`}`
+        return `${agent} couldn't start.${stuck.detail === null ? '' : ` ${stuck.detail}`} Check that it's installed and signed in, or hand the step to another agent.`
       case 'restarted':
-        return `Althar stopped again soon after it carried this step on after a restart, so it waits for you rather than start ${agent} once more.`
+        return `Althar restarted twice while this step was running, so it paused the step in case the step caused it. If you restarted Althar yourself, start ${agent} again.`
       case 'round_limit':
-        return `Three rounds of review are done, and the lead's last changes haven't been reviewed.${
+        return `The work has been reviewed three times, and the lead's last changes haven't been reviewed yet.${
           stuck.open === 0 ? '' : stuck.open === 1 ? ' One finding is still open.' : ` ${stuck.open} findings are still open.`
-        }`
+        } Review it again, or accept it as it is.`
       case 'not_connected':
-        return "Althar isn't connected to this repository's host, so it can't push the branch or open the pull request. Connect it, then try again."
+        return "Althar isn't connected to this repository's host, so it can't push the branch or open the pull request. Connect it, then press Try again."
       case 'usage_limit':
         return limitText.what(agent, stuck.limit?.resetsAt == null ? null : clock(stuck.limit.resetsAt))
       case 'stalled':
-        return `${agent} stopped showing any sign of work on this step.`
+        return `${agent} has gone quiet: there has been no sign of work on this step for a while. Start it again, or hand the step to another agent.`
       case 'looping':
-        return `${agent} kept running ${stuck.detail === null ? 'the same thing' : `\`${stuck.detail}\``} to the same end.`
+        return `${agent} kept running ${stuck.detail === null ? 'the same thing' : `\`${stuck.detail}\``} and got the same result each time. Tell it to try something else, or hand the step to another agent.`
       case 'over_budget':
-        return `${agent} has worked on this step for ${stuck.detail ?? 'a long time'} since you last said anything, and isn't done.`
+        return `${agent} has worked on this step for ${stuck.detail ?? 'a long time'} since you last said anything, and isn't done. Let it carry on if it seems to be getting somewhere, or hand the step to another agent.`
       case 'refused':
-        return `${agent} declined to go on with this step.`
+        return `${agent} refused to go on with this step. Tell it what to do differently, or hand the step to another agent.`
     }
   },
   /** What Althar did before it asked. */
   tried: (agent: string): Record<NonNullable<StuckStep['tried']>[number], { what: string; result: string }> => ({
-    carried_on: { what: 'Stopped its turn and told it to carry on', result: 'it went quiet again' },
-    restarted: { what: `Started ${agent} afresh`, result: 'it went quiet again' },
-    redirected: { what: 'Told it to try another way', result: 'it went back to the same' },
+    carried_on: { what: 'Told it to carry on', result: 'it stopped again' },
+    restarted: { what: `Started ${agent} again from the start`, result: 'it stopped again' },
+    redirected: { what: 'Told it to try another way', result: 'it did the same again' },
   }),
   /** Tried again on the same agent: started again where it went quiet, or let go on where it ran long. */
   again: {
@@ -58,14 +58,14 @@ export const text = {
   /** For the pull request, which Althar opens itself: what went wrong. */
   publishing: (stuck: StuckStep): string =>
     stuck.why === 'restarted'
-      ? 'Althar stopped again soon after it went back to opening the pull request.'
-      : `Althar couldn't open the pull request.${stuck.detail === null ? '' : ` ${stuck.detail}`}`,
+      ? 'Althar restarted twice while opening the pull request, so it paused in case that caused it. If you restarted Althar yourself, try again.'
+      : `Althar couldn't open the pull request.${stuck.detail === null ? '' : ` ${stuck.detail}`} Try again, or go on without it.`,
   publish: {
     abandon: 'Go on without it',
     abandoned: 'Went on without it',
     abandonedNote: 'the task is ready on its branch',
   },
-  reminded: { what: 'Reminded it to report', result: 'its turn ended again without a report' },
+  reminded: { what: 'Reminded it to say when the step is done', result: 'it stopped again without saying' },
   /** An agent out of usage: told nothing, since it would hit the same limit; handed on, or tried again once it is back. */
   out: {
     again: (agent: string) => `Try ${agent} again`,

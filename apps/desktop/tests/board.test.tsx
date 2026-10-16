@@ -737,13 +737,17 @@ describe('every state the board shows', () => {
     expect(screen.getByText('No agent is working on it')).toBeTruthy()
     expect(screen.getByText('2h 30m')).toBeTruthy()
     expect(screen.getByText('Conversation')).toBeTruthy()
-    expect(screen.getByText('Claude Code stopped before the step was done.')).toBeTruthy()
+    expect(
+      screen.getByText(
+        'Claude Code closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+      ),
+    ).toBeTruthy()
     // A step held for a usage limit says whom it waits for, and when they're back.
     expect(screen.getByText(`Waits for Codex, back at ${clock('2026-10-01T13:40:00.000Z')}`)).toBeTruthy()
     // One waiting for a free agent says so, and what for.
     expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
     expect(screen.getByText('Waiting')).toBeTruthy()
-    expect(screen.getByText("Althar couldn't open the pull request.")).toBeTruthy()
+    expect(screen.getByText("Althar couldn't open the pull request. Try again, or go on without it.")).toBeTruthy()
     expect(screen.getByText(/isn't connected to this repository's host/)).toBeTruthy()
     expect(screen.getByText('PR #12 closed')).toBeTruthy()
     expect(screen.getAllByText('althar/add-a-retry').length).toBeGreaterThan(0)
@@ -1103,7 +1107,11 @@ describe('each kind’s card', () => {
     expect(question.getByText('Which database?')).toBeTruthy()
     const stuck = within(cardOf('Gave up'))
     expect(stuck.getByText('Stuck')).toBeTruthy()
-    expect(stuck.getByText('Claude Code stopped before the step was done.')).toBeTruthy()
+    expect(
+      stuck.getByText(
+        'Claude Code closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+      ),
+    ).toBeTruthy()
     // Merged, with commits after it: its branch, with what is in no pull request yet.
     const after = within(cardOf('Merged, then more'))
     expect(after.getByText('Ready for a new pull request')).toBeTruthy()

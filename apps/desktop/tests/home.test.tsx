@@ -183,7 +183,11 @@ describe('the home', () => {
     withServices(<Home onTask={onTask} />, client)
     const needs = await screen.findByRole('region', { name: /needs? you/ })
     expect(within(needs).getByText('npm publish')).toBeTruthy()
-    expect(within(needs).getByText('Claude Code stopped before the step was done.')).toBeTruthy()
+    expect(
+      within(needs).getByText(
+        'Claude Code closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+      ),
+    ).toBeTruthy()
     // A change on its branch says its size; tasks are named by their titles alone, never their slugs.
     expect(within(needs).getByText('On its branch: 3 files, +40 −12')).toBeTruthy()
     expect(within(needs).getByText('On its branch')).toBeTruthy()
@@ -191,7 +195,11 @@ describe('the home', () => {
     // A change with what stands between it and merging, or how its checks went, then how big, in its one line.
     expect(within(needs).getByText('api #12 · test failed · +12 −3')).toBeTruthy()
     expect(within(needs).getByText('api #13 · No checks ran')).toBeTruthy()
-    expect(within(needs).getByText('The agent stopped before the step was done.')).toBeTruthy()
+    expect(
+      within(needs).getByText(
+        'The agent closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+      ),
+    ).toBeTruthy()
     expect(within(needs).getAllByText('Write outside the worktree')).toHaveLength(2)
     expect(screen.queryByText(/^Gone/)).toBeNull()
     // A step a usage limit stopped is out of usage, here as in its task, with when the agent is back.
