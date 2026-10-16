@@ -250,6 +250,9 @@
   align-items: center;
   gap: 4px;
   margin-left: -6px;
+  /* when even the fixed controls don't fit, whole controls wrap to a row below, the actions staying at the right */
+  flex-wrap: wrap;
+  row-gap: 4px;
   container-type: inline-size;
 }
 
@@ -260,6 +263,7 @@
 .bar > :first-child:not(.space) {
   flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
 }
 
 .space {

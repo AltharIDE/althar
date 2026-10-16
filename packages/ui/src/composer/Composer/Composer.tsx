@@ -470,7 +470,7 @@ export function Composer({
           )}
           {canSendNow && (
             <Tooltip label={t.sendNowNote}>
-              <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey}>
+              <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey} aria-label={t.sendNow}>
                 <span className={s.sendNowLabel}>{t.sendNow}</span>
               </ActionButton>
             </Tooltip>
