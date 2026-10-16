@@ -269,6 +269,14 @@ export const MultiLine: Story = {
 export const Busy: Story = { render: () => <Example busy onStopAgent={() => {}} /> }
 /** The lead is working and you have written something: Enter queues it, and Send now interrupts the lead with it instead. */
 export const BusyWithDraft: Story = { render: () => <Example busy initial="Also check the webhook retry path." /> }
+/** A narrow composer with everything on: the picker gives way and, past that, whole controls wrap; nothing is clipped. */
+export const NarrowFoot: Story = {
+  render: () => (
+    <div style={{ width: 300 }}>
+      <Example busy takesImages recording initial={'Two things:\n1. keep the limiter where it is\n2. add the test first'} />
+    </div>
+  ),
+}
 /** Sending now: ⌘Enter or the button. The lead stops at a safe point and carries on with both. */
 export const SendingNow: Story = {
   args: { onSendNow: fn() },

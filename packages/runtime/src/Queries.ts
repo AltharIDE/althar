@@ -1647,13 +1647,6 @@ export class Queries extends Context.Service<
                   del: said.files.reduce((sum, file) => sum + file.del, 0),
                 }
               : null
-          // Not settled, whether nothing it asks waits for the person: by its own switch, or its project's (ADR-043).
-          const sql = yield* SqlClient.SqlClient
-          const [allows] =
-            card.phase === 'settled'
-              ? []
-              : yield* sql<{ allows: number | null }>`
-                  SELECT k.allow_everything = 1 OR ${sql.unsafe(PROJECT_ALLOWS('k.project_id'))} AS allows FROM tasks k WHERE k.id = ${row.id}`
           const read = {
             ...card,
             state: row.state,
@@ -1661,7 +1654,6 @@ export class Queries extends Context.Service<
             settledAt: row.settledAt,
             changed,
             here: said?.here ?? [],
-            ...(allows?.allows === 1 ? { allowEverything: true } : {}),
           }
           if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, { seen, card: read })
           // Back at work, what was kept of it as it settled goes: settled again, at the same time, it may say more.

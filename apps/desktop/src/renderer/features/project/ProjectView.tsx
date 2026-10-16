@@ -493,6 +493,7 @@ export function ProjectView({
                   now={now}
                   onOpen={onTask}
                   closing={closing}
+                  actions={board}
                   {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                 />
               </>

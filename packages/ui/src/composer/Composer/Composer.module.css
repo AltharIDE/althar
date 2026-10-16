@@ -250,16 +250,37 @@
   align-items: center;
   gap: 4px;
   margin-left: -6px;
+  /* when even the fixed controls don't fit, whole controls wrap to a row below, the actions staying at the right */
+  flex-wrap: wrap;
+  row-gap: 4px;
+  container-type: inline-size;
+}
+
+/* the picker, which can shrink, takes what the buttons leave; the buttons never give way */
+.bar > * {
+  flex: none;
+}
+.bar > :first-child:not(.space) {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .space {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
+/* one line, cut with an ellipsis rather than wrapped; it gives way before anything else */
 .note {
+  flex: 0 1 auto;
+  min-width: 0;
   margin-right: 6px;
+  overflow: hidden;
   font-size: 11px;
   color: var(--t-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .kbd {
@@ -269,6 +290,14 @@
 /* the other way to send while the agent works: quieter than the button, beside the note that explains it */
 .sendNow {
   margin-right: 6px;
+  white-space: nowrap;
+}
+
+/* tight, Send now is just its key */
+@container (max-width: 520px) {
+  .sendNowLabel {
+    display: none;
+  }
 }
 
 /* beside the microphone, narrow: which one it hears */
