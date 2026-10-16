@@ -1,7 +1,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 
-import { LoadMeter, ProjectTabs, TitleBar, type Room, UpdateReady } from '@althar/ui'
+import { commandDown, LoadMeter, primaryDown, ProjectTabs, type Room, TitleBar, UpdateReady } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { FinderView } from '../finder/FinderView'
@@ -193,12 +193,12 @@ export function TabsFrame({ children }: { children: ReactNode }) {
         return
       }
       // Before there is a project, the first screen has ⌘N for a folder of its own.
-      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n' && !none) {
+      if (commandDown(event) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n' && !none) {
         event.preventDefault()
         newProject()
         return
       }
-      if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
+      if (primaryDown(event) && !event.altKey && !event.shiftKey && /^[1-9]$/.test(event.key)) {
         const id = byNumber(ids, Number(event.key))
         if (id === undefined) return
         event.preventDefault()

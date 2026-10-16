@@ -1,6 +1,7 @@
 import { products } from '@althar/connectors'
 import { Cause, Option } from 'effect'
 
+import { thisDevice } from './device'
 import type { AccountRefused } from './Accounts'
 import type { CantMerge, DocumentRefused, ImageRefused, NoChangeToOpen, ProjectRefused, TaskRefused } from './errors'
 import { MESSAGE_IMAGES } from './pictures'
@@ -53,7 +54,7 @@ export const agentSaid = (error: unknown): string | undefined => {
       // The person's own command, where the sandbox cannot reach the device: say what to put right, never "isn't installed".
       if (command === 'flatpak-spawn' || /flatpak|org\.freedesktop\.Flatpak/i.test(reason)) return hostDenied
       return /ENOENT/.test(reason)
-        ? `${command} isn't installed, or isn't on this Mac's PATH.`
+        ? `${command} isn't installed, or isn't on ${thisDevice()}'s PATH.`
         : sentence(`${command} wouldn't start: ${reason}`)
     }
     case 'AgentExited': {
@@ -213,7 +214,7 @@ export const words = (
       case 'TaskRefused':
         return taskRefused[text(error, 'why') as TaskRefused['why']] ?? "Althar can't change the task that way."
       case 'SignOutFailed':
-        return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on this Mac any more, remove it anyway; its sign-in may stay behind.`
+        return `Althar couldn't sign this account out, so it kept it and its folder. Try again, or run this in a terminal, then remove it: ${text(error, 'line')}. If the agent isn't on ${thisDevice()} any more, remove it anyway; its sign-in may stay behind.`
       case 'AccountRefused':
         return accountRefused[text(error, 'reason') as AccountRefused['reason']] ?? "Althar can't add that account."
       case 'ChangedSinceSeen':
@@ -242,7 +243,7 @@ export const words = (
         return fieldOf(error, 'keyring') === true && reason !== '' ? reason : "Althar's runtime couldn't do that. Its log has the details."
       }
       case 'CliSignedOut':
-        return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this Mac.`
+        return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on ${thisDevice()}.`
       case 'CliUnanswered':
         return `${text(error, 'tool')} didn't answer in time. Try again in a moment.`
       case 'CliElsewhere':
@@ -303,7 +304,7 @@ const cantMerge = {
     `Althar couldn’t read the default branch’s checkout, or a submodule the merge moves, so nothing was merged. Where, and what git said:\n${detail}`,
   untracked: (files: string) => `The merge would overwrite files git doesn’t track: ${files}. Move them away, then merge again.`,
   moved: (branch: string) => `${branch} moved while Althar was merging, so nothing was merged. Merge again.`,
-  missing: (branch: string) => `This Mac has no ${branch} branch to merge into.`,
+  missing: (branch: string) => `${thisDevice().replace(/^t/, 'T')} has no ${branch} branch to merge into.`,
 } as const satisfies Record<CantMerge['why'], (detail: string) => string>
 
 /** Why a task has no pull request to open, by reason, with the files it concerns where it says them. */

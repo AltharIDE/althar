@@ -1,3 +1,4 @@
+import { device } from '../../foundations/device'
 import { BrandChip } from '../../foundations/Marks/Marks'
 import type { Brand } from '../../foundations/brands/brands'
 import { cx } from '../../lib/cx'
@@ -26,7 +27,7 @@ export interface AgentInstallText {
 }
 
 export const agentInstallText: AgentInstallText = {
-  missing: (name) => `${name} isn’t on this Mac`,
+  missing: (name) => `${name} isn’t on ${device.this}`,
   can: (name, size) =>
     `Althar can fetch ${name}’s latest release from GitHub, about ${size}, check it against the release, and keep it in its own folder. Your terminal stays as it is.`,
   cannot: (name) => `Install ${name} with its own installer, then come back here.`,

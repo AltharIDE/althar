@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 import { Icon } from '../../foundations/Icon/Icon'
+import { modKey } from '../../foundations/keys'
 import { Logo } from '../../foundations/Logo/Logo'
 import { ProjectMark } from '../../foundations/ProjectMark/ProjectMark'
 import type { ProjectInk } from '../../foundations/ProjectMark/drawing'
@@ -89,7 +90,7 @@ export const projectTabsText: ProjectTabsText = {
   open: 'Open a project',
   others: 'Other projects',
   newProject: 'New project',
-  newProjectKbd: '⌘N',
+  newProjectKbd: modKey('N'),
   all: 'All open projects',
   closeWindow: 'Close the window',
   minimizeWindow: 'Minimize the window',

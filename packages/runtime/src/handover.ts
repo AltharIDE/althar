@@ -2,6 +2,7 @@ import type { ProjectId } from '@althar/domain'
 import { Effect, Option, Schema } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { thisDevice } from './device'
 import { endWords, type ModelNamer, teamOf, withEffort } from './coordinatorNews'
 import { git } from './git'
 import { Instance } from './Instance'
@@ -106,7 +107,7 @@ export const projectOverview = (projectId: string) =>
       `Repositories:\n${repositories
         .map(
           (repository) =>
-            `- ${withRole(repository.name, repository.role)} (${repository.base ?? 'main'}), on this Mac at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
+            `- ${withRole(repository.name, repository.role)} (${repository.base ?? 'main'}), on ${thisDevice()} at ${repository.path}${repository.within === null ? '' : `; the project is its folder ${repository.within}`}`,
         )
         .join('\n')}`,
       `Tasks: ${counts?.open ?? 0} open, ${counts?.drafts ?? 0} planned and not yet started.`,
