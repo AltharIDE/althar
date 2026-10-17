@@ -65,8 +65,8 @@ export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void):
     monitor = child
     let pending = ''
     let gone = false
+    const started = Date.now()
     child.stdout?.on('data', (chunk: Buffer) => {
-      failures = 0
       snapshot(true)
       const lines = (pending + chunk.toString()).split('\n')
       pending = lines.pop() ?? ''
@@ -82,6 +82,8 @@ export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void):
       if (gone) return
       gone = true
       if (stopped) return
+      // Only a monitor that stayed up a while was a working one: a banner and an exit is a failure, and the pause grows.
+      if (Date.now() - started > 30_000) failures = 0
       snapshot(false)
       confirmed = false
       heard = false
