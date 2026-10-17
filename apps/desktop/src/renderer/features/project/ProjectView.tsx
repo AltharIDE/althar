@@ -19,6 +19,7 @@ import {
 
 import { contextMeter } from '../../shared/ContextMeter'
 import { useModels } from '../../data/models'
+import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, useDraft } from '../../shared/drafts'
 import { queuedOf, queueShown, withQueued } from '../../shared/items'
@@ -62,6 +63,10 @@ import type { ProjectSettingsModel } from './useProjectSettings'
  */
 
 export const text = {
+  /** Dictation carried once the person leaves the coordinator: whose it is, and putting another thread's here. */
+  carriedTo: (project: string) => `To the coordinator · ${project}`,
+  carriedSend: 'Send to the coordinator',
+  carriedTake: 'Move it to the coordinator',
   project: 'Project',
   conversation: 'Conversation',
   coordinator: 'Coordinator',
@@ -180,7 +185,21 @@ export function ProjectView({
   const about = model.project?.id ?? model.coordinator?.project.id ?? null
   const draftOf = draftKey.coordinator(about ?? '')
   const [draft, setDraft] = useDraft(draftOf)
-  const voice = useDictation(draftOf, { projectId: about })
+  const coordinatorThread = model.coordinator?.threadId ?? null
+  const voice = useDictation(draftOf, {
+    projectId: about,
+    to:
+      about === null
+        ? null
+        : {
+            to: text.carriedTo(model.project?.name ?? model.coordinator?.project.name ?? text.project),
+            back: { kind: 'coordinator', projectId: about },
+            // What the person says to the coordinator starts it if it isn't running, so it goes from anywhere.
+            threadId: coordinatorThread,
+            send: text.carriedSend,
+            take: text.carriedTake,
+          },
+  })
   // Images to send with what the person says, and which agents take them.
   const images = useImages(draftOf)
   const models = useModels()
@@ -208,10 +227,10 @@ export function ProjectView({
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Whatever it ran on last, while that agent can; otherwise the first that can.
   const first = model.agents[0]
-  const waiting = session === null || handover?.agentId === session.agentId ? null : handover
+  const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
   const chosen: Choice | null =
     waiting ??
-    (session === null ? null : runningOn(session)) ??
+    (session === null || !session.held ? null : runningOn(session)) ??
     pick ??
     (suggested?.available === true ? { agentId: suggested.agentId, model: suggested.model, effort: suggested.effort } : null) ??
     (first === undefined ? null : { agentId: first.id, model: null, effort: null })
@@ -255,7 +274,7 @@ export function ProjectView({
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {
-    if (session === null) return setPick(next)
+    if (session === null || !session.held) return setPick(next)
     if (next.agentId !== session.agentId) return setHandover(next)
     setHandover(null)
     void model.choose(next)
@@ -284,8 +303,8 @@ export function ProjectView({
           <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
         </p>
       )}
-      {session === null && model.agents.length === 0 && <p className={s.quiet}>{text.needsAgent}</p>}
-      {session === null && suggested !== null && !suggested.available && chosen !== null && (
+      {(session === null || !session.held) && model.agents.length === 0 && <p className={s.quiet}>{text.needsAgent}</p>}
+      {(session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null && (
         <p className={s.quiet}>{text.signedOut(suggested.agentName, agentName(chosen.agentId))}</p>
       )}
       <Composer
@@ -294,6 +313,7 @@ export function ProjectView({
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
+        carried={<CarriedOver here={draftOf} />}
         above={
           launches.length > 0 && (
             <Running
@@ -328,7 +348,7 @@ export function ProjectView({
               value={chosen}
               onChange={choose}
               // Another agent's model hands the conversation over, once the person says something.
-              {...(session === null ? {} : { handover: { note: text.handsOver, ask: null } })}
+              {...(session === null || !session.held ? {} : { handover: { note: text.handsOver, ask: null } })}
             />
           )
         }
@@ -489,6 +509,7 @@ export function ProjectView({
                   agents={model.agents}
                   now={now}
                   onOpen={onTask}
+                  actions={board}
                   {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                 />
               </>

@@ -50,7 +50,7 @@ export const TellingTheLead: Story = {
 export const HandingToAnother: Story = {
   play: async ({ args, canvasElement }) => {
     const c = within(canvasElement)
-    await userEvent.click(c.getByRole('button', { name: 'Try another agent' }))
+    await userEvent.click(c.getByRole('button', { name: 'Hand to another agent' }))
     await userEvent.click(await within(document.body).findByRole('menuitem', { name: /Gemini 3 Pro/ }))
     await expect(args.onRetry).toHaveBeenCalledWith(STUCK.agents[0]!.model)
     await expect(document.activeElement).toHaveTextContent('Handed to')
@@ -62,7 +62,7 @@ export const Abandoning: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Tell the lead' }))
     await userEvent.click(c.getByRole('button', { name: 'Cancel' }))
-    await userEvent.click(c.getByRole('button', { name: 'Abandon' }))
+    await userEvent.click(c.getByRole('button', { name: 'Abandon this step' }))
     await expect(args.onAbandon).toHaveBeenCalledOnce()
     await expect(document.activeElement).toHaveTextContent('Abandoned')
   },

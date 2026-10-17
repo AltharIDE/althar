@@ -10,6 +10,11 @@
 .model > svg {
   align-self: center;
 }
+.name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .strong {
   gap: 6px;
   font-weight: 600;

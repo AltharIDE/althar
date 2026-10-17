@@ -183,7 +183,11 @@ describe('the home', () => {
     withServices(<Home onTask={onTask} />, client)
     const needs = await screen.findByRole('region', { name: /needs? you/ })
     expect(within(needs).getByText('npm publish')).toBeTruthy()
-    expect(within(needs).getByText('Claude Code stopped before the step was done.')).toBeTruthy()
+    expect(
+      within(needs).getByText(
+        'Claude Code closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+      ),
+    ).toBeTruthy()
     // A change on its branch says its size; tasks are named by their titles alone, never their slugs.
     expect(within(needs).getByText('On its branch: 3 files, +40 −12')).toBeTruthy()
     expect(within(needs).getByText('On its branch')).toBeTruthy()
@@ -191,7 +195,11 @@ describe('the home', () => {
     // A change with what stands between it and merging, or how its checks went, then how big, in its one line.
     expect(within(needs).getByText('api #12 · test failed · +12 −3')).toBeTruthy()
     expect(within(needs).getByText('api #13 · No checks ran')).toBeTruthy()
-    expect(within(needs).getByText('The agent stopped before the step was done.')).toBeTruthy()
+    expect(
+      within(needs).getByText(
+        'The agent closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+      ),
+    ).toBeTruthy()
     expect(within(needs).getAllByText('Write outside the worktree')).toHaveLength(2)
     expect(screen.queryByText(/^Gone/)).toBeNull()
     // A step a usage limit stopped is out of usage, here as in its task, with when the agent is back.
@@ -220,6 +228,40 @@ describe('the home', () => {
     expect(onTask).toHaveBeenLastCalledWith('th4')
     await userEvent.click(within(needs).getByRole('button', { name: 'Name it better' }))
     expect(onTask).toHaveBeenLastCalledWith('th5')
+  })
+
+  it('says why a push from a line failed, and offers to try again', async () => {
+    const push = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError({ reason: 'ConnectorFailed', message: 'GitHub says: the branch is protected' }))
+      .mockResolvedValue(undefined)
+    const { client } = fakeClient({
+      push,
+      getHome: vi.fn(async () =>
+        home({
+          looked: null,
+          tasks: [
+            task({
+              taskId: 'r22',
+              threadId: 'thr22',
+              title: 'Commits to push',
+              phase: 'ready',
+              change: change({ number: 22, draft: false, localHead: 'def456', unpushed: 3 }),
+            }),
+          ],
+          calls: [],
+          events: [],
+          projects: [project],
+        }),
+      ),
+    })
+    withServices(<Home onTask={vi.fn()} />, client)
+    const line = within(await screen.findByRole('article', { name: 'Commits to push' }))
+    await userEvent.click(line.getByRole('button', { name: 'Push 3 commits to #22' }))
+    expect((await line.findByRole('alert')).textContent).toContain('Push failed: GitHub says: the branch is protected')
+    await userEvent.click(line.getByRole('button', { name: 'Try pushing 3 commits to #22 again' }))
+    await waitFor(() => expect(push).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(line.queryByRole('alert')).toBeNull())
   })
 
   it('says what stands between a ready change and merging, and does the next thing from its line', async () => {
@@ -270,26 +312,16 @@ describe('the home', () => {
     expect(line('Checks still running').getByText('api #25 · Checks running, 3 of 5 passed · +12 −3')).toBeTruthy()
 
     // The person's own to do, done at once, at the heads they saw.
-    await userEvent.click(line('Good to merge').getByRole('button', { name: 'Accept and merge' }))
+    await userEvent.click(line('Good to merge').getByRole('button', { name: 'Accept and merge #21' }))
     expect(client.merge).toHaveBeenCalledWith('r21', 'abc123', 'https://github.com/meridian/api/pull/12')
-    await userEvent.click(line('Commits to push').getByRole('button', { name: 'Push 3 commits' }))
+    await userEvent.click(line('Commits to push').getByRole('button', { name: 'Push 3 commits to #22' }))
     expect(client.push).toHaveBeenCalledWith('r22', 'def456', 'https://github.com/meridian/api/pull/12')
-    // The lead's, as a note to it.
+    // The lead's, a link into the task, where it is told: nothing is sent from here.
     await userEvent.click(line('In conflict').getByRole('button', { name: 'Ask the lead to resolve it' }))
-    await waitFor(() =>
-      expect(client.send).toHaveBeenCalledWith(
-        expect.objectContaining({
-          threadId: 'thr23',
-          body: expect.stringMatching(/^PR #23 conflicts with main\. Bring the branch up to date: merge main into it/),
-        }),
-      ),
-    )
+    expect(onTask).toHaveBeenLastCalledWith('thr23')
     await userEvent.click(line('A check failed').getByRole('button', { name: 'Ask the lead to fix it' }))
-    await waitFor(() =>
-      expect(client.send).toHaveBeenCalledWith(
-        expect.objectContaining({ threadId: 'thr24', body: 'A check on PR #24 failed: test. Fix what made it fail, then ask to push.' }),
-      ),
-    )
+    expect(onTask).toHaveBeenLastCalledWith('thr24')
+    expect(client.send).not.toHaveBeenCalled()
     // While checks run there's nothing to do but wait: its button opens it.
     await userEvent.click(line('Checks still running').getByRole('button', { name: 'Review' }))
     expect(onTask).toHaveBeenLastCalledWith('thr25')
@@ -306,6 +338,22 @@ describe('the home', () => {
     await userEvent.click(within(needs).getAllByRole('button', { name: 'Deny' })[0]!)
     expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'reject' })
     expect(await within(needs).findByRole('article', { name: 'Run npm publish', description: 'Denied Once · in halyard' })).toBeTruthy()
+  })
+
+  it('says a stuck pull request in its own words, not the agent’s', async () => {
+    const publish: HomeCall = {
+      ...stuck,
+      id: 'a9',
+      stuck: { step: 'publish', why: 'restarted', detail: null, agentId: null, round: 0, open: 0 },
+    }
+    const { client } = fakeClient({ getHome: vi.fn(async () => ({ ...busy(), calls: [publish] })) })
+    withServices(<Home />, client)
+    const needs = await screen.findByRole('region', { name: /needs? you/ })
+    expect(
+      within(needs).getByText(
+        'Althar restarted twice while opening the pull request, so it paused in case that caused it. If you restarted Althar yourself, try again.',
+      ),
+    ).toBeTruthy()
   })
 
   it('offers on a permission’s card what its task’s card offers: always allow, never allow, and deny with a note', async () => {

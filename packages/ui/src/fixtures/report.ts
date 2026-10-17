@@ -19,7 +19,7 @@ export const WINDOW_SHOT = `data:image/svg+xml;charset=utf-8,${encodeURIComponen
       .join('') +
     `<rect x="64" y="350" width="760" height="120" rx="10" fill="#ffffff" stroke="#c9c2f2"/>` +
     `<text x="84" y="384" font-family="Helvetica, Arial" font-size="13" fill="#5b4bd6">STUCK · Implement</text>` +
-    `<text x="84" y="414" font-family="Helvetica, Arial" font-size="15" fill="#26262b">Claude Code stopped before the step was done.</text>` +
+    `<text x="84" y="414" font-family="Helvetica, Arial" font-size="15" fill="#26262b">Claude Code closed before finishing the step.</text>` +
     `</svg>`,
 )}`
 

@@ -236,14 +236,15 @@ export class Nudges extends Context.Service<
 
       /**
        * Whether a change after `cursor` bears on what needs the person: a call,
-       * a task, its plan or run, a step, a session starting, a turn ending. A
-       * thread's items, most of what is recorded, never do.
+       * a task, its plan or run, a step, a session starting, a turn ending, a
+       * review drafted, posted or dropped. A thread's items, most of what is
+       * recorded, never do.
        */
       const movedSince = (cursor: number) =>
         Effect.map(
           sql<{ moved: number }>`
             SELECT EXISTS (SELECT 1 FROM change_log WHERE cursor > ${cursor} AND aggregate_type IN ('attention_request', 'task',
-              'task_plan', 'run', 'node_attempt', 'provider_session', 'turn_delivery')) AS moved`,
+              'task_plan', 'run', 'node_attempt', 'provider_session', 'turn_delivery', 'review_draft')) AS moved`,
           (rows) => rows.some((row) => row.moved === 1),
         )
 
