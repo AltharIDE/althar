@@ -162,11 +162,11 @@ describe('what needs the person', () => {
 
     // Each line says what to do: merge, fix, push, open a new pull request, or take over a conflict.
     const line = (title: string) => within(within(needs).getByRole('article', { name: title }))
-    expect(line('Accept the retry').getByRole('button', { name: 'Accept and merge' })).toBeTruthy()
+    expect(line('Accept the retry').getByRole('button', { name: /^Accept and merge/ })).toBeTruthy()
     expect(line('Fix the failing checks').getByText(/test failed/)).toBeTruthy()
     expect(line('Fix the failing checks').getByRole('button', { name: 'Ask the lead to fix it' })).toBeTruthy()
     expect(line('Push the last commits').getByText(/2 commits not on the/)).toBeTruthy()
-    expect(line('Push the last commits').getByRole('button', { name: 'Push 2 commits' })).toBeTruthy()
+    expect(line('Push the last commits').getByRole('button', { name: /^Push 2 commits/ })).toBeTruthy()
     expect(line('Merged, then more').getByText('Ready for a new pull request')).toBeTruthy()
     expect(line('Merged, then more').getByText('3 commits in no pull request · +40 −2')).toBeTruthy()
     expect(line('Merged, then more').getByRole('button', { name: 'Open' })).toBeTruthy()
