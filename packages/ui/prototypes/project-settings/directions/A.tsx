@@ -1,5 +1,5 @@
 // Scrappy: A, as the app's Settings tab: down the side, the project, its quick switches and its sections; beside them, the section open on a sheet of its own.
-import { Panel, ProjectMark, SettingsNav } from '../../../src/index'
+import { Panel, SettingsNav } from '../../../src/index'
 import type { Things } from '../parts'
 import { Body, QuickCards, sectionText } from '../sections'
 import { proto, type Section, useProto } from '../state'
@@ -15,12 +15,6 @@ export function A({ things }: { things: Things }) {
     <div className={c.page}>
       <div className={c.columns}>
         <aside className={c.side}>
-          <div className={c.who}>
-            <ProjectMark seed={things.seed} ink={things.ink} size={22} />
-            <span>
-              <b>{things.name}</b> settings
-            </span>
-          </div>
           <QuickCards things={things} columns={1} onSection={go} />
           <SettingsNav
             label="Project settings"

@@ -37,7 +37,7 @@
   {
     "id": "A1",
     "page": "?d=A&open=open&s=general",
-    "caption": "A, as the app's Settings: the project and its three switches as cards down the side, its sections under them, General on a sheet"
+    "caption": "A, as the app's Settings, under the project's own header: its three switches as cards down the side, its sections under them, General on a sheet"
   },
   {
     "id": "A2",
@@ -62,7 +62,7 @@
   {
     "id": "B1",
     "page": "?d=B&open=open&s=general",
-    "caption": "B, tabs: the project's name and switches on top, its sections as tabs under them, General as wide as the page"
+    "caption": "B, tabs, under the project's own header: its sections as tabs with the switches beside them, General as wide as the page"
   },
   {
     "id": "B2",
@@ -77,7 +77,7 @@
   {
     "id": "C1",
     "page": "?d=C&open=open&s=general",
-    "caption": "C, one page: every section after another, each part labelled down the left as the rules' clauses are; the jump bar held on top"
+    "caption": "C, one page under the project's own header: every section after another, each part labelled down the left as the rules' clauses are; the jump bar held on top"
   },
   {
     "id": "C2",
@@ -92,7 +92,7 @@
   {
     "id": "D1",
     "page": "?d=D&open=open&s=overview",
-    "caption": "D, overview: a card per section saying what it holds now, the switches in their cards; Remove a quiet button at the foot"
+    "caption": "D, overview under the project's own header: a card per section saying what it holds now, the switches in their cards; Remove a quiet button at the foot"
   },
   {
     "id": "D2",

@@ -10,19 +10,26 @@ import { D } from '../directions/D'
 import { type Things, useThings } from '../parts'
 import { type Direction, useProto } from '../state'
 
-/** Over the project's window, under the bar: its front page and its views give way, as a view of the bar does. */
+/** Under the project's header, as Home, Conversation and Board are: the views give way, the header stays, so it reads as the project's. */
 function Cover({ children }: { children: ReactNode }) {
   const mark = useRef<HTMLSpanElement>(null)
-  const [window, setWindow] = useState<HTMLElement | null>(null)
+  const [place, setPlace] = useState<{ window: HTMLElement; top: number } | null>(null)
   useLayoutEffect(() => {
-    const parent = mark.current?.parentElement ?? null
-    if (parent !== null) parent.style.position = 'relative'
-    setWindow(parent)
+    const window = mark.current?.parentElement
+    const front = mark.current?.previousElementSibling
+    if (window == null || !(front instanceof HTMLElement)) return
+    window.style.position = 'relative'
+    const measure = () => setPlace({ window, top: front.offsetTop + front.offsetHeight })
+    measure()
+    const watch = new ResizeObserver(measure)
+    watch.observe(front)
+    return () => watch.disconnect()
   }, [])
   return (
     <>
       <span ref={mark} hidden />
-      {window !== null && createPortal(<div style={{ position: 'absolute', inset: 0, zIndex: 3 }}>{children}</div>, window)}
+      {place !== null &&
+        createPortal(<div style={{ position: 'absolute', inset: `${place.top}px 0 0 0`, zIndex: 3 }}>{children}</div>, place.window)}
     </>
   )
 }

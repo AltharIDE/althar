@@ -1,7 +1,7 @@
 // Scrappy: C, one page in the rules' own way: every section one after another, each part of it labelled down the left as the rules' clauses are, the way to each held at the top.
 import { type ReactNode, useEffect } from 'react'
 
-import { Button, LinkButton, ProjectMark, SettingList } from '../../../src/index'
+import { Button, LinkButton, SettingList } from '../../../src/index'
 import {
   AllowEverything,
   AppWide,
@@ -51,9 +51,6 @@ export function C({ things }: { things: Things }) {
     <div className={c.page}>
       <div className={c.wide}>
         <div className={c.held}>
-          <ProjectMark seed={things.seed} ink={things.ink} size={22} />
-          <b style={{ fontSize: 13 }}>{things.name}</b>
-          <span className={c.grow} />
           <nav className={c.jump} aria-label="Sections">
             {SECTIONS.map((id) => (
               <LinkButton key={id} onClick={() => jump(id)}>

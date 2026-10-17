@@ -1,5 +1,5 @@
 // Scrappy: D, an overview first: the project's name and its switches, then a card per section saying what it holds now; each opens a page of its own, the overview a crumb away.
-import { Button, LinkButton, Panel, ProjectMark, SettingList } from '../../../src/index'
+import { Button, LinkButton, Panel, SettingList } from '../../../src/index'
 import { AllowEverything, Conflicts, IdentityRow, LinkRow, MoveIssues, NotesRow, overlay, RulesRow, RunsRow, type Things } from '../parts'
 import { Body, sectionText } from '../sections'
 import { proto, type Section, useProto } from '../state'
@@ -29,13 +29,6 @@ function Card({ id, things, across, children }: { id: Section; things: Things; a
 function Overview({ things }: { things: Things }) {
   return (
     <>
-      <header className={c.top}>
-        <ProjectMark seed={things.seed} ink={things.ink} size={44} />
-        <div className={c.grow}>
-          <h1 className={c.name}>{things.name}</h1>
-          <p className={c.lede}>Its settings at a glance. Each card opens all of it.</p>
-        </div>
-      </header>
       <div className={c.cards}>
         <Card id="general" things={things}>
           <SettingList>
@@ -89,7 +82,7 @@ export function D({ things }: { things: Things }) {
         ) : (
           <>
             <div className={c.crumb}>
-              <LinkButton onClick={() => go(null)}>← {things.name} settings</LinkButton>
+              <LinkButton onClick={() => go(null)}>← All settings</LinkButton>
             </div>
             <Panel key={section} title={sectionText[section].title} lede={sectionText[section].lede} headingLevel={1}>
               <div className={c.body}>
