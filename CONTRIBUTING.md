@@ -4,7 +4,7 @@ Thanks for wanting to help. Althar is early, so the most useful contributions ri
 
 ## Ways to help
 
-- **Use it on real work, and tell us what breaks.** Open [an issue](https://github.com/AltharIDE/althar/issues) with what you did, what you expected and what happened. Say which agents and models were involved, and attach the app's log if you can.
+- **Use it on real work, and tell us what breaks.** Open [an issue](https://github.com/AltharIDE/althar/issues) with what you did, what you expected and what happened. Say which agents and models were involved, and attach the app's logs if you can: they are in `~/Library/Logs/Althar` on a Mac. In the app, Report a problem (in Help on a Mac, or at the foot of the quick settings) sends what happened with them, masked.
 - **Tell us how you work.** What goes wrong today when you switch agents, run out of a plan's limit, or leave a task running overnight? An issue is the right place.
 - **Argue with the thesis.** [THESIS.md](THESIS.md) makes claims about where software engineering is going. Tell us where it's wrong.
 - **Bring an agent.** Agents join through the Agent Client Protocol, so a new one takes an adapter, not a rewrite. See [the agent runtime](docs/architecture/03-agent-runtime-and-auth.md) and `packages/provider-adapters`.

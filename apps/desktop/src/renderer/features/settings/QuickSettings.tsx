@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 
 import { MOST_AT_ONCE } from '@althar/contracts'
-import { AgentsAtOnce, AppVersion, Button, ControlCenter, ControlFoot, ControlSheet, IconButton } from '@althar/ui'
+import { AgentsAtOnce, AppVersion, Button, ControlCenter, ControlFoot, ControlSheet, IconButton, LinkButton } from '@althar/ui'
 
 import { notesOf } from '../../../main/updates'
 import { reads } from '../../data/reads'
@@ -20,9 +20,10 @@ import { useAgentsAtOnce } from './useAgentsAtOnce'
  * often. Round switches for keeping this computer awake while work runs,
  * notifications, their sound, and how hard it works in the bar; under them,
  * how many agents work at once, on a track of its own. In the foot, which
- * Althar this is, and All settings, which opens the Settings tab beside the
- * home's; a card's name opens it at that card's section. Nothing in it says
- * what is running: settings are calm.
+ * Althar this is, Report a problem (DEV-61), which closes the panel for its
+ * dialog, and All settings, which opens the Settings tab beside the home's;
+ * a card's name opens it at that card's section. Nothing in it says what is
+ * running: settings are calm.
  */
 
 export interface QuickSettingsProps {
@@ -33,7 +34,8 @@ export interface QuickSettingsProps {
 }
 
 export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsProps) {
-  const { client } = useServices()
+  const { client, host } = useServices()
+  const { reportProblem } = host
   const preferences = usePreferences()
   const sounds = useSounds()
   const atOnce = useAgentsAtOnce()
@@ -78,6 +80,17 @@ export function QuickSettings({ open, onOpenChange, onSettings }: QuickSettingsP
       </div>
       <ControlFoot>
         {version !== undefined && <AppVersion version={version} notes={notesOf(version)} text={{ name: text.version }} />}
+        {reportProblem !== undefined && (
+          <LinkButton
+            onClick={() => {
+              // The panel closes, and the dialog opens over the window.
+              onOpenChange(false)
+              reportProblem({ kind: 'asked', from: 'settings' })
+            }}
+          >
+            {text.report}
+          </LinkButton>
+        )}
         <Button size="small" icon="gear" kbd={text.allKbd} onClick={() => settings(null)}>
           {text.all}
         </Button>

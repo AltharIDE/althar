@@ -6,9 +6,11 @@ import { join } from 'node:path'
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
 import { backupsIn, connection, databaseIn, Folders, Nudges, Secrets, SecretsUnavailable, services, UsageData } from '@althar/runtime'
-import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Queue, Stream } from 'effect'
+import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
 import { editorsHere, openInEditor } from './editors'
+import { runtimeFacts } from './facts'
+import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
 import { openInBrowser, openInTerminal } from './terminal'
 
@@ -47,6 +49,9 @@ const required = (name: string) => {
 
 const profile = required('ALTHAR_PROFILE')
 mkdirSync(profile, { recursive: true })
+
+/* What agents' processes write to stderr, in agents.log, where the main process keeps the app's logs (DEV-61). */
+const agents = agentsLog(process.env.ALTHAR_LOGS)
 
 /**
  * The public ids of Althar's own apps registered with code hosts and
@@ -154,6 +159,7 @@ const options = {
   },
   appVersion: process.env.ALTHAR_APP_VERSION ?? '0.0.0',
   deviceName: hostname(),
+  ...(agents === null ? {} : { agentStderr: agents.stderr }),
 }
 
 /** The machine the end-to-end tests name in `ALTHAR_MACHINE`, as `cores,GB`; without one, a large one: 64 cores and 256 GB. */
@@ -167,9 +173,15 @@ const machineIn = (named: string | undefined) => {
 /* Ports and folders that arrive before the runtime is ready wait here. */
 const early: Array<Port> = []
 let accept = (port: Port) => void early.push(port)
-let isReady: (context: Context.Context<Folders>) => void = () => {}
-const ready = new Promise<Context.Context<Folders>>((resolve) => {
-  isReady = resolve
+/* Everything the runtime's services provide, for the main process's requests to reach. */
+type Ready = Context.Context<Layer.Success<ReturnType<typeof services>>>
+let isReady: (context: Ready) => void = () => {}
+let readyNow = false
+const ready = new Promise<Ready>((resolve) => {
+  isReady = (context) => {
+    readyNow = true
+    resolve(context)
+  }
 })
 
 /** The store an update couldn't move: what stopped, the copy from before (if one was made), and what was said. */
@@ -226,6 +238,7 @@ const program = Effect.gen(function* () {
     }),
   )
   isReady(context)
+  yield* Effect.logInfo('Runtime ready').pipe(Effect.annotateLogs({ version: options.appVersion, pid: process.pid }))
   // What needs the person goes to the main process, which notifies them and keeps the Dock's count.
   yield* Effect.forkScoped(
     Stream.runForEach(Context.get(context, Nudges).events, (event) => Effect.sync(() => parent.postMessage({ type: 'nudge', event }))),
@@ -243,7 +256,8 @@ const program = Effect.gen(function* () {
   }
 })
 
-const fiber = Effect.runFork(Effect.scoped(program))
+// The runtime's own lines go to stdout, for the main process to keep in runtime.log.
+const fiber = Effect.runFork(Effect.scoped(program).pipe(Effect.provide(Logger.layer([stdoutLogger]))))
 
 fiber.addObserver((exit) => {
   if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
@@ -252,6 +266,21 @@ fiber.addObserver((exit) => {
   }
   process.exit(0)
 })
+
+/**
+ * What a report needs from the runtime (facts.ts), for the main process:
+ * whatever goes wrong reading it, an answer goes back, and at once while the
+ * store isn't open, so main says what it can itself.
+ */
+const tellFacts = (requestId: string, threadId: string | null) => {
+  if (!readyNow) return parent.postMessage({ type: 'facts', requestId, error: 'The store isn’t open.' })
+  void ready
+    .then((context) => Effect.runPromise(runtimeFacts(threadId).pipe(Effect.provideContext(context))))
+    .then(
+      (value) => parent.postMessage({ type: 'facts', requestId, value }),
+      (error: unknown) => parent.postMessage({ type: 'facts', requestId, error: error instanceof Error ? error.message : String(error) }),
+    )
+}
 
 /** A folder the person chose, from the main process: its grant goes back, for the window to open it by. */
 const allowFolder = (requestId: string, path: string) =>
@@ -268,6 +297,7 @@ parent.on('message', (message) => {
     readonly path?: string
     readonly value?: string
     readonly error?: string
+    readonly threadId?: string
   } | null
   const port = message.ports[0]
   if (data?.type === 'sealed' && data.requestId !== undefined) {
@@ -279,6 +309,10 @@ parent.on('message', (message) => {
   }
   if (data?.type === 'connect' && port !== undefined) accept(port)
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)
+  if (data?.type === 'facts' && data.requestId !== undefined) tellFacts(data.requestId, data.threadId ?? null)
   // Interrupting the program closes its scope: every session is stopped and recorded first.
-  if (data?.type === 'shutdown') Effect.runFork(Fiber.interrupt(fiber))
+  if (data?.type === 'shutdown') {
+    Effect.runFork(Effect.logInfo('Runtime stopping').pipe(Effect.provide(Logger.layer([stdoutLogger]))))
+    Effect.runFork(Fiber.interrupt(fiber))
+  }
 })

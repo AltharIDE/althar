@@ -73,6 +73,19 @@
         "vitest": "5.0.1",
       },
     },
+    "apps/report": {
+      "name": "@althar/report",
+      "version": "0.0.0",
+      "devDependencies": {
+        "@types/bun": "^1.3.5",
+        "@vitest/coverage-v8": "5.0.1",
+        "typescript": "^7.0.2",
+        "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
+        "vite-plus": "1.0.0-rc.0",
+        "vitest": "5.0.1",
+        "wrangler": "^4.143.0",
+      },
+    },
     "apps/site": {
       "name": "@althar/site",
       "version": "0.0.0",
@@ -300,6 +313,8 @@
     "@althar/persistence-sqlite": ["@althar/persistence-sqlite@workspace:packages/persistence-sqlite"],
 
     "@althar/provider-adapters": ["@althar/provider-adapters@workspace:packages/provider-adapters"],
+
+    "@althar/report": ["@althar/report@workspace:apps/report"],
 
     "@althar/runtime": ["@althar/runtime@workspace:packages/runtime"],
 
