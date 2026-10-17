@@ -52,4 +52,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [042](042-a-task-s-thread-reads-in-rounds.md) | A task's thread reads in rounds: an ask, then what its lead says first, its work in a line, and what it says last |
 | [043](043-allow-everything-is-one-switch-for-a-project-or-a-task.md) | Allow everything is one switch, for a project or a task, apart from what the rest gets |
 | [044](044-a-project-runs-many-things.md) | A project runs many things, from a list with a default |
-| [045](045-a-task-attaches-to-a-pull-request-it-didn-t-open.md) | A task can be attached to an open pull request it didn't open, and follows it as one it opened |
+| [045](045-problem-reports.md) | Problems are reported from the app, masked, through a Worker that makes Linear issues |
+| [046](046-a-task-attaches-to-a-pull-request-it-didn-t-open.md) | A task can be attached to an open pull request it didn't open, and follows it as one it opened |

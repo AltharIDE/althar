@@ -1,5 +1,5 @@
 /*
- * A task may be attached to a pull request it didn't open (ADR-045): one
+ * A task may be attached to a pull request it didn't open (ADR-046): one
  * opened by hand, or by an earlier try on another repository, such as a
  * fork's before its pull requests went upstream. Its change set then comes
  * from no run: the person or the coordinator attached it, perhaps to a task

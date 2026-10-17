@@ -269,6 +269,24 @@ export const MultiLine: Story = {
 export const Busy: Story = { render: () => <Example busy onStopAgent={() => {}} /> }
 /** The lead is working and you have written something: Enter queues it, and Send now interrupts the lead with it instead. */
 export const BusyWithDraft: Story = { render: () => <Example busy initial="Also check the webhook retry path." /> }
+/** The foot from 300 to 900px, in each state: the picker gives way first, then the recording gets compact; send stays on the row at the right. */
+export const NarrowFoot: Story = {
+  render: () => (
+    <div style={{ display: 'grid', gap: 24 }}>
+      {[300, 420, 560, 720, 900].map((w) => (
+        <div key={w} style={{ width: w }} data-testid={`foot-${w}`}>
+          <p style={{ margin: '0 0 6px', font: '11px var(--mono)' }}>{w}px: idle, typing, dictating, transcribing, lead working</p>
+          <Example takesImages />
+          <Example takesImages initial="Two things: keep the limiter" />
+          <Example takesImages recording />
+          <Example takesImages dictation={{ elapsed: null, busy: true, onStart: () => {}, onStop: () => {} }} />
+          <Example busy takesImages recording initial="Two things: keep the limiter" />
+        </div>
+      ))}
+    </div>
+  ),
+}
+
 /** Sending now: ⌘Enter or the button. The lead stops at a safe point and carries on with both. */
 export const SendingNow: Story = {
   args: { onSendNow: fn() },

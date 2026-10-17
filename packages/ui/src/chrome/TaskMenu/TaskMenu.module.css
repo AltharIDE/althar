@@ -1,13 +1,3 @@
-/* A warm word beside the button while everything on the task is allowed: nothing it asks waits for you. */
-.unrestricted {
-  flex: none;
-  margin-right: 6px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--warm);
-  white-space: nowrap;
-}
-
 /* A quiet word beside the button, where the task resolves conflicts otherwise than its project. */
 .hint {
   flex: none;

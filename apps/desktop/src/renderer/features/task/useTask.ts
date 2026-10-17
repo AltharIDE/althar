@@ -96,7 +96,10 @@ export interface TaskModel {
   readonly setResolveConflicts: (on: boolean | null) => Promise<void>
   /** Allows everything its agents ask, short of what its project never allows, or takes it back: what waits goes ahead. */
   readonly setAllowEverything: (on: boolean) => Promise<void>
-  /** Settles it without its change; its worktree and branch stay. Whether it was abandoned. */
+  /**
+   * Settles it without its change; its worktree and branch stay. A merged one settles without the commits after its pull
+   * request, which stay on its branch, and stays merged. Whether it was abandoned.
+   */
   readonly abandon: () => Promise<boolean>
   /** Opens it again, once abandoned, on its worktree and branch. */
   readonly reopen: () => Promise<void>
@@ -462,7 +465,10 @@ export const useTask = (threadId: string): TaskModel => {
     choose: (choice) =>
       act(async () => {
         const session = snapshot?.session
-        await (session == null ? client.startSession(startOf(threadId, choice)) : moveTo(client, threadId, runningOn(session), choice))
+        // A thread the runtime no longer holds can't be moved: the choice starts the lead on it instead. While it is held, the choice changes the lead it has.
+        await (session == null || !session.held
+          ? client.startSession(startOf(threadId, choice))
+          : moveTo(client, threadId, runningOn(session), choice))
       }),
     handOver: (choice, body, images) =>
       shown(body, 'after_current', () => client.switchAgent({ ...startOf(threadId, choice), body, ...sentWith(images) }), images, false),
@@ -473,8 +479,10 @@ export const useTask = (threadId: string): TaskModel => {
     setAllowEverything: (on) => onTask((taskId) => client.setTaskAllowEverything({ taskId, allowEverything: on })),
     abandon: async () => {
       let abandoned = false
+      // Merged, the runtime offers leaving out what came after in its place: the person abandons either way.
+      const merged = snapshot?.task.actions.includes('leaveOut') === true
       await onTask(async (taskId) => {
-        await client.abandonTask(taskId)
+        await (merged ? client.leaveOutCommits(taskId) : client.abandonTask(taskId))
         abandoned = true
       })
       return abandoned

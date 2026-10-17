@@ -71,6 +71,7 @@ describe('push_tag', () => {
       // Only a tag that is there, by a name git takes.
       assert.include(yield* callTool(access, 'push_tag', { tag: 'v1.0.0' }), "There's no tag v1.0.0 here.")
       assert.include(yield* callTool(access, 'push_tag', { tag: '--mirror' }), "isn't a name git takes for a tag")
+      assert.include(yield* callTool(access, 'push_tag', { tag: 'v1.0.0', repository: 'nowhere' }), 'Say which repository')
 
       writeFileSync(join(worktree, 'CHANGELOG.md'), '1.0.0\n')
       git(worktree, 'add', '.')
@@ -104,6 +105,12 @@ describe('push_tag', () => {
       yield* answer((yield* card).id, 'allow')
       assert.include(yield* Fiber.join(moving), 'origin has a tag v1.0.0 already')
       assert.strictEqual(git(remote, 'rev-parse', 'v1.0.0^{commit}'), head)
+
+      // Its lead gone, there is no one to ask for: nothing is asked or pushed.
+      git(worktree, 'tag', 'v1.0.2')
+      yield* (yield* Sessions).stop(access.threadId)
+      assert.include(yield* callTool(access, 'push_tag', { tag: 'v1.0.2' }), 'Only a running lead can push a tag.')
+      assert.strictEqual(git(remote, 'tag', '--list'), 'v1.0.0')
     }).pipe(Effect.provide(runtime())),
   )
 })

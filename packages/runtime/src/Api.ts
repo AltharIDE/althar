@@ -709,6 +709,11 @@ export const handlers = Api.toLayer(
             ),
           ),
         ),
+      LeaveOutCommits: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.leave_out', { taskId }, commandId), (said) => tasks.leaveOut({ envelope: said, taskId }))),
+        ),
       AbandonTask: ({ commandId, taskId }) =>
         once(
           commandId,

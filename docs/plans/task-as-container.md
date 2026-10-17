@@ -42,14 +42,16 @@ Then, at most, one card in the card and one fact under it:
 |---|---|---|---|
 | Change | The step track (calmer: a still bar with a slow sheen), its branch and size, or its pull request | Its pull request and size; the checks (`All 8 checks passed`), or a conflict, warm with an icon (`Conflicts with main in 2 files`) | Merged, PR #143 |
 | Review | Their pull request (number, whose, size); `1 finding so far` | Their pull request; **`3 findings`** a little louder, then `1 blocking · request changes` | Posted, with its verdict |
-| Plain | `Working`, its title, nothing else | Why it needs you (Question, Stuck, Permission, with the agent's reason), or `Finished`; pictures or files it handed back, small | Done |
+| Plain | `Working`, its title, nothing else | Why it needs you (Question, Stuck, Permission, with the agent's reason), or `Finished` (above Settled); pictures or files it handed back, small | Done |
 
 - A task with an open call shows **once**, in Needs you: its card says the
   call's kind and why. A call with no task (the coordinator's question) is
   still a card of its own.
 - **Finished, then Done:** a plain task that finished and the person hasn't
-  opened sits in the project's Needs you as `Finished`. Opening it settles
-  it as `Done`. Not on the home, the edge or in notifications.
+  opened waits as `Finished`, above Settled on the board, not in Needs you
+  (it asks nothing, and the board and the home agree on that: `needsYou`).
+  Opening it settles it as `Done`. Not on the home, the edge or in
+  notifications.
 - Up next and Settled stay rows, with the kind's word where there is one.
 
 ## Reviews

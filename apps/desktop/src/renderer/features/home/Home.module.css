@@ -17,4 +17,6 @@
   font-size: 12.5px;
   color: var(--danger);
   border-bottom: 1px solid var(--line-1);
+  /* Some say what git said, line by line. */
+  white-space: pre-line;
 }
