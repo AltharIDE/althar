@@ -84,6 +84,9 @@ const useAnswers = (onAnswer: AnswerCall) => {
   return { round, send }
 }
 
+/** Takes focus as the cards first show; started afresh after an answer that didn't go through, only while nothing else has it, so it never takes it back from what the person moved on to. */
+const afresh = (focus: PermissionFocus | undefined, round: number) => (round === 0 || !focus ? focus : 'idle')
+
 export function PermissionCall({
   request,
   project,
@@ -104,7 +107,7 @@ export function PermissionCall({
       key={round}
       {...cardOf(request, project, wayOut)}
       project={project}
-      focusOnMount={focusOnMount}
+      focusOnMount={afresh(focusOnMount, round)}
       onAnswer={(answer) => send(request.id, replyOf(answer))}
     />
   )
@@ -132,7 +135,7 @@ export function PermissionCalls({
       key={round}
       items={requests.map((request) => cardOf(request, project, wayOut))}
       project={project}
-      focusOnMount={focusOnMount}
+      focusOnMount={afresh(focusOnMount, round)}
       onAnswer={(request, answer) => send(request.id, replyOf(answer))}
     />
   )
