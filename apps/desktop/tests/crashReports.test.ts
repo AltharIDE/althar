@@ -15,6 +15,7 @@ import {
   goneBadly,
   LONGEST_VALUE,
   MOST_A_LAUNCH,
+  namesLearned,
   newDumps,
   runtimeThrown,
   thrownOf,
@@ -118,6 +119,24 @@ describe('the switch', () => {
     on = false
     await turning.stop()
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('waits, as Althar quits, for the request itself to be answered, the last fatal one too', async () => {
+    const { fetch: answer, requests } = posthog()
+    let answered = false
+    // PostHog answers late, as a slow network would, and later than PostHog's own shutdown waits (a second):
+    // what is on its way is the request itself, not only the report made ready.
+    const slow = vi.fn<CrashReportsOptions['fetch']>(async (url, options) => {
+      await new Promise((resolve) => setTimeout(resolve, 1_500))
+      const response = await answer(url, options)
+      answered = true
+      return response
+    })
+    const reports = sender(() => true, slow)
+    reports.keepsStopping(4, 1)
+    await reports.stop()
+    expect(answered).toBe(true)
+    expect(sent(requests).map((event) => event.properties.$exception_list[0]?.type)).toEqual(['Runtime keeps stopping'])
   })
 
   it('never fails into what failed, even when PostHog can’t be reached or masking breaks', async () => {
@@ -288,6 +307,49 @@ describe('what a report carries', () => {
       ]),
     )
     expect(JSON.stringify(events)).toContain('SessionFailed in [repository-1]')
+  })
+
+  it('keeps every name it learned this launch, so a repository renamed or removed is hidden still', () => {
+    const none = { projects: [], repositories: [] }
+    const first = namesLearned(none, { projects: ['Checkout'], repositories: ['meridian'] })
+    expect(first).toEqual({ projects: ['Checkout'], repositories: ['meridian'] })
+    // meridian renamed atlas, Checkout removed: both are known still, the new name after them.
+    const renamed = namesLearned(first, { projects: [], repositories: ['atlas'] })
+    expect(renamed).toEqual({ projects: ['Checkout'], repositories: ['meridian', 'atlas'] })
+    expect(namesLearned(renamed, { projects: ['Checkout'], repositories: ['atlas'] })).toEqual(renamed)
+    // A read that failed adds none and takes none away.
+    expect(namesLearned(renamed, null)).toBe(renamed)
+  })
+
+  it('hides a repository’s old name in a report made after it was renamed', async () => {
+    const { fetch, requests } = posthog()
+    // The store's names as each report asks them, the way main asks the runtime: meridian, then renamed atlas.
+    const reads = [
+      { projects: ['Checkout'], repositories: ['meridian'] },
+      { projects: ['Checkout'], repositories: ['atlas'] },
+    ]
+    let known = { projects: [] as ReadonlyArray<string>, repositories: [] as ReadonlyArray<string> }
+    const reports = sender(() => true, fetch, {
+      mask: () => {
+        known = namesLearned(known, reads.shift() ?? null)
+        return masker({
+          home: HOME,
+          user: 'ana',
+          device: 'anas-mac.local',
+          names: { project: known.projects, repository: known.repositories },
+        })
+      },
+    })
+    reports.thrown(new Error('Couldn’t open meridian'), 'main', 'uncaught')
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    // Something still holding the old name fails after the rename.
+    reports.thrown(new RangeError('meridian is gone; atlas has no worktree'), 'main', 'rejection')
+    await reports.stop()
+    const said = JSON.stringify(sent(requests))
+    expect(sent(requests)).toHaveLength(2)
+    expect(said).not.toContain('meridian')
+    expect(said).not.toContain('atlas')
+    expect(said).toContain('[repository-1] is gone; [repository-2] has no worktree')
   })
 
   it('sends a process gone, the runtime that keeps stopping and a native crash as exceptions of their own, with no stack', async () => {

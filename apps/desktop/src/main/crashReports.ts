@@ -211,6 +211,26 @@ export const fingerprintOf = (exceptions: ReadonlyArray<Record<string, unknown>>
 /** The properties an event may carry; anything PostHog's client or a caller adds besides is dropped. */
 const KEPT = ['$exception_level', 'process', '$app_version', '$os', 'arch', 'release', '$process_person_profile'] as const
 
+/** The projects' and repositories' names a report hides. */
+export interface HiddenNames {
+  readonly projects: ReadonlyArray<string>
+  readonly repositories: ReadonlyArray<string>
+}
+
+/**
+ * The names a launch hides, once more are read: every name it has learned,
+ * and the new ones after them. None is ever forgotten, so a project renamed
+ * or removed while Althar runs is hidden still in what is said of it later;
+ * a read that failed (null) leaves them as they were.
+ */
+export const namesLearned = (known: HiddenNames, read: HiddenNames | null): HiddenNames =>
+  read === null
+    ? known
+    : {
+        projects: [...new Set([...known.projects, ...read.projects])],
+        repositories: [...new Set([...known.repositories, ...read.repositories])],
+      }
+
 /* ---- the sender ---------------------------------------------------------------- */
 
 export interface CrashReportsOptions {
@@ -264,7 +284,7 @@ export const crashReports = (options: CrashReportsOptions): CrashReports => {
   const seen = new Set<string>()
   let asked = 0
   let sent = 0
-  /* The mask made for the latest report, with the names as they stood: names are only ever added, so it hides the earlier ones' too. */
+  /* The mask made for the latest report, with the names as they stood: names are only ever added (namesLearned), so it hides the earlier ones' too. */
   let masking: Mask | undefined
   const base = {
     $app_version: options.app.version,

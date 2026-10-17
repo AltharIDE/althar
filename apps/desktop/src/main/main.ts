@@ -9,7 +9,7 @@ import { type AppIcon, DEFAULT_APP_ICON, isAppIcon, readAppIcon, writeAppIcon } 
 import { type AppPreferences, DEFAULT_PREFERENCES, doNotTrack, isPreferenceKey } from './appPreferences'
 import { keepingAwake } from './awake'
 import { tokenIn } from './clipboard'
-import { childKind, type CrashReports, crashReports, goneBadly, newDumps } from './crashReports'
+import { childKind, type CrashReports, crashReports, goneBadly, type HiddenNames, namesLearned, newDumps } from './crashReports'
 import { startDictation } from './dictation'
 import { isEdgePlace } from './edge'
 import { type Edge, startEdge } from './edgeWindows'
@@ -258,12 +258,9 @@ const usage = Promise.all([install, app.whenReady()]).then(([install]) => {
 })
 const recordUsage = (said: unknown) => void usage.then((sender) => sender.record(said))
 
-/* The projects' and repositories' names to hide, as last learned: the runtime holds the store while it runs, so it is asked; without one, main reads it. */
+/* The projects' and repositories' names to hide, all those learned this launch: the runtime holds the store while it runs, so it is asked; without one, main reads it. */
 const names = factsAsker('names')
-let namesKnown: { readonly projects: ReadonlyArray<string>; readonly repositories: ReadonlyArray<string> } = {
-  projects: [],
-  repositories: [],
-}
+let namesKnown: HiddenNames = { projects: [], repositories: [] }
 const namesNow = async () => {
   let read: Pick<RuntimeFacts, 'projects' | 'repositories'> | null = null
   try {
@@ -274,12 +271,12 @@ const namesNow = async () => {
   } catch {
     read = null
   }
-  // A store that couldn't be read, or a runtime that couldn't say, keeps the names last learned.
-  if (read !== null && (read.projects.length > 0 || read.repositories.length > 0)) namesKnown = read
+  // Added to what was learned, never in its place: a name renamed or removed is hidden still. A store that couldn't be read, or a runtime that couldn't say, adds none.
+  namesKnown = namesLearned(namesKnown, read)
   return namesKnown
 }
 
-/** What hides the person in a crash report, as Report a problem does: their home, who they are, this computer, and the projects' and repositories' names as they stand. */
+/** What hides the person in a crash report, as Report a problem does: their home, who they are, this computer, and every project's and repository's name learned this launch. */
 const maskHere = async () => {
   const known = await namesNow()
   let user: string | undefined
