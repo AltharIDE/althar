@@ -103,7 +103,7 @@ export const taskMenuText: TaskMenuText = {
   conflictsOffAbout: 'You ask the lead to fix a conflict when one comes up.',
   conflictsHint: (on) => `Auto-resolve conflicts: ${on ? 'on' : 'off'}`,
   allowAll: 'Allow everything on this task',
-  allowAllAbout: 'Nothing its agents ask waits for you. Never still holds.',
+  allowAllAbout: 'Nothing its agents ask waits for you but what could lose work, such as a force push. Never still holds.',
   allowAllProject: 'On for every task in this project, from its Rules.',
 }
 

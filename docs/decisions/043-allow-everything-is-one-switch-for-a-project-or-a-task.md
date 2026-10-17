@@ -2,6 +2,15 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-15
+- **Amended:** 2026-10-15: allowing everything stops short of what could
+  lose work, which still asks the person (DEV-69,
+  [the safety pass](../plans/safety-pass.md)): a force push, a push to or a
+  deletion of the default branch, deleting or forcing a branch that isn't
+  the task's, a push Althar can't read, git throwing away work in another
+  checkout or what it keeps to recover lost work, deleting outside the
+  task's worktree, and reading a `.env` outside it. Its card says "even with
+  everything allowed", and offers no "always allow": only Never, or turning
+  the switch off and always allowing the kind, settles it otherwise.
 - **Owner:** Repository maintainers
 - **Context:** A project's rules ([ADR-013](013-project-rules.md)) said what
   happens to what no rule keeps in one of four modes, and "allow everything"
