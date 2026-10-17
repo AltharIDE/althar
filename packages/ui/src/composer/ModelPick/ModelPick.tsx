@@ -150,7 +150,7 @@ export function ModelPick({
       className={s.pop}
       trigger={
         <button type="button" className={cx(s.button, s[variant])} aria-label={t.current(owner, model.short, level)}>
-          <Model model={model} short />
+          <Model model={model} short className={s.name} />
           {level !== null && <span className={s.effort}>{level}</span>}
           <Icon name="chevronD" size={10} className={s.chev} />
         </button>

@@ -42,6 +42,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'outputs/ChangeView/ChangeView.tsx': 'a file in the list of what changed',
   'screens/Start/Start.tsx': 'the ways to start, as large options',
   'setup/ConnectCard/ConnectCard.tsx': 'the ways in to a service, as large options',
+  'setup/SettingsNav/SettingsNav.tsx': 'a section in the list down the side of Settings',
   /* a shape of its own */
   'composer/ContextRing/ContextRing.tsx': 'the ring',
   'chrome/LoadMeter/LoadMeter.tsx': 'the meters, drawn in steps as the ring is drawn',
@@ -54,6 +55,7 @@ const PLAIN: Readonly<Record<string, string>> = {
   'setup/Charter/Charter.tsx': 'a built-in setting, as an underlined word inside a sentence',
   'thread/Furniture/Furniture.tsx': 'the floating jump to the latest',
   'composer/Listening/Listening.tsx': 'the listening pill, and stop on its sunk bar',
+  'composer/DictationPill/DictationPill.tsx': 'the words carried in the pill, stretched across it, which open it',
   'composer/Running/Running.tsx': 'the running pill, and its actions on the sunk bar',
   'setup/ControlCenter/ControlCenter.tsx': 'a module, the whole of which opens it out, and a round switch',
   'home/Island/Island.tsx': 'the mark and the count, on the notch’s black',

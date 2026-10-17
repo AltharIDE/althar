@@ -7,6 +7,7 @@ import { Composer, DictationTray } from '@althar/ui'
 import type { DictationHost, DictationState } from '../src/renderer/data/services'
 import { microphonesOf, microphoneToUse } from '../src/renderer/shared/dictation/microphones'
 import type { Frame, Record } from '../src/renderer/shared/dictation/recorder'
+import { forgetSessions } from '../src/renderer/shared/dictation/sessions'
 import { bytes, lengthOf, timeLeft, trayText } from '../src/renderer/shared/dictation/text'
 import { together, useDictation } from '../src/renderer/shared/dictation/useDictation'
 import { setDraftText, useDraft } from '../src/renderer/shared/drafts'
@@ -410,7 +411,7 @@ describe('dictation’s edges', () => {
     }
   })
 
-  it('stops listening when the composer goes, and writes down what was said into its thread’s draft', async () => {
+  it('goes on listening when the composer goes, carried with the person, and is still listening as it is back', async () => {
     const { record, cancel } = fakeRecord()
     const host = fakeDictation(state({}, { ready: true }))
     const { unmount } = show(host.dictation, record)
@@ -418,10 +419,12 @@ describe('dictation’s edges', () => {
     await screen.findByRole('button', { name: /^Stop dictating/ })
     unmount()
     expect(cancel).not.toHaveBeenCalled()
-    await waitFor(() => expect(host.dictation.transcribe).toHaveBeenCalledTimes(1))
+    expect(host.dictation.transcribe).not.toHaveBeenCalled()
     show(host.dictation, record)
+    await userEvent.click(await screen.findByRole('button', { name: /^Stop dictating/ }))
     await waitFor(() => expect(field()).toHaveProperty('value', 'check the retry path'))
-    expect(screen.getByText('What you said was written down while you were away.')).toBeTruthy()
+    // Back before it was written down: nothing to say.
+    expect(screen.queryByText('What you said was written down while you were away.')).toBeNull()
   })
 })
 
@@ -600,7 +603,8 @@ describe('choosing the microphone', () => {
     expect(record).toHaveBeenLastCalledWith(expect.any(Function), 'usb')
     unmount()
 
-    // Another launch: the choice is still there.
+    // Another launch: the choice is still there, and nothing listens from the last.
+    forgetSessions()
     const again = fakeRecord()
     show(ready().dictation, again.record)
     const next = await microphoneMenu()

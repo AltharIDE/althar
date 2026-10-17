@@ -3,7 +3,7 @@ name: post-merge
 # The heavy part of desktop, harness and ui, after merge: their checks again (two pull requests can each pass and still
 # clash), the coverage gates, the Storybook build, the desktop app's end-to-end run and its packages. On a pull request
 # those workflows run only checks and unit tests, so a change to main doesn't hold every open pull request up for the
-# long runs. pitch, site and brand are quick, and still run in full on their own. Main may go red for a while; a
+# long runs. site and brand are quick, and still run in full on their own. Main may go red for a while; a
 # release can't: release.yml cuts only a commit this workflow passed on.
 #
 # Merges in quick succession share a run: one runs, the newest waits, and those between are skipped. When main goes
