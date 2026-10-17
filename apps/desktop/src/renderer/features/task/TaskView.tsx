@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TaskAction, ThreadSnapshot } from '@althar/contracts'
 import {
   AbandonTask,
+  AttachPullRequest,
   ChangeView,
   BackCrumb,
   ChromeButton,
@@ -291,6 +292,11 @@ export function TaskView({
   const [connecting, setConnecting] = useState(false)
   // Abandoning it asks first, saying what happens to its worktree and branch.
   const [abandoning, setAbandoning] = useState(false)
+  // Attaching it to a pull request asks which; then, where its branch isn't based on that one's head, whether to start it there.
+  const [attaching, setAttaching] = useState<{
+    readonly value: string
+    readonly start?: { readonly name: string; readonly source: string; readonly own: number }
+  } | null>(null)
   // Whether its title is a field, from its menu's Rename or from pressing the title.
   const [renaming, setRenaming] = useState(false)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
@@ -343,7 +349,7 @@ export function TaskView({
     if ((showsTask && !was.task) || (showsOutputs && !was.outputs) || (showsChanges && !was.changes)) readFiles()
   }, [showsTask, showsOutputs, showsChanges, readFiles])
   // c and o switch the faces, and Escape goes back to the project: never while typing, or with something else open.
-  const open = changes.open || abandoning
+  const open = changes.open || abandoning || attaching !== null
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || typing(event) || open) return
@@ -534,6 +540,16 @@ export function TaskView({
         onRename={() => setRenaming(true)}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
+        // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-045); a
+        // review reads one only.
+        {...(can('abandon') && snapshot.task.phase !== 'settled' && snapshot.task.review == null && snapshot.task.worktree !== null
+          ? {
+              onAttach: () => {
+                model.dismissError()
+                setAttaching({ value: '' })
+              },
+            }
+          : {})}
         {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
         {...(can('stop') ? { onStop: () => void model.stop() } : {})}
         {...(can('resume') ? { onResume: () => void model.resume() } : {})}
@@ -853,6 +869,32 @@ export function TaskView({
           {...(model.error === null ? {} : { error: model.error })}
           onAbandon={() => void model.abandon().then((abandoned) => abandoned && setAbandoning(false))}
           onClose={() => setAbandoning(false)}
+        />
+      )}
+      {attaching !== null && (
+        <AttachPullRequest
+          key={attaching.start === undefined ? 'ask' : 'start'}
+          defaultValue={attaching.value}
+          {...(attaching.start === undefined
+            ? {}
+            : {
+                start: attaching.start,
+                onBack: () => {
+                  model.dismissError()
+                  setAttaching({ value: attaching.value })
+                },
+              })}
+          busy={model.pending}
+          {...(model.error === null ? {} : { error: model.error })}
+          onAttach={(pullRequest, start) =>
+            void model.attach(pullRequest, start).then((done) => {
+              if (done === null) return
+              setAttaching(
+                done.kind === 'start' ? { value: pullRequest, start: { name: done.name, source: done.source, own: done.own } } : null,
+              )
+            })
+          }
+          onClose={() => setAttaching(null)}
         />
       )}
       {changes.open && (

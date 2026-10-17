@@ -118,6 +118,16 @@ export const MarkingReady: Story = {
   },
 }
 
+/** A task that follows the wrong pull request, or none, attaches one: the consumer asks which. */
+export const AttachingAPullRequest: Story = {
+  args: { onStop: undefined, onAttach: fn() },
+  play: async ({ args, canvasElement }) => {
+    const page = await opened(canvasElement)
+    await userEvent.click(await page.findByRole('menuitem', { name: /Attach a pull request…/ }))
+    await expect(args.onAttach).toHaveBeenCalledOnce()
+  },
+}
+
 const changing = fn()
 /** Choosing how its conflicts go says which; the word beside the button shows only where it isn't the project's. */
 export const ChangingConflicts: Story = {
