@@ -229,16 +229,30 @@ const secretFromHome = (fromHome: string): boolean => {
 /** The home folder, as a command may name it at the start of a path. */
 const HOME_WORD = /^(~|\$HOME|\$\{HOME\})(?=$|\/)/
 
-/** Whether a path, named from a folder, is where a secret is kept: as written, and with symlinks followed. */
+/** The real path of a place that may not exist yet: its nearest existing folder, with symlinks followed, and the rest. */
+const realFrom =
+  (follow: (path: string) => string) =>
+  (path: string): string => {
+    let existing = path
+    const rest: Array<string> = []
+    for (;;) {
+      try {
+        return resolve(follow(existing), ...rest.toReversed())
+      } catch {
+        const parent = dirname(existing)
+        if (parent === existing) return path
+        rest.push(existing.slice(parent.length).replace(/^[/\\]/, ''))
+        existing = parent
+      }
+    }
+  }
+
+/** Whether a path, named from a folder, is where a secret is kept: as written, and with symlinks followed, to a file not there yet too. */
 const secretPath = (path: string, cwd: string, follow: (path: string) => string = realpathSync): boolean => {
   const home = homedir()
   const full = resolve(cwd, path.replace(HOME_WORD, home))
-  if (secretFromHome(relative(home, full))) return true
-  try {
-    return secretFromHome(relative(follow(home), follow(full)))
-  } catch {
-    return false
-  }
+  const real = realFrom(follow)
+  return secretFromHome(relative(home, full)) || secretFromHome(relative(real(home), real(full)))
 }
 
 /** The paths a command's word may name: itself, and what follows an `@` or an `=` (`curl -d @file`, `--key-file=path`). */
@@ -716,22 +730,7 @@ interface Places {
 }
 
 const places = (context: RuleContext): Places => {
-  const follow = context.realPath ?? realpathSync
-  /** The real path of a place that may not exist yet: its nearest existing folder, with symlinks followed, and the rest. */
-  const real = (path: string): string => {
-    let existing = path
-    const rest: Array<string> = []
-    for (;;) {
-      try {
-        return resolve(follow(existing), ...rest.toReversed())
-      } catch {
-        const parent = dirname(existing)
-        if (parent === existing) return path
-        rest.push(existing.slice(parent.length).replace(/^[/\\]/, ''))
-        existing = parent
-      }
-    }
-  }
+  const real = realFrom(context.realPath ?? realpathSync)
   return {
     real,
     worktrees: (context.worktrees ?? [context.worktree]).map(real),
@@ -980,6 +979,40 @@ const redirects = (words: ReadonlyArray<string>): ReadonlyArray<string> =>
 /** A command made only of the redirects a shell wrapper carried, for where its script's output goes. */
 const onlyRedirects = (words: ReadonlyArray<string>) => REDIRECTS.includes(words[0] ?? '')
 
+/** Programs that take the folder they copy or move into as `-t`, by the other short flags they take a value for. */
+const TARGET_FOLDER: Readonly<Record<string, string>> = { cp: 'S', mv: 'S', ln: 'S', install: 'Sgmo' }
+
+/**
+ * What a copy or move takes from and where it puts it, as its words say: the
+ * last operand is where, but where `-t` names the folder (`-t dir`, `-tdir`,
+ * `--target-directory=dir`), every operand is something it takes.
+ */
+const copied = (words: ReadonlyArray<string>): { readonly sources: ReadonlyArray<string>; readonly target: string | undefined } => {
+  const values = TARGET_FOLDER[(words[0] ?? '').split('/').at(-1) ?? '']
+  const operands: Array<string> = []
+  let folder: string | undefined
+  for (let index = 1; index < words.length; index += 1) {
+    const word = words[index] ?? ''
+    if (REDIRECTS.includes(word)) index += 1
+    else if (!word.startsWith('-')) operands.push(word)
+    else if (values === undefined || word === '-' || word === '--') continue
+    else if (word.startsWith('--')) {
+      const [name = '', ...value] = word.split('=')
+      if (name.length >= 3 && '--target-directory'.startsWith(name))
+        folder = value.length > 0 ? value.join('=') : (words[(index += 1)] ?? '')
+    } else {
+      // A cluster of short flags, where the first that takes a value takes the rest of the word, or the next.
+      const at = word.slice(1).search(new RegExp(`[t${values}]`)) + 1
+      if (at === 0) continue
+      const value = word.length > at + 1 ? word.slice(at + 1) : (words[(index += 1)] ?? '')
+      if (word[at] === 't') folder = value
+    }
+  }
+  return folder === undefined
+    ? { sources: operands.slice(0, -1), target: operands.length > 1 ? operands.at(-1) : undefined }
+    : { sources: operands, target: folder }
+}
+
 /** The places a command writes, as far as its words say. */
 const writes = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
   const targets: Array<string> = [...redirects(words)]
@@ -991,7 +1024,8 @@ const writes = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
     .slice(1)
     .filter((word, index, all) => !word.startsWith('-') && !REDIRECTS.includes(word) && !REDIRECTS.includes(all[index - 1] ?? ''))
   if (WRITES_ALL.includes(program)) targets.push(...operands)
-  if (WRITES_LAST.includes(program) && operands.length > 1) targets.push(operands.at(-1) ?? '')
+  const { target } = copied(words)
+  if (WRITES_LAST.includes(program) && target !== undefined) targets.push(target)
   if (program === 'sed' && words.some((word) => word.startsWith('-i') || word === '--in-place')) targets.push(...operands.slice(1))
   return targets
 }
@@ -1011,7 +1045,7 @@ const removes = (words: ReadonlyArray<string>): ReadonlyArray<string> => {
   const program = (words[0] ?? '').split('/').at(-1) ?? ''
   const operands = operandsOf(words)
   if (['rm', 'rmdir', 'unlink', 'shred', 'rimraf', 'trash'].includes(program)) return operands
-  if (program === 'mv') return operands.slice(0, -1)
+  if (program === 'mv') return copied(words).sources
   if (program === 'rsync')
     return [
       ...(words.some((word) => word.startsWith('--delete')) ? operands.slice(-1) : []),
@@ -1122,6 +1156,9 @@ const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
     case 'switch':
       return branchKept('Resetting the branch', [flagValue(git.args, '-C', '--force-create')])
     case 'update-ref': {
+      // What it changes comes in on its input, which isn't read here: deleting or moving any branch, say.
+      if (git.args.includes('--stdin'))
+        return [kept("Althar can't tell which branches `git update-ref --stdin` changes, so it asks.", 'unclear', true)]
       const ref = git.args.filter((arg, index, all) => !arg.startsWith('-') && all[index - 1] !== '-m')[0] ?? ''
       if (!ref.startsWith('refs/heads/')) return []
       return branchKept(git.args.includes('-d') ? 'Deleting the branch' : 'Moving the branch', [ref.slice('refs/heads/'.length)])
@@ -1152,8 +1189,35 @@ const gitKinds = (git: GitCall, context: RuleContext): ReadonlyArray<Kept> => {
   }
 }
 
-/** Whether a git command throws away work in the checkout it runs in: changes not committed, files it doesn't track, a stash. */
-const discards = (git: GitCall): boolean => {
+/** What `git checkout` may take that changes no file, beside the branch it switches to and the name `-b`, `-B` or `--orphan` makes. */
+const CHECKOUT_SWITCHES =
+  /^(-q|--quiet|--progress|--no-progress|--detach|-t|--track(=.*)?|--no-track|--guess|--no-guess|--recurse-submodules|--no-recurse-submodules)$/
+
+/**
+ * Whether `git checkout` only switches branch, which never overwrites a
+ * change: to one branch at most, by a name that can't be a file there. A name
+ * git could read as a file (`README.md`, `src`, `*.ts`), or anything else it
+ * takes, could put back files over what the checkout's owner changed.
+ */
+const onlySwitches = (args: ReadonlyArray<string>, isPath: (name: string) => boolean): boolean => {
+  const names: Array<string> = []
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? ''
+    if (['-b', '-B', '--orphan'].includes(arg)) index += 1
+    else if (arg !== '-' && arg.startsWith('-')) {
+      if (!CHECKOUT_SWITCHES.test(arg)) return false
+    } else names.push(arg)
+  }
+  const [name] = names
+  return names.length <= 1 && (name === undefined || name === '-' || (/^\w[\w/-]*$/.test(name) && !isPath(name)))
+}
+
+/**
+ * Whether a git command throws away work in the checkout it runs in: changes
+ * not committed, files it doesn't track, a stash. `isPath` says whether a name
+ * is a file or folder there.
+ */
+const discards = (git: GitCall, isPath: (name: string) => boolean): boolean => {
   const { subcommand, args } = git
   switch (subcommand) {
     case 'reset':
@@ -1161,7 +1225,7 @@ const discards = (git: GitCall): boolean => {
     case 'clean':
       return hasFlag(args, '-f', '--force')
     case 'checkout':
-      return args.some((arg) => ['--', '.', '-f', '--force'].includes(arg))
+      return !onlySwitches(args, isPath)
     case 'switch':
       return hasFlag(args, '-f', '--force', '--discard-changes')
     case 'restore':
@@ -1187,6 +1251,7 @@ interface CommandKinds {
 const eachCommand = (text: string, context: RuleContext): { readonly opaque: boolean; readonly commands: ReadonlyArray<CommandKinds> } => {
   const { commands, opaque } = parseCommandLine(text)
   const where = places(context)
+  const follow = context.realPath ?? realpathSync
   let cwd = context.worktree
   const each: Array<CommandKinds> = []
   for (const words of commands) {
@@ -1213,7 +1278,16 @@ const eachCommand = (text: string, context: RuleContext): { readonly opaque: boo
       if (elsewhere !== undefined) {
         kinds.push(kept(`Git in another folder always asks: ${elsewhere}`, 'outside'))
         // The person's own checkout, say: what they haven't committed there is nowhere else.
-        if (discards(git))
+        const isPath = (name: string) =>
+          repository.some((folder) => {
+            try {
+              follow(resolve(folder, name))
+              return true
+            } catch {
+              return false
+            }
+          })
+        if (discards(git, isPath))
           kinds.push(
             kept(
               `\`git ${git.subcommand}\` in another checkout always asks: it could throw away work there: ${elsewhere}`,
@@ -2242,15 +2316,19 @@ export const OFFLINE =
  * a reader's request is allowed or refused. `offline`, as the lead of a
  * review of a pull request from outside the project is, it reaches nothing
  * on the network: a fetch is refused, as anything the agent's sandbox asks
- * to reach is, and no command it may run reaches the network anyway.
+ * to reach is, and no command it may run reaches the network anyway. `cwd`
+ * is the folder the agent works in, which the paths it names are read from.
  */
-export const decideReader = (request: PermissionRequest, options: { readonly offline?: boolean } = {}): ReaderVerdict => {
+export const decideReader = (
+  request: PermissionRequest,
+  options: { readonly offline?: boolean; readonly cwd?: string } = {},
+): ReaderVerdict => {
   if (ALTHAR_TOOL.test(request.title)) return ALLOW
   switch (request.kind) {
     case 'read':
     case 'search': {
       // A reader may read anything but where the person keeps keys and sign-ins.
-      const secret = secretReason(request)
+      const secret = secretReason(request, options.cwd)
       return secret === undefined ? ALLOW : deny(secret)
     }
     case 'think':
@@ -2268,7 +2346,7 @@ export const decideReader = (request: PermissionRequest, options: { readonly off
         parseCommandLine(command)
           .commands.map((words) => credentialReason(unwrap(words)) ?? deviceBridgeReason(unwrap(words)))
           .find((found) => found !== undefined) ??
-        secretCommandReason(command) ??
+        secretCommandReason(command, options.cwd) ??
         readerCommandReason(command)
       return reason === undefined ? ALLOW : deny(reason)
     }

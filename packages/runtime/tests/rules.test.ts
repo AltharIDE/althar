@@ -1485,4 +1485,81 @@ describe('what could lose work or a secret (DEV-69)', () => {
       assert.strictEqual(verdictOf(command, { mode: 'allow' }), 'ask', command)
     assert.strictEqual(verdictOf('cp .env.example .env'), 'allow')
   })
+
+  it('reads every operand of a move into a named folder as moved away, and that folder as where it writes', () => {
+    for (const command of [
+      'mv --target-directory=./saved /Users/alice/project/file',
+      'mv --target-directory ./saved /Users/alice/project/file',
+      'mv -t ./saved /Users/alice/project/file',
+      'mv -t./saved /Users/alice/project/file',
+      'mv -vt ./saved /Users/alice/project/file',
+    ]) {
+      assert.deepInclude(run(command, rules({ mode: 'allow' })), { verdict: 'ask', held: false }, command)
+      assert.include(reasonOf(run(command, rules({}))), 'Deleting or moving away', command)
+    }
+    for (const command of ['cp -t /Users/alice/project src/app.ts', 'cp --target-directory=/Users/alice/project src/app.ts'])
+      assert.include(reasonOf(run(command, rules({}))), 'Writing outside', command)
+    assert.strictEqual(verdictOf('mv -t ./saved ./file ./other'), 'allow')
+    assert.strictEqual(verdictOf('cp -t ./saved /Users/alice/project/file'), 'allow')
+  })
+
+  it('reads a checkout in another checkout as throwing work away, unless it only switches branch', () => {
+    const allow = { mode: 'allow' as const }
+    for (const command of [
+      'git -C /Users/alice/project checkout README.md',
+      'git -C /Users/alice/project checkout main README.md',
+      'git -C /Users/alice/project checkout "*.ts"',
+      'git -C /Users/alice/project checkout -p',
+      'git -C /Users/alice/project checkout --ours src/app.ts',
+    ])
+      assert.deepInclude(run(command, rules(allow)), { verdict: 'ask', held: false }, command)
+    for (const command of [
+      'git -C /Users/alice/project checkout main',
+      'git -C /Users/alice/project checkout -',
+      'git -C /Users/alice/project checkout -b spike',
+      'git -C /Users/alice/project checkout -q feature/retry',
+    ])
+      assert.strictEqual(verdictOf(command, allow), 'allow', command)
+    // A name that is a folder there is read as one: `git checkout src` puts back what's in it.
+    const elsewhere = mkdtempSync(join(tmpdir(), 'althar-checkout-'))
+    mkdirSync(join(elsewhere, 'src'))
+    const away = { ...rules(allow), scratch: [] }
+    assert.deepInclude(run(`git -C ${elsewhere} checkout src`, away), { verdict: 'ask', held: false })
+    assert.strictEqual(run(`git -C ${elsewhere} checkout spike`, away).verdict, 'allow')
+  })
+
+  it('reads `git update-ref --stdin` as what it can’t tell, as its refs come in on its input', () => {
+    for (const command of ["printf 'delete refs/heads/main\\n' | git update-ref --stdin", 'git update-ref -z --stdin < refs.txt'])
+      assert.deepInclude(run(command, rules({ mode: 'allow' })), { verdict: 'ask', held: false }, command)
+  })
+
+  it('follows a symlink in the worktree into where secrets are kept, to a file that isn’t there yet', () => {
+    const root = mkdtempSync(join(tmpdir(), 'althar-secrets-'))
+    const tree = join(root, 'tree')
+    const was = process.env.HOME
+    process.env.HOME = join(root, 'home')
+    try {
+      mkdirSync(join(root, 'home', '.aws'), { recursive: true })
+      mkdirSync(tree)
+      symlinkSync(join(root, 'home', '.aws'), join(tree, 'creds'))
+      const real = { ...context, worktree: tree, scratch: [], ...rules({ mode: 'allow' }) }
+      for (const path of [join(tree, 'creds', 'new-profile'), 'creds/new-profile'])
+        assert.strictEqual(decide(request({ kind: 'edit', title: 'Edit', paths: [path] }), real).verdict, 'deny', path)
+      assert.strictEqual(decide(request({ title: 'echo x > creds/new-profile' }), real).verdict, 'deny')
+      assert.strictEqual(decide(request({ kind: 'edit', title: 'Edit', paths: ['src/new.ts'] }), real).verdict, 'allow')
+    } finally {
+      if (was === undefined) delete process.env.HOME
+      else process.env.HOME = was
+    }
+  })
+
+  it('refuses a reader’s request that names a secret from the folder it works in', () => {
+    const path = `../../../..${home}/.ssh/id_rsa`
+    const options = { cwd: worktree }
+    assert.strictEqual(decideReader(request({ kind: 'read', title: `Read ${path}`, paths: [path] }), options).verdict, 'deny')
+    assert.strictEqual(decideReader(request({ kind: 'search', title: 'Search', paths: [path] }), options).verdict, 'deny')
+    const command = `cat ${path}`
+    assert.strictEqual(decideReader(request({ kind: 'execute', title: command, rawInput: { command } }), options).verdict, 'deny')
+    assert.strictEqual(decideReader(request({ kind: 'read', title: 'Read', paths: ['src/app.ts'] }), options).verdict, 'allow')
+  })
 })
