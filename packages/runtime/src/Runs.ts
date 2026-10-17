@@ -782,6 +782,7 @@ export class Runs extends Context.Service<
                 case 'opened': {
                   const noun = one.change.words.noun
                   const name = `${noun} ${one.change.words.prefix}${one.change.number}`
+                  if (one.attached === true) return `Pushed to ${name}, which the task follows.`
                   return end === 'ready' || !one.change.draft ? `Opened ${name} for review.` : `Opened draft ${name}.`
                 }
                 case 'pushed':

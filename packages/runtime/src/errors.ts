@@ -161,6 +161,17 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
   said: Schema.optional(Schema.String),
 }) {}
 
+/**
+ * A pull request can't be attached to the task (ADR-045), in words for the
+ * person or the coordinator: it isn't one, it's closed, its branch is
+ * somewhere the task doesn't push to, another task follows it, or its
+ * branch couldn't start from its head.
+ */
+export class AttachRefused extends Schema.TaggedError<AttachRefused>()('AttachRefused', {
+  taskId: Schema.String,
+  message: Schema.String,
+}) {}
+
 /** A link given for an issue points at something else on its host: `what` is it, in the host's words ("pull request", "merge request"). */
 export class NotAnIssue extends Schema.TaggedError<NotAnIssue>()('NotAnIssue', {
   link: Schema.String,
