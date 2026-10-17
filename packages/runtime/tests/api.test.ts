@@ -424,7 +424,7 @@ describe('the API', () => {
     ),
   )
 
-  it.live('says when the turn running started, which the wait for its first word is counted from, and nothing between turns', () =>
+  it.live('says when the turn running started, which the wait for its first word is counted from, and when it ended', () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { client, grant } = yield* connected()
@@ -444,11 +444,15 @@ describe('the API', () => {
         const started = Date.parse(thinking.session?.turnStartedAt ?? '')
         assert.isAtLeast(started, sent)
         assert.isAtMost(started, Date.now())
+        // Before its first turn ends, none has.
+        assert.isNull(thinking.session?.turnEndedAt)
         const answered = yield* eventually(
           client.GetCoordinator({ projectId: project.id }),
           (snapshot) => snapshot.session !== null && !snapshot.session.turnRunning,
         )
         assert.isNull(answered.session?.turnStartedAt)
+        // Between turns, when the last ended: what was said before it has been answered.
+        assert.isAtLeast(Date.parse(answered.session?.turnEndedAt ?? ''), started)
       }),
     ),
   )

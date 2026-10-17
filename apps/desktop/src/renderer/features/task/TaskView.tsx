@@ -454,6 +454,7 @@ export function TaskView({
         turnRunning: busy,
         turnStarted: session?.turnStartedAt ?? null,
         reading: readingNow(session, model.pending, snapshot.task.queued !== null || snapshot.task.waits !== null),
+        turnEnded: session?.turnEndedAt ?? null,
         // What the person asked for, which opens the thread above, is what the lead's first turn answers.
         openedAt: snapshot.task.request === null || snapshot.earlier ? null : snapshot.task.startedAt,
         worktree: snapshot.task.worktree,

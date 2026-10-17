@@ -162,6 +162,7 @@ export interface RoundSource {
   readonly turnStarted?: string | null
   readonly openedAt?: string | null
   readonly reading?: boolean
+  readonly turnEnded?: string | null
 }
 
 /** A task's thread in rounds, oldest first, with what is still being written but not yet read at the end. */
@@ -199,6 +200,7 @@ export const roundsOf = (
         // What opens the thread is answered in its first stretch, when that is all there is yet.
         ...(last && index === 0 && source.openedAt !== undefined ? { openedAt: source.openedAt } : {}),
         ...(last && source.reading !== undefined ? { reading: source.reading } : {}),
+        ...(last && source.turnEnded !== undefined ? { turnEnded: source.turnEnded } : {}),
         ...(last && index > 0 ? { earlierAt } : {}),
       },
       last ? streaming : new Map(),

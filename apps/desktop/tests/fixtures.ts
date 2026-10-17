@@ -716,6 +716,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     models: ['opus', 'sonnet'],
     turnRunning: false,
     turnStartedAt: null,
+    turnEndedAt: null,
     held: true,
     context: null,
     background: [],

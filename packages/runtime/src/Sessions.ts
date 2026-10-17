@@ -508,6 +508,8 @@ export class Sessions extends Context.Service<
         readonly turnRunning: boolean
         /** When the turn running started, in milliseconds; null between turns. */
         readonly turnStartedAt: number | null
+        /** When its last turn ended, in milliseconds; null before its first. */
+        readonly turnEndedAt: number | null
         /** The agent's process, where it runs as one. */
         readonly pid: number | null
         /** How full its context is, in tokens, as the agent last said; null until it says. */
@@ -2645,6 +2647,7 @@ export class Sessions extends Context.Service<
                   accountId: running.account.id,
                   turnRunning: running.turnRunning,
                   turnStartedAt: running.turnRunning ? running.turnStartedAt : null,
+                  turnEndedAt: running.turnEndedAt,
                   pid: running.connection.process?.pid ?? null,
                   context: running.context,
                   stopping: running.stopping,

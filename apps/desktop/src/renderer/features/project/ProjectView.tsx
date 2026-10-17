@@ -465,6 +465,7 @@ export function ProjectView({
                           turnRunning: busy,
                           turnStarted: session?.turnStartedAt ?? null,
                           reading: readingNow(session, model.pending),
+                          turnEnded: session?.turnEndedAt ?? null,
                           worktree: null,
                           queue,
                           outputs: model.outputs,

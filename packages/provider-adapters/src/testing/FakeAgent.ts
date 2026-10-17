@@ -1187,8 +1187,9 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
       // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five
       // seconds, then a sentence; `[thinks-after:5s]` and `[reads-after:5s]` first think aloud, or read a file, for a second and a
-      // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails. Cancelled, it stops.
-      const slowly = /\[(answers|thinks|reads|fails)-after:(\d+)s\]/.exec(text)
+      // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails; `[ends-after:5s]` ends its turn having said
+      // nothing. Cancelled, it stops.
+      const slowly = /\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/.exec(text)
       if (slowly?.[2] !== undefined) {
         const waitOut = async (ms: number) => {
           for (let waited = 0; !session.cancelled && waited < ms; waited += 10) await pause(10)
@@ -1196,6 +1197,7 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         await waitOut(Number(slowly[2]) * 1000)
         if (session.cancelled) return { stopReason: 'cancelled' }
         if (slowly[1] === 'fails') throw new acp.RequestError(-32603, API_ERROR_MESSAGE)
+        if (slowly[1] === 'ends') return ended()
         if (slowly[1] === 'thinks')
           await update({
             sessionUpdate: 'agent_thought_chunk',

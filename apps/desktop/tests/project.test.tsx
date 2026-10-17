@@ -49,6 +49,7 @@ const session = {
   models: [],
   turnRunning: false,
   turnStartedAt: null,
+  turnEndedAt: null,
   held: true,
   context: null,
   background: [],
@@ -586,6 +587,22 @@ describe('the Talk room', () => {
     // The reply before it is over: its work folded under how long it took, not at work again.
     expect(screen.getByRole('button', { name: /Worked for/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Working for/ })).toBeNull()
+  })
+
+  it('lets go of Thinking once the coordinator’s turn ended with nothing said, as when it was interrupted before its first word', async () => {
+    const asked = { ...items.you('And the docs?'), createdAt: new Date(Date.now() - 5000).toISOString() }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          session: { ...session, turnEndedAt: new Date().toISOString() },
+          items: [items.you('Why is checkout slow?'), items.says('The call has no retry.'), asked],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    expect(await screen.findByText('And the docs?')).toBeTruthy()
+    expect(screen.queryByText('Thinking')).toBeNull()
+    expect(screen.getByRole('textbox', { name: /^Tell the coordinator/ })).toBeTruthy()
   })
 
   it('interrupts it, sends now, and moves it to another agent while it works', async () => {

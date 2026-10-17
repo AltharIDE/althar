@@ -805,6 +805,10 @@ export class Queries extends Context.Service<
               Option.isSome(running) && running.value.sessionId === session.id && running.value.turnStartedAt !== null
                 ? new Date(running.value.turnStartedAt).toISOString()
                 : null,
+            turnEndedAt:
+              Option.isSome(running) && running.value.sessionId === session.id && running.value.turnEndedAt !== null
+                ? new Date(running.value.turnEndedAt).toISOString()
+                : null,
             // Whether the runtime holds a session on this thread, which takes a note and makes a start refuse. The summary describes that held
             // session, not a newer row a switch is still starting, so a model or effort pick is compared with what the runtime runs.
             held: Option.isSome(running),

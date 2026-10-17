@@ -14,7 +14,8 @@ import { launch, openFirstProject, say, startTask, toConversation } from './supp
  * place, nothing above them moved. In the coordinator's thread and a task's;
  * where a thought or a call comes first (`[thinks-after:4s]`,
  * `[reads-after:4s]`), and where the agent gives up instead
- * (`[fails-after:4s]`). While the agent starts for what the person sent
+ * (`[fails-after:4s]`); where its turn ends with nothing said, interrupted
+ * or done (`[ends-after:3s]`), Thinking goes. While the agent starts for what the person sent
  * (ALTHAR_FAKE_SLOW_START), it thinks just the same. After 30 seconds it
  * says it's longer than usual, still where motion is reduced. What the
  * person sent never reads as queued, with nothing to wait behind; sent while
@@ -112,6 +113,32 @@ const handedOff = async (page: Page, thread: Locator, words: string, name: strin
   await page.waitForTimeout(300)
   await shoot(page, thread, `${name}-${first === 'words' ? 'words' : 'first'}`)
   expect(await queuedSeen(page)).toEqual([])
+}
+
+/**
+ * Interrupted before its first word, then done without one: each time
+ * Thinking goes, stays gone with nothing running, and the composer takes
+ * a new message rather than adding to a queue.
+ */
+const endsQuietly = async (page: Page, thread: Locator, name: string) => {
+  const thinking = thinkingIn(thread)
+  const idle = page.getByRole('textbox', { name: /^Tell .* something/ })
+  await say(page, 'Why is checkout slow? [answers-after:20s]')
+  await expect(thinking).toBeVisible()
+  await page.waitForTimeout(1000)
+  await page.getByRole('button', { name: /^Interrupt the/ }).click()
+  await expect(thinking).toHaveCount(0, { timeout: 5_000 })
+  await expect(idle).toBeVisible()
+  await page.waitForTimeout(1500)
+  await expect(thinking).toHaveCount(0)
+  await shoot(page, thread, `${name}-interrupted`)
+  await say(page, 'And refunds? [ends-after:3s]')
+  await expect(thinking).toBeVisible()
+  await expect(thinking).toHaveCount(0, { timeout: 8_000 })
+  await expect(idle).toBeVisible()
+  await page.waitForTimeout(1500)
+  await expect(thinking).toHaveCount(0)
+  await shoot(page, thread, `${name}-ended-empty`)
 }
 
 /** A task's lead, done: its thread, open on its conversation. */
@@ -234,6 +261,17 @@ test('says it’s longer than usual after 30 seconds, and keeps still where moti
     // Where motion isn't reduced, the label shimmers on.
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     expect(await moving(thinkingIn(thread))).not.toEqual([])
+  } finally {
+    await electronApp.close()
+  }
+})
+
+test('lets go of Thinking when the turn ends with nothing said, interrupted or done: in the coordinator’s thread and a task’s', async () => {
+  test.setTimeout(120_000)
+  const { electronApp, page } = await opened()
+  try {
+    await endsQuietly(page, page.getByRole('region', { name: 'Conversation' }), 'coordinator')
+    await endsQuietly(page, await readyTask(page), 'task')
   } finally {
     await electronApp.close()
   }

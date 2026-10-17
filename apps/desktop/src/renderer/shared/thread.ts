@@ -2,6 +2,7 @@ import type { AllowedBy, FileMention, Picture, ThreadItem, Unfurl } from '@altha
 import { Delivery, PlanState, ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar, type PartHanded, type Ran, ranOf } from './handed'
+import { isSending } from './items'
 import { took } from './time'
 
 /*
@@ -328,6 +329,8 @@ export interface ThreadSource {
    * not a queue, though the agent may still be starting to read it.
    */
   readonly reading?: boolean
+  /** When the agent's last turn ended, by the runtime's clock: a message delivered before it was answered, if with nothing. */
+  readonly turnEnded?: string | null
   /** When the newest of what comes before these items was written, where they are the last stretch of a longer thread. */
   readonly earlierAt?: string
 }
@@ -389,6 +392,8 @@ export const blocksOf = (
   /** When the newest item so far was written; and whether what was last asked waited behind something newer, as a turn at work. */
   let newest = source.earlierAt === undefined ? 0 : Date.parse(source.earlierAt)
   let waitedBehind = false
+  /** Whether what was last asked is still on its way to the agent: the window's copy of what the person sent, or queued in the store. */
+  let onItsWay = false
   /** When each turn began and last grew, by its id. */
   const spans = new Map<string, { from: string; to: string }>()
   const add = (agentId: string | null, at: string, part: Part) => {
@@ -442,6 +447,7 @@ export const blocksOf = (
         if (delivery === Delivery.Delivered) {
           asked = item
           waitedBehind = before > Date.parse(item.createdAt)
+          onItsWay = isSending(item.id) || item.input?.state === 'queued'
         }
         continue
       }
@@ -486,6 +492,7 @@ export const blocksOf = (
           if (relayed(item.content)) {
             asked = item
             waitedBehind = before > Date.parse(item.createdAt)
+            onItsWay = false
           }
           continue
         }
@@ -510,7 +517,11 @@ export const blocksOf = (
   const askedId = asked?.id
   // Where what it was last asked stands: among the blocks, or before them all, where it opens the thread from outside it.
   const askedAt = askedId !== undefined ? blocks.findLastIndex((block) => block.id === askedId) : source.openedAt == null ? null : -0.5
-  const waiting = (turnRunning || source.reading === true) && askedAt !== null && askedAt > lastTurn
+  const askedWhen = asked?.createdAt ?? source.openedAt
+  // Between turns it is waited on only on its way to the agent, or given to it with no turn ended since: a turn that ended on it,
+  // interrupted or with nothing said, has answered it as far as it will.
+  const over = !onItsWay && source.turnEnded != null && askedWhen != null && Date.parse(source.turnEnded) >= Date.parse(askedWhen)
+  const waiting = askedAt !== null && askedAt > lastTurn && (turnRunning || (source.reading === true && !over))
   const runningTurn = turnRunning && !waiting ? lastTurn : -1
   // What an agent says after its step's result, closing its turn, folds with the work that led to it. A run it starts on its own after, with tool calls or a plan, is work of its own: it folds under its own time, and its last message shows.
   const merged: Array<Block> = []
@@ -546,7 +557,6 @@ export const blocksOf = (
       handed: handedBy(block.parts.map(partHanded), worktree),
     }
   })
-  const askedWhen = asked?.createdAt ?? source.openedAt
   if (!waiting || askedWhen == null) return drawn
   // Counted from when it was asked, through the agent's start where it starts for it. Where it waited behind something first,
   // as what the person sent while the agent was at work, or a task's request behind its setup, from when the turn on it started,

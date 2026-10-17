@@ -57,8 +57,8 @@ const patches = [
       ],
       ['(item.input.interrupting || source.reading !== true)', '(item.input.interrupting || __reading(source.reading) !== true)'],
       [
-        'const waiting = (turnRunning || source.reading === true) && askedAt !== null && askedAt > lastTurn',
-        'const waiting = __waits((turnRunning || source.reading === true) && askedAt !== null && askedAt > lastTurn)',
+        'const waiting = askedAt !== null && askedAt > lastTurn && (turnRunning || (source.reading === true && !over))',
+        'const waiting = __waits(askedAt !== null && askedAt > lastTurn && (turnRunning || (source.reading === true && !over)))',
       ],
     ],
   },

@@ -14,6 +14,7 @@ import {
   verbFor,
   verbs,
 } from '../src/renderer/shared/thread'
+import { sending } from '../src/renderer/shared/items'
 import { card, items, NOW } from './fixtures'
 
 const at = () => 'just now'
@@ -169,6 +170,33 @@ describe('the wait for a reply', () => {
     // Where the turn heard of is the one before, from the message; where none is heard of yet, uncounted.
     expect(waiting(behind, { turnStarted: after(-600) })).toMatchObject({ took: '1m 5s', slow: true })
     expect(waiting(behind, { turnStarted: null })).toMatchObject({ took: null, slow: false })
+  })
+
+  it('lets go of the wait once a turn ended on what was asked with nothing said, but not of what is still on its way', () => {
+    const thread = [items.you('Go'), items.says('Done.'), items.you('And the docs?')]
+    const between = (turnEnded: string | null) => kinds(blocksOf({ ...source(thread), reading: true, turnEnded }, new Map(), at))
+    // A turn ended on it since it was sent, interrupted before its first word or done without one: nothing is waited for.
+    expect(between(after(5))).toEqual(['you', 'turn', 'you'])
+    // The last turn ended before it, or none is heard of yet: it is still to be read.
+    expect(between(after(-5))).toEqual(['you', 'turn', 'you', 'waiting'])
+    expect(between(null)).toEqual(['you', 'turn', 'you', 'waiting'])
+    // While a turn runs on it, it is waited on whatever ended before.
+    expect(kinds(blocksOf({ ...source(thread, true), turnEnded: after(5) }, new Map(), at))).toEqual(['you', 'turn', 'you', 'waiting'])
+    // Still on its way, queued in the store or the window's copy as it is sent, it is waited on however long ago it was sent.
+    const queued = [
+      items.you('Go'),
+      items.says('Done.'),
+      { ...items.you('And the docs?', { state: 'queued', interrupting: false }), createdAt: after(-60) },
+    ]
+    expect(kinds(blocksOf({ ...source(queued), reading: true, turnEnded: after(5) }, new Map(), at))).toEqual([
+      'you',
+      'turn',
+      'you',
+      'waiting',
+    ])
+    const sent = sending([items.you('Go'), items.says('Done.')], { text: 'And the docs?', queued: false, interrupting: false }).items
+    const later = new Date(Date.now() + 60_000).toISOString()
+    expect(kinds(blocksOf({ ...source(sent), reading: true, turnEnded: later }, new Map(), at))).toEqual(['you', 'turn', 'you', 'waiting'])
   })
 
   it('has what waits after the last reply asked as the agent starts to read it, and queued where nothing will', () => {
