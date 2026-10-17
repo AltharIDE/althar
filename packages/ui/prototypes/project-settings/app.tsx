@@ -11,7 +11,7 @@ import { connectionsOf, data, notesOf, projectsOf, repositoryOf, tasksOf } from 
 import { createBrowserHistory, type HomeTask, RouterProvider } from './deps'
 import { Overlays } from './parts'
 import css from './parts.module.css'
-import { type Connection, type Direction, type Notes, proto, type Showing, type Tracker, useProto } from './state'
+import { type Connection, type Direction, type Notes, proto, type Section, SECTIONS, type Showing, type Tracker, useProto } from './state'
 
 import { follow } from '../../../../apps/desktop/src/renderer/data/feed'
 import { makeQueryClient } from '../../../../apps/desktop/src/renderer/data/reads'
@@ -25,7 +25,7 @@ const coordinatorItems = [
   items.you('Our settings look really ugly at the project level. Can you plan a prototype of a few directions?'),
   items.tool({ title: 'Read apps/desktop/src/renderer/features/project/ProjectSettings.tsx' }),
   items.says(
-    'Today they’re a Control Center panel whose modules move about with what the project has, and its rules open on a screen of their own. I planned a prototype with five directions on one page, none with a sidebar.',
+    'Today they’re a Control Center panel whose modules move about with what the project has, and its rules open on a screen of their own. I planned a prototype: Home, Conversation and Board in the bar, then Settings as a view of its own, in four layouts.',
   ),
 ]
 
@@ -83,14 +83,25 @@ data.subscribe(() => {
 
 const DIRECTIONS: ReadonlyArray<{ value: Direction; name: string; about: string }> = [
   { value: 'Today', name: 'Today', about: 'The project’s settings as built: a Control Center from the front page’s Settings button' },
-  { value: 'F', name: 'One column', about: 'One calm column over the board, read top to bottom; the switches first, Remove at the end' },
-  { value: 'G', name: 'Tabs on top', about: 'A dialog with four short tabs across its top, none needing a scroll' },
-  { value: 'H', name: 'Written out', about: 'A few sentences; every value in them a word that opens its choices' },
-  { value: 'I', name: 'Header unfolds', about: 'The project’s header opens downward over the board, in three columns' },
   {
-    value: 'J',
-    name: 'One search',
-    about: 'No project button: the bar’s one gear opens every setting, the project’s first, as a list you type into',
+    value: 'A',
+    name: 'As the app’s',
+    about: 'Settings in the bar; laid out as the app’s Settings tab: switches and sections down the side, one on a sheet',
+  },
+  {
+    value: 'B',
+    name: 'Tabs',
+    about: 'Settings in the bar; the project’s name and switches on top, its sections as tabs, the open one page-wide',
+  },
+  {
+    value: 'C',
+    name: 'One page',
+    about: 'Settings in the bar; every section on one page, labelled down the left as the rules are, a jump bar held on top',
+  },
+  {
+    value: 'D',
+    name: 'Overview',
+    about: 'Settings in the bar; a card per section saying what it holds now, each opening a page of its own',
   },
 ]
 
@@ -113,6 +124,7 @@ const SHOWING: ReadonlyArray<{ value: Showing; label: string }> = [
   { value: 'open', label: 'Open' },
   { value: 'notes', label: 'Notes open' },
 ]
+const SECTION_WORDS: ReadonlyArray<{ value: Section | 'overview' }> = [...SECTIONS.map((value) => ({ value })), { value: 'overview' }]
 
 const directionOf = (word: string | null) => DIRECTIONS.find((one) => one.value.toLowerCase() === word?.toLowerCase())?.value
 const pick = <V extends string>(list: ReadonlyArray<{ value: V }>, word: string | null) => list.find((one) => one.value === word)?.value
@@ -122,15 +134,17 @@ const titled = (direction: Direction) => {
   document.title = `${direction === 'Today' ? 'Today' : `${direction} · ${one?.name ?? ''}`} · Project settings`
 }
 
-// The URL says what the page shows, so a link opens it again: ?d=G&tracker=none&conn=tracker&notes=many&open=notes.
+// The URL says what the page shows, so a link opens it again: ?d=B&tracker=none&conn=tracker&notes=many&open=notes.
 proto.subscribe(() => {
-  const { direction, tracker, connection, notes, showing } = proto.get()
+  const { direction, tracker, connection, notes, showing, section } = proto.get()
   const params = new URLSearchParams(window.location.search)
   params.set('d', direction)
   params.set('tracker', tracker)
   params.set('conn', connection)
   params.set('notes', notes)
   params.set('open', showing)
+  if (direction === 'Today' || showing === 'closed') params.delete('s')
+  else params.set('s', section ?? 'overview')
   const next = `${window.location.pathname}?${params.toString()}${window.location.hash}`
   if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`)
     window.history.replaceState(window.history.state, '', next)
@@ -143,7 +157,7 @@ const go = (direction: Direction) => {
   if (!window.location.hash.startsWith('#/projects/p1')) window.location.hash = '#/projects/p1'
 }
 
-/** Keys 1 to 6 pick a direction, ← and → step through them; never while typing, or inside a menu, dialog or list. */
+/** Keys 1 to 5 pick a direction, ← and → step through them; never while typing, or inside a menu, dialog or list. */
 const onKey = (event: KeyboardEvent) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return
   const target = event.target instanceof Element ? event.target : null
@@ -187,7 +201,20 @@ function Switcher() {
         options={CONNECTIONS}
       />
       <Segmented<Notes> label="Notes" value={p.notes} onChange={(notes) => proto.set({ notes })} options={NOTES} />
-      <Segmented<Showing> label="Settings" value={p.showing} onChange={(showing) => proto.set({ showing })} options={SHOWING} />
+      <Segmented<Showing>
+        label="Settings"
+        value={p.direction !== 'Today' && p.showing !== 'closed' && p.section === 'notes' ? 'notes' : p.showing}
+        onChange={(showing) =>
+          // In A to D, Notes open is their Settings at Notes; Open, at the start.
+          p.direction === 'Today'
+            ? proto.set({ showing })
+            : proto.set({
+                showing: showing === 'closed' ? 'closed' : 'open',
+                section: showing === 'notes' ? 'notes' : p.direction === 'D' ? null : 'general',
+              })
+        }
+        options={SHOWING}
+      />
     </div>
   )
 }
@@ -216,11 +243,17 @@ const history = createBrowserHistory({
 export const boot = () => {
   const params = new URLSearchParams(window.location.search)
   proto.set({
-    direction: directionOf(params.get('d')) ?? 'F',
+    direction: directionOf(params.get('d')) ?? 'A',
     tracker: pick(TRACKERS, params.get('tracker')) ?? 'linear',
     connection: pick(CONNECTIONS, params.get('conn')) ?? 'ok',
     notes: pick(NOTES, params.get('notes')) ?? 'many',
     showing: pick(SHOWING, params.get('open')) ?? 'closed',
+    section: (() => {
+      const word = pick(SECTION_WORDS, params.get('s'))
+      const direction = directionOf(params.get('d')) ?? 'A'
+      if (direction !== 'Today' && params.get('open') === 'notes') return 'notes'
+      return word === undefined ? (direction === 'D' ? null : 'general') : word === 'overview' ? null : word
+    })(),
     bare: params.has('bare'),
   })
   // Every page opens on althar's tab, whatever another page kept.

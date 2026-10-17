@@ -242,8 +242,15 @@ export function useThings(): Things {
     removeTracker: (link) => data.set({ trackers: named.filter((one) => idOf(one) !== link.id) }),
     connectAnother: () => overlay.set({ connecting: 'all' }),
     manageConnections: () => openAppSettings('code-hosts'),
-    openRules: () => void navigate({ to: '/projects/$projectId/rules', params: { projectId: PROJECT } }),
-    openRepositories: () => void navigate({ to: '/projects/$projectId/repositories', params: { projectId: PROJECT } }),
+    // In A to D the rules and repositories are sections of the project's Settings, not screens of their own.
+    openRules: () =>
+      proto.get().direction === 'Today'
+        ? void navigate({ to: '/projects/$projectId/rules', params: { projectId: PROJECT } })
+        : proto.set({ showing: 'open', section: 'rules' }),
+    openRepositories: () =>
+      proto.get().direction === 'Today'
+        ? void navigate({ to: '/projects/$projectId/repositories', params: { projectId: PROJECT } })
+        : proto.set({ showing: 'open', section: 'code' }),
   }
 }
 

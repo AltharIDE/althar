@@ -1,0 +1,167 @@
+/* Scrappy: how each direction lays the project's Settings out under the window's bar; what is in them is the kit's and the app's. */
+
+/* every direction: the project's window under the bar, scrolling at its edge, as the app's Settings tab does */
+.page {
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--n-2);
+}
+
+/* ---- A: as the app's Settings: a side of cards and sections, the open one on a sheet ---- */
+.columns {
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr);
+  align-items: start;
+  gap: 32px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 48px 72px;
+}
+.side {
+  position: sticky;
+  top: 28px;
+  display: grid;
+  gap: 20px;
+}
+.main {
+  min-width: 0;
+}
+.body {
+  display: grid;
+  gap: 16px;
+  padding: 0 22px 20px;
+}
+.who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--t-3);
+}
+.who b {
+  font-weight: 600;
+  color: var(--t-1);
+}
+
+/* ---- B and C: one wide page, the project's name over it ---- */
+.wide {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 28px 48px 72px;
+}
+.top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.name {
+  margin: 0;
+  font: 640 27px/1.1 var(--font-display);
+  letter-spacing: -0.026em;
+  color: var(--t-1);
+}
+.lede {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--t-3);
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+/* B: the sections as tabs under the name, the open one's line under them */
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 24px 0 8px;
+}
+.tabLede {
+  margin: 0 0 24px;
+  font-size: 13px;
+  color: var(--t-3);
+}
+
+/* C: the sections one after another, labelled as the rules are, the way to each held at the top */
+.held {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 0 -48px;
+  padding: 12px 48px;
+  border-bottom: 1px solid var(--line);
+  background: var(--n-2);
+}
+.jump {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+}
+.section {
+  scroll-margin-top: 64px;
+  padding-top: 40px;
+}
+.sectionTitle {
+  margin: 0;
+  font: 640 20px/1.2 var(--font-display);
+  letter-spacing: -0.02em;
+  color: var(--t-1);
+}
+.sectionLede {
+  margin: 4px 0 18px;
+  font-size: 13px;
+  color: var(--t-3);
+}
+.clauses {
+  border-top: 1px solid var(--line-2);
+}
+.clause {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  column-gap: 24px;
+  padding: 18px 0 19px;
+  border-bottom: 1px solid var(--line);
+}
+.label {
+  margin: 0;
+  padding-top: 7px;
+  font: 600 10.5px/1 var(--font-label);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--t-3);
+}
+
+/* ---- D: an overview of cards, each opening a page of its own ---- */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+  margin-top: 26px;
+}
+.across {
+  grid-column: 1 / -1;
+}
+.card {
+  display: grid;
+  gap: 12px;
+  padding: 0 22px 18px;
+}
+.foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 28px;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+.crumb {
+  display: flex;
+  margin: 0 0 16px;
+}

@@ -18,9 +18,11 @@ const repo = resolve(here, '../../../..')
 const seams = [
   // The project's settings, from its front page: the direction's.
   { importer: 'features/project/ProjectView.tsx', id: './ProjectSettings', to: 'seams/ProjectSettings.tsx' },
-  // The project's front page: in F a column covers the board, in I the header unfolds over it, in J it has no settings button.
+  // The project's front page: in A to D, with no Settings button, and its Settings over the window when the bar says so.
   { importer: 'features/project/ProjectView.tsx', id: '@althar/ui', to: 'seams/projectUi.ts' },
-  // The gear at the bar's end: in J, the one search for every setting.
+  // The project's views in the bar: in A to D, Home, Conversation, Board, then Settings.
+  { importer: 'features/project/ProjectBar.tsx', id: '@althar/ui', to: 'seams/barUi.ts' },
+  // The gear at the bar's end: the app's, kept for the project's rows that open the app's connections.
   { importer: 'features/tabs/TabsFrame.tsx', id: '../settings/QuickSettings', to: 'seams/QuickSettings.tsx' },
 ]
 

@@ -1,40 +1,43 @@
-// Scrappy: the project's front page, the kit's own, with what the direction puts under it.
-import { type CSSProperties, useLayoutEffect, useRef, useState } from 'react'
+// Scrappy: the project's front page, the kit's own; in A to D, with the bar's Settings on, the direction's Settings cover its whole window.
+import { type ReactNode, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { ProjectFront as Real, type ProjectFrontProps, type WorkNeed } from '../../../src/index'
-import { F } from '../directions/F'
-import { I } from '../directions/I'
-import { useThings } from '../parts'
-import { proto, useProto } from '../state'
+import { A } from '../directions/A'
+import { B } from '../directions/B'
+import { C } from '../directions/C'
+import { D } from '../directions/D'
+import { type Things, useThings } from '../parts'
+import { type Direction, useProto } from '../state'
 
-/** What sits over the screen under the front page, in its window, from the header down: F's column, I's unfolded header. */
-function Under({ children }: { children: React.ReactNode }) {
+/** Over the project's window, under the bar: its front page and its views give way, as a view of the bar does. */
+function Cover({ children }: { children: ReactNode }) {
   const mark = useRef<HTMLSpanElement>(null)
-  const [place, setPlace] = useState<{ window: HTMLElement; top: number } | null>(null)
+  const [window, setWindow] = useState<HTMLElement | null>(null)
   useLayoutEffect(() => {
-    const window = mark.current?.parentElement
-    const front = mark.current?.previousElementSibling
-    if (window == null || front == null) return
-    window.style.position = 'relative'
-    const measure = () => setPlace({ window, top: (front as HTMLElement).offsetHeight })
-    measure()
-    const watch = new ResizeObserver(measure)
-    watch.observe(front)
-    return () => watch.disconnect()
+    const parent = mark.current?.parentElement ?? null
+    if (parent !== null) parent.style.position = 'relative'
+    setWindow(parent)
   }, [])
   return (
     <>
       <span ref={mark} hidden />
-      {place !== null &&
-        createPortal(
-          <div style={{ position: 'absolute', inset: `${place.top}px 0 0 0`, zIndex: 3, pointerEvents: 'none' } as CSSProperties}>
-            <div style={{ pointerEvents: 'auto' }}>{children}</div>
-          </div>,
-          place.window,
-        )}
+      {window !== null && createPortal(<div style={{ position: 'absolute', inset: 0, zIndex: 3 }}>{children}</div>, window)}
     </>
   )
+}
+
+function Settings({ direction, things }: { direction: Direction; things: Things }) {
+  switch (direction) {
+    case 'A':
+      return <A things={things} />
+    case 'B':
+      return <B things={things} />
+    case 'C':
+      return <C things={things} />
+    default:
+      return <D things={things} />
+  }
 }
 
 export function ProjectFront(props: ProjectFrontProps) {
@@ -66,29 +69,21 @@ export function ProjectFront(props: ProjectFrontProps) {
       ...(link.url === null ? {} : { openLabel: `Open on ${link.name}`, onOpen: () => window.open(link.url ?? '', '_blank') }),
     })),
   ]
-  const front = (
-    <Real
-      {...props}
-      parts={parts}
-      yours={yours}
-      needs={[...troubles, ...(props.needs ?? [])]}
-      {...(props.onYours === undefined || (props.yours ?? 0) > 0 ? {} : { onYours: () => troubles[0]?.onOpen() })}
-      {...(p.direction === 'J' ? { settings: undefined } : {})}
-    />
+  const { settings: _, ...rest } = props
+  return (
+    <>
+      <Real
+        {...rest}
+        parts={parts}
+        yours={yours}
+        needs={[...troubles, ...(props.needs ?? [])]}
+        {...(props.onYours === undefined || (props.yours ?? 0) > 0 ? {} : { onYours: () => troubles[0]?.onOpen() })}
+      />
+      {p.showing !== 'closed' && (
+        <Cover>
+          <Settings direction={p.direction} things={things} />
+        </Cover>
+      )}
+    </>
   )
-  const open = p.showing !== 'closed'
-  if (open && (p.direction === 'F' || p.direction === 'I'))
-    return (
-      <>
-        {front}
-        <Under>
-          {p.direction === 'F' ? (
-            <F key={p.showing} things={things} onClose={() => proto.set({ showing: 'closed' })} />
-          ) : (
-            <I things={things} />
-          )}
-        </Under>
-      </>
-    )
-  return front
 }

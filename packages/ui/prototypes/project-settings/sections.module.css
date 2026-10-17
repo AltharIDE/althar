@@ -1,0 +1,54 @@
+/* Scrappy: how the sections' pieces sit; their words and controls are the kit's and the app's, in its tokens. */
+
+.stack {
+  display: grid;
+  gap: 28px;
+}
+
+/* a heading inside a section: what it is, a line on it, and a button at its end */
+.sub {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 10px;
+}
+.subTitle {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.subNote {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--t-3);
+}
+
+/* taking the project out: at the end, a little apart */
+.away {
+  padding-top: 8px;
+}
+
+/* ---- one of the app's screens inside a section: its window and scroll give way to the page's ---- */
+.embed > div {
+  height: auto;
+  background: transparent;
+}
+.embed > div > main {
+  overflow: visible;
+  padding: 0;
+}
+.embed > div > main > div {
+  max-width: none;
+  padding: 0;
+}
+/* bare: the section names it, so its back crumb and its own title go */
+.bare :global([class*='__back__']),
+.bare :global([class*='__headText__']) {
+  display: none;
+}
+.bare :global([class*='ProjectRules__head__']),
+.bare :global([class*='ProjectRepositories__head__']) {
+  margin-bottom: 20px;
+}
