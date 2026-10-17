@@ -44,12 +44,12 @@ export interface QuickProps {
 /** The project's switches, two to a row, as the app's cards are; a connection that needs you across them. */
 function ProjectBlock({ things, onOpen }: { things: Things; onOpen: () => void }) {
   const rules = things.rules
-  const trouble = [things.host, things.tracker].find((one) => one?.trouble != null) ?? null
+  const trouble = [things.host, ...things.trackers].find((one) => one?.trouble != null) ?? null
   const cards =
     rules === null
       ? []
       : [
-          ...(things.tracker === null
+          ...(things.trackers.length === 0
             ? []
             : [
                 {
@@ -99,7 +99,7 @@ function ProjectBlock({ things, onOpen }: { things: Things; onOpen: () => void }
         {trouble !== null && trouble !== undefined && (
           <ControlModule title={`${trouble.name} · ${trouble.what}`} onClick={() => things.connect(trouble)} place={{ column: [1, 5] }}>
             <ControlLine tone="yours">
-              {trouble.trouble === 'signed-out' ? 'Signed out: sign in again' : 'Not connected: connect it'}
+              {trouble.trouble === 'signed-out' ? 'Signed out: sign in again, for every project' : 'Not connected: connect it'}
             </ControlLine>
           </ControlModule>
         )}

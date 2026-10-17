@@ -4,6 +4,8 @@ import { type ReactNode, useState } from 'react'
 import { Button, ControlCenter, ControlDetail, ControlFoot, ControlSheet, LinkButton } from '../../../src/index'
 import {
   AllowEverything,
+  AppWide,
+  TrackerRows,
   Conflicts,
   Identity,
   IdentityRow,
@@ -70,8 +72,9 @@ export function A({ things }: { things: Things }) {
             </Group>
             <Group title="Code and issues">
               {things.host !== null && <LinkRow link={things.host} things={things} />}
-              {things.tracker !== null && <LinkRow link={things.tracker} things={things} />}
+              <TrackerRows things={things} />
             </Group>
+            <AppWide things={things} />
             <Group title="Rules, runs and notes">
               <RulesRow things={things} />
               <RunsRow things={things} />

@@ -16,9 +16,36 @@ import type {
   ProjectRepository,
   ProjectRulesView,
   ProjectSummary,
+  Product,
   Runnable,
 } from './deps'
-import type { Connection, Notes, Tracker } from './state'
+import { type Connection, type Notes, proto, type Tracker, trackerResets } from './state'
+
+/** A tracker the project names as its own: a product, on a server, one key its issues share. */
+export interface Chosen {
+  readonly product: Product
+  readonly at: string | null
+  readonly key: string
+  /** Where its issues are, on the web. */
+  readonly url: string
+}
+
+export const LINEAR_DEV: Chosen = { product: 'linear', at: 'linear.app', key: 'DEV', url: 'https://linear.app/charrette/team/DEV' }
+export const JIRA_OPS: Chosen = {
+  product: 'jira_cloud',
+  at: 'charrette.atlassian.net',
+  key: 'OPS',
+  url: 'https://charrette.atlassian.net/jira/software/projects/OPS',
+}
+export const GITHUB_ISSUES: Chosen = {
+  product: 'github',
+  at: 'github.com',
+  key: 'AltharIDE/althar',
+  url: 'https://github.com/AltharIDE/althar/issues',
+}
+
+/** The trackers the picker starts the project with: none chosen (its tasks' are found), or Linear's and Jira's. */
+const chosenFor = (tracker: Tracker): ReadonlyArray<Chosen> | null => (tracker === 'two' ? [LINEAR_DEV, JIRA_OPS] : null)
 
 /* ——— What changes while the page is open: its name and ink, its rules, its notes, what it runs. ——— */
 
@@ -28,6 +55,8 @@ export interface Kept {
   readonly rules: ProjectRulesView
   readonly dropped: ReadonlySet<string>
   readonly runnables: ReadonlyArray<Runnable>
+  /** The trackers it names as its own; null where none were chosen, and its tasks' issues say. */
+  readonly trackers: ReadonlyArray<Chosen> | null
 }
 
 let kept: Kept = {
@@ -50,6 +79,7 @@ let kept: Kept = {
     { id: 'rnbl_site', name: 'Site', command: 'bun --filter @althar/site dev', repository: 'althar', own: false, from: 'person' },
     { id: 'rnbl_check', name: null, command: 'bun run check', repository: 'althar', own: false, from: 'coordinator' },
   ],
+  trackers: chosenFor(proto.get().tracker),
 }
 const listeners = new Set<() => void>()
 
@@ -64,6 +94,7 @@ export const data = {
     return () => listeners.delete(listener)
   },
 }
+trackerResets.add(() => data.set({ trackers: chosenFor(proto.get().tracker) }))
 
 /* ——— The project, as listed, and the one beside it. ——— */
 
@@ -125,11 +156,40 @@ const linear: ConnectionSummary = {
   state: 'ready',
 }
 
+const jira: ConnectionSummary = {
+  id: 'conn_jira',
+  product: 'jira_cloud',
+  name: 'Jira',
+  webUrl: 'https://charrette.atlassian.net',
+  account: { login: 'balazs@charrette.dev', name: 'Balázs' },
+  auth: 'token',
+  state: 'ready',
+}
+
+/** Althar's connections, for every project: GitHub, Linear (unless the picker says it isn't) and Jira. */
 export const connectionsOf = (connection: Connection): ConnectionList => ({
   ...connectionList,
   connections: [
     { ...githubConnection, account: { login: 'balazs', name: 'Balázs' }, state: connection === 'host' ? 'reauth_required' : 'ready' },
     ...(connection === 'tracker' ? [] : [linear]),
+    jira,
+  ],
+  products: [
+    ...connectionList.products,
+    {
+      product: 'jira_cloud',
+      service: 'jira',
+      name: 'Jira',
+      host: false,
+      tracker: true,
+      hostedUrl: null,
+      selfHosted: false,
+      browserSignIn: false,
+      tokenNeeds: null,
+      tokenPrefixes: [],
+      tokenHelpForKey: null,
+      keyChecks: [],
+    },
   ],
   places: [{ product: 'github', webUrl: 'https://github.com', project: 'althar', remote: null, repositories: ['AltharIDE/althar'] }],
 })
@@ -141,6 +201,13 @@ const issue = (key: string, title: string) => ({
   key,
   title,
   url: `https://linear.app/charrette/issue/${key}/${title.toLowerCase().replace(/[^a-z]+/g, '-')}`,
+})
+
+const opsIssue = (key: string, title: string) => ({
+  product: 'jira_cloud' as const,
+  key,
+  title,
+  url: `https://charrette.atlassian.net/browse/${key}`,
 })
 
 const boardTask = (overrides: Partial<BoardTask>): BoardTask => ({
@@ -155,7 +222,7 @@ const boardTask = (overrides: Partial<BoardTask>): BoardTask => ({
 })
 
 export const tasksOf = (tracker: Tracker): BoardTask[] => {
-  const named = (key: string, title: string) => (tracker === 'linear' ? { issue: issue(key, title) } : { issue: null })
+  const named = (key: string, title: string) => (tracker === 'none' ? { issue: null } : { issue: issue(key, title) })
   return [
     boardTask({
       taskId: 't1',
@@ -193,7 +260,7 @@ export const tasksOf = (tracker: Tracker): BoardTask[] => {
       phase: 'ready',
       change: change({ draft: false, number: 224, title: 'Green main’s post-merge', repository: 'AltharIDE/althar' }),
       summary: 'Covers the submodule failures #122 handles, and nudges on review drafts.',
-      ...named('DEV-226', 'Green main post-merge'),
+      ...(tracker === 'two' ? { issue: opsIssue('OPS-88', 'Green main post-merge') } : named('DEV-226', 'Green main post-merge')),
     }),
   ]
 }

@@ -91,7 +91,8 @@ const DIRECTIONS: ReadonlyArray<{ value: Direction; name: string; about: string 
 ]
 
 const TRACKERS: ReadonlyArray<{ value: Tracker; label: string }> = [
-  { value: 'linear', label: 'Linear' },
+  { value: 'linear', label: 'Linear, found' },
+  { value: 'two', label: 'Linear + Jira' },
   { value: 'none', label: 'No tracker' },
 ]
 const CONNECTIONS: ReadonlyArray<{ value: Connection; label: string }> = [

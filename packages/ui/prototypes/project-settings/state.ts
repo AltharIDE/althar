@@ -2,8 +2,11 @@
 import { useSyncExternalStore } from 'react'
 
 export type Direction = 'Today' | 'A' | 'B' | 'C' | 'D' | 'E'
-/** The tracker its tasks name: Linear's DEV team, or none. */
-export type Tracker = 'linear' | 'none'
+/**
+ * Its trackers: none chosen, and Linear's DEV team found in its tasks' issues;
+ * chosen, Linear's DEV team and Jira's OPS project; or none, and no task names an issue.
+ */
+export type Tracker = 'linear' | 'two' | 'none'
 /** How its connections stand: all well, Linear not connected, GitHub signed out (its token expired). */
 export type Connection = 'ok' | 'tracker' | 'host'
 export type Notes = 'few' | 'many'
@@ -32,11 +35,15 @@ let state: Proto = {
   bare: false,
 }
 const listeners = new Set<() => void>()
+/** What starts again when the picker's trackers change: the trackers the page chose. */
+export const trackerResets = new Set<() => void>()
 
 export const proto = {
   get: () => state,
   set: (next: Partial<Proto>) => {
+    const was = state.tracker
     state = { ...state, ...next }
+    if (state.tracker !== was) for (const listener of trackerResets) listener()
     for (const listener of listeners) listener()
   },
   subscribe: (listener: () => void) => {

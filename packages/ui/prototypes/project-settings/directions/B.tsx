@@ -13,7 +13,7 @@ export function ProjectCards({ things, side = true, onOpen }: { things: Things; 
   const rules = things.rules
   if (rules === null) return null
   const cards = [
-    ...(things.tracker === null
+    ...(things.trackers.length === 0
       ? []
       : [
           {

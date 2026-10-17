@@ -3,8 +3,11 @@ import { type CSSProperties, type ReactNode, useLayoutEffect, useRef, useState }
 
 import { Button, ControlSheet, IconButton, LinkButton, Popover } from '../../../src/index'
 import {
+  AddTrackerMenu,
   AllowEverything,
+  AppWide,
   Conflicts,
+  TrackerRows,
   Identity,
   LinkRow,
   MoveIssues,
@@ -99,8 +102,8 @@ export function DFront({ things, children }: { things: Things; children: ReactNo
     const watch = new ResizeObserver(measure)
     watch.observe(element)
     return () => watch.disconnect()
-  }, [things.tracker, things.name])
-  const [repo, tracker] = boxes.parts
+  }, [things.trackers.length, things.name])
+  const [repo, ...trackerBoxes] = boxes.parts
   return (
     <div ref={frame} className={css.inPlace}>
       {children}
@@ -114,24 +117,33 @@ export function DFront({ things, children }: { things: Things; children: ReactNo
           <SettingList>
             <LinkRow link={things.host} things={things} />
             <WhereRows things={things} />
+            {/* With no tracker, there is no chip of one: the way to add one is here. */}
+            {things.trackers.length === 0 && <TrackerRows things={things} />}
           </SettingList>
           <div className={css.row}>
             <LinkButton onClick={() => window.open('https://github.com/AltharIDE/althar', '_blank')}>Open on GitHub</LinkButton>
             <LinkButton onClick={things.openRepositories}>Add or change repositories</LinkButton>
           </div>
+          <AppWide things={things} />
         </InPlace>
       )}
-      {tracker !== undefined && things.tracker !== null && (
-        <InPlace box={tracker} label={`${things.tracker.name}: ${things.tracker.what}`} yours={things.tracker.trouble !== null}>
-          <SettingList>
-            <LinkRow link={things.tracker} things={things} />
-            <MoveIssues things={things} />
-          </SettingList>
-          <div className={css.row}>
-            <LinkButton onClick={() => window.open('https://linear.app/charrette/team/DEV', '_blank')}>Open on Linear</LinkButton>
-          </div>
-        </InPlace>
-      )}
+      {things.trackers.map((link, i) => {
+        const box = trackerBoxes[i]
+        if (box === undefined) return null
+        return (
+          <InPlace key={link.id} box={box} label={`${link.name}: ${link.what}`} yours={link.trouble !== null}>
+            <SettingList>
+              <LinkRow link={link} things={things} />
+              <MoveIssues things={things} />
+            </SettingList>
+            <div className={css.row}>
+              {link.url !== null && <LinkButton onClick={() => window.open(link.url ?? '', '_blank')}>Open on {link.name}</LinkButton>}
+              <AddTrackerMenu things={things} trigger={<LinkButton>Add another tracker…</LinkButton>} />
+            </div>
+            <AppWide things={things} />
+          </InPlace>
+        )
+      })}
     </div>
   )
 }

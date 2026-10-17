@@ -2,6 +2,8 @@
 import { Button, type IconName, LinkButton } from '../../../src/index'
 import {
   AllowEverything,
+  AppWide,
+  TrackerRows,
   Conflicts,
   Identity,
   LinkRow,
@@ -28,8 +30,8 @@ export const GROUPS: ReadonlyArray<ReadonlyArray<Section>> = [['general', 'conne
 export const sectionText: Readonly<Record<Section, { readonly title: string; readonly lede: string; readonly icon: IconName }>> = {
   general: { title: 'General', lede: 'Its name and colour, and where its work goes.', icon: 'pencil' },
   connections: {
-    title: 'Repositories and connections',
-    lede: 'The code its tasks change, and who Althar is on its code host and tracker.',
+    title: 'Code and issues',
+    lede: 'The code its tasks change, and the trackers its issues are in: none, one or several.',
     icon: 'plug',
   },
   rules: { title: 'Rules and access', lede: 'What its agents may do without asking you.', icon: 'lock' },
@@ -69,15 +71,18 @@ export function SectionBody({ section, things, full = true }: { section: Section
     case 'connections':
       return (
         <>
-          <SettingList>
-            {things.host !== null && <LinkRow link={things.host} things={things} />}
-            {things.tracker !== null && <LinkRow link={things.tracker} things={things} />}
-            <MoveIssues things={things} indent />
-          </SettingList>
-          {things.tracker === null && <p className={css.quiet}>No tracker yet: once its tasks name issues, their tracker shows here.</p>}
+          <h3 className={css.groupTitle}>Code</h3>
+          <SettingList>{things.host !== null && <LinkRow link={things.host} things={things} />}</SettingList>
           <div className={css.row}>
             <LinkButton onClick={things.openRepositories}>Add or change repositories</LinkButton>
           </div>
+          <h3 className={css.groupTitle}>Issues</h3>
+          <SettingList>
+            <TrackerRows things={things}>
+              <MoveIssues things={things} indent />
+            </TrackerRows>
+          </SettingList>
+          <AppWide things={things} />
         </>
       )
     case 'rules':

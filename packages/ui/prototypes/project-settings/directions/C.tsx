@@ -10,7 +10,7 @@ import { SECTIONS, type Section, SectionBody, sectionText, yoursIn } from './sec
 
 const SHORT: Readonly<Record<Section, string>> = {
   general: 'General',
-  connections: 'Connections',
+  connections: 'Code and issues',
   rules: 'Rules',
   running: 'Running',
   notes: 'Notes',

@@ -7,6 +7,9 @@ import {
   ControlLine,
   Icon,
   LinkButton,
+  Menu,
+  MenuItem,
+  MenuSeparator,
   ProjectIdentity,
   ProjectInk,
   ProjectMark,
@@ -29,8 +32,9 @@ import { connectedAs, hostNameOf, rulesLineOf, trackersOf } from '../../../../ap
 import { inkOf } from '../../../../apps/desktop/src/renderer/features/project/ProjectSettings'
 import { type ProjectSettingsModel, useProjectSettings } from '../../../../apps/desktop/src/renderer/features/project/useProjectSettings'
 import { productBrand, productName } from '../../../../apps/desktop/src/renderer/shared/products'
-import { data, notesOf } from './data'
+import { type Chosen, data, GITHUB_ISSUES, JIRA_OPS, LINEAR_DEV, notesOf } from './data'
 import css from './parts.module.css'
+import { openAppSettings } from './seams/QuickSettings'
 import { proto, useProto } from './state'
 
 export const PROJECT = 'p1'
@@ -61,7 +65,12 @@ export const overlay = {
 /** A connection's trouble: none, never connected, or its sign-in no longer works. */
 export type Trouble = null | 'not-connected' | 'signed-out'
 
+/**
+ * A code host or tracker the project is on. The connection is Althar's, for
+ * every project on that server: the project only names what of it is its own.
+ */
 export interface Link {
+  readonly id: string
   readonly product: Product
   readonly name: string
   readonly brand: Brand
@@ -70,6 +79,21 @@ export interface Link {
   readonly login: string | null
   readonly trouble: Trouble
   readonly at: string | null
+  /** Where it is on the web. */
+  readonly url: string | null
+  /** Found in its tasks' issues, where the project names no tracker of its own. */
+  readonly found: boolean
+  /** The other projects on the same connection. */
+  readonly shared: ReadonlyArray<string>
+}
+
+/** A tracker it could add: one Althar is connected to, or knows. */
+export interface Addable {
+  readonly chosen: Chosen
+  readonly name: string
+  readonly brand: Brand
+  readonly what: string
+  readonly login: string | null
 }
 
 export interface Things {
@@ -78,7 +102,11 @@ export interface Things {
   readonly seed: string
   readonly model: ProjectSettingsModel
   readonly host: Link | null
-  readonly tracker: Link | null
+  /** Its trackers: none, one or several, in any product. */
+  readonly trackers: ReadonlyArray<Link>
+  /** Whether it names its trackers, or they are found in its tasks' issues. */
+  readonly chose: boolean
+  readonly addable: ReadonlyArray<Addable>
   /** How many connections need the person. */
   readonly troubles: number
   readonly rules: ProjectRulesView | null
@@ -89,9 +117,21 @@ export interface Things {
   readonly branches: string
   readonly finish: string
   readonly connect: (link: Link) => void
+  readonly addTracker: (one: Addable) => void
+  readonly removeTracker: (link: Link) => void
+  /** Connects a tracker Althar has no connection to yet: the app's own walk in. */
+  readonly connectAnother: () => void
+  /** The app's Settings tab, at its code hosts and trackers. */
+  readonly manageConnections: () => void
   readonly openRules: () => void
   readonly openRepositories: () => void
 }
+
+const idOf = (one: Pick<Chosen, 'product' | 'at' | 'key'>) => `${one.product}:${one.at ?? ''}:${one.key}`
+const trackerName = (product: Product) => (product === 'github' ? 'GitHub Issues' : productName(product))
+const trackerWhat = (one: Chosen) => `${one.key} issues`
+/** The other projects on a server: charrette-site is on GitHub too. */
+const sharedOn = (product: Product): ReadonlyArray<string> => (product === 'github' ? ['charrette-site'] : [])
 
 /** The project's settings, from the app's own reads and hooks, as every direction shows them. */
 export function useThings(): Things {
@@ -105,6 +145,7 @@ export function useThings(): Things {
   const coordinator = useQuery(read.coordinator(PROJECT)).data ?? null
   const board = useQuery(read.board(PROJECT)).data ?? null
   const runnables = useSyncExternalStore(data.subscribe, () => data.get().runnables)
+  const chosen = useSyncExternalStore(data.subscribe, () => data.get().trackers)
   const repository = repositories[0]
   const hostOf = coordinator?.host ?? null
   const host: Link | null =
@@ -114,6 +155,7 @@ export function useThings(): Things {
           const login = connectedAs(list, hostOf.product, hostNameOf(hostOf.webUrl))
           const account = repository?.host?.account ?? null
           return {
+            id: 'host',
             product: hostOf.product,
             name: hostOf.name,
             brand: productBrand(hostOf.product),
@@ -121,24 +163,49 @@ export function useThings(): Things {
             login: login ?? account?.login ?? null,
             trouble: account === null ? 'not-connected' : account.state === 'reauth_required' ? 'signed-out' : null,
             at: hostNameOf(hostOf.webUrl),
+            url: repository?.host?.url ?? null,
+            found: false,
+            shared: sharedOn(hostOf.product),
           }
         })()
-  const first = board === null ? undefined : trackersOf(board.tasks, list)[0]
-  const tracker: Link | null =
-    first === undefined
-      ? null
-      : (() => {
-          const login = connectedAs(list, first.product, first.at)
-          return {
-            product: first.product,
-            name: productName(first.product),
-            brand: productBrand(first.product),
-            what: `${first.key} issues`,
-            login,
-            trouble: login === null ? 'not-connected' : null,
-            at: first.at,
-          }
-        })()
+  // What it names as its own, or else what its tasks' issues name.
+  const found: ReadonlyArray<Chosen> =
+    board === null
+      ? []
+      : trackersOf(board.tasks, list).map((one) => ({ product: one.product, at: one.at, key: one.key, url: one.url ?? '' }))
+  const named = chosen ?? found
+  const standing = (one: Chosen) => {
+    const login = connectedAs(list, one.product, one.at)
+    const out = list?.connections.find(
+      (connection) => connection.product === one.product && (one.at === null || hostNameOf(connection.webUrl) === one.at),
+    )
+    return {
+      login: login ?? out?.account.login ?? null,
+      trouble: (login !== null ? null : out?.state === 'reauth_required' ? 'signed-out' : 'not-connected') as Trouble,
+    }
+  }
+  const trackers: Link[] = named.map((one) => ({
+    id: idOf(one),
+    product: one.product,
+    name: trackerName(one.product),
+    brand: productBrand(one.product),
+    what: trackerWhat(one),
+    ...standing(one),
+    at: one.at,
+    url: one.url === '' ? null : one.url,
+    found: chosen === null,
+    shared: sharedOn(one.product),
+  }))
+  const addable: Addable[] = [LINEAR_DEV, JIRA_OPS, GITHUB_ISSUES]
+    .filter((one) => !named.some((each) => idOf(each) === idOf(one)))
+    .map((one) => ({
+      chosen: one,
+      name: trackerName(one.product),
+      brand: productBrand(one.product),
+      what: trackerWhat(one),
+      login: connectedAs(list, one.product, one.at),
+    }))
+  const connect = (link: Pick<Link, 'product' | 'at'>) => overlay.set({ connecting: openingFor(list, link.product, link.at) })
   const rules = model.rules
   return {
     name: model.name ?? '',
@@ -146,8 +213,10 @@ export function useThings(): Things {
     seed: PROJECT,
     model,
     host,
-    tracker,
-    troubles: [host, tracker].filter((one) => one?.trouble != null).length,
+    trackers,
+    chose: chosen !== null,
+    addable,
+    troubles: [host, ...trackers].filter((one) => one?.trouble != null).length,
     rules,
     policy: rules === null ? null : rulesLineOf(rules),
     setAllowEverything: (on) => {
@@ -165,7 +234,14 @@ export function useThings(): Things {
         : rules?.end === 'none'
           ? 'Pushes the branch only'
           : 'Opens a draft pull request',
-    connect: (link) => overlay.set({ connecting: openingFor(list, link.product, link.at) }),
+    connect,
+    addTracker: (one) => {
+      data.set({ trackers: [...named, one.chosen] })
+      if (one.login === null) connect(one.chosen)
+    },
+    removeTracker: (link) => data.set({ trackers: named.filter((one) => idOf(one) !== link.id) }),
+    connectAnother: () => overlay.set({ connecting: 'all' }),
+    manageConnections: () => openAppSettings('code-hosts'),
     openRules: () => void navigate({ to: '/projects/$projectId/rules', params: { projectId: PROJECT } }),
     openRepositories: () => void navigate({ to: '/projects/$projectId/repositories', params: { projectId: PROJECT } }),
   }
@@ -175,10 +251,22 @@ export function useThings(): Things {
 
 export const words = {
   connectedAs: (login: string) => `Connected as ${login}`,
-  notConnected: 'Not connected: Althar can’t read or move its issues',
-  signedOut: (login: string | null) => `Signed out${login === null ? '' : ` as ${login}`}: Althar can’t push or open pull requests`,
+  found: 'found in its tasks’ issues',
+  shared: (others: ReadonlyArray<string>) => `also ${others.join(', ')}’s`,
+  notConnected: (what: string) => `Not connected: Althar can’t read or move its ${what}`,
+  signedOutHost: (name: string, login: string | null) =>
+    `Signed out${login === null ? '' : ` as ${login}`}: no project can push to ${name} or open pull requests`,
+  signedOut: (login: string | null) => `Signed out${login === null ? '' : ` as ${login}`}: Althar can’t read or move its issues`,
   connect: 'Connect',
   signIn: 'Sign in again',
+  noTracker: 'No tracker',
+  noTrackerNote: 'Tasks don’t start from issues, and none move as tasks start',
+  addTracker: 'Add a tracker',
+  addTrackerNote: 'Another place its issues are, in any product',
+  connectAnother: 'Connect another tracker…',
+  connectAnotherNote: 'Trello, a Jira or GitLab of your own…',
+  appWide: 'Connections are Althar’s, not the project’s: connect GitHub, Linear or Jira once, and every project there uses it.',
+  manage: 'Manage connections',
   moveIssues: 'Move issues to In Progress when their task starts',
   moveIssuesOn: 'On: Althar moves the issue as its task starts',
   moveIssuesOff: 'Off: you move issues yourself',
@@ -192,11 +280,31 @@ export const words = {
   removeNote: 'Its tasks and worktrees go; its repositories and branches stay.',
 }
 
-/** A connection's line: who it is connected as, or its trouble in violet. */
+/** A connection's line: who Althar is there, whether it was found or is shared; or its trouble in violet. */
 export function LinkLine({ link }: { link: Link }) {
-  if (link.trouble === null) return <>{words.connectedAs(link.login ?? '')}</>
-  return <ControlLine tone="yours">{link.trouble === 'signed-out' ? words.signedOut(link.login) : words.notConnected}</ControlLine>
+  if (link.trouble === null)
+    return (
+      <>
+        {[
+          words.connectedAs(link.login ?? ''),
+          ...(link.found ? [words.found] : []),
+          ...(link.shared.length > 0 ? [words.shared(link.shared)] : []),
+        ].join(' · ')}
+      </>
+    )
+  return (
+    <ControlLine tone="yours">
+      {link.trouble === 'not-connected'
+        ? words.notConnected(link.what)
+        : link.id === 'host'
+          ? words.signedOutHost(link.name, link.login)
+          : words.signedOut(link.login)}
+    </ControlLine>
+  )
 }
+
+/** What putting a connection right says: connect it, or sign in again. */
+export const fixOf = (link: Link) => (link.trouble === 'signed-out' ? words.signIn : words.connect)
 
 /* ——— The rows, in the app's Settings rows (SettingList, SettingRow, SettingSwitch). ——— */
 
@@ -234,25 +342,81 @@ export function Identity({ things }: { things: Things }) {
   )
 }
 
-/** A code host or tracker: what of it is the project's, who Althar is there, and a way to put it right. */
+/**
+ * A code host or tracker: what of it is the project's, who Althar is there,
+ * and a way to put it right. Which account is Althar's, not the project's: a
+ * tracker can be taken out of the project, its connection stays.
+ */
 export function LinkRow({ link, things }: { link: Link; things: Things }) {
   return (
     <SettingRow title={`${link.name} · ${link.what}`} note={<LinkLine link={link} />} glyph={<BrandChip brand={link.brand} size={26} />}>
       {() =>
-        link.trouble === null ? (
-          <LinkButton onClick={() => things.connect(link)}>Change account</LinkButton>
-        ) : (
+        link.trouble !== null ? (
           <Button size="small" variant="signal" onClick={() => things.connect(link)}>
-            {link.trouble === 'signed-out' ? words.signIn : words.connect}
+            {fixOf(link)}
           </Button>
+        ) : link.id === 'host' ? null : (
+          <LinkButton onClick={() => things.removeTracker(link)}>Remove</LinkButton>
         )
       }
     </SettingRow>
   )
 }
 
+/** The trackers Althar could add, connected or not, and the way to connect another. */
+export function AddTrackerMenu({ things, trigger }: { things: Things; trigger?: React.ReactElement }) {
+  return (
+    <Menu trigger={trigger ?? <LinkButton>Add…</LinkButton>} label={words.addTracker} align="end" width={300}>
+      {things.addable.map((one) => (
+        <MenuItem
+          key={idOf(one.chosen)}
+          lead={<BrandChip brand={one.brand} size={16} />}
+          description={one.login === null ? 'Not connected yet: you connect it first' : words.connectedAs(one.login)}
+          onSelect={() => things.addTracker(one)}
+        >
+          {`${one.name} · ${one.what}`}
+        </MenuItem>
+      ))}
+      <MenuSeparator />
+      <MenuItem icon="plug" description={words.connectAnotherNote} onSelect={things.connectAnother}>
+        {words.connectAnother}
+      </MenuItem>
+    </Menu>
+  )
+}
+
+/** Its trackers, one row each, then the way to add one; with none, that row says so. */
+export function TrackerRows({ things, children }: { things: Things; children?: React.ReactNode }) {
+  const none = things.trackers.length === 0
+  return (
+    <>
+      {things.trackers.map((link) => (
+        <LinkRow key={link.id} link={link} things={things} />
+      ))}
+      {/* What depends on its trackers, under them: Move issues. */}
+      {children}
+      <SettingRow
+        title={none ? words.noTracker : words.addTracker}
+        note={none ? words.noTrackerNote : words.addTrackerNote}
+        glyph={<Icon name="plus" size={15} />}
+      >
+        {() => <AddTrackerMenu things={things} />}
+      </SettingRow>
+    </>
+  )
+}
+
+/** That connections are the app's, and the way to them. */
+export function AppWide({ things }: { things: Things }) {
+  return (
+    <p className={css.quiet}>
+      {words.appWide} <LinkButton onClick={things.manageConnections}>{words.manage}</LinkButton>
+    </p>
+  )
+}
+
 export function MoveIssues({ things, indent }: { things: Things; indent?: boolean }) {
-  if (things.rules === null || things.tracker === null) return null
+  if (things.rules === null || things.trackers.length === 0) return null
   const on = things.rules.moveIssues
   return (
     <SettingSwitch

@@ -44,7 +44,7 @@ export function ProjectFront(props: ProjectFrontProps) {
   const things = useThings()
   if (p.direction === 'Today') return <Real {...props} />
   // A connection that needs the person is one more thing that needs them, as on every screen.
-  const troubles: WorkNeed[] = [things.host, things.tracker].flatMap((link) =>
+  const troubles: WorkNeed[] = [things.host, ...things.trackers].flatMap((link) =>
     link === null || link.trouble === null
       ? []
       : [
@@ -58,9 +58,20 @@ export function ProjectFront(props: ProjectFrontProps) {
         ],
   )
   const yours = (props.yours ?? 0) + troubles.length
+  // Its trackers as the project names them, not only as its tasks' issues do: added or taken out, the front follows.
+  const parts = [
+    ...(props.parts ?? []).filter((part) => !part.id.startsWith('tracker:')),
+    ...things.trackers.map((link) => ({
+      id: `tracker:${link.id}`,
+      name: link.what,
+      brand: link.brand,
+      ...(link.url === null ? {} : { openLabel: `Open on ${link.name}`, onOpen: () => window.open(link.url ?? '', '_blank') }),
+    })),
+  ]
   const front = (
     <Real
       {...props}
+      parts={parts}
       yours={yours}
       needs={[...troubles, ...(props.needs ?? [])]}
       {...(props.onYours === undefined || (props.yours ?? 0) > 0 ? {} : { onYours: () => troubles[0]?.onOpen() })}
