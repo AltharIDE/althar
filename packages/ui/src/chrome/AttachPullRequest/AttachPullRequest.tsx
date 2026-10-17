@@ -145,7 +145,6 @@ export function AttachPullRequest({
         aria-label={t.label}
         placeholder={t.placeholder}
         value={value}
-        autoFocus
         invalid={missing}
         {...(missing ? { 'aria-describedby': errorId } : {})}
         onChange={(event) => {
