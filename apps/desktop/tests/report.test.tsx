@@ -105,6 +105,31 @@ describe('where a report is asked from', () => {
   })
 })
 
+describe('how the items read in the smaller cases', () => {
+  it('words the counts, sizes, versions and sign-ins as each is', () => {
+    const value = (preview: ReportPreview, id: string) => itemsOf(preview).find((item) => item.id === id)?.value
+    expect(value({ ...previewed, errors: 0 }, 'errors')).toBe('None')
+    expect(value({ ...previewed, errors: 1 }, 'errors')).toBe('One line')
+    expect(value({ ...previewed, logs: [{ name: 'main', bytes: 512 }] }, 'log-main')).toBe('Its last 512 bytes')
+    expect(value({ ...previewed, migrations: { count: 0, last: null } }, 'profile')).toBe('No migrations')
+    expect(value({ ...previewed, migrations: { count: 1, last: null } }, 'profile')).toBe('1 migration')
+    expect(value({ ...previewed, context: { ...previewed.context, screen: 'elsewhere', taskId: null } }, 'screen')).toBe(
+      'elsewhere, thr_1, proj_1',
+    )
+    const agents = (signIn: 'signed_out' | 'unknown'): ReportPreview => ({
+      ...previewed,
+      agents: [{ id: 'codex', name: 'Codex', version: null, adapter: null, signIn }],
+    })
+    expect(value(agents('signed_out'), 'agent-codex')).toBe('Version not known, signed out')
+    expect(value(agents('unknown'), 'agent-codex')).toBe('Version not known, sign-in not known')
+  })
+
+  it('reads a project’s screens from the address, and a settings address with nothing after it', () => {
+    expect(placeOf('#/projects/proj_1/repositories?tab=1')).toEqual({ screen: 'repositories', projectId: 'proj_1', threadId: null })
+    expect(placeOf('#/settings')).toEqual({ screen: 'settings', projectId: null, threadId: null })
+  })
+})
+
 describe('Report a problem', () => {
   it('opens where it is asked from, after the window’s picture is taken, and sends what the person wrote', async () => {
     window.location.hash = '#/threads/thr_1'
@@ -196,6 +221,21 @@ describe('what the window doesn’t handle', () => {
     expect(logError.mock.calls).toEqual([
       [{ kind: 'error', message: 'Uncaught Error: It broke', stack: thrown.stack, source: 'index.js:3:7' }],
       [{ kind: 'rejection', message: 'no answer', stack: '' }],
+    ])
+    // An error that isn't an Error, a stack it doesn't have, and a rejection that is an Error.
+    logError.mockClear()
+    target.dispatchEvent(new ErrorEvent('error', { message: 'Script error.', filename: '', lineno: 0, colno: 0 }))
+    const bare = Object.assign(new Error('No stack'), { stack: undefined })
+    target.dispatchEvent(new ErrorEvent('error', { message: 'bare', error: bare }))
+    const failure = new Error('Rejected')
+    target.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: failure }))
+    const bareRejection = Object.assign(new Error('Also none'), { stack: undefined })
+    target.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: bareRejection }))
+    expect(logError.mock.calls.map(([line]) => [line.kind, line.message, line.stack])).toEqual([
+      ['error', 'Script error.', ''],
+      ['error', 'bare', ''],
+      ['rejection', 'Rejected', failure.stack],
+      ['rejection', 'Also none', ''],
     ])
     // Where the host keeps no log, nothing listens.
     expect(() => keepWindowErrors({}, target)).not.toThrow()
