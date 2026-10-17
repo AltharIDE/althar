@@ -1,4 +1,4 @@
-// Scrappy: a thread's blocks as each direction has them in the gap. Today's as they are; in every direction, the message just sent reads as sent (not a flash of Queued), and the agent's error is the direction's to say. In B, the message carries the receipt.
+// Scrappy: a thread's blocks as each direction has them in the gap. Never the app's own wait for the reply (C, as built): only the direction's sign of life shows. Today's as they are; in every direction, the message just sent reads as sent (not a flash of Queued), and the agent's error is the direction's to say. In B, the message carries the receipt.
 import { Delivery } from '@althar/ui'
 
 import type { Screen } from '../data'
@@ -13,8 +13,9 @@ export const adjust = <B extends { readonly kind: string; readonly id: string }>
   screen: Screen,
 ): ReadonlyArray<B> => {
   const gap = st.gap
-  if (st.d === 'T' || gap === null || gap.screen !== screen || gap.phase === 'queued') return blocks
-  const kept = blocks.filter((block) => block.id !== `${gap.id}-failed`)
+  const theirs = blocks.filter((block) => block.kind !== 'waiting')
+  if (st.d === 'T' || gap === null || gap.screen !== screen || gap.phase === 'queued') return theirs
+  const kept = theirs.filter((block) => block.id !== `${gap.id}-failed`)
   const last = kept.findLastIndex((block) => block.kind === 'you')
   if (last === -1) return kept
   const receipt = st.d === 'B' && (gap.phase === 'waiting' || gap.phase === 'failed' || gap.phase === 'stopped')

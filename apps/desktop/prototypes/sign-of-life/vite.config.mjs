@@ -42,25 +42,33 @@ const swap = {
 
 /**
  * Each patch: the file, and the text it finds and what it puts in its place. A patch that finds nothing stops the page.
- * Today the last turn counts as the running one, even with the person's message after it, so in the gap the previous
- * reply shows as at work again; every direction counts only a turn after the person's last message (fix.ts).
+ * The app now holds the reply's place itself, thinking (C, built): today goes back to how it was before that (fix.ts), so the
+ * previous reply shows as at work again in the gap, a message about to be read reads as queued, and its queued look shows at
+ * once; every direction keeps the app's reckoning of the wait but not its Thinking (seams/adjust.ts). roundsOf follows
+ * blocksOf.
  */
 const patches = [
   {
     file: 'apps/desktop/src/renderer/shared/thread.ts',
     edits: [
-      ["import { took } from './time'", "import { took } from './time'\nimport { liveTurn as __liveTurn } from '@proto/fix'"],
       [
-        "const live = turnRunning ? merged.findLastIndex((block) => block.kind === 'turn') : -1",
-        'const live = turnRunning ? __liveTurn(merged) : -1',
+        "import { took } from './time'",
+        "import { took } from './time'\nimport { reading as __reading, waits as __waits } from '@proto/fix'",
+      ],
+      ['(item.input.interrupting || source.reading !== true)', '(item.input.interrupting || __reading(source.reading) !== true)'],
+      [
+        'const waiting = (turnRunning || source.reading === true) && askedAt !== null && askedAt > lastTurn',
+        'const waiting = __waits((turnRunning || source.reading === true) && askedAt !== null && askedAt > lastTurn)',
       ],
     ],
   },
   {
-    file: 'apps/desktop/src/renderer/shared/rounds.ts',
+    file: 'packages/ui/src/thread/You/You.module.css',
     edits: [
-      ["import { took } from './time'", "import { took } from './time'\nimport { liveTurn as __liveTurn } from '@proto/fix'"],
-      ["const lastTurn = blocks.findLastIndex((block) => block.kind === 'turn')", 'const lastTurn = __liveTurn(blocks)'],
+      [
+        '@media (prefers-reduced-motion: reduce) {',
+        ":global(html[data-direction='T']) .queued .body,\n:global(html[data-direction='T']) .queued .at {\n  animation: none;\n}\n\n@media (prefers-reduced-motion: reduce) {",
+      ],
     ],
   },
 ]

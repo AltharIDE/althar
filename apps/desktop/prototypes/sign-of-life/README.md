@@ -78,7 +78,7 @@ To take from the others: B's honest steps (Sent, has it) belong where something 
 
 ## How it's built
 
-- `vite.config.mjs`: seams swap ProjectView's `ThreadBlocks`, TaskView's `TaskThread` and ThreadBlocks' kit (for B's `You`). Two patches to `thread.ts` and `rounds.ts` fix the live turn outside Today.
+- `vite.config.mjs`: seams swap ProjectView's `ThreadBlocks`, TaskView's `TaskThread` and ThreadBlocks' kit (for B's `You`). Since C was built into the app, patches to `thread.ts` and the kit's `You.module.css` keep it out of the comparison: Today is the app as it was before (`fix.ts`), and every direction drops the app's own Thinking (`seams/adjust.ts`).
 - `store.ts`: the page's state and the fake runtime's timeline (stored, handed, first word, streaming, the lead's work, failure, queue).
 - `life/`: the directions. `seams/adjust.ts`: the blocks as each direction has them.
 - `timeline.ts`: the beats the strip shows. `data.ts`: the two conversations and the replies.

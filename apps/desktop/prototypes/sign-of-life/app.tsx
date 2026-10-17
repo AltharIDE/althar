@@ -150,6 +150,13 @@ const reduce = () => document.documentElement.toggleAttribute('data-reduced', ge
 subscribe(reduce)
 reduce()
 
+// The direction, for what today's look keeps as it was (vite.config.mjs).
+const direct = () => {
+  document.documentElement.dataset.direction = get().d
+}
+subscribe(direct)
+direct()
+
 // A direction switched: the thread reads again which turn runs (today's or the directions').
 let shownDirection = get().d
 subscribe(() => {
