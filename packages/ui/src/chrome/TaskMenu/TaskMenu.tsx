@@ -68,8 +68,6 @@ export interface TaskMenuText {
   allowAllAbout: string
   allowAllProject: string
   /** Beside the button while everything on the task is allowed: the word, and what it means, by its project's switch or its own. */
-  unrestricted: string
-  unrestrictedAbout: (byProject: boolean) => string
 }
 
 export const taskMenuText: TaskMenuText = {
@@ -104,11 +102,6 @@ export const taskMenuText: TaskMenuText = {
   allowAll: 'Allow everything on this task',
   allowAllAbout: 'Nothing its agents ask waits for you but what could lose work, such as a force push. Never still holds.',
   allowAllProject: 'On for every task in this project, from its Rules.',
-  unrestricted: 'Unrestricted',
-  unrestrictedAbout: (byProject) =>
-    byProject
-      ? 'Its project allows everything: nothing its agents ask waits for you but what could lose work, such as a force push. Never still holds.'
-      : 'Everything is allowed on this task: nothing its agents ask waits for you but what could lose work, such as a force push. Never still holds.',
 }
 
 export interface TaskMenuProps {
@@ -206,8 +199,6 @@ export function TaskMenu({
   if (!opens && course.length === 0 && !onAbandon && !conflicts && !allowEverything) return null
   // Said beside the button only where the task goes otherwise than its project.
   const differs = conflicts !== undefined && conflicts.choice !== 'project' && (conflicts.choice === 'on') !== conflicts.project
-  // Said beside it whenever everything on the task is allowed, by its own switch or its project's.
-  const unrestricted = allowEverything !== undefined && (allowEverything.on || allowEverything.project)
   const menu = (
     <Menu
       label={t.label}
@@ -282,17 +273,9 @@ export function TaskMenu({
       )}
     </Menu>
   )
-  if (!differs && !unrestricted) return menu
+  if (!differs) return menu
   return (
     <>
-      {unrestricted && (
-        <Tooltip label={t.unrestrictedAbout(!allowEverything.on)} placement="below">
-          <span className={s.unrestricted}>
-            {t.unrestricted}
-            <VisuallyHidden>, {t.unrestrictedAbout(!allowEverything.on)}</VisuallyHidden>
-          </span>
-        </Tooltip>
-      )}
       {differs && <span className={s.hint}>{t.conflictsHint(conflicts.choice === 'on')}</span>}
       {menu}
     </>

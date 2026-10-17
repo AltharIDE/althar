@@ -1209,6 +1209,8 @@ export const TaskCard = Schema.Struct({
   queued: Schema.NullOr(Queued),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
   planWaits: Schema.optional(Schema.Boolean),
+  /** With `planWaits`: its place in the order what waits for a place starts, among everything that waits; 1 starts first. */
+  place: Schema.optional(Schema.Int),
 })
 export type TaskCard = typeof TaskCard.Type
 
@@ -1515,6 +1517,15 @@ export const SessionSummary = Schema.Struct({
   /** The models the agent offers for this session. */
   models: Schema.Array(Schema.String),
   turnRunning: Schema.Boolean,
+  /**
+   * Whether the runtime still holds a session on this thread: the one that
+   * takes a note, and that makes starting another refuse. A recorded session
+   * it no longer has — left by a crash, or by a start that never took — looks
+   * the same as a live one here, but can take neither a note nor a choice:
+   * sending one back to such a lead has to start it afresh. While the thread
+   * is held, a note waits its turn there, running or between turns.
+   */
+  held: Schema.Boolean,
   /** How full its context is, in tokens, as the agent last said while it runs; null until it says, or where it doesn't. */
   context: Schema.NullOr(ContextUse),
   /** What it left running in the background, while it runs, in the order it started them. */
@@ -1808,8 +1819,6 @@ export const BoardTask = Schema.Struct({
   changed: Schema.NullOr(Schema.Struct({ files: Schema.Number, add: Schema.Number, del: Schema.Number })),
   /** A ready task's repositories with no pull request, not merged yet, which merge here. */
   here: Schema.Array(TaskRepositoryHere),
-  /** Not settled, everything its agents ask is allowed, by the task's own switch or its project's (ADR-043). Not without it. */
-  allowEverything: Schema.optional(Schema.Boolean),
 })
 export type BoardTask = typeof BoardTask.Type
 

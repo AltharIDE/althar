@@ -239,7 +239,7 @@ The rules see what reaches Althar. A command an agent's sandbox runs without ask
 ## Get started
 
 > [!NOTE]
-> **Early.** Althar runs on macOS, Windows and Linux, and is tested most on macOS. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues).
+> **Early.** Althar runs on macOS, Windows and Linux, and is tested most on macOS. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues), or, in the app, Report a problem (in Help on a Mac, or at the foot of the quick settings), which sends what happened with the app's logs, paths and repository names hidden.
 
 Sign in each agent you want to use with its own tool first:
 
