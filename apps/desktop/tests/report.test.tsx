@@ -103,6 +103,36 @@ describe('where a report is asked from', () => {
       'runtime.log',
     ])
   })
+
+  it('says what isn’t known, and counts in words, as the items go', () => {
+    const items = itemsOf({
+      ...previewed,
+      context: { screen: 'elsewhere', projectId: null, taskId: null, threadId: null, about: null },
+      agents: [{ id: 'codex', name: 'Codex', version: null, adapter: null, signIn: 'unknown' }],
+      migrations: { count: 1, last: null },
+      errors: 1,
+      logs: [{ name: 'main', bytes: 640 }],
+    })
+    expect(items.map((item) => [item.label, item.value])).toEqual([
+      ['Althar', '0.4.0, Electron 44.5.0'],
+      ['System', 'macOS 26.5, arm64'],
+      ['Codex', 'Version not known, sign-in not known'],
+      ['Screen', 'elsewhere'],
+      ['Profile', '1 migration'],
+      ['Install id', '3f0c9a52-6b1e-4f7d-9a0e-2c5b8d71e4aa'],
+      ['Screenshot', 'This window, as it was'],
+      ['Last errors', 'One line'],
+      ['main.log', 'Its last 640 bytes'],
+    ])
+    const none = itemsOf({ ...previewed, migrations: { count: 0, last: null }, errors: 0 })
+    expect(none.find((item) => item.id === 'profile')?.value).toBe('No migrations')
+    expect(none.find((item) => item.id === 'errors')?.value).toBe('None')
+  })
+
+  it('reads a project’s repositories, and ids the address encodes', () => {
+    expect(placeOf('#/projects/proj%201/repositories')).toEqual({ screen: 'repositories', projectId: 'proj 1', threadId: null })
+    expect(placeOf('#/threads/thr%2F1?open=1')).toEqual({ screen: 'task', projectId: null, threadId: 'thr/1' })
+  })
 })
 
 describe('Report a problem', () => {
@@ -180,6 +210,50 @@ describe('Report a problem', () => {
     await failing.ask({ kind: 'asked', from: 'menu' })
     await waitFor(() => expect(failing.host.open).toHaveBeenCalledTimes(2))
   })
+
+  it('says it is about an update, with no picture, and lists nothing more when what goes can’t be read', async () => {
+    const { host, ask } = reportHost({ preview: vi.fn(async () => Promise.reject(new Error('gone'))) }, { screenshot: null })
+    render(<ReportDialog host={fakeHost({ report: host })} />)
+    await ask({ kind: 'update', reason: 'migration 0033 failed' })
+    expect(await screen.findByText('About an update that couldn’t move your data.')).toBeTruthy()
+    expect(host.open).toHaveBeenCalledWith(
+      expect.objectContaining({ screen: 'update', about: 'an update that couldn’t move your data: migration 0033 failed' }),
+    )
+    await waitFor(() => expect(host.preview).toHaveBeenCalledWith('r1'))
+    expect(screen.queryByRole('img', { name: 'Screenshot of this window' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'See what’s sent' }))
+    expect(screen.queryByText('2.1.263, adapter 0.88.0, signed in')).toBeNull()
+  })
+
+  it('says it couldn’t send when sending throws, and keeps a late answer off a report that closed', async () => {
+    const thrown = reportHost({ send: vi.fn(async (): Promise<Sent> => Promise.reject(new Error('main went away'))) })
+    const first = render(<ReportDialog host={fakeHost({ report: thrown.host })} />)
+    await thrown.ask({ kind: 'asked', from: 'menu' })
+    await userEvent.type(await screen.findByRole('textbox', { name: 'What happened?' }), 'Blank window')
+    await userEvent.click(screen.getByRole('button', { name: /^Send/ }))
+    expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'Althar couldn’t send the report.')
+    first.unmount()
+
+    let answer: (sent: Sent) => void = () => {}
+    let readPreview: (preview: ReportPreview) => void = () => {}
+    const late = reportHost({
+      send: vi.fn(() => new Promise<Sent>((resolve) => (answer = resolve))),
+      preview: vi.fn(() => new Promise<ReportPreview>((resolve) => (readPreview = resolve))),
+    })
+    render(<ReportDialog host={fakeHost({ report: late.host })} />)
+    await late.ask({ kind: 'asked', from: 'menu' })
+    await userEvent.type(await screen.findByRole('textbox', { name: 'What happened?' }), 'Slow')
+    await userEvent.click(screen.getByRole('button', { name: /^Send/ }))
+    // Cancelled while it sends: what comes back after belongs to no report on screen.
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(late.host.close).toHaveBeenCalledWith('r1')
+    await act(async () => {
+      answer({ kind: 'sent' })
+      readPreview(previewed)
+    })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Report sent' })).toBeNull()
+  })
 })
 
 describe('what the window doesn’t handle', () => {
@@ -199,5 +273,25 @@ describe('what the window doesn’t handle', () => {
     ])
     // Where the host keeps no log, nothing listens.
     expect(() => keepWindowErrors({}, target)).not.toThrow()
+  })
+
+  it('logs what was thrown that isn’t an Error, an Error with no stack, and a rejected Error', () => {
+    const logError = vi.fn()
+    const target = new EventTarget() as Window
+    keepWindowErrors({ logError }, target)
+    target.dispatchEvent(new ErrorEvent('error', { message: 'Script error.', error: 'a string', filename: '', lineno: 0, colno: 0 }))
+    const bare = Object.assign(new Error('No stack'), { stack: undefined })
+    target.dispatchEvent(
+      new ErrorEvent('error', { message: 'Uncaught Error: No stack', error: bare, filename: 'a.js', lineno: 1, colno: 2 }),
+    )
+    const refused = new Error('Refused')
+    target.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: refused }))
+    target.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: Object.assign(new Error('Bare'), { stack: undefined }) }))
+    expect(logError.mock.calls).toEqual([
+      [{ kind: 'error', message: 'Script error.', stack: '', source: ':0:0' }],
+      [{ kind: 'error', message: 'Uncaught Error: No stack', stack: '', source: 'a.js:1:2' }],
+      [{ kind: 'rejection', message: 'Refused', stack: refused.stack }],
+      [{ kind: 'rejection', message: 'Bare', stack: '' }],
+    ])
   })
 })
