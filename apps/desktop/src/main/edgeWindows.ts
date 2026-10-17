@@ -2,7 +2,7 @@ import { join } from 'node:path'
 
 import { app, BrowserWindow, Menu, nativeImage, nativeTheme, type Rectangle, screen, Tray } from 'electron'
 
-import { darkPanel, type Scheme, watchColorScheme } from './colorScheme'
+import { darkPanel, readSystemUsesLightTheme, type Scheme, watchColorScheme } from './colorScheme'
 import {
   DEFAULT_EDGE,
   type EdgePlace,
@@ -215,10 +215,14 @@ export const startEdge = (host: EdgeHost): Edge => {
   /* ---- the menu bar ---- */
 
   let scheme: Scheme | undefined
+  let taskbarLight: boolean | undefined
   const picture = (yours: boolean) => {
-    // A Windows taskbar follows the system's mode. On Linux Electron's nativeTheme says light where it has no word, on a dark
-    // panel too, so the desktop's setting comes from the Settings portal; with none, most panels are dark: the mark is light.
-    const dark = process.platform === 'linux' ? darkPanel(scheme) : nativeTheme.shouldUseDarkColors
+    // The Windows taskbar follows the system theme (SystemUsesLightTheme), not the apps' (nativeTheme), which is the fallback.
+    // On Linux Electron's nativeTheme says light where it has no word, on a dark panel too, so the desktop's setting comes from
+    // the Settings portal; with none, most panels are dark: the mark is light.
+    let dark = nativeTheme.shouldUseDarkColors
+    if (process.platform === 'linux') dark = darkPanel(scheme)
+    else if (taskbarLight !== undefined) dark = !taskbarLight
     const image = nativeImage.createFromPath(join(host.pictures, markFile(process.platform, dark, yours)))
     // The menu bar draws a template in its own colour, light or dark, whatever is behind it; elsewhere the file is the colour.
     if (process.platform === 'darwin') image.setTemplateImage(true)
@@ -338,16 +342,26 @@ export const startEdge = (host: EdgeHost): Edge => {
   screen.on('display-removed', changed)
   screen.on('display-metrics-changed', changed)
 
-  // The system's mode changes under a Windows taskbar: the mark is drawn again in the other colour.
-  nativeTheme.on('updated', () => {
-    if (process.platform !== 'darwin' && tray !== undefined && !tray.isDestroyed()) tray.setImage(picture(waiting > 0))
-  })
+  const redraw = () => {
+    if (tray !== undefined && !tray.isDestroyed()) tray.setImage(picture(waiting > 0))
+  }
+
+  // The system's mode changes under a Windows taskbar: the setting is read again and the mark is drawn in the other colour.
+  if (process.platform === 'win32') {
+    const reread = () =>
+      readSystemUsesLightTheme((light) => {
+        taskbarLight = light
+        redraw()
+      })
+    nativeTheme.on('updated', reread)
+    reread()
+  }
 
   // On Linux the portal tells when the desktop's light/dark setting changes, and the mark is drawn again.
   if (process.platform === 'linux') {
     const stop = watchColorScheme((next) => {
       scheme = next
-      if (tray !== undefined && !tray.isDestroyed()) tray.setImage(picture(waiting > 0))
+      redraw()
     })
     app.once('will-quit', stop)
   }

@@ -11,6 +11,13 @@ export const parseScheme = (text: string): Scheme | undefined => {
   return value === undefined ? undefined : (Number(value) as Scheme)
 }
 
+/** Whether a line of `gdbus monitor` is the portal's change of the colour scheme: this setting's namespace and key, exactly. */
+export const isSchemeChange = (line: string): boolean =>
+  line.includes('SettingChanged') && line.includes("'org.freedesktop.appearance', 'color-scheme'")
+
+/** How long to wait before starting the monitor again after it ended `failures` times in a row: a second, doubling, at most a minute. */
+export const restartAfter = (failures: number): number => Math.min(60_000, 1000 * 2 ** failures)
+
 /** Whether the panel is dark. Chromium cannot say on Linux, and most panels are dark: light only where the desktop says light. */
 export const darkPanel = (scheme: Scheme | undefined): boolean => scheme !== 2
 
@@ -43,26 +50,49 @@ export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void):
       },
     )
   }
-  try {
-    monitor = spawn('gdbus', ['monitor', ...PORTAL], { stdio: ['ignore', 'pipe', 'ignore'] })
+  // The monitor is a child that can end (the bus restarts, gdbus is killed): it is started again after a pause that grows, and
+  // the snapshot is read again once it speaks, as a change in the gap would be missed.
+  let failures = 0
+  let restart: NodeJS.Timeout | undefined
+  const listen = () => {
+    let child: ChildProcess
+    try {
+      child = spawn('gdbus', ['monitor', ...PORTAL], { stdio: ['ignore', 'pipe', 'ignore'] })
+    } catch {
+      // No gdbus: the default stands.
+      return
+    }
+    monitor = child
     let pending = ''
-    monitor.stdout?.on('data', (chunk: Buffer) => {
+    let gone = false
+    child.stdout?.on('data', (chunk: Buffer) => {
+      failures = 0
       snapshot(true)
       const lines = (pending + chunk.toString()).split('\n')
       pending = lines.pop() ?? ''
       for (const line of lines) {
-        if (!line.includes('SettingChanged') || !line.includes('color-scheme')) continue
+        if (!isSchemeChange(line)) continue
         const scheme = parseScheme(line)
         if (scheme === undefined || stopped) continue
         heard = true
         changed(scheme)
       }
     })
-    monitor.on('error', () => snapshot(false))
-    monitor.unref()
-  } catch {
-    // No gdbus: the default stands.
+    const ended = () => {
+      if (gone) return
+      gone = true
+      if (stopped) return
+      snapshot(false)
+      confirmed = false
+      heard = false
+      restart = setTimeout(listen, restartAfter(failures++))
+      restart.unref()
+    }
+    child.on('error', ended)
+    child.on('close', ended)
+    child.unref()
   }
+  listen()
 
   const timer = setTimeout(() => snapshot(false), 1000)
   timer.unref()
@@ -70,6 +100,25 @@ export const watchColorScheme = (changed: (scheme: Scheme | undefined) => void):
   return () => {
     stopped = true
     clearTimeout(timer)
+    clearTimeout(restart)
     monitor?.kill()
   }
+}
+
+const PERSONALIZE = String.raw`HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`
+
+/** Whether the system (taskbar) theme is light, from `reg query … /v SystemUsesLightTheme`; nothing where the value is not there. */
+export const parseSystemUsesLightTheme = (text: string): boolean | undefined => {
+  const value = /SystemUsesLightTheme\s+REG_DWORD\s+(0x[0-9a-f]+)/i.exec(text)?.[1]
+  return value === undefined ? undefined : Number(value) !== 0
+}
+
+/**
+ * Reads whether the Windows taskbar is light. That is the system theme, `SystemUsesLightTheme`; the apps' theme
+ * (nativeTheme.shouldUseDarkColors, `AppsUseLightTheme`) is another setting and may differ. `undefined` where it cannot be read.
+ */
+export const readSystemUsesLightTheme = (done: (light: boolean | undefined) => void): void => {
+  execFile('reg', ['query', PERSONALIZE, '/v', 'SystemUsesLightTheme'], { timeout: 5000, windowsHide: true }, (error, out) => {
+    done(error === null ? parseSystemUsesLightTheme(out) : undefined)
+  })
 }

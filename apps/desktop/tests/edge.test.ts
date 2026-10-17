@@ -8,7 +8,7 @@ import { LOGO_BORE, LOGO_SECTION } from '@althar/ui'
 
 import { BORE, SECTION } from '../scripts/trayPictures'
 import { readAppIcon, writeAppIcon } from '../src/main/appIcon'
-import { darkPanel, parseScheme } from '../src/main/colorScheme'
+import { darkPanel, isSchemeChange, parseScheme, parseSystemUsesLightTheme, restartAfter } from '../src/main/colorScheme'
 import { edgeIn, markFile, notchIn, pointerOn, readEdge, sheetBounds, trayItems, writeEdge } from '../src/main/edge'
 
 /*
@@ -152,5 +152,30 @@ describe('the desktop colour scheme on Linux', () => {
     expect(darkPanel(2)).toBe(false)
     expect(darkPanel(0)).toBe(true)
     expect(darkPanel(undefined)).toBe(true)
+  })
+})
+
+describe('the monitor and the Windows taskbar', () => {
+  it('takes only the colour-scheme change of the appearance namespace', () => {
+    const line = (namespace: string, key: string) =>
+      `/org/freedesktop/portal/desktop: org.freedesktop.portal.Settings.SettingChanged ('${namespace}', '${key}', <uint32 1>)`
+    expect(isSchemeChange(line('org.freedesktop.appearance', 'color-scheme'))).toBe(true)
+    expect(isSchemeChange(line('org.freedesktop.appearance', 'accent-color'))).toBe(false)
+    expect(isSchemeChange(line('org.gnome.desktop.interface', 'color-scheme'))).toBe(false)
+    expect(isSchemeChange('Monitoring signals on object /org/freedesktop/portal/desktop')).toBe(false)
+  })
+
+  it('waits longer each time the monitor ends again, up to a minute', () => {
+    expect([0, 1, 2, 3].map(restartAfter)).toEqual([1000, 2000, 4000, 8000])
+    expect(restartAfter(20)).toBe(60_000)
+  })
+
+  it('reads the taskbar theme from the registry, not the apps one', () => {
+    const query = (name: string, value: string) =>
+      `\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\r\n    ${name}    REG_DWORD    ${value}\r\n`
+    expect(parseSystemUsesLightTheme(query('SystemUsesLightTheme', '0x0'))).toBe(false)
+    expect(parseSystemUsesLightTheme(query('SystemUsesLightTheme', '0x1'))).toBe(true)
+    expect(parseSystemUsesLightTheme(query('AppsUseLightTheme', '0x1'))).toBeUndefined()
+    expect(parseSystemUsesLightTheme('ERROR: The system was unable to find the specified registry key or value.')).toBeUndefined()
   })
 })
