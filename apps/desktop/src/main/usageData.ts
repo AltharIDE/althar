@@ -99,12 +99,20 @@ export const usageEventOf = (said: unknown): UsageEvent | null => {
   return { name, properties: Object.fromEntries(kept) }
 }
 
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+/** Whether a value is an install id: a random UUID v4, lowercase, as `randomUUID` makes and the reports Worker takes. */
+export const isInstallId = (value: unknown): value is string => typeof value === 'string' && UUID_V4.test(value)
+
 /**
- * This install, as usage data knows it, kept in the profile's desktop.json:
- * a random id, made the first time, and the version Althar last opened on,
- * kept whether or not anything is sent, so turning the switch on later
- * never reports an update from long ago. `updatedFrom` is that version when
- * this one differs: an update was installed.
+ * This install, kept in the profile's desktop.json: a random id, made the
+ * first time, and the version Althar last opened on, kept whether or not
+ * anything is sent, so turning the switch on later never reports an update
+ * from long ago. `updatedFrom` is that version when this one differs: an
+ * update was installed. The id is the install's one id: usage data's, and
+ * what ties a problem report to the install it came from (report/reports.ts,
+ * DEV-61), whatever usage data's switch says. It names no machine, account
+ * or person.
  */
 export const installOf = async (
   profile: string,
@@ -112,7 +120,7 @@ export const installOf = async (
 ): Promise<{ readonly id: string; readonly updatedFrom: string | null }> => {
   const kept = (await readPreferences(profile)).usage
   const was = typeof kept === 'object' && kept !== null ? (kept as { readonly id?: unknown; readonly version?: unknown }) : {}
-  const id = typeof was.id === 'string' && /^[0-9a-f-]{36}$/.test(was.id) ? was.id : randomUUID()
+  const id = isInstallId(was.id) ? was.id : randomUUID()
   const last = typeof was.version === 'string' ? was.version : null
   // One that can't be kept is made again next time: usage data is never worth a failure.
   if (id !== was.id || last !== version) await writePreference(profile, 'usage', { id, version }).catch(() => undefined)

@@ -407,7 +407,7 @@ never under running work.
   person: a narrow exception, an account's token in memory for one call to a
   per-provider allowlisted usage URL, never written, refreshed, logged or
   sent elsewhere, no Claude endpoint
-  ([ADR-045](decisions/045-a-usage-read-may-use-an-accounts-token-once.md),
+  ([ADR-046](decisions/046-a-usage-read-may-use-an-accounts-token-once.md),
   [architecture 03](architecture/03-agent-runtime-and-auth.md#the-usage-read)).
 - [ ] **OpenCode 2.x usage.** Its credentials moved into `opencode.db` and
   `auth list` says "can't tell", so an OpenCode 2.x account has no usage

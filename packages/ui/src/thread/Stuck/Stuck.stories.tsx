@@ -114,6 +114,18 @@ export const OutOfUsage: Story = {
   },
 }
 
+/** Report this, quiet at the end of its answers: it opens Report a problem with this task. */
+export const Reporting: Story = {
+  args: { onReport: fn() },
+  play: async ({ args, canvasElement }) => {
+    const c = within(canvasElement)
+    await userEvent.click(c.getByRole('button', { name: 'Report this' }))
+    await expect(args.onReport).toHaveBeenCalledOnce()
+    // It answers nothing: the step still waits.
+    await expect(c.getByRole('button', { name: 'Tell the lead' })).toBeInTheDocument()
+  },
+}
+
 export const AllStates: Story = {
   parameters: statesOn({ hover: 'button:first-of-type', focus: 'button:first-of-type', pressed: 'button:first-of-type' }),
   render: (args) => (
@@ -124,6 +136,7 @@ export const AllStates: Story = {
         { state: 'no other agent', node: <Stuck {...args} agents={[]} /> },
         { state: 'bare', node: <Stuck {...args} read={undefined} output={undefined} /> },
         { state: 'nothing tried', node: <Stuck {...args} tried={[]} read={undefined} output={undefined} /> },
+        { state: 'with report this', node: <Stuck {...args} read={undefined} output={undefined} onReport={() => {}} /> },
         { state: 'tell, hover', force: 'hover', node: <Stuck {...args} read={undefined} output={undefined} /> },
         { state: 'tell, focus', force: 'focus', node: <Stuck {...args} read={undefined} output={undefined} /> },
       ]}

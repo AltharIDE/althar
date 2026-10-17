@@ -14,11 +14,12 @@ import type { WindowAction } from '../renderer/data/services'
  * dictation: where the speech model and the microphone stand, the model's
  * download, and what was said, sent to be written down. A token on the
  * clipboard, while connecting a service asks for one. An update ready to
- * install, and restarting into it. And an update that couldn't move the
+ * install, and restarting into it. An update that couldn't move the
  * store, with where its copy is as the person knows the place, which main
  * shows in the file manager when asked. Whether DO_NOT_TRACK is set, which
- * keeps usage data off. The page never sees or sends a path. It gets no
- * Node, no file system, no shell.
+ * keeps usage data off. And reporting a problem, and the page's own errors,
+ * for the log. The page never sees or sends a path. It gets no Node, no
+ * file system, no shell.
  */
 
 ipcRenderer.on('althar:port', (event) => {
@@ -31,6 +32,12 @@ ipcRenderer.on('althar:edge-pointed', (_event, on: unknown) => {
   if (typeof on === 'boolean') for (const listener of pointing) listener(on)
 })
 
+/* Report a problem, asked from the page or from Help in the app's menu: the page opens the dialog, with what it is about. */
+const reporting = new Set<(about: unknown) => void>()
+const reportAsked = (about: unknown) => {
+  for (const listener of reporting) listener(about)
+}
+ipcRenderer.on('althar:report', () => reportAsked({ kind: 'asked', from: 'menu' }))
 /* Whether the window is maximized, on the window's own buttons' account. */
 const maximized = new Set<(maximized: boolean) => void>()
 ipcRenderer.on('althar:maximized', (_event, on: unknown) => {
@@ -139,6 +146,21 @@ contextBridge.exposeInMainWorld('althar', {
     return () => void storeFailed.delete(listener)
   },
   showBackup: (): Promise<void> => ipcRenderer.invoke('althar:show-backup'),
+  // Report a problem (DEV-61): the page's dialog opens, about what it was asked from; main takes the screenshot as it opens, gathers the rest, and sends or saves it.
+  reportProblem: (about: unknown): void => reportAsked(about),
+  report: {
+    open: (context: unknown): Promise<unknown> => ipcRenderer.invoke('althar:report-open', context),
+    preview: (reportId: string): Promise<unknown> => ipcRenderer.invoke('althar:report-preview', reportId),
+    send: (reportId: string, choices: unknown): Promise<unknown> => ipcRenderer.invoke('althar:report-send', reportId, choices),
+    close: (reportId: string): void => ipcRenderer.send('althar:report-close', reportId),
+    onAsked: (listener: (about: unknown) => void): (() => void) => {
+      reporting.add(listener)
+      return () => void reporting.delete(listener)
+    },
+  },
+  // What the page couldn't handle, for main's log: its message and stack, nothing else.
+  logError: (error: { kind: 'error' | 'rejection'; message: string; stack: string; source?: string }): void =>
+    ipcRenderer.send('althar:window-error', error),
   onOpen: (listener: (threadId: string) => void): (() => void) => {
     opening.add(listener)
     if (pending !== undefined) {

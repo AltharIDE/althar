@@ -4,7 +4,7 @@ import { isAbsolute, join, normalize, sep } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
 /*
- * The one place that opens an agent's credential file (ADR-045, the usage
+ * The one place that opens an agent's credential file (ADR-046, the usage
  * read). It is not exported from the package, and only `usageRead.ts` imports
  * it: a test fails if another file does. It reads one named file inside one
  * account's home, and takes one string out of it by its path, without ever
