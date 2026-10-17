@@ -4,7 +4,7 @@ import { EdgeSheet, Island, ISLAND_HOVER, type NotchSize } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { refOf, text as homeText } from '../home/HomeView'
-import { needLineOf, needsOf, workOf } from '../home/needs'
+import { DEFAULT_ANSWER, needLineOf, needsOf, workOf } from '../home/needs'
 import s from './Edge.module.css'
 import type { EdgeModel } from './useEdge'
 import { isFinished } from '../../shared/calls'
@@ -97,7 +97,11 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
         )}
       </Pointed>
     )
-  return <Measured onHeight={host.edgeSize}>{sheet}</Measured>
+  return (
+    <Measured onHeight={host.edgeSize} opening={showing && home !== null}>
+      {sheet}
+    </Measured>
+  )
 }
 
 /**
@@ -148,9 +152,18 @@ function Pointed({
 /**
  * The menu bar's sheet, telling the main process how tall it draws, so its
  * window fits it; taller than the screen allows, it scrolls in the window.
+ * As it opens (`opening`: shown, with the home loaded), focus goes to the
+ * first permission's Allow once, so Enter answers it, as the window's card
+ * does, if it is on the page itself. Never again while it stays open: after an
+ * answer focus stays on that line, and a second Enter allows nothing unread.
  */
-function Measured({ children, onHeight }: { children: ReactNode; onHeight: (height: number) => void }) {
+function Measured({ children, onHeight, opening }: { children: ReactNode; onHeight: (height: number) => void; opening: boolean }) {
   const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!opening) return
+    const on = document.activeElement
+    if (on === null || on === document.body) box.current?.querySelector<HTMLElement>(DEFAULT_ANSWER)?.focus({ preventScroll: true })
+  }, [opening])
   useEffect(() => {
     const element = box.current
     if (element === null) return
