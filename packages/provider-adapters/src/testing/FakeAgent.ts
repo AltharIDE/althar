@@ -1186,12 +1186,33 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
       // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five
-      // seconds, then a sentence, and `[fails-after:5s]` gives up after them, as when Anthropic's API fails; cancelled, it stops.
-      const slowly = /\[(answers|fails)-after:(\d+)s\]/.exec(text)
+      // seconds, then a sentence; `[thinks-after:5s]` and `[reads-after:5s]` first think aloud, or read a file, for a second and a
+      // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails. Cancelled, it stops.
+      const slowly = /\[(answers|thinks|reads|fails)-after:(\d+)s\]/.exec(text)
       if (slowly?.[2] !== undefined) {
-        for (let waited = 0; !session.cancelled && waited < Number(slowly[2]) * 1000; waited += 10) await pause(10)
+        const waitOut = async (ms: number) => {
+          for (let waited = 0; !session.cancelled && waited < ms; waited += 10) await pause(10)
+        }
+        await waitOut(Number(slowly[2]) * 1000)
         if (session.cancelled) return { stopReason: 'cancelled' }
         if (slowly[1] === 'fails') throw new acp.RequestError(-32603, API_ERROR_MESSAGE)
+        if (slowly[1] === 'thinks')
+          await update({
+            sessionUpdate: 'agent_thought_chunk',
+            content: { type: 'text', text: 'The checkout calls the payment provider once, and gives up on its first timeout.' },
+          })
+        if (slowly[1] === 'reads')
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'read-1',
+            title: 'Read checkout.ts',
+            kind: 'read',
+            status: 'in_progress',
+            locations: [{ path: 'checkout.ts' }],
+          })
+        if (slowly[1] !== 'answers') await waitOut(1500)
+        if (session.cancelled) return { stopReason: 'cancelled' }
+        if (slowly[1] === 'reads') await update({ sessionUpdate: 'tool_call_update', toolCallId: 'read-1', status: 'completed' })
         await say('Looked into it: the payment call has no retry, so one slow answer from the provider fails the whole checkout.')
         return ended()
       }

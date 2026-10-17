@@ -161,6 +161,7 @@ export interface RoundSource {
   readonly outputs?: ReadonlyMap<string, OutputSoFar>
   readonly turnStarted?: string | null
   readonly openedAt?: string | null
+  readonly reading?: boolean
 }
 
 /** A task's thread in rounds, oldest first, with what is still being written but not yet read at the end. */
@@ -179,6 +180,12 @@ export const roundsOf = (
     stretches.at(-1)?.push(item)
     if (item.kind === 'step_result') stretches.push([])
   }
+  // When the newest of what came before the last stretch was written: what was asked in it may have waited behind that.
+  const earlierAt = new Date(
+    items
+      .slice(0, items.length - (stretches.at(-1)?.length ?? 0))
+      .reduce((newest, item) => Math.max(newest, Date.parse(item.createdAt)), 0),
+  ).toISOString()
   const blocks = stretches.flatMap((stretch, index) => {
     const last = index === stretches.length - 1
     return blocksOf(
@@ -191,6 +198,8 @@ export const roundsOf = (
         ...(last && source.turnStarted !== undefined ? { turnStarted: source.turnStarted } : {}),
         // What opens the thread is answered in its first stretch, when that is all there is yet.
         ...(last && index === 0 && source.openedAt !== undefined ? { openedAt: source.openedAt } : {}),
+        ...(last && source.reading !== undefined ? { reading: source.reading } : {}),
+        ...(last && index > 0 ? { earlierAt } : {}),
       },
       last ? streaming : new Map(),
       ago,

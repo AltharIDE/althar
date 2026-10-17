@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   type Block,
   blocksOf,
+  type ThreadSource,
   planStateOf,
   type Streamed,
   targetOf,
@@ -155,13 +156,31 @@ describe('the wait for a reply', () => {
     expect(kinds(blocksOf(source([...thread, items.tool({ status: 'in_progress' })], true), new Map(), at))).toEqual(['you', 'turn, live'])
   })
 
-  it('counts from when the turn started, not from when a message that waited its turn was sent', () => {
-    const thread = [items.you('Next')]
-    const waiting = (turnStarted: string | null) => blocksOf({ ...source(thread, true), turnStarted }, new Map(), at, after(65)).at(-1)
-    expect(waiting(after(60))).toMatchObject({ kind: 'waiting', took: '5s' })
-    // Where the turn heard of is the one before, it counts from the message; and so where it isn't known.
-    expect(waiting(after(-600))).toMatchObject({ took: '1m 5s', slow: true })
-    expect(waiting(null)).toMatchObject({ took: '1m 5s' })
+  it('counts from when it was sent, through the agent’s start, and from when its turn started where it waited behind one', () => {
+    const waiting = (thread: ReadonlyArray<ThreadItem>, extra: Partial<ThreadSource>) =>
+      blocksOf({ ...source(thread, true), ...extra }, new Map(), at, after(65)).at(-1)
+    // Sent with nothing to wait behind, it counts from then: while the agent starts, and once its turn has.
+    const next = items.you('Next')
+    expect(waiting([next], { turnRunning: false, reading: true })).toMatchObject({ kind: 'waiting', took: '1m 5s', slow: true })
+    expect(waiting([next], { turnStarted: after(60) })).toMatchObject({ took: '1m 5s' })
+    // Sent while a turn was at work, and read after it, it counts from when the turn on it started.
+    const behind = [items.you('First'), { ...items.says('Still on the first'), createdAt: after(30) }, next]
+    expect(waiting(behind, { turnStarted: after(60) })).toMatchObject({ kind: 'waiting', took: '5s', slow: false })
+    // Where the turn heard of is the one before, from the message; where none is heard of yet, uncounted.
+    expect(waiting(behind, { turnStarted: after(-600) })).toMatchObject({ took: '1m 5s', slow: true })
+    expect(waiting(behind, { turnStarted: null })).toMatchObject({ took: null, slow: false })
+  })
+
+  it('has what waits after the last reply asked as the agent starts to read it, and queued where nothing will', () => {
+    const thread = [items.you('Go'), items.says('Done.'), items.you('And the docs?', { state: 'queued', interrupting: false })]
+    const shown = (reading: boolean) => blocksOf({ ...source(thread), reading }, new Map(), at)
+    expect(kinds(shown(true))).toEqual(['you', 'turn', 'you', 'waiting'])
+    expect(shown(true)[2]).toMatchObject({ delivery: Delivery.Delivered })
+    expect(kinds(shown(false))).toEqual(['you', 'turn', 'you'])
+    expect(shown(false)[2]).toMatchObject({ delivery: Delivery.Queued })
+    // Interrupting, it says so, read or not.
+    const now = [items.you('Go'), items.says('Done.'), items.you('Stop', { state: 'queued', interrupting: true })]
+    expect(blocksOf({ ...source(now), reading: true }, new Map(), at)[2]).toMatchObject({ delivery: Delivery.Interrupting })
   })
 
   it('waits on what the coordinator passed on, and on what opens the thread from outside it, but not on what waits behind a turn', () => {

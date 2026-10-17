@@ -322,6 +322,14 @@ export interface ThreadSource {
   readonly turnStarted?: string | null
   /** When what opens the thread was asked, where it isn't one of its items, as a task's request: the agent's first turn answers it. */
   readonly openedAt?: string | null
+  /**
+   * What waits after the agent's last reply is being read now, with nothing
+   * to wait behind (see `readingNow`): it is what the reply is waited for,
+   * not a queue, though the agent may still be starting to read it.
+   */
+  readonly reading?: boolean
+  /** When the newest of what comes before these items was written, where they are the last stretch of a longer thread. */
+  readonly earlierAt?: string
 }
 
 /** What a part handed back, for the turn to gather. */
@@ -378,6 +386,9 @@ export const blocksOf = (
   const blocks: Array<Block> = []
   /** What the agent was last asked, in the thread: what the person said it has, or what the coordinator passed on. */
   let asked: ThreadItem | null = null
+  /** When the newest item so far was written; and whether what was last asked waited behind something newer, as a turn at work. */
+  let newest = source.earlierAt === undefined ? 0 : Date.parse(source.earlierAt)
+  let waitedBehind = false
   /** When each turn began and last grew, by its id. */
   const spans = new Map<string, { from: string; to: string }>()
   const add = (agentId: string | null, at: string, part: Part) => {
@@ -404,14 +415,21 @@ export const blocksOf = (
     spans.set(part.id, { from: at, to: at })
   }
   for (const item of source.items) {
+    const before = newest
+    newest = Math.max(newest, Date.parse(item.createdAt))
     // The agent asking the person something: its question stands in its place.
     if (item.kind === 'tool_call' && item.content.asks === true) continue
     switch (item.kind) {
       case 'user_message': {
         // What waits its turn shows in the composer's queue, where it can be edited or taken back; what was taken back is gone.
         if (item.input?.state === 'withdrawn' || (queue && item.input?.state === 'queued' && !item.input.interrupting)) continue
+        // Being read now, it is the agent's already, in the store's word a moment later.
         const delivery =
-          item.input?.state === 'queued' ? (item.input.interrupting ? Delivery.Interrupting : Delivery.Queued) : Delivery.Delivered
+          item.input?.state === 'queued' && (item.input.interrupting || source.reading !== true)
+            ? item.input.interrupting
+              ? Delivery.Interrupting
+              : Delivery.Queued
+            : Delivery.Delivered
         blocks.push({
           kind: 'you',
           id: item.id,
@@ -421,7 +439,10 @@ export const blocksOf = (
           links: item.content.links,
           pictures: item.content.pictures,
         })
-        if (delivery === Delivery.Delivered) asked = item
+        if (delivery === Delivery.Delivered) {
+          asked = item
+          waitedBehind = before > Date.parse(item.createdAt)
+        }
         continue
       }
       case 'arrival':
@@ -462,7 +483,10 @@ export const blocksOf = (
         // What Althar itself says, such as a change of agent, is a line across the thread.
         if (item.content.source === 'runtime') {
           blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
-          if (relayed(item.content)) asked = item
+          if (relayed(item.content)) {
+            asked = item
+            waitedBehind = before > Date.parse(item.createdAt)
+          }
           continue
         }
     }
@@ -481,12 +505,12 @@ export const blocksOf = (
     )
   }
   // The turn running is the last one, unless what the agent was last asked came after it: then the last is over, and the
-  // running one hasn't said anything yet.
+  // running one hasn't said anything yet; or none runs yet, as the agent starts to read it.
   const lastTurn = blocks.findLastIndex((block) => block.kind === 'turn')
   const askedId = asked?.id
   // Where what it was last asked stands: among the blocks, or before them all, where it opens the thread from outside it.
   const askedAt = askedId !== undefined ? blocks.findLastIndex((block) => block.id === askedId) : source.openedAt == null ? null : -0.5
-  const waiting = turnRunning && askedAt !== null && askedAt > lastTurn
+  const waiting = (turnRunning || source.reading === true) && askedAt !== null && askedAt > lastTurn
   const runningTurn = turnRunning && !waiting ? lastTurn : -1
   // What an agent says after its step's result, closing its turn, folds with the work that led to it. A run it starts on its own after, with tool calls or a plan, is work of its own: it folds under its own time, and its last message shows.
   const merged: Array<Block> = []
@@ -524,16 +548,23 @@ export const blocksOf = (
   })
   const askedWhen = asked?.createdAt ?? source.openedAt
   if (!waiting || askedWhen == null) return drawn
-  // Counted from when its turn started, or from when it was asked where that is later, as when the turn heard of is the one before.
-  const since = Math.max(Date.parse(source.turnStarted ?? askedWhen), Date.parse(askedWhen))
-  const waited = (Date.parse(now) - since) / 1000
+  // Counted from when it was asked, through the agent's start where it starts for it. Where it waited behind something first,
+  // as what the person sent while the agent was at work, or a task's request behind its setup, from when the turn on it started,
+  // or from when it was asked where that is later, as when the turn heard of is the one before; uncounted until then.
+  const since =
+    asked !== null && !waitedBehind
+      ? Date.parse(askedWhen)
+      : source.turnStarted == null || !turnRunning
+        ? null
+        : Math.max(Date.parse(source.turnStarted), Date.parse(askedWhen))
+  const waited = since === null ? 0 : (Date.parse(now) - since) / 1000
   return [
     ...drawn,
     {
       kind: 'waiting',
       // One of its own, whatever it waits on, so it never starts again as the store's copy of a message takes the window's place.
       id: 'waiting',
-      took: waited >= WAIT.counted ? took(new Date(since).toISOString(), now) : null,
+      took: since !== null && waited >= WAIT.counted ? took(new Date(since).toISOString(), now) : null,
       slow: waited >= WAIT.slow,
     },
   ]

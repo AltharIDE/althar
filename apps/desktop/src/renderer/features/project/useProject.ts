@@ -246,8 +246,9 @@ export const useProject = (projectId: string): ProjectModel => {
       } catch (failure) {
         fail(failure)
       } finally {
-        setPending(false)
+        // Done once the head is read again: what it started, such as the agent the person's message starts, shows as it goes on.
         await readHead()
+        setPending(false)
       }
     },
     [readHead, fail],

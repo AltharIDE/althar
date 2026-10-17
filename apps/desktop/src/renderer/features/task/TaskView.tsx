@@ -40,7 +40,7 @@ import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, useDraft } from '../../shared/drafts'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
-import { queuedOf, queueShown, withQueued } from '../../shared/items'
+import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
@@ -381,7 +381,13 @@ export function TaskView({
     return () => window.removeEventListener('keydown', onKey)
   }, [onBack, open, setFace])
   // A running turn says how long it has worked so far, a task under way how long it has run, and a run of it how long it has been up.
-  const now = useNow(ticking(model.snapshot) || (model.snapshot?.task.launches.some((launch) => launch.ended === null) ?? false))
+  const now = useNow(
+    ticking(model.snapshot) ||
+      // While what the person sent is on its way, or the lead starts for it, how long they have waited.
+      model.pending ||
+      model.snapshot?.session?.state === 'starting' ||
+      (model.snapshot?.task.launches.some((launch) => launch.ended === null) ?? false),
+  )
   // What its pull request says while the task is open shows on the pill over the composer for a moment.
   const heard = useHeard(model.snapshot?.items ?? null)
   const snapshot = model.snapshot
@@ -447,6 +453,7 @@ export function TaskView({
         items: snapshot.items,
         turnRunning: busy,
         turnStarted: session?.turnStartedAt ?? null,
+        reading: readingNow(session, model.pending, snapshot.task.queued !== null || snapshot.task.waits !== null),
         // What the person asked for, which opens the thread above, is what the lead's first turn answers.
         openedAt: snapshot.task.request === null || snapshot.earlier ? null : snapshot.task.startedAt,
         worktree: snapshot.task.worktree,

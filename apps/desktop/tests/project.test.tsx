@@ -658,7 +658,10 @@ describe('the Talk room', () => {
     try {
       const queued = items.you('Next', { state: 'queued', interrupting: false })
       const { client, emit } = fakeClient({
-        getCoordinator: vi.fn(async () => coordinatorSnapshot({ session, items: [queued, items.card(card(), 'c1')] })),
+        // Althar no longer holds the coordinator, so what waits for it stays queued.
+        getCoordinator: vi.fn(async () =>
+          coordinatorSnapshot({ session: { ...session, held: false }, items: [queued, items.card(card(), 'c1')] }),
+        ),
         getThreadItem: vi.fn(async (_threadId: string, itemId: string) =>
           itemId === queued.id ? { ...queued, input: { state: 'delivered' as const, interrupting: false } } : items.says('Read again'),
         ),
@@ -694,7 +697,7 @@ describe('the Talk room', () => {
     }
   })
 
-  it('shows the turn running only once what it took is read as delivered, never in the queue on its way', async () => {
+  it('shows the coordinator thinking on what waits for it idle, and the turn on it only once that is read as delivered', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
       const sent = items.you('Why is checkout slow?', { state: 'queued', interrupting: false })
@@ -708,18 +711,19 @@ describe('the Talk room', () => {
         getThreadItem: vi.fn(() => new Promise<ThreadItem>((resolve) => (delivered = resolve))),
       })
       withServices(<Project />, client)
-      // Read before the runtime gave it to the coordinator, it waits; the turn on it starts.
-      await screen.findByText('Queued · the coordinator reads it next')
+      // Read before the runtime gave it to the coordinator, idle, it is being read: the coordinator thinks; then the turn on it starts.
+      expect(await screen.findByText('Thinking')).toBeTruthy()
+      expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull()
       act(() => emit(changed('provider_session', 's1', 'thc')))
       await vi.advanceTimersByTimeAsync(50)
       await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledWith('thc', sent.id))
       // The head that says so waits for the message read again: it doesn't jump into the composer's queue meanwhile.
       expect(screen.queryByRole('region', { name: 'Queued; the coordinator reads it next' })).toBeNull()
-      expect(screen.queryByText('Thinking')).toBeNull()
+      expect(screen.getByText('Why is checkout slow?')).toBeTruthy()
       act(() => delivered({ ...items.you('Why is checkout slow?', { state: 'delivered', interrupting: false }), id: sent.id }))
-      expect(await screen.findByText('Thinking')).toBeTruthy()
+      await waitFor(() => expect(screen.getByRole('textbox', { name: /^Add to the queue/ })).toBeTruthy())
+      expect(screen.getByText('Thinking')).toBeTruthy()
       expect(screen.queryByRole('region', { name: 'Queued; the coordinator reads it next' })).toBeNull()
-      expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull()
     } finally {
       vi.useRealTimers()
     }
