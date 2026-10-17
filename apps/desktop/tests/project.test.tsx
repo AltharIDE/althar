@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type CoordinatorSnapshot } from '@althar/contracts'
+import { ApiError, type CoordinatorSnapshot, type ThreadItem } from '@althar/contracts'
 import { Room } from '@althar/ui'
 
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
@@ -689,6 +689,37 @@ describe('the Talk room', () => {
       ).toEqual(['c1', 'i9', queued.id].toSorted())
       expect(client.getCoordinator).toHaveBeenLastCalledWith('p1', { limit: 0 })
       await waitFor(() => expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows the turn running only once what it took is read as delivered, never in the queue on its way', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const sent = items.you('Why is checkout slow?', { state: 'queued', interrupting: false })
+      let delivered: (item: ThreadItem) => void = () => undefined
+      const { client, emit } = fakeClient({
+        getCoordinator: vi
+          .fn(async () =>
+            coordinatorSnapshot({ session: { ...session, turnRunning: true, turnStartedAt: new Date().toISOString() }, items: [] }),
+          )
+          .mockResolvedValueOnce(coordinatorSnapshot({ session, items: [sent] })),
+        getThreadItem: vi.fn(() => new Promise<ThreadItem>((resolve) => (delivered = resolve))),
+      })
+      withServices(<Project />, client)
+      // Read before the runtime gave it to the coordinator, it waits; the turn on it starts.
+      await screen.findByText('Queued · the coordinator reads it next')
+      act(() => emit(changed('provider_session', 's1', 'thc')))
+      await vi.advanceTimersByTimeAsync(50)
+      await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledWith('thc', sent.id))
+      // The head that says so waits for the message read again: it doesn't jump into the composer's queue meanwhile.
+      expect(screen.queryByRole('region', { name: 'Queued; the coordinator reads it next' })).toBeNull()
+      expect(screen.queryByText('Thinking')).toBeNull()
+      act(() => delivered({ ...items.you('Why is checkout slow?', { state: 'delivered', interrupting: false }), id: sent.id }))
+      expect(await screen.findByText('Thinking')).toBeTruthy()
+      expect(screen.queryByRole('region', { name: 'Queued; the coordinator reads it next' })).toBeNull()
+      expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull()
     } finally {
       vi.useRealTimers()
     }

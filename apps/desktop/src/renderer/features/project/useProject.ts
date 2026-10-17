@@ -136,19 +136,38 @@ export const useProject = (projectId: string): ProjectModel => {
     [setCoordinator],
   )
 
-  /** The thread's head again: the agent working, the one it would start on. Its items stay as they are. */
+  /** What the window holds of the thread now, for a read that lands later. */
+  const held = useRef<ReadonlyArray<ThreadItem>>([])
+  held.current = coordinator?.items ?? []
+
+  const readItems = useCallback(
+    (ids: Iterable<string>) =>
+      threadId === null
+        ? Promise.resolve()
+        : Promise.all([...ids].map((itemId) => newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail))),
+    [client, threadId, newest, arrived, fail],
+  )
+
+  /**
+   * The thread's head again: the agent working, the one it would start on.
+   * Its items stay as they are, but for those it may have moved on, read after
+   * it and landing before it: what still waits its turn, and what else is
+   * asked. The runtime has a message delivered before it says the turn on it
+   * runs, so the thread never shows the turn running while what it took still
+   * waits in the queue.
+   */
   const readHead = useCallback(
-    () =>
+    (also: Iterable<string> = []) =>
       newest(
         'head',
-        client.getCoordinator(projectId, { limit: 0 }),
+        client.getCoordinator(projectId, { limit: 0 }).finally(() => readItems(new Set([...also, ...waiting(held.current)]))),
         (head) =>
           cache.setQueryData<CoordinatorSnapshot>(keys.coordinator(projectId), (current) =>
             current === undefined ? head : { ...head, items: current.items, earlier: current.earlier },
           ),
         fail,
       ),
-    [client, cache, projectId, newest, fail],
+    [client, cache, projectId, newest, readItems, fail],
   )
 
   /** Reads what the gathered changes touched. */
@@ -157,11 +176,10 @@ export const useProject = (projectId: string): ProjectModel => {
     const { head, cards, items } = changed.current
     changed.current = { head: false, cards: false, items: new Set() }
     if (threadId === null) return
-    if (head) void readHead()
     const read = new Set(items)
     if (cards) for (const item of coordinator?.items ?? []) if (item.kind === 'task') read.add(item.id)
-    for (const itemId of read) void newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail)
-  }, [client, threadId, coordinator, readHead, newest, arrived, fail])
+    void (head ? readHead(read) : readItems(read))
+  }, [threadId, coordinator, readHead, readItems])
 
   useWatch((event) => {
     // A command's output as far as it has come is useOutputs'; the coordinator leaves nothing running.

@@ -13,8 +13,10 @@ import { launch, openFirstProject, say, startTask, toConversation } from './supp
  * where its words will start, then how long; then its words in that very
  * place, nothing above them moved. In the coordinator's thread and a task's,
  * and where the agent gives up instead (`[fails-after:4s]`). What the person
- * sent never reads as queued, with nothing to wait behind. The screenshots
- * it takes are this change's own evidence (test-results/first-word-*.png).
+ * sent never reads as queued, with nothing to wait behind; sent while it
+ * thinks, it waits in the composer's queue, with no Thinking of its own. The
+ * screenshots it takes are this change's own evidence
+ * (test-results/first-word-*.png).
  */
 
 /** Where something's top stands in the window, to the pixel. */
@@ -31,16 +33,29 @@ const shoot = async (page: Page, thread: Locator, name: string) => {
   await page.screenshot({ path: `test-results/first-word-${name}.png`, clip, scale: 'css', animations: 'disabled' })
 }
 
-/** From now on, whether anything in the window says Queued. */
+/** From now on, frame by frame, whatever the window shows saying Queued: when, where, and what. */
 const watchQueued = (page: Page) =>
   page.evaluate(() => {
-    const seen = window as unknown as { queuedSeen: boolean }
-    seen.queuedSeen = false
-    new MutationObserver(() => {
-      if (document.body.innerText.includes('Queued')) seen.queuedSeen = true
-    }).observe(document.body, { subtree: true, childList: true, characterData: true })
+    const seen = window as unknown as { queuedSeen: Array<string>; queuedWatch?: number }
+    if (seen.queuedWatch !== undefined) cancelAnimationFrame(seen.queuedWatch)
+    seen.queuedSeen = []
+    const from = performance.now()
+    const shown = (element: Element | null) => {
+      for (let at = element; at !== null; at = at.parentElement) if (Number(getComputedStyle(at).opacity) === 0) return false
+      return element !== null && element.getClientRects().length > 0
+    }
+    const look = () => {
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        if (node.textContent?.includes('Queued') !== true || !shown(node.parentElement)) continue
+        const where = node.parentElement?.closest('[aria-label]')?.getAttribute('aria-label') ?? ''
+        seen.queuedSeen.push(`${Math.round(performance.now() - from)}ms ${where}: ${node.textContent}`)
+      }
+      seen.queuedWatch = requestAnimationFrame(look)
+    }
+    look()
   })
-const queuedSeen = (page: Page) => page.evaluate(() => (window as unknown as { queuedSeen: boolean }).queuedSeen)
+const queuedSeen = (page: Page) => page.evaluate(() => (window as unknown as { queuedSeen: Array<string> }).queuedSeen)
 
 /** Sends, and follows the reply from its first sign to its first words, which must take its place. */
 const answered = async (page: Page, thread: Locator, words: string, name: string) => {
@@ -64,7 +79,7 @@ const answered = async (page: Page, thread: Locator, words: string, name: string
   expect(await top(said)).toBe(before.line)
   await page.waitForTimeout(300)
   await shoot(page, thread, `${name}-words`)
-  expect(await queuedSeen(page)).toBe(false)
+  expect(await queuedSeen(page)).toEqual([])
 }
 
 test('holds the reply’s place, thinking, until its first words take it: in the coordinator’s thread and a task’s', async () => {
@@ -84,6 +99,25 @@ test('holds the reply’s place, thinking, until its first words take it: in the
     await expect(conversation.getByRole('status').filter({ hasText: 'Thinking' })).toHaveCount(0)
     await page.waitForTimeout(300)
     await shoot(page, conversation, 'coordinator-failed')
+
+    // Sent while it thinks, a message waits its turn in the composer's queue, where it can be changed: nothing thinks about it
+    // yet, and the thread goes on thinking about the one before. Then it is read, and thought about, in turn.
+    await say(page, 'And the docs? [answers-after:5s]')
+    const thinking = conversation.getByRole('status').filter({ hasText: 'Thinking' })
+    await expect(thinking).toBeVisible()
+    await say(page, 'Then the changelog. [answers-after:1s]')
+    const queue = page.getByRole('region', { name: 'Queued; the coordinator reads it next' })
+    await expect(queue).toBeVisible()
+    await expect(queue).toContainText('Then the changelog.')
+    await expect(thinking).toHaveCount(1)
+    await page.waitForTimeout(700)
+    const from = await conversation.getByRole('article', { name: /^You/ }).last().boundingBox()
+    const to = await queue.boundingBox()
+    if (from === null || to === null) throw new Error('Nothing to shoot')
+    const clip = { x: to.x - 20, y: from.y - 16, width: to.width + 40, height: to.y + to.height + 16 - (from.y - 16) }
+    await page.screenshot({ path: 'test-results/first-word-coordinator-queued.png', clip, scale: 'css', animations: 'disabled' })
+    await expect(queue).toHaveCount(0, { timeout: 10_000 })
+    await expect(conversation.getByRole('article', { name: /^You/ }).last()).toContainText('Then the changelog.')
 
     // A task's lead, asked again once it's done.
     await startTask(page, 'Add a retry to checkout')
