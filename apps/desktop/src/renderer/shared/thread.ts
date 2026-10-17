@@ -16,6 +16,7 @@ import { took } from './time'
  * worked. Only its last message stays open, or nothing when a step's result
  * follows, since the step's summary is what the person reads. While it runs,
  * the fold says how long it has worked so far and what it is doing now.
+ * Before it has said anything, where its reply will start is held for it.
  */
 
 /** What a message or a tool call handed back beside its words (handed.ts). */
@@ -113,10 +114,26 @@ export type Block =
   | { readonly kind: 'push'; readonly id: string; readonly at: string; readonly request: PushRequestContent }
   /** A review the lead drafted of someone else's pull request, posted only when the person says. */
   | { readonly kind: 'review'; readonly id: string; readonly review: ReviewDraftContent }
+  /**
+   * The agent's turn runs on what it was last asked, and it hasn't said
+   * anything yet: where its reply will start, held for it, with how long it
+   * has been once that is worth saying, and whether that is longer than usual.
+   */
+  | { readonly kind: 'waiting'; readonly id: string; readonly took: string | null; readonly slow: boolean }
 
 /** ACP's tool kinds, as the kit's. */
 /** The notice earlier versions left in a thread when Althar restarted under its lead. */
 const RESTARTED = 'Althar restarted.'
+
+/** What the coordinator passed on to a lead, before notices had roles: by its title. */
+const RELAYED_TITLE = 'From the coordinator'
+
+/** What the coordinator passed on to a lead, which Althar says as the lead reads it: by its role, or before roles, its title. */
+export const relayed = (content: { readonly title: string; readonly role?: string }): boolean =>
+  content.role === 'relayed' || (content.role === undefined && content.title.startsWith(RELAYED_TITLE))
+
+/** How many seconds an agent's first word is waited for before the thread says how long it has been, and then that it's longer than usual. */
+export const WAIT = { counted: 3, slow: 30 }
 
 export const toolKindOf = (kind: string): ToolKind => {
   switch (kind) {
@@ -301,6 +318,10 @@ export interface ThreadSource {
   readonly queue?: boolean
   /** Commands' output as far as it has come, by their tool call's item, while they run. */
   readonly outputs?: ReadonlyMap<string, OutputSoFar>
+  /** When the turn running started, by the runtime's clock: what the wait for its first word is counted from. */
+  readonly turnStarted?: string | null
+  /** When what opens the thread was asked, where it isn't one of its items, as a task's request: the agent's first turn answers it. */
+  readonly openedAt?: string | null
 }
 
 /** What a part handed back, for the turn to gather. */
@@ -355,6 +376,8 @@ export const blocksOf = (
   const queue = source.queue ?? turnRunning
   const outputs = source.outputs ?? new Map<string, OutputSoFar>()
   const blocks: Array<Block> = []
+  /** What the agent was last asked, in the thread: what the person said it has, or what the coordinator passed on. */
+  let asked: ThreadItem | null = null
   /** When each turn began and last grew, by its id. */
   const spans = new Map<string, { from: string; to: string }>()
   const add = (agentId: string | null, at: string, part: Part) => {
@@ -398,6 +421,7 @@ export const blocksOf = (
           links: item.content.links,
           pictures: item.content.pictures,
         })
+        if (delivery === Delivery.Delivered) asked = item
         continue
       }
       case 'arrival':
@@ -438,6 +462,7 @@ export const blocksOf = (
         // What Althar itself says, such as a change of agent, is a line across the thread.
         if (item.content.source === 'runtime') {
           blocks.push({ kind: 'divider', id: item.id, text: noticeText(item.content) })
+          if (relayed(item.content)) asked = item
           continue
         }
     }
@@ -455,8 +480,15 @@ export const blocksOf = (
         : { kind: 'message', id, text: streamed.text, pictures: [], files: [] },
     )
   }
-  // What an agent says after its step's result, closing its turn, folds with the work that led to it. A run it starts on its own after, with tool calls or a plan, is work of its own: it folds under its own time, and its last message shows.
+  // The turn running is the last one, unless what the agent was last asked came after it: then the last is over, and the
+  // running one hasn't said anything yet.
   const lastTurn = blocks.findLastIndex((block) => block.kind === 'turn')
+  const askedId = asked?.id
+  // Where what it was last asked stands: among the blocks, or before them all, where it opens the thread from outside it.
+  const askedAt = askedId !== undefined ? blocks.findLastIndex((block) => block.id === askedId) : source.openedAt == null ? null : -0.5
+  const waiting = turnRunning && askedAt !== null && askedAt > lastTurn
+  const runningTurn = turnRunning && !waiting ? lastTurn : -1
+  // What an agent says after its step's result, closing its turn, folds with the work that led to it. A run it starts on its own after, with tool calls or a plan, is work of its own: it folds under its own time, and its last message shows.
   const merged: Array<Block> = []
   blocks.forEach((block, index) => {
     const step = merged.at(-1)
@@ -467,15 +499,15 @@ export const blocksOf = (
       before?.kind === 'turn' &&
       before.agentId === block.agentId &&
       !block.parts.some((part) => part.kind === 'tool' || part.kind === 'plan')
-    if (!closing || (turnRunning && index === lastTurn)) return void merged.push(block)
+    if (!closing || index === runningTurn) return void merged.push(block)
     const span = spans.get(before.id)
     const after = spans.get(block.id)
     if (span !== undefined && after !== undefined) spans.set(before.id, { ...span, to: after.to })
     merged[merged.length - 2] = { ...before, parts: [...before.parts, ...block.parts] }
   })
   // Each turn folds its work; the one still running says what it is doing now.
-  const live = turnRunning ? merged.findLastIndex((block) => block.kind === 'turn') : -1
-  return merged.map((block, index) => {
+  const live = runningTurn === -1 ? -1 : merged.findLastIndex((block) => block.kind === 'turn')
+  const drawn = merged.map((block, index): Block => {
     if (block.kind !== 'turn') return block
     const span = spans.get(block.id)
     const running = index === live
@@ -490,4 +522,19 @@ export const blocksOf = (
       handed: handedBy(block.parts.map(partHanded), worktree),
     }
   })
+  const askedWhen = asked?.createdAt ?? source.openedAt
+  if (!waiting || askedWhen == null) return drawn
+  // Counted from when its turn started, or from when it was asked where that is later, as when the turn heard of is the one before.
+  const since = Math.max(Date.parse(source.turnStarted ?? askedWhen), Date.parse(askedWhen))
+  const waited = (Date.parse(now) - since) / 1000
+  return [
+    ...drawn,
+    {
+      kind: 'waiting',
+      // One of its own, whatever it waits on, so it never starts again as the store's copy of a message takes the window's place.
+      id: 'waiting',
+      took: waited >= WAIT.counted ? took(new Date(since).toISOString(), now) : null,
+      slow: waited >= WAIT.slow,
+    },
+  ]
 }

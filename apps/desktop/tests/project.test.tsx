@@ -48,6 +48,7 @@ const session = {
   effort: null,
   models: [],
   turnRunning: false,
+  turnStartedAt: null,
   held: true,
   context: null,
   background: [],
@@ -562,6 +563,29 @@ describe('the Talk room', () => {
     expect(await screen.findByText("OpenCode isn't signed in, so the coordinator starts on Claude Code.")).toBeTruthy()
     await userEvent.type(screen.getByRole('textbox', { name: 'Tell the coordinator something' }), 'Hello{Enter}')
     await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code' }))
+  })
+
+  it('shows the coordinator thinking where its reply will start, and its last reply as it was', async () => {
+    const asked = { ...items.you('And the docs?'), createdAt: new Date().toISOString() }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          session: { ...session, turnRunning: true, turnStartedAt: asked.createdAt },
+          items: [
+            items.you('Why is checkout slow?'),
+            items.tool({ title: 'Read checkout.ts' }),
+            items.says('The call has no retry.'),
+            asked,
+          ],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    const thinking = await screen.findByText('Thinking')
+    expect(thinking.closest('article')).toBe(screen.getAllByRole('article').at(-1))
+    // The reply before it is over: its work folded under how long it took, not at work again.
+    expect(screen.getByRole('button', { name: /Worked for/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Working for/ })).toBeNull()
   })
 
   it('interrupts it, sends now, and moves it to another agent while it works', async () => {

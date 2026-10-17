@@ -259,6 +259,8 @@ interface Running {
    * its brief would fill leaves it.
    */
   handover: 'none' | 'under_way' | 'left'
+  /** When its turn running started, in milliseconds: what the person's wait for its first word is counted from. */
+  turnStartedAt: number | null
   /** When its last turn ended, in milliseconds; null before its first. A lead idle past its cache's life is at a break. */
   turnEndedAt: number | null
   /** Its last turn ended a step of its work, or made its task a change (`atBreak`): a break, where a lead may start afresh. */
@@ -504,6 +506,8 @@ export class Sessions extends Context.Service<
         readonly agentId: string
         readonly accountId: string
         readonly turnRunning: boolean
+        /** When the turn running started, in milliseconds; null between turns. */
+        readonly turnStartedAt: number | null
         /** The agent's process, where it runs as one. */
         readonly pid: number | null
         /** How full its context is, in tokens, as the agent last said; null until it says. */
@@ -1116,6 +1120,7 @@ export class Sessions extends Context.Service<
             )
           if (!compacting) running.brief = undefined
           running.turnRunning = true
+          running.turnStartedAt = yield* Clock.currentTimeMillis
           running.atBreak = false
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
@@ -1782,6 +1787,7 @@ export class Sessions extends Context.Service<
             workedAt: null,
             wakeAt: null,
             handover: 'none',
+            turnStartedAt: null,
             turnEndedAt: null,
             atBreak: false,
           }
@@ -2638,6 +2644,7 @@ export class Sessions extends Context.Service<
                   agentId: running.entry.definition.id,
                   accountId: running.account.id,
                   turnRunning: running.turnRunning,
+                  turnStartedAt: running.turnRunning ? running.turnStartedAt : null,
                   pid: running.connection.process?.pid ?? null,
                   context: running.context,
                   stopping: running.stopping,

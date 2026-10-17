@@ -2,7 +2,7 @@ import type { ThreadItem } from '@althar/contracts'
 import { ToolKind, ToolState } from '@althar/ui'
 
 import { type Handed, handedBy, type OutputSoFar } from './handed'
-import { type Block, blocksOf, type Part, type StepResult, type Streamed } from './thread'
+import { type Block, blocksOf, type Part, relayed, type StepResult, type Streamed } from './thread'
 import { text as threadText } from './ThreadBlocks'
 import { took } from './time'
 
@@ -81,8 +81,6 @@ export type RoundBlock =
 
 type NoticeContent = Extract<ThreadItem, { kind: 'notice' }>['content']
 
-/** What the coordinator passed on, by its role; before roles, by its title. */
-const RELAYED_TITLE = 'From the coordinator'
 /** Althar's housekeeping, by its role; before roles, by what it said. */
 const ASIDES = [
   /on a branch of its own/,
@@ -93,7 +91,7 @@ const ASIDES = [
 ]
 
 const roleOf = (content: NoticeContent): 'relayed' | 'aside' | 'news' =>
-  content.role === 'relayed' || (content.role === undefined && content.title.startsWith(RELAYED_TITLE))
+  relayed(content)
     ? 'relayed'
     : content.role === 'aside' || (content.role === undefined && ASIDES.some((pattern) => pattern.test(content.title)))
       ? 'aside'
@@ -161,6 +159,8 @@ export interface RoundSource {
   readonly worktree: string | null
   readonly queue?: boolean
   readonly outputs?: ReadonlyMap<string, OutputSoFar>
+  readonly turnStarted?: string | null
+  readonly openedAt?: string | null
 }
 
 /** A task's thread in rounds, oldest first, with what is still being written but not yet read at the end. */
@@ -188,13 +188,17 @@ export const roundsOf = (
         worktree,
         queue: (source.queue ?? turnRunning) && last,
         ...(source.outputs === undefined ? {} : { outputs: source.outputs }),
+        ...(last && source.turnStarted !== undefined ? { turnStarted: source.turnStarted } : {}),
+        // What opens the thread is answered in its first stretch, when that is all there is yet.
+        ...(last && index === 0 && source.openedAt !== undefined ? { openedAt: source.openedAt } : {}),
       },
       last ? streaming : new Map(),
       ago,
       now,
     )
   })
-  const lastTurn = blocks.findLastIndex((block) => block.kind === 'turn')
+  // The lead's turn runs in its last round, unless its reply to what it was last asked is still waited for.
+  const lastTurn = blocks.some((block) => block.kind === 'waiting') ? -1 : blocks.findLastIndex((block) => block.kind === 'turn')
   const out: Array<RoundBlock> = []
   let open: Gathering | null = null
   // What Althar did between rounds goes in the next one's work.

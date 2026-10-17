@@ -443,7 +443,16 @@ export function TaskView({
         ]),
     // The thread in rounds: each ask, its lead's acknowledgement, its work in one line, and its result, which ends it (ADR-042).
     ...roundsOf(
-      { items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree, queue, outputs: model.outputs },
+      {
+        items: snapshot.items,
+        turnRunning: busy,
+        turnStarted: session?.turnStartedAt ?? null,
+        // What the person asked for, which opens the thread above, is what the lead's first turn answers.
+        openedAt: snapshot.task.request === null || snapshot.earlier ? null : snapshot.task.startedAt,
+        worktree: snapshot.task.worktree,
+        queue,
+        outputs: model.outputs,
+      },
       model.streaming,
       (iso) => ago(iso),
       now,

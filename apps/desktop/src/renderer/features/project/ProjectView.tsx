@@ -457,7 +457,14 @@ export function ProjectView({
                   <ThreadShellProvider value={shown.shell}>
                     <ThreadBlocks
                       blocks={blocksOf(
-                        { items: coordinator.items, turnRunning: busy, worktree: null, queue, outputs: model.outputs },
+                        {
+                          items: coordinator.items,
+                          turnRunning: busy,
+                          turnStarted: session?.turnStartedAt ?? null,
+                          worktree: null,
+                          queue,
+                          outputs: model.outputs,
+                        },
                         model.streaming,
                         (iso) => ago(iso),
                         now,

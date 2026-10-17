@@ -13,7 +13,7 @@ import {
   verbFor,
   verbs,
 } from '../src/renderer/shared/thread'
-import { card, items } from './fixtures'
+import { card, items, NOW } from './fixtures'
 
 const at = () => 'just now'
 
@@ -98,8 +98,8 @@ describe('a thread as blocks', () => {
       items.you('old', null),
     ]
     const shown = (turnRunning: boolean, queue?: boolean) =>
-      blocksOf({ ...source(thread), turnRunning, ...(queue === undefined ? {} : { queue }) }, new Map(), at).map((block) =>
-        block.kind === 'you' ? [block.text, block.delivery] : null,
+      blocksOf({ ...source(thread), turnRunning, ...(queue === undefined ? {} : { queue }) }, new Map(), at).flatMap((block) =>
+        block.kind === 'you' ? [[block.text, block.delivery]] : [],
       )
     expect(shown(false)).toEqual([
       ['next', Delivery.Queued],
@@ -125,6 +125,68 @@ describe('a thread as blocks', () => {
     ).toEqual([PlanState.Running, ['Reading', ToolState.Running]])
     const [stopped] = blocksOf(source(running), new Map(), at)
     expect(stopped?.kind === 'turn' && stopped.parts[1]).toMatchObject({ verb: 'Read', state: ToolState.Cancelled })
+  })
+})
+
+describe('the wait for a reply', () => {
+  const after = (seconds: number) => new Date(Date.parse(NOW) + seconds * 1000).toISOString()
+  const kinds = (blocks: ReadonlyArray<Block>) =>
+    blocks.map((block) => (block.kind === 'turn' ? `turn${block.live ? ', live' : ''}` : block.kind))
+
+  it('holds where the reply starts while the agent has said nothing since it was asked, and leaves the reply before it over', () => {
+    const thread = [items.you('Why is it slow?'), items.says('The index is missing.'), items.you('Add it, then.')]
+    const waited = (seconds: number) => blocksOf({ ...source(thread, true), turnStarted: NOW }, new Map(), at, after(seconds))
+    expect(kinds(waited(1))).toEqual(['you', 'turn', 'you', 'waiting'])
+    // Its time and what it said are the reply's own still, with nothing of it at work.
+    expect(waited(1)[1]).toMatchObject({ live: false, took: '0s', doing: null, said: [{ kind: 'message', text: 'The index is missing.' }] })
+    // Seconds once they are worth saying, then that it's longer than usual.
+    expect(waited(1).at(-1)).toEqual({ kind: 'waiting', id: 'waiting', took: null, slow: false })
+    expect(waited(12).at(-1)).toMatchObject({ took: '12s', slow: false })
+    expect(waited(34).at(-1)).toMatchObject({ took: '34s', slow: true })
+    // Between turns, nothing is waited for.
+    expect(kinds(blocksOf(source(thread), new Map(), at))).toEqual(['you', 'turn', 'you'])
+  })
+
+  it('gives its place to the first words, a thought or a call, whichever comes first', () => {
+    const thread = [items.you('Add it.')]
+    const first = (streamed: Streamed) => kinds(blocksOf(source(thread, true), new Map([['unread', streamed]]), at))
+    expect(first({ kind: 'agent_message', agentId: 'claude-code', text: 'On it', at: NOW })).toEqual(['you', 'turn, live'])
+    expect(first({ kind: 'agent_thought', agentId: 'claude-code', text: 'Hm', at: NOW })).toEqual(['you', 'turn, live'])
+    expect(kinds(blocksOf(source([...thread, items.tool({ status: 'in_progress' })], true), new Map(), at))).toEqual(['you', 'turn, live'])
+  })
+
+  it('counts from when the turn started, not from when a message that waited its turn was sent', () => {
+    const thread = [items.you('Next')]
+    const waiting = (turnStarted: string | null) => blocksOf({ ...source(thread, true), turnStarted }, new Map(), at, after(65)).at(-1)
+    expect(waiting(after(60))).toMatchObject({ kind: 'waiting', took: '5s' })
+    // Where the turn heard of is the one before, it counts from the message; and so where it isn't known.
+    expect(waiting(after(-600))).toMatchObject({ took: '1m 5s', slow: true })
+    expect(waiting(null)).toMatchObject({ took: '1m 5s' })
+  })
+
+  it('waits on what the coordinator passed on, and on what opens the thread from outside it, but not on what waits behind a turn', () => {
+    const passed = items.notice({ source: 'runtime', title: 'From the coordinator:', description: 'Ship it.', role: 'relayed' }, null)
+    expect(kinds(blocksOf(source([items.says('Done.'), passed], true), new Map(), at))).toEqual(['turn', 'divider', 'waiting'])
+    // Any other line of Althar's is no ask: the turn before it runs on.
+    const news = items.notice({ source: 'runtime', title: 'Codex takes over.' }, null)
+    expect(kinds(blocksOf(source([items.you('Go'), items.says('On it.'), news], true), new Map(), at))).toEqual([
+      'you',
+      'turn, live',
+      'divider',
+    ])
+    // A task's request opens its thread above its items: the lead's first turn answers it.
+    expect(kinds(blocksOf({ ...source([], true), openedAt: NOW }, new Map(), at))).toEqual(['waiting'])
+    expect(kinds(blocksOf({ ...source([items.says('On it.')], true), openedAt: NOW }, new Map(), at))).toEqual(['turn, live'])
+    // What waits behind the turn, or interrupts it, isn't read yet: the turn runs on.
+    const running = [items.you('Go'), items.tool({ status: 'in_progress' })]
+    expect(
+      kinds(blocksOf(source([...running, items.you('Then this', { state: 'queued', interrupting: false })], true), new Map(), at)),
+    ).toEqual(['you', 'turn, live'])
+    expect(kinds(blocksOf(source([...running, items.you('Stop', { state: 'queued', interrupting: true })], true), new Map(), at))).toEqual([
+      'you',
+      'turn, live',
+      'you',
+    ])
   })
 })
 

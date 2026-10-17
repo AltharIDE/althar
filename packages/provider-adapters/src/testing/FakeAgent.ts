@@ -137,6 +137,9 @@ export const HANDED_DOCUMENT = {
 
 export const USAGE_LIMIT_MESSAGE = 'Claude AI usage limit reached|1759075200'
 
+/** What Claude Code says when Anthropic's API fails and it gives up: no class Althar tries again. */
+export const API_ERROR_MESSAGE = 'API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}'
+
 /** How many tokens its context holds, as it says when a prompt ends `[context:…]`. */
 export const CONTEXT_SIZE = 200_000
 
@@ -1182,6 +1185,16 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
+      // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five
+      // seconds, then a sentence, and `[fails-after:5s]` gives up after them, as when Anthropic's API fails; cancelled, it stops.
+      const slowly = /\[(answers|fails)-after:(\d+)s\]/.exec(text)
+      if (slowly?.[2] !== undefined) {
+        for (let waited = 0; !session.cancelled && waited < Number(slowly[2]) * 1000; waited += 10) await pause(10)
+        if (session.cancelled) return { stopReason: 'cancelled' }
+        if (slowly[1] === 'fails') throw new acp.RequestError(-32603, API_ERROR_MESSAGE)
+        await say('Looked into it: the payment call has no retry, so one slow answer from the provider fails the whole checkout.')
+        return ended()
+      }
       // Asked to compact, as Claude Code, Codex and OpenCode take `/compact`, it says its context holds a tenth of what it may.
       // With `[lead:compact-fails]`, it says so in a call of its own and ends its turn as usual, as Claude Code does.
       if (text === '/compact') {
