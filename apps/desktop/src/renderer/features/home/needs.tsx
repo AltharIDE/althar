@@ -4,7 +4,7 @@ import type { HomeCall, HomeTask } from '@althar/contracts'
 import { Button, type EdgeWork, Fact, LinkButton, NeedLine, type ProjectRef } from '@althar/ui'
 
 import { commandOf, titleOf } from '../../shared/callCommand'
-import { callKindOf, isFinished, kindWords, readyKindOf, whereOf } from '../../shared/calls'
+import { callKindOf, isUnshipped, kindWords, readyKindOf, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
 import {
@@ -55,6 +55,9 @@ export const needText = {
   answer: 'Answer',
   /** A change on its branch alone, by its size. */
   onBranch: 'On its branch',
+  /** Commits after its last pull request, in none yet, and how big they are. */
+  inNone: (commits: number, add: number, del: number) =>
+    `${commits === 1 ? '1 commit' : `${commits} commits`} in no pull request · +${add} −${del}`,
   branchSize: (files: number, add: number, del: number) => `On its branch: ${files === 1 ? '1 file' : `${files} files`}, +${add} −${del}`,
   /** A review drafted, in a line: whose pull request, and what the draft found. */
   by: (author: string) => `by ${author}`,
@@ -125,6 +128,9 @@ export const briefOf = (task: HomeTask): string => {
       needText.findings(reviewing.findings),
     ].join(' · ')
   const change = task.change
+  // Commits after its last pull request merged or closed: a new one is the person's to open.
+  const after = task.unshipped
+  if (after != null && isUnshipped(task)) return needText.inNone(after.commits, after.add, after.del)
   if (change === null)
     return task.changed === null ? needText.onBranch : needText.branchSize(task.changed.files, task.changed.add, task.changed.del)
   const where = `${change.repository.slice(change.repository.lastIndexOf('/') + 1)} ${change.prefix}${change.number}`
@@ -218,8 +224,8 @@ export const needsOf = ({
   }),
   ...ready.flatMap((task): ReadonlyArray<Need> => {
     const project = refs.get(task.projectId)
-    // A plain task that finished waits on its board, not here.
-    if (project === undefined || isFinished(task)) return []
+    // `ready` is the tasks that wait on the person (`readyOf`): a plain task that finished waits on its board, not here.
+    if (project === undefined) return []
     const next = nextOf(task)
     return [
       {
