@@ -138,7 +138,33 @@ export interface RunButtonProps {
   text?: Partial<RunButtonText>
 }
 
-const labelOf = (target: RunTarget) => target.name ?? target.command
+const LONGEST = 24
+
+const truncate = (text: string) => (text.length > LONGEST ? `${text.slice(0, LONGEST - 1)}…` : text)
+
+/** Setup a one-line command does on the way, not what it runs: export, unset, cd, NAME=value on its own. */
+const setup = (part: string) => /^(export|unset|cd|set|source|\.)\s/.test(part) || /^[A-Za-z_]\w*=\S*$/.test(part)
+
+/**
+ * A command in a few words: the last meaningful one of a chain on && ; || or
+ * lines, without its exec, whole where it is short, else its first word, cut.
+ */
+export function shortCommand(command: string): string {
+  const parts = command
+    .split(/&&|\|\||;|\n/)
+    .map((part) => part.trim().replace(/^exec\s+/, ''))
+    .filter((part) => part !== '')
+  const last = parts.findLast((part) => !setup(part)) ?? parts.at(-1) ?? command.trim()
+  if (last.length <= LONGEST) return last
+  const word = last.split(/\s+/)[0] ?? last
+  return truncate(word.slice(word.lastIndexOf('/') + 1) || word)
+}
+
+/** What the list calls it: its name, else its command in a few words. */
+export const labelOf = (target: RunTarget) => target.name ?? shortCommand(target.command)
+
+/** What the button says after Run: its name, else (not where the repository's own way runs, which is just Run) its command in a few words. */
+export const buttonLabelOf = (target: RunTarget) => target.name ?? (target.from === 'repository' ? undefined : shortCommand(target.command))
 
 const live = (target: RunTarget) => target.run !== undefined && target.run.state !== 'ended'
 
@@ -192,7 +218,7 @@ export function RunButton({ targets, onRun, onStop, onOpen, onAdd, onEdit, open,
     const hint =
       run?.state === 'starting' ? t.startingHint : on && run?.url !== undefined ? run.url : target === first && !on ? t.default : undefined
     const about = [
-      target.name === undefined ? null : target.command,
+      target.name === undefined && labelOf(target) === target.command ? null : target.command,
       target.where,
       run?.state === 'ended' ? endedOf(run, t) : null,
       on && run?.since !== undefined ? run.since : null,
@@ -218,26 +244,31 @@ export function RunButton({ targets, onRun, onStop, onOpen, onAdd, onEdit, open,
   const resting = targets.filter((target) => !live(target))
 
   // The main half: runs the default; while it runs, says where it answers and opens it, or, with no address, opens the list.
+  // Whatever it says is cut with an ellipsis, so it never crowds the title beside it; the full command is its tooltip.
   const run = first.run
+  const label = buttonLabelOf(first)
+  const cut = (words: string) => <span className={s.text}>{words}</span>
   const main =
     run?.state === 'starting'
-      ? { children: t.starting(labelOf(first)), busy: true }
+      ? { children: cut(label === undefined ? t.startingHint : t.starting(label)), busy: true }
       : run?.state === 'running'
         ? {
             children: (
               <span className={s.live}>
                 <LiveDot />
-                {run.url === undefined ? labelOf(first) : `${labelOf(first)} · ${run.url}`}
+                {cut([label ?? t.running, run.url].filter((part) => part !== undefined).join(' · '))}
               </span>
             ),
             onClick: () => (run.url === undefined ? setOpened(true) : onOpen(first.id)),
           }
-        : { children: t.run(labelOf(first)), icon: 'terminal' as const, onClick: () => onRun(first.id) }
+        : { children: cut(label === undefined ? t.empty : t.run(label)), icon: 'terminal' as const, onClick: () => onRun(first.id) }
 
   return (
     <SplitButton
       size="small"
+      className={s.split}
       moreLabel={t.more}
+      title={first.command}
       {...main}
       menu={(trigger) => (
         <Menu label={t.label} align="end" width={440} open={opened} onOpenChange={setOpened} trigger={trigger} note={t.note}>

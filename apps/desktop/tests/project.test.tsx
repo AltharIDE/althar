@@ -93,7 +93,7 @@ describe('running the project, with no agent', () => {
     withServices(<WithSettings />, client)
     // Once the conversation is read, its front offers what the project runs.
     await screen.findByText(/^Ask the coordinator about/)
-    await userEvent.click(await screen.findByRole('button', { name: 'Run npm run dev' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Run$/ }))
     expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc', 'rnbl_dev')
     const launch = {
       id: 'proc_1',
@@ -113,7 +113,12 @@ describe('running the project, with no agent', () => {
         launches: [launch, { ...launch, id: 'proc_2', taskId: 't1', where: 'Fix the login timeout', command: 'bun run dev' }],
       }),
     )
-    const pill = await screen.findByRole('button', { name: /^Running/ })
+    // The pill, not the Run button, which says Running once its default is up.
+    const pill = await waitFor(() => {
+      const found = screen.getAllByRole('button', { name: /^Running/ }).find((button) => /process/.test(button.textContent ?? ''))
+      if (found === undefined) throw new Error('no pill')
+      return found
+    })
     await waitFor(() => expect(pill.textContent).toContain('2 processes'))
     await userEvent.click(pill)
     const list = within(await screen.findByRole('dialog', { name: 'Running' }))
