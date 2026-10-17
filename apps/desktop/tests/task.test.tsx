@@ -1610,6 +1610,35 @@ describe('a task', () => {
     expect(box).toBe(document.activeElement)
   })
 
+  it('doesn’t take focus back from the composer when a card remounts after a failed answer', async () => {
+    const call = {
+      id: 'a1',
+      kind: 'permission' as const,
+      stuck: null,
+      title: 'Run git push',
+      reason: 'It asks.',
+      command: 'git push',
+      createdAt: '2026-09-29T12:00:00.000Z',
+    }
+    let fail: (error: Error) => void = () => {}
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ attention: [call] })),
+      answer: vi.fn(() => new Promise<never>((_, reject) => (fail = reject))),
+    })
+    withServices(<Task />, client)
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Yes, this once/ })).toBe(document.activeElement))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(client.answer).toHaveBeenCalledTimes(1))
+    // The person moves on to the composer while the answer is out; then it fails and the card starts afresh.
+    const box = await screen.findByPlaceholderText(/^Tell .+ something$/)
+    box.focus()
+    await act(async () => fail(new Error('offline')))
+    await act(async () => {})
+    await screen.findByText('Needs your permission')
+    expect(box).toBe(document.activeElement)
+    expect(client.answer).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps an answer as a rule by the scope the runtime offers, and offers no always it wouldn’t keep', async () => {
     const call = {
       id: 'a1',

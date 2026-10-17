@@ -98,7 +98,7 @@ export function EdgeView({ model, shown }: { model: EdgeModel; shown: EdgePlaceS
       </Pointed>
     )
   return (
-    <Measured onHeight={host.edgeSize} showing={showing}>
+    <Measured onHeight={host.edgeSize} opening={showing && home !== null}>
       {sheet}
     </Measured>
   )
@@ -152,28 +152,18 @@ function Pointed({
 /**
  * The menu bar's sheet, telling the main process how tall it draws, so its
  * window fits it; taller than the screen allows, it scrolls in the window.
- * Its window takes focus as it opens; within it, focus goes to the first
- * permission's Allow once, so Enter answers it, as the window's card does.
+ * As it opens (`opening`: shown, with the home loaded), focus goes to the
+ * first permission's Allow once, so Enter answers it, as the window's card
+ * does, if it is on the page itself. Never again while it stays open: after an
+ * answer focus stays on that line, and a second Enter allows nothing unread.
  */
-function Measured({ children, onHeight, showing }: { children: ReactNode; onHeight: (height: number) => void; showing: boolean }) {
+function Measured({ children, onHeight, opening }: { children: ReactNode; onHeight: (height: number) => void; opening: boolean }) {
   const box = useRef<HTMLDivElement>(null)
-  // As it shows, and again whenever focus is left on the page with an Allow waiting: a permission arriving, or the next one once this is answered.
   useEffect(() => {
-    const element = box.current
-    if (!showing || element === null) return
-    let live = true
-    const take = () => {
-      const on = document.activeElement
-      const free = on === null || on === document.body || (on instanceof HTMLElement && on.tagName === 'ARTICLE' && element.contains(on))
-      if (live && free) element.querySelector<HTMLElement>(DEFAULT_ANSWER)?.focus({ preventScroll: true })
-    }
-    take()
-    // And once the line of a call just answered here has taken focus after the commit, which it holds only until the next Allow.
-    queueMicrotask(take)
-    return () => {
-      live = false
-    }
-  })
+    if (!opening) return
+    const on = document.activeElement
+    if (on === null || on === document.body) box.current?.querySelector<HTMLElement>(DEFAULT_ANSWER)?.focus({ preventScroll: true })
+  }, [opening])
   useEffect(() => {
     const element = box.current
     if (element === null) return
@@ -185,15 +175,7 @@ function Measured({ children, onHeight, showing }: { children: ReactNode; onHeig
   }, [onHeight])
   return (
     <div className={s.menu}>
-      <div
-        ref={box}
-        onKeyDownCapture={(e) => {
-          // Held down, Enter would click each Allow that takes focus after the last.
-          if (e.key === 'Enter' && e.repeat) e.preventDefault()
-        }}
-      >
-        {children}
-      </div>
+      <div ref={box}>{children}</div>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -188,7 +188,7 @@ describe('the edge', () => {
     }
   })
 
-  it('under the menu bar, moves focus on to the next permission\u2019s Allow once after one is answered', async () => {
+  it('under the menu bar, never lets two Enters in a row allow a second permission unread', async () => {
     const seen = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => 'visible')
     try {
       const second: HomeCall = { ...permission, id: 'a2', title: 'Run npm test', command: 'npm test' }
@@ -198,15 +198,20 @@ describe('the edge', () => {
       await waitFor(() => expect(document.activeElement).not.toBe(document.body))
       await userEvent.keyboard('{Enter}')
       expect(client.answer).toHaveBeenCalledWith(expect.objectContaining({ attentionId: 'a1' }))
-      await waitFor(() => expect(next).toBe(document.activeElement))
+      // Focus is on the answered line, so a screen reader announces it, not on the next Allow once.
+      const answered = await screen.findByRole('article', { name: 'Run npm publish', description: 'Allowed Once · in halyard' })
+      await waitFor(() => expect(answered).toBe(document.activeElement))
+      expect(next).not.toBe(document.activeElement)
       await userEvent.keyboard('{Enter}')
-      expect(client.answer).toHaveBeenCalledWith(expect.objectContaining({ attentionId: 'a2' }))
+      await act(async () => {})
+      expect(client.answer).toHaveBeenCalledTimes(1)
+      expect(client.answer).not.toHaveBeenCalledWith(expect.objectContaining({ attentionId: 'a2' }))
     } finally {
       seen.mockRestore()
     }
   })
 
-  it('under the menu bar, focuses an Allow once that comes in while the sheet is open, and ignores held Enter', async () => {
+  it('under the menu bar, takes no focus for an Allow once that comes in while the sheet is open', async () => {
     let calls: ReadonlyArray<HomeCall> = []
     const seen = vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => 'visible')
     try {
@@ -220,9 +225,9 @@ describe('the edge', () => {
       const allow = await within(await screen.findByRole('article', { name: 'Run npm publish' })).findByRole('button', {
         name: 'Allow once',
       })
-      await waitFor(() => expect(allow).toBe(document.activeElement))
-      // Not answered, and its default (a button's native activation) is prevented.
-      expect(fireEvent.keyDown(allow, { key: 'Enter', repeat: true })).toBe(false)
+      await act(async () => {})
+      expect(allow).not.toBe(document.activeElement)
+      await userEvent.keyboard('{Enter}')
       expect(client.answer).not.toHaveBeenCalled()
     } finally {
       seen.mockRestore()
