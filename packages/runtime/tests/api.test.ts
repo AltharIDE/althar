@@ -424,6 +424,35 @@ describe('the API', () => {
     ),
   )
 
+  it.live('says when the turn running started, which the wait for its first word is counted from, and nothing between turns', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, grant } = yield* connected()
+        const project = yield* client.OpenProject({ commandId: commandId(), grant: yield* grant(repository()) })
+        const { threadId } = yield* client.GetCoordinator({ projectId: project.id })
+        const sent = Date.now()
+        yield* client.Send({
+          commandId: commandId(),
+          threadId,
+          body: 'Why is checkout slow? [answers-after:1s]',
+          disposition: 'after_current',
+        })
+        const thinking = yield* eventually(
+          client.GetCoordinator({ projectId: project.id }),
+          (snapshot) => snapshot.session?.turnRunning === true,
+        )
+        const started = Date.parse(thinking.session?.turnStartedAt ?? '')
+        assert.isAtLeast(started, sent)
+        assert.isAtMost(started, Date.now())
+        const answered = yield* eventually(
+          client.GetCoordinator({ projectId: project.id }),
+          (snapshot) => snapshot.session !== null && !snapshot.session.turnRunning,
+        )
+        assert.isNull(answered.session?.turnStartedAt)
+      }),
+    ),
+  )
+
   it.live('asks the person, and takes their answer', () =>
     Effect.scoped(
       Effect.gen(function* () {
