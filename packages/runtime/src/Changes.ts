@@ -1342,8 +1342,11 @@ export class Changes extends Context.Service<
                 return yield* refuse('Althar isn’t connected to where that link points. Connect its host in Settings, then attach it.')
               if (resolved.ref.kind !== 'change') return yield* refuse('That link isn’t to a pull request.')
               const ref = resolved.ref
+              // On the host the repository is on, not one of the same path on another host Althar is connected to.
               const place = places.find(
-                (one) => same(one.found.path, ref.path) || (one.fork !== null && same(one.fork.upstream.path, ref.path)),
+                (one) =>
+                  one.found.connectionId === resolved.connectionId &&
+                  (same(one.found.path, ref.path) || (one.fork !== null && same(one.fork.upstream.path, ref.path))),
               )
               if (place === undefined)
                 return yield* refuse(`That pull request is on ${ref.path.join('/')}, which isn’t one of the task’s repositories.`)
@@ -1395,6 +1398,15 @@ export class Changes extends Context.Service<
               AND x.task_id <> ${input.taskId} AND k.state IN ('open', 'draft') LIMIT 1`
           if (other !== undefined)
             return yield* refuse(`Task ${other.slug} follows ${name} already. Abandon it first, or leave ${name} to it.`)
+          // One another open task's work still goes to, listened to or not: its pushes would land on the same branch.
+          const [sending] = yield* sql<{ slug: string }>`
+            SELECT k.slug FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id JOIN tasks k ON k.id = w.task_id
+            WHERE c.project_id = ${task.projectId} AND c.pull_request_url = ${pull.url} AND w.task_id <> ${input.taskId}
+              AND k.state IN ('open', 'draft')
+              AND c.id = (SELECT l.id FROM repository_changes l WHERE l.workspace_id = c.workspace_id ORDER BY l.created_at DESC, l.rowid DESC LIMIT 1)
+            LIMIT 1`
+          if (sending !== undefined)
+            return yield* refuse(`Task ${sending.slug}’s work goes to ${name}. Abandon it first, or leave ${name} to it.`)
           const pushTarget = yield* fromHost(host.pushTarget(same(own, path) ? repository : yield* fromHost(host.repository(own))))
           // Its head as its branch has it now, fetched here: what the task's branch must be on for its pushes to add to it.
           const tip = yield* fetchInto(row.path, pushTarget, pull.source, `refs/althar/pull-request/${pull.source}`)

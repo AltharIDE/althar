@@ -199,6 +199,79 @@ describe('a task attached to a pull request it didn’t open', () => {
     }).pipe(Effect.provide(withQueries(github)))
   })
 
+  it.live('asks the person to push to the pull request’s own branch when its lead asks, and their Push sends it there', () => {
+    const { bare, github, pull, working } = forked()
+    return Effect.gen(function* () {
+      const { projectId, task, personId } = yield* project(working)
+      const changes = yield* Changes
+      yield* changes.attach({ taskId: task.taskId, pullRequest: linkTo(pull.number), start: true, actorId: personId })
+      const lead: ToolAccess = { role: 'lead', projectId, threadId: task.threadId, sessionId: 'none', taskId: task.taskId }
+      // Nothing new on it yet: the pull request's branch is read under its own name, not the task's.
+      assert.strictEqual(
+        yield* callTool(lead, 'push_to_pull_request', {}),
+        "PR #1 already has every commit on the branch, so there's nothing new to push.",
+      )
+      const mine = commit(task.worktree, 'why.md', 'It restarts.\n')
+      assert.include(yield* callTool(lead, 'push_to_pull_request', {}), 'Asked the person to push 1 commit to PR #1.')
+      const [card] = yield* until(
+        Effect.map(items(task.threadId), (all) => all.filter((item) => item.kind === 'push_request').map((item) => item.content)),
+        (all) => all.length === 1,
+      )
+      assert.deepInclude(card, { where: 'PR #1', count: 1, head: mine })
+      assert.strictEqual(tipOf(bare, 'fix-send-back'), git(task.worktree, 'rev-parse', 'HEAD~1'))
+
+      // The person's Push sends it onto the pull request's branch; none of the task's name is made.
+      yield* changes.push(task.taskId, mine, 'https://github.com/meridian/api/pull/1')
+      assert.strictEqual(tipOf(bare, 'fix-send-back'), mine)
+      assert.isNull(tipOf(bare, task.branch))
+      assert.lengthOf(github.changes, 1)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('leaves a pull request to the task whose work still goes to it, even once it stops listening', () => {
+    const { github, pull, working } = forked()
+    return Effect.gen(function* () {
+      const { projectId, task, personId } = yield* project(working)
+      const changes = yield* Changes
+      yield* changes.attach({ taskId: task.taskId, pullRequest: `#${pull.number}`, start: true, actorId: personId })
+      yield* changes.stopListening(task.taskId, 'https://github.com/meridian/api/pull/1')
+      const other = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', { title: 'Answer it again' }),
+        projectId,
+        title: 'Answer it again',
+      })
+      const refused = yield* Effect.flip(
+        changes.attach({ taskId: other.taskId, pullRequest: `#${pull.number}`, start: true, actorId: personId }),
+      )
+      assert.strictEqual(
+        (refused as { message?: string }).message,
+        `Task ${task.slug}’s work goes to PR #1. Abandon it first, or leave PR #1 to it.`,
+      )
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
+  it.live('takes a link only on the host the task’s repository is on, not one of the same path on another', () => {
+    const { github, pull, working } = forked()
+    return Effect.gen(function* () {
+      const { task, personId } = yield* project(working)
+      yield* (yield* Connections).connectToken({ product: 'github', token: 't2', actorId: personId, webUrl: 'https://ghe.test' })
+      const changes = yield* Changes
+      const refused = yield* Effect.flip(
+        changes.attach({
+          taskId: task.taskId,
+          pullRequest: `https://ghe.test/meridian/api/pull/${pull.number}`,
+          start: true,
+          actorId: personId,
+        }),
+      )
+      assert.strictEqual(
+        (refused as { message?: string }).message,
+        'That pull request is on meridian/api, which isn’t one of the task’s repositories.',
+      )
+      assert.lengthOf(yield* changes.ofTask(task.taskId), 0)
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
   it.live('keeps the task’s own commits on top of the head it starts from', () => {
     const { github, head, working } = forked()
     return Effect.gen(function* () {

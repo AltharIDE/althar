@@ -26,8 +26,11 @@
     (upstream, for a fork that sends them there). Only an open one. Its
     branch must be on the repository the task pushes to (the fork, else the
     repository itself), as GitHub's reading of it says: one on someone else's
-    fork is refused, since Althar can't push there. One another open task
-    follows stays that task's.
+    fork is refused, since Althar can't push there. A link is taken only on
+    the host the task's repository is on, not one of the same path on
+    another host Althar is connected to. One another open task follows, or
+    whose work still goes to it after it stopped listening, stays that
+    task's.
   - **Its branch:** where the task's branch already has that pull request's
     head, it stays as it is. Where it doesn't, nothing changes until the
     person says to start it there: then the head is fetched, the branch is
