@@ -1,7 +1,7 @@
 // Scrappy: what the page shows: which direction, and the project's state as the picker under the window says.
 import { useSyncExternalStore } from 'react'
 
-export type Direction = 'Today' | 'A' | 'B' | 'C' | 'D' | 'E'
+export type Direction = 'Today' | 'F' | 'G' | 'H' | 'I' | 'J'
 /**
  * Its trackers: none chosen, and Linear's DEV team found in its tasks' issues;
  * chosen, Linear's DEV team and Jira's OPS project; or none, and no task names an issue.
@@ -19,19 +19,16 @@ export interface Proto {
   readonly connection: Connection
   readonly notes: Notes
   readonly showing: Showing
-  /** In E, the Settings tab shows the project's section. */
-  readonly inSettings: boolean
   /** Without the switcher, for screenshots. */
   readonly bare: boolean
 }
 
 let state: Proto = {
-  direction: 'A',
+  direction: 'F',
   tracker: 'linear',
   connection: 'ok',
   notes: 'many',
   showing: 'closed',
-  inSettings: false,
   bare: false,
 }
 const listeners = new Set<() => void>()

@@ -18,14 +18,10 @@ const repo = resolve(here, '../../../..')
 const seams = [
   // The project's settings, from its front page: the direction's.
   { importer: 'features/project/ProjectView.tsx', id: './ProjectSettings', to: 'seams/ProjectSettings.tsx' },
-  // The project's front page: in B a view takes the screen, in D what it shows opens in place, in E it has no settings of its own.
+  // The project's front page: in F a column covers the board, in I the header unfolds over it, in J it has no settings button.
   { importer: 'features/project/ProjectView.tsx', id: '@althar/ui', to: 'seams/projectUi.ts' },
-  // The project's views in the window's bar: in B, Settings is one of them.
-  { importer: 'features/project/ProjectBar.tsx', id: '@althar/ui', to: 'seams/barUi.ts' },
-  // The gear at the bar's end: in E, it holds the project's quick settings too.
+  // The gear at the bar's end: in J, the one search for every setting.
   { importer: 'features/tabs/TabsFrame.tsx', id: '../settings/QuickSettings', to: 'seams/QuickSettings.tsx' },
-  // The Settings tab: in E, the projects are sections of it.
-  { importer: 'features/settings/SettingsPage.tsx', id: '@althar/ui', to: 'seams/settingsUi.ts' },
 ]
 
 /** @type {import('vite-plus').Plugin} */

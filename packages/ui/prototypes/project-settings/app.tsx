@@ -25,7 +25,7 @@ const coordinatorItems = [
   items.you('Our settings look really ugly at the project level. Can you plan a prototype of a few directions?'),
   items.tool({ title: 'Read apps/desktop/src/renderer/features/project/ProjectSettings.tsx' }),
   items.says(
-    'Today they’re a Control Center panel whose modules move about with what the project has, and its rules open on a screen of their own. I planned a prototype with five directions on one page.',
+    'Today they’re a Control Center panel whose modules move about with what the project has, and its rules open on a screen of their own. I planned a prototype with five directions on one page, none with a sidebar.',
   ),
 ]
 
@@ -83,11 +83,15 @@ data.subscribe(() => {
 
 const DIRECTIONS: ReadonlyArray<{ value: Direction; name: string; about: string }> = [
   { value: 'Today', name: 'Today', about: 'The project’s settings as built: a Control Center from the front page’s Settings button' },
-  { value: 'A', name: 'Calm panel', about: 'The quick panel kept: groups under plain headers, one row style, switches aligned' },
-  { value: 'B', name: 'Settings view', about: 'A view of its own beside the board, laid out as the app’s Settings tab' },
-  { value: 'C', name: 'One sheet', about: 'One scrolling sheet beside the project, its index held at the top' },
-  { value: 'D', name: 'In place', about: 'Each setting changed where the front page shows it; a small menu for the rest' },
-  { value: 'E', name: 'One gear', about: 'No project button: the bar’s gear leads with the project, and the Settings tab lists projects' },
+  { value: 'F', name: 'One column', about: 'One calm column over the board, read top to bottom; the switches first, Remove at the end' },
+  { value: 'G', name: 'Tabs on top', about: 'A dialog with four short tabs across its top, none needing a scroll' },
+  { value: 'H', name: 'Written out', about: 'A few sentences; every value in them a word that opens its choices' },
+  { value: 'I', name: 'Header unfolds', about: 'The project’s header opens downward over the board, in three columns' },
+  {
+    value: 'J',
+    name: 'One search',
+    about: 'No project button: the bar’s one gear opens every setting, the project’s first, as a list you type into',
+  },
 ]
 
 const TRACKERS: ReadonlyArray<{ value: Tracker; label: string }> = [
@@ -118,7 +122,7 @@ const titled = (direction: Direction) => {
   document.title = `${direction === 'Today' ? 'Today' : `${direction} · ${one?.name ?? ''}`} · Project settings`
 }
 
-// The URL says what the page shows, so a link opens it again: ?d=B&tracker=none&conn=tracker&notes=many&open=notes.
+// The URL says what the page shows, so a link opens it again: ?d=G&tracker=none&conn=tracker&notes=many&open=notes.
 proto.subscribe(() => {
   const { direction, tracker, connection, notes, showing } = proto.get()
   const params = new URLSearchParams(window.location.search)
@@ -135,7 +139,7 @@ proto.subscribe(() => {
 
 /** Another direction, on the same screen and state; back on the project, as each puts its settings there. */
 const go = (direction: Direction) => {
-  proto.set({ direction, inSettings: false })
+  proto.set({ direction })
   if (!window.location.hash.startsWith('#/projects/p1')) window.location.hash = '#/projects/p1'
 }
 
@@ -212,7 +216,7 @@ const history = createBrowserHistory({
 export const boot = () => {
   const params = new URLSearchParams(window.location.search)
   proto.set({
-    direction: directionOf(params.get('d')) ?? 'A',
+    direction: directionOf(params.get('d')) ?? 'F',
     tracker: pick(TRACKERS, params.get('tracker')) ?? 'linear',
     connection: pick(CONNECTIONS, params.get('conn')) ?? 'ok',
     notes: pick(NOTES, params.get('notes')) ?? 'many',

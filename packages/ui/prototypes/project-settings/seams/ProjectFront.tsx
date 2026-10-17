@@ -1,17 +1,15 @@
-// Scrappy: the project's front page, the kit's own, with what the direction does around it.
+// Scrappy: the project's front page, the kit's own, with what the direction puts under it.
 import { type CSSProperties, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import { ProjectFront as Real, type ProjectFrontProps, type WorkNeed } from '../../../src/index'
-import { B } from '../directions/B'
-import { C } from '../directions/C'
-import { Access, DFront } from '../directions/D'
+import { F } from '../directions/F'
+import { I } from '../directions/I'
 import { useThings } from '../parts'
-import css from '../parts.module.css'
 import { proto, useProto } from '../state'
 
-/** What covers the screen under the front page, in its window: B's view, C's sheet. */
-function Under({ children, cover }: { children: React.ReactNode; cover: boolean }) {
+/** What sits over the screen under the front page, in its window, from the header down: F's column, I's unfolded header. */
+function Under({ children }: { children: React.ReactNode }) {
   const mark = useRef<HTMLSpanElement>(null)
   const [place, setPlace] = useState<{ window: HTMLElement; top: number } | null>(null)
   useLayoutEffect(() => {
@@ -30,8 +28,8 @@ function Under({ children, cover }: { children: React.ReactNode; cover: boolean 
       <span ref={mark} hidden />
       {place !== null &&
         createPortal(
-          <div className={cover ? css.cover : css.beside} style={{ top: place.top } as CSSProperties}>
-            {children}
+          <div style={{ position: 'absolute', inset: `${place.top}px 0 0 0`, zIndex: 3, pointerEvents: 'none' } as CSSProperties}>
+            <div style={{ pointerEvents: 'auto' }}>{children}</div>
           </div>,
           place.window,
         )}
@@ -75,35 +73,20 @@ export function ProjectFront(props: ProjectFrontProps) {
       yours={yours}
       needs={[...troubles, ...(props.needs ?? [])]}
       {...(props.onYours === undefined || (props.yours ?? 0) > 0 ? {} : { onYours: () => troubles[0]?.onOpen() })}
-      {...(p.direction === 'E' || p.direction === 'B' ? { settings: undefined } : {})}
-      {...(p.direction === 'D'
-        ? {
-            run: (
-              <>
-                <Access things={things} />
-                {props.run}
-              </>
-            ),
-          }
-        : {})}
+      {...(p.direction === 'J' ? { settings: undefined } : {})}
     />
   )
-  if (p.direction === 'D') return <DFront things={things}>{front}</DFront>
-  if (p.direction === 'B' && p.showing !== 'closed')
+  const open = p.showing !== 'closed'
+  if (open && (p.direction === 'F' || p.direction === 'I'))
     return (
       <>
         {front}
-        <Under cover>
-          <B key={p.showing} things={things} />
-        </Under>
-      </>
-    )
-  if (p.direction === 'C' && p.showing !== 'closed')
-    return (
-      <>
-        {front}
-        <Under cover={false}>
-          <C things={things} onClose={() => proto.set({ showing: 'closed' })} />
+        <Under>
+          {p.direction === 'F' ? (
+            <F key={p.showing} things={things} onClose={() => proto.set({ showing: 'closed' })} />
+          ) : (
+            <I things={things} />
+          )}
         </Under>
       </>
     )

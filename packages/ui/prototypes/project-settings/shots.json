@@ -21,110 +21,96 @@
   },
   { "id": "T5", "page": "?d=Today&open=notes", "caption": "Today: Notes opened, in place of the grid" },
   {
-    "id": "A1",
-    "page": "?d=A&open=open",
-    "caption": "A · Calm panel: the project's row, then groups under plain headers; Linear is marked as found in its tasks' issues, GitHub as shared with charrette-site"
+    "id": "F1",
+    "page": "?d=F&open=open",
+    "caption": "F · One column: the settings over the board in one calm column, the three switches first, one line per setting, brand marks only on code and issues"
   },
   {
-    "id": "A2",
-    "page": "?d=A&open=open&tracker=two",
-    "caption": "A with two trackers the project names, Linear's DEV and Jira's OPS, each removable, and Add a tracker under them"
+    "id": "F2",
+    "page": "?d=F&open=open&tracker=two&conn=host",
+    "caption": "F with Linear + Jira named and GitHub signed out: the GitHub line turns violet with Sign in again and what it stops; the header counts it as needing you"
   },
   {
-    "id": "A3",
-    "page": "?d=A&open=open&tracker=none",
-    "caption": "A without a tracker: a No tracker row says what that means and offers Add; Move issues goes, nothing else moves"
+    "id": "F3",
+    "page": "?d=F&open=notes",
+    "caption": "F scrolled to the end: every note, then Remove as a quiet link at the very bottom"
   },
   {
-    "id": "A4",
-    "page": "?d=A&open=open&tracker=none",
-    "click": ["text:Add…"],
-    "caption": "A: Add opens the trackers Althar is connected to (Linear, Jira, GitHub Issues), and Connect another tracker"
+    "id": "F4",
+    "page": "?d=F&open=open&tracker=none",
+    "caption": "F with no tracker: one line says what that means and offers Add a tracker; Move issues goes, as there is nothing to move"
   },
   {
-    "id": "A5",
-    "page": "?d=A&open=open&conn=tracker",
-    "caption": "A with Linear not connected: a violet line and Connect in its row, and one more Needs you on the front"
-  },
-  {
-    "id": "A6",
-    "page": "?d=A&open=open",
-    "click": ["text:Manage connections"],
-    "caption": "A: Manage connections opens the app's Settings tab at Code hosts, where connections live for every project"
-  },
-  { "id": "A7", "page": "?d=A&open=notes", "caption": "A: Notes opened in the panel" },
-  {
-    "id": "B1",
-    "page": "?d=B&open=open",
-    "caption": "B · Settings view: Settings is the fourth of the project's views, laid out like the app's Settings tab, with the project's switches down the side"
-  },
-  {
-    "id": "B2",
-    "page": "?d=B&open=open&conn=host&tracker=two",
-    "click": ["text:Code and issues"],
-    "caption": "B with GitHub signed out and two trackers: a violet dot on Code and issues; Code and Issues each under a header; signing in again is for every project"
-  },
-  {
-    "id": "B3",
-    "page": "?d=B&open=open",
-    "click": ["text:Rules and access"],
-    "caption": "B: Rules and access holds the switches and the real rules screen itself, no longer a page of its own"
-  },
-  { "id": "B4", "page": "?d=B&open=notes&notes=few", "caption": "B: Notes, two of them" },
-  {
-    "id": "C1",
-    "page": "?d=C&open=open",
-    "caption": "C · One sheet: Settings opens a sheet beside the project, its index held at the top, the switches first"
-  },
-  {
-    "id": "C2",
-    "page": "?d=C&open=open&tracker=none",
-    "click": ["[role=radio]:has-text('Code and issues')"],
-    "caption": "C without a tracker: Code and issues says so and offers Add, with the note that connections are the app's"
-  },
-  { "id": "C3", "page": "?d=C&open=notes", "caption": "C: scrolled down to Notes, the index following" },
-  {
-    "id": "D1",
-    "page": "?d=D&conn=tracker&tracker=two",
-    "caption": "D · In place: the front page with both trackers as chips, an access word beside Run, a ⋯ menu, and a violet dot on DEV issues"
-  },
-  {
-    "id": "D2",
-    "page": "?d=D&conn=tracker&tracker=two",
-    "click": ["[aria-label='Linear: DEV issues']"],
-    "caption": "D: DEV issues opened in place: Linear not connected, Connect, Move issues, Add another tracker"
-  },
-  {
-    "id": "D3",
-    "page": "?d=D&tracker=none",
-    "click": ["[aria-label='GitHub: AltharIDE/althar']"],
-    "caption": "D without a tracker: no tracker chip, so the repository's chip holds No tracker and Add"
-  },
-  {
-    "id": "D4",
-    "page": "?d=D",
+    "id": "F5",
+    "page": "?d=F&open=open",
     "click": ["text:The coordinator decides"],
-    "caption": "D: the access word opened: Allow everything, Resolve conflicts and the way to the rules"
+    "caption": "F: a value opens its choices in place, with Every rule… under them"
   },
   {
-    "id": "D5",
-    "page": "?d=D",
-    "click": ["[aria-label='Change its name and colour']"],
-    "caption": "D: the name and mark opened: its name and colour, changed in place"
+    "id": "G1",
+    "page": "?d=G&open=open",
+    "caption": "G · Tabs on top: a dialog with four tabs across its top; General has the project, the three switches and Remove"
   },
   {
-    "id": "D6",
-    "page": "?d=D&open=notes",
-    "caption": "D: the ⋯ menu keeps what has no place on the front: runs, notes (open here), Remove"
+    "id": "G2",
+    "page": "?d=G&open=open&conn=tracker&tracker=two",
+    "click": ["[role=radio]:has-text('Code and issues')"],
+    "caption": "G's Code and issues with Linear not connected: the tab itself says 1 needs you, and the line turns violet with Connect"
   },
   {
-    "id": "E1",
-    "page": "?d=E&open=open&conn=tracker&tracker=two",
-    "caption": "E · One gear: no project button; on a project's screen the bar's gear leads with its switches, Linear's trouble across them, then the app's"
+    "id": "G3",
+    "page": "?d=G&open=open",
+    "click": ["[role=radio]:has-text('How tasks run')"],
+    "caption": "G's How tasks run: what the rules don't cover, how a task finishes, branches, Run, worktrees, the way to every rule"
   },
   {
-    "id": "E2",
-    "page": "?d=E&open=notes&tracker=two",
-    "caption": "E: 'althar settings' opens the Settings tab at althar, beside the app's Code hosts section; every part one under another"
+    "id": "H1",
+    "page": "?d=H&open=open",
+    "caption": "H · Written out: the settings as four sentences; every underlined word opens its choices, and the foot says you can also tell the lead"
+  },
+  {
+    "id": "H2",
+    "page": "?d=H&open=open&conn=tracker&tracker=two",
+    "caption": "H with Linear + Jira and Linear not connected: Linear's word goes violet and the sentence says Althar isn't connected to it"
+  },
+  {
+    "id": "H3",
+    "page": "?d=H&open=open",
+    "click": ["text:leave what the rules don’t cover to the coordinator"],
+    "caption": "H: pressing what agents may do opens its four choices, with Every rule… under them"
+  },
+  {
+    "id": "H4",
+    "page": "?d=H&open=open&tracker=none",
+    "caption": "H with no tracker: “It has no tracker”, and those words open Add a tracker; the sentence about moving issues goes"
+  },
+  {
+    "id": "I1",
+    "page": "?d=I&open=open",
+    "caption": "I · Header unfolds: Project settings opens the header downward over the board, in three columns, the latest note and Remove along its foot"
+  },
+  {
+    "id": "I2",
+    "page": "?d=I&open=open&conn=host&tracker=two",
+    "caption": "I with GitHub signed out and two trackers: the trouble is in the middle column, in violet"
+  },
+  {
+    "id": "J1",
+    "page": "?d=J&open=open",
+    "caption": "J · One search: no project button; the bar's one gear opens every setting, althar's first, then the app's sections"
+  },
+  {
+    "id": "J2",
+    "page": "?d=J&open=open",
+    "click": ["[role=dialog] input"],
+    "type": "linear",
+    "caption": "J after typing “linear”: only what says it, the Linear line and Move issues, changed right there"
+  },
+  {
+    "id": "J3",
+    "page": "?d=J&open=open",
+    "click": ["[role=dialog] input"],
+    "type": "remove",
+    "caption": "J after typing “remove”: Remove from Althar is found, and nowhere else in the way"
   }
 ]

@@ -1,13 +1,14 @@
-// Scrappy: the project's settings as its front page sees them here: the real ones in Today, else the direction's.
+// Scrappy: the project's settings as its front page sees them here: the real ones in Today, else the direction's way in.
 import { useEffect } from 'react'
 
 import {
   ProjectSettings as Real,
   type ProjectSettingsProps,
 } from '../../../../../apps/desktop/src/renderer/features/project/ProjectSettings'
-import { A } from '../directions/A'
-import { CButton } from '../directions/C'
-import { DMore } from '../directions/D'
+import { ProjectButton } from '../calm'
+import { G } from '../directions/G'
+import { H } from '../directions/H'
+import { IButton } from '../directions/I'
 import { useThings } from '../parts'
 import { proto, useProto } from '../state'
 
@@ -33,20 +34,30 @@ function Today(props: ProjectSettingsProps) {
   return <Real {...props} />
 }
 
+const opening = () => proto.set({ showing: 'open' })
+const closing = () => proto.set({ showing: 'closed' })
+
 export function ProjectSettings(props: ProjectSettingsProps) {
   const p = useProto()
   const things = useThings()
   switch (p.direction) {
     case 'Today':
       return <Today {...props} />
-    case 'A':
-      return <A key={p.showing} things={things} />
-    case 'C':
-      return <CButton open={p.showing !== 'closed'} onOpen={(open) => proto.set({ showing: open ? 'open' : 'closed' })} />
-    case 'D':
-      return <DMore key={p.showing} things={things} />
+    case 'F':
+      return <ProjectButton onClick={opening} />
+    case 'G':
+      return (
+        <>
+          <ProjectButton onClick={opening} />
+          {p.showing !== 'closed' && <G key={p.showing} things={things} onClose={closing} />}
+        </>
+      )
+    case 'H':
+      return <H key={p.showing} things={things} />
+    case 'I':
+      return <IButton />
     default:
-      // B: Settings is one of the project's views, in the bar. E: the gear at the bar's end.
+      // J: the bar's one gear.
       return null
   }
 }

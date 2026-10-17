@@ -25,6 +25,10 @@ for (const shot of shots.filter((one) => only.length === 0 || only.includes(one.
     else await page.locator(click).first().click()
     await page.waitForTimeout(700)
   }
+  if (shot.type !== undefined) {
+    await page.keyboard.type(shot.type)
+    await page.waitForTimeout(500)
+  }
   await page.screenshot({ path: resolve(out, `${shot.id}.png`) })
   process.stdout.write(`${shot.id}  ${errors.length === 0 ? 'ok' : errors.join(' | ')}\n`)
   await page.close()
