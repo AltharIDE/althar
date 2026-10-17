@@ -87,7 +87,6 @@ export interface ComposerText {
   stop: string
   /** The host's shortcut for stopping, shown in the button's tooltip. */
   stopKey: string
-  queueNote: string
   /** Sends while the agent works, instead of queueing: it stops at a safe point and carries on with both. */
   sendNow: string
   /** What Send now does, in its tooltip. */
@@ -132,7 +131,6 @@ export const composerText: ComposerText = {
   queue: 'Queue',
   stop: 'Interrupt the lead',
   stopKey: '⌘.',
-  queueNote: 'Enter queues it; the lead reads it next',
   sendNow: 'Send now',
   sendNowNote: 'Interrupt the lead with this; it carries on with both',
   sendNowKey: '⌘↵',
@@ -184,6 +182,8 @@ export interface ComposerProps {
   hint?: string
   /** What floats on the composer's top edge: what the agent listens to, what it left running. */
   above?: ReactNode
+  /** Dictation carried from another thread (a DictationPill): centred over the composer, above all that floats on its edge, so it covers none of it. */
+  carried?: ReactNode
   /** What is joined to the composer's top edge, in the flow: a DictationTray. The field stays usable under it. */
   tray?: ReactNode
   /** Images to send with what is written, in order: they go when it is sent, even with nothing written. */
@@ -231,6 +231,7 @@ export function Composer({
   onUnqueue,
   hint,
   above,
+  carried,
   tray,
   images = [],
   onAddImages,
@@ -329,7 +330,6 @@ export function Composer({
   })()
 
   const note = (() => {
-    if (busy && drafted) return t.queueNote
     if (value.includes('\n')) return t.newlineNote
     return null
   })()
@@ -346,7 +346,12 @@ export function Composer({
   /* One shape whether or not a tray shows, so the field is never rebuilt under the cursor as one comes and goes. What floats sits above the tray, not over it. */
   return (
     <div className={s.stack} data-tray-host="" {...drop.handlers}>
-      {above && <div className={s.above}>{above}</div>}
+      {(above || carried) && (
+        <div className={s.floats}>
+          {carried && <div className={s.carried}>{carried}</div>}
+          {above && <div className={s.above}>{above}</div>}
+        </div>
+      )}
       {tray != null && <div className={s.tray}>{tray}</div>}
       <form className={cx(s.composer, elapsed !== null && s.recording, drop.over && s.over, className)} onSubmit={submit}>
         {drop.over && (
@@ -473,8 +478,8 @@ export function Composer({
           )}
           {canSendNow && (
             <Tooltip label={t.sendNowNote}>
-              <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey}>
-                {t.sendNow}
+              <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey} aria-label={t.sendNow}>
+                <span className={s.sendNowLabel}>{t.sendNow}</span>
               </ActionButton>
             </Tooltip>
           )}
