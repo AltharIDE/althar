@@ -56,6 +56,7 @@ import {
 } from './errors'
 import { Instance } from './Instance'
 import { Limits } from './Limits'
+import { PlanUsage } from './PlanUsage'
 import { Live } from './Live'
 import type { Models } from './Models'
 import type { Policies } from './Policies'
@@ -308,6 +309,7 @@ type Store =
   | RuntimeConfig
   | Accounts
   | Limits
+  | PlanUsage
   | Models
   | Setups
   | Policies
@@ -600,6 +602,12 @@ export class Sessions extends Context.Service<
       const questions = yield* Questions
       const accounts = yield* Accounts
       const limits = yield* Limits
+      const planUsage = yield* PlanUsage
+      /* Claude Code's adapter says a plan window with the usage it streams: kept for the account the session runs on. */
+      const heardPlan = (running: Running, event: SessionEvent) =>
+        event._tag === 'ContextUsage' && event.planWindow !== undefined
+          ? planUsage.heard(running.account.id, running.entry.definition.id, event.planWindow)
+          : Effect.void
       const toolServer = yield* ToolServer
       const setups = yield* Setups
       const stopGrace = (yield* RuntimeConfig).stopGrace ?? Duration.seconds(10)
@@ -1230,6 +1238,7 @@ export class Sessions extends Context.Service<
               // An agent may say its compaction failed in a call of its own, and end its turn as usual (Claude Code).
               if (compacting && event._tag === 'ToolCallUpdate' && event.status === 'failed') compactFailed = true
               heardContext(running, event)
+              yield* heardPlan(running, event)
               yield* record(event)
               yield* heardBackground(running, event)
               yield* live.publish({ _tag: 'Agent', threadId: thread.threadId, event })
@@ -1800,7 +1809,10 @@ export class Sessions extends Context.Service<
                   Effect.andThen(
                     Effect.andThen(
                       Effect.andThen(
-                        Effect.sync(() => heardContext(running, event)),
+                        Effect.andThen(
+                          Effect.sync(() => heardContext(running, event)),
+                          heardPlan(running, event),
+                        ),
                         heard.record(event),
                       ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not record an agent event', cause))),
                       Effect.andThen(heardWork(running, event), heardBackground(running, event)),

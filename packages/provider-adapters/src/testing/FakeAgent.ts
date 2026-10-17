@@ -34,6 +34,8 @@ export const scenarios = {
   bareAsk: 'bare-ask',
   /** A plan, context usage, a notice, and the agent changing its own option. */
   updates: 'updates',
+  /** Usage updates that carry Claude Code's rate-limit event in `_meta`: the five-hour window at 82 percent, then the weekly at 40. */
+  planUsage: 'plan-usage',
   /** One chunk, then waits until cancelled. */
   slow: 'slow',
   /** Fails with Claude Code's usage-limit message. */
@@ -1582,6 +1584,22 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say(`chosen=${chosen}`)
           return ended()
         }
+        case scenarios.planUsage:
+          await update({
+            sessionUpdate: 'usage_update',
+            used: 10,
+            size: 100,
+            _meta: {
+              '_claude/rateLimit': { status: 'allowed_warning', rateLimitType: 'five_hour', utilization: 0.82, resetsAt: 1_760_540_400 },
+            },
+          })
+          await update({
+            sessionUpdate: 'usage_update',
+            used: 20,
+            size: 100,
+            _meta: { '_claude/rateLimit': { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: 1_761_000_000 } },
+          })
+          return ended()
         case scenarios.updates:
           await update({ sessionUpdate: 'plan', entries: [{ content: 'Write the test', priority: 'high', status: 'in_progress' }] })
           await update({ sessionUpdate: 'usage_update', used: 1200, size: 200_000, cost: { amount: 0.02, currency: 'USD' } })

@@ -5,6 +5,7 @@ import type { ToolKind } from '@althar/domain'
 
 import type { BackgroundEvent } from './background'
 import type { Classified } from './failures'
+import { claudeRateLimitWindow, record, type UsageWindow } from './usage'
 
 /*
  * What an agent's updates become inside Althar. The runtime turns these
@@ -130,6 +131,8 @@ export type SessionEvent =
       readonly used: number
       readonly size: number
       readonly cost?: { readonly amount: number; readonly currency: string }
+      /** Claude Code's adapter sends a plan window with the usage it streams (`usage.ts`): one per event. */
+      readonly planWindow?: UsageWindow
     }
   | { readonly _tag: 'OptionsChanged'; readonly options: ReadonlyArray<ConfigOption> }
   /** The mode changed. `byAgent` when Althar didn't ask for it, such as a plan session leaving plan mode. */
@@ -368,6 +371,7 @@ export const normalize = (update: acp.SessionUpdate): SessionEvent => {
           'cost',
           update.cost === null || update.cost === undefined ? undefined : { amount: update.cost.amount, currency: update.cost.currency },
         ),
+        ...defined('planWindow', claudeRateLimitWindow(record(update._meta)?.['_claude/rateLimit']) ?? undefined),
       }
     case 'config_option_update':
       return { _tag: 'OptionsChanged', options: normalizeOptions(update.configOptions) }

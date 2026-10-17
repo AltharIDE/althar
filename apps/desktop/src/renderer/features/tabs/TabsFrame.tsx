@@ -2,11 +2,13 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useS
 import { createPortal } from 'react-dom'
 import { useNavigate } from '@tanstack/react-router'
 
-import { LoadMeter, ProjectTabs, Room, TitleBar, UpdateReady } from '@althar/ui'
+import { LoadMeter, ProjectTabs, Room, TitleBar, UpdateReady, UsageButton } from '@althar/ui'
 
 import { useServices } from '../../data/services'
 import { FinderView } from '../finder/FinderView'
 import { QuickSettings } from '../settings/QuickSettings'
+import { UsageView } from '../usage/UsageView'
+import { UsageOpenContext, usePlanUsage } from '../usage/useUsage'
 import { CarriedAtFoot, CarriedBack } from '../../shared/dictation/Carried'
 import { useWindowChrome } from '../../shared/useWindowChrome'
 import { useUpdate } from '../../shared/useUpdate'
@@ -23,15 +25,17 @@ import { useTabs } from './useTabs'
  * the projects in order, ⌘9 to the last, and Control-Tab to the next tab
  * (with Shift, the one before), as in a browser. ⌘N starts a new project in
  * a tab of its own, as the + does. ⌘K finds a task: in the project whose tab
- * has the window, or, on the home, in every project. The tabs are the
- * window's one bar: a screen puts its own controls at the bar's end with
- * BarEnd, and its way back, where it has one, at the top of its page.
- * Before it, on every screen, how hard the computer works, in two short
- * meters the person may turn off (`useLoad`), and a newer Althar ready to
- * install, in one quiet line; after it, at the very end, Althar's settings'
- * gear, whose quick settings ⌘, opens and closes, and whose All settings,
- * or ⌘⇧,, opens the settings' tab. Before there is any project there are no
- * tabs: the first screen has the whole window.
+ * has the window, or, on the home, in every project. ⌘U opens plan usage,
+ * and again closes it; the bar also always has a way to it, with the count
+ * of warnings not yet seen. The tabs are the window's one bar: a screen puts
+ * its own controls at the bar's end with BarEnd, and its way back, where it
+ * has one, at the top of its page. Before it, on every screen, how hard the
+ * computer works, in two short meters the person may turn off (`useLoad`),
+ * and a newer Althar ready to install, in one quiet line; after it, at the
+ * very end, Althar's settings' gear, whose quick settings ⌘, opens and
+ * closes, and whose All settings, or ⌘⇧,, opens the settings' tab. Before
+ * there is any project there are no tabs: the first screen has the whole
+ * window.
  */
 
 /** The settings' tab among the projects' ids, stepping from tab to tab: no project's id is empty. */
@@ -95,11 +99,13 @@ export const useLastRoom = (projectId: string): readonly [Room | null, (room: Ro
  */
 function TabsBar({
   tabs,
+  usage,
   endRef,
   quick,
   onQuick,
 }: {
   tabs: ReturnType<typeof useTabs>
+  usage: { readonly open: boolean; readonly toggle: () => void }
   endRef: (element: HTMLElement | null) => void
   /** Whether the quick settings are open. */
   quick: boolean
@@ -109,6 +115,7 @@ function TabsBar({
   const chrome = useWindowChrome()
   const update = useUpdate()
   const load = useLoad(tabs.tabs.length > 0 || tabs.others.length > 0)
+  const waiting = usePlanUsage()?.warnings.length ?? 0
   const { select, current } = tabs
   return (
     <ProjectTabs
@@ -129,6 +136,7 @@ function TabsBar({
             <LoadMeter load={load.glance} slots={SLOTS} onOpen={load.open} onHide={load.hide} text={loadText.meter} />
           )}
           {update.ready !== null && <UpdateReady {...update.ready} />}
+          <UsageButton waiting={waiting} expanded={usage.open} onClick={usage.toggle} />
           <div ref={endRef} className={s.end} />
           <QuickSettings open={quick} onOpenChange={onQuick} onSettings={tabs.openSettings} />
         </>
@@ -169,6 +177,9 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   const [end, setEnd] = useState<HTMLElement | null>(null)
   // Finding a task, in the project with the window or on the home in every one; from a composer too.
   const [finding, setFinding] = useState(false)
+  // Plan usage, over the window, from any screen.
+  const [usage, setUsage] = useState(false)
+  const openUsage = useCallback(() => setUsage(true), [])
   // The quick settings, from the gear at the bar's end, and ⌘, on every screen.
   const [quick, setQuick] = useState(false)
   const { select, current, newProject, none, openSettings } = tabs
@@ -204,6 +215,12 @@ export function TabsFrame({ children }: { children: ReactNode }) {
         setFinding(true)
         return
       }
+      // ⌘U, Control-U off a Mac: plan usage, opened and closed again by the same key.
+      if (command && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'u') {
+        event.preventDefault()
+        setUsage((open) => !open)
+        return
+      }
       // Before there is a project, the first screen has ⌘N for a folder of its own.
       if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'n' && !none) {
         event.preventDefault()
@@ -232,17 +249,28 @@ export function TabsFrame({ children }: { children: ReactNode }) {
     <CarriedBack.Provider value={back}>
       <VisitContext.Provider value={tabs.visit}>
         <NewTabContext.Provider value={newTab}>
-          <EndContext.Provider value={end}>
-            <TabBarContext.Provider value={!tabs.none}>
-              <div className={s.frame}>
-                {!tabs.none && <TabsBar tabs={tabs} endRef={setEnd} quick={quick} onQuick={setQuick} />}
-                <div className={s.screen}>{children}</div>
-              </div>
-              {finding && <FinderView projectId={current} onClose={() => setFinding(false)} />}
-              {/* Dictation carried from its composer, at the window's foot where no composer shows. */}
-              <CarriedAtFoot />
-            </TabBarContext.Provider>
-          </EndContext.Provider>
+          <UsageOpenContext.Provider value={openUsage}>
+            <EndContext.Provider value={end}>
+              <TabBarContext.Provider value={!tabs.none}>
+                <div className={s.frame}>
+                  {!tabs.none && (
+                    <TabsBar
+                      tabs={tabs}
+                      usage={{ open: usage, toggle: () => setUsage((open) => !open) }}
+                      endRef={setEnd}
+                      quick={quick}
+                      onQuick={setQuick}
+                    />
+                  )}
+                  <div className={s.screen}>{children}</div>
+                </div>
+                {finding && <FinderView projectId={current} onClose={() => setFinding(false)} />}
+                {usage && <UsageView onClose={() => setUsage(false)} />}
+                {/* Dictation carried from its composer, at the window's foot where no composer shows. */}
+                <CarriedAtFoot />
+              </TabBarContext.Provider>
+            </EndContext.Provider>
+          </UsageOpenContext.Provider>
         </NewTabContext.Provider>
       </VisitContext.Provider>
     </CarriedBack.Provider>
