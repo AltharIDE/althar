@@ -403,6 +403,7 @@ describe('the API', () => {
               LeftHome: () => Effect.die('unused'),
               SeeTask: () => Effect.die('unused'),
               Merge: () => Effect.die('unused'),
+              ClosePullRequest: () => Effect.die('unused'),
               Push: () => Effect.die('unused'),
               ReplacePullRequest: () => Effect.die('unused'),
               MergeNote: () => Effect.die('unused'),

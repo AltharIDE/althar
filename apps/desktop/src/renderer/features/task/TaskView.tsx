@@ -311,8 +311,14 @@ export function TaskView({
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
   const [connecting, setConnecting] = useState(false)
-  // Abandoning it asks first, saying what happens to its worktree and branch.
+  // Abandoning it asks first, saying what happens to its worktree and branch, and offering to close its pull requests.
   const [abandoning, setAbandoning] = useState(false)
+  // Abandoned, the pull requests it was to close that are still open, by address, offered again: null until then.
+  const [leftOpen, setLeftOpen] = useState<ReadonlyArray<string> | null>(null)
+  const endAbandoning = () => {
+    setAbandoning(false)
+    setLeftOpen(null)
+  }
   // Whether its title is a field, from its menu's Rename or from pressing the title.
   const [renaming, setRenaming] = useState(false)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
@@ -528,7 +534,9 @@ export function TaskView({
   const { planId } = snapshot.task
   // Its draft pull requests, marked ready from the menu too, while it is under way or ready.
   const drafts = snapshot.task.phase === 'settled' ? [] : snapshot.task.changes.filter((one) => one.state === 'open' && one.draft)
-  const openChange = snapshot.task.changes.find((one) => one.state === 'open')
+  // Its pull requests still open, offered to close as it is abandoned; those left open after, offered again.
+  const openChanges = snapshot.task.changes.filter((one) => one.state === 'open')
+  const offered = leftOpen === null ? openChanges : openChanges.filter((one) => leftOpen.includes(one.url))
   // Its newest pull request that merged: what a merged task's commits came after.
   const mergedChange = snapshot.task.changes.findLast((one) => one.state === 'merged')
   // What it changed opens over the window; what else it can do is in its menu.
@@ -889,9 +897,8 @@ export function TaskView({
           activity={can('stop') ? TaskActivity.Working : can('start') ? TaskActivity.Planned : TaskActivity.Still}
           worktree={snapshot.task.worktree === null ? null : shortFolder(snapshot.task.worktree)}
           branch={snapshot.task.branch}
-          {...(openChange === undefined
-            ? {}
-            : { change: { name: `${openChange.short} ${openChange.prefix}${openChange.number}`, host: productName(openChange.product) } })}
+          changes={offered.map((one) => ({ id: one.url, name: `${one.noun} ${one.prefix}${one.number}`, host: productName(one.product) }))}
+          abandoned={leftOpen !== null}
           {...(mergedChange === undefined || !can('leaveOut')
             ? {}
             : {
@@ -902,8 +909,25 @@ export function TaskView({
               })}
           busy={model.pending}
           {...(model.error === null ? {} : { error: model.error })}
-          onAbandon={() => void model.abandon().then((abandoned) => abandoned && setAbandoning(false))}
-          onClose={() => setAbandoning(false)}
+          onAbandon={(choices) =>
+            void model
+              .abandon(
+                offered
+                  .filter((one) => choices.close.includes(one.url))
+                  .map((one) => ({
+                    url: one.url,
+                    name: `${one.short} ${one.prefix}${one.number}`,
+                    deleteBranch: choices.deleteBranch.includes(one.url),
+                  })),
+              )
+              .then(({ abandoned, open }) => {
+                // Abandoned, with each it was to close closed: done. One its host wouldn't close stays offered, with why.
+                if (!abandoned) return
+                if (open.length === 0) endAbandoning()
+                else setLeftOpen(open)
+              })
+          }
+          onClose={endAbandoning}
         />
       )}
       {changes.open && (
