@@ -12,7 +12,9 @@ import s from './AbandonTask.module.css'
  * reopened on them (a plain task, on its worktree alone: it has no branch
  * yet). A pull request it has open is offered to close on its host, on as
  * the dialog opens, with its branch there to delete too, off: only what
- * the person leaves on is done, as they press. It is the one step; nothing
+ * the person leaves on is done, as they press. A merged task abandons only
+ * the commits after its pull request: that stays merged, and its lead
+ * carries on when the person writes to it. It is the one step; nothing
  * happens until it is pressed, and Cancel, first, has focus as it opens.
  * Abandoned, but a pull request it was to close still open (the host said
  * no), it says so, and offers to close what is left again.
@@ -42,6 +44,10 @@ export interface AbandonTaskText {
   reopenWorktree: string
   /** For a task with neither yet. */
   reopenLater: string
+  /** For a merged task: its pull request, which stays merged, and the commits after it, left out. */
+  mergedDescription: (change: string) => string
+  mergedCommits: (count: number) => string
+  mergedLater: string
   abandon: string
   cancel: string
   /** Abandoned, with a pull request it was to close still open. */
@@ -66,6 +72,10 @@ export const abandonTaskText: AbandonTaskText = {
   reopen: 'You can reopen it later, on the same worktree and branch.',
   reopenWorktree: 'You can reopen it later, on the same worktree.',
   reopenLater: 'You can reopen it later.',
+  mergedDescription: (change) => `${change} stays merged. The task ends here without the work after it.`,
+  mergedCommits: (count) =>
+    count === 1 ? 'The commit after it goes in no pull request.' : `The ${count} commits after it go in no pull request.`,
+  mergedLater: 'Write to its lead to carry on with it later.',
   abandon: 'Abandon task',
   cancel: 'Cancel',
   abandonedTitle: 'Task abandoned',
@@ -98,6 +108,8 @@ export interface AbandonTaskProps {
   changes?: ReadonlyArray<AbandonChange>
   /** Abandoned already, with these pull requests still open: only closing them is offered. */
   abandoned?: boolean
+  /** Its change merged: its last pull request, by name, and how many commits after it are left out. */
+  merged?: { readonly name: string; readonly commits: number }
   onAbandon: (choices: AbandonChoices) => void
   onClose: () => void
   busy?: boolean
@@ -129,6 +141,7 @@ export function AbandonTask({
   branch,
   changes = [],
   abandoned = false,
+  merged,
   onAbandon,
   onClose,
   busy = false,
@@ -150,7 +163,7 @@ export function AbandonTask({
   return (
     <Dialog
       title={abandoned ? t.abandonedTitle : t.title}
-      description={abandoned ? t.abandonedDescription : t.description}
+      description={abandoned ? t.abandonedDescription : merged === undefined ? t.description : t.mergedDescription(merged.name)}
       onClose={onClose}
       width={460}
       actions={
@@ -172,9 +185,12 @@ export function AbandonTask({
       {!abandoned && (
         <ul className={s.list}>
           {stopping !== null && <li>{stopping}</li>}
+          {merged !== undefined && <li>{t.mergedCommits(merged.commits)}</li>}
           <li>{worktree === null ? t.noWorktree : t.worktree(worktree)}</li>
           {branch !== null && <li>{deleting.length > 0 ? t.branchHere(branch) : t.branch(branch)}</li>}
-          <li>{branch !== null ? t.reopen : worktree !== null ? t.reopenWorktree : t.reopenLater}</li>
+          <li>
+            {merged !== undefined ? t.mergedLater : branch !== null ? t.reopen : worktree !== null ? t.reopenWorktree : t.reopenLater}
+          </li>
         </ul>
       )}
       {changes.length > 0 && (

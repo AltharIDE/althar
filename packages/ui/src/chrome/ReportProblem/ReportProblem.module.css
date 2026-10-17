@@ -1,0 +1,89 @@
+.form {
+  display: grid;
+  gap: 16px;
+  color: var(--t-2);
+}
+.what,
+.email {
+  display: grid;
+  gap: 6px;
+}
+.label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--t-1);
+}
+.note {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--t-3);
+}
+
+/* a switch, its words beside it, and what it shows under them */
+.option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: start;
+}
+.option > :first-child {
+  margin-top: 1px;
+}
+.words {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* what an option includes, at its end: the screenshot's preview */
+.withAside {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+/* the window as it was, small, framed by a hairline; an empty frame while it is left out */
+.shot {
+  width: 148px;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--n-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+.shot img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+}
+.shotOff {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.disclosure {
+  margin-top: 4px;
+}
+.see {
+  justify-self: start;
+  font-size: 12px;
+}
+.sent {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--frost-well);
+  overflow-wrap: anywhere;
+}
+.reading {
+  font-size: 12px;
+  color: var(--t-3);
+}
+
+.error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--danger);
+}

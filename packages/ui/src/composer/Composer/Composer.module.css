@@ -232,13 +232,32 @@
   margin: 0 10px;
 }
 
-/* floats on the top edge, over the end of the thread */
-.above {
+/* what floats on the top edge, over the end of the thread: carried dictation, then the pills nearest the field */
+.floats {
   position: absolute;
   left: 0;
+  right: 0;
   bottom: calc(100% + 8px);
   z-index: var(--z-float);
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* the thread under its empty corners stays clickable */
+  pointer-events: none;
+}
+.above,
+.carried > * {
+  pointer-events: auto;
+}
+
+.carried {
+  display: flex;
+  justify-content: center;
+}
+
+.above {
+  display: flex;
+  align-self: flex-start;
   /* when they don't fit side by side, the first stays nearest the field and the rest stack above it */
   flex-wrap: wrap-reverse;
   gap: 6px;
@@ -250,29 +269,34 @@
   align-items: center;
   gap: 4px;
   margin-left: -6px;
-  /* when even the fixed controls don't fit, whole controls wrap to a row below, the actions staying at the right */
+  /* only when even the picker's mark and effort don't fit beside the actions does the picker take a row of its own */
   flex-wrap: wrap;
   row-gap: 4px;
-  container-type: inline-size;
+  container: foot / inline-size;
 }
 
-/* the picker, which can shrink, takes what the buttons leave; the buttons never give way */
-.bar > * {
-  flex: none;
+/* the picker takes what the actions leave and shrinks first; the actions stay together on the right and never wrap on their own */
+.left {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 64px;
 }
-.bar > :first-child:not(.space) {
-  flex: 0 1 auto;
+.left > * {
   min-width: 0;
   max-width: 100%;
 }
-
-.space {
-  flex: 1 1 0;
-  min-width: 0;
+.right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+.right > * {
+  flex: none;
 }
 
 /* one line, cut with an ellipsis rather than wrapped; it gives way before anything else */
-.note {
+.right > .note {
   flex: 0 1 auto;
   min-width: 0;
   margin-right: 6px;
@@ -355,6 +379,13 @@
   background: currentColor;
   opacity: calc(0.35 + var(--l, 0) * 0.65);
   transition: height 90ms linear;
+}
+
+/* narrow, dictating gets compact: the waveform goes, the time and the stop stay */
+@container foot (max-width: 480px) {
+  .wave {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

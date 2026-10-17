@@ -459,6 +459,7 @@ describe('the API', () => {
               SetTaskResolveConflicts: () => Effect.void,
               SetTaskAllowEverything: () => Effect.void,
               ResumeTask: () => Effect.void,
+              LeaveOutCommits: () => Effect.void,
               AbandonTask: () => Effect.void,
               RenameTask: () => Effect.void,
               ReopenTask: () => Effect.void,

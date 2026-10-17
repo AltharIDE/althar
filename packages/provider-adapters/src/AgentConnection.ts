@@ -40,8 +40,17 @@ export interface InProcessAgent {
 }
 
 export type Transport =
-  /** The agent runs as a process Althar owns. `capture` receives the raw protocol, numbered, in both directions. */
-  | { readonly _tag: 'Process'; readonly spec: LaunchSpec; readonly cwd: string; readonly capture?: (frame: CapturedFrame) => void }
+  /**
+   * The agent runs as a process Althar owns. `capture` receives the raw protocol, numbered, in both directions; `stderr`, what
+   * the process writes there, for the app's log.
+   */
+  | {
+      readonly _tag: 'Process'
+      readonly spec: LaunchSpec
+      readonly cwd: string
+      readonly capture?: (frame: CapturedFrame) => void
+      readonly stderr?: (chunk: string, pid: number) => void
+    }
   | { readonly _tag: 'InProcess'; readonly agent: InProcessAgent }
 
 export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always'
@@ -484,11 +493,11 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
     let owned: OwnedProcess | undefined
     let connection: acp.ClientConnection
     if (options.transport._tag === 'Process') {
-      owned = yield* spawnOwned(
-        options.transport.spec,
-        options.transport.cwd,
-        options.transport.capture === undefined ? {} : { capture: options.transport.capture },
-      )
+      const { capture, stderr } = options.transport
+      owned = yield* spawnOwned(options.transport.spec, options.transport.cwd, {
+        ...(capture === undefined ? {} : { capture }),
+        ...(stderr === undefined ? {} : { stderr }),
+      })
       connection = app.connect(takingBackground(acp.ndJsonStream(owned.stdin, owned.stdout), heardBackground))
     } else {
       // In process, over a pair of streams, so what it leaves running is taken off them as a process's would be.

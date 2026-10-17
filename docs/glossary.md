@@ -80,6 +80,7 @@ say the right. When something new needs a name on screen, add it here first.
 | Post reviews of my team’s pull requests without asking | the `post_team_reviews` setting | In Settings, off by default: a review of a pull request by one of the repository's people, from a branch of its own, posts itself as soon as its lead drafts it. One from outside the team always waits for Post. |
 | Stop the task | run suspended | From the task menu. Every agent on it stops, and the step it was on is cut short. Nothing runs, and nothing waits on you, until you resume it. Status: Stopped. |
 | Resume | run resumed | From the task menu, or by writing to a stopped task: the lead carries on the step it was on, with what you wrote first. |
+| Abandon, a merged task | commits after its last pull request left out (`leaveOut`, `refs/althar/left-out/…`, ADR-034) | From the task menu, while commits after a merged task's last pull request are in none yet and its lead isn't in a turn: they are what keep it in Needs you. It settles without them, done still, at the time it first settled where it had one; an open task merged in every repository too, as settling it asks. They stay on its branch and in its worktree; only what is committed after counts again. Never marked `abandoned`: its change is in. |
 | Abandon | task abandoned, its run suspended | From the task menu, asked first. Ends the task without its change. It moves to Settled. Its worktree and branch stay. |
 | Reopen | an abandoned task open again | Only for an abandoned task, never a merged one. It opens on the same worktree and branch, where it was: a step cut short resumes, work that had passed is ready again. Writing to an abandoned task reopens it too. |
 | Follow-up, Following up | a round of work after the plan (a run with no plan, ADR-034) | What the person asks a task's lead for once its plan's steps are done: the task runs again, ready, merged or settled as it was, and its track names its first step Follow-up, its header Following up. The lead finishes it with its summary, a review follows where the plan has one, and one that changed nothing leaves the task where it was. Not "round" or "iteration" on screen. |
@@ -95,6 +96,15 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 |---|---|---|
 | This update couldn’t move your data | a migration that didn't finish (`MigrationFailed`, `ForeignKeyViolations`), or the copy before it (`BackupFailed`) | What the window shows instead of opening when an update couldn't bring the person's data to its new shape. It says the data is safe, where the copy from before the update is, and what stopped it. Nothing of Althar runs behind it. |
 | Copy from before the update | a backup, in the profile's `backups` folder | The copy of the person's data Althar makes before an update moves it, kept as a file they can find. The newest three are kept. |
+
+## When something goes wrong with Althar
+
+| On screen | In the model | What it is |
+|---|---|---|
+| Report a problem | a problem report, sent to the reports Worker, which makes a Linear issue | From Help in the app's menu on a Mac, the foot of the quick settings, or About Althar in Settings: a dialog with one box, "What happened?". The screenshot of the window and the logs go with it unless the person switches them off; "See what's sent" lists every item; an email if they'd like a reply. Without the reports service, it is saved in Downloads and a mail opens to send it with. |
+| Report this | a problem report about something that went wrong, carrying its task, or what stopped an update | Quiet, at the end of a Stuck call's answers, and on This update couldn’t move your data. It opens Report a problem about that step or that update. On a Stuck call it answers nothing: the step still waits. |
+| Logs | `main.log`, `runtime.log`, `agents.log` | What the app writes as it runs, in the system's place for logs. A report sends the last part of each, with paths in the home folder and repository names hidden. |
+| Install id | usage data's random id, kept in the profile's `desktop.json` | Which install a report came from, and nothing about who. The same id usage data sends, whether or not usage data is on. |
 
 ## What comes back
 

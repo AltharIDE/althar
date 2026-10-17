@@ -51,6 +51,8 @@ export interface TaskMenuText {
   resumeAbout: string
   abandon: string
   abandonAbout: string
+  /** For a merged task, which abandons only what came after its pull request. */
+  abandonMergedAbout: string
   reopen: string
   reopenAbout: string
   conflicts: string
@@ -89,6 +91,7 @@ export const taskMenuText: TaskMenuText = {
   resumeAbout: 'The lead carries on from the step it was on, in a fresh session.',
   abandon: 'Abandon',
   abandonAbout: 'It ends here, and its change isn’t merged. Its worktree and branch stay.',
+  abandonMergedAbout: 'Its pull request stays merged. The commits after it stay on its branch, in no pull request.',
   reopen: 'Reopen',
   reopenAbout: 'It opens again, on the same worktree and branch.',
   conflicts: 'Resolve conflicts automatically',
@@ -121,6 +124,8 @@ export interface TaskMenuProps {
   onResume?: () => void
   /** Abandons it; the consumer asks first, since it settles the task. */
   onAbandon?: () => void
+  /** Its change merged: abandoning it leaves out only the commits after it, and it stays merged. */
+  merged?: boolean
   onReopen?: () => void
   /**
    * Whether its lead resolves a conflict on its own: the task's choice, what
@@ -149,6 +154,7 @@ export function TaskMenu({
   onStop,
   onResume,
   onAbandon,
+  merged = false,
   onReopen,
   conflicts,
   allowEverything,
@@ -266,7 +272,7 @@ export function TaskMenu({
       {onAbandon && (
         <>
           {(opens || course.length > 0 || conflicts || allowEverything) && <MenuSeparator />}
-          <MenuItem icon="close" tone="danger" description={t.abandonAbout} onSelect={onAbandon}>
+          <MenuItem icon="close" tone="danger" description={merged ? t.abandonMergedAbout : t.abandonAbout} onSelect={onAbandon}>
             {t.abandon}
           </MenuItem>
         </>

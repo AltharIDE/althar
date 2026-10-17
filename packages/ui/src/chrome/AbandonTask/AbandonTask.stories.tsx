@@ -77,6 +77,16 @@ export const CloseFailed: Story = {
     error: 'Pull request #1206 is still open. GitHub won’t let this account do that: Resource not accessible by integration.',
   },
 }
+/** Merged, with commits after its pull request: those are left out, and it stays merged. */
+export const Merged: Story = {
+  args: { activity: TaskActivity.Still, merged: { name: 'Pull request #142', commits: 1 } },
+  play: async () => {
+    const dialog = within(document.body).getByRole('dialog')
+    await expect(dialog).toHaveTextContent('Pull request #142 stays merged.')
+    await expect(dialog).toHaveTextContent('The commit after it goes in no pull request.')
+    await expect(dialog).not.toHaveTextContent('isn’t merged')
+  },
+}
 /** Before its worktree was made, it has none to leave. */
 export const NoWorktree: Story = {
   args: { activity: TaskActivity.Planned, worktree: null, branch: null },

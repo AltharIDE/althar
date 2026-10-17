@@ -7,6 +7,7 @@ import { ApiError, type BoardCall, type BoardSnapshot, type BoardTask } from '@a
 import { BoardView, trackOf } from '../src/renderer/features/board/BoardView'
 import { DockView } from '../src/renderer/features/board/DockView'
 import { pictureUrl } from '../src/main/pictureAddress'
+import { queuedWords } from '../src/renderer/shared/agents'
 import { clock, running } from '../src/renderer/shared/time'
 import { inYoursOf, lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
 import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
@@ -155,6 +156,48 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
+  describe('a task started that waits for a free agent, by lane', () => {
+    const NOW = '2026-10-01T10:00:00.000Z'
+    const queued = { busy: 4, atOnce: 4 }
+    const waiting = (taskId: string, place: number, overrides: Partial<BoardTask> = {}) =>
+      task({ taskId, threadId: `th-${taskId}`, title: `Waiting ${taskId}`, phase: 'running', queued, planWaits: true, place, ...overrides })
+    const planned = task({
+      taskId: 'p',
+      title: 'Add a retry',
+      phase: 'planned',
+      plan: { ...card().plan!, startsAt: '2026-10-01T10:00:20.000Z' },
+    })
+    const held = task({ taskId: 'h', title: 'Hold off', phase: 'held', plan: { ...card().plan!, startsAt: null } })
+
+    it('goes up next when no step has had an agent, in the order they will start, above planned and held plans', () => {
+      const lanes = lanesOf(board({ tasks: [held, planned, waiting('b', 2), waiting('a', 1), waiting('c', 3)], calls: [] }))
+      expect(lanes.next.map((work) => work.taskId)).toEqual(['a', 'b', 'c', 'p', 'h'])
+      expect(lanes.free).toBe(3)
+      expect(lanes.running).toEqual([])
+    })
+
+    it('stays running when it is mid-work and a later turn waits for a place', () => {
+      const midWork = task({ taskId: 'm', phase: 'running', step: 'implement', queued })
+      const lanes = lanesOf(board({ tasks: [midWork, waiting('a', 1)], calls: [] }))
+      expect(lanes.next.map((work) => work.taskId)).toEqual(['a'])
+      expect(lanes.running.map((work) => work.taskId)).toEqual(['m'])
+    })
+
+    it('moves to running by itself once an agent frees and it starts', () => {
+      const lanes = lanesOf(board({ tasks: [waiting('a', 1, { planWaits: undefined, queued: null, step: 'implement' })], calls: [] }))
+      expect(lanes.next).toEqual([])
+      expect(lanes.running.map((work) => work.taskId)).toEqual(['a'])
+    })
+
+    it('draws a divider over those that start when an agent is free, and keeps today’s wording', () => {
+      const lanes = lanesOf(board({ tasks: [held, planned, waiting('a', 1)], calls: [] }))
+      withServices(<BoardView lanes={lanes} agents={agents} now={NOW} onOpen={vi.fn()} />, fakeClient().client)
+      expect(screen.getByText('Starts when an agent is free')).toBeTruthy()
+      expect(screen.getByText(queuedWords(queued))).toBeTruthy()
+      expect(screen.getByText('Planned')).toBeTruthy()
+    })
+  })
+
   it('keeps a call its own card where no task on the board waits on it, and a waiting task whose call isn’t read yet', () => {
     const question: BoardCall = { ...permission, id: 'q1', kind: 'question', taskId: null, taskTitle: null, threadId: 'thc' }
     const held: BoardCall = { ...permission, id: 'a2', taskId: 't1', threadId: 'th1' }
@@ -192,6 +235,29 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(1)
     expect(needsOf(lanes, () => '', vi.fn()).map((need) => need.title)).toEqual(['Rate-limit refunds'])
     expect(firstNeedOf(lanes)).toBe('th4')
+  })
+
+  it('keeps a merged task with commits after its pull request in Needs you, and settles it once they are left out', () => {
+    const merged = change({ state: 'merged' })
+    const after = task({
+      taskId: 't8',
+      threadId: 'th8',
+      title: 'Cap parallel agents per machine',
+      state: 'done',
+      phase: 'ready',
+      change: merged,
+      unshipped: { commits: 1, add: 300, del: 304 },
+      settledAt: '2026-10-01T09:30:00.000Z',
+    })
+    const before = lanesOf(board({ tasks: [after], calls: [] }))
+    expect(before.ready.map((work) => work.taskId)).toEqual(['t8'])
+    expect(yoursOf(before)).toBe(1)
+    expect(needsOf(before, () => '', vi.fn()).map((need) => need.title)).toEqual(['Cap parallel agents per machine'])
+    // Left out, the runtime reads it as settled, with nothing in none: it goes among the settled, at the time it first settled.
+    const left = lanesOf(board({ tasks: [{ ...after, phase: 'settled', unshipped: null }], calls: [], settledTotal: 1 }))
+    expect(left.ready).toEqual([])
+    expect(left.settled.map((work) => [work.taskId, work.settledAt])).toEqual([['t8', '2026-10-01T09:30:00.000Z']])
+    expect(yoursOf(left)).toBe(0)
   })
 
   it('lists a drafted review as one to post, by its pull request and whose it is', () => {
@@ -828,10 +894,11 @@ describe('every state the board shows', () => {
         fakeClient().client,
       )
 
-    it('shows nothing of progress before its first step has had an agent: no steps, branch or clock', () => {
+    it('shows nothing of progress before its first step has had an agent, in Up next: no steps, branch or clock', () => {
       draw(task({ ...waiting, title: 'Not yet', branch: 'althar/not-yet', changed: { files: 0, add: 0, del: 0 }, planWaits: true }))
-      expect(screen.getByText('Waiting')).toBeTruthy()
-      expect(screen.getByText('4 of 4 agents busy on this Mac')).toBeTruthy()
+      const next = screen.getByRole('region', { name: 'Up next' })
+      expect(within(next).getByText('Not yet')).toBeTruthy()
+      expect(within(next).getByText(queuedWords(waiting.queued))).toBeTruthy()
       expect(screen.queryByRole('list', { name: 'Steps' })).toBeNull()
       expect(screen.queryByText('althar/not-yet')).toBeNull()
       expect(screen.queryByText('0s')).toBeNull()
