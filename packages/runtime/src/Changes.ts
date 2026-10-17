@@ -705,7 +705,9 @@ export class Changes extends Context.Service<
           )
           const links = url === undefined ? all : all.filter((candidate) => candidate.seen?.url === url)
           const reachable = links.filter((candidate) => candidate.link.connectionId !== null)
+          // The one it follows first: one attached since takes over from one still open before it (ADR-045).
           const link = (
+            reachable.find((candidate) => candidate.seen?.state === 'open' && candidate.link.listening === 1) ??
             reachable.find((candidate) => candidate.seen?.state === 'open') ??
             reachable.at(-1) ??
             links.find((candidate) => candidate.seen?.state === 'open') ??
