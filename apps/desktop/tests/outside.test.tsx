@@ -1260,11 +1260,15 @@ describe('a task’s pull request', () => {
     expect(await screen.findByText(/isn't connected to this repository's host/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(answer).toHaveBeenCalledWith({ attentionId: 'a-not_connected', answer: { kind: 'retry', agentId: 'althar' } })
-    expect(stuckWords.publishing(call('failed_to_start').stuck)).toBe("Althar couldn't open the pull request. The host said no.")
-    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, why: 'restarted', detail: null })).toBe(
-      'Althar stopped again soon after it went back to opening the pull request.',
+    expect(stuckWords.publishing(call('failed_to_start').stuck)).toBe(
+      "Althar couldn't open the pull request. The host said no. Try again, or go on without it.",
     )
-    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, detail: null })).toBe("Althar couldn't open the pull request.")
+    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, why: 'restarted', detail: null })).toBe(
+      'Althar restarted twice while opening the pull request, so it paused in case that caused it. If you restarted Althar yourself, try again.',
+    )
+    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, detail: null })).toBe(
+      "Althar couldn't open the pull request. Try again, or go on without it.",
+    )
   })
 })
 
