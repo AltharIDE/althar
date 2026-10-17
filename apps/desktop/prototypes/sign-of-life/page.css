@@ -1,0 +1,22 @@
+/* Scrappy: the bar's Reduce motion, for the kit's own motion too (which follows only the Mac's setting): still, as each part's reduced style has it. */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+[data-reduced] [class*='__shimmer__'] {
+  animation: none !important;
+  color: var(--t-3) !important;
+  background: none !important;
+}
+[data-reduced] [class*='__pulse__'] {
+  animation: none !important;
+  opacity: 0.85 !important;
+}
+[data-reduced] [class*='__ping__']::after,
+[data-reduced] [class*='__spin__'],
+[data-reduced] [class*='__word__'] {
+  animation: none !important;
+}

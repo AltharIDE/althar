@@ -1,0 +1,112 @@
+/* Scrappy: the page around the app, the prototype's own: a strip that says when each thing appears, and a slim bar that sends and switches. */
+
+.frame {
+  height: calc(100% - 42px - var(--strip, 38px));
+}
+
+.bare {
+  height: 100%;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 42px;
+  padding: 0 12px;
+  border-top: 1px solid var(--line-2);
+  background: var(--chrome);
+  font-size: 11.5px;
+  color: var(--t-3);
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 38px;
+  padding: 0 12px;
+  border-top: 1px solid var(--line);
+  background: var(--n-1);
+  font-size: 11.5px;
+  color: var(--t-3);
+  overflow-x: auto;
+}
+
+.clock {
+  display: inline-flex;
+  flex: none;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 190px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--t-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.phase {
+  font-family: var(--font);
+  color: var(--t-3);
+}
+
+.beats {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.beat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 99px;
+  color: var(--t-4);
+  white-space: nowrap;
+  transition:
+    color var(--base) var(--ease),
+    background var(--base) var(--ease);
+}
+
+.beat:not(:disabled):hover {
+  background: var(--n-4);
+  color: var(--t-1);
+}
+
+.past {
+  color: var(--t-2);
+}
+
+.when {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--t-3);
+}
+
+.first .when {
+  color: var(--live);
+}
+
+.note {
+  margin-left: 8px;
+  color: var(--t-3);
+  white-space: nowrap;
+}

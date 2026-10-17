@@ -1,0 +1,223 @@
+[
+  {
+    "id": "today-coordinator",
+    "page": "?d=T&v=coordinator&delay=20&at=6",
+    "clip": [380, 180, 680, 560],
+    "caption": "Today, the coordinator, 6s after Enter: nothing under the message, and the previous reply is “Working for 14m” again"
+  },
+  {
+    "id": "today-task",
+    "page": "?d=T&v=task&delay=20&at=6",
+    "clip": [380, 180, 680, 560],
+    "caption": "Today, a task, 6s after Enter: nothing under the message; the previous round’s answer is folded into a live “Working” line"
+  },
+  {
+    "id": "page-E",
+    "page": "?d=E&v=task&delay=20&at=8",
+    "caption": "The page: the real task screen, the timeline strip, and the bar (direction, screen, first word after, lead busy, reduce motion, Send)"
+  },
+  {
+    "id": "n-A",
+    "page": "?d=A&v=coordinator&delay=20&at=0.6",
+    "clip": [380, 430, 680, 250],
+    "caption": "A · Dots, 0.6s after Enter"
+  },
+  {
+    "id": "p-A-before",
+    "page": "?d=A&v=coordinator&delay=5&at=4.8",
+    "clip": [380, 430, 680, 250],
+    "caption": "A · Dots, 4.8s: just before the first word"
+  },
+  {
+    "id": "p-A-after",
+    "page": "?d=A&v=coordinator&delay=5&at=5.5",
+    "clip": [380, 430, 680, 250],
+    "caption": "A · Dots, 5.5s: the first words",
+    "wait": 6000
+  },
+  {
+    "id": "p-A-slow",
+    "page": "?d=A&v=coordinator&delay=fails&at=34",
+    "clip": [380, 430, 680, 250],
+    "caption": "A · Dots, 34s: longer than usual"
+  },
+  {
+    "id": "p-A-fail",
+    "page": "?d=A&v=coordinator&delay=fails&at=46",
+    "clip": [380, 430, 680, 250],
+    "caption": "A · Dots, 46s: the agent gave up"
+  },
+  {
+    "id": "r-A",
+    "page": "?d=A&v=coordinator&delay=20&at=8&reduced=1",
+    "clip": [380, 430, 680, 250],
+    "caption": "A · Dots, reduced motion, 8s",
+    "reduce": true
+  },
+  {
+    "id": "n-B",
+    "page": "?d=B&v=coordinator&delay=20&at=0.6",
+    "clip": [380, 430, 680, 250],
+    "caption": "B · Receipt, 0.6s after Enter"
+  },
+  {
+    "id": "p-B-before",
+    "page": "?d=B&v=coordinator&delay=5&at=4.8",
+    "clip": [380, 430, 680, 250],
+    "caption": "B · Receipt, 4.8s: just before the first word"
+  },
+  {
+    "id": "p-B-after",
+    "page": "?d=B&v=coordinator&delay=5&at=5.5",
+    "clip": [380, 430, 680, 250],
+    "caption": "B · Receipt, 5.5s: the first words",
+    "wait": 6000
+  },
+  {
+    "id": "p-B-slow",
+    "page": "?d=B&v=coordinator&delay=fails&at=34",
+    "clip": [380, 430, 680, 250],
+    "caption": "B · Receipt, 34s: longer than usual"
+  },
+  {
+    "id": "p-B-fail",
+    "page": "?d=B&v=coordinator&delay=fails&at=46",
+    "clip": [380, 430, 680, 250],
+    "caption": "B · Receipt, 46s: the agent gave up"
+  },
+  {
+    "id": "n-C",
+    "page": "?d=C&v=coordinator&delay=20&at=0.6",
+    "clip": [380, 430, 680, 250],
+    "caption": "C · Placeholder, 0.6s after Enter"
+  },
+  {
+    "id": "p-C-before",
+    "page": "?d=C&v=coordinator&delay=5&at=4.8",
+    "clip": [380, 430, 680, 250],
+    "caption": "C · Placeholder, 4.8s: just before the first word"
+  },
+  {
+    "id": "p-C-after",
+    "page": "?d=C&v=coordinator&delay=5&at=5.5",
+    "clip": [380, 430, 680, 250],
+    "caption": "C · Placeholder, 5.5s: the first words",
+    "wait": 6000
+  },
+  {
+    "id": "p-C-slow",
+    "page": "?d=C&v=coordinator&delay=fails&at=34",
+    "clip": [380, 430, 680, 250],
+    "caption": "C · Placeholder, 34s: longer than usual"
+  },
+  {
+    "id": "p-C-fail",
+    "page": "?d=C&v=coordinator&delay=fails&at=46",
+    "clip": [380, 430, 680, 250],
+    "caption": "C · Placeholder, 46s: the agent gave up"
+  },
+  {
+    "id": "r-C",
+    "page": "?d=C&v=coordinator&delay=20&at=8&reduced=1",
+    "clip": [380, 430, 680, 250],
+    "caption": "C · Placeholder, reduced motion, 8s",
+    "reduce": true
+  },
+  {
+    "id": "n-D",
+    "page": "?d=D&v=coordinator&delay=20&at=0.6",
+    "clip": [380, 430, 680, 250],
+    "caption": "D · Althar’s mark, 0.6s after Enter"
+  },
+  {
+    "id": "p-D-before",
+    "page": "?d=D&v=task&delay=5&at=4.8",
+    "clip": [380, 430, 680, 250],
+    "caption": "D · Althar’s mark, 4.8s: just before the first word"
+  },
+  {
+    "id": "p-D-after",
+    "page": "?d=D&v=task&delay=5&at=5.5",
+    "clip": [380, 430, 680, 250],
+    "caption": "D · Althar’s mark, 5.5s: the first words",
+    "wait": 6000
+  },
+  {
+    "id": "p-D-slow",
+    "page": "?d=D&v=task&delay=fails&at=34",
+    "clip": [380, 430, 680, 250],
+    "caption": "D · Althar’s mark, 34s: longer than usual"
+  },
+  {
+    "id": "p-D-fail",
+    "page": "?d=D&v=task&delay=fails&at=46",
+    "clip": [380, 430, 680, 250],
+    "caption": "D · Althar’s mark, 46s: the agent gave up"
+  },
+  {
+    "id": "r-D",
+    "page": "?d=D&v=coordinator&delay=20&at=8&reduced=1",
+    "clip": [380, 430, 680, 250],
+    "caption": "D · Althar’s mark, reduced motion, 8s",
+    "reduce": true
+  },
+  {
+    "id": "n-E",
+    "page": "?d=E&v=coordinator&delay=20&at=0.6",
+    "clip": [380, 430, 680, 250],
+    "caption": "E · Name at once, 0.6s after Enter"
+  },
+  {
+    "id": "p-E-before",
+    "page": "?d=E&v=task&delay=5&at=4.8",
+    "clip": [380, 430, 680, 250],
+    "caption": "E · Name at once, 4.8s: just before the first word"
+  },
+  {
+    "id": "p-E-after",
+    "page": "?d=E&v=task&delay=5&at=5.5",
+    "clip": [380, 430, 680, 250],
+    "caption": "E · Name at once, 5.5s: the first words",
+    "wait": 6000
+  },
+  {
+    "id": "p-E-slow",
+    "page": "?d=E&v=task&delay=fails&at=34",
+    "clip": [380, 430, 680, 250],
+    "caption": "E · Name at once, 34s: longer than usual"
+  },
+  {
+    "id": "p-E-fail",
+    "page": "?d=E&v=task&delay=fails&at=46",
+    "clip": [380, 430, 680, 250],
+    "caption": "E · Name at once, 46s: the agent gave up"
+  },
+  {
+    "id": "r-E",
+    "page": "?d=E&v=coordinator&delay=20&at=8&reduced=1",
+    "clip": [380, 430, 680, 250],
+    "caption": "E · Name at once, reduced motion, 8s",
+    "reduce": true
+  },
+  {
+    "id": "q-T-queued",
+    "page": "?d=T&v=coordinator&busy=1&send=1",
+    "clip": [380, 250, 680, 600],
+    "caption": "Today, sent while the lead works: queued over the composer",
+    "wait": 4200
+  },
+  {
+    "id": "q-A-queued",
+    "page": "?d=A&v=coordinator&busy=1&send=1",
+    "clip": [380, 250, 680, 600],
+    "caption": "A, the same: queued, and no dots while it waits its turn",
+    "wait": 4200
+  },
+  {
+    "id": "q-A-turned",
+    "page": "?d=A&v=coordinator&busy=1&delay=20&at=4",
+    "clip": [380, 250, 680, 600],
+    "caption": "A, once the lead turns to it: the dots start, counted from then",
+    "wait": 11000
+  }
+]
