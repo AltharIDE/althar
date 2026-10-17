@@ -34,6 +34,8 @@ export interface Platform {
   name: string
   needs: string
   files: string | null
+  /** The system as schema.org's operatingSystem names it, for search engines and AI assistants. */
+  schema: string
 }
 
 /**
@@ -44,10 +46,15 @@ export interface Platform {
  * as coming, never as there to download. Change this when a release changes.
  */
 export const PLATFORMS: readonly Platform[] = [
-  { os: 'mac', name: 'macOS', needs: '13 Ventura or later, on Apple silicon', files: '.dmg' },
-  { os: 'linux', name: 'Linux', needs: 'x64', files: 'AppImage, .deb or .rpm' },
-  { os: 'windows', name: 'Windows', needs: 'Coming', files: null },
+  { os: 'mac', name: 'macOS', needs: '13 Ventura or later, on Apple silicon', files: '.dmg', schema: 'macOS 13 or later (Apple silicon)' },
+  { os: 'linux', name: 'Linux', needs: 'x64', files: 'AppImage, .deb or .rpm', schema: 'Linux (x64)' },
+  { os: 'windows', name: 'Windows', needs: 'Coming', files: null, schema: 'Windows' },
 ]
+
+/** The systems a release can be downloaded for, as schema.org's operatingSystem takes them. */
+export const DOWNLOADABLE = PLATFORMS.filter((platform) => platform.files !== null)
+  .map((platform) => platform.schema)
+  .join(', ')
 
 /** The same, in a line. */
 export const RUNS_ON = 'For macOS 13 or later on Apple silicon, and Linux on x64. Windows is coming.'

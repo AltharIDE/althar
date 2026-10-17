@@ -3,8 +3,10 @@ import { resolve } from 'node:path'
 
 import { describe, expect, it } from 'vite-plus/test'
 
+import { PLATFORMS } from '../src/content/facts'
 import { NOT_FOUND, PAGE_META, pageMeta } from '../src/content/pages'
 import { withMeta } from '../src/lib/meta'
+import { structuredData } from '../src/lib/structured'
 
 const HTML = `<!doctype html>
 <html lang="en">
@@ -109,6 +111,18 @@ describe('withMeta', () => {
     expect(scripts).toHaveLength(1)
     expect(out).not.toContain('</script><b>')
     expect(JSON.parse(scripts[0]!.replace(/^<script[^>]*>|<\/script>$/g, ''))).toEqual({ '@type': 'Thing', name: '</script><b>' })
+  })
+
+  it('names, as the app’s systems, only those PLATFORMS has a build for', () => {
+    const app = structuredData('/', 'https://althar.ai').find(
+      (thing) => (thing as { '@type'?: string })['@type'] === 'SoftwareApplication',
+    ) as { operatingSystem: string } | undefined
+    expect(app?.operatingSystem).toBe('macOS 13 or later (Apple silicon), Linux (x64)')
+    expect(app?.operatingSystem).toBe(
+      PLATFORMS.filter((platform) => platform.files !== null)
+        .map((platform) => platform.schema)
+        .join(', '),
+    )
   })
 
   it('escapes what goes into attributes and the title', () => {
