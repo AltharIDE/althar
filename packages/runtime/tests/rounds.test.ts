@@ -838,6 +838,85 @@ describe('a task’s first pull request in a repository, and a reported round wi
   )
 
   it.live(
+    'abandons, not leaves out, an open task whose one repository merged while another has commits in no pull request',
+    () => {
+      const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
+      const bares: Record<string, string> = {}
+      for (const name of ['api', 'web']) {
+        const path = join(folder, name)
+        mkdirSync(path)
+        git(path, 'init', '-q', '-b', 'main')
+        writeFileSync(join(path, 'README.md'), `# ${name}\n`)
+        git(path, 'add', '.')
+        git(path, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'commit', '-q', '-m', 'Start')
+        git(path, 'remote', 'add', 'origin', `${HOST}/meridian/${name}.git`)
+        bares[name] = mkdtempSync(join(tmpdir(), 'althar-remote-'))
+        execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: bares[name] })
+        git(path, 'push', '-q', bares[name] ?? '', 'main')
+      }
+      const github = makeFakeService({ pushUrl: (path) => bares[path.at(-1) ?? ''] ?? '' })
+      github.addRepository(['meridian', 'api'])
+      github.addRepository(['meridian', 'web'])
+      const commitIn = (path: string, file: string, message: string) => {
+        appendFileSync(join(path, file), `${message}\n`)
+        git(path, 'add', '-A')
+        git(path, '-c', 'user.name=Fake', '-c', 'user.email=fake@althar.test', 'commit', '-q', '-m', message)
+      }
+      return Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const instance = yield* Instance
+        yield* connect()
+        const projects = yield* Projects
+        const plans = yield* Plans
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: folder })
+        const task = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId: project.projectId,
+          title: 'Share the retry',
+          description: '[lead:finish]',
+          draft: true,
+          repositories: ['api', 'web'],
+        })
+        const worktrees = yield* sql<{ path: string }>`
+        SELECT w.path FROM workspaces w JOIN repository_bindings b ON b.id = w.binding_id WHERE w.task_id = ${task.taskId} ORDER BY b.created_at, b.rowid`
+        const [api = '', web = ''] = worktrees.map((worktree) => worktree.path)
+        // Its plan changes api alone: api's pull request opens, and web has nothing to propose.
+        commitIn(api, 'retry.txt', 'Retry')
+        const planId = yield* plans.propose({
+          projectId: project.projectId as Parameters<typeof plans.propose>[0]['projectId'],
+          taskId: task.taskId,
+          steps: [{ key: 'implement', agentId: 'codex', model: null, skipped: false }],
+          reason: null,
+          actorId: instance.personId,
+        })
+        yield* plans.start(planId, instance.personId)
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].change !== null, Duration.seconds(20))
+        assert.lengthOf(github.changes, 1)
+
+        // web gets a commit in no pull request, then api's merges, with one after it: api is merged, web isn't, so it stays open.
+        commitIn(web, 'retry.txt', 'Web first')
+        squashMerge(bares.api ?? '', task.branch)
+        github.mergeByHand(1)
+        yield* (yield* Changes).refresh(task.taskId)
+        yield* until(cards(project.projectId), (all) => all[0]?.change?.state === 'merged')
+        commitIn(api, 'retry.txt', 'More for api')
+        yield* until(cards(project.projectId), (all) => all[0]?.unshipped != null)
+        assert.strictEqual((yield* taskRow(task.taskId))?.state, 'open')
+        assert.isFalse(yield* (yield* Changes).merged(task.taskId))
+
+        // Leaving out wouldn't settle it, so Abandon abandons it, and leaving out leaves nothing out.
+        const actions = (yield* (yield* Queries).thread(task.threadId)).task.actions
+        assert.isTrue(actions.includes('abandon') && !actions.includes('leaveOut'))
+        yield* (yield* Tasks).leaveOut({ envelope: yield* Runtime.envelope('task.leave_out', {}), taskId: task.taskId })
+        assert.strictEqual((yield* taskRow(task.taskId))?.state, 'open')
+        assert.isFalse((yield* notices(task.threadId)).some((notice) => notice.title?.startsWith('Abandoned ') === true))
+        assert.isNotNull((yield* cards(project.projectId))[0]?.unshipped)
+      }).pipe(Effect.provide(runtimeWith(github)))
+    },
+    60_000,
+  )
+
+  it.live(
     'starts a reported round of a task with no pull request or review where its last run left it, and from its start where that isn’t known',
     () =>
       Effect.gen(function* () {

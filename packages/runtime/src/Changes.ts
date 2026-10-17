@@ -442,6 +442,12 @@ export class Changes extends Context.Service<
      */
     settleIfMerged(taskId: string): Effect.Effect<void, unknown>
     /**
+     * Whether the task had pull requests and every repository of it is
+     * merged, as settling it asks: each one's latest pull request merged,
+     * and one with none has its branch's head in its default branch here.
+     */
+    merged(taskId: string): Effect.Effect<boolean, unknown>
+    /**
      * Leaves out the commits after a merged task's last pull requests that
      * are in none yet, as the person abandoning it says (ADR-034): they stay
      * on its branch, and it settles without them, done. Nothing for an open
@@ -2519,6 +2525,43 @@ export class Changes extends Context.Service<
        * takes (ADR-034). Not done yet, what is still open is said in the
        * thread.
        */
+      /**
+       * Where a task's change stands, by repository, as settling it reads it:
+       * the pull requests still open or closed, each repository's latest,
+       * and the repositories with none whose branch's head isn't in their
+       * default branch here.
+       */
+      const mergeOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient
+          const repositories = yield* sql<{ name: string; path: string; base: string; root: string; opened: number }>`
+            SELECT b.display_name AS name, w.path, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root,
+              EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
+            FROM workspaces w
+            JOIN repository_bindings b ON b.id = w.binding_id
+            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
+            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
+            ORDER BY b.created_at, b.rowid`
+          // Each repository by its latest pull request, the open one else its newest: one closed before its next merged is history
+          // (ADR-034). Among several, each is said with its repository.
+          const seen = (yield* Effect.forEach(yield* linksOf(taskId), (link) => Effect.option(decodeSnapshot(link.snapshot)))).flatMap(
+            (one) => (Option.isSome(one) ? [one.value] : []),
+          )
+          const latest = latestOf(seen)
+          const open = latest.flatMap((one) =>
+            one.state !== 'merged' ? [repositories.length > 1 ? `${nameOf(one)} in ${one.repository.at(-1) ?? ''}` : nameOf(one)] : [],
+          )
+          // A repository with no pull request is merged where its branch's head is in its default branch here.
+          const unmerged: Array<string> = []
+          for (const repository of repositories) {
+            if (repository.opened === 1) continue
+            const head = yield* commitOf(repository.path, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
+            const merged = yield* gitOutcome(repository.root, 'merge-base', '--is-ancestor', head, `refs/heads/${repository.base}`)
+            if (head === '' || merged.code !== 0) unmerged.push(repository.name)
+          }
+          return { repositories, open, unmerged, merged: latest.length > 0 && open.length === 0 && unmerged.length === 0 }
+        })
+
       const settleIfDone = (
         taskId: string,
         by: {
@@ -2536,32 +2579,7 @@ export class Changes extends Context.Service<
           // A round of work under way settles it when it ends, by what it left (ADR-034).
           const [working] = yield* sql<{ id: string }>`SELECT id FROM runs WHERE task_id = ${taskId} AND state = 'running' LIMIT 1`
           if (working !== undefined) return yield* touchCard(taskId)
-          const repositories = yield* sql<{ name: string; path: string; base: string; root: string; opened: number }>`
-            SELECT b.display_name AS name, w.path, coalesce(b.default_base_ref, w.base_ref) AS base, l.path AS root,
-              EXISTS (SELECT 1 FROM repository_changes c WHERE c.workspace_id = w.id AND c.pull_request_url IS NOT NULL) AS opened
-            FROM workspaces w
-            JOIN repository_bindings b ON b.id = w.binding_id
-            JOIN repository_locations l ON l.binding_id = b.id AND l.device_id = ${instance.deviceId}
-            WHERE w.task_id = ${taskId} AND w.device_id = ${instance.deviceId}
-            ORDER BY b.created_at, b.rowid`
-          // Each repository by its latest pull request, the open one else its newest: one closed before its next merged is history
-          // (ADR-034). Among several, each is said with its repository.
-          const seen = (yield* Effect.forEach(yield* linksOf(taskId), (link) => Effect.option(decodeSnapshot(link.snapshot)))).flatMap(
-            (one) => (Option.isSome(one) ? [one.value] : []),
-          )
-          const open = latestOf(seen).flatMap((latest) =>
-            latest.state !== 'merged'
-              ? [repositories.length > 1 ? `${nameOf(latest)} in ${latest.repository.at(-1) ?? ''}` : nameOf(latest)]
-              : [],
-          )
-          // A repository with no pull request is merged where its branch's head is in its default branch here.
-          const unmerged: Array<string> = []
-          for (const repository of repositories) {
-            if (repository.opened === 1) continue
-            const head = yield* commitOf(repository.path, 'HEAD').pipe(Effect.orElseSucceed(() => ''))
-            const merged = yield* gitOutcome(repository.root, 'merge-base', '--is-ancestor', head, `refs/heads/${repository.base}`)
-            if (head === '' || merged.code !== 0) unmerged.push(repository.name)
-          }
+          const { repositories, open, unmerged } = yield* mergeOf(taskId)
           // Commits after a merged pull request are in none yet: a new one takes them.
           const after =
             open.length > 0
@@ -2620,13 +2638,9 @@ export class Changes extends Context.Service<
             SELECT k.project_id, t.id AS thread_id, k.state, k.revision FROM tasks k
             JOIN threads t ON t.task_id = k.id AND t.kind = 'task' WHERE k.id = ${input.taskId}`
           if (task === undefined) return yield* new NotFound({ kind: 'task', id: input.taskId })
-          // Open, it is merged only where each repository's latest pull request is: else abandoning it is abandoning, not this.
+          // Open, it is merged only where every repository of it is, as settling it asks: else abandoning it is abandoning, not this.
           if (task.state === 'open') {
-            const seen = (yield* Effect.forEach(yield* linksOf(input.taskId), (link) =>
-              Effect.option(decodeSnapshot(link.snapshot)),
-            )).flatMap((one) => (Option.isSome(one) ? [one.value] : []))
-            const latest = latestOf(seen)
-            if (latest.length === 0 || latest.some((one) => one.state !== 'merged')) return
+            if (!(yield* mergeOf(input.taskId)).merged) return
           } else if (task.state !== 'done') return
           const left: Array<{ readonly repository: string; readonly branch: string; readonly at: string; readonly commits: number }> = []
           for (const one of after) {
@@ -3949,6 +3963,7 @@ export class Changes extends Context.Service<
               }),
             ),
           ),
+        merged: (taskId) => provide(Effect.map(mergeOf(taskId), (one) => one.merged)),
         leaveOut: (input) => provide(locked(input.taskId)(leaveOut(input))),
         // The person pushing takes the change into their hands: from here, its lead's fixes wait for them (ADR-040).
         push: (taskId, head, url) => provide(locked(taskId)(Effect.andThen(taken(taskId, 'pushed'), push(taskId, head, url)))),

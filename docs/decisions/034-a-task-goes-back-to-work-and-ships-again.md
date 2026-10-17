@@ -133,10 +133,12 @@
     task's does: one way to take a task off the person's plate. Abandoning a
     merged task leaves those commits out (`leaveOut`, which `actionsOf`
     offers in place of `abandon`, as it says everything a task's menu
-    offers), and Abandon says so. A task stays `done`, or an open one whose
-    pull requests all merged, each repository's latest, settles as `done` as
-    a merge does; its settled time is kept where it had one. An open task
-    with a pull request open or closed abandons as ever.
+    offers), and Abandon says so. A task stays `done`, or an open one merged
+    in every repository, as settling it asks (each one's latest pull request
+    merged, and one with none has its branch in its default branch), settles
+    as `done` as a merge does; its settled time is kept where it had one. An
+    open task with a pull request open or closed, or a repository with
+    commits in none, abandons as ever: leaving out wouldn't settle it.
     The commits stay on its branch, in its worktree, as abandoning keeps
     them: Althar keeps where each worktree was, in a ref of its own
     (`refs/althar/left-out/<worktree>`), and only what is committed after it
@@ -216,8 +218,8 @@
   | Every pull request merged, nothing after | (the host says so) | `done` | Settled |
   | A pull request merged, commits after it | (the host says so) | stays `open` | Ready, offering a new pull request |
   | `done`, commits after its last pull request | (read for its card) | as it is | Ready, offering a new pull request, and Abandon |
-  | `done`, or `open` with every pull request merged, commits after its last pull request, no turn under way | Abandon | `done`, its settled time kept; the commits left out, on its branch still | Settled |
-  | `open`, a pull request open or closed | Abandon | `abandoned`, as ever | Settled |
+  | `done`, or `open` merged in every repository, commits after its last pull request, no turn under way | Abandon | `done`, its settled time kept; the commits left out, on its branch still | Settled |
+  | `open`, a pull request open or closed, or a repository with commits in none | Abandon | `abandoned`, as ever | Settled |
   | Any, commits after its last pull request the default branch has (merged in, or cherry-picked) | (read for its card) | as it is | as if there were none |
 - **Alternatives considered:**
   - **A new task for follow-up work.** What the person asked not to be the

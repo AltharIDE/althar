@@ -270,8 +270,9 @@ stateDiagram-v2
 - **Abandon, on a merged task**, leaves out the commits after its last pull
   request that are in none yet, which put it in Needs you, while no round
   of work or agent's turn may add to them: `actionsOf` offers `leaveOut` in
-  place of `abandon` for a `done` task, and for an open one whose pull
-  requests all merged
+  place of `abandon` for a `done` task, and for an open one merged in
+  every repository, as settling it asks (a repository with no pull request
+  merged where its branch is in its default branch)
   ([ADR-034](../decisions/034-a-task-goes-back-to-work-and-ships-again.md)).
   The menu says Abandon for both, and the dialog that it stays merged.
   Where each worktree is is kept in a ref of Althar's, and only what is

@@ -38,7 +38,7 @@ import { Busy } from './Busy'
 import { planWaits } from './Runs'
 import { Agents, RuntimeConfig } from './Config'
 import { questionTitle } from './Questions'
-import { Changes, latestOf } from './Changes'
+import { Changes } from './Changes'
 import { Coordinator } from './Coordinator'
 import type { PullRequestFacts } from './pullRequestStanding'
 import { baseOf, type ChangedFile, changedFiles, fileDiff, type FileDiff } from './diffs'
@@ -1243,12 +1243,6 @@ export class Queries extends Context.Service<
           return { issue, changes }
         })
 
-      /** Whether a task had pull requests and each repository's latest merged: the open one, else its newest (ADR-034). */
-      const allMerged = (changes: ReadonlyArray<ChangeSummary>) => {
-        const latest = latestOf(changes.map((change) => ({ ...change, repository: [change.repository] })))
-        return latest.length > 0 && latest.every((change) => change.state === 'merged')
-      }
-
       /** A task's pull requests as its card reads them, and the repositories it merged here: what the coordinator is told of them. */
       const pullRequestsOf = (taskId: string): Effect.Effect<PullRequestFacts, SqlError.SqlError, Store> =>
         Effect.gen(function* () {
@@ -2017,8 +2011,18 @@ export class Queries extends Context.Service<
               commits: said.commits,
               here: said.here,
               merged: said.merged,
-              // With commits after its last pull request in none yet, a merged task abandons them, leaving them out, and stays merged.
-              actions: [...actionsOf({ ...standing, unshipped: card?.unshipped != null, merged: allMerged(links.changes) })],
+              // With commits after its last pull request in none yet, a merged task abandons them, leaving them out, and stays merged:
+              // an open one only where every repository of it is merged, as settling it asks, else leaving out wouldn't settle it.
+              actions: [
+                ...actionsOf({
+                  ...standing,
+                  unshipped: card?.unshipped != null,
+                  merged:
+                    head.state === 'open' &&
+                    card?.unshipped != null &&
+                    (yield* (yield* Changes).merged(head.taskId).pipe(Effect.orElseSucceed(() => false))),
+                }),
+              ],
               planId: standing.planId,
               runCommand: yield* launches.commandFor(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => null)),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
