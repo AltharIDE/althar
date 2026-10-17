@@ -63,18 +63,19 @@
     safeStorage only if `isEncryptionAvailable()` is true,
     `keyringIsSafe()` allows the selected backend, and the selected backend
     is libsecret's sandbox-local `gnome_libsecret` file; it accepts only the
-    sync `v10` result. That key may not be found after restart, so the
+    sync `v11` result, which Chromium makes with a key from the keyring.
+    `v10` is its fixed key, used when the keyring gave no password, and is
+    refused. We keep this fallback, rather than failing closed without the
+    portal, so a sign-in still works for the session. That key may not be found after restart, so the
     person may need to sign in again. On a Linux machine without a safe
     keyring, or with `basic_text`, sealing still fails closed. Existing portal
     seals remain on disk; a prior KDE/KWallet seal may require signing in once
     again after this change. No profile or keyring data is removed.
     `packages/runtime/src/Secrets.ts` still transports opaque base64 seals;
     the runtime never receives a key.
-  - **Rollout order:** #201 is the standalone KDE fix. Land #201 first as an
-    interim fix; then land #207, which removes the direct
-    KWallet selection and replaces it with the same app-specific portal path
-    on KDE and GNOME. Do not land #201 after #207, since it would restore a
-    second KDE sealing path.
+  - **Rollout order:** #207 replaces the standalone KDE/KWallet fix of #201,
+    which is closed; do not land #201, since it would restore a second KDE
+    sealing path.
 - **Alternatives considered:** keeping the menu's bar visible on Linux (it
   would sit above the strip's own chrome, and a framed window gives that up);
   publishing on every main push (tagged releases are what people install, and

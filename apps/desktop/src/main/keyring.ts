@@ -54,8 +54,11 @@ export const withPortalFeature = (enabled: string): string => {
 /** Prefix for Chromium's per-application Secret portal key. */
 export const sealedByPortal = (sealed: Uint8Array): boolean => new TextDecoder().decode(sealed.subarray(0, 3)) === 'v12'
 
-/** Prefix used by sync safeStorage; accepted only when Electron reports a real keyring. */
-const sealedBySyncKeyring = (sealed: Uint8Array): boolean => new TextDecoder().decode(sealed.subarray(0, 3)) === 'v10'
+/**
+ * Prefix of a sync safeStorage seal made with a key from the keyring: `v11`. Chromium's `v10` is its fixed key, used when there is
+ * no keyring password, so it is never accepted; this is only reached once Electron reports a real keyring.
+ */
+const sealedBySyncKeyring = (sealed: Uint8Array): boolean => new TextDecoder().decode(sealed.subarray(0, 3)) === 'v11'
 
 /** Shown when Chromium cannot obtain its per-app Secret portal key and no safe session fallback can seal. */
 export const portalKeyUnavailable =

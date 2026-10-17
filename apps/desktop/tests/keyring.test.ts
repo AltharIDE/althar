@@ -13,10 +13,11 @@ import {
   type SafeStorageLike,
 } from '../src/main/keyring'
 
-const storage = (overrides: Partial<SafeStorageLike> = {}): SafeStorageLike => ({
+const storage = (overrides: Partial<SafeStorageLike> = {}, keyringPassword = true): SafeStorageLike => ({
   getSelectedStorageBackend: vi.fn(() => 'gnome_libsecret'),
   isEncryptionAvailable: vi.fn(() => true),
-  encryptString: vi.fn((value) => Buffer.from(`v10${value}`)),
+  // Chromium's sync seal: v11 when the keyring gave it a password, v10 (a fixed key) when it did not.
+  encryptString: vi.fn((value) => Buffer.from(`${keyringPassword ? 'v11' : 'v10'}${value}`)),
   decryptString: vi.fn((sealed) => sealed.toString().slice(3)),
   encryptStringAsync: vi.fn(async (value) => Buffer.from(`v12${value}`)),
   decryptStringAsync: vi.fn(async (sealed) => ({ result: sealed.toString().slice(3), shouldReEncrypt: false })),
@@ -105,18 +106,31 @@ describe('the Secret portal and session fallback', () => {
   it('falls back to safe sync safeStorage for the current session when the portal is absent or returns a shared format', async () => {
     const absent = storage({ encryptStringAsync: vi.fn(async () => Buffer.from('v10fixed-fallback')) })
     const sealed = await sealWithPortal(true, 'credential', absent, 'linux')
-    expect(sealed).toEqual({ value: encoded('v10', 'credential') })
+    expect(sealed).toEqual({ value: encoded('v11', 'credential') })
     expect(vi.mocked(absent.encryptString)).toHaveBeenCalledWith('credential')
 
     const openStore = storage()
-    const opened = await sealWithPortal(false, encoded('v10', 'credential'), openStore, 'linux')
+    const opened = await sealWithPortal(false, encoded('v11', 'credential'), openStore, 'linux')
     expect(opened).toEqual({ value: 'credential' })
     expect(vi.mocked(openStore.decryptString)).toHaveBeenCalled()
   })
 
+  it('refuses a sync seal made with Chromium’s fixed key (v10), when sealing and when opening', async () => {
+    const noPassword = storage({ encryptStringAsync: vi.fn(async () => Buffer.from('v10fixed-fallback')) }, false)
+    expect(await sealWithPortal(true, 'credential', noPassword, 'linux')).toEqual({ error: keyringUnavailable('linux'), keyring: true })
+
+    const openStore = storage()
+    expect(await sealWithPortal(false, encoded('v10', 'credential'), openStore, 'linux')).toEqual({
+      error: portalSealUnavailable,
+      keyring: true,
+      unreadable: true,
+    })
+    expect(vi.mocked(openStore.decryptString)).not.toHaveBeenCalled()
+  })
+
   it('falls back to a safe sync keyring when the portal errors, but never uses basic_text', async () => {
     const erroring = storage({ encryptStringAsync: vi.fn(async () => Promise.reject(new Error('portal unavailable'))) })
-    expect(await sealWithPortal(true, 'credential', erroring, 'linux')).toEqual({ value: encoded('v10', 'credential') })
+    expect(await sealWithPortal(true, 'credential', erroring, 'linux')).toEqual({ value: encoded('v11', 'credential') })
 
     const noKeyring = storage({
       getSelectedStorageBackend: vi.fn(() => 'basic_text'),
@@ -134,12 +148,9 @@ describe('the Secret portal and session fallback', () => {
   })
 
   it('does not open shared-service or fixed-key async seals, or fall back from a failed portal seal', async () => {
-    const shared = storage()
-    expect(await sealWithPortal(false, encoded('v11'), shared, 'linux')).toEqual({
-      error: portalSealUnavailable,
-      keyring: true,
-      unreadable: true,
-    })
+    // A v11 seal is only tried where Electron's sync keyring is the sandbox-local libsecret file, not a shared service like KWallet.
+    const shared = storage({ getSelectedStorageBackend: vi.fn(() => 'kwallet6') })
+    expect(await sealWithPortal(false, encoded('v11'), shared, 'linux')).toEqual({ error: keyringUnavailable('linux'), keyring: true })
     expect(vi.mocked(shared.decryptString)).not.toHaveBeenCalled()
 
     const failedPortal = storage({ decryptStringAsync: vi.fn(async () => Promise.reject(new Error('portal unavailable'))) })
