@@ -1,4 +1,4 @@
-import { LINKS } from '../content/facts'
+import { DOWNLOADABLE, LINKS } from '../content/facts'
 import { PAGE_META, type PagePath } from '../content/pages'
 import { SHIFTS } from '../content/shifts'
 import { newestFirst } from '../shifts/group'
@@ -56,7 +56,8 @@ function home(origin: string): object[] {
       url: urlOf(origin, '/'),
       image: urlOf(origin, page.image),
       applicationCategory: 'DeveloperApplication',
-      operatingSystem: 'macOS, Windows, Linux',
+      // Only what a release can be downloaded for (PLATFORMS): Windows joins when it has a build.
+      operatingSystem: DOWNLOADABLE,
       license: LICENCE,
       isAccessibleForFree: true,
       offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },

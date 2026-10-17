@@ -1,4 +1,4 @@
-import { LINKS } from '../content/facts'
+import { LINKS, RUNS_ON } from '../content/facts'
 import { DOES, FITS, NOT, STORY, SUMMARY, TAGLINE, WHY } from '../content/llms'
 import { PAGE_META, type PageMeta, type PagePath } from '../content/pages'
 import { KIND_WORD, type Shift, SHIFTS, UPCOMING, type Upcoming } from '../content/shifts'
@@ -89,9 +89,9 @@ export const llmsTxt = (origin: string): string => {
     '',
     '## Get it',
     '',
-    '- Free and open source, under the Apache License 2.0. For macOS, Windows and Linux, tested most on macOS. Early, and moving fast.',
-    `- Download it from [GitHub Releases](${LINKS.releases}), or run it from source: see the [README](${LINKS.repo}#readme).`,
-    "- Sign in each agent with its own tool first (for example `claude auth login` or `codex login`). Althar's first screen shows which agents are ready.",
+    `- Free and open source, under the Apache License 2.0. ${RUNS_ON} Tested most on macOS. Early, and moving fast.`,
+    `- Download it from [the latest release](${LINKS.latest}) (a dmg for the Mac; an AppImage, deb or rpm for Linux), or run it from source: see the [README](${LINKS.repo}#readme).`,
+    "- Althar's first screen finds the agents on the computer, installs one that's missing where it can, and signs each in.",
     `- Agents join through the [Agent Client Protocol](${LINKS.acp}). The [README](${LINKS.repo}#your-agents) lists the ones Althar runs today, and the ones on the way.`,
     '- Every page on this site may be read and quoted.',
     '',

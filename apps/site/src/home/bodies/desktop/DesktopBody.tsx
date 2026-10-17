@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 
 import { cx } from '../../../lib/cx'
-import { Get } from '../../../shared/Close'
+import { Get, Platforms } from '../../../shared/Close'
 import { LightUnder } from '../../../shared/lightUnder'
 import { HomeWindow, IslandOpen } from '../kit/app'
 import { EdgeTour } from '../kit/EdgeTour'
@@ -145,6 +145,7 @@ export function DesktopBody() {
             Bring the agents <b>you already pay for.</b>
           </p>
           <Get tone="paper" />
+          <Platforms tone="paper" />
         </div>
       </section>
     </main>

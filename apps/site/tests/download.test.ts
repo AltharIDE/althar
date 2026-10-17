@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
-import { type Asset, pickAsset } from '../src/lib/download'
+import { type Asset, noBuild, pickAsset } from '../src/lib/download'
 
 /*
  * Which of a release's files a system gets: the files as the release
@@ -62,6 +62,24 @@ describe('pickAsset', () => {
   it('gives nothing from a release with no files', () => {
     expect(pickAsset('mac', 'arm', [])).toBeNull()
     expect(pickAsset('linux', null, [])).toBeNull()
+  })
+})
+
+describe('noBuild', () => {
+  it('says Windows has no build, and names the systems the release is for', () => {
+    expect(noBuild('windows', 'x86', SHIPPED)).toBe('No Windows build yet. The latest release is for macOS and Linux.')
+    expect(noBuild('windows', null, SHIPPED)).toBe('No Windows build yet. The latest release is for macOS and Linux.')
+  })
+
+  it('says which chip the system’s build is for, where it is the chip that has none', () => {
+    expect(noBuild('mac', 'x86', SHIPPED)).toBe('No build for Intel Macs yet. The macOS build is for Apple silicon.')
+    expect(noBuild('linux', 'arm', SHIPPED)).toBe('No build for Linux on ARM yet. The Linux build is for x64 Linux.')
+  })
+
+  it('names one other system, or none, as plainly', () => {
+    const macOnly = SHIPPED.filter((a) => !a.name.endsWith('.AppImage'))
+    expect(noBuild('linux', 'x86', macOnly)).toBe('No Linux build yet. The latest release is for macOS.')
+    expect(noBuild('windows', null, [])).toBe('No Windows build yet.')
   })
 })
 
@@ -162,28 +180,36 @@ describe('findDownload', () => {
   it('gives a Mac the dmg, where the browser says nothing of the chip or says Apple silicon', async () => {
     browse({ ua: UA.macSafari })
     api({ assets: SHIPPED })
-    expect(await (await lookup())()).toEqual({ os: 'mac', href: url('Althar-0.2.0-arm64.dmg') })
+    expect(await (await lookup())()).toEqual({ os: 'mac', href: url('Althar-0.2.0-arm64.dmg'), missing: null })
     browse({ ua: UA.macChrome, arch: 'arm' })
-    expect(await (await lookup())()).toEqual({ os: 'mac', href: url('Althar-0.2.0-arm64.dmg') })
+    expect(await (await lookup())()).toEqual({ os: 'mac', href: url('Althar-0.2.0-arm64.dmg'), missing: null })
   })
 
-  it('sends an Intel Mac, where Chromium says so, to the releases page', async () => {
+  it('sends an Intel Mac, where Chromium says so, to the latest release, saying it has no build for it', async () => {
     browse({ ua: UA.macChrome, arch: 'x86' })
     api({ assets: SHIPPED })
-    expect(await (await lookup())()).toBeNull()
+    expect(await (await lookup())()).toEqual({
+      os: 'mac',
+      href: null,
+      missing: 'No build for Intel Macs yet. The macOS build is for Apple silicon.',
+    })
   })
 
   it('gives Linux the AppImage, and Windows its exe only once a release has one', async () => {
     browse({ ua: UA.linux, arch: 'x86' })
     api({ assets: SHIPPED })
-    expect(await (await lookup())()).toEqual({ os: 'linux', href: url('Althar-0.2.0.AppImage') })
+    expect(await (await lookup())()).toEqual({ os: 'linux', href: url('Althar-0.2.0.AppImage'), missing: null })
     browse({ ua: UA.windows, arch: 'x86' })
-    expect(await (await lookup())()).toBeNull()
+    expect(await (await lookup())()).toEqual({
+      os: 'windows',
+      href: null,
+      missing: 'No Windows build yet. The latest release is for macOS and Linux.',
+    })
     api({ assets: WITH_WINDOWS })
-    expect(await (await lookup())()).toEqual({ os: 'windows', href: url('Althar-Setup-0.2.0.exe') })
+    expect(await (await lookup())()).toEqual({ os: 'windows', href: url('Althar-Setup-0.2.0.exe'), missing: null })
   })
 
-  it('sends a phone or a desktop-mode iPad to the releases page without asking the API', async () => {
+  it('sends a phone or a desktop-mode iPad to the latest release without asking the API', async () => {
     const fetch = api({ assets: SHIPPED })
     browse({ ua: UA.iphone, touches: 5 })
     expect(await (await lookup())()).toBeNull()
@@ -192,7 +218,7 @@ describe('findDownload', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('sends a Mac to the releases page when the API is down, rate-limited, or has no published release', async () => {
+  it('sends a Mac to the latest release when the API is down, rate-limited, or has no published release', async () => {
     browse({ ua: UA.macSafari })
     api(new Error('offline'))
     expect(await (await lookup())()).toBeNull()
@@ -217,6 +243,6 @@ describe('findDownload', () => {
   it('lets ?platform= stand for the whole system, chip included', async () => {
     browse({ ua: UA.macChrome, arch: 'arm', search: '?platform=linux' })
     api({ assets: SHIPPED })
-    expect(await (await lookup())()).toEqual({ os: 'linux', href: url('Althar-0.2.0.AppImage') })
+    expect(await (await lookup())()).toEqual({ os: 'linux', href: url('Althar-0.2.0.AppImage'), missing: null })
   })
 })

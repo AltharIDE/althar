@@ -4,6 +4,8 @@
  * screen are the glossary's (lead, call, notes), never worker or session.
  */
 
+import type { Os } from '../shared/OsMark'
+
 /** The site's public origin. A build can serve it from another with SITE_URL (scripts/prerender.ts). */
 export const SITE = 'https://althar.ai'
 
@@ -18,18 +20,44 @@ export const LINKS = {
   issues: `${REPO}/issues`,
   components: `${REPO}/tree/main/packages/ui`,
   releases: `${REPO}/releases`,
+  /** The latest published release's page, with its files: where a download goes when there is no installer to give. */
+  latest: `${REPO}/releases/latest`,
   acp: 'https://agentclientprotocol.com',
 } as const
 
 /** GitHub's API for the latest published release: its files are what the download links give (src/lib/download.ts). Unauthenticated, 60 calls an hour per address. */
 export const LATEST_RELEASE = 'https://api.github.com/repos/AltharIDE/althar/releases/latest'
 
-/** How to install it. The releases are published; the cask and the clone URL are placeholders until they ship. */
-export const INSTALL = {
-  brew: 'brew install --cask althar',
-  clone: 'git clone github.com/AltharIDE/althar',
-  platforms: 'For macOS, Windows and Linux.',
-} as const
+/** A system the site names, what it needs, and the files a release has for it; null files where there is no build yet. */
+export interface Platform {
+  os: Os
+  name: string
+  needs: string
+  files: string | null
+  /** The system as schema.org's operatingSystem names it, for search engines and AI assistants. */
+  schema: string
+}
+
+/**
+ * What a release can be downloaded for, and what each system needs: the
+ * files .github/workflows/release.yml publishes (a dmg for Apple silicon;
+ * an AppImage, deb and rpm for x64 Linux), and macOS 13, the oldest Electron
+ * 44, which the app runs on, supports. Windows has no build yet: it is named
+ * as coming, never as there to download. Change this when a release changes.
+ */
+export const PLATFORMS: readonly Platform[] = [
+  { os: 'mac', name: 'macOS', needs: '13 Ventura or later, on Apple silicon', files: '.dmg', schema: 'macOS 13 or later (Apple silicon)' },
+  { os: 'linux', name: 'Linux', needs: 'x64', files: 'AppImage, .deb or .rpm', schema: 'Linux (x64)' },
+  { os: 'windows', name: 'Windows', needs: 'Coming', files: null, schema: 'Windows' },
+]
+
+/** The systems a release can be downloaded for, as schema.org's operatingSystem takes them. */
+export const DOWNLOADABLE = PLATFORMS.filter((platform) => platform.files !== null)
+  .map((platform) => platform.schema)
+  .join(', ')
+
+/** The same, in a line. */
+export const RUNS_ON = 'For macOS 13 or later on Apple silicon, and Linux on x64. Windows is coming.'
 
 export const LINE = {
   come: 'Agents come and go.',

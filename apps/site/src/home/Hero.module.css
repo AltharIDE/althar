@@ -61,6 +61,7 @@
 .short { display: none; }
 .ctas { margin-top: 26px; }
 .ctas > div { justify-content: center; }
+.ctas p { text-align: center; }
 .fine { margin-top: 14px; font-size: 13px; color: rgba(255, 255, 255, 0.72); }
 
 /* The nav turns to smoked glass from a little above the headline, where the light's cobalt is strong, to the first screen's foot. */
