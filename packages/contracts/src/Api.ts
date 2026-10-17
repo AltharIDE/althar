@@ -1209,6 +1209,8 @@ export const TaskCard = Schema.Struct({
   queued: Schema.NullOr(Queued),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
   planWaits: Schema.optional(Schema.Boolean),
+  /** With `planWaits`: its place in the order what waits for a place starts, among everything that waits; 1 starts first. */
+  place: Schema.optional(Schema.Int),
 })
 export type TaskCard = typeof TaskCard.Type
 
