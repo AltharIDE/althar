@@ -11,9 +11,10 @@ import { CardTitle } from '../Board/CardTitle'
 import s from './BoardCard.module.css'
 
 /*
- * A task on the board, of any kind, with nothing to press: the whole card
- * opens the task, where a permission is answered and the lead is told
- * what's next. Its top says where it stands in a word, in the lane's colour
+ * A task on the board, of any kind, with next to nothing to press: the whole
+ * card opens the task, where a permission is answered and the lead is told
+ * what's next (only a next step in its foot may be a button of its own, as
+ * NextStep says). Its top says where it stands in a word, in the lane's colour
  * (cobalt while it runs, violet when it needs you), then its kind's word,
  * then how long. Then its title, and, where the word isn't enough, why.
  * Under them, at most, its steps, one card in the card (the pull request,

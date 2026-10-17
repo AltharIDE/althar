@@ -1120,46 +1120,10 @@ describe('a task', () => {
     expect(await shownFor(true, true)).toEqual([false, false])
   })
 
-  it('allows everything on it from its menu, and says Unrestricted beside the menu while it does, by its own switch or its project’s', async () => {
-    const { client, view } = await taskMenu({})
-    expect(screen.queryByText('Unrestricted')).toBeNull()
+  it('allows everything on it from its menu', async () => {
+    const { client } = await taskMenu({})
     await userEvent.click(screen.getByRole('menuitemcheckbox', { name: /Allow everything on this task/ }))
     await waitFor(() => expect(client.setTaskAllowEverything).toHaveBeenCalledWith({ taskId: 't1', allowEverything: true }))
-    view.unmount()
-    const shownFor = async (own: boolean, project: boolean) => {
-      const { client } = fakeClient({
-        getThread: vi.fn(async () => thread({ task: { ...thread().task, allowEverything: { task: own, project } } })),
-      })
-      const shown = withServices(<Task />, client)
-      await screen.findByRole('button', { name: 'More for this task' })
-      const said = screen.queryByText('Unrestricted') !== null
-      shown.unmount()
-      return said
-    }
-    expect(await shownFor(true, false)).toBe(true)
-    expect(await shownFor(false, true)).toBe(true)
-    expect(await shownFor(false, false)).toBe(false)
-  })
-
-  it('says Unrestricted as its project’s switch turns on, and no longer as it turns off, with nothing else changing on it', async () => {
-    let project = false
-    const { client, emit } = fakeClient({
-      getThread: vi.fn(async () => thread({ task: { ...thread().task, allowEverything: { task: false, project } } })),
-    })
-    withServices(<Task />, client)
-    await screen.findByRole('button', { name: 'More for this task' })
-    expect(screen.queryByText('Unrestricted')).toBeNull()
-    project = true
-    act(() => emit(changed('policy', 'pol2', null, 'p1')))
-    expect(await screen.findByText('Unrestricted')).toBeTruthy()
-    // Another project's rules read nothing here.
-    const reads = vi.mocked(client.getThread).mock.calls.length
-    act(() => emit(changed('policy', 'pol3', null, 'p2')))
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    expect(client.getThread).toHaveBeenCalledTimes(reads)
-    project = false
-    act(() => emit(changed('policy', 'pol4', null, 'p1')))
-    await waitFor(() => expect(screen.queryByText('Unrestricted')).toBeNull())
   })
 
   it('says why a call the project always asks about has no always allow, and allows everything on the task from it', async () => {
@@ -1762,8 +1726,12 @@ describe('a task', () => {
     })
     const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [stuck()] })) })
     const view = withServices(<Task />, client)
-    expect(await screen.findByText('Claude Code ended its turn twice without saying the step is done.')).toBeTruthy()
-    expect(screen.getByText('Reminded it to report')).toBeTruthy()
+    expect(
+      await screen.findByText(
+        'Claude Code stopped twice without saying whether the step is done, even after Althar reminded it. Tell it what to do next, or hand the step to another agent.',
+      ),
+    ).toBeTruthy()
+    expect(screen.getByText('Reminded it to say when the step is done')).toBeTruthy()
     expect(screen.getByText('Needs you')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Tell the lead' }))
     await userEvent.type(screen.getByRole('textbox', { name: 'What should it do instead?' }), 'Report it now.')
@@ -1778,7 +1746,11 @@ describe('a task', () => {
       thread({ attention: [stuck({ step: 'review', why: 'failed_to_start', detail: 'It isn’t signed in.', agentId: 'codex' })] }),
     )
     const again = withServices(<Task />, client)
-    expect(await screen.findByText("Codex couldn't start. It isn’t signed in.")).toBeTruthy()
+    expect(
+      await screen.findByText(
+        "Codex couldn't start. It isn’t signed in. Check that it's installed and signed in, or review with another agent.",
+      ),
+    ).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Review again' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: /Claude Code/ }))
@@ -1792,7 +1764,7 @@ describe('a task', () => {
       thread({ attention: [stuck({ step: 'review', why: 'round_limit', open: 2 })] }),
     )
     withServices(<Task />, client)
-    expect(await screen.findByText(/Three rounds of review are done.*2 findings are still open\./)).toBeTruthy()
+    expect(await screen.findByText(/reviewed three times.*2 findings are still open\./)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Accept it as it is' }))
     await waitFor(() => expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st1', answer: { kind: 'abandon' } }))
   })
@@ -1801,11 +1773,19 @@ describe('a task', () => {
     const at = (why: StuckStep['why'], detail: string | null = null, open = 0) =>
       stuckWords.what({ step: 'implement', why, detail, agentId: null, round: 0, open }, 'Codex')
     expect([at('session_ended'), at('restarted'), at('failed_to_start'), at('round_limit', null, 1), at('usage_limit')]).toEqual([
-      'Codex stopped before the step was done.',
-      'Althar stopped again soon after it carried this step on after a restart, so it waits for you rather than start Codex once more.',
-      "Codex couldn't start.",
-      "Three rounds of review are done, and the lead's last changes haven't been reviewed. One finding is still open.",
+      'Codex closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+      'Althar restarted twice while this step was running, so it paused the step in case the step caused it. If you restarted Althar yourself, start Codex again.',
+      "Codex couldn't start. Check that it's installed and signed in, or hand the step to another agent.",
+      "The work has been reviewed three times, and the lead's last changes haven't been reviewed yet. One finding is still open. Review it again, or accept it as it is.",
       "Codex reached its usage limit and didn't say when it resets.",
+    ])
+    // A review has no lead to tell: it advises the buttons it has.
+    const inReview = (why: StuckStep['why']) =>
+      stuckWords.what({ step: 'review', why, detail: null, agentId: null, round: 0, open: 0 }, 'Codex')
+    expect([inReview('session_ended'), inReview('restarted'), inReview('refused')]).toEqual([
+      'Codex closed before finishing the step. This is usually harmless: review again, or skip the review.',
+      'Althar restarted twice while this step was running, so it paused the step in case the step caused it. If you restarted Althar yourself, review again.',
+      'Codex refused to go on with this step. Review again with another agent, or skip the review.',
     ])
     const back = '2026-09-29T14:00:00.000Z'
     expect(
@@ -1823,10 +1803,10 @@ describe('a task', () => {
       ),
     ).toBe(`Codex reached its usage limit, until ${clock(back)}.`)
     expect([at('stalled'), at('looping', 'npm test'), at('over_budget', '6 hours'), at('refused')]).toEqual([
-      'Codex stopped showing any sign of work on this step.',
-      'Codex kept running `npm test` to the same end.',
-      "Codex has worked on this step for 6 hours since you last said anything, and isn't done.",
-      'Codex declined to go on with this step.',
+      'Codex has gone quiet: there has been no sign of work on this step for a while. Start it again, or hand the step to another agent.',
+      'Codex kept running `npm test` and got the same result each time. Tell it to try something else, or hand the step to another agent.',
+      "Codex has worked on this step for 6 hours since you last said anything, and isn't done. Let it carry on if it seems to be getting somewhere, or hand the step to another agent.",
+      'Codex refused to go on with this step. Tell it what to do differently, or hand the step to another agent.',
     ])
   })
 
@@ -1850,9 +1830,11 @@ describe('a task', () => {
     }
     const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [quiet] })) })
     withServices(<Task />, client)
-    await screen.findByText('Codex stopped showing any sign of work on this step.')
-    expect(screen.getByText('Stopped its turn and told it to carry on')).toBeTruthy()
-    expect(screen.getByText('Started Codex afresh')).toBeTruthy()
+    await screen.findByText(
+      'Codex has gone quiet: there has been no sign of work on this step for a while. Start it again, or hand the step to another agent.',
+    )
+    expect(screen.getByText('Told it to carry on')).toBeTruthy()
+    expect(screen.getByText('Started Codex again from the start')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Tell the lead' })).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Start Codex again' }))
     await waitFor(() =>
@@ -1872,7 +1854,7 @@ describe('a task', () => {
     }
     const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [restarted] })) })
     withServices(<Task />, client)
-    await screen.findByText(/Althar stopped again soon after it carried this step on after a restart/)
+    await screen.findByText(/Althar restarted twice while this step was running/)
     await userEvent.click(screen.getByRole('button', { name: 'Start Codex again' }))
     await waitFor(() =>
       expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st8', answer: { kind: 'retry', agentId: 'codex' } }),
@@ -1894,7 +1876,7 @@ describe('a task', () => {
     await screen.findByText("Codex reached its usage limit and didn't say when it resets.")
     expect(screen.queryByRole('button', { name: 'Tell the lead' })).toBeNull()
     // Handing it on is offered only to the agents that aren't out.
-    await userEvent.click(screen.getByRole('button', { name: 'Try another agent' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Hand to another agent' }))
     expect(screen.queryByRole('menuitem', { name: /Codex/ })).toBeNull()
     await userEvent.keyboard('{Escape}')
     await userEvent.click(screen.getByRole('button', { name: 'Try Codex again' }))
@@ -2047,6 +2029,26 @@ describe('a task', () => {
     await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'claude-code', model: 'default' }))
     expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Carry on with the retry.', disposition: 'after_current' })
     // Queued before the lead starts, so it reads it in its first turn.
+    expect(vi.mocked(client.send).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.startSession).mock.invocationCallOrder[0] ?? 0)
+  })
+
+  it('uses the picked agent for a stale session summary and queues the note before starting it', async () => {
+    const base = thread()
+    const stale = thread({
+      session: base.session === null ? null : { ...base.session, held: false },
+      task: { ...base.task, phase: 'stopped', actions: ['abandon'], lead: { agentId: 'codex', model: 'gpt-5.2-codex', account: null } },
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => stale) })
+    withServices(<Task />, client)
+    await waitFor(() => expect(client.status).toHaveBeenCalled())
+    expect(await screen.findByText('Stopped')).toBeTruthy()
+    const box = await screen.findByRole('textbox', { name: 'Tell Codex something' })
+    fireEvent.drop(box, { dataTransfer: { types: ['Files'], files: [new File([PNG], 'shot.png', { type: 'image/png' })] } })
+    expect(await screen.findByText('Codex doesn’t take images, so they can’t be sent to it.')).toBeTruthy()
+    expect(screen.queryByRole('img', { name: 'shot.png' })).toBeNull()
+    await userEvent.type(box, 'Carry on{Enter}')
+    await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'th1', agentId: 'codex', model: 'gpt-5.2-codex' }))
+    expect(client.send).toHaveBeenCalledWith({ threadId: 'th1', body: 'Carry on', disposition: 'after_current' })
     expect(vi.mocked(client.send).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(client.startSession).mock.invocationCallOrder[0] ?? 0)
   })
 

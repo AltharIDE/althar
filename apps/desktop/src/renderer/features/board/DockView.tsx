@@ -169,23 +169,23 @@ export function DockView({
           // What the lead committed since, up to the head the dock showed: pushed first, as the person says.
           unpushed={change.localHead === null ? 0 : change.unpushed}
           onPush={() => void model.push(task.taskId, change.localHead ?? '', change.url)}
-          pushing={model.pushing === task.taskId}
+          pushing={model.pushing.has(task.taskId)}
           onOpenFile={(path) => onChanges(task, path)}
-          accepting={model.merging === task.taskId}
-          sendingBack={model.sending === task.taskId}
+          accepting={model.merging.has(task.taskId)}
+          sendingBack={model.sending.has(task.taskId)}
           {...(model.error === null ? {} : { error: model.error })}
           text={{ number: (n: number) => `${change.prefix}${n}` }}
         />
         <div className={s.actions}>
           {/* Another of its repositories, whose last pull request merged with commits after it, opens a new one. */}
           {task.unshipped != null && (
-            <ActionButton icon="pr" disabled={model.opening === task.taskId} onClick={() => void model.openChange(task.taskId)}>
+            <ActionButton icon="pr" disabled={model.opening.has(task.taskId)} onClick={() => void model.openChange(task.taskId)}>
               {text.openNewChange}
             </ActionButton>
           )}
           {/* A repository of the task that ended on its branch merges here, beside the pull request of the rest. */}
           {task.here.length > 0 && (
-            <ActionButton icon="branch" disabled={model.merging === task.taskId} onClick={() => void model.mergeHere(task)}>
+            <ActionButton icon="branch" disabled={model.merging.has(task.taskId)} onClick={() => void model.mergeHere(task)}>
               {mergeHereLabel(task.here, true)}
             </ActionButton>
           )}
@@ -243,18 +243,18 @@ export function DockView({
         )}
         {/* Work that ended on its branch merges here, or can still open its pull request, as the person says. */}
         {task.phase === 'ready' && change === null && task.here.length > 0 && (
-          <ActionButton icon="branch" disabled={model.merging === task.taskId} onClick={() => void model.mergeHere(task)}>
+          <ActionButton icon="branch" disabled={model.merging.has(task.taskId)} onClick={() => void model.mergeHere(task)}>
             {mergeHereLabel(task.here)}
           </ActionButton>
         )}
         {task.phase === 'ready' && change === null && (
-          <ActionButton icon="pr" disabled={model.opening === task.taskId} onClick={() => void model.openChange(task.taskId)}>
+          <ActionButton icon="pr" disabled={model.opening.has(task.taskId)} onClick={() => void model.openChange(task.taskId)}>
             {text.openChange}
           </ActionButton>
         )}
         {/* Its last pull request merged or closed, the commits after it go in a new one (ADR-034). */}
         {task.phase === 'ready' && change !== null && task.unshipped != null && (
-          <ActionButton icon="pr" disabled={model.opening === task.taskId} onClick={() => void model.openChange(task.taskId)}>
+          <ActionButton icon="pr" disabled={model.opening.has(task.taskId)} onClick={() => void model.openChange(task.taskId)}>
             {text.openNewChange}
           </ActionButton>
         )}

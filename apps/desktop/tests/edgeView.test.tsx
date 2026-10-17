@@ -145,7 +145,11 @@ describe('the edge', () => {
     const { client } = fakeClient({ getHome: vi.fn(async () => home({ tasks, calls: [stuck], projects: [project, halyard] })) })
     withServices(<Edge shown={{ place: 'menu' }} />, client, host)
     const stalled = await screen.findByRole('article', { name: 'Spike the cache' })
-    expect(within(stalled).getByText('Claude Code stopped before the step was done.')).toBeTruthy()
+    expect(
+      within(stalled).getByText(
+        'Claude Code closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
+      ),
+    ).toBeTruthy()
     expect(within(screen.getByRole('article', { name: 'Name the limits better' })).getByText(/#1191 · .+ · \+212 −41$/)).toBeTruthy()
     await userEvent.click(within(stalled).getByRole('button', { name: 'Open' }))
     expect(host.openInWindow).toHaveBeenCalledWith('th4')

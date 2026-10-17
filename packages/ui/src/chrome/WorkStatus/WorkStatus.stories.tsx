@@ -10,7 +10,8 @@ const needs: WorkNeed[] = [
   {
     id: 's1',
     kind: 'Implement stopped',
-    title: 'Claude Code stopped before the step was done.',
+    title:
+      'Claude Code closed before finishing the step. This is usually harmless: tell it to carry on, or hand the step to another agent.',
     meta: 'Migrate billing webhooks',
     at: '1h ago',
     onOpen: fn(),
