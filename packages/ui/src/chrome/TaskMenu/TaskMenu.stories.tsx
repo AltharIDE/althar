@@ -118,6 +118,8 @@ export const MarkingReady: Story = {
   },
 }
 
+/** Open, with Attach a pull request… among what it can do. */
+export const WithAttach: Story = { args: { onAttach: fn(), defaultOpen: true } }
 /** A task that follows the wrong pull request, or none, attaches one: the consumer asks which. */
 export const AttachingAPullRequest: Story = {
   args: { onStop: undefined, onAttach: fn() },
