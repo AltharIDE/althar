@@ -163,6 +163,8 @@ export interface Client {
     readonly model?: string | null
     readonly effort?: string | null
   }) => Promise<void>
+  /** Leaves out the commits after a task's last pull request that are in none yet: it settles without them, and they stay on its branch. */
+  readonly leaveOutCommits: (taskId: string) => Promise<void>
   /** Settles a task without its change; its worktree and branch stay. */
   readonly abandonTask: (taskId: string) => Promise<void>
   /** Opens an abandoned task again, on its worktree and branch. */
@@ -486,6 +488,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setTaskResolveConflicts: (input) => command((commandId) => api.SetTaskResolveConflicts({ commandId, ...input })),
     setTaskAllowEverything: (input) => command((commandId) => api.SetTaskAllowEverything({ commandId, ...input })),
     resumeTask: (input) => command((commandId) => api.ResumeTask({ commandId, ...input })),
+    leaveOutCommits: (taskId) => command((commandId) => api.LeaveOutCommits({ commandId, taskId })),
     abandonTask: (taskId) => command((commandId) => api.AbandonTask({ commandId, taskId })),
     reopenTask: (taskId) => command((commandId) => api.ReopenTask({ commandId, taskId })),
     renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),

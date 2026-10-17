@@ -1190,6 +1190,30 @@ describe('a task', () => {
     expect((await taskMenu({ phase: 'settled', state: 'done', actions: [] }, null)).offered).toEqual(['Open in Zed'])
   })
 
+  it('offers abandoning a merged task with commits after its pull request, which keep it in Needs you: it stays merged', async () => {
+    const after = await taskMenu(
+      {
+        phase: 'ready',
+        state: 'done',
+        actions: ['leaveOut'],
+        changes: [change({ state: 'merged' })],
+        unshipped: { commits: 1, add: 300, del: 304 },
+      },
+      null,
+    )
+    expect(after.offered).toEqual(['Open in Zed', 'Abandon'])
+    expect(screen.getByRole('menuitem', { name: /Abandon/ }).textContent).toContain('Its pull request stays merged.')
+    await userEvent.click(screen.getByRole('menuitem', { name: /Abandon/ }))
+    // Asked first, it says what stays merged and what is left out, and offers no reopening.
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('stays merged.')
+    expect(dialog.textContent).toContain('The commit after it goes in no pull request.')
+    expect(dialog.textContent).not.toContain('reopen')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    await waitFor(() => expect(after.client.leaveOutCommits).toHaveBeenCalledWith('t1'))
+    expect(after.client.abandonTask).not.toHaveBeenCalled()
+  })
+
   it('renames a task in its header: pressing the title edits it where it is, Enter keeps it and Escape puts it back', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     withServices(<Task />, client)

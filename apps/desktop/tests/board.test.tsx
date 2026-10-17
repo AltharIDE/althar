@@ -236,6 +236,29 @@ describe('the board’s lanes', () => {
     expect(firstNeedOf(lanes)).toBe('th4')
   })
 
+  it('keeps a merged task with commits after its pull request in Needs you, and settles it once they are left out', () => {
+    const merged = change({ state: 'merged' })
+    const after = task({
+      taskId: 't8',
+      threadId: 'th8',
+      title: 'Cap parallel agents per machine',
+      state: 'done',
+      phase: 'ready',
+      change: merged,
+      unshipped: { commits: 1, add: 300, del: 304 },
+      settledAt: '2026-10-01T09:30:00.000Z',
+    })
+    const before = lanesOf(board({ tasks: [after], calls: [] }))
+    expect(before.ready.map((work) => work.taskId)).toEqual(['t8'])
+    expect(yoursOf(before)).toBe(1)
+    expect(needsOf(before, () => '', vi.fn()).map((need) => need.title)).toEqual(['Cap parallel agents per machine'])
+    // Left out, the runtime reads it as settled, with nothing in none: it goes among the settled, at the time it first settled.
+    const left = lanesOf(board({ tasks: [{ ...after, phase: 'settled', unshipped: null }], calls: [], settledTotal: 1 }))
+    expect(left.ready).toEqual([])
+    expect(left.settled.map((work) => [work.taskId, work.settledAt])).toEqual([['t8', '2026-10-01T09:30:00.000Z']])
+    expect(yoursOf(left)).toBe(0)
+  })
+
   it('lists a drafted review as one to post, by its pull request and whose it is', () => {
     const reviewing = {
       product: 'github' as const,

@@ -529,6 +529,8 @@ export function TaskView({
   // Its draft pull requests, marked ready from the menu too, while it is under way or ready.
   const drafts = snapshot.task.phase === 'settled' ? [] : snapshot.task.changes.filter((one) => one.state === 'open' && one.draft)
   const openChange = snapshot.task.changes.find((one) => one.state === 'open')
+  // Its newest pull request that merged: what a merged task's commits came after.
+  const mergedChange = snapshot.task.changes.findLast((one) => one.state === 'merged')
   // What it changed opens over the window; what else it can do is in its menu.
   const actions = (
     <>
@@ -561,8 +563,10 @@ export function TaskView({
         {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
         {...(can('stop') ? { onStop: () => void model.stop() } : {})}
         {...(can('resume') ? { onResume: () => void model.resume() } : {})}
-        {...(can('abandon')
+        // A merged task abandons the commits after its pull request, and stays merged: one Abandon, said for what it does.
+        {...(can('abandon') || can('leaveOut')
           ? {
+              merged: can('leaveOut'),
               onAbandon: () => {
                 model.dismissError()
                 setAbandoning(true)
@@ -888,6 +892,14 @@ export function TaskView({
           {...(openChange === undefined
             ? {}
             : { change: { name: `${openChange.short} ${openChange.prefix}${openChange.number}`, host: productName(openChange.product) } })}
+          {...(mergedChange === undefined || !can('leaveOut')
+            ? {}
+            : {
+                merged: {
+                  name: `${mergedChange.short} ${mergedChange.prefix}${mergedChange.number}`,
+                  commits: snapshot.task.unshipped?.commits ?? 0,
+                },
+              })}
           busy={model.pending}
           {...(model.error === null ? {} : { error: model.error })}
           onAbandon={() => void model.abandon().then((abandoned) => abandoned && setAbandoning(false))}

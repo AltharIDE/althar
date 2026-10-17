@@ -1140,10 +1140,11 @@ export type ReviewBrief = typeof ReviewBrief.Type
 /**
  * What the person can do to a task as a whole, where it stands now, as its
  * menu offers it (docs/architecture/05, "Task and run lifecycle"): start its
- * plan now, stop it, resume what stopping cut short, abandon it, or reopen
- * it once abandoned. A merged task has none.
+ * plan now, stop it, resume what stopping cut short, leave out the commits
+ * after its last pull request that are in none yet (ADR-034), abandon it, or
+ * reopen it once abandoned. A merged task has none, but leaving those out.
  */
-export const TaskAction = Schema.Literals(['start', 'stop', 'resume', 'abandon', 'reopen'])
+export const TaskAction = Schema.Literals(['start', 'stop', 'resume', 'leaveOut', 'abandon', 'reopen'])
 export type TaskAction = typeof TaskAction.Type
 
 /**
@@ -2358,6 +2359,13 @@ export const Api = RpcGroup.make(
     },
     Schema.Void,
   ),
+  /**
+   * Leaves out the commits after a task's last pull request that are in none
+   * yet (ADR-034): it settles without them, done where every pull request of
+   * it merged; they stay on its branch, in its worktree. Nothing, where it
+   * has none, or its lead is at work.
+   */
+  command('LeaveOutCommits', { taskId: Schema.String }, Schema.Void),
   /** Settles a task without its change: its agents stop and its plan doesn't start; its worktree and branch stay as they are. */
   command('AbandonTask', { taskId: Schema.String }, Schema.Void),
   /** Gives a task another title, in any state. Its slug, branch, worktree folder, and the title of a pull request or issue already opened, stay as they are. */

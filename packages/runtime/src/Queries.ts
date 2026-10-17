@@ -2016,7 +2016,18 @@ export class Queries extends Context.Service<
               commits: said.commits,
               here: said.here,
               merged: said.merged,
-              actions: [...actionsOf(standing)],
+              // With commits after its last pull request in none yet, a merged task abandons them, leaving them out, and stays merged:
+              // an open one only where every repository of it is merged, as settling it asks, else leaving out wouldn't settle it.
+              actions: [
+                ...actionsOf({
+                  ...standing,
+                  unshipped: card?.unshipped != null,
+                  merged:
+                    head.state === 'open' &&
+                    card?.unshipped != null &&
+                    (yield* (yield* Changes).merged(head.taskId).pipe(Effect.orElseSucceed(() => false))),
+                }),
+              ],
               planId: standing.planId,
               runnables: yield* launches.runnables(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => [])),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),
