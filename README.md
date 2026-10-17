@@ -226,7 +226,7 @@ Everything runs on your machine. The project's tasks, threads and history are ke
 ## Get started
 
 > [!NOTE]
-> **Early.** Althar runs on macOS on Apple silicon and on Linux, and is tested most on macOS. Windows is coming. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues).
+> **Early.** Althar runs on macOS on Apple silicon and on Linux, and is tested most on macOS. Windows is coming. Things will change, and some will break. [Tell us when they do](https://github.com/AltharIDE/althar/issues), or, in the app, Report a problem (in Help on a Mac, or at the foot of the quick settings), which sends what happened with the app's logs, paths and repository names hidden.
 
 [Download Althar](https://github.com/AltharIDE/althar/releases/latest) for your system from the latest release:
 

@@ -71,7 +71,7 @@ export const layer = (options: RuntimeLayerOptions) => {
   const base = Layer.mergeAll(Instance.layer, Live.layer, ToolServer.layer, ModelFacts.layer, Artifacts.layer).pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(Layer.succeed(RuntimeConfig, options)),
-    Layer.provideMerge(options.agents ?? Agents.registry),
+    Layer.provideMerge(options.agents ?? Agents.registry(options.agentStderr)),
     // Agents Althar downloads at the person's asking, where it keeps them; the registry's point at them where the person has none.
     Layer.provideMerge(Installs.layer({ root: options.agentsRoot, fetch: options.fetch, onDevice: options.onDevice })),
     Layer.provideMerge(options.secrets ?? Secrets.none('Althar keeps sign-ins in the app; it can open them, and this can’t.')),

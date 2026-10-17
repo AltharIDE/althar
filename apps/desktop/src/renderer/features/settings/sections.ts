@@ -54,7 +54,7 @@ export const sectionText: Readonly<Record<Section, { readonly title: string; rea
   editor: { title: 'Editor', lede: 'Which app a task’s files and folder open in.', icon: 'file' },
   about: {
     title: 'About Althar',
-    lede: 'Which Althar this is, a newer one once it’s ready, and the anonymous usage data it sends.',
+    lede: 'Which Althar this is, a newer one once it’s ready, the anonymous usage data it sends, and where to report a problem.',
     icon: 'down',
   },
 }

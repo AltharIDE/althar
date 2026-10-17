@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gunzipSync } from 'node:zlib'
@@ -6,7 +6,7 @@ import { gunzipSync } from 'node:zlib'
 import { describe, expect, it, vi } from 'vitest'
 
 import { doNotTrack } from '../src/main/appPreferences'
-import { installOf, usageData, usageEventOf, type UsageDataOptions } from '../src/main/usageData'
+import { installOf, isInstallId, usageData, usageEventOf, type UsageDataOptions } from '../src/main/usageData'
 
 /* Anonymous usage data (DEV-76): only named events and properties leave, from the main process, and nothing while the switch is off. */
 
@@ -190,5 +190,14 @@ describe('the install', () => {
     await installOf(at, '0.1.0')
     expect((await installOf(at, '0.2.0')).updatedFrom).toBe('0.1.0')
     expect((await installOf(at, '0.2.0')).updatedFrom).toBeNull()
+  })
+
+  it('makes the id again where the file holds one that isn’t a UUID v4, as the reports Worker takes', async () => {
+    const at = profile()
+    writeFileSync(join(at, 'desktop.json'), JSON.stringify({ usage: { id: '0000000000000000000000000000000000ff', version: '0.1.0' } }))
+    const { id } = await installOf(at, '0.1.0')
+    expect(isInstallId(id)).toBe(true)
+    expect(id).not.toBe('0000000000000000000000000000000000ff')
+    expect(isInstallId('3F0C9A52-6B1E-4F7D-9A0E-2C5B8D71E4AA')).toBe(false)
   })
 })
