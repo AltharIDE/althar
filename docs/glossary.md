@@ -96,6 +96,15 @@ A call's kind reads the same everywhere it shows: on the board, in the bar's pre
 | This update couldn’t move your data | a migration that didn't finish (`MigrationFailed`, `ForeignKeyViolations`), or the copy before it (`BackupFailed`) | What the window shows instead of opening when an update couldn't bring the person's data to its new shape. It says the data is safe, where the copy from before the update is, and what stopped it. Nothing of Althar runs behind it. |
 | Copy from before the update | a backup, in the profile's `backups` folder | The copy of the person's data Althar makes before an update moves it, kept as a file they can find. The newest three are kept. |
 
+## When something goes wrong with Althar
+
+| On screen | In the model | What it is |
+|---|---|---|
+| Report a problem | a problem report, sent to the reports Worker, which makes a Linear issue | From Help in the app's menu on a Mac, the foot of the quick settings, or About Althar in Settings: a dialog with one box, "What happened?". The screenshot of the window and the logs go with it unless the person switches them off; "See what's sent" lists every item; an email if they'd like a reply. Without the reports service, it is saved in Downloads and a mail opens to send it with. |
+| Report this | a problem report about something that went wrong, carrying its task, or what stopped an update | Quiet, at the end of a Stuck call's answers, and on This update couldn’t move your data. It opens Report a problem about that step or that update. On a Stuck call it answers nothing: the step still waits. |
+| Logs | `main.log`, `runtime.log`, `agents.log` | What the app writes as it runs, in the system's place for logs. A report sends the last part of each, with paths in the home folder and repository names hidden. |
+| Install id | usage data's random id, kept in the profile's `desktop.json` | Which install a report came from, and nothing about who. The same id usage data sends, whether or not usage data is on. |
+
 ## What comes back
 
 | On screen | In the model | What it is |

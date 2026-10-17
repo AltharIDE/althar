@@ -1209,6 +1209,8 @@ export const TaskCard = Schema.Struct({
   queued: Schema.NullOr(Queued),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
   planWaits: Schema.optional(Schema.Boolean),
+  /** With `planWaits`: its place in the order what waits for a place starts, among everything that waits; 1 starts first. */
+  place: Schema.optional(Schema.Int),
 })
 export type TaskCard = typeof TaskCard.Type
 
@@ -1817,8 +1819,6 @@ export const BoardTask = Schema.Struct({
   changed: Schema.NullOr(Schema.Struct({ files: Schema.Number, add: Schema.Number, del: Schema.Number })),
   /** A ready task's repositories with no pull request, not merged yet, which merge here. */
   here: Schema.Array(TaskRepositoryHere),
-  /** Not settled, everything its agents ask is allowed, by the task's own switch or its project's (ADR-043). Not without it. */
-  allowEverything: Schema.optional(Schema.Boolean),
 })
 export type BoardTask = typeof BoardTask.Type
 

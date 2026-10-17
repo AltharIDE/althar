@@ -1,14 +1,25 @@
 import type { ReactNode } from 'react'
 
 import type { HomeCall, HomeTask } from '@althar/contracts'
-import { Button, type EdgeWork, NeedLine, type ProjectRef } from '@althar/ui'
+import { Button, type EdgeWork, Fact, LinkButton, NeedLine, type ProjectRef } from '@althar/ui'
 
 import { commandOf, titleOf } from '../../shared/callCommand'
 import { callKindOf, isFinished, kindWords, readyKindOf, whereOf } from '../../shared/calls'
 import type { Reply } from '../../shared/permissions'
 import { briefOf as questionBrief } from '../../shared/questions'
-import { factsOf, type Next, nextWords, standingOf } from '../../shared/standing'
+import {
+  doingWords,
+  doneHere,
+  factsOf,
+  labelWords,
+  type DoneHere,
+  type Next,
+  nextWords,
+  standingOf,
+  standingText,
+} from '../../shared/standing'
 import { text as stuckText } from '../task/StuckCall'
+import type { ActionFailure } from '../board/useWorkActions'
 
 /*
  * What waits on the person across every project, as the home and the edge
@@ -16,8 +27,10 @@ import { text as stuckText } from '../task/StuckCall'
  * NeedLine of its kind with the one thing to know to answer it. A permission
  * is answered where it is; a stuck step opens its task. A ready change says
  * what stands between it and merging, as its board card does, and where the
- * place offers it (the home), its button is the one next thing to do: push,
- * accept and merge, or ask its lead to fix the checks or resolve a conflict.
+ * place offers it (the home), its button is the one next thing to do: push or
+ * accept and merge, right there, saying why when that failed and offering to
+ * try again; asking its lead to fix the checks or resolve a conflict is a
+ * link into its task, where the lead is told.
  * Answered there, its line stays where it was, at its height, and goes
  * quiet, with what was said where its answers were, until the place is left.
  */
@@ -196,7 +209,10 @@ export const needsOf = ({
             kind: callKindOf(call),
             project,
             title: whereOf(call),
-            brief: stuckText.what(stuck, agentName(stuck.agentId) || 'The agent'),
+            brief:
+              stuck.step === 'publish' && stuck.why !== 'not_connected'
+                ? stuckText.publishing(stuck)
+                : stuckText.what(stuck, agentName(stuck.agentId) || 'The agent'),
           },
     ]
   }),
@@ -234,19 +250,26 @@ export function needLineOf(
     answers,
     onNext,
     doing,
+    failed,
   }: {
     onOpen: (threadId: string) => void
     onAnswer: (call: HomeCall, project: ProjectRef, decision: 'allow' | 'reject') => void
     /** A permission's answers, in place of Deny and Allow once. */
     answers?: (call: HomeCall, project: ProjectRef) => ReactNode
     /** Does a ready change's next thing; without it, its button opens the task to review. */
-    onNext?: (task: HomeTask, next: Next) => void
+    onNext?: (task: HomeTask, next: DoneHere) => void
     /** Whether a task's next thing is under way, so its button says so and waits. */
     doing?: (taskId: string) => boolean
+    /** What last failed for a task's push or merge, to say in its line and offer to try again. */
+    failed?: (taskId: string) => ActionFailure | undefined
   },
 ): ReactNode {
   const open = () => onOpen(need.threadId)
   const { permission, answer, ready } = need
+  // The next thing done from here, if it is the person's own; and why it failed last time, if it did.
+  const here = ready !== undefined && onNext !== undefined && doneHere(ready.next) ? ready.next : null
+  const failure = ready === undefined ? undefined : failed?.(ready.task.taskId)
+  const why = here !== null && failure !== undefined && failure.action === here.kind ? failure.message : null
   // Answered here: where it was, as high as it was, quiet; focus comes to it from the button pressed.
   if (answer !== undefined)
     return (
@@ -268,19 +291,41 @@ export function needLineOf(
       project={need.project}
       title={need.title}
       {...(need.command === undefined ? {} : { command: need.command })}
-      {...(need.brief === undefined ? {} : { brief: need.brief })}
+      {...(why !== null && here !== null
+        ? {
+            brief: (
+              <>
+                <Fact icon="close" tone="danger" role="alert">
+                  {standingText.nextFailed[here.kind](why)}
+                </Fact>
+                {need.brief !== undefined && <> · {need.brief}</>}
+              </>
+            ),
+          }
+        : need.brief === undefined
+          ? {}
+          : { brief: need.brief })}
       onOpen={open}
       actions={
         ready !== undefined && onNext !== undefined ? (
-          <Button
-            size="small"
-            // Merging and pushing are the person's own to do, so they're violet; asking the lead isn't.
-            {...(ready.next.kind === 'merge' || ready.next.kind === 'push' ? { variant: 'signal' as const } : {})}
-            busy={doing?.(ready.task.taskId) === true}
-            onClick={() => onNext(ready.task, ready.next)}
-          >
-            {nextWords(ready.next)}
-          </Button>
+          here === null ? (
+            // Asking the lead to resolve or fix takes the lead: a link into the task, where it is told.
+            <LinkButton onClick={open}>{nextWords(ready.next)}</LinkButton>
+          ) : (
+            <Button
+              size="small"
+              // Merging and pushing are the person's own to do, so they're violet.
+              variant="signal"
+              // The pull request it acts on, for a screen reader: the line's own words don't name it.
+              {...(ready.task.change === null
+                ? {}
+                : { 'aria-label': labelWords(here, `${ready.task.change.prefix}${ready.task.change.number}`, why !== null) })}
+              busy={doing?.(ready.task.taskId) === true}
+              onClick={() => onNext(ready.task, here)}
+            >
+              {doing?.(ready.task.taskId) === true ? doingWords(here) : why === null ? nextWords(here) : standingText.nextFailed.again}
+            </Button>
+          )
         ) : permission === undefined ? (
           <Button size="small" {...(need.kind === kindWords.question ? { variant: 'signal' as const } : {})} onClick={open}>
             {need.kind === kindWords.ready || need.kind === kindWords.drafted

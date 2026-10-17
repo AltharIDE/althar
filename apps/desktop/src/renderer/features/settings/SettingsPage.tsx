@@ -19,6 +19,7 @@ import {
   EdgeSpot,
   Icon,
   KeepAwake,
+  LinkButton,
   NotificationSettings,
   NotificationSound,
   type NotifyChoices,
@@ -467,8 +468,9 @@ function EditorSection() {
 
 /**
  * Which Althar this is, with its release's notes; a newer one, once it is
- * ready to install; and whether it sends anonymous usage data, which is
- * off, and stays off here, while DO_NOT_TRACK is set where it started.
+ * ready to install; Report a problem (DEV-61), where the app can report;
+ * and whether it sends anonymous usage data, which is off, and stays off
+ * here, while DO_NOT_TRACK is set where it started.
  */
 function AboutSection({ start }: { start: StartModel }) {
   const update = useUpdate()
@@ -480,6 +482,9 @@ function AboutSection({ start }: { start: StartModel }) {
       <div className={s.about}>
         {version !== undefined && <AppVersion version={version} notes={notesOf(version)} text={{ name: text.version }} />}
         {update.ready !== null && <UpdateReady {...update.ready} />}
+        {host.reportProblem !== undefined && (
+          <LinkButton onClick={() => host.reportProblem?.({ kind: 'asked', from: 'settings' })}>{text.report}</LinkButton>
+        )}
       </div>
       <SettingList>
         <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={host.doNotTrack === true} />

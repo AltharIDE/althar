@@ -1333,6 +1333,13 @@ export class Queries extends Context.Service<
         }
       })
 
+      /** A waiting task's place in the order what waits starts, among everything that waits: 1 starts first. */
+      const placeOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const order = yield* (yield* Busy).order
+          return Math.max(1, order.findIndex((waiter) => waiter.taskId === taskId && waiter.review !== true) + 1)
+        })
+
       /* A settled task's kind, by the task and when it settled: it is read from git once, not each time its card is. */
       const settledKinds = new Map<string, TaskCard['kind']>()
 
@@ -1589,7 +1596,7 @@ export class Queries extends Context.Service<
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow : null,
-            ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
+            ...(queued && (yield* planWaits(taskId)) ? { planWaits: true, place: yield* placeOf(taskId) } : {}),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
@@ -1641,13 +1648,6 @@ export class Queries extends Context.Service<
                   del: said.files.reduce((sum, file) => sum + file.del, 0),
                 }
               : null
-          // Not settled, whether nothing it asks waits for the person: by its own switch, or its project's (ADR-043).
-          const sql = yield* SqlClient.SqlClient
-          const [allows] =
-            card.phase === 'settled'
-              ? []
-              : yield* sql<{ allows: number | null }>`
-                  SELECT k.allow_everything = 1 OR ${sql.unsafe(PROJECT_ALLOWS('k.project_id'))} AS allows FROM tasks k WHERE k.id = ${row.id}`
           const read = {
             ...card,
             state: row.state,
@@ -1655,7 +1655,6 @@ export class Queries extends Context.Service<
             settledAt: row.settledAt,
             changed,
             here: said?.here ?? [],
-            ...(allows?.allows === 1 ? { allowEverything: true } : {}),
           }
           if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, read)
           // Back at work, what was kept of it as it settled goes: settled again, at the same time, it may say more.

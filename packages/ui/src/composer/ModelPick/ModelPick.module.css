@@ -2,7 +2,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   height: 28px;
   padding: 0 7px 0 8px;
   border-radius: 7px;
@@ -176,4 +177,24 @@
 .count {
   font: 500 10.5px/1 var(--mono);
   color: var(--t-3);
+}
+
+/* narrow, the name is cut with an ellipsis; the effort and the chevron stay */
+.name {
+  min-width: 0;
+}
+.name > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.button > :is(.effort, .chev) {
+  flex: none;
+}
+
+/* narrowest, the picker is its mark and effort */
+@container foot (max-width: 380px) {
+  .name > span {
+    display: none;
+  }
 }

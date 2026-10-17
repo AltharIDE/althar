@@ -35,6 +35,7 @@ import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { Holders } from '../../shared/Holders'
+import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, useDraft } from '../../shared/drafts'
 import { isGenerated } from '../../shared/generated'
@@ -64,6 +65,8 @@ import { StuckCall } from './StuckCall'
 import { TaskThread } from './TaskThread'
 import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
+import { useServices } from '../../data/services'
+import { text as reportText } from '../report/reportWords'
 import { NoOutputsView } from './NoOutputsView'
 import { conflictsOf, hasOutputs, Outputs } from './Outputs'
 import s from './Task.module.css'
@@ -90,6 +93,10 @@ type Face = 'talk' | 'out'
 
 export const text = {
   thread: 'Thread',
+  /** Dictation carried once the person leaves the task: whose it is, and putting another thread's here. */
+  carriedTo: (task: string) => `To the lead · ${task}`,
+  carriedSend: 'Send to the lead',
+  carriedTake: 'Move it to this task',
   /** The sentence under a review's header: what its lead can reach. */
   reach: 'What this review’s lead can reach',
   noLead: 'No lead yet',
@@ -279,7 +286,21 @@ export function TaskView({
   // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
   const kept = draftKey.task(model.snapshot?.threadId ?? '')
   const [draft, setDraft] = useDraft(kept)
-  const voice = useDictation(kept, { projectId: model.snapshot?.project.id ?? null })
+  const threadId = model.snapshot?.threadId ?? null
+  const voice = useDictation(kept, {
+    projectId: model.snapshot?.project.id ?? null,
+    to:
+      threadId === null || model.snapshot === null
+        ? null
+        : {
+            to: text.carriedTo(model.snapshot.task.title),
+            back: { kind: 'task', threadId },
+            // Sent from elsewhere only while its lead is on it; otherwise its own composer starts one.
+            threadId: model.snapshot.session?.held === true ? threadId : null,
+            send: text.carriedSend,
+            take: text.carriedTake,
+          },
+  })
   // Images to send with what the person says, and which agents take them.
   const images = useImages(kept)
   const models = useModels()
@@ -317,6 +338,8 @@ export function TaskView({
   const editor = editors.main
   // What the thread's parts open: a picture in the lightbox, a document beside the thread.
   const host = useThreadHost()
+  // Report this, on a stuck step: Report a problem, with this task (DEV-61).
+  const { reportProblem } = useServices().host
   const files = model.snapshot?.task.files ?? []
   // What it changed opens on the first file someone wrote, not a lockfile.
   const changes = useChanges(model.snapshot?.task.id ?? null, (files.find((file) => !isGenerated(file.path)) ?? files[0])?.path ?? null)
@@ -594,6 +617,7 @@ export function TaskView({
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
+        carried={<CarriedOver here={kept} />}
         // What goes on outside the conversation floats over its end: the pull requests it listens to, and what its lead left running.
         above={
           (listening.length > 0 || leftRunning.length > 0) && (
@@ -825,6 +849,18 @@ export function TaskView({
                   agents={model.agents}
                   agentName={agentName}
                   onAnswer={(attentionId, answer) => void model.answerStuck(attentionId, answer)}
+                  {...(reportProblem === undefined
+                    ? {}
+                    : {
+                        onReport: (step: string) =>
+                          reportProblem({
+                            kind: 'failed',
+                            taskId: snapshot.task.id,
+                            projectId: snapshot.project.id,
+                            threadId: snapshot.threadId,
+                            what: reportText.stuck(step),
+                          }),
+                      })}
                 />
               ) : null,
             )}
