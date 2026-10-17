@@ -323,6 +323,7 @@ describe('the client', () => {
           SkipReview: () => Effect.die('unused'),
           RefreshTask: () => Effect.die('unused'),
           StopListening: () => Effect.die('unused'),
+          AttachPullRequest: () => Effect.die('unused'),
           StopBackground: () => Effect.die('unused'),
           ClearBackground: () => Effect.die('unused'),
           RunProject: () => Effect.die('unused'),

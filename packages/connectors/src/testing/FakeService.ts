@@ -92,6 +92,8 @@ export interface FakeControls {
   /** Someone merges a change on the host itself. */
   mergeByHand(number: number): void
   close(number: number): void
+  /** Someone reopens a closed change on the host itself. */
+  reopen(number: number): void
   /** Someone marks a draft ready on the host itself. */
   readyByHand(number: number): void
   /** The next call to `method` fails with this: when to try again for a rate limit, and the HTTP status a host would give. */
@@ -623,6 +625,7 @@ export const makeFakeService = (options: FakeServiceOptions = {}): FakeService =
     },
     mergeByHand: (number) => update(number, { state: 'merged' }),
     close: (number) => update(number, { state: 'closed' }),
+    reopen: (number) => update(number, { state: 'open' }),
     readyByHand: (number) => update(number, { draft: false }),
     failNext: (method, reason, retryAt, status) =>
       void failures.set(method, {

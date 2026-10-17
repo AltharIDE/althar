@@ -945,6 +945,14 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     skipReview: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
     stopListening: vi.fn(async () => {}),
+    attachPullRequest: vi.fn(async () => ({
+      kind: 'attached' as const,
+      name: 'PR #1',
+      source: 'feature',
+      started: false,
+      kept: 0,
+      own: 0,
+    })),
     stopBackground: vi.fn(async () => {}),
     clearBackground: vi.fn(async () => {}),
     runProject: vi.fn(async (_projectId: string, taskId: string | null, _threadId: string | null, runnableId?: string) => ({
