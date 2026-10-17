@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 
 import { build } from 'electron-builder'
 
+import { adapterPatchFor, applyAdapterPatch, assertAdapterPatched } from './adapterPatch.ts'
 import { entitlementsFor } from './entitlements.ts'
 import { refresh } from './feed.ts'
 import { fetchNode, NODE_IN_APP } from './node.ts'
@@ -145,6 +146,12 @@ writeFileSync(
 )
 // npm, for a flat node_modules the adapters' own lookups find their way through.
 execFileSync('npm', ['install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock'], { cwd: stage, stdio: 'inherit' })
+// This install is npm's, which skips bun's patches: the Claude adapter's is applied here, or the app would not get plan usage before a turn's first figure.
+const CLAUDE_ADAPTER = join('node_modules', '@agentclientprotocol', 'claude-agent-acp')
+applyAdapterPatch(
+  join(stage, CLAUDE_ADAPTER),
+  adapterPatchFor(join(desktop, '..', '..'), own.dependencies['@agentclientprotocol/claude-agent-acp']),
+)
 for (const [name, version] of Object.entries(pinned)) {
   const staged = versionAt(join(stage, 'node_modules', name, 'package.json'))
   if (staged !== version) throw new Error(`The package has ${name} ${staged}, but the workspace runs ${version}`)
@@ -254,12 +261,18 @@ if (mac) {
   const app = join(dist, process.arch === 'arm64' ? 'mac-arm64' : 'mac', `${own.productName}.app`)
   for (const path of [app, dmg, made('-mac.zip'), join(dist, 'latest-mac.yml')])
     if (!existsSync(path)) throw new Error(`The package is missing ${path}`)
+  // What ships, not only what was staged.
+  assertAdapterPatched(join(app, 'Contents', 'Resources', 'app', CLAUDE_ADAPTER))
   process.stdout.write(`\n${app}\n${dmg}\n${made('-mac.zip')}\n${join(dist, 'latest-mac.yml')}\n`)
 } else {
   const made = readdirSync(dist).filter((name) => /\.(AppImage|deb|rpm)$/.test(name))
   if (made.length < 3) throw new Error(`The packages are missing: only ${made.length} were made (${made.join(', ')})`)
   const feed = join(dist, 'latest-linux.yml')
   if (!existsSync(feed)) throw new Error(`The package is missing ${feed}`)
+  // What ships, not only what was staged: the unpacked app (linux-unpacked, or linux-arm64-unpacked) the packages are made from.
+  const unpacked = readdirSync(dist).filter((name) => /^linux(-\w+)?-unpacked$/.test(name))
+  if (unpacked.length === 0) throw new Error(`The package is missing the unpacked app in ${dist}`)
+  for (const name of unpacked) assertAdapterPatched(join(dist, name, 'resources', 'app', CLAUDE_ADAPTER))
   for (const name of made) process.stdout.write(`${join(dist, name)}\n`)
   process.stdout.write(`${feed}\n`)
 }

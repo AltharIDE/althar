@@ -62,6 +62,81 @@ export const AccountStatus = Schema.Struct({
 })
 export type AccountStatus = typeof AccountStatus.Type
 
+/** A plan's window by its length: five hours, a week, a month; anything else, with the agent's name for it. */
+export const UsageWindowKind = Schema.Literals(['five_hour', 'weekly', 'monthly', 'other'])
+export type UsageWindowKind = typeof UsageWindowKind.Type
+
+/** How much of one window of a plan is used, and when it resets. */
+export const UsageWindow = Schema.Struct({
+  kind: UsageWindowKind,
+  /** The agent's name for it where it gave one: a model's window, or extra usage. */
+  label: Schema.NullOr(Schema.String),
+  /** 0 to 100. */
+  usedPercent: Schema.Number,
+  resetsAt: Schema.NullOr(Schema.String),
+})
+export type UsageWindow = typeof UsageWindow.Type
+
+/**
+ * Why an account has no usage to show, which is a fault to fix and not a
+ * calm state (docs/plans/plan-usage.md): its sign-in is refused, the provider
+ * answered in another shape or can't be reached, there is no source for it
+ * yet, the agent has not reported yet, or its sign-ins can't be told plan
+ * from key.
+ */
+export const UsageFaultKind = Schema.Literals([
+  'sign_in_again',
+  'source_changed',
+  'unreachable',
+  'no_source',
+  'no_data_yet',
+  'cannot_classify',
+])
+export type UsageFaultKind = typeof UsageFaultKind.Type
+
+/** One account's plan usage: its windows as last read, from where, and how old; or the fault. */
+export const AccountUsage = Schema.Struct({
+  agentId: Schema.String,
+  agentName: Schema.String,
+  accountId: Schema.String,
+  accountName: Schema.String,
+  paidBy: Schema.Literals(['plan', 'key', 'unknown']),
+  /** Where the windows came from: ACP, an adapter's extension, the agent's own channel, or the provider's endpoint; null before any. */
+  source: Schema.NullOr(Schema.Literals(['acp', 'acp_extension', 'agent', 'endpoint'])),
+  /** When Althar last saw these numbers; null before any. */
+  observedAt: Schema.NullOr(Schema.String),
+  /** The plan as the agent names it: plus, pro, max. */
+  plan: Schema.NullOr(Schema.String),
+  windows: Schema.Array(UsageWindow),
+  /** Why the numbers are missing or old, where they are; the windows shown are the last ones then. */
+  fault: Schema.NullOr(Schema.Struct({ kind: UsageFaultKind, message: Schema.String })),
+})
+export type AccountUsage = typeof AccountUsage.Type
+
+/** A plan window ran down to a threshold: 50, 25, 10 or 5 percent left. Told once per account and window for each reset. */
+export const UsageWarning = Schema.Struct({
+  accountId: Schema.String,
+  accountName: Schema.String,
+  agentId: Schema.String,
+  agentName: Schema.String,
+  /** Which window: its kind, and its label where it has one. */
+  windowKey: Schema.String,
+  kind: UsageWindowKind,
+  label: Schema.NullOr(Schema.String),
+  /** The threshold crossed: the percent of the window left, at most. */
+  remainingPercent: Schema.Int,
+  resetsAt: Schema.NullOr(Schema.String),
+  raisedAt: Schema.String,
+})
+export type UsageWarning = typeof UsageWarning.Type
+
+/** Every account's plan usage, and the warnings the person has not yet seen. */
+export const PlanUsage = Schema.Struct({ accounts: Schema.Array(AccountUsage), warnings: Schema.Array(UsageWarning) })
+export type PlanUsage = typeof PlanUsage.Type
+
+/** The percent of a plan left at which a warning is told. */
+export const USAGE_WARN_AT = [50, 25, 10, 5] as const
+
 export const AgentStatus = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -1980,6 +2055,8 @@ export const WatchEvent = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal('Background'), threadId: Schema.String, background: Schema.Array(BackgroundCommand) }),
   /** What Althar runs of a project itself, whole each time it changes. */
   Schema.Struct({ _tag: Schema.Literal('Launches'), projectId: Schema.String, launches: Schema.Array(Launch) }),
+  /** Every account's plan usage and the warnings not yet seen, whole each time either changes. */
+  Schema.Struct({ _tag: Schema.Literal('PlanUsage'), usage: PlanUsage }),
   /** A command's output as far as it has come, while it runs: its last lines, whole each time, and how many came before them. */
   Schema.Struct({
     _tag: Schema.Literal('Output'),
@@ -2570,6 +2647,14 @@ export const Api = RpcGroup.make(
   call('ListEditors', {}, Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
   /** How hard this computer works now, and Althar's work's part, for the window's bar while it shows it. */
   call('GetLoad', {}, Load),
+  /** Every account's plan usage and the warnings not yet seen: read again first where `refresh`, else as kept (at most a minute old). */
+  call('GetPlanUsage', { refresh: Schema.optional(Schema.Boolean) }, PlanUsage),
+  /** The person has seen these warnings: they are not told again for their reset. */
+  command(
+    'AcknowledgeUsageWarnings',
+    { warnings: Schema.Array(Schema.Struct({ accountId: Schema.String, windowKey: Schema.String })) },
+    Schema.Void,
+  ),
   /** Downloads an agent's latest release for the person, checks it against the digest its release publishes, and keeps it for Althar to run; done once it is ready. */
   command('InstallAgent', { agentId: Schema.String }, Schema.Void),
   /** Opens a task's folder in an editor, at one of its files and a line where given; whether it could. The path is the task's, as its changes list it. */

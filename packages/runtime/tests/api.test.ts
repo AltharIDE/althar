@@ -373,6 +373,35 @@ describe('the API', () => {
         assert.deepStrictEqual(usage, { _tag: 'Context', threadId: task.threadId, used: 1200, size: 200_000 })
         const full = yield* eventually(client.GetThread({ threadId: task.threadId, limit: 0 }), (value) => value.session?.context != null)
         assert.deepStrictEqual(full.session?.context, { used: 1200, size: 200_000 })
+        // The plan windows the agent reports with its usage reach the account's usage, and a warning, as the window watches.
+        const watched = yield* Effect.forkChild(
+          Stream.runCollect(
+            Stream.take(
+              Stream.filter(client.Watch({}), (event) => event._tag === 'PlanUsage' && event.usage.warnings.length > 0),
+              1,
+            ),
+          ),
+        )
+        yield* Effect.sleep('50 millis')
+        yield* client.Send({ commandId: commandId(), threadId: task.threadId, body: scenarios.planUsage, disposition: 'after_current' })
+        const [told] = (yield* Fiber.join(watched)) as ReadonlyArray<WatchEvent>
+        assert.strictEqual(told?._tag === 'PlanUsage' ? told.usage.warnings[0]?.remainingPercent : undefined, 25)
+        const plan = yield* client.GetPlanUsage({})
+        const windows = plan.accounts.find((account) => account.agentId === 'codex' && account.windows.length > 0)?.windows
+        assert.deepStrictEqual(
+          windows?.map((window) => [window.kind, window.usedPercent]),
+          [
+            ['five_hour', 82],
+            ['weekly', 40],
+          ],
+        )
+        const [warning] = plan.warnings
+        assert.strictEqual(warning?.windowKey, 'five_hour')
+        yield* client.AcknowledgeUsageWarnings({
+          commandId: commandId(),
+          warnings: [{ accountId: warning?.accountId ?? '', windowKey: 'five_hour' }],
+        })
+        assert.deepStrictEqual((yield* client.GetPlanUsage({})).warnings, [])
         yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
         yield* client.StopSession({ commandId: commandId(), threadId: task.threadId })
         assert.isNull((yield* client.GetThread({ threadId: task.threadId })).session)
