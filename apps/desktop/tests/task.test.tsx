@@ -11,7 +11,7 @@ import { conflictsOf } from '../src/renderer/features/task/Outputs'
 import { elapsedOf, openingFace, sinceOf, statusOf, TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
 import { numberOf, reachOf, reviewedUnfurl } from '../src/renderer/features/task/ReviewCard'
-import { agents, change, changed, fakeClient, items, models, snapshot, status, streamed, usual } from './fixtures'
+import { agents, change, changed, fakeClient, fakeHost, items, models, snapshot, status, streamed, usual } from './fixtures'
 import type { ChangedFile } from '@althar/contracts'
 import { clock } from '../src/renderer/shared/time'
 import { reads } from '../src/renderer/data/reads'
@@ -1694,6 +1694,58 @@ describe('a task', () => {
     expect(await screen.findByText(/reviewed three times.*2 findings are still open\./)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Accept it as it is' }))
     await waitFor(() => expect(client.answerStuck).toHaveBeenCalledWith({ attentionId: 'st1', answer: { kind: 'abandon' } }))
+  })
+
+  it('reports a stuck step with its task, from Report this, where the app can report', async () => {
+    const stuckThread = thread({
+      attention: [
+        {
+          id: 'st1',
+          kind: 'stuck' as const,
+          title: '',
+          reason: '',
+          command: null,
+          createdAt: '2026-09-29T12:00:00.000Z',
+          stuck: { step: 'implement' as const, why: 'session_ended' as const, detail: null, agentId: 'claude-code', round: 0, open: 0 },
+        },
+      ],
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => stuckThread) })
+    const reportProblem = vi.fn()
+    withServices(<Task />, client, fakeHost({ reportProblem }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Report this' }))
+    expect(reportProblem).toHaveBeenCalledWith({
+      kind: 'failed',
+      taskId: stuckThread.task.id,
+      projectId: stuckThread.project.id,
+      threadId: stuckThread.threadId,
+      what: 'the stuck Implement step',
+    })
+    // It answers nothing: the step still waits on the person.
+    expect(client.answerStuck).not.toHaveBeenCalled()
+  })
+
+  it('offers no Report this where the app can’t report', async () => {
+    const { client } = fakeClient({
+      getThread: vi.fn(async () =>
+        thread({
+          attention: [
+            {
+              id: 'st1',
+              kind: 'stuck' as const,
+              title: '',
+              reason: '',
+              command: null,
+              createdAt: '2026-09-29T12:00:00.000Z',
+              stuck: { step: 'implement' as const, why: 'session_ended' as const, detail: null, agentId: 'claude-code', round: 0, open: 0 },
+            },
+          ],
+        }),
+      ),
+    })
+    withServices(<Task />, client)
+    expect(await screen.findByText(/^Claude Code closed before finishing the step\./)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Report this' })).toBeNull()
   })
 
   it('says why each step needed the person', () => {

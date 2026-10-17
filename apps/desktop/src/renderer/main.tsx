@@ -12,8 +12,10 @@ import { Launch, OpenFailed } from '@althar/ui/screens'
 import { receivePort } from './data/client'
 import { openWindow } from './data/open'
 import { ServicesProvider, type StoreFailure } from './data/services'
-import { useMaximized } from './shared/useWindowChrome'
+import { ReportDialog } from './features/report/ReportDialog'
 import { UpdateStoppedView } from './features/update/UpdateStoppedView'
+import { useMaximized } from './shared/useWindowChrome'
+import { keepWindowErrors } from './shared/windowErrors'
 
 /*
  * The window's entry. The launch plays at once, while the window waits for
@@ -32,6 +34,9 @@ const WAIT_PORT = 15_000
 const text = {
   noRuntime: 'The runtime didn’t start.',
 }
+
+// What the page doesn't handle goes to the app's log.
+keepWindowErrors(window.althar)
 
 // Listen before anything else: the port arrives once the page has loaded.
 const port = Promise.race([
@@ -109,5 +114,7 @@ if (element === null) throw new Error('The page has no #root')
 createRoot(element).render(
   <StrictMode>
     <Window />
+    {/* Report a problem opens over whatever the window shows, with or without the runtime. */}
+    <ReportDialog host={window.althar} />
   </StrictMode>,
 )

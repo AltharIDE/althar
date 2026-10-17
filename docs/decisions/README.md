@@ -52,4 +52,5 @@ ADR-001, the repository-wide engineering target, is recorded in
 | [042](042-a-task-s-thread-reads-in-rounds.md) | A task's thread reads in rounds: an ask, then what its lead says first, its work in a line, and what it says last |
 | [043](043-allow-everything-is-one-switch-for-a-project-or-a-task.md) | Allow everything is one switch, for a project or a task, apart from what the rest gets |
 | [044](044-a-project-runs-many-things.md) | A project runs many things, from a list with a default |
-| [045](045-a-usage-read-may-use-an-accounts-token-once.md) | A usage read: an account's access token, in memory, for one call to its provider's usage URL |
+| [045](045-problem-reports.md) | Problems are reported from the app, masked, through a Worker that makes Linear issues |
+| [046](046-a-usage-read-may-use-an-accounts-token-once.md) | A usage read: an account's access token, in memory, for one call to its provider's usage URL |

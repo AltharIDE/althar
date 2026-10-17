@@ -90,6 +90,17 @@ describe('the quick settings', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Quick settings' })).toBeNull())
   })
 
+  it('report a problem from the foot: the panel closes and the dialog is asked for, only where the app can report', async () => {
+    const reportProblem = vi.fn()
+    const view = withServices(<Quick />, fakeClient().client, fakeHost({ reportProblem }))
+    await userEvent.click(within(await quick()).getByRole('button', { name: 'Report a problem' }))
+    expect(reportProblem).toHaveBeenCalledWith({ kind: 'asked', from: 'settings' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Quick settings' })).toBeNull())
+    view.unmount()
+    withServices(<Quick />, fakeClient().client)
+    expect(within(await quick()).queryByRole('button', { name: 'Report a problem' })).toBeNull()
+  })
+
   it('open the section a card is in by its name', async () => {
     const onSettings = vi.fn()
     withServices(<Quick onSettings={onSettings} />, fakeClient().client)
@@ -549,6 +560,17 @@ describe('the Settings tab', () => {
         .getByRole('link', { name: /What’s new/ })
         .getAttribute('href'),
     ).toBe('https://github.com/AltharIDE/althar/releases/tag/v0.0.0')
+  })
+
+  it('reports a problem from About Althar, only where the app can report', async () => {
+    const reportProblem = vi.fn()
+    const view = withServices(<Settings at="about" />, fakeClient().client, fakeHost({ reportProblem }))
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: 'Report a problem' }))
+    expect(reportProblem).toHaveBeenCalledWith({ kind: 'asked', from: 'settings' })
+    view.unmount()
+    withServices(<Settings at="about" />, fakeClient().client)
+    expect(await within(screen.getByRole('main')).findByText('Althar 0.0.0')).toBeTruthy()
+    expect(within(screen.getByRole('main')).queryByRole('button', { name: 'Report a problem' })).toBeNull()
   })
 
   it('sends anonymous usage data until the person turns it off under About Althar, with one line on what it sends', async () => {

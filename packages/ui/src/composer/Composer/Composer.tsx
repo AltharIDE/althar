@@ -469,65 +469,66 @@ export function Composer({
           />
         </div>
         <div className={s.bar}>
-          {picker}
-          <span className={s.space} />
-          {note && (
-            <span id={hintId} className={s.note}>
-              {note}
-            </span>
-          )}
-          {canSendNow && (
-            <Tooltip label={t.sendNowNote}>
-              <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey} aria-label={t.sendNow}>
-                <span className={s.sendNowLabel}>{t.sendNow}</span>
-              </ActionButton>
-            </Tooltip>
-          )}
-          {meter}
-          {onAddImages && (
-            <>
-              <IconButton icon="image" label={t.addImages} onClick={() => files.current?.click()} />
-              <input
-                ref={files}
-                type="file"
-                accept={imageTypes}
-                multiple
-                hidden
-                tabIndex={-1}
-                onChange={(e) => {
-                  const picked = [...(e.target.files ?? [])]
-                  // Picking the same file again is a change too.
-                  e.target.value = ''
-                  if (picked.length > 0) onAddImages(picked)
-                }}
-              />
-            </>
-          )}
-          {dictation &&
-            (elapsed !== null ? (
-              <button type="button" className={s.recButton} onClick={dictation.onStop} aria-label={t.stopDictating(elapsed)}>
-                <span className={s.wave} aria-hidden="true">
-                  {(dictation.levels ?? QUIET).map((l, i) => (
-                    <i key={i} style={cssVars({ '--l': Math.max(0, Math.min(1, l)) })} />
-                  ))}
-                </span>
-                {elapsed}
-                <Icon name="square" size={11} />
-              </button>
-            ) : (
-              <IconButton
-                ref={mic}
-                icon="mic"
-                label={micLabel(dictation, t)}
-                {...(dictation.kbd === undefined ? {} : { kbd: dictation.kbd })}
-                busy={dictation.busy}
-                progress={dictation.busy ? undefined : dictation.progress}
-                aria-expanded={dictation.expanded}
-                onClick={dictation.onStart}
-              />
-            ))}
-          {dictation?.onChooseInput && <InputMenu dictation={dictation} onChoose={dictation.onChooseInput} t={t} />}
-          {action}
+          <div className={s.left}>{picker}</div>
+          <div className={s.right}>
+            {note && (
+              <span id={hintId} className={s.note}>
+                {note}
+              </span>
+            )}
+            {canSendNow && (
+              <Tooltip label={t.sendNowNote}>
+                <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey} aria-label={t.sendNow}>
+                  <span className={s.sendNowLabel}>{t.sendNow}</span>
+                </ActionButton>
+              </Tooltip>
+            )}
+            {meter}
+            {onAddImages && (
+              <>
+                <IconButton icon="image" label={t.addImages} onClick={() => files.current?.click()} />
+                <input
+                  ref={files}
+                  type="file"
+                  accept={imageTypes}
+                  multiple
+                  hidden
+                  tabIndex={-1}
+                  onChange={(e) => {
+                    const picked = [...(e.target.files ?? [])]
+                    // Picking the same file again is a change too.
+                    e.target.value = ''
+                    if (picked.length > 0) onAddImages(picked)
+                  }}
+                />
+              </>
+            )}
+            {dictation &&
+              (elapsed !== null ? (
+                <button type="button" className={s.recButton} onClick={dictation.onStop} aria-label={t.stopDictating(elapsed)}>
+                  <span className={s.wave} aria-hidden="true">
+                    {(dictation.levels ?? QUIET).map((l, i) => (
+                      <i key={i} style={cssVars({ '--l': Math.max(0, Math.min(1, l)) })} />
+                    ))}
+                  </span>
+                  {elapsed}
+                  <Icon name="square" size={11} />
+                </button>
+              ) : (
+                <IconButton
+                  ref={mic}
+                  icon="mic"
+                  label={micLabel(dictation, t)}
+                  {...(dictation.kbd === undefined ? {} : { kbd: dictation.kbd })}
+                  busy={dictation.busy}
+                  progress={dictation.busy ? undefined : dictation.progress}
+                  aria-expanded={dictation.expanded}
+                  onClick={dictation.onStart}
+                />
+              ))}
+            {dictation?.onChooseInput && <InputMenu dictation={dictation} onChoose={dictation.onChooseInput} t={t} />}
+            {action}
+          </div>
         </div>
       </form>
     </div>

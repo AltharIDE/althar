@@ -64,3 +64,8 @@
     grid-column: 2;
   }
 }
+
+/* reporting it is no answer to the step: quiet, at the far end of the answers */
+.report {
+  margin-left: auto;
+}

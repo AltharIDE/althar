@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { Brand } from '../../foundations/brands/brands'
 import { effortFor, MODEL_LIST, RUNTIMES, UNKNOWN_MODEL, useModelPrefs } from '../../fixtures/models'
 import { Button } from '../../primitives/Button/Button'
 import { ModelBrowser } from './ModelBrowser'
@@ -153,4 +154,37 @@ export const AllStates: Story = {
     },
   },
   render: () => <Example onConnect={() => {}} />,
+}
+
+const OPENCODE = { id: 'opencode', name: 'OpenCode', how: 'signed in', brand: Brand.OpenCode }
+const LONG_NAMES: typeof MODEL_LIST = [
+  ...MODEL_LIST.slice(0, 3),
+  ...[
+    'Muse Spark 1.3 Contributor · OpenCode Go',
+    'DeepSeek V4.1 Flash Free · OpenCode',
+    'Qwen3 Coder Next 480B A35B Instruct · OpenCode Zen',
+  ].map((name, i) => ({ id: `opencode-${i}`, name, short: name, runtime: 'opencode', context: 256, efforts: ['low', 'high'] })),
+]
+
+function Long({ blocked }: { blocked: readonly string[] }) {
+  return (
+    <ModelBrowser
+      models={LONG_NAMES}
+      runtimes={[...RUNTIMES, OPENCODE]}
+      value="opencode-0"
+      pins={['opencode-2']}
+      defaultEffort={() => 'high'}
+      onTogglePin={fn()}
+      onSetDefaultEffort={fn()}
+      onClose={fn()}
+      onPick={fn()}
+      blocked={blocked}
+      onToggleBlocked={fn()}
+    />
+  )
+}
+
+/** Long names, and models switched off: no text spills into another column, at any width. */
+export const LongNames: Story = {
+  render: () => <Long blocked={['opencode-1', 'opencode-2']} />,
 }
