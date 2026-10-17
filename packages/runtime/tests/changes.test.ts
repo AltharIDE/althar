@@ -1060,6 +1060,43 @@ describe('an abandoned task’s pull request', () => {
       assert.deepStrictEqual(github.branchesDeleted, [])
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
+
+  it.live(
+    'keeps a pull request merged on its host meanwhile as merged, closing nothing, and leaves its branch where the person asks',
+    () => {
+      const { working, github } = fresh()
+      return Effect.gen(function* () {
+        const changes = yield* Changes
+        const { taskId, url } = yield* opened(github, working)
+        yield* abandon(taskId)
+        github.mergeByHand(1)
+        const merged = yield* changes.close(taskId, url, { deleteBranch: true })
+        assert.strictEqual(merged.change.state, 'merged')
+        assert.isNull(merged.branch)
+        assert.notInclude(github.calls, 'closeChange')
+        assert.deepStrictEqual(github.branchesDeleted, [])
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    },
+  )
+
+  it.live('is closed without deleting its branch where the person doesn’t ask, and a settled read that fails is let go', () => {
+    const { working, github } = fresh()
+    return Effect.gen(function* () {
+      const changes = yield* Changes
+      const { taskId, url } = yield* opened(github, working)
+      yield* abandon(taskId)
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`UPDATE external_links SET listening = 0 WHERE task_id = ${taskId} AND kind = 'change'`
+      // The host failing to answer is logged, not raised, and the pull request stays as it was seen.
+      github.failNext('change', 'unreachable')
+      yield* changes.readSettled
+      assert.strictEqual((yield* changes.ofTask(taskId))[0]?.state, 'open')
+      const closed = yield* changes.close(taskId, url, { deleteBranch: false })
+      assert.strictEqual(closed.change.state, 'closed')
+      assert.isNull(closed.branch)
+      assert.deepStrictEqual(github.branchesDeleted, [])
+    }).pipe(Effect.provide(runtimeWith({ github })))
+  })
 })
 
 describe('a branch that parted from its pull request', () => {
