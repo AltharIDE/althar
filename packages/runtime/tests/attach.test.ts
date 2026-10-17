@@ -250,6 +250,27 @@ describe('a task attached to a pull request it didn’t open', () => {
     }).pipe(Effect.provide(withQueries(github)))
   })
 
+  it.live('lets another task attach a pull request reopened after the one attached to it saw it closed', () => {
+    const { github, pull, working } = forked()
+    return Effect.gen(function* () {
+      const { projectId, task, personId } = yield* project(working)
+      const changes = yield* Changes
+      yield* changes.attach({ taskId: task.taskId, pullRequest: `#${pull.number}`, start: true, actorId: personId })
+      // Closed, and seen closed: the first task publishes elsewhere from then on, so it doesn't keep it once it reopens.
+      github.close(pull.number)
+      yield* changes.refresh(task.taskId)
+      yield* until(changes.ofTask(task.taskId), (all) => all.some((one) => one.state === 'closed' && !one.listening))
+      github.reopen(pull.number)
+      const other = yield* (yield* Projects).createTask({
+        envelope: yield* Runtime.envelope('task.create', { title: 'Answer it again' }),
+        projectId,
+        title: 'Answer it again',
+      })
+      const done = yield* changes.attach({ taskId: other.taskId, pullRequest: `#${pull.number}`, start: true, actorId: personId })
+      assert.strictEqual(done.kind, 'attached')
+    }).pipe(Effect.provide(withQueries(github)))
+  })
+
   it.live('takes a link only on the host the task’s repository is on, not one of the same path on another', () => {
     const { github, pull, working } = forked()
     return Effect.gen(function* () {

@@ -30,7 +30,8 @@
     the host the task's repository is on, not one of the same path on
     another host Althar is connected to. One another open task follows, or
     whose work still goes to it after it stopped listening, stays that
-    task's.
+    task's; one it was attached to only while it last saw it open, so one
+    closed and reopened since can go to another.
   - **Its branch:** where the task's branch already has that pull request's
     head, it stays as it is. Where it doesn't, nothing changes until the
     person says to start it there: then the head is fetched, the branch is

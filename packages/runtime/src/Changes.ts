@@ -1398,12 +1398,15 @@ export class Changes extends Context.Service<
               AND x.task_id <> ${input.taskId} AND k.state IN ('open', 'draft') LIMIT 1`
           if (other !== undefined)
             return yield* refuse(`Task ${other.slug} follows ${name} already. Abandon it first, or leave ${name} to it.`)
-          // One another open task's work still goes to, listened to or not: its pushes would land on the same branch.
+          // One another open task's work still goes to, listened to or not: its pushes would land on the same branch. One it
+          // was attached to goes there only while it last saw it open; closed since, it publishes elsewhere, reopened or not.
           const [sending] = yield* sql<{ slug: string }>`
             SELECT k.slug FROM repository_changes c JOIN workspaces w ON w.id = c.workspace_id JOIN tasks k ON k.id = w.task_id
             WHERE c.project_id = ${task.projectId} AND c.pull_request_url = ${pull.url} AND w.task_id <> ${input.taskId}
               AND k.state IN ('open', 'draft')
               AND c.id = (SELECT l.id FROM repository_changes l WHERE l.workspace_id = c.workspace_id ORDER BY l.created_at DESC, l.rowid DESC LIMIT 1)
+              AND NOT EXISTS (SELECT 1 FROM external_links x WHERE x.task_id = w.task_id AND x.kind = 'change' AND x.url = c.pull_request_url
+                AND json_extract(x.snapshot, '$.attached') = 1 AND json_extract(x.snapshot, '$.state') <> 'open')
             LIMIT 1`
           if (sending !== undefined)
             return yield* refuse(`Task ${sending.slug}’s work goes to ${name}. Abandon it first, or leave ${name} to it.`)
