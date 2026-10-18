@@ -14,7 +14,10 @@ import { readPreferences, writePreference } from './preferences'
  * process of Althar's that stops abnormally, the runtime stopping too often
  * to start again, and a native crash, said once on the launch after it:
  * Crashpad keeps its minidump on this computer, and only that it happened,
- * when, and in which process, ever leaves.
+ * when, and in which process, ever leaves. And, as handled, what the runtime
+ * kept to what it belonged to and carried on past (ADR-047): a call from the
+ * window that failed for no reason of the person's, a part of one, an agent
+ * that stopped on its own; each by Althar's name for where it was.
  *
  * Before anything goes, every word of it is masked as a problem report is
  * (logs/mask.ts): paths under the home folder, the projects' and
@@ -22,8 +25,9 @@ import { readPreferences, writePreference } from './preferences'
  * anything like a key or a token. The lines of source PostHog's client reads
  * round each frame never leave, nor anything else it would add: an event
  * carries only the exceptions, their frames' places, their level, which
- * process, the app's version (as its release), the system and the
- * processor. At most twenty go a launch, and the same one once. Like usage
+ * process and where in it, the app's version (as its release), the system
+ * and the processor. At most twenty crashes and ten handled failures go a
+ * launch, and the same one in the same place once. Like usage
  * data, it is anonymous (the install's random id, no person profile, no
  * GeoIP), nothing is sent while the switch is off, with DO_NOT_TRACK set, or
  * from a build without PostHog's key, and a report that can't go is dropped.
@@ -33,11 +37,19 @@ import { readPreferences, writePreference } from './preferences'
 export const PROCESSES = ['main', 'window', 'runtime', 'gpu', 'utility', 'unknown'] as const
 export type CrashProcess = (typeof PROCESSES)[number]
 
-/** How it came: thrown and not caught, a rejection nobody handled, a defect the runtime stopped on, a process gone, a native crash. */
-export type CrashHow = 'uncaught' | 'rejection' | 'defect' | 'gone' | 'native'
+/**
+ * How it came: thrown and not caught, a rejection nobody handled, a defect
+ * the runtime stopped on, a process gone, a native crash; or handled, a
+ * failure the runtime kept to what it belonged to and carried on past
+ * (ADR-047), as a call from the window that failed for no reason of the
+ * person's, or an agent that stopped on its own.
+ */
+export type CrashHow = 'uncaught' | 'rejection' | 'defect' | 'gone' | 'native' | 'handled'
 
 /** The most reports a launch sends. */
 export const MOST_A_LAUNCH = 20
+/** The most handled failures a launch sends, counted apart, so they never crowd out a crash. */
+export const MOST_HANDLED = 10
 /** The most reports a launch even makes ready, duplicates included, so a storm of errors costs little. */
 const MOST_ASKED = MOST_A_LAUNCH * 5
 /** The longest a message goes, in characters. */
@@ -96,13 +108,31 @@ export const windowThrown = (report: unknown): { readonly how: CrashHow; readonl
   return { how: report.kind === 'rejection' ? 'rejection' : 'uncaught', thrown: { name, message, stack } }
 }
 
-/** What the runtime said it couldn't handle (runtime/crashes.ts), as something thrown; null for anything else. */
-export const runtimeThrown = (report: unknown): { readonly how: CrashHow; readonly thrown: Thrown } | null => {
+/** Where in Althar a handled failure was, and whose: Althar's own names for them, kept only as such. */
+export interface Place {
+  /** A call from the window (`Status`), or a part of one (`Status.account`), or `agent`. */
+  readonly where?: string
+  /** An agent's id: claude-code, codex. */
+  readonly agent?: string
+}
+
+/** The place a report names, keeping only words shaped as Althar's own names: never a path, a title or anything written. */
+export const placeOf = (report: unknown): Place => {
+  if (!isRecord(report)) return {}
+  const where = typeof report.where === 'string' && /^[A-Za-z][A-Za-z0-9]{0,63}(?:\.[A-Za-z][A-Za-z0-9]{0,31})?$/.test(report.where)
+  const agent = typeof report.agent === 'string' && /^[a-z0-9][a-z0-9.-]{0,39}$/.test(report.agent)
+  return { ...(where ? { where: report.where as string } : {}), ...(agent ? { agent: report.agent as string } : {}) }
+}
+
+/** What the runtime said it couldn't handle (runtime/crashes.ts), or kept and carried on past (Failures), as something thrown; null for anything else. */
+export const runtimeThrown = (report: unknown): { readonly how: CrashHow; readonly thrown: Thrown; readonly place: Place } | null => {
   if (!isRecord(report) || typeof report.message !== 'string') return null
-  const how: CrashHow = report.how === 'rejection' ? 'rejection' : report.how === 'defect' ? 'defect' : 'uncaught'
+  const how: CrashHow =
+    report.how === 'rejection' ? 'rejection' : report.how === 'defect' ? 'defect' : report.how === 'handled' ? 'handled' : 'uncaught'
   return {
     how,
     thrown: { name: text(report.name, LONGEST_NAME) || 'Error', message: text(report.message, 4_000), stack: text(report.stack, 16_000) },
+    place: placeOf(report),
   }
 }
 
@@ -164,7 +194,7 @@ const exceptionOf = (
   const synthetic = given.synthetic === true
   const mechanism: Record<string, unknown> = {
     type: first && how !== undefined ? how : text(given.type, 40) || 'generic',
-    handled: first && how !== undefined ? false : given.handled !== false,
+    handled: first && how !== undefined ? how === 'handled' : given.handled !== false,
     synthetic,
   }
   for (const key of ['exception_id', 'parent_id'] as const) if (typeof given[key] === 'number') mechanism[key] = given[key]
@@ -209,7 +239,7 @@ export const fingerprintOf = (exceptions: ReadonlyArray<Record<string, unknown>>
 }
 
 /** The properties an event may carry; anything PostHog's client or a caller adds besides is dropped. */
-const KEPT = ['$exception_level', 'process', '$app_version', '$os', 'arch', 'release', '$process_person_profile'] as const
+const KEPT = ['$exception_level', 'process', 'where', 'agent', '$app_version', '$os', 'arch', 'release', '$process_person_profile'] as const
 
 /** The projects' and repositories' names a report hides. */
 export interface HiddenNames {
@@ -258,7 +288,7 @@ export interface CrashReports {
   readonly thrown: (thrown: unknown, process: CrashProcess, how: CrashHow) => void
   /** What the window sent for the log (`althar:window-error`). */
   readonly fromWindow: (report: unknown) => void
-  /** What the runtime said it couldn't handle (a `crash` message over its parent port). */
+  /** What the runtime said it couldn't handle, or kept and carried on past (a `crash` message over its parent port). */
   readonly fromRuntime: (report: unknown) => void
   /** A process of Althar's that stopped other than cleanly: why, as Electron says, and its exit code. */
   readonly gone: (process: CrashProcess, details: { readonly reason: string; readonly exitCode: number }) => void
@@ -284,6 +314,9 @@ export const crashReports = (options: CrashReportsOptions): CrashReports => {
   const seen = new Set<string>()
   let asked = 0
   let sent = 0
+  let sentHandled = 0
+  /** Whether a report of this kind still fits in the launch's budget for it. */
+  const room = (how: CrashHow | undefined) => (how === 'handled' ? sentHandled < MOST_HANDLED : sent < MOST_A_LAUNCH)
   /* The mask made for the latest report, with the names as they stood: names are only ever added (namesLearned), so it hides the earlier ones' too. */
   let masking: Mask | undefined
   const base = {
@@ -297,16 +330,19 @@ export const crashReports = (options: CrashReportsOptions): CrashReports => {
 
   /* Everything leaves through here: masked, cut down to what may go, once each, and twenty at most. */
   const scrub = (event: EventMessage | null): EventMessage | null => {
-    if (event === null || event.event !== '$exception' || sent >= MOST_A_LAUNCH) return null
+    if (event === null || event.event !== '$exception') return null
     const given = event.properties ?? {}
+    const how = typeof given.how === 'string' ? (given.how as CrashHow) : undefined
+    if (!room(how)) return null
     const mask = masking
     if (mask === undefined) return null
-    const how = typeof given.how === 'string' ? (given.how as CrashHow) : undefined
     const exceptions = exceptionsOf(given.$exception_list, mask, how, options.cwd ?? process.cwd())
-    const fingerprint = fingerprintOf(exceptions)
+    // The same failure in two calls is two reports: each call is its own place to look.
+    const fingerprint = `${typeof given.where === 'string' ? given.where : ''}|${fingerprintOf(exceptions)}`
     if (exceptions.length === 0 || seen.has(fingerprint)) return null
     seen.add(fingerprint)
-    sent += 1
+    if (how === 'handled') sentHandled += 1
+    else sent += 1
     const properties: Record<string, unknown> = { $exception_list: exceptions }
     for (const key of KEPT) if (key in given) properties[key] = given[key]
     const at = typeof given.at === 'string' ? new Date(given.at) : undefined
@@ -340,9 +376,9 @@ export const crashReports = (options: CrashReportsOptions): CrashReports => {
       fetch: (url, init) => (options.allowed() ? options.fetch(url, init) : Promise.reject(new Error('Crash reports are off.'))),
     }))
 
-  const send = (error: Error, process: CrashProcess, how: CrashHow, at?: Date) => {
+  const send = (error: Error, process: CrashProcess, how: CrashHow, at?: Date, place: Place = {}) => {
     try {
-      if (options.key === '' || options.host === '' || !options.allowed() || sent >= MOST_A_LAUNCH || asked >= MOST_ASKED) return
+      if (options.key === '' || options.host === '' || !options.allowed() || !room(how) || asked >= MOST_ASKED) return
       asked += 1
       const going = Promise.resolve()
         .then(() => options.mask())
@@ -355,6 +391,7 @@ export const crashReports = (options: CrashReportsOptions): CrashReports => {
             $exception_level: how === 'defect' || how === 'gone' || how === 'native' ? 'fatal' : 'error',
             process: PROCESSES.includes(process) ? process : 'unknown',
             how,
+            ...placeOf(place),
             ...(at === undefined ? {} : { at: at.toISOString() }),
           })
         })
@@ -376,7 +413,7 @@ export const crashReports = (options: CrashReportsOptions): CrashReports => {
     },
     fromRuntime: (report) => {
       const read = runtimeThrown(report)
-      if (read !== null) send(errorFrom(read.thrown), 'runtime', read.how)
+      if (read !== null) send(errorFrom(read.thrown), 'runtime', read.how, undefined, read.place)
     },
     gone: (process, { reason, exitCode }) =>
       send(said('Process gone', `The ${process} process stopped: ${text(reason, 40)}, exit code ${exitCode}.`), process, 'gone'),

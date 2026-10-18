@@ -1,6 +1,6 @@
 # ADR-046: Errors and crashes go to PostHog's error tracking from the main process, masked, behind a switch of their own
 
-- **Status:** Accepted
+- **Status:** Accepted; what was caught and carried on past, and agents that stop, reported too since [ADR-047](047-failures-kept-where-they-belong-and-reported-at-the-edge.md)
 - **Date:** 2026-10-17
 - **Owner:** Repository maintainers
 - **Context:** Report a problem (ADR-045) needs the person to notice and
