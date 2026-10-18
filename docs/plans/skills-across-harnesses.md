@@ -626,13 +626,31 @@ checks and the harness permission rules remain the enforcement.
   (its stored version is kept) and reported (`removedByCatalog` lists them first,
   for the later update screen); a person's own installs are untouched.
 
+- **Default catalog (2026-10-18).** `packages/skills/catalog/`: 33 skills from
+  agent-skills and superpowers at pinned commits, every skill of both except
+  where two do the same job, read in full and patched to fit (no push or pull
+  request steps, planning files kept out of commits, harness-neutral text);
+  `catalog/CURATION.md` says what was chosen and why, `scripts/vendor.ts`
+  rebuilds it. The desktop app and the CLI turn delivery on with it, the store
+  in the profile's `skills/`.
+- **GitHub install, review, update, rollback (2026-10-18).** A ref is resolved
+  once to a commit, only the skill's folder is fetched (files from GitHub's
+  raw host, each checked against the commit tree's blob hash), and a review
+  card shows source, licence, findings, files and a line diff; only approving
+  it installs. Updates are checked on request and staged as cards; the
+  version replaced is kept to roll back to. Settings has a Skills section for
+  all of it. Public repositories only: the connections hold no token the
+  skills page may use.
+- **Checked live (2026-10-18), without a model call:** OpenCode 1.19.0's
+  `debug skill` lists all 33 from `skills.paths` with an isolated home; Codex
+  0.160.1's app server lists all 33 from the extra root codex-acp sets.
+
 **Not yet:** the commit-time check before staging; the Repository files section in the
-project's settings window; turning delivery on in the desktop app and the CLI
-(neither sets `RuntimeOptions.skills`, so no run gets skills there yet); a live
-check of Codex and OpenCode loading them; refusing OpenCode 2.x (per the
-OpenCode 2 plan, which is not in this tree); the
-`althar-skills` catalog and any GitHub fetch (the fixture catalog is a local
-directory); review cards, updates and rollback; OpenSpec.
+project's settings window; per-project selection and bindings (stage 4); a
+logged-in Claude Code, Codex or OpenCode session using a skill end to end;
+refusing OpenCode 2.x (per the OpenCode 2 plan, which is not in this tree);
+installs from private repositories; a catalog update channel between app
+releases (`althar-skills`); OpenSpec.
 
 ## Open decisions and risks
 
