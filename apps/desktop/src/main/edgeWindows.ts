@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 
-import { app, BrowserWindow, Menu, nativeImage, nativeTheme, type Rectangle, screen, Tray } from 'electron'
+import { BrowserWindow, Menu, nativeImage, nativeTheme, type Rectangle, screen, Tray } from 'electron'
 
 import { darkPanel, readSystemUsesLightTheme, type Scheme, watchColorScheme } from './colorScheme'
 import {
@@ -363,7 +363,9 @@ export const startEdge = (host: EdgeHost): Edge => {
       scheme = next
       redraw()
     })
-    app.once('will-quit', stop)
+    // On the process's exit, not will-quit: quitting ends in app.exit (main.ts), which skips will-quit, and a monitor left
+    // running outlives Althar.
+    process.once('exit', stop)
   }
 
   const first = readEdge(host.profile()).then((place) => {

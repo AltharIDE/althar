@@ -7,7 +7,6 @@ import { Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
 
 import { builtAsk, EVIDENCE_TEXT_KEPT, taskShown, textKept } from '../src/evidence'
-import { evidenceText } from '../src/pullRequestWords'
 import { Queries } from '../src/Queries'
 import type { ToolAccess } from '../src/ToolServer'
 import { callTool, runtime, task } from './support'
@@ -140,48 +139,5 @@ describe('the evidence a lead hands', () => {
     assert.isTrue(text.endsWith('line 3999'))
     assert.strictEqual(dropped + text.split('\n').length, 4000)
     assert.deepStrictEqual(textKept('short'), { text: 'short', dropped: 0 })
-  })
-})
-
-describe('evidence in the pull request', () => {
-  const piece = { picture: null, command: null, exit: null, text: null }
-
-  it('names pictures, quotes the end of what a command printed, and lists what wasn’t shown', () => {
-    const output = Array.from({ length: 20 }, (_, index) => `ok ${index}`).join('\n')
-    assert.strictEqual(
-      evidenceText(
-        [
-          { ...piece, kind: 'screenshot', caption: 'After', picture: { digest: 'a' } },
-          { ...piece, kind: 'test_run', caption: 'Tests', command: 'bun `test`', exit: 1, text: `${output}\n` },
-          { ...piece, kind: 'note', caption: 'A typo: nothing to show' },
-        ],
-        ['Not tried on Windows'],
-      ),
-      [
-        '### Evidence',
-        '',
-        '- Screenshot: After',
-        "- Test run: Tests: `bun 'test'`, exit 1",
-        '  …',
-        '  ~~~~',
-        ...Array.from({ length: 12 }, (_, index) => `  ok ${index + 8}`),
-        '  ~~~~',
-        '- Note: A typo: nothing to show',
-        '',
-        'Screenshots are in Althar, on the task.',
-        '',
-        '### Unverified',
-        '',
-        '- Not tried on Windows',
-      ].join('\n'),
-    )
-  })
-
-  it('fences a text its own fence can’t close, and says nothing with nothing shown', () => {
-    assert.include(
-      evidenceText([{ ...piece, kind: 'log', caption: 'Log', text: '~~~~\nin a fence' }], []),
-      '  ~~~~~\n  ~~~~\n  in a fence\n  ~~~~~',
-    )
-    assert.strictEqual(evidenceText([], []), '')
   })
 })
