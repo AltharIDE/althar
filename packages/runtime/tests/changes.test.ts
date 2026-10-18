@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
-import { BUILT, BUILT_FIXED, BUILT_SETTLED } from '@althar/provider-adapters/testing'
+import { BUILT, BUILT_FIXED, BUILT_SETTLED, DESCRIBED } from '@althar/provider-adapters/testing'
 import type { ProjectId } from '@althar/domain'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
@@ -104,13 +104,14 @@ describe('a task that ends in a pull request', () => {
       assert.isTrue(change?.draft)
       assert.strictEqual(`${change?.short} ${change?.prefix}${change?.number}`, 'PR #1')
 
-      // The branch is on the host, its description leading with what the task built, then what the steps reported.
+      // The branch is on the host, described as its lead wrote it for a reviewer, once Althar asked: nothing of the review.
       const opened = github.changes[0]
       assert.strictEqual(opened?.source, 'althar/add-a-retry')
       assert.strictEqual(opened?.target, 'main')
       assert.isTrue(opened?.draft)
-      assert.isTrue(opened?.body.startsWith(BUILT))
-      assert.include(opened?.body, 'Passed after one round of review.')
+      assert.isTrue(opened?.body.startsWith(`${DESCRIBED}\n\n`))
+      assert.notInclude(opened?.body, BUILT)
+      assert.notMatch(opened?.body ?? '', /review/i)
       // What it pushed is what the lead committed; Althar commits nothing of its own, and is its co-author.
       assert.strictEqual(git(bare, 'log', '-1', '--format=%an %s', 'althar/add-a-retry'), 'Fake Change it')
       assert.strictEqual(git(bare, 'log', '-1', '--format=%B', 'althar/add-a-retry'), `Change it\n\n${coAuthorLine}`)
@@ -210,16 +211,15 @@ describe('a task that ends in a pull request', () => {
       yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(20))
       const opened = github.changes[0]
       assert.strictEqual(opened?.source, 'feature/add-a-retry')
-      // What the task built, then the lead's description, in the template: its headings and checklist kept, the box it ticked
-      // unticked, Althar's own below.
+      // The lead's description, in the template: its headings and checklist kept, the box it ticked unticked, Althar's line below.
       assert.strictEqual(
         opened?.body,
-        `${BUILT}\n\n## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\n### Review\n\nPassed after one round of review.\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>`,
+        `## What changed\n\nDid the task, in the template.\n\n<!-- A line or two. -->\n\n## Checklist\n\n- [ ] Tests pass\n- [ ] Docs updated\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>`,
       )
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
-  it.live('leads a description written in the template with what the task built as settling last said it', () => {
+  it.live('keeps what the task built out of a description written in the template, though settling says it again', () => {
     const { working, bare } = hosted()
     mkdirSync(join(working, '.github'))
     writeFileSync(join(working, '.github', 'pull_request_template.md'), '## What changed\n\n<!-- A line or two. -->\n')
@@ -234,7 +234,8 @@ describe('a task that ends in a pull request', () => {
       const projectId = yield* ask(working, 'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [review:findings]')
       yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
       const body = github.changes[0]?.body ?? ''
-      assert.isTrue(body.startsWith(`${BUILT_SETTLED}\n\n## What changed\n\nDid the task, in the template.`))
+      assert.isTrue(body.startsWith('## What changed\n\nDid the task, in the template.'))
+      assert.notInclude(body, BUILT_SETTLED)
       assert.notInclude(body, BUILT)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
@@ -609,31 +610,8 @@ describe('a task that ends in a pull request', () => {
       const sql = yield* SqlClient.SqlClient
       const [workspace] = yield* sql<{ branch: string }>`SELECT branch FROM workspaces`
       assert.deepStrictEqual(git(bare, 'ls-tree', '--name-only', workspace?.branch ?? '').split('\n'), ['README.md', 'change.txt'])
-      // The pull request says what the task built, then what was shown, in words: the screenshot is in Althar.
-      const body = github.changes[0]?.body ?? ''
-      assert.include(
-        body,
-        [
-          BUILT,
-          '',
-          '### Evidence',
-          '',
-          '- Screenshot: The retry button after a failed checkout',
-          '- Test run: The checkout tests: `bun test checkout`, exit 0',
-          '  ~~~~',
-          '  checkout.test.ts',
-          '    ✓ retries once',
-          '  ',
-          '  1 passed',
-          '  ~~~~',
-          '',
-          'Screenshots are in Althar, on the task.',
-          '',
-          '### Unverified',
-          '',
-          '- Not tried against the real payment provider: no sandbox account',
-        ].join('\n'),
-      )
+      // The evidence is the person's, in Althar: the pull request is described as the lead wrote it, with none of it.
+      assert.strictEqual(github.changes[0]?.body, `${DESCRIBED}\n\n<sub>Opened by [Althar](https://github.com/AltharIDE/althar).</sub>`)
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
@@ -657,43 +635,47 @@ describe('a task that ends in a pull request', () => {
       const settled = results.find((result) => result.step === 'settle')
       assert.deepStrictEqual(settled?.unverified, [])
       assert.strictEqual(results.find((result) => result.step === 'publish')?.summary, 'Opened draft pull request #1.')
-      // The pull request has all it showed, and nothing left unverified: settling cleared it.
+      // The pull request has none of what it showed, settling or not.
       const body = github.changes[0]?.body ?? ''
-      assert.include(body, '- Screenshot: The retry button after a failed checkout\n- Test run: The checkout tests')
-      assert.include(body, '- Test run: The heading test: `bun test heading`, exit 0')
-      assert.notInclude(body, '### Unverified')
+      assert.isTrue(body.startsWith(DESCRIBED))
+      assert.notInclude(body, 'The heading test')
+      assert.notInclude(body, 'exit 0')
     }).pipe(Effect.provide(runtimeWith({ github })))
   })
 
-  it.live('leads its description with what the task built as it ended: a settling that changed the work says it again', () => {
-    const { working, bare } = hosted()
-    const github = makeFakeService({ pushUrl: () => bare })
-    github.addRepository(['meridian', 'api'])
-    return Effect.gen(function* () {
-      yield* connect('github', HOST)
-      // Settling commits a fix but leaves what it built unsaid, until Althar asks for it again.
-      const projectId = yield* ask(
-        working,
-        'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:built-unsaid] [review:findings]',
-      )
-      const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
-      const results = (yield* items(ready?.threadId ?? '')).flatMap((item) => (item.kind === 'step_result' ? [item.content] : []))
-      assert.deepStrictEqual(
-        results.map((result) => [result.step, result.built ?? null]),
-        [
-          ['implement', BUILT],
-          ['review', null],
-          ['settle', BUILT_SETTLED],
-          ['review', null],
-          ['publish', null],
-        ],
-      )
-      // The pull request leads with it as it now stands, never as it was first said.
-      const body = github.changes[0]?.body ?? ''
-      assert.isTrue(body.startsWith(BUILT_SETTLED))
-      assert.notInclude(body, BUILT)
-    }).pipe(Effect.provide(runtimeWith({ github })))
-  })
+  it.live(
+    'says what the task built as it ended, a settling that changed the work saying it again, and keeps it out of the description',
+    () => {
+      const { working, bare } = hosted()
+      const github = makeFakeService({ pushUrl: () => bare })
+      github.addRepository(['meridian', 'api'])
+      return Effect.gen(function* () {
+        yield* connect('github', HOST)
+        // Settling commits a fix but leaves what it built unsaid, until Althar asks for it again.
+        const projectId = yield* ask(
+          working,
+          'Add a retry. [coordinator:plan] [lead:finish] [lead:edit] [lead:built-unsaid] [review:findings]',
+        )
+        const [ready] = yield* until(cards(projectId), (all) => all[0]?.phase === 'ready', Duration.seconds(30))
+        const results = (yield* items(ready?.threadId ?? '')).flatMap((item) => (item.kind === 'step_result' ? [item.content] : []))
+        assert.deepStrictEqual(
+          results.map((result) => [result.step, result.built ?? null]),
+          [
+            ['implement', BUILT],
+            ['review', null],
+            ['settle', BUILT_SETTLED],
+            ['review', null],
+            ['publish', null],
+          ],
+        )
+        // That is the person's; the pull request has the description the lead wrote for its reviewer.
+        const body = github.changes[0]?.body ?? ''
+        assert.isTrue(body.startsWith(DESCRIBED))
+        assert.notInclude(body, BUILT_SETTLED)
+        assert.notInclude(body, BUILT)
+      }).pipe(Effect.provide(runtimeWith({ github })))
+    },
+  )
 
   it.live(
     'gives a reviewer carrying on to another round the evidence the lead handed settling',

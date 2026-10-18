@@ -5,6 +5,7 @@ import { join } from 'node:path'
 
 import { type FakeService, makeFakeService } from '@althar/connectors/testing'
 import type { ProjectId } from '@althar/domain'
+import { DESCRIBED } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Duration, Effect, Layer } from 'effect'
 import { SqlClient } from 'effect/sql'
@@ -192,8 +193,9 @@ describe('a task that goes back to work', () => {
         assert.deepStrictEqual([second?.source, second?.target, second?.draft], ['althar/add-a-retry-2', 'main', true])
         assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry-2^'), git(bare, 'rev-parse', 'main'))
         assert.strictEqual(git(bare, 'rev-list', '--count', 'main..althar/add-a-retry-2'), '1')
-        // Described from the round's work, reviewed once; and the merged branch is as it was merged: nothing forced onto it.
-        assert.include(second?.body, 'Passed after one round of review.')
+        // Described as the lead wrote it for the round's work, with nothing of its review; and the merged branch is as it was merged.
+        assert.isTrue(second?.body.startsWith(`${DESCRIBED}\n\n`))
+        assert.notMatch(second?.body ?? '', /review/i)
         assert.strictEqual(git(bare, 'rev-parse', 'althar/add-a-retry'), mergedHead)
         assert.strictEqual(git(task.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'althar/add-a-retry-2')
         const [workspace] = yield* sql<{
@@ -835,11 +837,21 @@ describe('a task’s first pull request in a repository, and a reported round wi
         const [lead] = yield* sql<{
           id: string
         }>`SELECT id FROM provider_sessions WHERE thread_id = ${task.threadId} ORDER BY started_at DESC LIMIT 1`
-        const said = yield* callTool(
-          { role: 'lead', projectId: project.projectId, threadId: task.threadId, sessionId: lead?.id ?? '', taskId: task.taskId },
-          'finish_step',
-          { summary: 'Did web too.', built: 'The retry, in web too.' },
-        )
+        const access = {
+          role: 'lead',
+          projectId: project.projectId,
+          threadId: task.threadId,
+          sessionId: lead?.id ?? '',
+          taskId: task.taskId,
+        } as const
+        // Web's pull request is its first, so the lead is asked for its description; api's merged one has its own already.
+        const asked = yield* callTool(access, 'finish_step', { summary: 'Did web too.', built: 'The retry, in web too.' })
+        assert.match(asked, /^Write the description of the task's pull request before you finish, one for each of web\. /)
+        const said = yield* callTool(access, 'finish_step', {
+          summary: 'Did web too.',
+          built: 'The retry, in web too.',
+          descriptions: [{ repository: 'web', text: 'Web gave up on the first failed call too. It now retries once, as api does.' }],
+        })
         assert.strictEqual(said, 'Althar has your summary. The task is ready for the person.')
         const [ready] = yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped != null)
         assert.deepStrictEqual(ready?.unshipped, { commits: 1, add: 1, del: 0 })
@@ -853,6 +865,7 @@ describe('a task’s first pull request in a repository, and a reported round wi
         assert.lengthOf(github.changes, 2)
         assert.include(github.changes[1]?.url, '/meridian/web/')
         assert.strictEqual(github.changes[1]?.source, task.branch)
+        assert.isTrue(github.changes[1]?.body.startsWith('Web gave up on the first failed call too.'))
         assert.strictEqual(git(bares.web ?? '', 'log', '-1', '--format=%s', task.branch), 'Web first')
         assert.strictEqual(git(api, 'rev-parse', '--abbrev-ref', 'HEAD'), task.branch)
       }).pipe(Effect.provide(runtimeWith(github)))
