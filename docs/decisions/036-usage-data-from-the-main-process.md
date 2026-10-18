@@ -48,7 +48,7 @@
   - **Only a release sends.** PostHog's project key and host are given to a
     packaged build alone (`--mode package`), from the environment or
     `apps/desktop/.env`; the release workflow takes them from the
-    repository's variables. Development builds, the end-to-end tests and
+    release environment's secrets. Development builds, the end-to-end tests and
     anyone's fork send nothing.
 - **Alternatives considered:**
   - **PostHog's browser SDK in the window** (`posthog-js`, as PostHog's

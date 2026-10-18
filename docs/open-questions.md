@@ -9,6 +9,20 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## Crash reports, 17 October
+
+- [x] **Where errors and crashes go.** PostHog's error tracking, from the
+  main process, masked, behind a switch of their own; no Sentry for now, and
+  native minidumps stay on the computer, only their occurrence sent
+  ([ADR-046](decisions/046-crash-reports-to-posthog-from-main.md)).
+- [x] **On or off at first, and where it is asked.** On, asked once as a
+  quiet line with its switch on the first screen, and in Settings beside
+  Usage data (DEV-66; ADR-046).
+- [ ] **Source maps.** Uploading the window's maps to PostHog in the release
+  workflow, with posthog-cli and a key that can write them (DEV-62).
+- [ ] **An agent's adapter that dies.** Reported from the runtime, once it
+  has one place that knows (ADR-046).
+
 ## Usage data, 12 October
 
 - [x] **Where usage data goes from, and what can.** The main process, with
@@ -407,7 +421,7 @@ never under running work.
   person: a narrow exception, an account's token in memory for one call to a
   per-provider allowlisted usage URL, never written, refreshed, logged or
   sent elsewhere, no Claude endpoint
-  ([ADR-046](decisions/046-a-usage-read-may-use-an-accounts-token-once.md),
+  ([ADR-047](decisions/047-a-usage-read-may-use-an-accounts-token-once.md),
   [architecture 03](architecture/03-agent-runtime-and-auth.md#the-usage-read)).
 - [ ] **OpenCode 2.x usage.** Its credentials moved into `opencode.db` and
   `auth list` says "can't tell", so an OpenCode 2.x account has no usage
