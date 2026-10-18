@@ -67,6 +67,8 @@ const install = async (root: string, directory: string): Promise<LocalCatalog & 
   for (const { entry, files } of catalog.skills) {
     const hash = await putObject(root, files)
     const was = installs.installs.find(({ id }) => id === entry.id)
+    // The person's own install of the same name took its place: the default is kept, not put back over it.
+    if (was !== undefined && was.source !== 'althar-default') continue
     installs = withInstall(installs, {
       id: entry.id,
       source: 'althar-default',

@@ -24,10 +24,24 @@ const Install = z
       .regex(/^[0-9a-f]{40}$/)
       .optional(),
     subpath: z.string().optional(),
+    /** The branch, tag or commit the person installed from, resolved again only when they check for updates. */
+    ref: z.string().optional(),
     treeHash: z.string().regex(/^[0-9a-f]{64}$/),
     review: z.enum(['not-reviewed', 'reviewed', 'default']),
     /** Whether it is bound for use; installed is not the same as active. */
     active: z.boolean(),
+    /** Versions it had before, newest last, so an update can be rolled back; their objects are kept. */
+    history: z
+      .array(
+        z.strictObject({
+          treeHash: z.string().regex(/^[0-9a-f]{64}$/),
+          sha: z
+            .string()
+            .regex(/^[0-9a-f]{40}$/)
+            .optional(),
+        }),
+      )
+      .optional(),
   })
   .refine((install) => !(install.active && install.review === 'not-reviewed'), {
     message: 'an install that was not reviewed cannot be active',
