@@ -1,0 +1,101 @@
+/* C · Story: one idea a screen, in the first screen's type, over a large piece of the app; a short column under each for the detail. */
+
+.lit :global(h1) { font-size: clamp(44px, 6vw, 92px); }
+
+/* Where you are, down the left edge, as the homepage's three moments have it. */
+.story { position: relative; }
+.rail { position: absolute; left: 34px; top: 0; bottom: 0; z-index: 20; pointer-events: none; }
+.index { position: sticky; top: calc(50% - 72px); pointer-events: auto; }
+.indexInk a { color: rgba(255, 255, 255, 0.55); }
+.indexInk a span { color: rgba(255, 255, 255, 0.35); }
+.indexInk .indexOn { color: #fff !important; }
+.indexInk .indexOn span { color: #9aa6ff !important; }
+.index ol { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.index a { display: inline-flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 14px; color: var(--t-3); text-decoration: none; transition: color 300ms ease; }
+.index a span { font: 500 11px var(--mono); color: var(--t-4); transition: color 300ms ease; }
+.index a:hover { color: var(--t-1); }
+.indexOn { color: var(--t-1) !important; }
+.indexOn span { color: var(--live) !important; }
+
+.scene { position: relative; padding: 150px 0 0; scroll-margin-top: 40px; }
+.head { display: grid; justify-items: center; gap: 22px; max-width: 1000px; margin: 0 auto; padding: 0 var(--gut); text-align: center; }
+.title { font-size: clamp(40px, 5.6vw, 84px); }
+.lead { max-width: 620px; }
+.picture { max-width: 1120px; margin: 64px auto 0; padding: 0 var(--gut); }
+.handoff > div { margin-top: 0; }
+.slab { max-width: 720px; margin: 0 auto; padding: 24px 0 48px; }
+.plans { max-width: 1120px; margin: 0 auto; }
+.plansFrame { border-radius: 18px; }
+.demo { max-width: 620px; margin: 0 auto; }
+
+.more { display: grid; gap: 16px; max-width: 640px; margin: 72px auto 0; padding: 0 var(--gut); font-size: 16.5px; line-height: 1.6; color: var(--t-2); }
+.more p { margin: 0; text-wrap: pretty; }
+.more > p + p { margin-top: -4px; }
+.more b { color: var(--t-1); font-weight: 650; }
+.more > :global(aside), .more > ul { margin-top: 6px; }
+
+/* The one dark screen: the choice, with the thing to try. */
+.ink { margin: 150px 16px 0; padding: 150px 0 150px; border-radius: 30px; background: #0b0c12; }
+.ink > .under { top: 0; bottom: 0; }
+.ink .head h2 { color: #fff; }
+.ink .head p { color: rgba(255, 255, 255, 0.7); }
+.ink .head p:first-child i { background: #9aa6ff; }
+.ink .head p:first-child b { color: #9aa6ff; }
+.ink .demo > div { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 40px 120px rgba(0, 0, 0, 0.6); }
+.onInk { display: grid; gap: 16px; --t-1: #fff; --t-2: rgba(255, 255, 255, 0.78); --t-3: rgba(255, 255, 255, 0.6); --t-4: rgba(255, 255, 255, 0.36); }
+
+.behind { max-width: 760px; margin: 150px auto 0; padding: 0 var(--gut); }
+
+.nextCard {
+  position: relative; isolation: isolate; display: grid; gap: 10px; max-width: calc(var(--max) - 2 * var(--gut)); margin: 120px auto 0; padding: 56px 56px 60px; box-sizing: border-box;
+  border-radius: 30px; background: var(--live); color: #fff; text-decoration: none; overflow: hidden;
+  transition: transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.nextCard:hover { transform: translateY(-4px); }
+.nextCard span { font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255, 255, 255, 0.7); }
+.nextCard b { font-family: 'Inter Display', var(--display); font-size: clamp(36px, 4.6vw, 68px); font-weight: 200; line-height: 1; letter-spacing: -0.05em; }
+.nextCard em { font-style: normal; font-size: 17px; color: rgba(255, 255, 255, 0.82); }
+
+/* ---- The docs' home: the crew, then what it does on its own ---- */
+.rowHead { margin: 0 0 28px; font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3); text-align: center; }
+.crew { max-width: var(--max); margin: 0 auto; padding: 96px var(--gut) 0; }
+.crew ul { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 20px; margin: 0; padding: 0; list-style: none; }
+.crew a { display: grid; justify-items: center; gap: 6px; padding: 10px 10px 22px; border-radius: 24px; text-align: center; color: var(--t-1); text-decoration: none; transition: background 300ms ease; }
+.crew a:hover { background: var(--n-1); }
+.crew img { width: min(100%, 210px); height: auto; }
+.crew b { font-family: 'Inter Display', var(--display); font-size: 23px; font-weight: 650; letter-spacing: -0.03em; }
+.crew span { max-width: 220px; font-size: 14.5px; line-height: 1.45; color: var(--t-3); text-wrap: pretty; }
+
+.behaves { padding-top: 150px; }
+.cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; max-width: var(--max); margin: 64px auto 0; padding: 0 var(--gut); list-style: none; }
+.card { display: grid; align-content: space-between; gap: 28px; height: 100%; min-height: 230px; padding: 24px 22px; box-sizing: border-box; border-radius: 22px; background: var(--n-1); box-shadow: 0 0 0 1px var(--line), var(--lift-card); color: var(--t-1); text-decoration: none; transition: transform 400ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 300ms ease; }
+.card:hover { transform: translateY(-3px); box-shadow: 0 0 0 1px var(--line-2), 0 24px 60px rgba(20, 24, 70, 0.1); }
+.cardQ { font-family: 'Inter Display', var(--display); font-size: 25px; font-weight: 300; line-height: 1.12; letter-spacing: -0.035em; text-wrap: balance; }
+.card b { display: block; font-size: 14.5px; font-weight: 600; }
+.card em { display: block; margin-top: -24px; font-style: normal; font-size: 13.5px; line-height: 1.4; color: var(--t-3); }
+.cardHere { box-shadow: 0 0 0 1.5px var(--live), 0 24px 60px rgba(20, 24, 70, 0.1); }
+.cardHere b { color: var(--live); }
+
+.restRow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px; max-width: 880px; margin: 120px auto 0; padding: 0 var(--gut) 40px; }
+.restRow > div { padding-top: 16px; border-top: 1px solid var(--line-2); }
+.restRow b { font-size: 16px; font-weight: 650; }
+.restRow ul { display: grid; margin: 10px 0 0; padding: 0; list-style: none; }
+.restRow a { font-size: 15px; line-height: 1.9; color: var(--t-2); text-decoration: none; }
+.restRow a:hover { color: var(--live); }
+
+@media (max-width: 1240px) {
+  .rail { display: none; }
+  .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .crew ul { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 28px; }
+}
+@media (max-width: 760px) {
+  .scene { padding-top: 104px; }
+  .ink { margin-top: 104px; padding: 104px 0; }
+  .picture { margin-top: 40px; }
+  .more { margin-top: 48px; }
+  .cards { grid-template-columns: minmax(0, 1fr); }
+  .card { min-height: 0; }
+  .crew ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .restRow { grid-template-columns: minmax(0, 1fr); }
+  .nextCard { padding: 36px 28px 40px; margin-left: 16px; margin-right: 16px; }
+}

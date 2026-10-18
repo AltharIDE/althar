@@ -1,0 +1,100 @@
+/* B · Side by side: the pages down the left, the words in the middle, the homepage's stage in Althar's light beside them. */
+
+.frame { display: grid; grid-template-columns: 200px minmax(0, 530px) minmax(0, 1fr); column-gap: clamp(36px, 4vw, 64px); max-width: 1520px; margin: 0 auto; padding: 128px 28px 160px; box-sizing: border-box; }
+
+/* ---- The pages, down the left ---- */
+.side { position: sticky; top: 100px; align-self: start; display: grid; gap: 20px; max-height: calc(100svh - 124px); overflow-y: auto; scrollbar-width: none; font-size: 13.5px; }
+.side a { display: block; padding: 4px 10px; margin: 0 -10px; border-radius: 8px; color: var(--t-3); text-decoration: none; transition: color 160ms ease, background 160ms ease; }
+.side a:hover { color: var(--t-1); }
+.sideHome { font-weight: 500; }
+.sideOn { color: var(--t-1) !important; font-weight: 600; background: var(--n-1); box-shadow: 0 0 0 1px var(--line); }
+.sideGroup p { margin: 0 0 4px; font: 500 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3); }
+.sideGroup ul { display: grid; margin: 0; padding: 0; list-style: none; }
+
+/* ---- The words ---- */
+.article { min-width: 0; font-size: 16.5px; line-height: 1.6; }
+.article section p { margin: 0; text-wrap: pretty; }
+.article section > p + p { margin-top: 12px; }
+.article b { font-weight: 650; }
+.head { display: grid; gap: 16px; padding-bottom: 8px; }
+.title { margin: 0; font-family: 'Inter Display', var(--display); font-weight: 200; font-size: clamp(42px, 4.6vw, 68px); line-height: 0.98; letter-spacing: -0.05em; text-wrap: balance; }
+.title b { font-weight: 720; letter-spacing: -0.056em; }
+.lead { margin: 0; font-size: 18px; line-height: 1.5; letter-spacing: -0.01em; color: var(--t-2); text-wrap: pretty; }
+.gist { margin: 8px 0 0; padding: 18px 20px; border-radius: 14px; background: var(--n-1); box-shadow: 0 0 0 1px var(--line-2), var(--lift-card); font-size: 17px; line-height: 1.5; letter-spacing: -0.01em; }
+.gist b { font-weight: 650; }
+
+.part { display: grid; align-content: start; gap: 16px; min-height: 64svh; padding-top: 96px; scroll-margin-top: 80px; }
+.part:last-of-type { min-height: 0; }
+.h2 { display: grid; gap: 8px; margin: 0; font-family: 'Inter Display', var(--display); font-size: 32px; line-height: 1.06; letter-spacing: -0.04em; font-weight: 640; }
+.h2 span { font: 500 12px var(--mono); letter-spacing: 0.06em; color: var(--live); }
+.part > :global(aside), .part > ul { margin-top: 6px; }
+.inline { margin-top: 12px; padding: 24px 18px; border-radius: 22px; background: #efede7; }
+.end { margin: 64px 0 0; font-size: 13.5px; color: var(--t-3); }
+
+/* ---- The stage ---- */
+.stage { position: sticky; top: 84px; align-self: start; height: calc(100svh - 104px); min-height: 560px; }
+.panel { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; overflow: hidden; border-radius: 30px; background: #efede7; }
+.light {
+  position: absolute; left: 0; right: 0; bottom: -2%; height: 64%; z-index: -1; pointer-events: none; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to top, transparent 3%, #000 calc(3% + 110px));
+  mask-image: linear-gradient(to top, transparent 3%, #000 calc(3% + 110px));
+}
+.stageLabel { position: absolute; left: 26px; top: 22px; z-index: 1; display: inline-flex; align-items: center; gap: 9px; margin: 0; font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3); }
+.stageLabel i { width: 6px; height: 6px; border-radius: 50%; background: var(--live); }
+.piece {
+  grid-area: 1 / 1; align-self: center; justify-self: center; width: min(100% - 56px, 640px); padding: 64px 0 40px;
+  opacity: 0; transform: translateY(28px) scale(0.97); filter: blur(6px); pointer-events: none;
+  transition: opacity 600ms ease, transform 900ms cubic-bezier(0.22, 1, 0.36, 1), filter 600ms ease;
+}
+.on { opacity: 1; transform: none; filter: none; pointer-events: auto; transition-delay: 80ms; }
+@media (prefers-reduced-motion: reduce) { .piece { transition-duration: 1ms; } }
+
+/* The homepage's pieces bring room of their own above them; here they sit where they're put. */
+.bare > div { margin-top: 0 !important; }
+
+/* ---- The docs' home ---- */
+.homeMain { grid-column: 2 / 4; min-width: 0; display: grid; gap: 72px; align-content: start; }
+.homeHead { display: grid; gap: 16px; max-width: 780px; }
+.kicker { display: inline-flex; align-items: center; gap: 9px; margin: 0; font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3); }
+.kicker i { width: 6px; height: 6px; border-radius: 50%; background: var(--live); }
+.homeSearch { width: min(560px, 100%); margin-top: 8px; }
+.rowHead { margin: 0 0 18px; font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3); }
+
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; margin: 0; padding: 0; list-style: none; }
+.card { display: grid; gap: 6px; color: var(--t-1); text-decoration: none; }
+.card b { margin-top: 10px; font-family: 'Inter Display', var(--display); font-size: 21px; font-weight: 640; letter-spacing: -0.03em; }
+.card span { font-size: 14.5px; line-height: 1.45; color: var(--t-3); }
+.cardPicture { position: relative; isolation: isolate; height: 250px; overflow: hidden; border-radius: 24px; background: #efede7; transition: transform 400ms cubic-bezier(0.22, 1, 0.36, 1); }
+.card:hover .cardPicture { transform: translateY(-3px); }
+.card:hover b { color: var(--live); }
+.cardLight {
+  position: absolute; left: 0; right: 0; bottom: -6%; height: 80%; z-index: -1; overflow: hidden; opacity: 0.8;
+  -webkit-mask-image: linear-gradient(to top, transparent 4%, #000 calc(4% + 60px));
+  mask-image: linear-gradient(to top, transparent 4%, #000 calc(4% + 60px));
+}
+.cardShot { padding: 28px 26px 0; }
+.cardShot > * { border-radius: 14px; box-shadow: 0 20px 50px rgba(20, 24, 70, 0.12); }
+
+.groups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; }
+.allGroup { display: grid; align-content: start; gap: 6px; padding-top: 16px; border-top: 1px solid var(--line-2); }
+.allGroup b { font-size: 16px; font-weight: 650; letter-spacing: -0.01em; }
+.allGroup p { margin: 0 0 8px; font-size: 13.5px; color: var(--t-3); }
+.allGroup ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.allGroup a { font-size: 14.5px; line-height: 1.8; color: var(--t-2); text-decoration: none; }
+.allGroup a:hover { color: var(--live); }
+
+@media (max-width: 1260px) {
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 1100px) {
+  .frame { grid-template-columns: 190px minmax(0, 1fr); padding-top: 112px; }
+  .part { min-height: 0; padding-top: 72px; }
+}
+@media (max-width: 760px) {
+  .frame { grid-template-columns: minmax(0, 1fr); padding: 104px var(--gut) 120px; }
+  .side { display: none; }
+  .homeMain { grid-column: 1; gap: 48px; }
+  .cards, .groups { grid-template-columns: minmax(0, 1fr); }
+  .h2 { font-size: 27px; }
+}

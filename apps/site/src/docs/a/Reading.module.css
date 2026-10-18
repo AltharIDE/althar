@@ -1,0 +1,94 @@
+/* A · Reading: the thesis's sheet, for the docs. Contents beside one column, sections numbered in cobalt, figures on the homepage's panel. */
+
+.lit :global(h1) { font-size: clamp(44px, 6vw, 92px); }
+
+.sheet { display: grid; grid-template-columns: 236px minmax(0, 700px); justify-content: center; column-gap: clamp(48px, 7vw, 104px); max-width: var(--max); margin: 0 auto; padding: 72px var(--gut) 140px; }
+
+/* ---- The docs' contents, this page opened under its name ---- */
+.contents { position: sticky; top: 96px; align-self: start; max-height: calc(100svh - 120px); overflow-y: auto; scrollbar-width: none; }
+.contents summary { list-style: none; }
+.contents summary::-webkit-details-marker { display: none; }
+.contentsHead { padding-bottom: 18px; font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
+.contentsHead span { display: none; }
+.contents ol { list-style: none; margin: 0; padding: 0; }
+.group + .group { margin-top: 22px; }
+.groupName { margin: 0 0 6px; font-size: 13px; font-weight: 600; letter-spacing: -0.005em; color: var(--t-1); }
+.group > ol > li > a { display: block; padding: 4px 0; font-size: 13.5px; line-height: 1.35; color: var(--t-3); text-decoration: none; transition: color 200ms ease; }
+.group a:hover { color: var(--t-1); }
+.here > a { color: var(--t-1) !important; font-weight: 600; }
+.sections { margin: 4px 0 6px !important; padding-left: 0; border-left: 1px solid var(--line-2) !important; }
+.sections a { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 2px; padding: 4px 0 4px 12px; margin-left: -1px; border-left: 1px solid transparent; font-size: 13px; line-height: 1.35; color: var(--t-3); text-decoration: none; transition: color 200ms ease, border-color 200ms ease; }
+.sections a span { font: 500 10.5px/1.75 var(--mono); color: var(--t-4); }
+.sections a[aria-current] { color: var(--t-1); border-left-color: var(--live); }
+.sections a[aria-current] span { color: var(--live); }
+
+/* ---- The column ---- */
+.article { min-width: 0; font-size: 16.5px; line-height: 1.6; color: var(--t-1); }
+.article > section p, .head p { margin: 0; text-wrap: pretty; }
+.article section > p + p { margin-top: 14px; }
+.article a { color: var(--t-1); text-decoration: underline; text-decoration-color: var(--live); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+.article b { font-weight: 650; }
+
+.head { display: grid; gap: 14px; padding-bottom: 8px; }
+.lede { font: 500 11px var(--mono) !important; letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
+.claim { font-family: 'Inter Display', var(--display); font-size: 28px; line-height: 1.24; letter-spacing: -0.03em; font-weight: 400; }
+.claim b { font-weight: 650; }
+
+.part { display: grid; gap: 18px; padding-top: 88px; scroll-margin-top: 72px; }
+.h2 { display: grid; gap: 10px; margin: 0 0 2px; font-family: 'Inter Display', var(--display); font-size: 38px; line-height: 1.04; letter-spacing: -0.045em; font-weight: 640; text-wrap: balance; }
+.no { font: 500 12px var(--mono); letter-spacing: 0.06em; color: var(--live); }
+.part > :global(aside), .part > :global(figure), .part > ul, .part > div { margin-top: 10px; }
+
+/* The figure and the thing to try reach past the column a little, as the homepage's pieces do. */
+.wide { margin-left: -40px; margin-right: -40px; }
+.wide :global([role='img']) { box-shadow: 0 0 0 1px rgba(20, 20, 40, 0.06), 0 24px 60px rgba(20, 24, 70, 0.1); }
+.wideDemo { margin-left: -22px; margin-right: -22px; }
+
+.turn { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 96px; border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }
+.turn a { display: grid; gap: 4px; padding: 20px 4px; text-decoration: none !important; transition: background 200ms ease; }
+.turn a:hover { background: var(--n-1); }
+.turn a span { font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--t-3); }
+.turn a b { font-family: 'Inter Display', var(--display); font-size: 22px; font-weight: 640; letter-spacing: -0.03em; }
+.next { text-align: right; box-shadow: inset 1px 0 0 var(--line-2); }
+.end { margin: 20px 0 0; font-size: 13.5px; color: var(--t-3); }
+.end a { color: var(--t-2) !important; }
+
+/* ---- The docs' home ---- */
+.homeLit :global(h1) { max-width: 920px; font-size: clamp(44px, 6vw, 88px); }
+.homeSearch { width: min(560px, 100%); margin-top: 10px; }
+
+.map { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: var(--max); margin: 0 auto; padding: 72px var(--gut) 140px; }
+.mapGroup { display: grid; align-content: start; gap: 8px; padding: 26px 26px 30px; border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }
+.mapGroup + .mapGroup { box-shadow: inset 1px 0 0 var(--line-2); }
+.mapName { margin: 2px 0 0; font-family: 'Inter Display', var(--display); font-size: 26px; font-weight: 650; letter-spacing: -0.035em; }
+.mapNote { margin: 0 0 14px; font-size: 14.5px; line-height: 1.45; color: var(--t-3); }
+.mapGroup ul { display: grid; margin: 0; padding: 0; list-style: none; }
+.mapGroup li a { display: grid; gap: 2px; margin: 0 -10px; padding: 10px; border-radius: 10px; text-decoration: none; color: var(--t-1); transition: background 200ms ease; }
+.mapGroup li a:hover { background: var(--n-1); }
+.mapGroup li b { font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em; }
+.mapGroup li span { font-size: 13.5px; line-height: 1.4; color: var(--t-3); }
+.mapHere b { color: var(--live); }
+
+@media (max-width: 1100px) {
+  .map { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mapGroup:nth-child(3) { box-shadow: none; }
+  .mapGroup:nth-child(n + 3) { border-top: 0; }
+}
+@media (max-width: 1000px) {
+  .sheet { grid-template-columns: minmax(0, 1fr); row-gap: 32px; padding-top: 40px; }
+  .contents { position: static; max-height: none; padding: 14px 16px; border-radius: 12px; background: var(--n-1); box-shadow: 0 0 0 1px var(--line); }
+  .contentsHead { padding: 0; cursor: pointer; }
+  .contentsHead span { display: inline; }
+  .contents[open] .contentsHead { padding-bottom: 14px; }
+  .wide, .wideDemo { margin-left: 0; margin-right: 0; }
+}
+@media (max-width: 640px) {
+  .map { grid-template-columns: minmax(0, 1fr); padding-top: 40px; }
+  .mapGroup { box-shadow: none !important; padding: 22px 4px 26px; }
+  .mapGroup + .mapGroup { border-top: 0; }
+  .claim { font-size: 23px; }
+  .h2 { font-size: 30px; }
+  .part { padding-top: 64px; }
+  .turn { grid-template-columns: minmax(0, 1fr); }
+  .next { text-align: left; box-shadow: inset 0 1px 0 var(--line-2); }
+}

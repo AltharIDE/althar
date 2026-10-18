@@ -26,7 +26,7 @@ From the repository root, run `bun install`. Then run these from `apps/site`:
 
 `dist/` is static. Each page is its own HTML file, rendered with its words: `index.html` for the developer page, then `shifts.html`, `thesis.html`, `wallpaper.html`, `docs.html` and `enterprise.html`. Cloudflare serves each at its path with no trailing slash (`/shifts`), and redirects `/shifts/` and `/shifts.html` there. `404.html` is served, with a 404, for any address that isn't a page or a file. Beside them are the wallpapers' files in `wallpaper/`, and `assets/`.
 
-Each page's HTML carries its own title, description, canonical address, link-preview tags and structured data (schema.org JSON-LD), from `src/content/pages.ts` and `src/lib/structured.ts`. `/docs` (a placeholder) and `/enterprise` are marked `noindex` and left out of the sitemap and `llms.txt`. The enterprise page is a 3D scene, so it isn't prerendered; it opens in the browser as before.
+Each page's HTML carries its own title, description, canonical address, link-preview tags and structured data (schema.org JSON-LD), from `src/content/pages.ts` and `src/lib/structured.ts`. `/docs` (a prototype, below) and `/enterprise` are marked `noindex` and left out of the sitemap and `llms.txt`. The enterprise page is a 3D scene, so it isn't prerendered; it opens in the browser as before.
 
 For crawlers, the build also writes:
 
@@ -57,6 +57,7 @@ From a machine logged in with `bunx wrangler login`, `bun run deploy` builds and
   - `Why.tsx`: the rolling "best coding agent right now", three reasons with small working pictures, and a ticker of the latest shifts.
   - `Coordinator.tsx`: a chat and the product's own `TaskLaunch` card, which starts on its own and becomes a `TaskCard`.
   - `TaskLoop.tsx`: one task's steps with the review loop; a list on narrow screens.
+- `src/docs/`: the docs, while their direction is chosen: four ways to draw them, each with its home and one page written out (When an account runs out), behind a graphite switcher at the window's foot. `?v=a|b|c|d` picks the direction (Reading, Side by side, Story, Questions) and `?p=home|page` the screen. `content.ts` is the map of pages, `copy.tsx` the written page's words, `parts.tsx` what every direction's page is made of (the four voices a page speaks in, the folds, a figure on the homepage's panel, and the one thing to try, drawn with the app's own `RateLimit` and `LimitMoved`). The figures are the homepage's own (`Handoff`, `Plans`).
 - `src/wallpaper/`: the wallpaper page: Aurora, the launch's light held still, in light and dark, each with the phone's beside it and its files to download. The footer links to it.
 - `src/shifts/`: the shifts page (`Shifts.tsx`) and the ordering and grouping both pages use (`group.ts`).
 - `src/shared/`: the developer pages' bar (`Bar.tsx`), their cobalt end with the wordmark (`Close.tsx`), and the agents' marks (`AgentMark.tsx`). `Masthead.tsx` and `sheet.tsx` belong to the enterprise page and the thesis.

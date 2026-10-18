@@ -1,0 +1,131 @@
+/* The pieces a docs page is made of, in the site's paper, ink and light. */
+
+.hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ---- The four voices, loudest first ---- */
+.callout { display: grid; grid-template-columns: 20px minmax(0, 1fr); column-gap: 12px; row-gap: 4px; margin: 0; padding: 16px 20px 17px 16px; border-radius: 14px; }
+.icon { grid-row: 1 / span 2; display: flex; padding-top: 1px; }
+.kicker { grid-column: 2; margin: 0; font: 500 11px/18px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.body { grid-column: 2; font-size: 15.5px; line-height: 1.55; color: var(--t-1); text-wrap: pretty; }
+.body p { margin: 0; }
+.body p + p { margin-top: 8px; }
+.body b { font-weight: 600; }
+
+.call { background: var(--signal-paper); box-shadow: inset 0 0 0 1px var(--signal-line); }
+.call .icon, .call .kicker { color: var(--signal-bright); }
+.heads { background: var(--n-1); box-shadow: inset 0 0 0 1px var(--line-2), var(--lift-card); }
+.heads .icon { color: var(--warm); }
+.heads .kicker { color: #8a5717; }
+.own { background: var(--n-1); box-shadow: inset 0 0 0 1px var(--line-2), var(--lift-card); }
+.own .icon, .own .kicker { color: var(--live); }
+.note { padding: 2px 0; border-radius: 0; }
+.note .icon, .note .kicker { color: var(--t-3); }
+.note .body { font-size: 15px; color: var(--t-2); }
+
+/* ---- Behind the scenes ---- */
+.folds { display: grid; }
+.foldsHead { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; padding-bottom: 12px; }
+.foldsHead h3 { margin: 0; font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--t-3); }
+.foldsHead p { margin: 0; font-size: 13.5px; color: var(--t-3); }
+.fold { border-top: 1px solid var(--line-2); }
+.fold:last-child { border-bottom: 1px solid var(--line-2); }
+.fold summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 2px; list-style: none; cursor: pointer; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--t-1); }
+.fold summary::-webkit-details-marker { display: none; }
+.fold summary:hover { color: var(--live); }
+.fold summary i { position: relative; flex: none; width: 12px; height: 12px; }
+.fold summary i::before, .fold summary i::after { content: ''; position: absolute; left: 0; top: 5.25px; width: 12px; height: 1.5px; border-radius: 1px; background: currentColor; transition: transform 240ms var(--ease); }
+.fold summary i::after { transform: rotate(90deg); }
+.fold[open] summary i::after { transform: rotate(0deg); }
+.answer { padding: 0 2px 18px; max-width: 640px; font-size: 15.5px; line-height: 1.6; color: var(--t-2); }
+.answer p { margin: 0; }
+.answer p + p { margin-top: 8px; }
+.answer a { color: var(--t-1); text-decoration-color: var(--live); text-underline-offset: 3px; }
+
+/* ---- A figure on the homepage's panel ---- */
+.plate { margin: 0; display: grid; gap: 12px; }
+.panel { position: relative; isolation: isolate; overflow: hidden; padding: 44px 40px 52px; border-radius: 26px; background: #efede7; }
+.light {
+  position: absolute; left: 0; right: 0; bottom: -4%; height: 70%; z-index: -1; pointer-events: none; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to top, transparent 2%, #000 calc(2% + 90px));
+  mask-image: linear-gradient(to top, transparent 2%, #000 calc(2% + 90px));
+  opacity: 0.85;
+}
+/* The homepage's pieces bring their own room above them: here the panel gives it. */
+.panel > [role='img'] { margin-top: 0; }
+.caption { padding: 0 6px; font-size: 13.5px; line-height: 1.5; color: var(--t-3); }
+
+/* ---- Where something is ---- */
+.path { display: flex; flex-wrap: wrap; gap: 4px 0; margin: 0; font: 500 12.5px/1.6 var(--mono); color: var(--t-3); }
+.path i { padding: 0 9px; font-style: normal; color: var(--t-4); }
+.path b { font-weight: 500; color: var(--t-1); }
+
+/* ---- What goes with the work ---- */
+.carried { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line-2); }
+.carried li { display: grid; grid-template-columns: 28px minmax(0, 0.9fr) minmax(0, 1.4fr); align-items: baseline; gap: 4px 12px; padding: 13px 2px; border-bottom: 1px solid var(--line-2); font-size: 15.5px; }
+.carried b { font-weight: 600; letter-spacing: -0.01em; }
+.carried li > span:not(.tick) { font-size: 14.5px; color: var(--t-3); }
+.carried li:not([data-kept]) b { color: var(--t-2); font-weight: 500; }
+.tick { font-weight: 700; color: var(--ok); }
+.carried li:not([data-kept]) .tick { color: var(--t-4); }
+@media (max-width: 560px) {
+  .carried li { grid-template-columns: 28px minmax(0, 1fr); }
+  .carried li > span:not(.tick):not(.hidden) { grid-column: 2; }
+}
+
+/* ---- The thing to try ---- */
+.demo { display: grid; gap: 18px; padding: 22px; border-radius: 22px; background: var(--n-1); box-shadow: 0 0 0 1px rgba(20, 20, 40, 0.06), 0 30px 80px rgba(20, 24, 70, 0.1); }
+.demoHead { display: grid; gap: 14px; }
+.sentence { margin: 0; font-size: 17px; line-height: 1.45; letter-spacing: -0.01em; color: var(--t-2); }
+.sentence b { display: inline-block; padding: 0 8px; border-radius: 6px; background: var(--n-4); font-weight: 600; color: var(--t-1); }
+.rules { display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; margin: 0; padding: 3px; border: 0; border-radius: 12px; background: var(--sunk); box-shadow: inset 0 0 0 1px var(--line); }
+.rule { flex: 1 1 auto; height: 34px; padding: 0 14px; border: 0; border-radius: 9px; background: transparent; font: 500 14px var(--font); color: var(--t-2); cursor: pointer; transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease; }
+.rule:hover { color: var(--t-1); }
+.ruleOn { background: var(--paper); color: var(--t-1); box-shadow: 0 0 0 1px var(--line-2), 0 1px 2px rgba(60, 50, 30, 0.08); }
+
+.task { display: grid; gap: 14px; padding: 18px; border-radius: 14px; background: var(--n-2); box-shadow: inset 0 0 0 1px var(--line); }
+.taskHead { display: flex; align-items: baseline; gap: 10px; font-size: 15.5px; letter-spacing: -0.01em; }
+.taskHead span { font: 500 12px var(--mono); color: var(--t-3); }
+.steps { display: grid; border-radius: 10px; background: var(--paper); box-shadow: 0 0 0 1px var(--line-2); }
+.step { display: grid; grid-template-columns: 16px auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 11px 14px; font-size: 14px; }
+.step + .step { border-top: 1px solid var(--line); }
+.step b { font-weight: 600; }
+.step span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--t-3); }
+.step em { font-style: normal; font-size: 13px; color: var(--t-3); }
+.emLive { color: var(--live) !important; font-weight: 500; }
+.emCall { color: var(--signal-bright) !important; font-weight: 600; }
+.dot { justify-self: center; width: 8px; height: 8px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 4px var(--live-dim); }
+.dotCall { background: var(--signal); box-shadow: 0 0 0 4px var(--signal-dim); }
+.dotRest { background: var(--t-4); box-shadow: none; }
+.next { justify-self: center; width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--t-4); }
+.meter { display: grid; grid-template-columns: 1fr auto; gap: 7px 12px; font-size: 12.5px; color: var(--t-3); }
+.meter > i { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--track); overflow: hidden; }
+.meter > i > i { display: block; height: 100%; border-radius: 3px; background: var(--live); transition: width 700ms var(--ease), background 400ms ease; }
+.meter > i > i[data-out] { background: var(--t-1); }
+.thread { display: grid; gap: 10px; min-height: 0; font-size: var(--prose-size); }
+.thread:empty { display: none; }
+
+.demoFoot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
+.use, .again { flex: none; height: 38px; padding: 0 16px; border: 0; border-radius: 999px; font: 600 14px var(--font); cursor: pointer; }
+.use { background: var(--t-1); color: var(--on-ink); }
+.use:hover { background: var(--ink-hover); }
+.again { background: var(--paper); color: var(--t-1); box-shadow: inset 0 0 0 1px var(--line-3); }
+.said { flex: 1 1 240px; margin: 0; font-size: 14px; line-height: 1.45; color: var(--t-2); }
+
+/* ---- Search ---- */
+.search { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 12px 0 16px; border-radius: 999px; background: var(--paper); box-shadow: 0 0 0 1px var(--line-2), 0 10px 30px -18px rgba(20, 24, 70, 0.3); color: var(--t-3); cursor: text; }
+.search input { flex: 1 1 auto; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; font: 400 16px var(--font); color: var(--t-1); }
+.search input::placeholder { color: var(--t-3); }
+.search input::-webkit-search-cancel-button { display: none; }
+.search kbd { flex: none; padding: 3px 7px; border-radius: 6px; background: var(--n-4); font: 500 11px var(--mono); color: var(--t-2); }
+.search:focus-within { box-shadow: 0 0 0 1px var(--live), 0 0 0 4px var(--live-dim); }
+.searchGlass { background: rgba(255, 255, 255, 0.16); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28); color: rgba(255, 255, 255, 0.85); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+.searchGlass input { color: #fff; }
+.searchGlass input::placeholder { color: rgba(255, 255, 255, 0.78); }
+.searchGlass kbd { background: rgba(255, 255, 255, 0.18); color: #fff; }
+.searchGlass:focus-within { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7); }
+
+/* ---- What the thread says ---- */
+.lines { display: grid; gap: 14px; padding: 20px; border-radius: 20px; background: var(--n-1); box-shadow: 0 0 0 1px rgba(20, 20, 40, 0.06), 0 30px 80px rgba(20, 24, 70, 0.1); }
+.linesHead { display: flex; align-items: baseline; gap: 10px; margin: 0; font-size: 15.5px; letter-spacing: -0.01em; }
+.linesHead span { font: 500 12px var(--mono); color: var(--t-3); }
+.linesBody { display: grid; gap: 12px; padding: 18px 16px; border-radius: 12px; background: var(--n-2); box-shadow: inset 0 0 0 1px var(--line); font-size: var(--prose-size); }

@@ -1,0 +1,37 @@
+/* The prototype's control: smoked graphite at the window's foot, above everything the page draws. */
+
+.switcher {
+  position: fixed; left: 50%; bottom: 18px; z-index: 90; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center;
+  width: max-content; max-width: calc(100vw - 24px); box-sizing: border-box;
+  padding: 6px 6px 6px 14px; border-radius: 999px;
+  background: rgba(22, 22, 26, 0.86);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 18px 40px -16px rgba(0, 0, 0, 0.5);
+  color: #fff;
+}
+.label { font: 500 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255, 255, 255, 0.5); }
+.group { display: flex; gap: 2px; padding: 2px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); }
+.option {
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border: 0; border-radius: 999px;
+  background: transparent; color: rgba(255, 255, 255, 0.72); font: 500 13px var(--font); cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+.option:hover { color: #fff; }
+.on { background: #fff; color: var(--t-1); }
+.on:hover { color: var(--t-1); }
+.letter { font: 600 11px var(--mono); }
+.on .letter { color: var(--live); }
+.note { padding-right: 12px; font-size: 12px; white-space: nowrap; color: rgba(255, 255, 255, 0.55); }
+.option:focus-visible { outline: 2px solid var(--on-ink-focus); outline-offset: 2px; }
+
+@media (max-width: 1320px) { .note { display: none; } }
+@media (max-width: 720px) {
+  .label { display: none; }
+  .name { display: none; }
+  .option { padding: 0 11px; }
+  .switcher { padding-left: 6px; }
+}
+fieldset.group { margin: 0; border: 0; min-width: 0; }
+.hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
