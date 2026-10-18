@@ -16,49 +16,6 @@
   gap: 10px;
 }
 
-/* ---- the Settings tab: under the window's bar it scrolls, with the scrollbar at the window's edge, as a project's rules do ---- */
-.page {
-  height: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
-  background: var(--n-2);
-}
-.columns {
-  display: grid;
-  grid-template-columns: 264px minmax(0, 1fr);
-  align-items: start;
-  gap: 32px;
-  max-width: 1180px;
-  margin: 0 auto;
-  padding: 28px 48px 72px;
-}
-/* the cards and the sections stay in sight while a long section scrolls */
-.side {
-  position: sticky;
-  top: 28px;
-  display: grid;
-  gap: 20px;
-}
-.main {
-  min-width: 0;
-}
-.body {
-  display: grid;
-  gap: 16px;
-  padding: 0 22px 20px;
-}
-
-/* narrow, the side goes over the section */
-@media (width < 820px) {
-  .columns {
-    grid-template-columns: minmax(0, 1fr);
-    padding-inline: 24px;
-  }
-  .side {
-    position: static;
-  }
-}
-
 /* the agents: their tabs over the chosen one's sheet */
 .agents {
   display: grid;

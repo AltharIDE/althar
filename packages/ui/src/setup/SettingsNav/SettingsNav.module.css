@@ -71,6 +71,20 @@
   background: var(--signal);
 }
 
+/* something to do, not a section: under the sections, apart and under a rule */
+.foot {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.danger,
+.danger .icon {
+  color: var(--danger);
+}
+.danger:hover {
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .section {
     transition: none;

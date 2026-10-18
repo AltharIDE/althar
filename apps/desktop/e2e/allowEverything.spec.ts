@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, planTask, say, startTask, toConversation } from './support'
+import { launch, openFirstProject, planTask, projectSettings, say, startTask, toConversation } from './support'
 
 /*
  * Allow everything (ADR-043), as the person meets it: a new project always
@@ -13,19 +13,14 @@ import { launch, openFirstProject, planTask, say, startTask, toConversation } fr
  * calls, wait as a stack whose card says why it has no "always allow", and
  * offers allowing everything on the task. Taken, the whole stack goes
  * ahead, its switch is on in its menu, and its next deploy asks nothing. The project's
- * own switch is on its rules screen, over the sentences it quietens: turned
+ * own switch is in its rules, over the sentences it quietens: turned
  * on while another task's stack waits, that stack goes ahead too. The lead is the fake agent,
  * which asks to run what follows `run ` (each of what follows `run each `,
  * at once) and runs nothing.
  */
 
-const openRules = async (page: Page) => {
-  await page.getByRole('button', { name: 'Settings', exact: true }).click()
-  await page
-    .getByRole('dialog', { name: /’s settings$/ })
-    .getByRole('button', { name: /^Rules/ })
-    .click()
-}
+/** The project's rules, a section of its settings. */
+const openRules = (page: Page) => projectSettings(page, 'Rules')
 
 /** Opens a task from the project's conversation once its first turn is done, on its conversation. */
 const openReady = async (page: Page, title: string) => {
@@ -110,7 +105,7 @@ test('allows everything on a task or a project, clearing what waits, and says so
     await expect(page.getByText('Off while everything is allowed.')).toHaveCount(3)
     await expect(page.getByRole('listitem', { name: 'Never' }).getByText('Off while everything is allowed.')).toHaveCount(0)
     await shoot(page, 'app-rules-allow-everything.png')
-    await page.keyboard.press('Escape')
+    await page.getByRole('radio', { name: /^Board/ }).click()
 
     // Turned on, the other task's stack went ahead: it waits on no one.
     await expect(cardOf('Tag the release').getByText(/make deploy|npm run deploy/)).toHaveCount(0)

@@ -2,8 +2,11 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { useState } from 'react'
 import { expect, fn, userEvent, within } from 'storybook/test'
 
+import { Brand } from '../../foundations/brands/brands'
 import { Logo } from '../../foundations/Logo/Logo'
+import { BrandMark } from '../../foundations/Marks/Marks'
 import { EdgeSpot } from '../../foundations/vocabulary'
+import { Button } from '../../primitives/Button/Button'
 import { States } from '../../storybook/States'
 import { ControlSheet } from '../ControlCenter/ControlCenter'
 import { EdgeMini } from '../EdgeMini/EdgeMini'
@@ -17,7 +20,10 @@ import {
   NotificationSound,
   type NotifyChoices,
   OpenFilesIn,
+  SettingGroup,
   SettingList,
+  SettingRow,
+  SettingSwitch,
   UsageData,
 } from './Preferences'
 
@@ -480,4 +486,49 @@ export const AllStates: Story = {
       ]}
     />
   ),
+}
+
+/** A section's parts, each under its name with what is done for all of it; a product's own mark before its row as it is, with no round glyph. */
+export const Groups: Story = {
+  render: () => (
+    <>
+      <SettingGroup
+        title="Trackers"
+        note="Where its tasks’ issues are."
+        action={
+          <Button size="small" icon="plug">
+            Connect a tracker
+          </Button>
+        }
+      >
+        <SettingList>
+          <SettingRow title="Linear · MER issues" note="Connected as balazs" mark={<BrandMark brand={Brand.Linear} size={18} />}>
+            {() => null}
+          </SettingRow>
+          <SettingRow title="Jira · OPS issues" note="Not connected" mark={<BrandMark brand={Brand.Jira} size={18} />}>
+            {() => (
+              <Button size="small" variant="signal">
+                Connect
+              </Button>
+            )}
+          </SettingRow>
+        </SettingList>
+      </SettingGroup>
+      <SettingGroup title="How its tasks work">
+        <SettingList>
+          <SettingSwitch
+            title="Resolve merge conflicts automatically"
+            note="The lead fixes them and says what it did."
+            checked
+            onChange={fn()}
+          />
+        </SettingList>
+      </SettingGroup>
+    </>
+  ),
+  play: async ({ canvasElement }) => {
+    const c = within(canvasElement)
+    await expect(c.getByRole('region', { name: 'Trackers' })).toBeVisible()
+    await expect(c.getByRole('heading', { name: 'How its tasks work', level: 2 })).toBeVisible()
+  },
 }

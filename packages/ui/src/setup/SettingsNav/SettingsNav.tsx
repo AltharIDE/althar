@@ -4,11 +4,13 @@ import { VisuallyHidden } from '../../primitives/VisuallyHidden/VisuallyHidden'
 import s from './SettingsNav.module.css'
 
 /*
- * The sections of Althar's settings, down the side of their page: each by
- * its icon and its name, in groups a little apart, the one open lifted as
- * the tab with the window is. A violet dot after a name says something in
- * that section waits on the person, such as an account to sign in again.
- * Pressing one opens it; which is open is the consumer's to keep.
+ * The sections of a page of settings, down its side: each by its icon and
+ * its name, in groups a little apart, the one open lifted as the tab with
+ * the window is. A violet dot after a name says something in that section
+ * waits on the person, such as an account to sign in again. Pressing one
+ * opens it; which is open is the consumer's to keep. Under them, apart and
+ * under a rule, can go one thing to do rather than a section to open, such
+ * as taking a project out of Althar, in red where it takes something away.
  */
 
 export interface SettingsSection<V extends string> {
@@ -17,6 +19,15 @@ export interface SettingsSection<V extends string> {
   icon: IconName
   /** Something in it waits on the person: a violet dot after its name. */
   yours?: boolean
+}
+
+/** Something to do from the side, not a section: it opens what does it, such as a dialog that asks first. */
+export interface SettingsNavAction {
+  title: string
+  icon: IconName
+  onSelect: () => void
+  /** It takes something away: in red. */
+  danger?: boolean
 }
 
 export interface SettingsNavText {
@@ -33,12 +44,14 @@ export interface SettingsNavProps<V extends string> {
   /** The section open. */
   value: V
   onChange: (id: V) => void
+  /** One thing to do, at the foot. */
+  action?: SettingsNavAction
   className?: string
   text?: Partial<SettingsNavText>
 }
 
 /** The sections of settings, one under another, the one open lifted. */
-export function SettingsNav<V extends string>({ label, groups, value, onChange, className, text }: SettingsNavProps<V>) {
+export function SettingsNav<V extends string>({ label, groups, value, onChange, action, className, text }: SettingsNavProps<V>) {
   const t = { ...settingsNavText, ...text }
   return (
     <nav aria-label={label} className={cx(s.nav, className)}>
@@ -68,6 +81,14 @@ export function SettingsNav<V extends string>({ label, groups, value, onChange, 
           })}
         </ul>
       ))}
+      {action !== undefined && (
+        <div className={s.foot}>
+          <button type="button" className={cx(s.section, action.danger === true && s.danger)} onClick={action.onSelect}>
+            <Icon name={action.icon} size={14} className={s.icon} />
+            <span className={s.title}>{action.title}</span>
+          </button>
+        </div>
+      )}
     </nav>
   )
 }
