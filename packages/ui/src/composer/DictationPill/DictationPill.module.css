@@ -1,0 +1,165 @@
+/* One width, small or open, whatever it says: it never jumps as words come in. */
+.root {
+  box-sizing: border-box;
+  width: 440px;
+  max-width: 100%;
+  background: var(--paper);
+  box-shadow:
+    inset 0 0 0 1px var(--line-2),
+    var(--lift-card);
+  color: var(--t-2);
+  font-size: 12px;
+}
+
+.pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 4px 0 12px;
+  border-radius: 99px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px 8px 12px;
+  border-radius: 12px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--t-1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* As wide at 0:07 as at 4:59, so the line never shifts. */
+.time {
+  min-width: 3ch;
+}
+
+.to {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--t-1);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.head .to {
+  flex: 1;
+  max-width: none;
+}
+
+/* The newest words at the end, in sight; the oldest fade out at its start. */
+.tail {
+  display: flex;
+  flex: 1;
+  justify-content: flex-end;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--t-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  mask-image: linear-gradient(to right, transparent, #000 28px);
+}
+.tail:hover {
+  color: var(--t-1);
+}
+.tailText {
+  flex: none;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.words {
+  max-height: 144px;
+  overflow-y: auto;
+  color: var(--t-1);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.faint {
+  color: var(--t-3);
+}
+
+.edit {
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 180px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--n-2);
+  color: var(--t-1);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: none;
+  field-sizing: content;
+}
+
+.failed,
+.error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--t-1);
+}
+.error {
+  color: var(--danger);
+}
+
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.grow {
+  flex: 1;
+}
+
+.wave {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+}
+.wave i {
+  width: 2px;
+  height: calc(3px + var(--l, 0) * 13px);
+  border-radius: 1px;
+  background: currentColor;
+  opacity: calc(0.35 + var(--l, 0) * 0.65);
+  transition: height 90ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wave i {
+    transition: none;
+  }
+}

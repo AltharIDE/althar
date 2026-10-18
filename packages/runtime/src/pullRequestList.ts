@@ -100,7 +100,7 @@ export const lineOf = (
 }
 
 /** Why a repository's pull requests couldn't be listed, in words the coordinator can say to the person. */
-const failureWords = (error: ConnectorFailed, noun: string): string => {
+export const failureWords = (error: ConnectorFailed, noun: string): string => {
   if (error.reason === 'forbidden' && error.scope !== undefined)
     return `Althar’s connection can’t list its ${noun}s: it lacks ${error.scope}. The person gives the connection that in Settings, or connects again with a token that has it.`
   if (error.reason === 'forbidden') return `The host refused to list its ${noun}s: ${error.message}`

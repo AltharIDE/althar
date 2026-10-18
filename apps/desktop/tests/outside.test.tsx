@@ -735,7 +735,7 @@ describe('running what a task built, with no agent', () => {
       })),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Run bun run dev' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Run$/ }))
     expect(client.runProject).toHaveBeenCalledWith('p1', 't1', 'th1', 'rnbl_dev')
     // The run comes back on the watch: one for another task, or another project, says nothing here.
     const launch = {
@@ -1260,11 +1260,15 @@ describe('a task’s pull request', () => {
     expect(await screen.findByText(/isn't connected to this repository's host/)).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
     expect(answer).toHaveBeenCalledWith({ attentionId: 'a-not_connected', answer: { kind: 'retry', agentId: 'althar' } })
-    expect(stuckWords.publishing(call('failed_to_start').stuck)).toBe("Althar couldn't open the pull request. The host said no.")
-    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, why: 'restarted', detail: null })).toBe(
-      'Althar stopped again soon after it went back to opening the pull request.',
+    expect(stuckWords.publishing(call('failed_to_start').stuck)).toBe(
+      "Althar couldn't open the pull request. The host said no. Try again, or go on without it.",
     )
-    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, detail: null })).toBe("Althar couldn't open the pull request.")
+    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, why: 'restarted', detail: null })).toBe(
+      'Althar restarted twice while opening the pull request, so it paused in case that caused it. If you restarted Althar yourself, try again.',
+    )
+    expect(stuckWords.publishing({ ...call('failed_to_start').stuck, detail: null })).toBe(
+      "Althar couldn't open the pull request. Try again, or go on without it.",
+    )
   })
 })
 

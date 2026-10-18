@@ -315,6 +315,7 @@ export function ModelBrowser({
                         className={s.use}
                         disabled={off}
                         onClick={() => onPick(m.id)}
+                        title={m.name}
                         aria-label={t.use(m.name, inUse)}
                         aria-describedby={`${via} ${ctx}`}
                       >
@@ -349,7 +350,7 @@ export function ModelBrowser({
                         {onToggleBlocked && (
                           <Tooltip label={t.blockTitle(off)} align="end">
                             <Toggle.Root
-                              className={s.pin}
+                              className={cx(s.pin, s.block)}
                               pressed={off}
                               onPressedChange={() => onToggleBlocked(m.id)}
                               aria-label={t.block(m.name)}

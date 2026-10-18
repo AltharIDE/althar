@@ -18,6 +18,8 @@ export const text = {
   connecting: `Looking at the agents on ${device.this}…`,
   agentHere: (name: string) => `${name} isn’t on ${device.this}`,
   version: (version: string) => `Althar ${version}`,
+  /** Report a problem (DEV-61), in the quick settings' foot and About Althar. */
+  report: 'Report a problem',
   off: 'Off',
   /* The quick settings' cards. */
   awake: 'Keep awake',

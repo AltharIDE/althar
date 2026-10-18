@@ -22,7 +22,7 @@ import type {
   Review,
   Verdict,
 } from './model'
-import { lacking, noReviews } from './model'
+import { branchPath, lacking, noReviews, stillOpen } from './model'
 import {
   type Answer,
   answered,
@@ -87,6 +87,8 @@ const PullAnswer = Schema.Struct({
     branch: Schema.Struct({ name: Schema.String }),
     // The head, by its first twelve characters, which git and Bitbucket both take.
     commit: Schema.optional(Schema.NullOr(Schema.Struct({ hash: Schema.String }))),
+    // The repository the branch is on: a fork's, for a branch from one; null where the fork is gone.
+    repository: Schema.optional(Schema.NullOr(Schema.Struct({ full_name: Schema.String }))),
   }),
   destination: Schema.Struct({ branch: Schema.Struct({ name: Schema.String }) }),
   author: Schema.optional(Schema.NullOr(User)),
@@ -532,6 +534,27 @@ export const makeBitbucketCloud = (options: AdapterOptions): CodeHost => {
           strategy === undefined ? {} : { merge_strategy: strategy },
         )
         return changeOf(repository, yield* http.json(PullAnswer, 'GET', pull(repository, change.number)))
+      }),
+    // Bitbucket's word for closing one unmerged is declining it.
+    closeChange: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
+        if (now.state !== 'OPEN') return changeOf(repository, now)
+        return changeOf(repository, yield* http.json(PullAnswer, 'POST', `${pull(repository, change.number)}/decline`))
+      }),
+    deleteBranch: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', pull(repository, change.number))
+        if (now.state === 'OPEN') return yield* stillOpen(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number)
+        // Its branch is where it came from: a fork's, for one from a fork; a fork that is gone took it along.
+        const on = now.source.repository === undefined ? repository.path : now.source.repository?.full_name.split('/')
+        if (on === undefined) return
+        yield* http.json(Schema.Unknown, 'DELETE', `${repo(on)}/refs/branches/${branchPath(now.source.branch.name)}`).pipe(
+          Effect.catchIf(
+            (error) => error.status === 404,
+            () => Effect.void,
+          ),
+        )
       }),
     checks: (repository, sha) =>
       Effect.map(http.cached(Statuses, `${repo(repository.path)}/commit/${encodeURIComponent(sha)}/statuses?pagelen=100`), (statuses) =>

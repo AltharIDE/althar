@@ -1,6 +1,7 @@
 export {
   Agents,
   type AgentEntry,
+  type AgentStderr,
   type BusyOptions,
   RuntimeConfig,
   type RuntimeOptions,
@@ -10,6 +11,7 @@ export {
 } from './Config'
 export { type AtOnce, Busy } from './Busy'
 export { type AtOnceDefault, atOnceFor, type Machine } from './atOnce'
+export { SignIns } from './SignIns'
 export * from './errors'
 export { Instance, type InstanceInfo } from './Instance'
 export { Live, type LiveEvent } from './Live'

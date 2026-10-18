@@ -11,8 +11,9 @@ import { launch } from './support'
  * An update whose migration can't run on the person's data: a profile made
  * by the version before, then the app again with a migration that always
  * fails (ALTHAR_FAIL_MIGRATION, a test hook). The window says so instead of
- * opening, the copy from before is in the profile's backups, and both the
- * store and the copy are still at the migration the version before left.
+ * opening, the copy from before is in the profile's backups, Report this
+ * opens Report a problem over it, and both the store and the copy are still
+ * at the migration the version before left.
  */
 
 /** The migration a database is at, read with SQLite alone, as nothing of Althar's would change it. */
@@ -50,10 +51,20 @@ test('an update that can’t move the data keeps a copy from before, leaves the 
     copy = join(profile, 'backups', copies[0] ?? '')
     await expect(page.getByRole('region', { name: 'Copy from before the update' })).toContainText(copies[0] ?? '')
     await expect(page.getByRole('region', { name: 'What stopped it' })).toContainText('no such table: no_such_table')
-    // Nothing offers to report it until the app can send a report.
-    await expect(page.getByRole('button', { name: 'Report this' })).toHaveCount(0)
     await page.waitForTimeout(600)
     await page.screenshot({ path: 'test-results/update-stopped.png' })
+
+    // Report this opens Report a problem over the page, about the update, with no runtime to ask: main says what it can itself.
+    await page.getByRole('button', { name: 'Report this' }).click()
+    const report = page.getByRole('dialog', { name: 'Report a problem' })
+    await expect(report).toBeVisible()
+    await expect(report).toContainText('About an update that couldn’t move your data.')
+    await report.getByRole('button', { name: 'See what’s sent' }).click()
+    await expect(report.getByText('Install id')).toBeVisible()
+    await page.screenshot({ path: 'test-results/update-stopped-report.png', animations: 'disabled' })
+    await report.getByRole('button', { name: 'Cancel' }).click()
+    await expect(report).toBeHidden()
+    await expect(page.getByRole('heading', { name: 'This update couldn’t move your data', level: 1 })).toBeVisible()
 
     // Main shows the copy in the file manager, by the path only it holds.
     await electronApp.evaluate(({ shell }) => {

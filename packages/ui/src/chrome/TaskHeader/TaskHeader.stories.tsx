@@ -8,6 +8,7 @@ import { trackOf } from '../../primitives/StepTrack/StepTrack'
 import { States } from '../../storybook/States'
 import { BackCrumb } from '../BackCrumb/BackCrumb'
 import { ChromeButton } from '../ChromeButton/ChromeButton'
+import { RunButton } from '../RunButton/RunButton'
 import { TaskMenu } from '../TaskMenu/TaskMenu'
 import { TitleBar } from '../TitleBar/TitleBar'
 import { TaskHeader, type TaskHeaderProps } from './TaskHeader'
@@ -66,6 +67,7 @@ function Header(props: Partial<TaskHeaderProps<Face>>) {
           onFace={setFace}
           actions={
             <>
+              {props.actions}
               <ChromeButton icon="branch" label="Graph" kbd="g" expanded={graph} onClick={() => setGraph(!graph)} />
               <TaskMenu {...menuFor(props.status ?? BASE.status)} />
             </>
@@ -108,6 +110,30 @@ export const NothingBuilt: Story = {
 /** A title too long for the bar: one line, the whole of it on hover. */
 export const LongTitle: Story = {
   args: { title: 'Repair token refresh on privilege change so that a downgraded admin loses access at once, everywhere' },
+}
+
+/** What an agent kept to run is one long unnamed command: its button says the last part, cut short, and the title keeps its room. */
+export const LongRunCommand: Story = {
+  args: {
+    actions: (
+      <RunButton
+        targets={[
+          {
+            id: 'long',
+            command:
+              'export PATH="$HOME/.bun/bin:$PATH"; unset ELECTRON_RUN_AS_NODE; P=$(pwd); cd apps/desktop && bun run build && cd "$P" && exec zypak-wrapper electron apps/desktop --no-sandbox',
+            where: 'this task',
+            from: 'agent',
+          },
+        ]}
+        onRun={fn()}
+        onStop={fn()}
+        onOpen={fn()}
+        onAdd={fn()}
+        onEdit={fn()}
+      />
+    ),
+  },
 }
 
 export const SwitchingFaces: Story = {

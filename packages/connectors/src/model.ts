@@ -291,6 +291,19 @@ export interface CodeHost {
    * checks or reviews it still needs, with the host's own words.
    */
   merge(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * Closes a change without merging it, because the person said to: never
+   * on an agent's word. Read back as the host has it after; one already
+   * closed or merged is left as it is. Refused, where the account may not,
+   * with the host's own words.
+   */
+  closeChange(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * Deletes a closed change's branch on the host, where the branch is (a
+   * fork's, for one from a fork), because the person said to. Refused for a
+   * change still open; a branch already gone is nothing to do.
+   */
+  deleteBranch(repository: Repository, change: ChangeRequest): Effect.Effect<void, ConnectorFailed>
   checks(repository: Repository, sha: string): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
   /** The end of a check's log, or with `whole` all of it, when the host keeps one Althar can read. */
   checkLog(repository: Repository, check: Check, whole?: boolean): Effect.Effect<string | null, ConnectorFailed>
@@ -327,6 +340,17 @@ export interface CodeHost {
 /** A host's refusal of a review, where it has no `capabilities.reviews`: said in its words for a change. */
 export const noReviews = (product: Product, words: ChangeWords): ConnectorFailed =>
   new ConnectorFailed({ product, reason: 'rejected', message: `Althar can’t review a ${words.noun} on this host yet.` })
+
+/** A host's refusal to delete the branch of a change still open: deleting it would close the change, or orphan it. */
+export const stillOpen = (product: Product, words: ChangeWords, number: number): ConnectorFailed =>
+  new ConnectorFailed({
+    product,
+    reason: 'rejected',
+    message: `${words.short} ${words.prefix}${number} is still open, so its branch stays.`,
+  })
+
+/** A branch as a URL's path takes it: each part encoded, its slashes kept. */
+export const branchPath = (branch: string): string => branch.split('/').map(encodeURIComponent).join('/')
 
 /** A host's refusal to list changes, or to narrow them as asked: said in its words for a change. */
 export const noListing = (product: Product, words: ChangeWords, why?: string): ConnectorFailed =>
