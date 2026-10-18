@@ -52,13 +52,42 @@ describe('the paths a push would send', () => {
         'é/ü.md',
       ])
       assert.deepStrictEqual((yield* pathsPushed(root, before, head)).toSorted(), ['.claude/skills/old/SKILL.md', 'docs-old.md'])
-      // With no base recorded, from where the branch left the default branch; only then, failing that, every path.
+      // With no base recorded, from where the branch left the default branch; only then, failing that, every commit's paths.
       assert.deepStrictEqual(yield* pathsPushed(root, null, head, 'main'), [])
       assert.deepStrictEqual((yield* pathsPushed(root, null, head, 'no-such-ref')).toSorted(), [
+        '.claude/skills/old/SKILL.md',
         'README.md',
         'docs-old.md',
         'src/odd name "q".ts',
         'é/ü.md',
+      ])
+    }),
+  )
+
+  it.live('leaves out what came in with the default branch, but not what a merge slipped in', () =>
+    Effect.gen(function* () {
+      const root = repository()
+      const base = git(root, 'rev-parse', 'HEAD')
+      git(root, 'checkout', '-q', '-b', 'task')
+      commitFiles(root, { 'src/mine.ts': 'mine' })
+      // The default branch moves on with skill and OpenSpec files of its own, fetched where Althar keeps it.
+      git(root, 'checkout', '-q', 'main')
+      const main = commitFiles(root, { '.claude/skills/theirs/SKILL.md': 'theirs', 'openspec/project.md': 'spec' })
+      git(root, 'update-ref', 'refs/althar/base/main', main)
+      git(root, 'checkout', '-q', 'task')
+      git(root, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'merge', '-q', '--no-edit', main)
+      const merged = git(root, 'rev-parse', 'HEAD')
+      assert.deepStrictEqual(yield* pathsPushed(root, base, merged, 'main'), ['src/mine.ts'])
+      // A resolution that adds a skill the default branch never had is the task's own.
+      git(root, 'reset', '-q', '--hard', 'HEAD~1')
+      git(root, '-c', 'user.name=T', '-c', 'user.email=t@t.test', 'merge', '-q', '--no-commit', main)
+      mkdirSync(join(root, '.claude/skills/slipped'), { recursive: true })
+      writeFileSync(join(root, '.claude/skills/slipped/SKILL.md'), 'slipped')
+      git(root, 'add', '-A')
+      git(root, 'commit', '-q', '--no-edit')
+      assert.deepStrictEqual((yield* pathsPushed(root, base, git(root, 'rev-parse', 'HEAD'), 'main')).toSorted(), [
+        '.claude/skills/slipped/SKILL.md',
+        'src/mine.ts',
       ])
     }),
   )

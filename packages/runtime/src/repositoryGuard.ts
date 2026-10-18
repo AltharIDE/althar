@@ -5,23 +5,40 @@ import { PushRefused } from './errors'
 import { gitExactly, gitOutcome } from './git'
 import { Policies, repositoryFilesOf } from './Policies'
 
+/** Where commits come from that are already off the machine, or came onto it from elsewhere: not the task's to answer for. */
+const ELSEWHERE = ['--remotes', '--glob=refs/althar/base/*', '--glob=refs/althar/pushed/*', '--glob=refs/althar/pull-request/*']
+
 /**
- * The paths a push would send that the commits since `base` changed: from git with NUL separators and no quoting,
- * a rename as its old and new paths, so a special character or a rename cannot hide a protected path. With no base
- * recorded, the base is where the branch left `ref` (the repository's default branch); only if that cannot be found
- * either is every path in the head counted, so that a push is held rather than let through unseen.
+ * The paths a push would send that the task's own commits changed: those in `head` that no remote, nor the default
+ * branch Althar merged in, nor what it pushed before, already has, past `base` and `ref` (the repository's default
+ * branch) where they are found. A merge counts only for what its resolution changed against every parent, so files
+ * that came in with the default branch are not the task's, while a protected file slipped into a resolution is. From
+ * git with NUL separators and no quoting, a rename as its old and new paths, so a special character or a rename
+ * cannot hide a protected path. With nothing found to stop at, every commit in the head counts, so that a push is held
+ * rather than let through unseen.
  */
 export const pathsPushed = (cwd: string, base: string | null, head: string, ref?: string) =>
   Effect.gen(function* () {
-    let from = base
-    if (from === null && ref !== undefined) {
-      const found = yield* gitOutcome(cwd, 'merge-base', head, ref)
-      from = found.code === 0 && found.stdout !== '' ? found.stdout : null
+    const stops: Array<string> = []
+    for (const candidate of [base, ref]) {
+      if (candidate === null || candidate === undefined) continue
+      const found = yield* gitOutcome(cwd, 'rev-parse', '--verify', '--quiet', `${candidate}^{commit}`)
+      if (found.code === 0 && found.stdout !== '') stops.push(found.stdout)
     }
-    const listed = yield* from === null
-      ? gitExactly(cwd, 'ls-tree', '-r', '--name-only', '-z', head)
-      : gitExactly(cwd, 'diff', '--name-only', '-z', '--no-renames', from, head)
-    return parseNulPaths(listed)
+    const listed = yield* gitExactly(
+      cwd,
+      'log',
+      '-z',
+      '--format=',
+      '--name-only',
+      '--no-renames',
+      '--diff-merges=dense-combined',
+      head,
+      '--not',
+      ...ELSEWHERE,
+      ...stops,
+    )
+    return [...new Set(parseNulPaths(listed))]
   })
 
 /**
