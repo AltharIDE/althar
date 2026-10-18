@@ -413,6 +413,14 @@ const RoundWaiting = Schema.Struct({
 })
 type RoundWaiting = typeof RoundWaiting.Type
 
+/** Why reading a repository failed, in a sentence: git's first line, before any usage it adds, or what went wrong otherwise. */
+const gitSaid = (cause: Cause.Cause<unknown>) => {
+  const failed = Option.getOrUndefined(Cause.findErrorOption(cause))
+  if (!(failed instanceof GitFailed)) return summarize(cause)
+  const said = failed.stderr.trim().split('\n')[0]?.trim() ?? ''
+  return /[.!?]$/.test(said) ? said : `${said}.`
+}
+
 /** One of a task's repositories here: its worktree and branch, the default branch it merges into, and whether it has a pull request. */
 interface HereRow {
   readonly slug: string
@@ -2118,15 +2126,29 @@ export class Changes extends Context.Service<
       /** A pull request by its repository and number, as the lead names one among several: web#3. */
       const shortNameOf = (snapshot: Snapshot) => `${snapshot.repository.at(-1) ?? ''}${snapshot.words.prefix}${snapshot.number}`
 
-      /** Each of the task's pull requests, read as `readOne` reads one, one after another. */
+      /**
+       * Each of the task's pull requests, read as `readOne` reads one, one
+       * after another: one that can't be read says why on its own, in the
+       * words the tool would have for it, and the rest are read.
+       */
       const read = (taskId: string) =>
         Effect.gen(function* () {
           const urls = yield* urlsOf(taskId)
           if (urls.length <= 1) return yield* readOne(taskId)
           return (yield* Effect.forEach(urls, (seen) =>
-            Effect.map(readOne(taskId, seen.url), (read) => `${shortNameOf(seen)}: ${read}`),
+            readOne(taskId, seen.url).pipe(
+              Effect.catch((error) => {
+                const refused = refusalOf(error)
+                return refused === undefined ? Effect.fail(error) : Effect.succeed(unread(refused))
+              }),
+              contained('Changes.read', (cause) => unread(summarize(cause))),
+              Effect.map((read) => `${shortNameOf(seen)}: ${read}`),
+            ),
           )).join('\n\n')
         })
+
+      /** A pull request the lead's read couldn't, with why. */
+      const unread = (why: string) => `Althar couldn’t read it (${why.replace(/\.$/, '')}).`
 
       /** The task's pull requests as last seen, oldest first. */
       const urlsOf = (taskId: string) =>
@@ -3126,21 +3148,31 @@ export class Changes extends Context.Service<
           if (room) yield* askLead({ id, ...task }, 1, body)
         })
 
-      /** Every round that waits for a place to ask its lead, with since when, and what asks it once it has one. */
+      /**
+       * Every round that waits for a place to ask its lead, with since when,
+       * and what asks it once it has one. One whose ask can't be read is left
+       * out, and the rest still wait.
+       */
       const roundsWaiting = Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient
         const rows = yield* sql<RoundRow>`
           SELECT ${roundColumns(sql)} FROM conflict_resolutions c JOIN threads t ON t.task_id = c.task_id AND t.kind = 'task'
           JOIN tasks k ON k.id = c.task_id JOIN projects p ON p.id = c.project_id
           WHERE c.state = 'resolving' AND c.waiting IS NOT NULL AND k.state = 'open' AND p.archived_at IS NULL`
-        return yield* Effect.forEach(rows, (round) =>
-          Effect.map(decodeWaiting(round.waiting ?? ''), (waited) => ({
-            taskId: round.taskId,
-            order: 'underway' as const,
-            since: waited.since,
-            start: provide(locked(round.taskId)(askWaiting(round.id))),
-          })),
+        const waiting = yield* Effect.forEach(rows, (round) =>
+          decodeWaiting(round.waiting ?? '').pipe(
+            Effect.map((waited) => [
+              {
+                taskId: round.taskId,
+                order: 'underway' as const,
+                since: waited.since,
+                start: provide(locked(round.taskId)(askWaiting(round.id))),
+              },
+            ]),
+            contained('Changes.roundsWaiting', () => []),
+          ),
         )
+        return waiting.flat()
       })
 
       /** A round that waited for a place, asked of its lead now it has one; nothing where it no longer waits, as one the person stopped. */
@@ -3224,8 +3256,16 @@ export class Changes extends Context.Service<
           const uncommitted: Array<Conflict> = []
           for (const conflict of conflicts) {
             const worktree = worktrees.get(conflict.repository)
+            // Git failing in one repository is why that one isn't resolved: the round is still settled.
             const left =
-              worktree === undefined ? { why: 'Its worktree is gone.', uncommitted: false } : yield* unresolved(worktree, conflict)
+              worktree === undefined || !existsSync(worktree)
+                ? { why: 'Its worktree is gone.', uncommitted: false }
+                : yield* unresolved(worktree, conflict).pipe(
+                    contained('Changes.settleRound', (cause) => ({
+                      why: `Althar couldn’t read its worktree: ${gitSaid(cause)}`,
+                      uncommitted: false,
+                    })),
+                  )
             if (left === null) continue
             failures.push(several ? `${conflict.name}: ${left.why}` : left.why)
             if (left.uncommitted) uncommitted.push(conflict)
@@ -3702,14 +3742,17 @@ export class Changes extends Context.Service<
             const sql = yield* SqlClient.SqlClient
             const open = yield* sql<{ id: string; taskId: string }>`
               SELECT id, task_id FROM conflict_resolutions WHERE state = 'resolving' AND waiting IS NULL`
+            // Each round on its own: one that can't be settled waits for the next launch, and the rest are settled.
             for (const round of open)
-              yield* locked(round.taskId)(settleRound(round.id, { why: 'Althar stopped while the lead was resolving it.' }))
+              yield* locked(round.taskId)(settleRound(round.id, { why: 'Althar stopped while the lead was resolving it.' })).pipe(
+                contained('Changes.sweep', () => undefined),
+              )
             // Waiting for checks on a pull request no longer listened to, nothing would end it.
             const unheard = yield* sql<{ id: string; taskId: string }>`
               SELECT c.id, c.task_id FROM conflict_resolutions c WHERE c.state = 'checking' AND NOT EXISTS (
                 SELECT 1 FROM external_links l WHERE l.task_id = c.task_id AND l.kind = 'change' AND l.listening = 1
                   AND json_extract(l.snapshot, '$.url') = c.pull_request_url)`
-            for (const round of unheard) yield* locked(round.taskId)(unfollowed(round.id))
+            for (const round of unheard) yield* locked(round.taskId)(unfollowed(round.id)).pipe(contained('Changes.sweep', () => undefined))
           }),
         ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not look at the conflicts leads were resolving', cause))),
       )
@@ -3997,6 +4040,17 @@ export class Changes extends Context.Service<
           return { link, snapshot, where, ahead, left }
         })
 
+      /** Why a lead's pull request tool can't, in words for it, where that is the host's or the person's to put right; else nothing. */
+      const refusalOf = (error: unknown) => {
+        // A review's lead, reading someone else's pull request, never gets here: its tools are a review's (Reviews.ts).
+        if (error instanceof NotFound && error.kind === 'pull request')
+          return 'This task has no pull request yet. Althar opens one when the plan’s steps are done.'
+        if (error instanceof NotConnected || (error instanceof NotFound && error.kind === 'connection'))
+          return 'Althar isn’t connected to this repository’s host, so it can’t reach the pull request. Tell the person.'
+        if (error instanceof ConnectorFailed) return `The code host said: ${error.message}`
+        return undefined
+      }
+
       /** A lead's tool: refusals reach it in words; anything else says to try again, and goes to the log. */
       const leadTool = (
         name: string,
@@ -4014,19 +4068,8 @@ export class Changes extends Context.Service<
             : provide(call(taskId, value, access)).pipe(
                 Effect.catch((error) => {
                   if (error instanceof ToolRefused) return Effect.fail(error)
-                  // A review's lead, reading someone else's pull request, never gets here: its tools are a review's (Reviews.ts).
-                  if (error instanceof NotFound && error.kind === 'pull request')
-                    return Effect.fail(
-                      new ToolRefused({ message: 'This task has no pull request yet. Althar opens one when the plan’s steps are done.' }),
-                    )
-                  if (error instanceof NotConnected || (error instanceof NotFound && error.kind === 'connection'))
-                    return Effect.fail(
-                      new ToolRefused({
-                        message: 'Althar isn’t connected to this repository’s host, so it can’t reach the pull request. Tell the person.',
-                      }),
-                    )
-                  if (error instanceof ConnectorFailed)
-                    return Effect.fail(new ToolRefused({ message: `The code host said: ${error.message}` }))
+                  const refused = refusalOf(error)
+                  if (refused !== undefined) return Effect.fail(new ToolRefused({ message: refused }))
                   return Effect.andThen(
                     Effect.logWarning('A pull request tool did not succeed', error),
                     Effect.fail(new ToolRefused({ message: 'Althar could not do that. Try again, or tell the person.' })),

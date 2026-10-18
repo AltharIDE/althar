@@ -17,16 +17,17 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
 - [x] **Whether a failure the runtime catches is reported.** Yes, where it
   is kept, unless the person caused it or can put it right: as a handled
   crash report, ten a launch (ADR-047).
-- [ ] **The all-or-nothing places left.** A sweep on 18 October found these
-  and left them for their own change. Conflict rounds still `resolving` at
-  launch are swept one after another, so one whose worktree is gone stops
-  the rest (`Changes.ts`, `settleRound`, `conflicts.ts` `unresolved`). The
-  lead's tool that reads a task's pull requests fails whole for one it can't
-  read (`Changes.ts` `read`). The plans' countdown and the usage-limit holds
-  pick a failing item again at once, and die on one bad row
-  (`Plans.ts` `countdown`, `Runs.ts` `holds`). One bad waiting conflict
-  round hides every one (`Changes.ts` `roundsWaiting`). Leaning: each item
-  its own, with a backoff for one that keeps failing.
+- [x] **The all-or-nothing places left.** A sweep on 18 October found four;
+  each item is now its own. Conflict rounds still `resolving` at launch are
+  settled one by one, and a repository whose worktree is gone or whose git
+  fails is that round's reason, not a stop for the rest. The lead's read of
+  a task's pull requests says of one it can't read why ("web#3: Althar
+  couldn't read it (…)") and reads the others. The plans' countdown and the
+  usage-limit holds read each row on its own, give an item that fails a
+  backoff (`backoff` in `Failures.ts`: 10 seconds, doubling, at most 10
+  minutes), and start again after a round that fails whole (`keptGoing`).
+  One waiting conflict round that can't be read is left out, and the rest
+  still wait (ADR-047).
 
 ## Crash reports, 17 October
 
