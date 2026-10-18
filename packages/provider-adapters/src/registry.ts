@@ -145,6 +145,22 @@ export interface AgentDefinition {
    */
   readonly sessionMeta?: (role?: 'lead' | 'reader', options?: SessionOptions) => Readonly<Record<string, unknown>>
   /**
+   * How a lead's session is given the skills Althar chose for its run (docs/plans/skills-across-harnesses.md), each
+   * from a folder of Althar's own laid out as `layout` (`@althar/skills`' projection), for that session alone: never
+   * the account's home, the person's own folders or a repository. `capabilities`, what it can do that a skill may
+   * need: one needing more is left out and reported. `via`, how the session finds the folder: `meta`, its
+   * `sessionMeta` (given `skills` in its options); `directory`, as a directory added to the session; `env`, what its
+   * environment adds over its own. Without it, its sessions get none.
+   */
+  readonly skills?: {
+    readonly layout: 'claude-plugin' | 'agents' | 'plain'
+    readonly capabilities: ReadonlyArray<string>
+    readonly via:
+      | { readonly kind: 'meta' }
+      | { readonly kind: 'directory' }
+      | { readonly kind: 'env'; readonly env: (folder: string, own: Readonly<Record<string, string>>) => Readonly<Record<string, string>> }
+  }
+  /**
    * How it is held as the lead of a review of someone else's pull request
    * (docs/architecture/06), beyond its reader mode and `sessionMeta`.
    * `env`, what its environment adds over `withoutOwnTools`' (which it is
@@ -187,11 +203,11 @@ export interface SessionOptions {
   readonly offline?: boolean
   readonly untrusted?: boolean
   /**
-   * A folder of skills Althar chose for this run, laid out as a Claude Code local plugin (`@althar/skills`'
-   * `claude-plugin` layout) and loaded for the session alone. Only a lead's session is given one; the
-   * person's own Claude folder and the repository are never written to.
+   * The folder of skills Althar chose for this run, laid out as the agent's `skills.layout` says and loaded for
+   * the session alone. Only a lead's session is given one; the person's own folders and the repository are never
+   * written to.
    */
-  readonly skillsPlugin?: string
+  readonly skills?: string
 }
 
 export interface AgentCli {
@@ -361,6 +377,13 @@ const openCodeReviewing = (own: Readonly<Record<string, string>>): Readonly<Reco
   }
 }
 
+/** OpenCode's config as its environment carries it, with the run's skills folder among its `skills.paths`. */
+const openCodeSkills = (folder: string, own: Readonly<Record<string, string>>): Readonly<Record<string, string>> => {
+  const config = JSON.parse(own.OPENCODE_CONFIG_CONTENT ?? openCodeConfig) as Readonly<Record<string, unknown>>
+  const skills = (config.skills ?? {}) as { readonly paths?: ReadonlyArray<string> }
+  return { OPENCODE_CONFIG_CONTENT: JSON.stringify({ ...config, skills: { ...skills, paths: [...(skills.paths ?? []), folder] } }) }
+}
+
 /**
  * Codex as the lead of a review of someone else's pull request, through the
  * config codex-acp merges into every session it starts (`CODEX_CONFIG`, read
@@ -406,12 +429,12 @@ const codexReviewing = (own: Readonly<Record<string, string>>): Readonly<Record<
  * Only the MCP servers Althar gives a session are loaded, not the user's
  * or the repository's own, whose tools the ask list doesn't cover.
  */
-const claudeAsks = (skillsPlugin?: string) => ({
+const claudeAsks = (skills?: string) => ({
   claudeCode: {
     options: {
       allowDangerouslySkipPermissions: false,
       strictMcpConfig: true,
-      ...(skillsPlugin === undefined ? {} : { plugins: [{ type: 'local', path: skillsPlugin }] }),
+      ...(skills === undefined ? {} : { plugins: [{ type: 'local', path: skills }] }),
       // An object: the adapter reads a string as a path to a settings file.
       settings: {
         permissions: { ask: ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'WebFetch'] },
@@ -524,7 +547,9 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     sessionMeta: (role = 'lead', options = {}) =>
       role === 'reader'
         ? claudeReads(process.env.FLATPAK_ID !== undefined, options.offline === true, options.untrusted === true)
-        : claudeAsks(options.skillsPlugin),
+        : claudeAsks(options.skills),
+    /* A local plugin its session loads (claudeAsks); it dispatches subagents. */
+    skills: { layout: 'claude-plugin', capabilities: ['subagents'], via: { kind: 'meta' } },
     /*
      * As a review's lead it is held by its session's settings alone (claudeReads, untrusted): every command asks and meets
      * Althar's reader rules, no settings file or hook of the repository's or the person's loads, and offline its web tools are
@@ -595,6 +620,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     withoutOwnTools: codexWithoutOwnTools,
     reviewing: { outside: false, env: codexReviewing },
     /*
+     * codex-acp 2.2.2 sets Codex's extra skill roots to `<dir>/.agents/skills` of each of a session's added directories
+     * (`skills/extraRoots/set`, Codex 0.160). That also makes the folder writable in its sandbox: only the run's own
+     * read-only copies are there. Whether it dispatches subagents isn't settled, so a skill that needs them is left out.
+     */
+    skills: { layout: 'agents', capabilities: [], via: { kind: 'directory' } },
+    /*
      * From codex-acp's ApprovalOptionId. `decline` skips a command and carries
      * on; `cancel` stops the turn and is the only rejection offered for a file
      * edit. Allowing a permission profile reaches the rest of the turn.
@@ -608,6 +639,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
       'It works inside its sandbox without asking: it edits the workspace and runs commands there, and asks only to go beyond it, such as for the network. As a reader too, so it never leads a review of a pull request from outside.',
       "codex-acp marks every session folder trusted, so a repository's own `.codex` config and hooks apply; a review's lead has hooks off.",
       'Usage limits are held by the adapter but only shown as /status text; only errors show them over ACP.',
+      "Beside Althar's skills it loads the person's own from the shared `skills` folder and `~/.agents/skills`, as it always does.",
     ],
     cli: {
       name: 'codex',
@@ -668,6 +700,12 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     version: () => ({ command: 'opencode', args: ['--version'] }),
     withoutOwnTools: openCodeWithoutOwnTools(openCodeBase),
     reviewing: { outside: true, env: openCodeReviewing },
+    /* Its config's `skills.paths`, each searched for every `SKILL.md` below it (OpenCode 1.19.0), beside its own config; its task tool runs subagents. */
+    skills: {
+      layout: 'plain',
+      capabilities: ['subagents'],
+      via: { kind: 'env', env: (folder, own) => openCodeSkills(folder, own) },
+    },
     /* MIT licensed; its releases are at anomalyco/opencode (sst/opencode before), each file with GitHub's sha256. Seen 9 October 2026, v1.18.35. */
     cli: {
       name: 'opencode',
@@ -690,6 +728,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     knownGaps: [
       'Provider rate limits come back as errors; API keys have no plan windows.',
       'Carrying on after a rejection relies on an experimental setting, continue_loop_on_deny.',
+      "Beside Althar's skills it loads the person's own from `~/.claude/skills` and `~/.agents/skills`, as it always does.",
     ],
   },
 }

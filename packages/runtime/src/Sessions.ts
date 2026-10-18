@@ -38,7 +38,7 @@ import { SqlClient, type SqlError } from 'effect/sql'
 import { type Account, Accounts } from './Accounts'
 import { Artifacts } from './Artifacts'
 import { Agents, type AgentEntry, RuntimeConfig } from './Config'
-import { claudeRunSkills } from './Skills'
+import { runSkills } from './Skills'
 import { type CoordinatorFolder, coordinatorFolder } from './coordinatorFolder'
 import { coordinatorNews, type ModelNamer, modelNamer } from './coordinatorNews'
 import { CACHE_LIFE, dueForHandover, dueForLeadHandover, handoverRecord, notesSection, roomFor, shrinks } from './handover'
@@ -1565,7 +1565,29 @@ export class Sessions extends Context.Service<
           }
           // In the account's home: its sign-in, not the agent's usual one (ADR-012), with what it shares brought up to date.
           yield* accounts.prepare(account)
-          const transport = entry.transport(cwdOf(thread), accounts.env(account), untrusted ? { untrusted } : undefined)
+          // The session's own scope, from here, so whatever it is given goes with it.
+          const scope = yield* Scope.fork(sessionsScope, 'sequential')
+          // Skills Althar selected, for a task's lead only (never a reader, a reviewer or a review's lead), on any agent its registry
+          // says how to give them to, in Althar's own folder for this session: nothing goes in the repository, the account's home or
+          // the person's own folders. A failure here costs the session its skills, not its start.
+          const skills =
+            !reads && skillsConfig !== undefined && definition.skills !== undefined
+              ? yield* Effect.tryPromise(() => runSkills(skillsConfig, definition, sessionId, foldersOf(thread))).pipe(
+                  Effect.tap((run) =>
+                    run === undefined ? Effect.void : Scope.addFinalizer(scope, Effect.promise(run.release).pipe(Effect.ignore)),
+                  ),
+                  Effect.catch((cause) => Effect.logWarning('Could not set up skills for the session', cause).pipe(Effect.as(undefined))),
+                )
+              : undefined
+          const sessionOptions = {
+            ...(untrusted ? { untrusted } : {}),
+            ...(skills === undefined ? {} : { skills: skills.folder }),
+          }
+          const transport = entry.transport(
+            cwdOf(thread),
+            accounts.env(account),
+            untrusted || skills !== undefined ? sessionOptions : undefined,
+          )
           const processId = transport._tag === 'Process' ? yield* newId(Ids.process) : undefined
           if (transport._tag === 'Process' && processId !== undefined) {
             // Recorded before it is spawned, so a crash in between leaves a trace to reconcile.
@@ -1615,7 +1637,6 @@ export class Sessions extends Context.Service<
             sessionId,
             taskId: thread.role === 'coordinator' ? null : thread.taskId,
           })
-          const scope = yield* Scope.fork(sessionsScope, 'sequential')
           const started = yield* Effect.exit(
             Effect.gen(function* () {
               const connection = yield* connect({
@@ -1633,18 +1654,6 @@ export class Sessions extends Context.Service<
                         ),
                     }),
               })
-              // Skills Althar selected, for a Claude Code lead only (never a reader, a reviewer or a review's lead), as a plugin in
-              // Althar's own folder for this session: nothing goes in the repository or the person's Claude folder. A failure here
-              // costs the session its skills, not its start.
-              const skills =
-                !reads && definition.id === 'claude-code' && skillsConfig !== undefined
-                  ? yield* Effect.tryPromise(() => claudeRunSkills(skillsConfig, sessionId, foldersOf(thread))).pipe(
-                      Effect.tap((run) => Effect.addFinalizer(() => Effect.promise(run.release).pipe(Effect.ignore))),
-                      Effect.catch((cause) =>
-                        Effect.logWarning('Could not set up skills for the session', cause).pipe(Effect.as(undefined)),
-                      ),
-                    )
-                  : undefined
               const agent = yield* connection.newSession({
                 cwd: cwdOf(thread),
                 // The coordinator, a reviewer and a review's lead only read: in the agent's read-only mode where that still lets it call
@@ -1652,6 +1661,7 @@ export class Sessions extends Context.Service<
                 mode: reads ? definition.modes.reader : definition.modes.ask,
                 modeOptionId: definition.options.mode,
                 mcpServers: [tools.server],
+                ...(skills !== undefined && definition.skills?.via.kind === 'directory' ? { additionalDirectories: [skills.folder] } : {}),
                 ...(definition.sessionMeta === undefined
                   ? {}
                   : {
@@ -1660,7 +1670,7 @@ export class Sessions extends Context.Service<
                         untrusted || skills !== undefined
                           ? {
                               ...(untrusted ? { untrusted, ...(offline ? { offline } : {}) } : {}),
-                              ...(skills === undefined ? {} : { skillsPlugin: skills.plugin }),
+                              ...(skills === undefined ? {} : { skills: skills.folder }),
                             }
                           : undefined,
                       ),
@@ -1701,6 +1711,15 @@ export class Sessions extends Context.Service<
               osStartedAt: connection.process.osStartedAt ?? null,
               environmentDigest: connection.process.environmentDigest,
               state: 'running',
+            })
+          }
+          // A skill this agent can't use is shown as a difference from the others, not hidden.
+          if (skills !== undefined && skills.omitted.length > 0) {
+            yield* addItem({ projectId: thread.projectId, threadId: thread.threadId, sessionId }, 'notice', {
+              source: 'runtime',
+              severity: 'info',
+              title: `${definition.name} wasn't given ${skills.omitted.length === 1 ? 'a skill' : `${skills.omitted.length} skills`} it can't use.`,
+              description: skills.omitted.map(({ id, missing }) => `${id} needs ${missing.join(', ')}`).join('; '),
             })
           }
           return { sessionId, entry, account, thread, connection, agent, scope, revokeTools: tools.revoke, requestContext }

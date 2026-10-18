@@ -118,6 +118,20 @@ export const definition = (id: string, signedOut: ReadonlyArray<string> = [], pe
         },
       }
     : {}),
+  // Given a run's skills as the registry's agents of the same id are: in its session, as an added directory, in its environment.
+  ...(id === 'claude-code'
+    ? { skills: { layout: 'claude-plugin' as const, capabilities: ['subagents'], via: { kind: 'meta' as const } } }
+    : id === 'codex'
+      ? { skills: { layout: 'agents' as const, capabilities: [], via: { kind: 'directory' as const } } }
+      : id === 'opencode'
+        ? {
+            skills: {
+              layout: 'plain' as const,
+              capabilities: ['subagents'],
+              via: { kind: 'env' as const, env: (folder: string) => ({ FAKE_SKILLS: folder }) },
+            },
+          }
+        : {}),
   // Each may lead a review of a pull request from outside but `codex`, as the registry's Codex may not.
   reviewing: { outside: id !== 'codex' },
   knownGaps: [],

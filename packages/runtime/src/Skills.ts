@@ -1,3 +1,4 @@
+import type { AgentDefinition } from '@althar/provider-adapters'
 import { releaseRun, installLocalCatalog, projectRun, activeSelection } from '@althar/skills'
 
 /** Where the shared skill store is and the local catalog that seeds it (docs/plans/skills-across-harnesses.md). Without it, runs have no Althar-selected skills. */
@@ -9,32 +10,45 @@ export interface SkillsConfig {
 }
 
 export interface RunSkills {
-  /** The folder to hand the agent as a local plugin. */
-  readonly plugin: string
-  /** Skills left out because Claude Code lacks a capability they need. */
+  /** The folder the agent is pointed at, laid out as its registry entry's `skills.layout` says. */
+  readonly folder: string
+  /** The skills it is given. */
+  readonly projected: ReadonlyArray<string>
+  /** Skills left out because the agent lacks a capability they need. */
   readonly omitted: ReadonlyArray<{ readonly id: string; readonly missing: ReadonlyArray<string> }>
   readonly release: () => Promise<void>
 }
 
-/** What Claude Code can do that skills may need. It dispatches subagents. */
-const CLAUDE_CODE_CAPABILITIES: ReadonlyArray<string> = ['subagents']
-
 /**
- * The skills Althar selected for one Claude Code run, laid out under the store's `runs/<run-id>/` as a plugin for
- * that session alone. `keepOutOf` lists the run's repositories and worktrees: the store is refused inside any of them,
- * so a misplaced profile cannot put skill files in a checkout. Nothing is written to the person's Claude folder.
+ * The skills Althar selected for one run of an agent, laid out under the store's `runs/<run-id>/<agent>/` as the
+ * agent's registry entry says, for that session alone; undefined for an agent with no way to be given them. Every
+ * agent is given the same active set, less what it can't do. `keepOutOf` lists the run's repositories and worktrees:
+ * the store is refused inside any of them, so a misplaced profile cannot put skill files in a checkout. Nothing is
+ * written to the agent's home or the person's own folders.
  */
-export const claudeRunSkills = async (config: SkillsConfig, runId: string, keepOutOf: ReadonlyArray<string>): Promise<RunSkills> => {
+export const runSkills = async (
+  config: SkillsConfig,
+  definition: Pick<AgentDefinition, 'id' | 'skills'>,
+  runId: string,
+  keepOutOf: ReadonlyArray<string>,
+): Promise<RunSkills | undefined> => {
+  const { skills } = definition
+  if (skills === undefined) return undefined
   const catalog = await installLocalCatalog(config.root, config.catalog)
   const needs = new Map(catalog.skills.map(({ entry }) => [entry.id, entry.needs]))
   const projected = await projectRun({
     root: config.root,
     runId,
-    agent: 'claude-code',
+    agent: definition.id,
     selected: await activeSelection(config.root, needs),
-    capabilities: CLAUDE_CODE_CAPABILITIES,
+    capabilities: skills.capabilities,
     keepOutOf,
-    layout: 'claude-plugin',
+    layout: skills.layout,
   })
-  return { plugin: projected.directory, omitted: projected.omitted, release: () => releaseRun(config.root, runId) }
+  return {
+    folder: projected.directory,
+    projected: projected.projected,
+    omitted: projected.omitted,
+    release: () => releaseRun(config.root, runId),
+  }
 }

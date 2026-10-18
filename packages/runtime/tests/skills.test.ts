@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -9,12 +9,12 @@ import type { RuntimeOptions } from '../src/Config'
 import { SqlClient } from 'effect/sql'
 
 import { Sessions } from '../src/Sessions'
-import { claudeRunSkills } from '../src/Skills'
-import { launches, runtime, sessionMetas, task } from './support'
+import { runSkills } from '../src/Skills'
+import { launches, notices, runtime, sessionMetas, task } from './support'
 
 /*
- * Althar-selected skills reach a Claude Code lead as a plugin in Althar's own folder, for that session alone
- * (docs/plans/skills-across-harnesses.md): never in the worktree, never for another agent or role.
+ * Althar-selected skills reach a task's lead on every agent the registry says how to give them to, from Althar's own
+ * folder, for that session alone (docs/plans/skills-across-harnesses.md): never in the worktree, never another role.
  */
 
 const skill = (name: string) => ({
@@ -47,7 +47,7 @@ const withStore = <A, E, R>(
     (store) => body(store).pipe(Effect.provide(runtime(':memory:', {}, { skills: store }))),
   )
 
-describe('skills for a Claude Code lead', () => {
+describe('skills for a task’s lead', () => {
   it.live('gives the lead the active skills as a plugin in the store, outside the worktree, and removes it when the session ends', () =>
     withStore({ alpha: skill('alpha'), beta: skill('beta') }, { beta: ['subagents'] }, (skills) =>
       Effect.gen(function* () {
@@ -58,7 +58,7 @@ describe('skills for a Claude Code lead', () => {
         assert.isTrue(sessionMetas.length > before)
         const meta = sessionMetas.at(-1)
         assert.strictEqual(meta?.role, 'lead')
-        const plugin = meta?.options?.skillsPlugin ?? ''
+        const plugin = meta?.options?.skills ?? ''
         assert.isTrue(plugin.startsWith(join(skills.root, 'runs')), plugin)
         assert.include(readFileSync(join(plugin, 'skills', 'alpha', 'SKILL.md'), 'utf8'), 'name: alpha')
         assert.include(readFileSync(join(plugin, '.claude-plugin', 'plugin.json'), 'utf8'), '"name": "althar"')
@@ -74,16 +74,41 @@ describe('skills for a Claude Code lead', () => {
     ),
   )
 
-  it.live('gives another agent none', () =>
-    withStore({ alpha: skill('alpha') }, {}, (skills) =>
+  it.live('gives a Codex lead the same skills as an added directory, less one it cannot use, and says so', () =>
+    withStore({ alpha: skill('alpha'), beta: skill('beta') }, { beta: ['subagents'] }, (skills) =>
       Effect.gen(function* () {
         const sessions = yield* Sessions
         const { task: created } = yield* task()
-        const seen = launches.length
         yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
-        assert.isTrue(launches.length > seen)
-        assert.isFalse(existsSync(join(skills.root, 'runs')))
+        const [run = ''] = readdirSync(join(skills.root, 'runs'))
+        const folder = join(skills.root, 'runs', run, 'codex')
+        assert.include(readFileSync(join(folder, '.agents', 'skills', 'alpha', 'SKILL.md'), 'utf8'), 'name: alpha')
+        // Beta needs subagents, which Codex isn't counted on for: left out, and the thread says so.
+        assert.isFalse(existsSync(join(folder, '.agents', 'skills', 'beta')))
+        const said = yield* notices(created.threadId)
+        assert.isTrue(
+          said.some((notice) => notice.description === 'beta needs subagents'),
+          JSON.stringify(said),
+        )
+        const worktree = yield* worktreeOf(created.threadId)
+        for (const root of ['.claude', '.agents', '.opencode', 'openspec']) assert.isFalse(existsSync(join(worktree, root)), root)
         yield* sessions.stop(created.threadId)
+        assert.isFalse(existsSync(folder))
+      }),
+    ),
+  )
+
+  it.live('gives an OpenCode lead the same skills through its environment', () =>
+    withStore({ alpha: skill('alpha'), beta: skill('beta') }, { beta: ['subagents'] }, (skills) =>
+      Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const { task: created } = yield* task()
+        yield* sessions.start({ threadId: created.threadId, agentId: 'opencode' })
+        const folder = launches.at(-1)?.options?.skills ?? ''
+        assert.isTrue(folder.startsWith(join(skills.root, 'runs')), folder)
+        assert.deepStrictEqual(readdirSync(folder).toSorted(), ['alpha', 'beta'])
+        yield* sessions.stop(created.threadId)
+        assert.isFalse(existsSync(folder))
       }),
     ),
   )
@@ -93,7 +118,7 @@ describe('skills for a Claude Code lead', () => {
       const sessions = yield* Sessions
       const { task: created } = yield* task()
       yield* sessions.start({ threadId: created.threadId, agentId: 'claude-code' })
-      assert.isUndefined(sessionMetas.at(-1)?.options?.skillsPlugin)
+      assert.isUndefined(sessionMetas.at(-1)?.options?.skills)
       yield* sessions.stop(created.threadId)
     }).pipe(Effect.provide(runtime())),
   )
@@ -105,7 +130,7 @@ describe('skills for a Claude Code lead', () => {
         const sessions = yield* Sessions
         const { task: created } = yield* task()
         yield* sessions.start({ threadId: created.threadId, agentId: 'claude-code' })
-        assert.isUndefined(sessionMetas.at(-1)?.options?.skillsPlugin)
+        assert.isUndefined(sessionMetas.at(-1)?.options?.skills)
         yield* sessions.stop(created.threadId)
       }),
     ),
@@ -116,12 +141,15 @@ describe('setting skills up for several leads at once', () => {
   it.live('keeps the store consistent and gives each its own run', () =>
     Effect.promise(async () => {
       const skills = await makeStore({ alpha: skill('alpha'), beta: skill('beta') }, {})
-      const runs = await Promise.all(Array.from({ length: 8 }, (_, at) => claudeRunSkills(skills, `run-${at}`, [])))
+      const claude = { id: 'claude-code', skills: { layout: 'claude-plugin', capabilities: [], via: { kind: 'meta' } } } as const
+      const runs = (await Promise.all(Array.from({ length: 8 }, (_, at) => runSkills(skills, claude, `run-${at}`, [])))).flatMap((run) =>
+        run === undefined ? [] : [run],
+      )
       for (const run of runs) {
-        assert.isTrue(existsSync(join(run.plugin, 'skills', 'alpha', 'SKILL.md')))
-        assert.isTrue(existsSync(join(run.plugin, 'skills', 'beta', 'SKILL.md')))
+        assert.isTrue(existsSync(join(run.folder, 'skills', 'alpha', 'SKILL.md')))
+        assert.isTrue(existsSync(join(run.folder, 'skills', 'beta', 'SKILL.md')))
       }
-      assert.strictEqual(new Set(runs.map((run) => run.plugin)).size, 8)
+      assert.strictEqual(new Set(runs.map((run) => run.folder)).size, 8)
       const installs = JSON.parse(readFileSync(join(skills.root, 'installs.json'), 'utf8')) as {
         installs: Array<{ id: string; active: boolean }>
       }

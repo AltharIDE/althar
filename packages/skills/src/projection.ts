@@ -13,8 +13,10 @@ export interface Selected {
  * How a run's directory is laid out. `plain`: `<agent>/<id>/…`. `claude-plugin`: a local plugin Claude Code loads
  * for the session alone (`plugins: [{ type: 'local', path }]`), `<agent>/plugin/skills/<id>/…` with a manifest
  * that names no hooks, commands, agents or servers, so nothing is written to the person's Claude home or a repository.
+ * `agents`: `<agent>/.agents/skills/<id>/…`, the Agent Skills folder Codex looks for in each of a session's added
+ * directories, so `directory` is handed to it as one.
  */
-export type Layout = 'plain' | 'claude-plugin'
+export type Layout = 'plain' | 'claude-plugin' | 'agents'
 
 export interface Projected {
   readonly directory: string
@@ -58,7 +60,8 @@ export const projectRun = async (input: {
   if (!/^[\w.-]+$/.test(runId) || !/^[\w.-]+$/.test(agent) || runId === '.' || runId === '..') throw new Error('unsafe run or agent name')
   const base = join(root, 'runs', runId, agent)
   const directory = layout === 'claude-plugin' ? join(base, 'plugin') : base
-  const skillsAt = layout === 'claude-plugin' ? join(directory, 'skills') : directory
+  const skillsAt =
+    layout === 'claude-plugin' ? join(directory, 'skills') : layout === 'agents' ? join(directory, '.agents', 'skills') : directory
   const where = await canonical(base)
   for (const repository of keepOutOf) {
     const there = await canonical(repository)

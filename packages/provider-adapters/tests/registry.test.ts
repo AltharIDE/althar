@@ -37,12 +37,29 @@ describe('the agent registry', () => {
     type Meta = { claudeCode: { options: { plugins?: Array<{ type: string; path: string }>; allowDangerouslySkipPermissions: boolean } } }
     const without = agents['claude-code'].sessionMeta?.('lead', {}) as Meta
     assert.isUndefined(without.claudeCode.options.plugins)
-    const lead = agents['claude-code'].sessionMeta?.('lead', { skillsPlugin: '/data/skills/runs/r1/claude-code/plugin' }) as Meta
+    const lead = agents['claude-code'].sessionMeta?.('lead', { skills: '/data/skills/runs/r1/claude-code/plugin' }) as Meta
     assert.deepStrictEqual(lead.claudeCode.options.plugins, [{ type: 'local', path: '/data/skills/runs/r1/claude-code/plugin' }])
     assert.isFalse(lead.claudeCode.options.allowDangerouslySkipPermissions)
     // A reader (and so a review's lead) is given none, even if one is passed.
-    const reader = agents['claude-code'].sessionMeta?.('reader', { skillsPlugin: '/x', untrusted: true }) as Meta
+    const reader = agents['claude-code'].sessionMeta?.('reader', { skills: '/x', untrusted: true }) as Meta
     assert.isUndefined(reader.claudeCode.options.plugins)
+  })
+
+  it('says how each agent is given the run’s skills: Claude Code in its session, Codex as an added directory, OpenCode in its config', () => {
+    assert.deepStrictEqual(
+      Object.fromEntries(Object.values(agents).map((agent) => [agent.id, [agent.skills?.layout, agent.skills?.via.kind]])),
+      { 'claude-code': ['claude-plugin', 'meta'], codex: ['agents', 'directory'], opencode: ['plain', 'env'] },
+    )
+    const via = agents.opencode.skills?.via
+    assert.strictEqual(via?.kind, 'env')
+    if (via?.kind !== 'env') return
+    const own = agents.opencode.launch('/usr/bin/node').env ?? {}
+    const config = JSON.parse(via.env('/data/skills/runs/r1/opencode', own).OPENCODE_CONFIG_CONTENT ?? '{}')
+    // Its asks are kept: the skills folder is added to them, not put in their place.
+    assert.deepStrictEqual(config, {
+      ...JSON.parse(own.OPENCODE_CONFIG_CONTENT ?? '{}'),
+      skills: { paths: ['/data/skills/runs/r1/opencode'] },
+    })
   })
 
   it('makes Claude Code ask, and keeps bypass mode out of reach', () => {

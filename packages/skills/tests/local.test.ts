@@ -114,6 +114,25 @@ describe('the Claude Code plugin layout', () => {
   })
 })
 
+describe('the Agent Skills layout', () => {
+  it('puts skills under the run folder’s .agents/skills, which a session is given as an added directory', async () => {
+    await writeCatalog(catalog, { alpha: good('alpha') })
+    await installLocalCatalog(root, catalog)
+    const result = await projectRun({
+      root,
+      runId: 'r1',
+      agent: 'codex',
+      selected: await activeSelection(root, new Map()),
+      capabilities: [],
+      keepOutOf: ['/repo'],
+      layout: 'agents',
+    })
+    expect(result.directory).toBe(join(root, 'runs', 'r1', 'codex'))
+    expect(await readFile(join(result.directory, '.agents', 'skills', 'alpha', 'SKILL.md'), 'utf8')).toContain('name: alpha')
+    expect(result.projected).toEqual(['alpha'])
+  })
+})
+
 describe('parseNulPaths', () => {
   it('splits NUL-separated paths, keeping spaces and quotes as they are', () => {
     expect(parseNulPaths('a b.md\0"q".md\0\0')).toEqual(['a b.md', '"q".md'])
