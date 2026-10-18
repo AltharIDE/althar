@@ -8,7 +8,6 @@ import {
   Conflicts,
   Identity,
   MoveIssues,
-  Notes,
   overlay,
   RemoveRow,
   RunRows,
@@ -16,7 +15,7 @@ import {
   TrackerRows,
   WhereRows,
 } from '../parts'
-import { RepositoriesScreen, RulesScreen, sectionText } from '../sections'
+import { NotesSection, RepositoriesScreen, RulesScreen, sectionText } from '../sections'
 import { SECTIONS, type Section, useProto } from '../state'
 import c from './pages.module.css'
 
@@ -112,7 +111,7 @@ export function C({ things }: { things: Things }) {
           </div>
         </Part>
         <Part id="notes">
-          <Notes things={things} />
+          <NotesSection things={things} />
         </Part>
         <section className={c.section}>
           <div className={c.clauses}>

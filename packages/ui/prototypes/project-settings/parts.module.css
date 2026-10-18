@@ -30,3 +30,9 @@
 .bare {
   height: 100%;
 }
+
+/* a brand's own mark where the row's glyph goes: no black circle around it */
+.plainGlyph > span:first-child {
+  background: none;
+  color: var(--t-1);
+}

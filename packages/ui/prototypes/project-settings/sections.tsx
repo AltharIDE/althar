@@ -1,14 +1,14 @@
 // Scrappy: the project's settings by section, as every direction shows them: what each is called and says, and what is in it, from the app's own screens and rows.
 import type { ReactNode } from 'react'
 
-import { Button, ControlGrid, ControlToggle, Heading, Icon, type IconName, SettingList } from '../../src/index'
+import { Button, ControlGrid, ControlToggle, Heading, Icon, IconButton, type IconName, SettingList } from '../../src/index'
 import {
+  AddTrackerMenu,
   AllowEverything,
   AppWide,
   Conflicts,
   Identity,
   MoveIssues,
-  Notes,
   overlay,
   RemoveRow,
   RunRows,
@@ -23,7 +23,7 @@ import { proto, type Section } from './state'
 
 import { useConnections } from '../../../../apps/desktop/src/renderer/features/connections/useConnections'
 import { RepositoriesView } from '../../../../apps/desktop/src/renderer/features/repositories/RepositoriesView'
-import { useRepositories } from '../../../../apps/desktop/src/renderer/features/repositories/useRepositories'
+import { type RepositoriesModel, useRepositories } from '../../../../apps/desktop/src/renderer/features/repositories/useRepositories'
 import { RulesView } from '../../../../apps/desktop/src/renderer/features/rules/RulesView'
 import { useRules } from '../../../../apps/desktop/src/renderer/features/rules/useRules'
 
@@ -81,10 +81,11 @@ export function RulesScreen({ bare = true }: { bare?: boolean }) {
   )
 }
 
-export function RepositoriesScreen({ bare = true }: { bare?: boolean }) {
+export function RepositoriesScreen({ bare = true, model }: { bare?: boolean; model?: RepositoriesModel }) {
+  const own = useRepositories(PROJECT)
   return (
     <Embed bare={bare}>
-      <RepositoriesView model={useRepositories(PROJECT)} connections={useConnections()} onBack={leave} />
+      <RepositoriesView model={model ?? own} connections={useConnections()} onBack={leave} />
     </Embed>
   )
 }
@@ -151,8 +152,8 @@ export function QuickCards({ things, columns = 2, onSection }: { things: Things;
 
 /* ——— What is in each section. ——— */
 
-/** Where the page has the quick cards, its switches are there, not here again. */
-export function General({ things, switches = true }: { things: Things; switches?: boolean }) {
+/** Where the page has the quick cards, its switches are there, not here again; where its side has Remove, so is that. */
+export function General({ things, switches = true, remove = true }: { things: Things; switches?: boolean; remove?: boolean }) {
   return (
     <div className={css.stack}>
       <Identity things={things} />
@@ -165,23 +166,60 @@ export function General({ things, switches = true }: { things: Things; switches?
           </SettingList>
         </div>
       )}
-      <div className={css.away}>
-        <SettingList>
-          <RemoveRow things={things} />
-        </SettingList>
-      </div>
+      {remove && (
+        <div className={css.away}>
+          <SettingList>
+            <RemoveRow things={things} />
+          </SettingList>
+        </div>
+      )}
     </div>
   )
 }
 
+/**
+ * Its repositories, under a heading of its own with the way to add one, then
+ * its trackers the same way: two headings in the section's one style, the
+ * repositories screen's own big title and drop line left out.
+ */
 export function CodeAndIssues({ things, bare = true }: { things: Things; bare?: boolean }) {
+  const repositories = useRepositories(PROJECT)
+  const anyTracker = things.trackers.length > 0
   return (
     <div className={css.stack}>
-      <RepositoriesScreen bare={bare} />
       <div>
-        <Sub title="Trackers" note="Where its issues are. Tasks start from them, and move them as they go." />
+        <Sub
+          title="Repositories"
+          note="Its folders on this Mac, and where each one’s work goes."
+          end={
+            bare ? (
+              <Button size="small" onClick={() => void repositories.add()}>
+                <Icon name="plus" size={13} /> Add a folder
+              </Button>
+            ) : undefined
+          }
+        />
+        <RepositoriesScreen bare={bare} model={repositories} />
+      </div>
+      <div className={css.trackers}>
+        <Sub
+          title="Trackers"
+          note="Where its issues are. Tasks start from them, and move them as they go."
+          end={
+            anyTracker ? (
+              <AddTrackerMenu
+                things={things}
+                trigger={
+                  <Button size="small">
+                    <Icon name="plus" size={13} /> Add a tracker
+                  </Button>
+                }
+              />
+            ) : undefined
+          }
+        />
         <SettingList>
-          <TrackerRows things={things}>
+          <TrackerRows things={things} quietAdd>
             <MoveIssues things={things} indent />
           </TrackerRows>
         </SettingList>
@@ -218,8 +256,44 @@ export function Running({ things }: { things: Things }) {
   )
 }
 
+const day = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short' })
+
+/**
+ * The notes, each a card of its own: what was decided, set as words to read
+ * rather than a field to type in, and under it who kept it and when. Newest
+ * first; the way to drop one shows on the card it is over.
+ */
 export function NotesSection({ things }: { things: Things }) {
-  return <Notes things={things} />
+  const notes = [...(things.model.notes ?? [])].reverse()
+  if (notes.length === 0)
+    return (
+      <div className={css.noNotes}>
+        <Icon name="quote" size={18} />
+        <p>No notes yet. When you decide something in a conversation that the code doesn’t show, the coordinator keeps it here.</p>
+      </div>
+    )
+  return (
+    <div>
+      <Sub
+        title={`${notes.length} ${notes.length === 1 ? 'note' : 'notes'}`}
+        note="The coordinator starts each session with them. To change one, tell the lead."
+      />
+      <ul className={css.notes}>
+        {notes.map((note) => (
+          <li key={note.id} className={css.note}>
+            <Icon name="quote" size={14} className={css.noteMark} />
+            <p className={css.noteBody}>{note.body}</p>
+            <p className={css.noteFoot}>
+              {note.keptBy === 'person' ? 'Kept by you' : 'Kept by the coordinator'} · {day.format(new Date(note.createdAt))}
+            </p>
+            <span className={css.noteDrop}>
+              <IconButton icon="close" label="Drop this note" size="small" onClick={() => void things.model.dropNote(note.id)} />
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 /** A section's body, whichever it is. */
@@ -228,15 +302,17 @@ export function Body({
   things,
   bare = true,
   switches = true,
+  remove = true,
 }: {
   section: Section
   things: Things
   bare?: boolean
   switches?: boolean
+  remove?: boolean
 }) {
   switch (section) {
     case 'general':
-      return <General things={things} switches={switches} />
+      return <General things={things} switches={switches} remove={remove} />
     case 'code':
       return <CodeAndIssues things={things} bare={bare} />
     case 'rules':

@@ -15,7 +15,7 @@ const only = process.argv.slice(2)
 
 const browser = await chromium.launch()
 for (const shot of shots.filter((one) => only.length === 0 || only.includes(one.id))) {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
+  const page = await browser.newPage({ viewport: { width: shot.width ?? 1440, height: shot.height ?? 900 }, deviceScaleFactor: 1 })
   const errors = []
   page.on('pageerror', (error) => errors.push(String(error)))
   await page.goto(`http://localhost:5362/${shot.page}&bare`)

@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react'
 
 import {
   BrandChip,
+  BrandMark,
   Button,
   ControlLine,
   Icon,
@@ -356,7 +357,12 @@ export function Identity({ things }: { things: Things }) {
  */
 export function LinkRow({ link, things }: { link: Link; things: Things }) {
   return (
-    <SettingRow title={`${link.name} · ${link.what}`} note={<LinkLine link={link} />} glyph={<BrandChip brand={link.brand} size={26} />}>
+    <SettingRow
+      title={`${link.name} · ${link.what}`}
+      note={<LinkLine link={link} />}
+      glyph={<BrandMark brand={link.brand} size={18} />}
+      className={css.plainGlyph}
+    >
       {() =>
         link.trouble !== null ? (
           <Button size="small" variant="signal" onClick={() => things.connect(link)}>
@@ -393,7 +399,7 @@ export function AddTrackerMenu({ things, trigger }: { things: Things; trigger?: 
 }
 
 /** Its trackers, one row each, then the way to add one; with none, that row says so. */
-export function TrackerRows({ things, children }: { things: Things; children?: React.ReactNode }) {
+export function TrackerRows({ things, children, quietAdd = false }: { things: Things; children?: React.ReactNode; quietAdd?: boolean }) {
   const none = things.trackers.length === 0
   return (
     <>
@@ -402,13 +408,11 @@ export function TrackerRows({ things, children }: { things: Things; children?: R
       ))}
       {/* What depends on its trackers, under them: Move issues. */}
       {children}
-      <SettingRow
-        title={none ? words.noTracker : words.addTracker}
-        note={none ? words.noTrackerNote : words.addTrackerNote}
-        glyph={<Icon name="plus" size={15} />}
-      >
-        {() => <AddTrackerMenu things={things} />}
-      </SettingRow>
+      {(none || !quietAdd) && (
+        <SettingRow title={none ? words.noTracker : words.addTracker} note={none ? words.noTrackerNote : words.addTrackerNote}>
+          {() => <AddTrackerMenu things={things} />}
+        </SettingRow>
+      )}
     </>
   )
 }
@@ -429,7 +433,7 @@ export function MoveIssues({ things, indent }: { things: Things; indent?: boolea
     <SettingSwitch
       title={words.moveIssues}
       note={on ? words.moveIssuesOn : words.moveIssuesOff}
-      glyph={<Icon name="play" size={15} />}
+      {...(indent === true ? {} : { glyph: <Icon name="play" size={15} /> })}
       checked={on}
       onChange={things.model.setMoveIssues}
       indent={indent}

@@ -37,27 +37,38 @@
   {
     "id": "A1",
     "page": "?d=A&open=open&s=general",
-    "caption": "A, as the app's Settings, under the project's own header: its three switches as cards down the side, its sections under them, General on a sheet"
+    "caption": "A at 1440×900: the side narrower, the sheet wider; General now holds only the name and colour, and Remove from Althar sits in red at the foot of the side"
   },
   {
     "id": "A2",
-    "page": "?d=A&open=open&s=code&conn=host",
-    "caption": "A, Code and issues with GitHub signed out: the section is marked in the side, the repositories screen and trackers in it"
+    "page": "?d=A&open=open&s=code",
+    "width": 1180,
+    "height": 760,
+    "caption": "A, Code and issues in a smaller 1180×760 window: the side narrows and the margins close so the sheet keeps the room; Repositories and Trackers are two headings with their own Add buttons, Linear's mark plain, Move issues set in under it"
   },
   {
     "id": "A3",
-    "page": "?d=A&open=open&s=rules",
-    "caption": "A, Rules: the app's own rules screen as a section, no longer a screen away from the settings"
+    "page": "?d=A&open=open&s=code&tracker=two&conn=tracker",
+    "width": 1180,
+    "height": 760,
+    "caption": "A, Code and issues with Linear not connected and Jira added: the violet line and Connect on Linear's row, the dot on the section and on Settings"
   },
   {
     "id": "A4",
     "page": "?d=A&open=open&s=running",
-    "caption": "A, Running: what the project runs, the default first, and where its worktrees and branches go"
+    "caption": "A, Running: unchanged, what it runs and where its work goes"
   },
   {
     "id": "A5",
     "page": "?d=A&open=notes&notes=many",
-    "caption": "A, Notes: the 9 notes the coordinator keeps, each one removable"
+    "caption": "A, Notes as cards: each decision set as words to read, who kept it and when under it, newest first; the cross to drop one shows on hover"
+  },
+  {
+    "id": "A6",
+    "page": "?d=A&open=open&s=notes&notes=many",
+    "width": 1180,
+    "height": 760,
+    "caption": "A, Notes in the smaller window: the cards fall to two columns"
   },
   {
     "id": "B1",

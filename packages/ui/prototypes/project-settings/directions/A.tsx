@@ -1,6 +1,6 @@
-// Scrappy: A, as the app's Settings tab: down the side, the project, its quick switches and its sections; beside them, the section open on a sheet of its own.
-import { Panel, SettingsNav } from '../../../src/index'
-import type { Things } from '../parts'
+// Scrappy: A, as the app's Settings tab: down the side, its quick switches, its sections and Remove; beside them, the section open on a sheet that takes the room the window has.
+import { Icon, Panel, SettingsNav } from '../../../src/index'
+import { overlay, type Things } from '../parts'
 import { Body, QuickCards, sectionText } from '../sections'
 import { proto, type Section, useProto } from '../state'
 import c from './pages.module.css'
@@ -29,11 +29,22 @@ export function A({ things }: { things: Things }) {
             value={section}
             onChange={go}
           />
+          {/* Taking it out of Althar: not a section, the last thing down the side, in red, its dialog says what goes. */}
+          <button type="button" className={c.remove} onClick={() => overlay.set({ removing: true })}>
+            <Icon name="close" size={14} />
+            Remove from Althar…
+          </button>
         </aside>
         <main className={c.main}>
-          <Panel key={section} title={open.title} lede={open.lede} headingLevel={1}>
+          <Panel
+            key={section}
+            title={open.title}
+            // Its switches are the cards and Remove is down the side, so General here is its name and colour only.
+            lede={section === 'general' ? 'Its name, and the colour its mark and tab take.' : open.lede}
+            headingLevel={1}
+          >
             <div className={c.body}>
-              <Body section={section} things={things} switches={false} />
+              <Body section={section} things={things} switches={false} remove={false} />
             </div>
           </Panel>
         </main>
