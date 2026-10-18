@@ -261,7 +261,8 @@ Decided in [ADR-012](decisions/012-several-accounts-per-agent.md).
   fight. A product question to try out before deciding. Althar puts the key
   in the branch and the pull request's title. Since 12 October it moves the
   issue to In Progress as its task's first step starts, once, on Linear and
-  Jira, unless the project's rules turn it off; it never moves one back from
+  Jira, and since 18 October on Trello, unless the project's rules turn it
+  off; it never moves one back from
   further along. In review and done are still open.
 - [ ] **What reaches the lead from a pull request.** Settled on 1 October,
   after review: failed checks, and what the person and the repository's own
