@@ -5,7 +5,7 @@ import { createInterface } from 'node:readline'
 
 import { agents, signInStatus } from '@althar/provider-adapters'
 import { backupsIn, databaseIn, type Instance, Live, Permissions, Projects, Runtime, Sessions } from '@althar/runtime'
-import { Cause, type Crypto, Effect, Exit, Option, Queue, Stream } from 'effect'
+import { Cause, type Crypto, Effect, Exit, Option, Queue, References, Stream } from 'effect'
 
 import { type Action, HELP, parseLine } from './input'
 import { defaultProfile, defaultWorktrees, parseOptions, USAGE } from './options'
@@ -172,9 +172,13 @@ process.once('SIGINT', () => {
   stop.abort()
 })
 
-const exit = await Effect.runPromiseExit(Effect.andThen(signedIn(options.agent), Effect.scoped(program).pipe(Effect.provide(layer))), {
-  signal: stop.signal,
-})
+const exit = await Effect.runPromiseExit(
+  Effect.andThen(signedIn(options.agent), Effect.scoped(program).pipe(Effect.provide(layer))).pipe(
+    // The runtime notes each turn's start and end for the app's log; the terminal shows the thread, and only warnings beside it.
+    Effect.provideService(References.MinimumLogLevel, 'Warn'),
+  ),
+  { signal: stop.signal },
+)
 if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
   process.stderr.write(`${messageOf(exit.cause)}\n`)
   process.exit(1)

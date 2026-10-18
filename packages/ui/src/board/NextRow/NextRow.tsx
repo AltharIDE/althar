@@ -48,7 +48,7 @@ export interface NextRowProps {
   /** What it waits for, in a line: Starts when 419 merges. */
   reason: string
   current?: boolean
-  /** One fact, at its foot, as on a card: Unrestricted, for a task that will start allowing everything. */
+  /** One fact, at its foot, as on a card. */
   foot?: ReactNode
   onOpen?: () => void
   text?: Partial<NextRowText>

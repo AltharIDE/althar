@@ -14,6 +14,7 @@ import {
   type QuestionAnswer,
   Reasoning,
   Terminal,
+  Thinking,
   ThreadDivider,
   Tool,
   ToolState,
@@ -50,8 +51,10 @@ import s from './ThreadBlocks.module.css'
  * A thread's blocks as the kit draws them, the same in a task and in the
  * coordinator's thread. A turn's work folds under how long it worked, or is
  * working, with its last message open under it; a step's result stands open
- * under the work that led to it. A task's card is the host's
- * to draw, since what it can do with one is the host's.
+ * under the work that led to it. Before the agent says anything, its turn
+ * stands under its name, thinking, where its words will take its place. A
+ * task's card is the host's to draw, since what it can do with one is the
+ * host's.
  */
 
 /** How long a command can be before its row, at the thread's width, clips it. */
@@ -448,6 +451,12 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{push?.(block.request, block.at)}</Fragment>
       case 'review':
         return <Fragment key={block.id}>{review?.(block.review)}</Fragment>
+      case 'waiting':
+        return (
+          <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>
+            <Thinking {...(block.took === null ? {} : { took: block.took })} slow={block.slow} />
+          </Turn>
+        )
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')

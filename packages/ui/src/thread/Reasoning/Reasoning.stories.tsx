@@ -29,6 +29,8 @@ export const AllStates: Story = {
       cells={[
         { state: 'thinking', node: <Thinking /> },
         { state: 'thinking, saying what', node: <Thinking>Reading the webhook delivery tests</Thinking> },
+        { state: 'thinking, counted', node: <Thinking took="12s" /> },
+        { state: 'thinking, longer than usual', node: <Thinking took="34s" slow /> },
         ...(['folded', 'hover', 'focus', 'pressed'] as const).map((state) => ({
           state,
           force: state === 'folded' ? undefined : state,

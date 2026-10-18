@@ -109,3 +109,8 @@ export function BoardList({ children }: { children: ReactNode }) {
     </ol>
   )
 }
+
+/** A quiet line between groups in a lane, naming the group under it: what starts when an agent is free. */
+export function BoardDivider({ children }: { children: ReactNode }) {
+  return <p className={s.divider}>{children}</p>
+}

@@ -24,7 +24,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
-import { lacking, leftAsItIs, noReviews } from './model'
+import { lacking, leftAsItIs, noReviews, stillOpen } from './model'
 import { answered, failedOf, probe, type Reached, reachLine, readAs, refusalOf, seenOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
@@ -344,6 +344,16 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     )
 
   const read = (repository: Repository, number: number) => http.json(MergeAnswer, 'GET', `${project(repository)}/merge_requests/${number}`)
+  /** 401 is GitLab's word for an account that may not do something here, while its token still works: forbidden, where it does. */
+  const mayNot = <A>(effect: Effect.Effect<A, ConnectorFailed>) =>
+    Effect.catchIf(
+      effect,
+      (error) => error.status === 401,
+      (error) =>
+        Effect.flatMap(account, () =>
+          Effect.fail(new ConnectorFailed({ product, reason: 'forbidden', status: 401, message: error.message })),
+        ),
+    )
 
   /** Each merge request's size at the head it was counted at: counted again only when the head moves. */
   const sizes = new Map<
@@ -536,6 +546,27 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
               }),
           ),
         ),
+    closeChange: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* read(repository, change.number)
+        if (now.state !== 'opened') return changeOf(now)
+        return changeOf(
+          yield* mayNot(http.json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}`, { state_event: 'close' })),
+        )
+      }),
+    deleteBranch: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* read(repository, change.number)
+        if (now.state === 'opened') return yield* stillOpen(product, { noun: 'merge request', short: 'MR', prefix: '!' }, change.number)
+        // Its branch is in the project it came from: a fork's, for one from a fork.
+        const on = now.source_project_id === undefined ? project(repository) : `${api}/projects/${now.source_project_id}`
+        yield* mayNot(http.json(Schema.Unknown, 'DELETE', `${on}/repository/branches/${encodeURIComponent(now.source_branch)}`)).pipe(
+          Effect.catchIf(
+            (error) => error.status === 404,
+            () => Effect.void,
+          ),
+        )
+      }),
     checks: (repository, sha) =>
       Effect.gen(function* () {
         const pipelines = yield* http.cached(Schema.Array(Pipeline), `${project(repository)}/pipelines?sha=${sha}&per_page=20`)

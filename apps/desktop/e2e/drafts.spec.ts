@@ -9,9 +9,10 @@ import { launch, openFirstProject } from './support'
 
 /*
  * What is written in the coordinator's composer is there again after the
- * home and back, in the built app; and what was dictated is written down
- * while the person is on the home, and waits in the composer with a quiet
- * line saying so. The speech process's stand-in takes a few seconds to
+ * home and back, in the built app; what was dictated is written down while
+ * the person is on the home, and waits in the composer with a quiet line
+ * saying so; and dictation that is still listening as they leave goes on, in
+ * a pill on the home, from which it is sent. The speech process's stand-in takes a few seconds to
  * write anything down (ALTHAR_FAKE_SPEECH_SLOW), as a busy machine or a
  * long dictation would.
  */
@@ -64,19 +65,37 @@ test('keeps the draft through the home and back, and dictation finishes while th
     await expect(page.getByText('What you said was written down while you were away.')).toBeVisible()
     await page.screenshot({ path: 'test-results/drafts-5-landed-while-away.png', animations: 'disabled' })
 
-    // Away while it listens: it stops, and what was said is written down; back before it is done, the composer says it is still writing.
+    // Away while it listens: it goes on listening, carried in a pill at the window's foot, saying whose it is.
     await box.fill('')
     await page.keyboard.press('Control+Shift+KeyD')
     await expect(stop).toHaveAccessibleName('Stop dictating, 0:01', { timeout: 5_000 })
     await toHome()
     await expect(box).toBeHidden()
+    const pill = page.getByRole('group', { name: 'To the coordinator · meridian' })
+    await expect(pill).toBeVisible()
+    await expect(pill).toContainText('0:03', { timeout: 5_000 })
+    const width = (await pill.boundingBox())?.width
+    await pill.screenshot({ path: 'test-results/drafts-6-carried-on-home.png', scale: 'css', animations: 'disabled' })
+    // Its width holds as it goes on.
+    await expect(pill).toContainText('0:04', { timeout: 5_000 })
+    expect((await pill.boundingBox())?.width).toBe(width)
+
+    // Stopped from the pill: it is written down, and opens to read, change and send.
+    await pill.getByRole('button', { name: /^Stop and write it down/ }).click()
+    await expect(pill).toContainText('Writing it down…')
+    await pill.screenshot({ path: 'test-results/drafts-7-writing-on-home.png', scale: 'css', animations: 'disabled' })
+    const card = page.getByRole('region', { name: 'To the coordinator · meridian' })
+    const said = card.getByRole('textbox', { name: 'What you said' })
+    await expect(said).toHaveValue('Also check the webhook retry path.', { timeout: SLOW * 4 })
+    await card.screenshot({ path: 'test-results/drafts-8-written-on-home.png', scale: 'css', animations: 'disabled' })
+
+    // Sent from the home, to the coordinator: there in its conversation, and the composer empty.
+    await card.getByRole('button', { name: 'Send to the coordinator' }).click()
+    await expect(card).toBeHidden()
     await toProject()
-    await expect(writing).toBeVisible()
-    await expect(box).toHaveJSProperty('readOnly', true)
-    await page.screenshot({ path: 'test-results/drafts-6-still-writing.png', animations: 'disabled' })
-    await expect(box).toHaveValue('Also check the webhook retry path.', { timeout: SLOW * 4 })
-    await expect(page.getByRole('button', { name: 'Dictate', exact: true })).toBeVisible()
-    await page.screenshot({ path: 'test-results/drafts-7-landed.png', animations: 'disabled' })
+    await expect(page.getByText('Also check the webhook retry path.').first()).toBeVisible()
+    await expect(box).toHaveValue('')
+    await page.screenshot({ path: 'test-results/drafts-9-sent-from-home.png', animations: 'disabled' })
   } finally {
     await electronApp.close()
   }

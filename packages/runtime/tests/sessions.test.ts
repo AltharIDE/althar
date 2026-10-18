@@ -4,7 +4,8 @@ import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
 import { scenarios } from '@althar/provider-adapters/testing'
-import { Effect, Layer, Option, Stream } from 'effect'
+import { Cause, Clock, Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Stream } from 'effect'
+import { TestClock } from 'effect/testing'
 import { SqlClient } from 'effect/sql'
 
 import { AlreadyDelivered, AttentionClosed, NoSession, NotFound, SessionFailed, SessionRunning } from '../src/errors'
@@ -376,6 +377,51 @@ describe('sessions', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('describes the session the runtime holds while a handover starts', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const { task: created } = yield* task()
+      const first = yield* sessions.start({ threadId: created.threadId, agentId: 'codex', model: 'large', effort: 'high' })
+      yield* settled(created.threadId, 1)
+
+      // The new row exists, but its slow connection has not replaced the session the runtime still holds.
+      const switching = yield* Effect.forkChild(sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode', model: 'small' }))
+      yield* until(sql<{ state: string }>`SELECT state FROM provider_sessions WHERE thread_id = ${created.threadId}`, (rows) =>
+        rows.some((row) => row.state === 'starting'),
+      )
+      const during = yield* queries.thread(created.threadId, { limit: 0 })
+      assert.deepStrictEqual(
+        [during.session?.id, during.session?.agentId, during.session?.model, during.session?.effort, during.session?.held],
+        [first, 'codex', 'large', 'high', true],
+      )
+
+      yield* Fiber.join(switching)
+      const after = yield* queries.thread(created.threadId, { limit: 0 })
+      assert.deepStrictEqual([after.session?.agentId, after.session?.model, after.session?.held], ['opencode', 'small', true])
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { each: { opencode: { slowStart: 500 } } }))))),
+  )
+
+  it.live('describes a recorded session the runtime no longer holds as not held', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const { task: created } = yield* task()
+      const sessionId = yield* begin(created.threadId, 'codex', 'large')
+      yield* sessions.stop(created.threadId)
+      // The row a crash leaves: still live, while the runtime holds nothing on the thread.
+      yield* sql`UPDATE provider_sessions SET state = 'active' WHERE id = ${sessionId}`
+
+      const { session } = yield* queries.thread(created.threadId, { limit: 0 })
+      assert.deepStrictEqual(
+        [session?.id, session?.model, session?.held, session?.turnRunning, session?.turnStartedAt, session?.context, session?.background],
+        [sessionId, 'large', false, false, null, null, []],
+      )
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+
   it.live('briefs the agent that takes over with what a failed command printed, not only that it failed', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
@@ -725,6 +771,98 @@ describe('sessions', () => {
         assert.strictEqual((yield* ended(created.threadId, 1))[0]?.state, 'completed')
       }).pipe(Effect.provide(runtime())),
     )
+
+    // The agent's startup stops answering at `hangsIn`; the timeout then cuts it off and the current lead carries on.
+    const timesOutStartup = (hangsIn: 'beforeInitialize' | 'beforeNewSession') => {
+      let entered!: () => void
+      const waitingForStartup = new Promise<void>((resolve) => {
+        entered = resolve
+      })
+      let releaseStartup!: () => void
+      const startupResponse = new Promise<void>((resolve) => {
+        releaseStartup = resolve
+      })
+      const startupTimeoutScheduled = Deferred.makeUnsafe<void>()
+      const testGuardScheduled = Deferred.makeUnsafe<void>()
+      // The test clock stands in for time, and the timeout isn't reachable from here, so the clock is watched instead: the
+      // timeout is found as the one 2-minute `Clock.sleep` (SESSION_START_TIMEOUT, which relies on `Effect.timeoutOption`
+      // sleeping on the Clock service) and the test's own 3-minute guard as the 3-minute one. Change either duration, or
+      // how the timeout waits, and this stops finding it and the test hangs rather than fails.
+      const observedClock = Layer.effect(
+        Clock.Clock,
+        Effect.gen(function* () {
+          const baseClock = yield* Clock.Clock
+          const clock = Object.create(baseClock) as Clock.Clock
+          Object.defineProperty(clock, 'sleep', {
+            value: (duration: Duration.Duration) =>
+              Effect.gen(function* () {
+                const millis = Duration.toMillis(duration)
+                if (millis === Duration.toMillis(Duration.minutes(2))) {
+                  yield* Deferred.succeed(startupTimeoutScheduled, undefined)
+                } else if (millis === Duration.toMillis(Duration.minutes(3))) {
+                  yield* Deferred.succeed(testGuardScheduled, undefined)
+                }
+                yield* baseClock.sleep(duration)
+              }),
+          })
+          return clock
+        }),
+      ).pipe(Layer.provideMerge(TestClock.layer()))
+      const app = runtime(
+        ':memory:',
+        {},
+        {
+          each: {
+            opencode: {
+              [hangsIn]: () => {
+                entered()
+                return startupResponse
+              },
+            },
+          },
+        },
+      ).pipe(Layer.provideMerge(observedClock))
+      return Effect.gen(function* () {
+        const sessions = yield* Sessions
+        const sql = yield* SqlClient.SqlClient
+        const { task: created } = yield* task()
+        const first = yield* sessions.start({ threadId: created.threadId, agentId: 'codex' })
+        const attempt = yield* Effect.forkChild(Effect.exit(sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode' })))
+        yield* Effect.promise(() => waitingForStartup)
+        yield* Deferred.await(startupTimeoutScheduled)
+        const timeout = yield* Effect.forkChild(Effect.timeoutOption(Fiber.join(attempt), Duration.minutes(3)))
+        yield* Deferred.await(testGuardScheduled)
+        yield* TestClock.adjust(Duration.minutes(3))
+        const finished = yield* Fiber.join(timeout)
+        releaseStartup()
+        if (Option.isNone(finished)) throw new Error('The startup attempt should finish before the test guard.')
+        if (Exit.isSuccess(finished.value)) throw new Error('The startup attempt should fail after its timeout.')
+        const failure = finished.value.cause.reasons.find(Cause.isFailReason)
+        if (failure === undefined) throw new Error('The startup attempt should fail with a typed error.')
+        assert.instanceOf(failure.error, SessionFailed)
+        assert.include(failure.error.summary, 'Timed out after 2m waiting for Fake opencode to set up a session.')
+        // The tag is what tells a hang from a failure, in the log and for telemetry.
+        assert.include(failure.error.reason, 'StartTimedOut')
+
+        assert.strictEqual((yield* session(first))?.state, 'active')
+        assert.strictEqual(Option.getOrUndefined(yield* sessions.running(created.threadId))?.sessionId, first)
+        const states = yield* sql<{ agentId: string; state: string }>`
+          SELECT agent_id, state FROM provider_sessions ORDER BY agent_id`
+        assert.deepStrictEqual(states, [
+          { agentId: 'codex', state: 'active' },
+          { agentId: 'opencode', state: 'failed' },
+        ])
+        const notices = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'notice')
+        assert.strictEqual(notices.at(-1)?.content.title, "Fake opencode couldn't start.")
+        assert.include(String(notices.at(-1)?.content.description), 'Timed out after 2m waiting for Fake opencode to set up a session')
+      }).pipe(Effect.ensuring(Effect.sync(releaseStartup)), Effect.provide(app))
+    }
+
+    it.effect('times out an ACP startup that hangs in session/new, records the failure and leaves the current lead running', () =>
+      timesOutStartup('beforeNewSession'),
+    )
+
+    it.effect('times out an ACP startup that hangs in initialize', () => timesOutStartup('beforeInitialize'))
 
     it.live('starts one session when two starts race', () =>
       Effect.gen(function* () {

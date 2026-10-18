@@ -1153,10 +1153,11 @@ export type ReviewBrief = typeof ReviewBrief.Type
 /**
  * What the person can do to a task as a whole, where it stands now, as its
  * menu offers it (docs/architecture/05, "Task and run lifecycle"): start its
- * plan now, stop it, resume what stopping cut short, abandon it, or reopen
- * it once abandoned. A merged task has none.
+ * plan now, stop it, resume what stopping cut short, leave out the commits
+ * after its last pull request that are in none yet (ADR-034), abandon it, or
+ * reopen it once abandoned. A merged task has none, but leaving those out.
  */
-export const TaskAction = Schema.Literals(['start', 'stop', 'resume', 'abandon', 'reopen'])
+export const TaskAction = Schema.Literals(['start', 'stop', 'resume', 'leaveOut', 'abandon', 'reopen'])
 export type TaskAction = typeof TaskAction.Type
 
 /**
@@ -1222,6 +1223,8 @@ export const TaskCard = Schema.Struct({
   queued: Schema.NullOr(Queued),
   /** Its plan's first step waits for a place, nothing of it started yet: the person can still change the plan. */
   planWaits: Schema.optional(Schema.Boolean),
+  /** With `planWaits`: its place in the order what waits for a place starts, among everything that waits; 1 starts first. */
+  place: Schema.optional(Schema.Int),
 })
 export type TaskCard = typeof TaskCard.Type
 
@@ -1528,6 +1531,23 @@ export const SessionSummary = Schema.Struct({
   /** The models the agent offers for this session. */
   models: Schema.Array(Schema.String),
   turnRunning: Schema.Boolean,
+  /** When the turn running started, by the runtime's clock; null between turns. What the wait for its first word is counted from. */
+  turnStartedAt: Schema.NullOr(Schema.String),
+  /**
+   * When its last turn ended, by the runtime's clock; null before its first,
+   * or where the runtime no longer holds it. A message delivered before it
+   * was answered, if with nothing: no reply is waited for on it any more.
+   */
+  turnEndedAt: Schema.NullOr(Schema.String),
+  /**
+   * Whether the runtime still holds a session on this thread: the one that
+   * takes a note, and that makes starting another refuse. A recorded session
+   * it no longer has — left by a crash, or by a start that never took — looks
+   * the same as a live one here, but can take neither a note nor a choice:
+   * sending one back to such a lead has to start it afresh. While the thread
+   * is held, a note waits its turn there, running or between turns.
+   */
+  held: Schema.Boolean,
   /** How full its context is, in tokens, as the agent last said while it runs; null until it says, or where it doesn't. */
   context: Schema.NullOr(ContextUse),
   /** What it left running in the background, while it runs, in the order it started them. */
@@ -1821,8 +1841,6 @@ export const BoardTask = Schema.Struct({
   changed: Schema.NullOr(Schema.Struct({ files: Schema.Number, add: Schema.Number, del: Schema.Number })),
   /** A ready task's repositories with no pull request, not merged yet, which merge here. */
   here: Schema.Array(TaskRepositoryHere),
-  /** Not settled, everything its agents ask is allowed, by the task's own switch or its project's (ADR-043). Not without it. */
-  allowEverything: Schema.optional(Schema.Boolean),
 })
 export type BoardTask = typeof BoardTask.Type
 
@@ -2458,6 +2476,13 @@ export const Api = RpcGroup.make(
     },
     Schema.Void,
   ),
+  /**
+   * Leaves out the commits after a task's last pull request that are in none
+   * yet (ADR-034): it settles without them, done where every pull request of
+   * it merged; they stay on its branch, in its worktree. Nothing, where it
+   * has none, or its lead is at work.
+   */
+  command('LeaveOutCommits', { taskId: Schema.String }, Schema.Void),
   /** Settles a task without its change: its agents stop and its plan doesn't start; its worktree and branch stay as they are. */
   command('AbandonTask', { taskId: Schema.String }, Schema.Void),
   /** Gives a task another title, in any state. Its slug, branch, worktree folder, and the title of a pull request or issue already opened, stay as they are. */
@@ -2698,6 +2723,18 @@ export const Api = RpcGroup.make(
    * fetched to the task's worktree first.
    */
   command('MergeNote', { taskId: Schema.String, url: Schema.optional(Schema.String) }, Schema.Struct({ note: Schema.String })),
+  /**
+   * Closes the task's pull request at this address without merging it,
+   * because the person said to; with `deleteBranch`, its branch on the host
+   * goes too, once it is closed. What the host refused to close fails, and
+   * it stays open. `branch` is what the host said to deleting the branch,
+   * null where it went or wasn't asked to.
+   */
+  command(
+    'ClosePullRequest',
+    { taskId: Schema.String, url: Schema.String, deleteBranch: Schema.Boolean },
+    Schema.Struct({ branch: Schema.NullOr(Schema.String) }),
+  ),
   /** Asks the task's pull request for news now. */
   command('RefreshTask', { taskId: Schema.String }, Schema.Void),
   /** Stops listening to the task's pull request at this address: nothing said there after arrives, and the lead hears none of it. */

@@ -11,6 +11,7 @@ import {
   Reviewer,
   Round,
   shotName,
+  Thinking,
   Verdict,
   WorkLine,
   WorkNote,
@@ -35,7 +36,8 @@ import s from './TaskThread.module.css'
  * its result, with what its report showed; what the coordinator passed on,
  * on the person's side; a reviewer in its own voice; what Althar says. What
  * the person said, what came from outside, questions, runs and the rest are
- * drawn as every thread draws them (ThreadBlocks).
+ * drawn as every thread draws them (ThreadBlocks). Before the lead says
+ * anything, its round stands under its name, thinking.
  */
 
 export const text = {
@@ -174,6 +176,12 @@ export function TaskThread({ rounds, versionOf, ...shared }: TaskThreadProps) {
     switch (block.kind) {
       case 'round':
         return round(block)
+      case 'waiting':
+        return (
+          <Round key={block.id} model={modelOf(session?.agentId ?? null)}>
+            <Thinking {...(block.took === null ? {} : { took: block.took })} slow={block.slow} />
+          </Round>
+        )
       case 'relayed':
         return <Relayed key={block.id} title={block.title} body={block.body} />
       case 'althar':

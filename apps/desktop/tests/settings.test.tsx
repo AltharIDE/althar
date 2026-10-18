@@ -90,6 +90,17 @@ describe('the quick settings', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Quick settings' })).toBeNull())
   })
 
+  it('report a problem from the foot: the panel closes and the dialog is asked for, only where the app can report', async () => {
+    const reportProblem = vi.fn()
+    const view = withServices(<Quick />, fakeClient().client, fakeHost({ reportProblem }))
+    await userEvent.click(within(await quick()).getByRole('button', { name: 'Report a problem' }))
+    expect(reportProblem).toHaveBeenCalledWith({ kind: 'asked', from: 'settings' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Quick settings' })).toBeNull())
+    view.unmount()
+    withServices(<Quick />, fakeClient().client)
+    expect(within(await quick()).queryByRole('button', { name: 'Report a problem' })).toBeNull()
+  })
+
   it('open the section a card is in by its name', async () => {
     const onSettings = vi.fn()
     withServices(<Quick onSettings={onSettings} />, fakeClient().client)
@@ -589,6 +600,17 @@ describe('the Settings tab', () => {
     ).toBe('https://github.com/AltharIDE/althar/releases/tag/v0.0.0')
   })
 
+  it('reports a problem from About Althar, only where the app can report', async () => {
+    const reportProblem = vi.fn()
+    const view = withServices(<Settings at="about" />, fakeClient().client, fakeHost({ reportProblem }))
+    await userEvent.click(await within(screen.getByRole('main')).findByRole('button', { name: 'Report a problem' }))
+    expect(reportProblem).toHaveBeenCalledWith({ kind: 'asked', from: 'settings' })
+    view.unmount()
+    withServices(<Settings at="about" />, fakeClient().client)
+    expect(await within(screen.getByRole('main')).findByText('Althar 0.0.0')).toBeTruthy()
+    expect(within(screen.getByRole('main')).queryByRole('button', { name: 'Report a problem' })).toBeNull()
+  })
+
   it('sends anonymous usage data until the person turns it off under About Althar, with one line on what it sends', async () => {
     const host = fakeHost()
     withServices(<Settings at="about" />, fakeClient().client, host)
@@ -610,6 +632,28 @@ describe('the Settings tab', () => {
     expect(usage.getAttribute('aria-checked')).toBe('false')
     expect((usage as HTMLButtonElement).disabled).toBe(true)
     expect(document.getElementById(usage.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Off while DO_NOT_TRACK is set.')
+  })
+
+  it('sends crash reports until the person turns them off beside usage data, a switch of their own', async () => {
+    const host = fakeHost()
+    withServices(<Settings at="about" />, fakeClient().client, host)
+    const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
+    await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('true'))
+    expect(document.getElementById(crashes.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      'What failed and where in Althar’s code, when it crashes or hits an error. Never your code, what is written, or any name.',
+    )
+    await userEvent.click(crashes)
+    expect(host.setPreference).toHaveBeenLastCalledWith('crashReports', false)
+    await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('false'))
+    // Usage data is its own.
+    expect(screen.getByRole('switch', { name: 'Usage data' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('keeps crash reports off, and can’t turn them on, while DO_NOT_TRACK is set', async () => {
+    withServices(<Settings at="about" />, fakeClient().client, fakeHost({ doNotTrack: true }))
+    const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
+    expect(crashes.getAttribute('aria-checked')).toBe('false')
+    expect((crashes as HTMLButtonElement).disabled).toBe(true)
   })
 })
 

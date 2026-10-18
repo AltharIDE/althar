@@ -31,3 +31,18 @@
   box-shadow: inset -1px 0 0 var(--line-2);
   color: var(--t-2);
 }
+/* above the row's own button, stretched over it */
+.action {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  margin-top: 1px;
+}
+.error {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--danger);
+}

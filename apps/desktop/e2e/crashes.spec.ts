@@ -1,0 +1,150 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { gunzipSync } from 'node:zlib'
+
+import { expect, test } from '@playwright/test'
+
+import { repository } from '../tests/repository'
+import { launch } from './support'
+
+/*
+ * Crash reports (ADR-046), from the app as it fails: the window's error, a
+ * rejection in main, and the window's page crashing reach PostHog from the
+ * main process as $exception events, masked, while their switch is on; the
+ * page's crash, a native one, is said again on the next launch from its
+ * minidump. Once the switch is off, nothing leaves. PostHog here is a
+ * server on this computer (ALTHAR_FAKE_POSTHOG), which keeps every request.
+ */
+
+interface Sent {
+  readonly event: string
+  readonly properties: Readonly<Record<string, unknown>> & {
+    readonly process?: string
+    readonly $exception_list?: ReadonlyArray<{ readonly type: string; readonly value: string }>
+  }
+}
+
+const posthog = async () => {
+  const requests: Array<string> = []
+  const events: Array<Sent> = []
+  const server = createServer((request, response) => {
+    const chunks: Array<Buffer> = []
+    request.on('data', (chunk: Buffer) => chunks.push(chunk))
+    request.on('end', () => {
+      const body = Buffer.concat(chunks)
+      const text = body[0] === 0x1f && body[1] === 0x8b ? gunzipSync(body).toString() : body.toString()
+      requests.push(`${request.method} ${request.url}`)
+      try {
+        const read = JSON.parse(text) as { batch?: ReadonlyArray<Sent> } & Sent
+        events.push(...(read.batch ?? [read]))
+      } catch {
+        // Not an event: kept as a request all the same.
+      }
+      response.writeHead(200, { 'content-type': 'application/json' }).end('{"status":1}')
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const { port } = server.address() as AddressInfo
+  return { url: `http://127.0.0.1:${port}`, requests, events, close: () => new Promise((resolve) => server.close(resolve)) }
+}
+
+/** The crash reports among what PostHog was sent, as which process and what type. */
+const crashes = (events: ReadonlyArray<Sent>) =>
+  events
+    .filter((event) => event.event === '$exception')
+    .map((event) => `${event.properties.process} ${event.properties.$exception_list?.[0]?.type}`)
+
+test('sends crash reports, masked, while their switch is on, a native crash on the next launch, and nothing once it is off', async () => {
+  test.setTimeout(120_000)
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  const projects = join(home, 'Projects')
+  mkdirSync(projects)
+  repository(projects)
+  const fake = await posthog()
+  mkdirSync('test-results', { recursive: true })
+  let { electronApp, page } = await launch(home, { ALTHAR_FAKE_POSTHOG: fake.url })
+  try {
+    // Asked once, on the first screen, as one quiet line with its switch: on until it is turned off.
+    const line = page.getByRole('switch', { name: 'Crash reports' })
+    await expect(line).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    // Once the launch has played over the screen and the repositories are found.
+    await expect(page.getByRole('list', { name: 'Repositories for the project' })).toBeVisible()
+    await page.waitForTimeout(2_500)
+    await line.locator('xpath=ancestor::section[1]').screenshot({
+      path: 'test-results/crash-reports-first-screen.png',
+      scale: 'css',
+      animations: 'disabled',
+    })
+
+    // The window's own error, with a path under the home folder in it, and a rejection nobody handled in main.
+    await page.evaluate((where) => {
+      setTimeout(() => {
+        throw new TypeError(`Couldn’t read ${where}/Projects/meridian/app.ts`)
+      })
+    }, home)
+    await electronApp.evaluate(() => {
+      setTimeout(() => void Promise.reject(new RangeError('Main went out of range')))
+    })
+    await expect.poll(() => crashes(fake.events)).toEqual(expect.arrayContaining(['window TypeError', 'main RangeError']))
+
+    // The window's page crashing: said now as a process gone, and on the next launch from its minidump.
+    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.forcefullyCrashRenderer())
+    await expect.poll(() => crashes(fake.events), { timeout: 20_000 }).toContain('window Process gone')
+    const sent = JSON.stringify(fake.events)
+    expect(sent).not.toContain(home)
+    expect(sent).toContain('Couldn’t read ~/…/app.ts')
+    expect(sent).not.toMatch(/context_line|pre_context|post_context/)
+    expect(fake.events.every((event) => event.properties.$process_person_profile === false)).toBe(true)
+    writeFileSync('test-results/crash-reports.json', `${JSON.stringify(fake.events, null, 2)}\n`)
+  } finally {
+    await electronApp.close()
+  }
+
+  // Opened again: the native crash, once, with no minidump in it.
+  ;({ electronApp, page } = await launch(home, { ALTHAR_FAKE_POSTHOG: fake.url }))
+  try {
+    await expect.poll(() => crashes(fake.events), { timeout: 20_000 }).toContain('window Native crash')
+    expect(crashes(fake.events).filter((crash) => crash === 'window Native crash')).toHaveLength(1)
+
+    // Once there is a project, its name and its repository's are hidden too.
+    await page
+      .getByRole('list', { name: 'Repositories for the project' })
+      .getByRole('checkbox', { name: /meridian/ })
+      .click()
+    await page.getByRole('button', { name: /Make the project/ }).click()
+    await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
+    await page.evaluate(() => {
+      setTimeout(() => {
+        throw new SyntaxError('meridian’s settings didn’t parse')
+      })
+    })
+    await expect.poll(() => crashes(fake.events)).toContain('window SyntaxError')
+    const named = fake.events.find((event) => event.properties.$exception_list?.[0]?.type === 'SyntaxError')
+    expect(named?.properties.$exception_list?.[0]?.value).toMatch(/^\[(project|repository)-1\]’s settings didn’t parse$/)
+
+    // Off in Settings, under About Althar, beside usage data: nothing more leaves. ⌘⇧, goes there once the bar is there.
+    await expect(page.getByRole('button', { name: /^Althar settings/ })).toBeVisible()
+    await page.keyboard.press('ControlOrMeta+Shift+Comma')
+    await page.getByRole('navigation', { name: 'Settings' }).getByRole('button', { name: 'About Althar' }).click()
+    const crashReports = page.getByRole('main').getByRole('switch', { name: 'Crash reports' })
+    await expect(crashReports).toHaveAttribute('aria-checked', 'true')
+    await crashReports.locator('xpath=ancestor::div[2]').screenshot({ path: 'test-results/crash-reports-settings.png', scale: 'css' })
+    await crashReports.click()
+    await expect(crashReports).toHaveAttribute('aria-checked', 'false')
+    const before = fake.requests.length
+    await page.evaluate(() => {
+      setTimeout(() => {
+        throw new Error('After the switch went off')
+      })
+    })
+    await page.waitForTimeout(3_000)
+    expect(fake.requests.slice(before)).toEqual([])
+  } finally {
+    await electronApp.close()
+    await fake.close()
+  }
+})

@@ -28,6 +28,37 @@ export const Knowledge: Story = { args: of(Outcome.Knowledge) }
 /** Given up on: quieter, with the reasoning kept. */
 export const Abandoned: Story = { args: of(Outcome.Abandoned) }
 export const Current: Story = { args: { current: true } }
+/** Abandoned with its pull request still open on its host: it says so, and offers to close it there. */
+export const AbandonedPullRequestOpen: Story = {
+  args: {
+    ...of(Outcome.Abandoned),
+    kind: 'Change',
+    title: 'Prototype the board’s settled lane',
+    meta: 'PR #145 still open',
+    action: { label: 'Close PR #145', onAction: fn() },
+  },
+  play: async ({ args, canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Close PR #145' }))
+    await expect(args.action?.onAction).toHaveBeenCalledOnce()
+    // Pressing it doesn't open the task.
+    await expect(args.onOpen).not.toHaveBeenCalled()
+  },
+}
+/** Closing it. */
+export const ClosingPullRequest: Story = {
+  args: { ...AbandonedPullRequestOpen.args, action: { label: 'Close PR #145', onAction: fn(), busy: true } },
+}
+/** The host said no: it stays open, and says why. */
+export const CloseFailed: Story = {
+  args: {
+    ...AbandonedPullRequestOpen.args,
+    error: 'GitHub won’t let this account do that: Resource not accessible by integration.',
+  },
+}
+/** Closed on its host: said, with nothing left to do. */
+export const AbandonedPullRequestClosed: Story = {
+  args: { ...AbandonedPullRequestOpen.args, meta: 'PR #145 closed', action: undefined },
+}
 
 /** The ledger, newest first. */
 export const Ledger: Story = {

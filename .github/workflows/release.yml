@@ -174,10 +174,17 @@ jobs:
         env:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          # Usage data's PostHog project (src/main/usageData.ts): public, as every PostHog project key is. Without them, the release sends none.
-          ALTHAR_POSTHOG_KEY: ${{ vars.ALTHAR_POSTHOG_KEY }}
-          ALTHAR_POSTHOG_HOST: ${{ vars.ALTHAR_POSTHOG_HOST }}
-        run: bun run release
+          # Usage data's PostHog project (src/main/usageData.ts), from the release environment's secrets; the key is public, as
+          # every PostHog project key is. A release made without them sends nothing, so it isn't made.
+          ALTHAR_POSTHOG_KEY: ${{ secrets.ALTHAR_POSTHOG_KEY }}
+          ALTHAR_POSTHOG_HOST: ${{ secrets.ALTHAR_POSTHOG_HOST }}
+          # Where Report a problem posts: the reports Worker (apps/report), baked into the build. Unset, a report goes by mail.
+          ALTHAR_REPORT_URL: ${{ secrets.ALTHAR_REPORT_URL }}
+        run: |
+          for name in ALTHAR_POSTHOG_KEY ALTHAR_POSTHOG_HOST ALTHAR_REPORT_URL; do
+            if [ -z "${!name}" ]; then echo "::error::$name is empty: the release environment has no secret of that name."; exit 1; fi
+          done
+          bun run release
       - name: Forget the certificate
         if: always()
         run: |
@@ -205,11 +212,13 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-  # Linux packages, made on the supported platform and uploaded for the one draft below.
+  # Linux packages, made on the supported platform and uploaded for the one draft below. In the release environment for
+  # its PostHog and report secrets alone; it waits with the Mac's, so one approval lets both go.
   linux:
     needs: check
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    environment: release
     defaults:
       run:
         working-directory: apps/desktop
@@ -223,10 +232,16 @@ jobs:
           node-version-file: .node-version
       - run: bun install --frozen-lockfile
         working-directory: .
-      - run: bun run package
+      - name: Package
         env:
-          ALTHAR_POSTHOG_KEY: ${{ vars.ALTHAR_POSTHOG_KEY }}
-          ALTHAR_POSTHOG_HOST: ${{ vars.ALTHAR_POSTHOG_HOST }}
+          ALTHAR_POSTHOG_KEY: ${{ secrets.ALTHAR_POSTHOG_KEY }}
+          ALTHAR_POSTHOG_HOST: ${{ secrets.ALTHAR_POSTHOG_HOST }}
+          ALTHAR_REPORT_URL: ${{ secrets.ALTHAR_REPORT_URL }}
+        run: |
+          for name in ALTHAR_POSTHOG_KEY ALTHAR_POSTHOG_HOST ALTHAR_REPORT_URL; do
+            if [ -z "${!name}" ]; then echo "::error::$name is empty: the release environment has no secret of that name."; exit 1; fi
+          done
+          bun run package
       - uses: actions/upload-artifact@v6
         with:
           name: release-linux
