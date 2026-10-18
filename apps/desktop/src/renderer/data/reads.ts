@@ -31,6 +31,8 @@ export const keys = {
   repositories: (projectId: string) => ['repositories', projectId] as const,
   connections: ['connections'] as const,
   settings: ['settings'] as const,
+  /** The skills store: read again after each change the skills page makes. */
+  skills: ['skills'] as const,
   /** Tasks found by words, in a project or (null) in every one. */
   search: (projectId: string | null, text: string) => ['search', projectId, text] as const,
   /** What a command printed: kept once it ended, so it never changes. */
@@ -117,6 +119,7 @@ export const reads = (client: Client) => ({
     queryOptions({ queryKey: keys.repositories(projectId), queryFn: () => client.getRepositories(projectId) }),
   connections: () => queryOptions({ queryKey: keys.connections, queryFn: () => client.listConnections() }),
   settings: () => queryOptions({ queryKey: keys.settings, queryFn: () => client.getSettings() }),
+  skills: () => queryOptions({ queryKey: keys.skills, queryFn: () => client.listSkills() }),
   // What is found changes with everything a task holds, and nothing on the feed says when: read again as the finder opens, and kept a moment.
   search: (projectId: string | null, text: string) =>
     queryOptions({

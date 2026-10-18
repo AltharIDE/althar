@@ -72,5 +72,14 @@ export const text = {
   noEditors: `No editor found on ${device.this}. Files open in ${device.files}.`,
   /* What couldn't be kept. */
   failed: 'That couldn’t be kept. Try again.',
+  skillsOff: 'Skills are off in this runtime.',
+  skillsFromAlthar: 'Althar',
+  skillsFromFolder: 'A folder you imported',
+  skillsCheck: 'Check for updates',
+  skillsCurrent: 'Every skill from GitHub is up to date.',
+  skillsUpdate: (id: string) => `Review the update to ${id}`,
+  skillsUnchecked: (id: string, why: string) => `${id} couldn’t be checked: ${why}`,
+  skillsCatalog: (revision: string) =>
+    `Althar’s skills come from agent-skills (Addy Osmani) and superpowers (Jesse Vincent), both MIT, catalog ${revision}. A later run gets a change; one under way keeps what it started with.`,
   iconFailed: 'That icon couldn’t be kept. Try again.',
 }

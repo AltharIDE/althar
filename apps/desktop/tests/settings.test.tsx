@@ -244,6 +244,7 @@ describe('the Settings tab', () => {
           .map((one) => one.textContent),
       ).toEqual([
         'Agents, needs you',
+        'Skills',
         'Code hosts and trackers',
         'Work on this Mac',
         'Reviews and pull requests',
@@ -277,10 +278,31 @@ describe('the Settings tab', () => {
   })
 
   it('names its sections as the address does, and takes nothing else for one', () => {
-    expect(SECTIONS).toEqual(['agents', 'code-hosts', 'this-mac', 'reviews', 'notifications', 'appearance', 'editor', 'about'])
+    expect(SECTIONS).toEqual(['agents', 'skills', 'code-hosts', 'this-mac', 'reviews', 'notifications', 'appearance', 'editor', 'about'])
     expect(isSection('this-mac')).toBe(true)
     expect(isSection('mac')).toBe(false)
     expect(isSection(undefined)).toBe(false)
+  })
+
+  it('lists the skills each lead is given, turns one off, and installs one from GitHub only once its card is read', async () => {
+    const { client } = fakeClient()
+    withServices(<Settings at="skills" />, client)
+    expect(await screen.findByRole('switch', { name: 'brainstorming' })).toBeTruthy()
+    expect(screen.getByText(/agent-skills \(Addy Osmani\) and superpowers \(Jesse Vincent\), both MIT/)).toBeTruthy()
+    await userEvent.click(screen.getByRole('switch', { name: 'brainstorming' }))
+    expect(client.setSkillActive).toHaveBeenCalledWith('brainstorming', false)
+
+    await userEvent.type(screen.getByRole('textbox', { name: 'Install a skill from GitHub' }), 'acme/agent-skills')
+    await userEvent.click(screen.getByRole('button', { name: 'Find skills' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Review' }))
+    expect(client.stageSkill).toHaveBeenCalledWith({ repo: 'acme/agent-skills', ref: 'HEAD', subpath: 'skills/release-notes' })
+    // The card: where it is from, its licence and what the agent is told; nothing installed until Install.
+    const card = await screen.findByRole('region', { name: 'release-notes' })
+    expect(within(card).getByText('Write the notes.', { exact: false })).toBeTruthy()
+    expect(client.approveSkill).not.toHaveBeenCalled()
+    await userEvent.click(within(card).getByRole('button', { name: 'Install' }))
+    await waitFor(() => expect(client.approveSkill).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-notes' }), false))
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'release-notes' })).toBeNull())
   })
 
   it('opens the agents on the one that needs the person, each with its accounts and who makes it', async () => {

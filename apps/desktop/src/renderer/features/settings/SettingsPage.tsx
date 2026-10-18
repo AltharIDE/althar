@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { type AgentStatus, MOST_AT_ONCE } from '@althar/contracts'
+import { type AgentStatus, type InstalledSkill, MOST_AT_ONCE, type SkillReviewCard } from '@althar/contracts'
 import {
   AgentInstall,
   AgentsAtOnce,
@@ -9,6 +9,7 @@ import {
   AgentTabPanel,
   AgentTabs,
   AppVersion,
+  Button,
   Choices,
   CoAuthor,
   CoAuthorFace,
@@ -28,6 +29,11 @@ import {
   SettingRow,
   SettingsNav,
   SettingSwitch,
+  SkillInstall,
+  SkillList,
+  SkillReview,
+  type SkillReviewModel,
+  type SkillRowModel,
   UpdateReady,
   UsageData,
 } from '@althar/ui'
@@ -62,6 +68,7 @@ import { useCoAuthor } from './useCoAuthor'
 import { useEdgeGlance } from './useEdgeGlance'
 import { type EdgePlaceModel, useEdgePlace } from './useEdgePlace'
 import { usePostTeamReviews } from './usePostTeamReviews'
+import { useSkills } from './useSkills'
 
 /*
  * Althar's settings, as a tab of the window beside the home's. Down the
@@ -152,6 +159,8 @@ function SectionBody({
   switch (section) {
     case 'agents':
       return <AgentsSection start={start} accounts={accounts} />
+    case 'skills':
+      return <SkillsSection />
     case 'code-hosts':
       return <ConnectionsView model={connections} columns />
     case 'this-mac':
@@ -237,6 +246,82 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
         )}
       </AgentTabPanel>
     </AgentTabs>
+  )
+}
+
+/* ---- skills ----------------------------------------------------------------------- */
+
+/** Where an install is from, as the person reads it. */
+const fromOf = (skill: { readonly source: InstalledSkill['source']; readonly repo?: string | null | undefined }) =>
+  skill.source === 'althar-default' ? text.skillsFromAlthar : skill.source === 'github' ? (skill.repo ?? 'GitHub') : text.skillsFromFolder
+
+const rowOf = (skill: InstalledSkill): SkillRowModel => ({
+  id: skill.id,
+  description: skill.description,
+  from: fromOf(skill),
+  on: skill.active,
+  needsSubagents: skill.needs.includes('subagents'),
+  canRollBack: skill.canRollBack,
+  removable: skill.source !== 'althar-default',
+})
+
+const reviewOf = (card: SkillReviewCard): SkillReviewModel => {
+  const { installed } = card
+  // Installing it replaces one of the same name from somewhere else; from the same repository it is an update.
+  const same = installed !== null && installed.source === 'github' && installed.repo === card.source.repo
+  return {
+    id: card.id,
+    ...card.source,
+    license: card.license,
+    description: card.description,
+    instructions: card.instructions,
+    files: card.files,
+    findings: card.findings,
+    installable: card.installable,
+    replaces: installed === null || same ? null : fromOf(installed),
+    update: same,
+    changes: card.changes,
+  }
+}
+
+/** The skills every lead is given, the one review open, and installing from GitHub. */
+function SkillsSection() {
+  const skills = useSkills()
+  if (skills.list === undefined) return <Failed when={skills.loadFailed} />
+  if (!skills.list.enabled) return <p className={s.quiet}>{text.skillsOff}</p>
+  const available = (skills.updates ?? []).flatMap((update) => (update.state === 'available' ? [update] : []))
+  const failed = (skills.updates ?? []).flatMap((update) => (update.state === 'failed' ? [update] : []))
+  return (
+    <div className={s.skills}>
+      {skills.card !== null ? (
+        <SkillReview card={reviewOf(skills.card)} busy={skills.busy} onInstall={skills.install} onCancel={skills.cancel} />
+      ) : (
+        <SkillInstall found={skills.found} busy={skills.busy} error={skills.error} onFind={skills.find} onReview={skills.review} />
+      )}
+      {skills.card !== null && skills.error !== null && (
+        <p role="alert" className={s.failed}>
+          {skills.error}
+        </p>
+      )}
+      <div className={s.skillUpdates}>
+        <Button size="small" variant="quiet" disabled={skills.busy} onClick={skills.checkUpdates}>
+          {text.skillsCheck}
+        </Button>
+        {skills.updates !== null && available.length === 0 && failed.length === 0 && <span className={s.quiet}>{text.skillsCurrent}</span>}
+        {available.map((update) => (
+          <Button key={update.id} size="small" disabled={skills.busy} onClick={() => skills.reviewUpdate(update.card)}>
+            {text.skillsUpdate(update.id)}
+          </Button>
+        ))}
+        {failed.map((update) => (
+          <span key={update.id} className={s.quiet}>
+            {text.skillsUnchecked(update.id, update.error)}
+          </span>
+        ))}
+      </div>
+      <SkillList skills={skills.list.skills.map(rowOf)} onToggle={skills.toggle} onRollBack={skills.rollBack} onRemove={skills.remove} />
+      {skills.list.catalogRevision !== null && <p className={s.quiet}>{text.skillsCatalog(skills.list.catalogRevision)}</p>}
+    </div>
   )
 }
 

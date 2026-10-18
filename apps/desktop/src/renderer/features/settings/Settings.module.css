@@ -82,3 +82,15 @@
   gap: 16px;
   padding: 4px 0;
 }
+
+/* ---- skills: installing or a review on top, the update check, then every skill ---- */
+.skills {
+  display: grid;
+  gap: 18px;
+}
+.skillUpdates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
