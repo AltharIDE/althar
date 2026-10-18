@@ -10,7 +10,6 @@ import { AltharLine } from '../AltharLine/AltharLine'
 import { Checked } from '../Checked/Checked'
 import { Gallery } from '../Gallery/Gallery'
 import { Markdown } from '../Markdown/Markdown'
-import { Thinking } from '../Reasoning/Reasoning'
 import { Relayed } from '../Relayed/Relayed'
 import { Thread } from '../Thread/Thread'
 import { Tool } from '../Tool/Tool'
@@ -98,41 +97,6 @@ export const AtWork: Story = {
         </WorkLine>
       </Round>
     </Thread>
-  ),
-}
-
-/** Before the lead's first word: its name, thinking where its words will start; then its words in that place. */
-export const BeforeTheFirstWord: Story = {
-  render: (args) => (
-    <States
-      size="thread"
-      cells={[
-        {
-          state: 'thinking',
-          node: (
-            <Round model={args.model}>
-              <Thinking took="4s" />
-            </Round>
-          ),
-        },
-        {
-          state: 'longer than usual',
-          node: (
-            <Round model={args.model}>
-              <Thinking took="34s" slow />
-            </Round>
-          ),
-        },
-        {
-          state: 'its first words',
-          node: (
-            <Round model={args.model}>
-              <Markdown source={ACK} />
-            </Round>
-          ),
-        },
-      ]}
-    />
   ),
 }
 

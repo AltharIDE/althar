@@ -5,7 +5,6 @@ import { fn } from 'storybook/test'
 import { OPUS, UNKNOWN_MODEL } from '../../fixtures/models'
 import { threadDecorator } from '../../storybook/ThreadFrame'
 import { Cite, FileRef } from '../Inline/Inline'
-import { Thinking } from '../Reasoning/Reasoning'
 import { Prose, Turn } from './Turn'
 import { States } from '../../storybook/States'
 
@@ -62,42 +61,6 @@ export const Dim: Story = {
 }
 /** A model with no mark: its name alone. */
 export const NoMark: Story = { args: { model: UNKNOWN_MODEL } }
-
-/** Before its first word: its name, thinking where its words will start, then how long, then that it's longer than usual; then its words in that place. */
-export const BeforeTheFirstWord: Story = {
-  render: (args) => (
-    <States
-      size="thread"
-      cells={[
-        {
-          state: 'thinking',
-          node: (
-            <Turn model={OPUS}>
-              <Thinking />
-            </Turn>
-          ),
-        },
-        {
-          state: 'counted',
-          node: (
-            <Turn model={OPUS}>
-              <Thinking took="12s" />
-            </Turn>
-          ),
-        },
-        {
-          state: 'longer than usual',
-          node: (
-            <Turn model={OPUS}>
-              <Thinking took="34s" slow />
-            </Turn>
-          ),
-        },
-        { state: 'its first words', node: <Turn model={OPUS}>{args.children}</Turn> },
-      ]}
-    />
-  ),
-}
 
 /* the turn is hovered or focused so its actions show; the state then lands on one of them */
 const turnIn = (force: string) => `[data-force='${force}'] > article`
