@@ -11,7 +11,7 @@ import s from './Skills.module.css'
 /*
  * The skills every task's lead is given, whichever agent leads it: the ones
  * Althar ships and the ones the person installed from GitHub, each on or
- * off for later runs. A skill from GitHub is read before it is installed: a
+ * off from the next time a lead starts. A skill from GitHub is read before it is installed: a
  * card shows where it is from, the commit it is pinned to, its licence, what
  * Althar noticed in it, every file and what changes from the version
  * installed, and only Install puts it in. Nothing in a skill is run by

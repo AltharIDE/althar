@@ -10,8 +10,8 @@ import { useServices } from '../../data/services'
 /*
  * A project's settings' view model: its name and ink, changed in place, its
  * rules in a line, whether its leads resolve conflicts and its tasks move
- * their issues to In Progress, whether skill and OpenSpec files may be
- * written to and pushed from its repositories, the notes its coordinator keeps, and removing
+ * their issues to In Progress, whether skill and OpenSpec files a task
+ * commits may stay in its repositories and be pushed, the notes its coordinator keeps, and removing
  * it. A new name or ink shows at once, and goes to the runtime one change
  * after another; the tabs and the home hear it through the change feed, and
  * the projects are read again at once too, so it shows everywhere before the
@@ -48,7 +48,7 @@ export interface ProjectSettingsModel {
   readonly setResolveConflicts: (on: boolean) => void
   /** Moves a task's issue to In Progress as the task starts, or stops doing so. */
   readonly setMoveIssues: (on: boolean) => void
-  /** Allows or stops writing skills or OpenSpec artifacts to its repositories, or pushing them: each a new revision of its rules. */
+  /** Allows or holds back skill or OpenSpec files in a task's commits, or pushing them: each a new revision of its rules. */
   readonly setRepositoryFile: (file: RepositoryFile, on: boolean) => void
   /** Which switch didn't hold, and why. */
   readonly ruleFailed: { readonly rule: RuleSwitch; readonly message: string } | null

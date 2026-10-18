@@ -74,7 +74,7 @@ export const text = {
   noEditors: `No editor found on ${device.this}. Files open in ${device.files}.`,
   /* What couldn't be kept. */
   failed: 'That couldn’t be kept. Try again.',
-  skillsOff: 'Skills are off in this runtime.',
+  skillsOff: 'Skills aren’t set up in this copy of Althar, so each lead starts without them.',
   skillsFromAlthar: 'Althar',
   skillsFromFolder: 'A folder you imported',
   skillsCheck: 'Check for updates',
@@ -82,6 +82,6 @@ export const text = {
   skillsUpdate: (id: string) => `Review the update to ${id}`,
   skillsUnchecked: (id: string, why: string) => `${id} couldn’t be checked: ${why}`,
   skillsCatalog: (revision: string) =>
-    `Althar’s skills come from agent-skills (Addy Osmani) and superpowers (Jesse Vincent), both MIT, catalog ${revision}. A later run gets a change; one under way keeps what it started with.`,
+    `Althar’s skills come from agent-skills (Addy Osmani) and superpowers (Jesse Vincent), both MIT, catalog ${revision}. A change reaches each lead the next time it starts, in a task under way too.`,
   iconFailed: 'That icon couldn’t be kept. Try again.',
 }

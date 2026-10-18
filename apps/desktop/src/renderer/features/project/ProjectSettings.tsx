@@ -21,9 +21,10 @@ import {
   ProjectNotes,
   RemoveProject,
   RepositoryFiles,
-  repositoryFilesText,
+  repositoryFilesWords,
 } from '@althar/ui'
 
+import { device } from '../../shared/device'
 import { shortFolder } from '../../shared/folders'
 import { productBrand, productName } from '../../shared/products'
 import { connectedAs, type Host, hostMarksOf, hostNameOf, rulesLineOf, text as frontText, type Tracker } from './front'
@@ -38,8 +39,9 @@ import type { ProjectSettingsModel } from './useProjectSettings'
  * host and tracker it is on. Beside the tracker, a switch for whether a task's
  * issue moves to In Progress as the task starts; beside its rules, one has
  * its leads resolve a conflict with the default branch unasked (ADR-030).
- * Whether skill and OpenSpec files may be written to its repositories, and
- * pushed from them, opens out to three switches, each off until turned on.
+ * Whether skill and OpenSpec files a task commits may stay in its
+ * repositories' commits, and be pushed, opens out to three switches, each
+ * off until turned on.
  * The notes its coordinator keeps open out too, to read and drop one that no
  * longer holds (ADR-031). Removing it from Althar is at the foot, and asks
  * first. Nothing in it says what is running.
@@ -65,6 +67,9 @@ export const text = {
   connect: 'Connect',
   remove: 'Remove from Althar',
 }
+
+/** The repository files' words, with this device named as the rest of the window names it. */
+const filesText = repositoryFilesWords(device.this)
 
 /** The runtime's name for each of the kit's inks. */
 /** Where a module sits beside another, in the grid's four columns: the left half, or the right. */
@@ -238,7 +243,7 @@ export function ProjectSettings({
               )}
               {model.rules !== null && (
                 <ControlModule title={text.repositoryFiles} onClick={() => setShowing('files')}>
-                  <ControlWords title={repositoryFilesText.summary(model.rules.repositoryFiles)} />
+                  <ControlWords title={filesText.summary(model.rules.repositoryFiles)} />
                 </ControlModule>
               )}
               {model.notes !== null && (
@@ -263,6 +268,7 @@ export function ProjectSettings({
               <RepositoryFiles
                 value={model.rules.repositoryFiles}
                 onChange={model.setRepositoryFile}
+                text={filesText}
                 {...(model.ruleFailed?.rule === 'repositoryFiles' ? { error: model.ruleFailed.message } : {})}
               />
             </ControlSheet>

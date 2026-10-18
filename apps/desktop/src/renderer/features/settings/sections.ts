@@ -36,7 +36,7 @@ export const sectionText: Readonly<Record<Section, { readonly title: string; rea
   },
   skills: {
     title: 'Skills',
-    lede: 'What every task’s lead is told how to do, whichever agent leads it: the skills Althar ships and any you install from GitHub.',
+    lede: 'What each task’s lead is given as it starts, whichever agent leads it: the skills Althar ships and any you install from GitHub.',
     icon: 'knowledge',
   },
   'code-hosts': {

@@ -31,7 +31,7 @@ export const keys = {
   repositories: (projectId: string) => ['repositories', projectId] as const,
   connections: ['connections'] as const,
   settings: ['settings'] as const,
-  /** The skills store: read again after each change the skills page makes. */
+  /** The skills store: read before the skills show, and again as a skill changes, in this window or another (feed.ts). */
   skills: ['skills'] as const,
   /** Tasks found by words, in a project or (null) in every one. */
   search: (projectId: string | null, text: string) => ['search', projectId, text] as const,

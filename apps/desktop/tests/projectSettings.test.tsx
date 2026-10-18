@@ -260,12 +260,17 @@ describe('a project’s settings', () => {
     expect(panel.getByText('Off: you ask the lead to fix them')).toBeTruthy()
   })
 
-  it('keeps skill and OpenSpec files on this computer until each is allowed, each switch a revision of its rules', async () => {
+  it('keeps skill and OpenSpec files a task commits on this Mac until each is allowed, each switch a revision of its rules', async () => {
     const { client } = windowAt('/projects/p1')
     const panel = await openSettings()
     const files = panel.getByRole('button', { name: /^Repository files/ })
-    expect(files.textContent).toContain('Kept on this computer, pushing blocked')
+    expect(files.textContent).toContain('Kept on this Mac')
     await userEvent.click(files)
+    // The device by the name the rest of the window gives it; and Althar never says it writes skills into the repository.
+    expect(panel.getByText(/stay on this Mac unless you allow them here/)).toBeTruthy()
+    expect(panel.queryByText(/this computer|runtime/)).toBeNull()
+    expect(panel.getByText(/Althar never puts them there itself/)).toBeTruthy()
+    expect(panel.queryByText(/written into/)).toBeNull()
     const skills = panel.getByRole('switch', { name: 'Write Althar-managed skills' })
     const openSpec = panel.getByRole('switch', { name: 'Write OpenSpec artifacts' })
     const push = panel.getByRole('switch', { name: 'Push skill/OpenSpec files' })
@@ -290,7 +295,7 @@ describe('a project’s settings', () => {
     )
     expect(panel.getByText('Allowed')).toBeTruthy()
     await userEvent.click(panel.getByRole('button', { name: 'Back to all settings' }))
-    expect(panel.getByRole('button', { name: /^Repository files/ }).textContent).toContain('OpenSpec written, pushing allowed')
+    expect(panel.getByRole('button', { name: /^Repository files/ }).textContent).toContain('OpenSpec in commits, pushed')
   })
 
   it('shows the repository files the rules allow, as kept', async () => {
@@ -302,7 +307,7 @@ describe('a project’s settings', () => {
       })),
     })
     const panel = await openSettings()
-    expect(panel.getByRole('button', { name: /^Repository files/ }).textContent).toContain('Skills written, pushing allowed')
+    expect(panel.getByRole('button', { name: /^Repository files/ }).textContent).toContain('Skills in commits, pushed')
     await userEvent.click(panel.getByRole('button', { name: /^Repository files/ }))
     expect(panel.getByRole('switch', { name: 'Write Althar-managed skills' }).getAttribute('aria-checked')).toBe('true')
     expect(panel.getByRole('switch', { name: 'Write OpenSpec artifacts' }).getAttribute('aria-checked')).toBe('false')

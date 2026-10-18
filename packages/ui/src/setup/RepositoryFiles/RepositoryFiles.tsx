@@ -8,11 +8,13 @@ import s from './RepositoryFiles.module.css'
 
 /*
  * Skill and OpenSpec files in a project's repositories, in its settings:
- * three separate permissions, each off until the person turns it on. Off,
- * Althar keeps its skills and OpenSpec artifacts in its own store and a push
- * that holds such a file is refused; writing them into the repository never
- * allows pushing them, which is a switch of its own. Each switch is a new
- * revision of the project's rules.
+ * three separate permissions, each off until the person turns it on. Althar
+ * never writes such files into a repository itself; an agent may, and
+ * commit them with a task's work. Off, a push of a task's commits that hold
+ * them is held back, so they stay on the device. Allowing a kind of file in
+ * the repository never allows pushing it, which is a switch of its own.
+ * Each switch is a new revision of the project's rules. The device is named
+ * as the consumer names it (this Mac, this PC), through `repositoryFilesWords`.
  */
 
 /** Which of the three permissions. */
@@ -23,6 +25,7 @@ export type RepositoryFilesValue = Readonly<Record<RepositoryFile, boolean>>
 export interface RepositoryFilesText {
   /** What they are, above them. */
   line: string
+  /** Each switch's name. The runtime's refused push names them as they are here, so they stay as they are. */
   title: Record<RepositoryFile, string>
   /** What each allows, under its name. */
   allows: Record<RepositoryFile, string>
@@ -33,8 +36,9 @@ export interface RepositoryFilesText {
   summary: (value: RepositoryFilesValue) => string
 }
 
-export const repositoryFilesText: RepositoryFilesText = {
-  line: 'Skill and OpenSpec files stay on this computer unless you allow them here. Each choice is for this project only.',
+/** The words, with the device named as the consumer names it: "this Mac". */
+export const repositoryFilesWords = (device: string): RepositoryFilesText => ({
+  line: `Skill and OpenSpec files a task commits stay on ${device} unless you allow them here. Each choice is for this project only.`,
   title: {
     writeSkills: 'Write Althar-managed skills',
     writeOpenSpec: 'Write OpenSpec artifacts',
@@ -42,19 +46,24 @@ export const repositoryFilesText: RepositoryFilesText = {
   },
   allows: {
     writeSkills:
-      'When a task asks, its skills are written into the agents’ own folders in the repository (.claude/skills, .agents/skills, .opencode/skills) and may be committed there.',
-    writeOpenSpec: 'OpenSpec’s openspec/ folder may live in the repository and be committed with it.',
+      'Skill files in the agents’ own folders (.claude/skills, .agents/skills, .opencode/skills) may be part of a task’s commits. Althar never puts them there itself; while this is off, a push with them is held back.',
+    writeOpenSpec: 'Files in an openspec/ folder may be part of a task’s commits. While this is off, a push with them is held back.',
     pushProtected:
-      'Changes to those skill folders and openspec/ may be pushed with a task’s branch. Neither switch above allows this on its own.',
+      'Those skill and OpenSpec files may be pushed with a task’s branch, each kind once its own switch above is on too. Neither of those allows pushing on its own.',
   },
-  off: { writeSkills: 'In Althar', writeOpenSpec: 'In Althar', pushProtected: 'Blocked' },
-  on: { writeSkills: 'In the repository', writeOpenSpec: 'In the repository', pushProtected: 'Allowed' },
+  off: { writeSkills: 'Held back', writeOpenSpec: 'Held back', pushProtected: 'Blocked' },
+  on: { writeSkills: 'In commits', writeOpenSpec: 'In commits', pushProtected: 'Allowed' },
   summary: (value) => {
-    const written = [value.writeSkills && 'skills', value.writeOpenSpec && 'OpenSpec'].filter(Boolean).join(' and ')
-    const push = value.pushProtected ? 'pushing allowed' : 'pushing blocked'
-    return written === '' ? `Kept on this computer, ${push}` : `${written[0]!.toUpperCase()}${written.slice(1)} written, ${push}`
+    const kinds = [value.writeSkills ? 'skills' : null, value.writeOpenSpec ? 'OpenSpec' : null].filter((kind) => kind !== null)
+    if (kinds.length === 0) return `Kept on ${device}`
+    const named = kinds.join(' and ')
+    const first = `${named.charAt(0).toUpperCase()}${named.slice(1)} in commits`
+    return value.pushProtected ? `${first}, pushed` : `${first}, kept on ${device}`
   },
-}
+})
+
+/** The words for a device with no name of its own. */
+export const repositoryFilesText: RepositoryFilesText = repositoryFilesWords('this computer')
 
 const ORDER: ReadonlyArray<RepositoryFile> = ['writeSkills', 'writeOpenSpec', 'pushProtected']
 
