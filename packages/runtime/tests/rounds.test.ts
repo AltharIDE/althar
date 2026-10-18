@@ -772,7 +772,7 @@ describe('a task’s next pull request, in its repositories', () => {
 
 describe('a task’s first pull request in a repository, and a reported round with nothing to go by', () => {
   it.live(
-    'opens a repository’s first pull request after another’s merged, as a follow-up changes it for the first time',
+    'opens a repository’s first pull request after another’s merged, as a follow-up changes it for the first time; then each one’s next, described anew',
     () => {
       const folder = realpathSync(mkdtempSync(join(tmpdir(), 'althar-folder-')))
       const bares: Record<string, string> = {}
@@ -868,6 +868,36 @@ describe('a task’s first pull request in a repository, and a reported round wi
         assert.isTrue(github.changes[1]?.body.startsWith('Web gave up on the first failed call too.'))
         assert.strictEqual(git(bares.web ?? '', 'log', '-1', '--format=%s', task.branch), 'Web first')
         assert.strictEqual(git(api, 'rev-parse', '--abbrev-ref', 'HEAD'), task.branch)
+
+        // Web's merges too, and the lead changes both again. Web's description came after api's pull request opened, but before
+        // web's own: each next pull request is asked for one of its own, by when its repository's last one opened.
+        squashMerge(bares.web ?? '', task.branch)
+        github.mergeByHand(2)
+        yield* (yield* Changes).refresh(task.taskId)
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'settled', Duration.seconds(10))
+        commitIn(api, 'retry.txt', 'Again for api')
+        commitIn(web, 'retry.txt', 'Again for web')
+        const again = { summary: 'Did both again.', built: 'The retry, again in both.' }
+        assert.match(
+          yield* callTool(access, 'finish_step', again),
+          /^Write the description of the task's pull request before you finish, one for each of api, web\. /,
+        )
+        assert.strictEqual(
+          yield* callTool(access, 'finish_step', {
+            ...again,
+            descriptions: [
+              { repository: 'api', text: 'Api retries twice now.' },
+              { repository: 'web', text: 'Web retries twice now.' },
+            ],
+          }),
+          'Althar has your summary. The task is ready for the person.',
+        )
+        yield* until(cards(project.projectId), (all) => all[0]?.phase === 'ready' && all[0].unshipped?.commits === 2)
+        yield* runs.publish(task.taskId)
+        assert.deepStrictEqual(
+          github.changes.slice(2).map((change) => change.body.split('\n\n')[0]),
+          ['Api retries twice now.', 'Web retries twice now.'],
+        )
       }).pipe(Effect.provide(runtimeWith(github)))
     },
     60_000,

@@ -2298,8 +2298,11 @@ export class Runs extends Context.Service<
           readonly base: string | null
         }>,
         given: Readonly<Record<string, string>>,
-        /** Only descriptions given since, for a task's next pull request: its last one's describe that. */
-        since: string | null = null,
+        /**
+         * When each repository's last pull request opened, by its worktree, for a next one: only descriptions given since count, as
+         * that one's describe it. Each its own, as the pull request is described (Changes.bodyFor).
+         */
+        since: Readonly<Record<string, string>> = {},
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -2315,7 +2318,7 @@ export class Runs extends Context.Service<
             const [before] = yield* sql<{ n: number }>`
               SELECT count(*) AS n FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
                 AND json_extract(content, '$.descriptions.' || json_quote(${worktree.slug})) IS NOT NULL
-                AND (${since} IS NULL OR created_at > ${since})`
+                AND (${since[worktree.id] ?? null} IS NULL OR created_at > ${since[worktree.id] ?? null})`
             if ((before?.n ?? 0) > 0) continue
             const { template } = yield* conventionsAt(worktree.path, 'HEAD')
             undescribed.push({ name: worktree.name, template })
@@ -2427,7 +2430,9 @@ export class Runs extends Context.Service<
           if ((end === 'draft' || end === 'ready') && !quiet) {
             // A round's work after its task's pull request merged or closed goes in a new one, described from what came since.
             const after = round === undefined ? [] : yield* changes.unshipped(current.taskId).pipe(Effect.orElseSucceed(() => []))
-            const since = after.flatMap((one) => (one.openedAt === null ? [] : [one.openedAt])).toSorted()[0] ?? null
+            const since = Object.fromEntries(
+              after.flatMap((one) => (one.openedAt === null ? [] : [[one.workspaceId, one.openedAt] as const])),
+            )
             const undescribed = yield* undescribedOf(access.threadId, worktrees, kept, since)
             if (undescribed.length > 0) {
               givenBefore.set(access.threadId, kept)
