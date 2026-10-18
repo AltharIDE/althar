@@ -71,7 +71,13 @@
     used most wins.
   - **A shortcut: ⌘⇧D** (Ctrl+Shift+D off the Mac) starts and stops it from
     anywhere in the window; held down, letting go stops it. The composer
-    shown last has it.
+    shown last has it, unless dictation is carried (below): then it stops that.
+  - **It goes with the person.** Leaving its composer while it listens goes
+    on listening, in a pill over the composer on screen (at the window's
+    foot where there is none) that says whose it is, so they can look at
+    what they are talking about. Once written, it is sent from the pill to
+    the thread it was said in, or moved into the composer on screen. The
+    microphone stays one: starting in another thread writes down the first.
 - **Alternatives considered:**
   - Hosted transcription with the person's own key (OpenAI's GPT-Transcribe,
     or OpenRouter's audio endpoint): the best quality on accents and noise,

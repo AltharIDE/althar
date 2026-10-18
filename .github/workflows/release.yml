@@ -177,6 +177,8 @@ jobs:
           # Usage data's PostHog project (src/main/usageData.ts): public, as every PostHog project key is. Without them, the release sends none.
           ALTHAR_POSTHOG_KEY: ${{ vars.ALTHAR_POSTHOG_KEY }}
           ALTHAR_POSTHOG_HOST: ${{ vars.ALTHAR_POSTHOG_HOST }}
+          # Where Report a problem posts: the reports Worker (apps/report), baked into the build. Unset, a report goes by mail.
+          ALTHAR_REPORT_URL: ${{ vars.ALTHAR_REPORT_URL }}
         run: bun run release
       - name: Forget the certificate
         if: always()
