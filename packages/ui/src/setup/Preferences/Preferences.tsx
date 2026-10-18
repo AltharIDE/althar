@@ -579,6 +579,81 @@ export function UsageData({ on, onChange, doNotTrack = false, text }: UsageDataP
   )
 }
 
+/* ---- crash reports ----------------------------------------------------------------- */
+
+export interface CrashReportsText {
+  title: string
+  note: string
+  /** Why it is off, whatever was chosen. */
+  doNotTrack: string
+}
+
+export const crashReportsText: CrashReportsText = {
+  title: 'Crash reports',
+  note: 'What failed and where in Althar’s code, when it crashes or hits an error. Never your code, what is written, or any name.',
+  doNotTrack: 'Off while DO_NOT_TRACK is set.',
+}
+
+export interface CrashReportsProps {
+  on: boolean
+  onChange: (on: boolean) => void
+  /** DO_NOT_TRACK is set where Althar started: off, whatever was chosen, and not turned on here. */
+  doNotTrack?: boolean
+  text?: Partial<CrashReportsText>
+}
+
+/** Whether Althar sends crash reports, with the one line on what they carry and never carry; beside usage data, a switch of its own. */
+export function CrashReports({ on, onChange, doNotTrack = false, text }: CrashReportsProps) {
+  const t = { ...crashReportsText, ...text }
+  return (
+    <SettingSwitch
+      title={t.title}
+      note={doNotTrack ? t.doNotTrack : t.note}
+      checked={on && !doNotTrack}
+      onChange={onChange}
+      disabled={doNotTrack}
+    />
+  )
+}
+
+export interface CrashReportsLineText {
+  title: string
+  note: string
+  doNotTrack: string
+}
+
+export const crashReportsLineText: CrashReportsLineText = {
+  title: 'Crash reports',
+  note: 'go to Althar’s team when something fails: what failed and where, never your code or any name.',
+  doNotTrack: 'are off while DO_NOT_TRACK is set.',
+}
+
+export interface CrashReportsLineProps extends CrashReportsProps {
+  text?: Partial<CrashReportsLineText>
+  className?: string
+}
+
+/**
+ * Crash reports, asked once, as one quiet line with its switch at the end,
+ * for a first screen to carry at its foot: not a dialog, and nothing to
+ * answer before going on. Settings has the same switch.
+ */
+export function CrashReportsLine({ on, onChange, doNotTrack = false, text, className }: CrashReportsLineProps) {
+  const t = { ...crashReportsLineText, ...text }
+  const id = useId()
+  return (
+    <p className={cx(s.line, className)}>
+      <span className={s.lineWords}>
+        <span id={`${id}-t`} className={s.lineTitle}>
+          {t.title}
+        </span>{' '}
+        <span id={`${id}-n`}>{doNotTrack ? t.doNotTrack : t.note}</span>
+      </span>
+      <Switch checked={on && !doNotTrack} onChange={onChange} disabled={doNotTrack} labelledBy={`${id}-t`} describedBy={`${id}-n`} />
+    </p>
+  )
+}
+
 /* ---- where Althar shows in another app ------------------------------------------- */
 
 export interface EdgeSceneProps {

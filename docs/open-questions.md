@@ -9,6 +9,20 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## Crash reports, 17 October
+
+- [x] **Where errors and crashes go.** PostHog's error tracking, from the
+  main process, masked, behind a switch of their own; no Sentry for now, and
+  native minidumps stay on the computer, only their occurrence sent
+  ([ADR-046](decisions/046-crash-reports-to-posthog-from-main.md)).
+- [x] **On or off at first, and where it is asked.** On, asked once as a
+  quiet line with its switch on the first screen, and in Settings beside
+  Usage data (DEV-66; ADR-046).
+- [ ] **Source maps.** Uploading the window's maps to PostHog in the release
+  workflow, with posthog-cli and a key that can write them (DEV-62).
+- [ ] **An agent's adapter that dies.** Reported from the runtime, once it
+  has one place that knows (ADR-046).
+
 ## Usage data, 12 October
 
 - [x] **Where usage data goes from, and what can.** The main process, with

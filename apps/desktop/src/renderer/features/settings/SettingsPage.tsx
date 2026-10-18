@@ -12,6 +12,7 @@ import {
   Choices,
   CoAuthor,
   CoAuthorFace,
+  CrashReports,
   DockPreview,
   EdgeHere,
   EdgeMini,
@@ -466,8 +467,9 @@ function EditorSection() {
 /**
  * Which Althar this is, with its release's notes; a newer one, once it is
  * ready to install; Report a problem (DEV-61), where the app can report;
- * and whether it sends anonymous usage data, which is off, and stays off
- * here, while DO_NOT_TRACK is set where it started.
+ * and whether it sends anonymous usage data, and crash reports (DEV-66),
+ * each with a switch of its own, both off, and staying off here, while
+ * DO_NOT_TRACK is set where it started.
  */
 function AboutSection({ start }: { start: StartModel }) {
   const update = useUpdate()
@@ -485,6 +487,7 @@ function AboutSection({ start }: { start: StartModel }) {
       </div>
       <SettingList>
         <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={host.doNotTrack === true} />
+        <CrashReports on={preferences.crashReports} onChange={(on) => set('crashReports', on)} doNotTrack={host.doNotTrack === true} />
       </SettingList>
       <Failed when={failed} />
     </>
