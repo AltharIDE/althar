@@ -1,3 +1,4 @@
+import { contained } from './Failures'
 import { REPORT_FOR } from './leftRunning'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -3940,7 +3941,8 @@ export class Changes extends Context.Service<
           Effect.forever(
             Effect.gen(function* () {
               const only = yield* Effect.raceFirst(Queue.take(wake), Effect.as(Effect.sleep(every), null))
-              yield* listenOnce(only)
+              // A round that failed is kept to that round: the next one listens again.
+              yield* listenOnce(only).pipe(contained('Changes.listen', () => undefined))
             }),
           ),
         ),

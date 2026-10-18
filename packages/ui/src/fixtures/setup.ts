@@ -38,6 +38,7 @@ export const EVERY_STATE: RuntimeEntry[] = [
   { ...GEMINI_CLI, state: RuntimeState.SignedOut, waiting: 2 },
   { ...OLLAMA, state: RuntimeState.Outdated, version: '0.3.2', needs: '0.5' },
   { id: 'aider', name: 'Aider', state: RuntimeState.Checking },
+  { id: 'amp', name: 'Amp', state: RuntimeState.Unchecked, why: 'Althar couldn’t check Amp. Its log has the details.' },
 ]
 
 export const ROLES: SelectOption<string>[] = [

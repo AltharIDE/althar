@@ -62,6 +62,7 @@ import type { Models } from './Models'
 import type { Policies } from './Policies'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
+import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
 import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
@@ -208,6 +209,22 @@ interface ReviewThread {
 type ThreadContext = TaskThread | CoordinatorThread | ReviewThread
 
 /** Where a thread's agent works. */
+/**
+ * An agent that went on its own, as a report says it: its id and how its
+ * process ended, never what it wrote. No stack: where Althar noticed says
+ * nothing, and each agent and way of ending is its own report.
+ */
+export const agentLost = (
+  agentId: string,
+  exit: Option.Option<{ readonly code: number | null; readonly signal: string | null }>,
+): Error => {
+  const how = Option.isSome(exit) ? `exit code ${exit.value.code ?? 'none'}, signal ${exit.value.signal ?? 'none'}` : 'no exit seen'
+  const error = new Error(`The ${agentId} agent stopped on its own: ${how}.`)
+  error.name = 'AgentLost'
+  error.stack = ''
+  return error
+}
+
 const cwdOf = (thread: ThreadContext) => (thread.role === 'coordinator' ? thread.folder.folder : thread.cwd)
 
 /** Every folder a thread's agent works in: a picture an agent points at is read only from inside them. */
@@ -622,6 +639,7 @@ export class Sessions extends Context.Service<
       const live = yield* Live
       const permissions = yield* Permissions
       const questions = yield* Questions
+      const failures = yield* Failures
       const accounts = yield* Accounts
       const limits = yield* Limits
       const toolServer = yield* ToolServer
@@ -1441,13 +1459,14 @@ export class Sessions extends Context.Service<
             // waits before it holds the turn, so the lead can be stopped meanwhile.
             if (running.thread.role === 'task' && running.brief !== undefined) yield* setups.ready(running.thread.taskId)
             const { thread } = running
+            // A turn that couldn't be delivered is kept to that turn: the next message wakes the loop again.
             if (thread.role === 'coordinator')
               return yield* running.delivering.withPermits(1)(
                 Effect.gen(function* () {
                   while (!running.stopping && (yield* deliver(running))) {
                     // Each turn may leave more input queued, such as what arrived while it ran.
                   }
-                }),
+                }).pipe(contained('Sessions.deliver', () => undefined, running.entry.definition.id)),
               )
             // A lead's or a reviewer's turns, one at a time, each waiting for a place among the agents at work here: what
             // is still queued after one wakes it again, and asks again.
@@ -1581,6 +1600,9 @@ export class Sessions extends Context.Service<
               ...(Option.isSome(exit) ? { exitCode: exit.value.code ?? 'none', signal: exit.value.signal ?? 'none' } : {}),
             }),
           )
+          // One that went on its own is reported (ADR-047), by its agent and how its process ended: never what it wrote.
+          if (state === 'lost')
+            yield* failures.report(Cause.die(agentLost(running.entry.definition.id, exit)), 'agent', running.entry.definition.id)
           yield* live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state })
           yield* Deferred.succeed(running.ended, undefined)
         })

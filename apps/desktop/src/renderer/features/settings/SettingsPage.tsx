@@ -56,7 +56,7 @@ import { AgentAccounts } from '../accounts/AgentAccounts'
 import { type AccountSignInModel, useAccountSignIn } from '../accounts/useAccountSignIn'
 import { ConnectionsView } from '../connections/ConnectionsView'
 import { type ConnectionsModel, useConnections } from '../connections/useConnections'
-import { StartError } from '../start/StartView'
+import { AgentProblem, StartError } from '../start/StartView'
 import type { StartModel } from '../start/useStart'
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { ModelsView } from './ModelsView'
@@ -228,7 +228,9 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
       <AgentTabList label={text.agents} agents={agents.map(tabOf)} />
       <StartError model={start} />
       <AgentTabPanel agent={tabOf(chosen)} headingLevel={2} aside={<ModelsView key={chosen.id} agent={chosen} />}>
-        {chosen.installed && chosen.download?.installing !== true ? (
+        {chosen.problem !== null ? (
+          <AgentProblem why={chosen.problem} model={start} />
+        ) : chosen.installed && chosen.download?.installing !== true ? (
           <AgentAccounts agent={chosen} start={start} signIn={accounts} />
         ) : (
           <AgentInstall

@@ -13,7 +13,7 @@ import { isSection, type Section, SECTIONS } from '../src/renderer/features/sett
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { edgeSpotOf, edgeWords } from '../src/renderer/shared/edge'
-import { connectionList, fakeClient, fakeHost, githubConnection, models, skillCard, withoutOpenCode } from './fixtures'
+import { agents, connectionList, fakeClient, fakeHost, githubConnection, models, skillCard, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -393,6 +393,29 @@ describe('the Settings tab', () => {
     expect(within(install).getByText(/from GitHub, about 45 MB, check it against the release/)).toBeTruthy()
     await userEvent.click(within(install).getByRole('button', { name: 'Download OpenCode' }))
     expect(client.installAgent).toHaveBeenCalledWith('opencode')
+  })
+
+  it('says on its tab alone why an agent couldn’t be checked, the others as they are, and checks again', async () => {
+    const problem = "Althar couldn't check OpenCode. Its log has the details."
+    const unchecked = agents.map((agent) =>
+      agent.id === 'opencode' ? { ...agent, signIn: 'unknown' as const, accounts: [], version: null, download: null, problem } : agent,
+    )
+    const statusOf = vi.fn(async ({ recheck }: { recheck?: boolean } = {}) => ({
+      apiVersion: 1,
+      appVersion: '0.0.0',
+      agents: recheck === true ? agents : unchecked,
+    }))
+    const { client } = fakeClient({ status: statusOf })
+    withServices(<Settings />, client, fakeHost())
+    await userEvent.click(await screen.findByRole('tab', { name: /OpenCode/ }))
+    expect(await alert()).toBe(problem)
+    // The others stand as they are.
+    await userEvent.click(screen.getByRole('tab', { name: /Claude Code/ }))
+    expect(screen.queryByRole('alert')).toBeNull()
+    await userEvent.click(screen.getByRole('tab', { name: /OpenCode/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Check again' }))
+    expect(statusOf).toHaveBeenCalledWith({ recheck: true })
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
   })
 
   it('has the code hosts beside the trackers, and connects one in place of the list', async () => {

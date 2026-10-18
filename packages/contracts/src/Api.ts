@@ -81,6 +81,8 @@ export const AgentStatus = Schema.Struct({
   kept: Schema.Boolean,
   /** Althar can download it for the person, about this big; null where it can't. `installing` while it does. */
   download: Schema.NullOr(Schema.Struct({ size: Schema.String, installing: Schema.Boolean })),
+  /** Why Althar couldn't check it, in words for the person; null where it could. The other agents are checked all the same. */
+  problem: Schema.NullOr(Schema.String),
 })
 export type AgentStatus = typeof AgentStatus.Type
 

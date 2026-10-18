@@ -5,10 +5,21 @@ import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
-import { backupsIn, connection, databaseIn, Folders, Nudges, Secrets, SecretsUnavailable, services, UsageData } from '@althar/runtime'
+import {
+  backupsIn,
+  connection,
+  databaseIn,
+  Failures,
+  Folders,
+  Nudges,
+  Secrets,
+  SecretsUnavailable,
+  services,
+  UsageData,
+} from '@althar/runtime'
 import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
-import { watchCrashes } from './crashes'
+import { handledOf, watchCrashes } from './crashes'
 import { editorsHere, openInEditor } from './editors'
 import { runtimeFacts, runtimeNames } from './facts'
 import { agentsLog, stdoutLogger } from './logging'
@@ -254,6 +265,12 @@ const program = Effect.gen(function* () {
   )
   yield* Effect.forkScoped(
     Stream.runForEach(Context.get(context, UsageData).events, (usage) => Effect.sync(() => parent.postMessage({ type: 'usage', usage }))),
+  )
+  // What the runtime kept to what it belonged to and carried on past goes too, as a handled crash report (crashes.ts, ADR-047).
+  yield* Effect.forkScoped(
+    Stream.runForEach(Context.get(context, Failures).events, (failure) =>
+      Effect.sync(() => parent.postMessage({ type: 'crash', crash: handledOf(failure) })),
+    ),
   )
   const ports = yield* Queue.unbounded<Port>()
   accept = (port) => void Queue.offerUnsafe(ports, port)
