@@ -1,5 +1,14 @@
 import type { AgentDefinition } from '@althar/provider-adapters'
-import { releaseRun, installLocalCatalog, projectRun, activeSelection } from '@althar/skills'
+import {
+  activeSelection,
+  type Install,
+  installLocalCatalog,
+  parseFrontmatter,
+  projectRun,
+  readInstalls,
+  readObject,
+  releaseRun,
+} from '@althar/skills'
 
 /** Where the shared skill store is and the local catalog that seeds it (docs/plans/skills-across-harnesses.md). Without it, runs have no Althar-selected skills. */
 export interface SkillsConfig {
@@ -50,5 +59,43 @@ export const runSkills = async (
     projected: projected.projected,
     omitted: projected.omitted,
     release: () => releaseRun(config.root, runId),
+  }
+}
+
+/** An installed skill as the window lists it, with what its stored `SKILL.md` says and what the catalog says it needs. */
+export const listSkills = async (config: SkillsConfig) => {
+  const catalog = await installLocalCatalog(config.root, config.catalog)
+  const known = new Map(catalog.skills.map(({ entry }) => [entry.id, entry]))
+  const read = await readInstalls(config.root)
+  if (!read.ok) throw new Error(read.error)
+  const skills = []
+  for (const install of read.value.installs) skills.push(await describe(config.root, install, known))
+  return { enabled: true, catalogRevision: catalog.revision, skills }
+}
+
+const decoder = new TextDecoder()
+
+/** What the catalog says of a default: its licence and what it needs. */
+type Known = ReadonlyMap<string, { readonly license: string; readonly needs: ReadonlyArray<string> }>
+
+export const describe = async (root: string, install: Install, known: Known = new Map()) => {
+  const entry = install.source === 'althar-default' ? known.get(install.id) : undefined
+  const skill = (await readObject(root, install.treeHash)).get('SKILL.md')
+  const front = skill === undefined ? null : parseFrontmatter(decoder.decode(skill))?.data
+  const said = (key: string) => (typeof front?.[key] === 'string' ? (front[key] as string).trim() : null)
+  return {
+    id: install.id,
+    source: install.source,
+    description: said('description'),
+    license: said('license') ?? entry?.license ?? null,
+    repo: install.repo ?? null,
+    subpath: install.subpath ?? null,
+    ref: install.ref ?? null,
+    sha: install.sha ?? null,
+    treeHash: install.treeHash,
+    review: install.review,
+    active: install.active,
+    needs: [...(entry?.needs ?? [])],
+    canRollBack: (install.history?.length ?? 0) > 0,
   }
 }

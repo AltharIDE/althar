@@ -214,3 +214,8 @@ export class CliUnanswered extends Schema.TaggedError<CliUnanswered>()('CliUnans
   tool: Schema.String,
   message: Schema.String,
 }) {}
+
+/** A skills store operation that couldn't be done, in words for the person: a skill that won't install, a repository GitHub won't give, no store at all. */
+export class SkillRefused extends Schema.TaggedError<SkillRefused>()('SkillRefused', {
+  message: Schema.String,
+}) {}

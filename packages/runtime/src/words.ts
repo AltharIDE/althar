@@ -243,6 +243,8 @@ export const words = (
         const reason = text(error, 'reason')
         return fieldOf(error, 'keyring') === true && reason !== '' ? reason : "Althar's runtime couldn't do that. Its log has the details."
       }
+      case 'SkillRefused':
+        return sentence(text(error, 'message'))
       case 'CliSignedOut':
         return `${text(error, 'tool')} isn't signed in to ${text(error, 'host')} on this Mac.`
       case 'CliUnanswered':
@@ -349,6 +351,7 @@ const reviewIncomplete = {
 
 /** Errors the person caused or can put right; anything else is worth the log. */
 export const expected = new Set([
+  'SkillRefused',
   'LaunchRefused',
   'DraftClosed',
   'DraftUntitled',

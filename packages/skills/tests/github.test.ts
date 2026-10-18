@@ -2,62 +2,11 @@ import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { fetchSkill, findSkills, type GitHubAccess, gitBlobSha, parseGitHubSource, resolveRef } from '../src/github'
+import { fetchSkill, findSkills, parseGitHubSource, resolveRef } from '../src/github'
 import { installLocalCatalog } from '../src/local'
 import { approve, checkUpdates, diffLines, rollBack, setActive, stageFromGitHub, uninstall } from '../src/review'
 import { readInstalls } from '../src/store'
-import { skillMd, writeCatalog } from './support'
-
-/**
- * GitHub's API and raw host over in-memory commits: each ref names a commit, each commit a tree of paths to text,
- * symlinks or submodules. `served` changes what the raw host hands out for a path, as a host that lied would.
- */
-const fakeGitHub = (
-  repos: Record<string, { refs: Record<string, string>; commits: Record<string, Record<string, string | { mode: string; type: string }>> }>,
-  served: Record<string, string> = {},
-) => {
-  const blobs = new Map<string, string>()
-  const requests: string[] = []
-  const access: GitHubAccess = {
-    api: 'https://api.test',
-    raw: 'https://raw.test',
-    fetch: async (input: string) => {
-      const url = new URL(input)
-      requests.push(`${url.host}${url.pathname}`)
-      const missing = new Response('{}', { status: 404 })
-      if (url.host === 'raw.test') {
-        const [, owner, name, sha = '', ...path] = url.pathname.split('/').map(decodeURIComponent)
-        const content = served[path.join('/')] ?? repos[`${owner}/${name}`]?.commits[sha]?.[path.join('/')]
-        return typeof content === 'string' ? new Response(content) : missing
-      }
-      const [, , owner, name, ...rest] = url.pathname.split('/')
-      const repo = repos[`${owner}/${name}`]
-      if (repo === undefined) return missing
-      if (rest[0] === 'commits') {
-        const ref = decodeURIComponent(rest.slice(1).join('/'))
-        const sha = repo.refs[ref] ?? (repo.commits[ref] === undefined ? undefined : ref)
-        return sha === undefined ? missing : new Response(sha)
-      }
-      if (rest[0] === 'git' && rest[1] === 'trees') {
-        const commit = repo.commits[rest[2] ?? '']
-        if (commit === undefined) return missing
-        const tree = Object.entries(commit).map(([path, content]) => {
-          if (typeof content !== 'string') return { path, ...content, sha: '0'.repeat(40) }
-          const sha = gitBlobSha(new TextEncoder().encode(content))
-          blobs.set(sha, content)
-          return { path, mode: '100644', type: 'blob', sha, size: Buffer.byteLength(content) }
-        })
-        return Response.json({ tree, truncated: false })
-      }
-      if (rest[0] === 'git' && rest[1] === 'blobs') {
-        const content = blobs.get(rest[2] ?? '')
-        return content === undefined ? missing : Response.json({ content: Buffer.from(content).toString('base64'), encoding: 'base64' })
-      }
-      return missing
-    },
-  }
-  return { access, requests }
-}
+import { fakeGitHub, skillMd, writeCatalog } from './support'
 
 const A = 'a'.repeat(40)
 const B = 'b'.repeat(40)

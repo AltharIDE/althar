@@ -191,7 +191,7 @@ export interface Approval {
   readonly subpath: string
   readonly treeHash: string
   /** Put it in place of an install of the same name from somewhere else, which the person was shown. */
-  readonly replace?: boolean
+  readonly replace?: boolean | undefined
 }
 
 /**

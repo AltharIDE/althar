@@ -13,6 +13,7 @@ import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Stream } from '
 import { RpcClient } from 'effect/rpc'
 import { SqlClient } from 'effect/sql'
 
+import { fakeGitHub, writeCatalog } from '../../skills/tests/support'
 import { connection, isInside, services } from '../src/Api'
 import {
   ChangedSinceSeen,
@@ -59,6 +60,9 @@ const connected = (
     readonly editors?: RuntimeOptions['editors']
     /** The machine how many agents are at work at once comes from: a large one unless a test says. */
     readonly machine?: { readonly cores: number; readonly memory: number }
+    /** A skills store and the catalog it is seeded from, and how GitHub is reached. */
+    readonly skills?: RuntimeOptions['skills']
+    readonly fetch?: RuntimeOptions['fetch']
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -80,6 +84,8 @@ const connected = (
           : { openTerminal: (line: string) => Effect.sync(() => void opened.push(line)).pipe(Effect.as(true)) }),
         ...(options.countdown === undefined ? {} : { countdown: options.countdown }),
         ...(options.editors === undefined ? {} : { editors: options.editors }),
+        ...(options.skills === undefined ? {} : { skills: options.skills }),
+        ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
         busy: { machine: options.machine ?? ROOMY },
         // A pull request with no checks has none: no test waits for a host to show them.
         checksAppear: Duration.zero,
@@ -2321,4 +2327,94 @@ describe('thread items', () => {
       },
     )
   })
+})
+
+describe('the skills page', () => {
+  const A = 'a'.repeat(40)
+  const B = 'b'.repeat(40)
+  const skill = (name: string, body: string) => `---\nname: ${name}\ndescription: Use when testing ${name}.\nlicense: MIT\n---\n${body}`
+  const store = async () => {
+    const catalog = mkdtempSync(join(tmpdir(), 'althar-skills-catalog-'))
+    await writeCatalog(catalog, { alpha: { 'SKILL.md': skill('alpha', 'Default.\n') } }, { alpha: ['subagents'] })
+    return { root: mkdtempSync(join(tmpdir(), 'althar-skills-store-')), catalog }
+  }
+
+  it.live('says skills are off where the runtime has no store', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected()
+        assert.deepStrictEqual(yield* client.ListSkills({}), { enabled: false, catalogRevision: null, skills: [] })
+        assert.strictEqual((yield* Effect.flip(client.CheckSkillUpdates({}))).message, 'Skills are off in this runtime.')
+      }),
+    ),
+  )
+
+  it.live('lists the catalog’s skills, turns one off, and keeps one Althar ships from being removed', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client } = yield* connected({ skills: yield* Effect.promise(store) })
+        const listed = yield* client.ListSkills({})
+        assert.deepStrictEqual(
+          [listed.enabled, listed.catalogRevision, listed.skills.map((one) => [one.id, one.source, one.active, one.needs, one.license])],
+          [true, 'fixture-1', [['alpha', 'althar-default', true, ['subagents'], 'MIT']]],
+        )
+        assert.strictEqual(listed.skills[0]?.description, 'Use when testing alpha.')
+        const off = yield* client.SetSkillActive({ commandId: commandId(), id: 'alpha', active: false })
+        assert.isFalse(off.active)
+        const refused = yield* Effect.flip(client.UninstallSkill({ commandId: commandId(), id: 'alpha' }))
+        assert.deepStrictEqual([refused.reason, refused.message], ['SkillRefused', 'alpha comes with Althar; turn it off instead.'])
+      }),
+    ),
+  )
+
+  it.live('finds, reviews and installs a skill from GitHub, offers its update, and rolls it back', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const repos = {
+          'o/r': {
+            refs: { main: A, HEAD: A } as Record<string, string>,
+            commits: { [A]: { 'skills/beta/SKILL.md': skill('beta', 'One.\n'), 'hooks/start.sh': 'x' } } as Record<
+              string,
+              Record<string, string>
+            >,
+          },
+        }
+        const { access } = fakeGitHub(repos)
+        const { client } = yield* connected({
+          skills: yield* Effect.promise(store),
+          ...(access.fetch === undefined ? {} : { fetch: access.fetch }),
+        })
+        const found = yield* client.FindSkills({ source: 'https://github.com/o/r' })
+        assert.deepStrictEqual(found, { repo: 'o/r', ref: 'HEAD', sha: A, paths: ['skills/beta'] })
+        const card = yield* client.StageSkill({ repo: 'o/r', ref: 'main', subpath: 'skills/beta' })
+        assert.deepStrictEqual(
+          [card.id, card.installable, card.installed, card.files.map((file) => file.path)],
+          ['beta', true, null, ['SKILL.md']],
+        )
+        // Staging installs nothing.
+        assert.deepStrictEqual(
+          (yield* client.ListSkills({})).skills.map((one) => one.id),
+          ['alpha'],
+        )
+        const installed = yield* client.ApproveSkill({ commandId: commandId(), id: card.id, ...card.source, treeHash: card.treeHash })
+        assert.deepStrictEqual(
+          [installed.source, installed.repo, installed.sha, installed.review, installed.active],
+          ['github', 'o/r', A, 'reviewed', true],
+        )
+
+        repos['o/r'].commits[B] = { 'skills/beta/SKILL.md': skill('beta', 'Two.\n') }
+        repos['o/r'].refs.main = B
+        const [update] = yield* client.CheckSkillUpdates({})
+        assert.strictEqual(update?.state, 'available')
+        if (update?.state !== 'available') return
+        yield* client.ApproveSkill({ commandId: commandId(), id: 'beta', ...update.card.source, treeHash: update.card.treeHash })
+        const back = yield* client.RollBackSkill({ commandId: commandId(), id: 'beta' })
+        assert.deepStrictEqual([back.sha, back.canRollBack], [A, false])
+        assert.strictEqual(
+          (yield* Effect.flip(client.FindSkills({ source: 'https://gitlab.com/o/r' }))).message,
+          "https://gitlab.com/o/r isn't a GitHub repository; paste its address or owner/name.",
+        )
+      }),
+    ),
+  )
 })

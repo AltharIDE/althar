@@ -25,7 +25,19 @@ import { type Account, Accounts } from './Accounts'
 import { AccountSignIns } from './AccountSignIns'
 import { Artifacts } from './Artifacts'
 import { Changes } from './Changes'
-import { NotFound } from './errors'
+import {
+  approve,
+  checkUpdates,
+  findSkills,
+  type GitHubAccess,
+  parseGitHubSource,
+  resolveRef,
+  rollBack,
+  setActive,
+  stageFromGitHub,
+  uninstall,
+} from '@althar/skills'
+import { NotFound, SkillRefused } from './errors'
 import { type AgentEntry, Agents, RuntimeConfig } from './Config'
 import { type ConnectionInfo, Connections } from './Connections'
 import { coAuthorLine, coAuthorOn, setCoAuthor } from './credit'
@@ -72,6 +84,7 @@ import { Tasks } from './Tasks'
 import { Sessions } from './Sessions'
 import { type InputImage, keepSent } from './sentImages'
 import { anyOf, SignIns } from './SignIns'
+import { describe, listSkills, type SkillsConfig } from './Skills'
 import { expected, words } from './words'
 
 /*
@@ -199,6 +212,23 @@ export const handlers = Api.toLayer(
      * the first one's result from here. One interrupted before it finished
      * may run again.
      */
+    /* GitHub as the skills page reaches it: over the app's own network, unauthenticated, for public repositories. */
+    const github: GitHubAccess = config.fetch === undefined ? {} : { fetch: config.fetch }
+    /** A skills store operation as the window gets it: its error in the person's words, and refused where the runtime has no store. */
+    const skills = <A>(work: (store: SkillsConfig) => Promise<A>): Effect.Effect<A, ApiError> => {
+      const store = config.skills
+      return api(
+        store === undefined
+          ? Effect.fail(new SkillRefused({ message: 'Skills are off in this runtime' }))
+          : Effect.tryPromise({
+              try: () => work(store),
+              catch: (error) =>
+                error instanceof SkillRefused
+                  ? error
+                  : new SkillRefused({ message: error instanceof Error ? error.message : String(error) }),
+            }),
+      )
+    }
     const recent = new Map<string, Deferred.Deferred<unknown, ApiError>>()
     const once = <A>(commandId: string, effect: Effect.Effect<A, ApiError>): Effect.Effect<A, ApiError> =>
       Effect.suspend(() => {
@@ -1138,6 +1168,41 @@ export const handlers = Api.toLayer(
       OrderRunnables: ({ commandId, projectId, ids }) =>
         once(commandId, api(launches.orderRunnables({ projectId, ids, actorId: instance.personId }))),
       GetRepositoryScripts: ({ projectId }) => api(launches.scripts(projectId)),
+      ListSkills: () =>
+        config.skills === undefined
+          ? Effect.succeed({ enabled: false, catalogRevision: null, skills: [] })
+          : skills((store) => listSkills(store)),
+      FindSkills: ({ source, ref }) =>
+        skills(async () => {
+          const parsed = parseGitHubSource(source)
+          if (parsed === null) throw new SkillRefused({ message: `${source} isn't a GitHub repository; paste its address or owner/name` })
+          const at = ref ?? parsed.ref ?? 'HEAD'
+          const sha = await resolveRef(github, parsed.repo, at)
+          const paths = parsed.subpath === undefined ? await findSkills(github, parsed.repo, sha) : [parsed.subpath]
+          return { repo: parsed.repo, ref: at, sha, paths }
+        }),
+      StageSkill: ({ repo, ref, subpath }) => skills((store) => stageFromGitHub(store.root, github, { repo, ref, subpath })),
+      ApproveSkill: ({ commandId, ...approval }) =>
+        once(
+          commandId,
+          skills(async (store) => describe(store.root, await approve(store.root, approval))),
+        ),
+      CheckSkillUpdates: () => skills((store) => checkUpdates(store.root, github)),
+      RollBackSkill: ({ commandId, id }) =>
+        once(
+          commandId,
+          skills(async (store) => describe(store.root, await rollBack(store.root, id))),
+        ),
+      SetSkillActive: ({ commandId, id, active }) =>
+        once(
+          commandId,
+          skills(async (store) => describe(store.root, await setActive(store.root, id, active))),
+        ),
+      UninstallSkill: ({ commandId, id }) =>
+        once(
+          commandId,
+          skills((store) => uninstall(store.root, id)),
+        ),
       StopLaunch: ({ commandId, id }) => once(commandId, api(launches.stop(id))),
       ClearLaunch: ({ commandId, id }) => once(commandId, api(launches.clear(id))),
       Watch: ({ since }) => Stream.merge(changes(since), streaming),
