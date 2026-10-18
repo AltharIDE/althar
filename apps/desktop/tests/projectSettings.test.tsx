@@ -102,8 +102,8 @@ const descriptionOf = (control: HTMLElement) =>
 /** The ink the front page's wash is drawn in. */
 const washOf = (name: string) => screen.getByRole('heading', { level: 1, name }).closest('header')?.getAttribute('style')
 
-/** A task on the board, from an issue on a tracker where it names one. */
-const taskFrom = (key: string): BoardTask => ({
+/** A task on the board, from an issue on Linear, read through a connection where it names one. */
+const taskFrom = (key: string, connectionId?: string): BoardTask => ({
   ...card(),
   taskId: `t_${key}`,
   threadId: `th_${key}`,
@@ -113,7 +113,13 @@ const taskFrom = (key: string): BoardTask => ({
   settledAt: '2026-10-01T09:00:00.000Z',
   changed: null,
   here: [],
-  issue: { product: 'linear', key, title: key, url: `https://linear.app/northwind/issue/${key}/refunds` },
+  issue: {
+    product: 'linear',
+    key,
+    title: key,
+    url: `https://linear.app/northwind/issue/${key}/refunds`,
+    ...(connectionId === undefined ? {} : { connectionId }),
+  },
 })
 
 /** The board with tasks from MER issues on Linear, which Althar is connected to as these say. */
@@ -122,12 +128,12 @@ const onLinear = (...connections: ReadonlyArray<ConnectionSummary>): Parameters<
   listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, ...connections] })),
 })
 
-const linear = (state: ConnectionSummary['state']): ConnectionSummary => ({
-  id: 'conn_linear',
+const linear = (state: ConnectionSummary['state'], id = 'conn_linear', login = 'balazs'): ConnectionSummary => ({
+  id,
   product: 'linear',
   name: 'Linear',
   webUrl: 'https://linear.app',
-  account: { login: 'balazs', name: 'Balázs' },
+  account: { login, name: 'Balázs' },
   auth: 'token',
   state,
 })
@@ -364,6 +370,78 @@ describe('a project’s trackers, in its settings', () => {
     expect(trackers.getByRole('button', { name: 'Sign in again' })).toBeTruthy()
   })
 
+  it('says to sign in again to the account its issues go through, though another is signed in there', async () => {
+    // Work's sign-in stopped working; a personal account is signed in on the same Linear.
+    const work = linear('reauth_required', 'conn_work', 'balazs-work')
+    const personal = linear('ready', 'conn_personal', 'balazs')
+    windowAt('/projects/p1', {
+      getBoard: vi.fn(async () => ({
+        cursor: 1,
+        tasks: [taskFrom('MER-12', 'conn_work'), taskFrom('MER-14', 'conn_work')],
+        calls: [],
+        settledTotal: 2,
+      })),
+      listConnections: vi.fn(async () => ({ ...connectionList, connections: [githubConnection, personal, work] })),
+    })
+    expect((await views()).getByRole('radio', { name: 'Settings, needs you' })).toBeTruthy()
+    const side = await openSettings()
+    await userEvent.click(side.getByRole('button', { name: 'Code and issues, needs you' }))
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getByText(/^Signed out as balazs-work: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.queryByText('Connected as balazs')).toBeNull()
+    // Signing in again opens that account's own sign-in, named for Linear, not the list of every connection.
+    await userEvent.click(trackers.getByRole('button', { name: 'Sign in again' }))
+    expect(await screen.findByRole('dialog', { name: 'Linear' })).toBeTruthy()
+  })
+
+  it('says who Althar is there by the account its issues go through, though another there is signed out', async () => {
+    windowAt('/projects/p1', {
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [taskFrom('MER-12', 'conn_personal')], calls: [], settledTotal: 1 })),
+      listConnections: vi.fn(async () => ({
+        ...connectionList,
+        connections: [githubConnection, linear('reauth_required', 'conn_work', 'balazs-work'), linear('ready', 'conn_personal', 'balazs')],
+      })),
+    })
+    expect((await views()).getByRole('radio', { name: 'Settings' })).toBeTruthy()
+    await openSettings('Code and issues')
+    expect(within(screen.getByRole('region', { name: 'Trackers' })).getByText('Connected as balazs')).toBeTruthy()
+  })
+
+  it('names a tracker whose issues share no key by its name: a project’s Trello cards', async () => {
+    const trello = {
+      ...connectionList.products[1]!,
+      product: 'trello',
+      service: 'trello',
+      name: 'Trello',
+      hostedUrl: 'https://trello.com',
+      tokenPrefixes: [],
+    } as const
+    const card = (key: string): BoardTask => ({
+      ...taskFrom(key),
+      issue: {
+        product: 'trello',
+        key,
+        title: 'Refund keys',
+        url: `https://trello.com/c/${key}/12-refund-keys`,
+        connectionId: 'conn_trello',
+      },
+    })
+    windowAt('/projects/p1', {
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [card('aBcD1234'), card('xYz98765')], calls: [], settledTotal: 2 })),
+      listConnections: vi.fn(async () => ({
+        ...connectionList,
+        products: [...connectionList.products, trello],
+        connections: [githubConnection],
+      })),
+    })
+    expect((await views()).getByRole('radio', { name: 'Settings, needs you' })).toBeTruthy()
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getByText('Trello cards')).toBeTruthy()
+    expect(trackers.getByText(/^Not connected: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.queryByText('No tracker yet')).toBeNull()
+  })
+
   it('says who Althar is there once connected, with no dot, and opens the team on Linear', async () => {
     const opened = vi.spyOn(window, 'open').mockReturnValue(null)
     windowAt('/projects/p1', onLinear(linear('ready')))
@@ -429,6 +507,23 @@ describe('what a project runs, in its settings', () => {
     expect(where.getByText('Open a draft pull request. Checks run on it; you mark it ready.')).toBeTruthy()
     await userEvent.click(where.getAllByRole('button', { name: 'Change in Rules' })[0]!)
     expect(await screen.findByRole('heading', { level: 2, name: 'Rules' })).toBeTruthy()
+  })
+
+  it('says a task stays on its branch while its host isn’t connected, as the runtime does, and leads to connecting it', async () => {
+    const unconnected = repositories.map((repository) =>
+      repository.host === null ? repository : { ...repository, host: { ...repository.host, account: null } },
+    )
+    windowAt('/projects/p1', { ...running, getRepositories: vi.fn(async () => unconnected) })
+    await openSettings('Running')
+    const where = within(screen.getByRole('region', { name: 'Where its work goes' }))
+    expect(
+      await where.findByText(
+        'Leave it on its branch. Nothing goes to GitHub until Althar is connected there. Then it opens a draft pull request.',
+      ),
+    ).toBeTruthy()
+    expect(where.queryByText(/^Open a draft pull request/)).toBeNull()
+    await userEvent.click(where.getByRole('button', { name: 'Connect GitHub' }))
+    expect(await screen.findByRole('heading', { level: 2, name: 'Code and issues' })).toBeTruthy()
   })
 })
 

@@ -3,7 +3,8 @@ import { BrandMark, Button, ControlLine, LinkButton, SettingGroup, SettingList, 
 
 import { productBrand, productName } from '../../shared/products'
 import { type Opening, openingFor } from '../connections/ConnectDialog'
-import type { Tracker } from '../project/front'
+import { serviceOfProduct } from '../connections/ways'
+import { text as frontText, type Tracker } from '../project/front'
 import { Repositories } from '../repositories/Repositories'
 import { useRepositories } from '../repositories/useRepositories'
 import s from './ProjectSettings.module.css'
@@ -25,7 +26,9 @@ export const text = {
   connectTracker: 'Connect a tracker',
   none: 'No tracker yet',
   noneNote: 'None of its tasks has started from an issue. Connect a tracker, and the coordinator can start tasks from its issues.',
-  issues: (tracker: Tracker) => `${productName(tracker.product)} · ${tracker.key} issues`,
+  /** Linear · MER issues; a tracker whose issues share no key by its name alone: Trello cards. */
+  issues: (tracker: Tracker) =>
+    tracker.key === null ? frontText.issues(tracker) : `${productName(tracker.product)} · ${frontText.issues(tracker)}`,
   standing: {
     connected: (login: string) => `Connected as ${login}`,
     notConnected: 'Not connected: Althar can’t read its issues, or move them as their tasks start.',
@@ -59,8 +62,13 @@ function TrackerRow({
   list: ConnectionList | null
   onConnect: (opening: Opening) => void
 }) {
-  const standing = standingOf(list, tracker.product, tracker.at)
+  const standing = standingOf(list, tracker)
   const url = tracker.url
+  // Signed out, the very connection its issues go through signs in again, whoever else is signed in there.
+  const opening: Opening =
+    standing.kind === 'signedOut'
+      ? { service: serviceOfProduct(tracker.product), again: standing.connectionId }
+      : openingFor(list, tracker.product, tracker.at)
   return (
     <SettingRow
       title={text.issues(tracker)}
@@ -69,7 +77,7 @@ function TrackerRow({
     >
       {() =>
         standing.kind !== 'connected' ? (
-          <Button size="small" variant="signal" onClick={() => onConnect(openingFor(list, tracker.product, tracker.at))}>
+          <Button size="small" variant="signal" onClick={() => onConnect(opening)}>
             {standing.kind === 'signedOut' ? text.signIn : text.connect}
           </Button>
         ) : url === null ? null : (
@@ -120,7 +128,7 @@ export function CodeSection({
           ) : (
             trackers.map((tracker) => (
               <TrackerRow
-                key={`${tracker.product}:${tracker.at ?? ''}:${tracker.key}`}
+                key={`${tracker.product}:${tracker.at ?? ''}:${tracker.key ?? ''}`}
                 tracker={tracker}
                 list={list}
                 onConnect={onConnect}

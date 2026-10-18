@@ -428,6 +428,7 @@ export function ProjectView({
             onSection={setSection}
             connections={connections}
             trackers={trackers}
+            repositories={model.repositories}
             connectionsNeedYou={settingsNeedYou}
             runnables={coordinator?.runnables ?? null}
             onConnections={settings.onConnections}

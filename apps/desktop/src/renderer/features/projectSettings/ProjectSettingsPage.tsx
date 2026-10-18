@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import type { ConnectionList, Runnable } from '@althar/contracts'
+import type { ConnectionList, ProjectRepository, Runnable } from '@althar/contracts'
 import { RemoveProject, SettingsLayout, SettingsNav } from '@althar/ui'
 
 import { shortFolder } from '../../shared/folders'
@@ -40,6 +40,8 @@ export interface ProjectSettingsPageProps {
   readonly connections: ConnectionsModel
   /** The trackers its tasks' issues are on, the one most of them name first. */
   readonly trackers: ReadonlyArray<Tracker>
+  /** Its repositories, each with the host its work goes to and whether Althar is signed in there; null until they are read. */
+  readonly repositories: ReadonlyArray<Pick<ProjectRepository, 'host'>> | null
   /** Something its work goes to waits on the person: a dot beside Code and issues. */
   readonly connectionsNeedYou: boolean
   /** What it runs, in its order; null until its coordinator is read. */
@@ -55,6 +57,7 @@ export function ProjectSettingsPage({
   onSection,
   connections,
   trackers,
+  repositories,
   connectionsNeedYou,
   runnables,
   onConnections,
@@ -94,6 +97,7 @@ export function ProjectSettingsPage({
           model={model}
           rules={rules}
           trackers={trackers}
+          repositories={repositories}
           list={connections.list}
           runnables={runnables}
           onSection={onSection}
@@ -124,12 +128,16 @@ function SectionBody({
   model,
   rules,
   trackers,
+  repositories,
   list,
   runnables,
   onSection,
   onConnect,
   onConnections,
-}: Pick<ProjectSettingsPageProps, 'section' | 'projectId' | 'model' | 'trackers' | 'runnables' | 'onSection' | 'onConnections'> & {
+}: Pick<
+  ProjectSettingsPageProps,
+  'section' | 'projectId' | 'model' | 'trackers' | 'repositories' | 'runnables' | 'onSection' | 'onConnections'
+> & {
   rules: RulesModel
   list: ConnectionList | null
   onConnect: (opening: Opening) => void
@@ -148,8 +156,10 @@ function SectionBody({
           project={model.name ?? ''}
           runnables={runnables}
           rules={model.rules}
+          repositories={repositories}
           worktrees={model.project?.worktrees ?? null}
           onRules={() => onSection('rules')}
+          onCode={() => onSection('code')}
         />
       )
     case 'notes':

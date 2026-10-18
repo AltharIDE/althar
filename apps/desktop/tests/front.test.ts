@@ -96,7 +96,7 @@ describe('a project’s front page', () => {
       ],
       names: [],
       host: github,
-      trackers: [{ product: 'linear', at: 'linear.app', key: 'MER', url: 'https://linear.app/acme/team/MER' }],
+      trackers: [{ product: 'linear', at: 'linear.app', key: 'MER', url: 'https://linear.app/acme/team/MER', connections: [] }],
       open,
     })
     expect(parts.map(({ id, name, brand, openLabel }) => ({ id, name, brand, openLabel }))).toEqual([
@@ -113,7 +113,7 @@ describe('a project’s front page', () => {
   })
 
   it('shows three trackers by name and counts the rest', () => {
-    const tracker = (key: string) => ({ product: 'linear' as const, at: 'linear.app', key, url: null })
+    const tracker = (key: string) => ({ product: 'linear' as const, at: 'linear.app', key, url: null, connections: [] })
     const parts = partsOf({
       repositories: [],
       names: [],
@@ -150,10 +150,39 @@ describe('a project’s front page', () => {
         connectionList,
       ),
     ).toEqual([
-      { product: 'linear', at: 'x', key: 'MER', url: 'https://x/acme/team/MER' },
-      { product: 'linear', at: 'x', key: 'OPS', url: 'https://x/acme/team/OPS' },
+      { product: 'linear', at: 'x', key: 'MER', url: 'https://x/acme/team/MER', connections: [] },
+      { product: 'linear', at: 'x', key: 'OPS', url: 'https://x/acme/team/OPS', connections: [] },
     ])
     expect(trackersOf([task({ issue: issue('MER-1') })], null)).toEqual([])
+  })
+
+  it('keeps the connections a tracker’s issues are read through, the most used first', () => {
+    const through = (key: string, connectionId: string) => ({
+      product: 'linear' as const,
+      key,
+      title: key,
+      url: `https://linear.app/acme/issue/${key}`,
+      connectionId,
+    })
+    expect(
+      trackersOf(
+        [
+          task({ issue: through('MER-1', 'conn_a') }),
+          task({ issue: through('MER-2', 'conn_b') }),
+          task({ issue: through('MER-3', 'conn_b') }),
+        ],
+        connectionList,
+      ).map((tracker) => tracker.connections),
+    ).toEqual([['conn_b', 'conn_a']])
+  })
+
+  it('names a tracker whose issues share no key once, by its name: Trello’s cards', () => {
+    const trello = { ...connectionList.products[1]!, product: 'trello', service: 'trello', name: 'Trello' } as const
+    const list = { ...connectionList, products: [...connectionList.products, trello] }
+    const card = (key: string) => ({ product: 'trello' as const, key, title: key, url: `https://trello.com/c/${key}/1-refunds` })
+    const trackers = trackersOf([task({ issue: card('aBcD1234') }), task({ issue: card('xYz98765') })], list)
+    expect(trackers).toEqual([{ product: 'trello', at: 'trello.com', key: null, url: 'https://trello.com', connections: [] }])
+    expect(partsOf({ repositories: [], names: [], host: null, trackers, open: vi.fn() }).map((part) => part.name)).toEqual(['Trello cards'])
   })
 
   it('works out a key’s space from the link of one of its issues', () => {

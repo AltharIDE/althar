@@ -1176,8 +1176,16 @@ export const TaskCard = Schema.Struct({
       end: Schema.NullOr(TaskEnd),
     }),
   ),
-  /** The issue it came from. */
-  issue: Schema.NullOr(Schema.Struct({ product: Product, key: Schema.String, title: Schema.String, url: Schema.String })),
+  /** The issue it came from, and the connection Althar reads it and moves it through, where it has one. */
+  issue: Schema.NullOr(
+    Schema.Struct({
+      product: Product,
+      key: Schema.String,
+      title: Schema.String,
+      url: Schema.String,
+      connectionId: Schema.optional(Schema.String),
+    }),
+  ),
   /** Its pull request, once opened: the open one, else its latest. */
   change: Schema.NullOr(ChangeSummary),
   /** Its other pull requests, newest first: those of earlier rounds of its work, merged or closed (ADR-034). */
