@@ -4,6 +4,7 @@ import { expect, fireEvent, fn, userEvent, within } from 'storybook/test'
 
 import { FIRST_RUN, NONE_READY } from '../../fixtures/setup'
 import { RuntimeState } from '../../foundations/vocabulary'
+import { CrashReportsLine } from '../../setup/Preferences/Preferences'
 import { States } from '../../storybook/States'
 import { Start, type StartProps, type StartRepository } from './Start'
 
@@ -44,6 +45,12 @@ function Picking(props: Partial<StartProps>) {
       onNameChange={setName}
     />
   )
+}
+
+/* As the app gives it: crash reports' line at the sheet's foot, on until turned off. */
+function Asking(props: StartProps) {
+  const [on, setOn] = useState(true)
+  return <Start {...props} foot={<CrashReportsLine on={on} onChange={setOn} />} />
 }
 
 const meta = {
@@ -118,6 +125,19 @@ export const NoneFound: Story = {
     await expect(c.getByRole('heading', { level: 1 })).toHaveTextContent('Where is your code?')
     await userEvent.click(c.getByRole('button', { name: /Add a folder/ }))
     await expect(args.onAdd).toHaveBeenCalled()
+  },
+}
+
+/** Crash reports asked once, at the sheet's foot: one quiet line with its switch, never a step to finish. */
+export const CrashReportsAsked: Story = {
+  render: (args) => <Asking {...args} />,
+  play: async ({ canvasElement }) => {
+    const crashes = within(canvasElement).getByRole('switch', { name: 'Crash reports' })
+    await expect(crashes).toBeChecked()
+    await userEvent.click(crashes)
+    await expect(crashes).not.toBeChecked()
+    // Making the project never waits on it.
+    await expect(within(canvasElement).getByRole('heading', { level: 1 })).toHaveTextContent('Where should they work?')
   },
 }
 
