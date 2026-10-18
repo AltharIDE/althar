@@ -27,6 +27,8 @@ import type { StartModel } from './useStart'
 
 export const text = {
   removeAnyway: 'Remove anyway',
+  /** Asks every agent again, after one couldn't be checked. */
+  checkAgain: 'Check again',
   /** The kit's first screen, in this computer's words, with the keys this system has. */
   first: () => {
     const key = platform === 'darwin' ? '⌘' : 'Ctrl+'
@@ -43,6 +45,9 @@ export const text = {
 export const runtimeEntry = (agent: AgentStatus, detail?: RuntimeEntry['detail'], failed?: string): RuntimeEntry => {
   const brand = brandOf(agent.id)
   const base = { id: agent.id, name: agent.name, ...(brand === undefined ? {} : { brand }), ...(detail === undefined ? {} : { detail }) }
+  // Couldn't be checked this time: it says so on its own row, and the others stand as they are.
+  if (agent.problem !== null)
+    return { id: base.id, name: base.name, ...(brand === undefined ? {} : { brand }), state: RuntimeState.Unchecked, why: agent.problem }
   // Not on this Mac: downloading, or the way to have it, where Althar can fetch it.
   if (agent.download?.installing === true)
     return {
@@ -80,6 +85,20 @@ export const runtimesOf = (model: StartModel, signIn: AccountSignInModel): Reado
       model.installFailed[agent.id],
     ),
   ) ?? []
+
+/** Why one agent couldn't be checked, with a way to check every agent again. */
+export function AgentProblem({ why, model }: { why: string; model: StartModel }) {
+  return (
+    <div className={s.failure}>
+      <p className={s.error} role="alert">
+        {why}
+      </p>
+      <Button size="small" onClick={() => void model.recheck()}>
+        {text.checkAgain}
+      </Button>
+    </div>
+  )
+}
 
 /** What went wrong, with a way past an account whose sign-out didn't work. */
 export function StartError({ model }: { model: StartModel }) {

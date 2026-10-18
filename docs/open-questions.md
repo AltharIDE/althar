@@ -9,6 +9,25 @@ Leanings are only where we are now. None of them are decisions.
 "The kit" is `@althar/ui` (`packages/ui`). "The prototype" is the shell
 prototype in the `althar-designs` repository (`prototypes/shell`).
 
+## Failures kept where they belong, 18 October
+
+- [x] **What one failure may take down.** Only what it belongs to; one item
+  of many says so on its own, and a loop goes on (ARCHITECTURE.md;
+  [ADR-047](decisions/047-failures-kept-where-they-belong-and-reported-at-the-edge.md)).
+- [x] **Whether a failure the runtime catches is reported.** Yes, where it
+  is kept, unless the person caused it or can put it right: as a handled
+  crash report, ten a launch (ADR-047).
+- [ ] **The all-or-nothing places left.** A sweep on 18 October found these
+  and left them for their own change. Conflict rounds still `resolving` at
+  launch are swept one after another, so one whose worktree is gone stops
+  the rest (`Changes.ts`, `settleRound`, `conflicts.ts` `unresolved`). The
+  lead's tool that reads a task's pull requests fails whole for one it can't
+  read (`Changes.ts` `read`). The plans' countdown and the usage-limit holds
+  pick a failing item again at once, and die on one bad row
+  (`Plans.ts` `countdown`, `Runs.ts` `holds`). One bad waiting conflict
+  round hides every one (`Changes.ts` `roundsWaiting`). Leaning: each item
+  its own, with a backoff for one that keeps failing.
+
 ## Crash reports, 17 October
 
 - [x] **Where errors and crashes go.** PostHog's error tracking, from the
@@ -20,8 +39,9 @@ prototype in the `althar-designs` repository (`prototypes/shell`).
   Usage data (DEV-66; ADR-046).
 - [ ] **Source maps.** Uploading the window's maps to PostHog in the release
   workflow, with posthog-cli and a key that can write them (DEV-62).
-- [ ] **An agent's adapter that dies.** Reported from the runtime, once it
-  has one place that knows (ADR-046).
+- [x] **An agent's adapter that dies.** Reported from the runtime as a
+  handled failure when its session is lost: its id and how its process
+  ended, never what it wrote (ADR-047).
 
 ## Usage data, 12 October
 
