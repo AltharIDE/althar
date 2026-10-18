@@ -467,11 +467,10 @@ button.toggleWords {
   color: var(--t-3);
 }
 
-/* the version and what goes with it, stacked, each on one line: the foot's button keeps the row's end, and only a panel too narrow for both wraps it */
+/* the version and what goes with it, stacked: the foot's button keeps the row's end at any width, and it is these words that give way (a line wraps) in a panel too narrow for both */
 .footStart {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
-  white-space: nowrap;
   display: flex;
   flex-direction: column;
   align-items: flex-start;

@@ -188,6 +188,25 @@ export const Reordering: Story = {
   },
 }
 
+/** A press whose release went elsewhere (off the tab, over the page) leaves nothing behind: hovering the tabs after it moves none. */
+export const MissedRelease: Story = {
+  args: { initial: ALL.slice(0, 4), current: 'meridian' },
+  play: async ({ canvasElement }) => {
+    const nav = within(within(canvasElement).getByRole('navigation', { name: 'Projects' }))
+    const tab = (name: string) => nav.getByRole('button', { name: new RegExp(`^${name}`) })
+    const at = tab('Meridian').getBoundingClientRect()
+    const event = (type: string, buttons: number, clientX: number) =>
+      new PointerEvent(type, { bubbles: true, pointerId: 7, isPrimary: true, button: 0, buttons, clientX, clientY: at.top + 10 })
+    tab('Meridian').dispatchEvent(event('pointerdown', 1, at.left + 20))
+    // The release never arrives; the pointer comes back over a tab further along with no button down.
+    const far = tab('Ferrous').getBoundingClientRect()
+    tab('Meridian').dispatchEvent(event('pointermove', 0, far.right - 10))
+    tab('Meridian').dispatchEvent(event('pointermove', 0, far.right - 5))
+    await expect(order(nav)).toEqual(['Meridian', 'Halyard', 'Tessera', 'Ferrous'])
+    await expect(canvasElement.querySelectorAll('li[style*="transform"]')).toHaveLength(0)
+  },
+}
+
 /** Althar's settings open in a tab of their own, beside the home's: pressing another tab keeps it, its × closes it. */
 export const WithSettings: Story = {
   args: { withSettings: true },

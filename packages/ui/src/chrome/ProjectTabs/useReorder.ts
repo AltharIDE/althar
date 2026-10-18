@@ -173,15 +173,25 @@ export function useReorder({ ids, movable, list, onReorder }: ReorderOptions) {
         moving: false,
         frame: 0,
       }
+      // Held from the press, so the release reaches this button wherever the pointer has gone.
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId)
+      } catch {
+        // Not an active pointer (a synthetic one): the buttons check on a move still ends a missed press.
+      }
     },
     onPointerMove: (event: PointerEvent<HTMLElement>) => {
       const p = press.current
       if (p === null || p.pointer !== event.pointerId) return
+      // The button is no longer down, so its release was missed: this is hover, not a drag.
+      if (event.buttons === 0) {
+        finish(false)
+        return
+      }
       p.clientX = event.clientX
       if (!p.moving) {
         if (Math.abs(event.clientX - p.startX) < SLOP) return
         p.moving = true
-        event.currentTarget.setPointerCapture(event.pointerId)
         p.frame = requestAnimationFrame(scrolling)
       }
       place()
@@ -190,6 +200,9 @@ export function useReorder({ ids, movable, list, onReorder }: ReorderOptions) {
       if (press.current?.pointer === event.pointerId) finish(true)
     },
     onPointerCancel: (event: PointerEvent<HTMLElement>) => {
+      if (press.current?.pointer === event.pointerId) finish(false)
+    },
+    onLostPointerCapture: (event: PointerEvent<HTMLElement>) => {
       if (press.current?.pointer === event.pointerId) finish(false)
     },
     onClickCapture: (event: { preventDefault: () => void; stopPropagation: () => void }) => {
