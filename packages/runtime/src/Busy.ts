@@ -163,6 +163,8 @@ export class Busy extends Context.Service<
       agent: Agent & { readonly threadId: string; readonly sessionId: string; readonly byPerson?: boolean },
       work: (begun: Effect.Effect<void>) => Effect.Effect<void>,
     ): Effect.Effect<boolean>
+    /** Who waits for a place, in the order they start: what waited longest first. */
+    readonly order: Effect.Effect<ReadonlyArray<Agent>>
     /** Adds where waiting work is read from: each time the queue is looked at, every source is read, and what waited longest starts first. */
     queue(waiting: Effect.Effect<ReadonlyArray<Waiter>, unknown>): Effect.Effect<void>
     /** Looks at the queue again: a place may have freed, or something waits. */
@@ -596,6 +598,7 @@ export class Busy extends Context.Service<
           const { at, holders } = yield* atWork
           return { busy: at.size, atOnce: (yield* atOnce).count, holders }
         }),
+        order: waiting,
         enter,
         turn,
 

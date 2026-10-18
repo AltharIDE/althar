@@ -259,6 +259,8 @@ interface Running {
    * its brief would fill leaves it.
    */
   handover: 'none' | 'under_way' | 'left'
+  /** When its turn running started, in milliseconds: what the person's wait for its first word is counted from. */
+  turnStartedAt: number | null
   /** When its last turn ended, in milliseconds; null before its first. A lead idle past its cache's life is at a break. */
   turnEndedAt: number | null
   /** Its last turn ended a step of its work, or made its task a change (`atBreak`): a break, where a lead may start afresh. */
@@ -504,6 +506,10 @@ export class Sessions extends Context.Service<
         readonly agentId: string
         readonly accountId: string
         readonly turnRunning: boolean
+        /** When the turn running started, in milliseconds; null between turns. */
+        readonly turnStartedAt: number | null
+        /** When its last turn ended, in milliseconds; null before its first. */
+        readonly turnEndedAt: number | null
         /** The agent's process, where it runs as one. */
         readonly pid: number | null
         /** How full its context is, in tokens, as the agent last said; null until it says. */
@@ -1116,6 +1122,7 @@ export class Sessions extends Context.Service<
             )
           if (!compacting) running.brief = undefined
           running.turnRunning = true
+          running.turnStartedAt = yield* Clock.currentTimeMillis
           running.atBreak = false
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
@@ -1151,6 +1158,15 @@ export class Sessions extends Context.Service<
             // What the person wrote shows in the thread; what Althar writes for them goes quietly.
             byPerson: inputs.some((input) => input.shown === 1),
           })
+          // The app's log has each turn's start and end by its ids, never what was said (DEV-61).
+          const turnLog = {
+            turn: turnId,
+            thread: thread.threadId,
+            session: running.sessionId,
+            agent: running.entry.definition.id,
+            ...(session?.model == null ? {} : { model: session.model }),
+          }
+          yield* Effect.logInfo('Turn started').pipe(Effect.annotateLogs(turnLog))
 
           const items = recorder({
             projectId: thread.projectId,
@@ -1306,6 +1322,15 @@ export class Sessions extends Context.Service<
                 ? { source: 'runtime', severity: 'warning', title: `${running.entry.definition.name} couldn't compact its context.` }
                 : { source: 'runtime', severity: 'info', title: compactedWords(running.entry.definition.name, before, running.context) },
             )
+          yield* (state === 'failed' ? Effect.logWarning : Effect.logInfo)('Turn ended').pipe(
+            Effect.annotateLogs({
+              ...turnLog,
+              state,
+              ...(ended === undefined ? {} : { stopReason: ended.stopReason }),
+              ...(errorClass === undefined ? {} : { errorClass }),
+              ...(Option.isSome(failure) ? { failure: failure.value._tag } : {}),
+            }),
+          )
           yield* live.publish({
             _tag: 'TurnEnded',
             threadId: thread.threadId,
@@ -1479,6 +1504,16 @@ export class Sessions extends Context.Service<
                 id: string
               }>`SELECT id FROM turn_deliveries WHERE provider_session_id = ${running.sessionId} AND state IN ('pending', 'delivered')`
               for (const turn of open) {
+                yield* Effect.logWarning('Turn ended').pipe(
+                  Effect.annotateLogs({
+                    turn: turn.id,
+                    thread: running.thread.threadId,
+                    session: running.sessionId,
+                    agent: running.entry.definition.id,
+                    state: 'failed',
+                    errorClass: 'agent_exited',
+                  }),
+                )
                 const revision = yield* change('turn_deliveries', turn.id, { state: 'failed', errorClass: 'agent_exited', endedAt: at })
                 yield* fact({
                   projectId: running.thread.projectId,
@@ -1518,6 +1553,15 @@ export class Sessions extends Context.Service<
                 }[running.thread.role],
               },
             )
+          yield* (state === 'lost' ? Effect.logWarning : Effect.logInfo)('Agent stopped').pipe(
+            Effect.annotateLogs({
+              agent: running.entry.definition.id,
+              session: running.sessionId,
+              thread: running.thread.threadId,
+              state,
+              ...(Option.isSome(exit) ? { exitCode: exit.value.code ?? 'none', signal: exit.value.signal ?? 'none' } : {}),
+            }),
+          )
           yield* live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state })
           yield* Deferred.succeed(running.ended, undefined)
         })
@@ -1656,6 +1700,9 @@ export class Sessions extends Context.Service<
           if (Exit.isFailure(started)) {
             yield* Scope.close(scope, Exit.void)
             yield* tools.revoke
+            yield* Effect.logWarning('Agent could not start', started.cause).pipe(
+              Effect.annotateLogs({ agent: definition.id, session: sessionId, thread: thread.threadId }),
+            )
             const reason = Cause.pretty(started.cause)
             const summary = summarize(started.cause)
             yield* sql.withTransaction(
@@ -1675,6 +1722,15 @@ export class Sessions extends Context.Service<
             return yield* new SessionFailed({ agentId: definition.id, reason, summary })
           }
           const { connection, agent } = started.value
+          yield* Effect.logInfo('Agent started').pipe(
+            Effect.annotateLogs({
+              agent: definition.id,
+              session: sessionId,
+              thread: thread.threadId,
+              ...(connection.process === undefined ? {} : { pid: connection.process.pid }),
+              adapter: `${connection.info.name} ${connection.info.version ?? ''}`.trim(),
+            }),
+          )
           if (processId !== undefined && connection.process !== undefined) {
             yield* change('processes', processId, {
               pid: connection.process.pid,
@@ -1733,6 +1789,7 @@ export class Sessions extends Context.Service<
             workedAt: null,
             wakeAt: null,
             handover: 'none',
+            turnStartedAt: null,
             turnEndedAt: null,
             atBreak: false,
           }
@@ -2589,6 +2646,8 @@ export class Sessions extends Context.Service<
                   agentId: running.entry.definition.id,
                   accountId: running.account.id,
                   turnRunning: running.turnRunning,
+                  turnStartedAt: running.turnRunning ? running.turnStartedAt : null,
+                  turnEndedAt: running.turnEndedAt,
                   pid: running.connection.process?.pid ?? null,
                   context: running.context,
                   stopping: running.stopping,

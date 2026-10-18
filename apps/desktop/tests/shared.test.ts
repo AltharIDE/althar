@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { agentLineOf, brandOf } from '../src/renderer/shared/agents'
 import { knownModelName, standsFor, type Unfurl } from '@althar/contracts'
-import { isSending, mergeItems, newestReads, queueShown, sending, unsent, waiting } from '../src/renderer/shared/items'
+import { isSending, mergeItems, newestReads, queueShown, readingNow, sending, unsent, waiting } from '../src/renderer/shared/items'
 import { keyOf, pastedIn } from '../src/renderer/shared/pasted'
 import { change, items } from './fixtures'
 import { latestOf } from '../src/renderer/features/task/Outputs'
@@ -188,6 +188,20 @@ describe('the composer queue', () => {
     expect(queueShown({ turnRunning: false }, false)).toBe(false)
     expect(queueShown(null, false)).toBe(true)
     expect(queueShown(null, true)).toBe(false)
+  })
+
+  it('has what waits read now while the person sends, or the agent holds the thread or starts, but not behind a turn or a wait', () => {
+    const idle = { turnRunning: false, held: true, state: 'active' }
+    expect(readingNow(idle, false)).toBe(true)
+    expect(readingNow({ ...idle, held: false, state: 'starting' }, false)).toBe(true)
+    // The person's own send on its way starts an agent that isn't there, or one Althar no longer holds.
+    expect(readingNow(null, true)).toBe(true)
+    expect(readingNow({ ...idle, held: false }, true)).toBe(true)
+    expect(readingNow(null, false)).toBe(false)
+    expect(readingNow({ ...idle, held: false }, false)).toBe(false)
+    // Behind a turn running it waits its turn; and where the task waits for a place, or its agent's usage, it waits too.
+    expect(readingNow({ ...idle, turnRunning: true }, true)).toBe(false)
+    expect(readingNow(idle, true, true)).toBe(false)
   })
 })
 

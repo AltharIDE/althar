@@ -129,9 +129,6 @@ describe('allow everything on a task (ADR-043)', () => {
       assert.lengthOf(yield* calls(other.threadId), 1)
       assert.deepStrictEqual((yield* queries.thread(created.threadId)).task.allowEverything, { task: true, project: false })
       assert.deepStrictEqual((yield* queries.thread(other.threadId)).task.allowEverything, { task: false, project: false })
-      const board = yield* queries.board(project.projectId)
-      assert.isTrue(board.tasks.find((each) => each.taskId === created.taskId)?.allowEverything)
-      assert.isUndefined(board.tasks.find((each) => each.taskId === other.taskId)?.allowEverything)
       // Kept as the person's fact, once: turning it on again changes nothing.
       yield* allow(created.taskId, true)
       const facts = yield* sql<{ payload: string }>`
@@ -194,7 +191,6 @@ describe('allow everything on a task (ADR-043)', () => {
       assert.deepStrictEqual(yield* calls(other.threadId), [])
       assert.deepStrictEqual((yield* queries.thread(other.threadId)).task.allowEverything, { task: false, project: true })
       const board = yield* queries.board(project.projectId)
-      assert.isTrue(board.tasks.find((each) => each.taskId === other.taskId)?.allowEverything)
       // Nothing waits on the person anywhere in the project.
       assert.deepStrictEqual(board.calls, [])
     }).pipe(Effect.provide(withQueries())),

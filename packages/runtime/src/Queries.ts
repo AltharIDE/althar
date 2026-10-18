@@ -769,7 +769,7 @@ export class Queries extends Context.Service<
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
           const agents = yield* Agents
-          const [session] = yield* sql<{
+          const rows = yield* sql<{
             id: string
             agentId: string
             state: string
@@ -780,9 +780,11 @@ export class Queries extends Context.Service<
           }>`
             SELECT s.id, s.agent_id, s.state, s.model, s.effort, s.config, a.name AS account FROM provider_sessions s
             LEFT JOIN agent_accounts a ON a.id = s.account_id
-            WHERE s.thread_id = ${threadId} AND s.state IN (${sql.unsafe(live)}) ORDER BY s.started_at DESC LIMIT 1`
-          if (session === undefined) return null
+            WHERE s.thread_id = ${threadId} AND s.state IN (${sql.unsafe(live)}) ORDER BY s.started_at DESC`
           const running = yield* sessions.running(threadId)
+          // The runtime's own session when it holds one, which a switch's newer, still-starting row is not; else the newest recorded one.
+          const session = Option.isSome(running) ? (rows.find((row) => row.id === running.value.sessionId) ?? rows[0]) : rows[0]
+          if (session === undefined) return null
           const definition = Option.getOrUndefined(yield* Effect.option(agents.get(session.agentId)))
           const options = field(parse(session.config), 'options')
           const modelOption = Array.isArray(options)
@@ -799,6 +801,17 @@ export class Queries extends Context.Service<
             effort: session.effort,
             models: Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string') : [],
             turnRunning: Option.isSome(running) && running.value.sessionId === session.id && running.value.turnRunning,
+            turnStartedAt:
+              Option.isSome(running) && running.value.sessionId === session.id && running.value.turnStartedAt !== null
+                ? new Date(running.value.turnStartedAt).toISOString()
+                : null,
+            turnEndedAt:
+              Option.isSome(running) && running.value.sessionId === session.id && running.value.turnEndedAt !== null
+                ? new Date(running.value.turnEndedAt).toISOString()
+                : null,
+            // Whether the runtime holds a session on this thread, which takes a note and makes a start refuse. The summary describes that held
+            // session, not a newer row a switch is still starting, so a model or effort pick is compared with what the runtime runs.
+            held: Option.isSome(running),
             context: Option.isSome(running) && running.value.sessionId === session.id ? running.value.context : null,
             background: Option.isSome(running) && running.value.sessionId === session.id ? running.value.background : [],
           }
@@ -1328,6 +1341,13 @@ export class Queries extends Context.Service<
         }
       })
 
+      /** A waiting task's place in the order what waits starts, among everything that waits: 1 starts first. */
+      const placeOf = (taskId: string) =>
+        Effect.gen(function* () {
+          const order = yield* (yield* Busy).order
+          return Math.max(1, order.findIndex((waiter) => waiter.taskId === taskId && waiter.review !== true) + 1)
+        })
+
       /* A settled task's kind, by the task and when it settled: it is read from git once, not each time its card is. */
       const settledKinds = new Map<string, TaskCard['kind']>()
 
@@ -1584,7 +1604,7 @@ export class Queries extends Context.Service<
             waits: task.heldFor === 'usage_limit' ? waitsOf(task.held) : null,
             // A merged task whose lead goes back to work waits its turn too (ADR-034).
             queued: queued && task.state !== 'abandoned' ? yield* queuedNow : null,
-            ...(queued && (yield* planWaits(taskId)) ? { planWaits: true } : {}),
+            ...(queued && (yield* planWaits(taskId)) ? { planWaits: true, place: yield* placeOf(taskId) } : {}),
             ...(round?.state === 'handed_back' && phase === 'ready' ? { handedBack: round.why } : {}),
           } satisfies Extract<ThreadItem, { kind: 'task' }>['content']
         })
@@ -1603,8 +1623,11 @@ export class Queries extends Context.Service<
       const FIRST_LOOK = 24 * 60 * 60 * 1000
       /** The most of what the loop did the home reads. */
       const EVENTS = 50
-      /* Settled work doesn't change, so its card is worked out once, by when it settled. */
-      const settledCards = new Map<string, BoardSnapshot['tasks'][number]>()
+      /*
+       * Settled work doesn't change, so its card is worked out once, by when it settled: but for its pull requests, which its host
+       * may close or merge after (an abandoned task's left open), so it is worked out again once what was seen of them moves on.
+       */
+      const settledCards = new Map<string, { readonly seen: string; readonly card: BoardSnapshot['tasks'][number] }>()
 
       /** A task as the board shows it: its card, and, ready, what it changed and what of it merges here. None where it has no card. */
       const onBoard = (row: {
@@ -1616,8 +1639,11 @@ export class Queries extends Context.Service<
         Effect.gen(function* () {
           // A settled task whose lead works on it again isn't as it settled (ADR-034).
           const working = (yield* (yield* Sessions).onTasks).some((session) => session.taskId === row.id)
+          const [links] = yield* (yield* SqlClient.SqlClient)<{ seen: string | null }>`
+            SELECT max(updated_at) AS seen FROM external_links WHERE task_id = ${row.id} AND kind = 'change'`
+          const seen = links?.seen ?? ''
           const settled = row.settledAt === null || working ? undefined : settledCards.get(`${row.id}:${row.settledAt}`)
-          if (settled !== undefined) return [settled]
+          if (settled !== undefined && settled.seen === seen) return [settled.card]
           const card = yield* cardFor(row.id)
           if (card === undefined) return []
           // Ready, what merges here is read from git; without a pull request, so is its size: its branch's. A change at work
@@ -1636,13 +1662,6 @@ export class Queries extends Context.Service<
                   del: said.files.reduce((sum, file) => sum + file.del, 0),
                 }
               : null
-          // Not settled, whether nothing it asks waits for the person: by its own switch, or its project's (ADR-043).
-          const sql = yield* SqlClient.SqlClient
-          const [allows] =
-            card.phase === 'settled'
-              ? []
-              : yield* sql<{ allows: number | null }>`
-                  SELECT k.allow_everything = 1 OR ${sql.unsafe(PROJECT_ALLOWS('k.project_id'))} AS allows FROM tasks k WHERE k.id = ${row.id}`
           const read = {
             ...card,
             state: row.state,
@@ -1650,9 +1669,8 @@ export class Queries extends Context.Service<
             settledAt: row.settledAt,
             changed,
             here: said?.here ?? [],
-            ...(allows?.allows === 1 ? { allowEverything: true } : {}),
           }
-          if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, read)
+          if (row.settledAt !== null && card.phase === 'settled') settledCards.set(`${row.id}:${row.settledAt}`, { seen, card: read })
           // Back at work, what was kept of it as it settled goes: settled again, at the same time, it may say more.
           else for (const key of settledCards.keys()) if (key.startsWith(`${row.id}:`)) settledCards.delete(key)
           return [read]
@@ -1778,7 +1796,13 @@ export class Queries extends Context.Service<
           const from = since ?? looked ?? new Date(Date.now() - FIRST_LOOK).toISOString()
           const rows = yield* sql<{ id: string; projectId: string; state: string; createdAt: string; settledAt: string | null }>`
             SELECT k.id, k.project_id, k.state, k.created_at, k.settled_at FROM tasks k JOIN projects p ON p.id = k.project_id
-            WHERE p.archived_at IS NULL AND k.state = 'open' ORDER BY k.created_at, k.id`
+            WHERE p.archived_at IS NULL AND (k.state = 'open' OR k.id IN (
+              -- A merged task the board still shows can be ready again, with commits after its pull request in none yet.
+              SELECT id FROM (
+                SELECT id, state, ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY settled_at DESC, id DESC) AS place
+                FROM tasks WHERE state IN ('done', 'abandoned'))
+              WHERE state = 'done' AND place <= ${SETTLED_SHOWN}))
+            ORDER BY k.created_at, k.id`
           const tasks = yield* Effect.forEach(
             rows,
             (row) =>
@@ -2012,7 +2036,18 @@ export class Queries extends Context.Service<
               commits: said.commits,
               here: said.here,
               merged: said.merged,
-              actions: [...actionsOf(standing)],
+              // With commits after its last pull request in none yet, a merged task abandons them, leaving them out, and stays merged:
+              // an open one only where every repository of it is merged, as settling it asks, else leaving out wouldn't settle it.
+              actions: [
+                ...actionsOf({
+                  ...standing,
+                  unshipped: card?.unshipped != null,
+                  merged:
+                    head.state === 'open' &&
+                    card?.unshipped != null &&
+                    (yield* (yield* Changes).merged(head.taskId).pipe(Effect.orElseSucceed(() => false))),
+                }),
+              ],
               planId: standing.planId,
               runnables: yield* launches.runnables(head.projectId, head.taskId).pipe(Effect.orElseSucceed(() => [])),
               launches: (yield* launches.ofProject(head.projectId)).filter((launch) => launch.taskId === head.taskId),

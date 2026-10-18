@@ -45,6 +45,9 @@ const out = new Map(
     }),
 )
 
+/** How long each fake agent takes to start a session, in milliseconds, where ALTHAR_FAKE_SLOW_START says: for what shows meanwhile. */
+const slowStart = process.env.ALTHAR_FAKE_SLOW_START === undefined ? undefined : Number(process.env.ALTHAR_FAKE_SLOW_START)
+
 export const fakeAgents = Layer.succeed(
   Agents,
   Agents.from(
@@ -55,7 +58,10 @@ export const fakeAgents = Layer.succeed(
         transport: (_cwd: string, env: Readonly<Record<string, string>> = {}) => {
           const home = env.ALTHAR_FAKE_HOME
           const own = out.get(`${real.id}@${home === undefined ? 'usual' : basename(home)}`) ?? limited
-          return { _tag: 'InProcess' as const, agent: fakeAgent(own === undefined ? {} : { outOfUsage: own }) }
+          return {
+            _tag: 'InProcess' as const,
+            agent: fakeAgent({ ...(own === undefined ? {} : { outOfUsage: own }), ...(slowStart === undefined ? {} : { slowStart }) }),
+          }
         },
       }
     }),

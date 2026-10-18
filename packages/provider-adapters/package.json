@@ -19,7 +19,7 @@
     "verify": "bun run check && bun run test:coverage"
   },
   "dependencies": {
-    "@agentclientprotocol/claude-agent-acp": "0.90.0",
+    "@agentclientprotocol/claude-agent-acp": "0.93.0",
     "@agentclientprotocol/codex-acp": "2.2.2",
     "@agentclientprotocol/sdk": "1.5.1",
     "@althar/domain": "workspace:*",
