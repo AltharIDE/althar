@@ -74,7 +74,6 @@ const rootRoute = createRootRoute({
 })
 const homeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/', component: Where })
 const projectRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects/$projectId', component: ProjectScreen })
-const rulesRoute = createRoute({ getParentRoute: () => rootRoute, path: '/projects/$projectId/rules', component: Where })
 const threadRoute = createRoute({ getParentRoute: () => rootRoute, path: '/threads/$threadId', component: Thread })
 let making = () => ''
 const newRoute = createRoute({ getParentRoute: () => rootRoute, path: '/new', component: () => <NewScreen projectId={() => making()} /> })
@@ -82,7 +81,7 @@ const settingsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/set
 
 const windowAt = (path: string, projects: ReadonlyArray<ProjectSummary> = [project, halyard, tessera], host: Host = fakeHost()) => {
   const router = createRouter({
-    routeTree: rootRoute.addChildren([homeRoute, projectRoute, rulesRoute, threadRoute, newRoute, settingsRoute]),
+    routeTree: rootRoute.addChildren([homeRoute, projectRoute, threadRoute, newRoute, settingsRoute]),
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   const { client, emit } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 3, projects })) })
@@ -138,17 +137,18 @@ describe('the window’s tabs', () => {
   })
 
   it('go by ⌘ and a number, and Control-Tab, and close to the next', async () => {
+    // Its rules were a place of their own once: kept from then, its tab opens the project.
     window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['p1', 'p2', 'p3'], places: { p3: { kind: 'rules' } } }))
     windowAt('/projects/p2')
     await waitFor(() => expect(tab('halyard').getAttribute('aria-current')).toBe('page'))
     fireEvent.keyDown(window, { key: '1', metaKey: true })
     await waitFor(() => expect(where()).toBe('/'))
     fireEvent.keyDown(window, { key: '9', metaKey: true })
-    await waitFor(() => expect(where()).toBe('/projects/p3/rules'))
+    await waitFor(() => expect(where()).toBe('/projects/p3'))
     fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true })
     await waitFor(() => expect(where()).toBe('/'))
     fireEvent.keyDown(window, { key: 'Tab', ctrlKey: true, shiftKey: true })
-    await waitFor(() => expect(where()).toBe('/projects/p3/rules'))
+    await waitFor(() => expect(where()).toBe('/projects/p3'))
     fireEvent.keyDown(window, { key: '2', metaKey: true })
     await waitFor(() => expect(where()).toBe('/projects/p1'))
     // Typing a number isn't a shortcut, nor a number with no tab.
@@ -488,8 +488,8 @@ describe('working out the tabs', () => {
     expect(whereOf('/settings')).toEqual({ kind: 'home' })
     expect(whereOf('/new')).toEqual({ kind: 'new' })
     expect(whereOf('/projects/p%201')).toEqual({ kind: 'project', projectId: 'p 1', place: { kind: 'project' } })
-    expect(whereOf('/projects/p1/rules')).toEqual({ kind: 'project', projectId: 'p1', place: { kind: 'rules' } })
-    expect(whereOf('/projects/p1/repositories')).toEqual({ kind: 'project', projectId: 'p1', place: { kind: 'repositories' } })
+    // A project's rules and repositories are sections of its settings now, not places of their own.
+    expect(whereOf('/projects/p1/rules')).toEqual({ kind: 'home' })
     expect(whereOf('/projects/p1/other')).toEqual({ kind: 'home' })
     expect(whereOf('/threads/th1')).toEqual({ kind: 'thread', threadId: 'th1' })
   })

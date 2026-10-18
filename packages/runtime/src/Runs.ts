@@ -32,7 +32,7 @@ import { Live, type LiveEvent } from './Live'
 import { Policies, usageLimitOf } from './Policies'
 import { conventionsAt } from './conventions'
 import { commitOf, commitsAhead, git, treeOf, uncommittedFiles } from './git'
-import { filesLine, templateAsk } from './pullRequestWords'
+import { DESCRIPTION_SHAPE, descriptionAsk, filesLine, type Undescribed } from './pullRequestWords'
 import { evidenceFolderOf, reviewCopyOf, snapshotForReview } from './reviewCopy'
 import { change, fact, timestamp } from './records'
 import { envelope } from './envelope'
@@ -137,7 +137,7 @@ const Finished = Schema.Struct({
   summary: Schema.String,
   /** What the task built, as it stands now: the task's own summary, which the person reads at its end. */
   built: Schema.optional(Schema.String),
-  /** The pull request's description, in the repository's template: by repository, which a task of one needn't name. */
+  /** The pull request's description, for its reviewer, in the repository's template where it has one: by repository, which a task of one needn't name. */
   descriptions: Schema.optional(Schema.Array(Schema.Struct({ repository: Schema.optional(Schema.String), text: Schema.String }))),
   /** What shows the change does what it should; and what couldn't be shown. */
   evidence: Schema.optional(Schema.Array(EvidenceGiven)),
@@ -1886,7 +1886,7 @@ export class Runs extends Context.Service<
 
       /** What the lead is told to settle a review's findings. */
       const settling = (findings: ReadonlyArray<Finding & { readonly id: string }>) =>
-        `The review found:\n\n${findingsText(findings)}\n\nSettle each: fix what holds, and set aside what doesn't, with a reason. Then call finish_step with a summary, and in \`findings\` what became of each, by its id: fixed, or set_aside with the reason. If settling changes the work, say again in \`built\` what the task has built, as it now stands.`
+        `The review found:\n\n${findingsText(findings)}\n\nSettle each: fix what holds, and set aside what doesn't, with a reason. Then call finish_step with a summary, and in \`findings\` what became of each, by its id: fixed, or set_aside with the reason. If settling changes the work, say again in \`built\` what the task has built, as it now stands, and, where it changes what the pull request's description says, give that again in \`descriptions\`.`
 
       /**
        * Whether a session kept for a step is on the model the step asks for,
@@ -2283,33 +2283,47 @@ export class Runs extends Context.Service<
         })
 
       /**
-       * The task's repositories with a pull request to open, in a template
-       * the lead hasn't written a description in, now or before. One with
-       * nothing to publish opens none, so it needs none.
+       * The task's repositories with a pull request to open that the lead
+       * hasn't described, now or before: in its template, where it has one.
+       * One with nothing to publish opens none, and one whose pull request is
+       * open has its description already, so neither needs one.
        */
-      const templatesUnwritten = (
+      const undescribedOf = (
         threadId: string,
-        worktrees: ReadonlyArray<{ readonly path: string; readonly name: string; readonly slug: string; readonly base: string | null }>,
+        worktrees: ReadonlyArray<{
+          readonly id: string
+          readonly path: string
+          readonly name: string
+          readonly slug: string
+          readonly base: string | null
+        }>,
         given: Readonly<Record<string, string>>,
-        /** Only descriptions given since, for a task's next pull request: its last one's describe that. */
-        since: string | null = null,
+        /**
+         * When each repository's last pull request opened, by its worktree, for a next one: only descriptions given since count, as
+         * that one's describe it. Each its own, as the pull request is described (Changes.bodyFor).
+         */
+        since: Readonly<Record<string, string>> = {},
       ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
-          const unwritten: Array<{ readonly name: string; readonly path: string; readonly text: string }> = []
+          const undescribed: Array<Undescribed> = []
           for (const worktree of worktrees) {
             if (given[worktree.slug] !== undefined) continue
             const ahead = worktree.base === null ? 1 : yield* commitsAhead(worktree.path, worktree.base).pipe(Effect.orElseSucceed(() => 1))
             if (ahead === 0) continue
-            const { template } = yield* conventionsAt(worktree.path, 'HEAD')
-            if (template === null) continue
+            const [open] = yield* sql<{ n: number }>`
+              SELECT count(*) AS n FROM repository_changes c JOIN external_links l ON l.kind = 'change' AND l.url = c.pull_request_url
+              WHERE c.workspace_id = ${worktree.id} AND json_extract(l.snapshot, '$.state') = 'open'`
+            if ((open?.n ?? 0) > 0) continue
             const [before] = yield* sql<{ n: number }>`
               SELECT count(*) AS n FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
                 AND json_extract(content, '$.descriptions.' || json_quote(${worktree.slug})) IS NOT NULL
-                AND (${since} IS NULL OR created_at > ${since})`
-            if ((before?.n ?? 0) === 0) unwritten.push({ name: worktree.name, ...template })
+                AND (${since[worktree.id] ?? null} IS NULL OR created_at > ${since[worktree.id] ?? null})`
+            if ((before?.n ?? 0) > 0) continue
+            const { template } = yield* conventionsAt(worktree.path, 'HEAD')
+            undescribed.push({ name: worktree.name, template })
           }
-          return unwritten
+          return undescribed
         })
 
       /** The lead says its step is done: Implement, or a round of settling. */
@@ -2343,7 +2357,7 @@ export class Runs extends Context.Service<
           const reply = (said: string) =>
             branched.length === 0
               ? said
-              : `${said} You changed the repository, so Althar put the task's work on a branch of its own, ${branched.join(', ')}, which stays on this Mac: commit there.`
+              : `${said} You changed the repository, so Althar put the task's work on a branch of its own, ${branched.join(', ')}, which stays on this computer: commit there.`
           const itemId = yield* newId(Ids.threadItem)
           const shows = Effect.gen(function* () {
             const kept = yield* keepEvidence({ projectId: access.projectId as ProjectId, itemId, folders: [] }, evidence)
@@ -2412,15 +2426,17 @@ export class Runs extends Context.Service<
                 message: `These aren't committed: ${filesLine(left)}. Althar pushes commits only, so commit what belongs to the task, delete the rest (scratch files, logs), and call finish_step again.`,
               })
           }
-          // A pull request in a repository with a template is described in it, by the lead, as a teammate would.
+          // A pull request the task opens is described by the lead, for its reviewer: in the repository's template, where it has one.
           if ((end === 'draft' || end === 'ready') && !quiet) {
             // A round's work after its task's pull request merged or closed goes in a new one, described from what came since.
             const after = round === undefined ? [] : yield* changes.unshipped(current.taskId).pipe(Effect.orElseSucceed(() => []))
-            const since = after.flatMap((one) => (one.openedAt === null ? [] : [one.openedAt])).toSorted()[0] ?? null
-            const unwritten = yield* templatesUnwritten(access.threadId, worktrees, kept, since)
-            if (unwritten.length > 0) {
+            const since = Object.fromEntries(
+              after.flatMap((one) => (one.openedAt === null ? [] : [[one.workspaceId, one.openedAt] as const])),
+            )
+            const undescribed = yield* undescribedOf(access.threadId, worktrees, kept, since)
+            if (undescribed.length > 0) {
               givenBefore.set(access.threadId, kept)
-              return yield* new ToolRefused({ message: templateAsk(unwritten, worktrees.length > 1) })
+              return yield* new ToolRefused({ message: descriptionAsk(undescribed, worktrees.length > 1) })
             }
           }
           givenBefore.delete(access.threadId)
@@ -2591,7 +2607,7 @@ export class Runs extends Context.Service<
       yield* toolServer.serve('lead', [
         tool(
           'finish_step',
-          "Tells Althar you have done your step: the task, or settling a review's findings. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open. In `built`, what the task has built as it stands now, which the person reads at its end. With it, the evidence you gathered that the change does what it should, and in `unverified` what you couldn't show.",
+          "Tells Althar you have done your step: the task, or settling a review's findings. The summary is what the person reads instead of your whole turn: a few lines on what you changed, how you checked it, and anything left open. In `built`, what the task has built as it stands now, which the person reads at its end. Where the task ends in a pull request, its description in `descriptions`, for whoever reviews it on the code host. With it, the evidence you gathered that the change does what it should, and in `unverified` what you couldn't show.",
           {
             type: 'object',
             properties: {
@@ -2633,8 +2649,7 @@ export class Runs extends Context.Service<
               },
               descriptions: {
                 type: 'array',
-                description:
-                  "Where the task's pull request is opened in a repository with a pull request template: its description, written in that template as a teammate would. Keep every heading and checklist, fill each section from your work, and leave every box unticked.",
+                description: `The description of the task's pull request, for whoever reviews it on the code host rather than the person in Althar: needed when you finish a task that ends in one, and again after settling a review that changes what it says. ${DESCRIPTION_SHAPE} Where the repository has a pull request template, write it in that: keep every heading and checklist, fill each section in that spirit, and leave every box unticked.`,
                 items: {
                   type: 'object',
                   properties: {

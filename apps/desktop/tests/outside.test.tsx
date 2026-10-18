@@ -11,7 +11,6 @@ import { ConnectPanel } from '../src/renderer/features/connections/ConnectPanel'
 import { connectionsOf, ConnectionsView, servicesOf } from '../src/renderer/features/connections/ConnectionsView'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
-import { useProjectSettings } from '../src/renderer/features/project/useProjectSettings'
 import { text as stuckWords } from '../src/renderer/features/task/StuckCall'
 import { TaskView } from '../src/renderer/features/task/TaskView'
 import { useTask } from '../src/renderer/features/task/useTask'
@@ -31,10 +30,11 @@ import {
   githubGuide,
   items,
   NOW,
+  repositories,
   runnables,
   snapshot,
 } from './fixtures'
-import { withServices } from './render'
+import { useSettingsOf, withServices } from './render'
 
 /*
  * What reaches outside, in the window: connecting code hosts and trackers,
@@ -1278,17 +1278,21 @@ function Project() {
       model={useProject('p1')}
       board={useBoard('p1')}
       connections={useConnections()}
-      settings={{ model: useProjectSettings('p1', vi.fn()), onRepositories: vi.fn(), onRules: vi.fn() }}
+      settings={useSettingsOf('p1')}
       onTask={vi.fn()}
     />
   )
 }
 
 describe('a project, reaching outside', () => {
-  it('says nothing of an unconnected host up front, and walks in to it from the project’s settings, on any view', async () => {
+  it('says nothing of an unconnected host up front, and walks in to it from where its work goes, in the project’s settings', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
         coordinatorSnapshot({ host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: false } }),
+      ),
+      // Its repositories' work goes to GitHub, which Althar isn't connected to.
+      getRepositories: vi.fn(async () =>
+        repositories.map((one) => (one.host?.product === 'github' ? { ...one, host: { ...one.host, account: null } } : one)),
       ),
       connectToken: vi.fn(async () => githubConnection),
     })
@@ -1296,19 +1300,20 @@ describe('a project, reaching outside', () => {
     await screen.findByRole('textbox', { name: 'Tell the coordinator something' })
     // Pushing needs no connection, so nothing stands in the way of the conversation.
     expect(screen.queryByText(/isn't connected to GitHub/)).toBeNull()
-    /** The host's module in the project's settings, which says it isn't connected. */
+    /** GitHub, where its repositories' work goes in the project's settings, which says it isn't connected. */
     const connectFromSettings = async () => {
-      await userEvent.click(screen.getByRole('button', { name: 'Settings' }))
-      const panel = within(await screen.findByRole('dialog', { name: 'meridian’s settings' }))
-      const github = panel.getByRole('button', { name: /^GitHub/ })
-      expect(github.textContent).toContain('Not connected')
-      await userEvent.click(github)
+      await userEvent.click(screen.getByRole('radio', { name: /^Settings/ }))
+      await userEvent.click(
+        within(screen.getByRole('navigation', { name: 'Project settings' })).getByRole('button', { name: 'Code and issues' }),
+      )
+      const github = within(await screen.findByRole('region', { name: 'GitHub' }))
+      expect(github.getByText('Not connected')).toBeTruthy()
+      await userEvent.click(github.getByRole('button', { name: 'Connect GitHub' }))
     }
     await connectFromSettings()
-    // GitHub's own walk in, at a sign-in card's width; the settings closed as it opened, so only the walk is over the project.
+    // GitHub's own walk in, at a sign-in card's width, over the project.
     const shown = await screen.findByRole('dialog', { name: 'GitHub' })
     const dialog = within(shown)
-    expect(screen.queryByRole('dialog', { name: 'meridian’s settings' })).toBeNull()
     expect(await dialog.findByRole('group', { name: 'Ways to connect GitHub' })).toBeTruthy()
     expect(shown.style.width).toMatch(/^min\(480px,/)
     // Nothing to press Done on yet, and nothing to step back to.
@@ -1326,18 +1331,17 @@ describe('a project, reaching outside', () => {
     await userEvent.click(dialog.getByRole('button', { name: 'Paste it myself' }))
     await userEvent.type(dialog.getByLabelText('Paste it'), 'github_pat_e2e{Enter}')
     expect(await dialog.findByRole('heading', { name: 'Connected as you' })).toBeTruthy()
-    // One Done, the walk's own: it closes the walk, and focus goes back to the button the settings opened from.
+    // One Done, the walk's own: it closes the walk.
     expect(dialog.getAllByRole('button', { name: 'Done' })).toHaveLength(1)
     await userEvent.click(dialog.getByRole('button', { name: 'Done' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Settings' })))
-    // On the board too, where nothing of the conversation shows.
+    // From the board too: the settings are a view of their own, whichever the project was on.
     await userEvent.click(screen.getByRole('radio', { name: 'Board' }))
     await connectFromSettings()
     expect(await screen.findByRole('dialog', { name: 'GitHub' })).toBeTruthy()
   })
 
-  it('opens all the code hosts and trackers for a host it is connected to, walks in to another in their place, and comes back to them', async () => {
+  it('opens all the code hosts and trackers to connect a tracker, walks in to one in their place, and comes back to them', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
         coordinatorSnapshot({ host: { product: 'github', name: 'GitHub', webUrl: 'https://github.com', connected: true } }),
@@ -1349,9 +1353,13 @@ describe('a project, reaching outside', () => {
       ),
     })
     withServices(<Project />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Settings' }))
-    const panel = within(await screen.findByRole('dialog', { name: 'meridian’s settings' }))
-    await userEvent.click(await panel.findByRole('button', { name: /^GitHub\s*Connected as you/ }))
+    await userEvent.click(await screen.findByRole('radio', { name: /^Settings/ }))
+    await userEvent.click(
+      within(screen.getByRole('navigation', { name: 'Project settings' })).getByRole('button', { name: 'Code and issues' }),
+    )
+    await userEvent.click(
+      within(await screen.findByRole('region', { name: 'Trackers' })).getByRole('button', { name: 'Connect a tracker' }),
+    )
     const shown = await screen.findByRole('dialog', { name: 'Code hosts and trackers' })
     const dialog = within(shown)
     expect(await dialog.findByText('Signed in as you')).toBeTruthy()

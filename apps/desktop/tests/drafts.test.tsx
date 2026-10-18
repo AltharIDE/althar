@@ -15,7 +15,7 @@ import { record } from '../src/renderer/shared/dictation/recorder'
 import { changeSession, listeningIn } from '../src/renderer/shared/dictation/sessions'
 import { forgetDrafts } from '../src/renderer/shared/drafts'
 import { fakeClient, fakeHost, items, snapshot } from './fixtures'
-import { withServices } from './render'
+import { useSettingsOf, withServices } from './render'
 
 /*
  * What the person writes in a composer stays with its thread: they go to the
@@ -34,6 +34,7 @@ function Project({ room }: { room?: Room }) {
       model={useProject('p1')}
       board={useBoard('p1')}
       connections={useConnections()}
+      settings={useSettingsOf('p1')}
       onTask={vi.fn()}
       {...(room === undefined ? {} : { room })}
     />

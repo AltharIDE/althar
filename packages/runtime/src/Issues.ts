@@ -344,7 +344,7 @@ export class Issues extends Context.Service<
           const exit = yield* Effect.exit(
             Effect.gen(function* () {
               const { tracker } = yield* connections.adapters(connectionId)
-              // GitHub's, GitLab's and Trello's have no In Progress of their own: their issues are left as they are, and nothing is said.
+              // GitHub's and GitLab's have no In Progress of their own: their issues are left as they are, and nothing is said.
               if (tracker === undefined || !tracker.capabilities.starts) return null
               // As it is now, not as it was when the task was drafted: one someone started meanwhile is left as it is.
               const issue = yield* tracker.issue(link.ref)

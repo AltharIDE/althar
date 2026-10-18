@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { type ElectronApplication, expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say, startTask, toConversation } from './support'
+import { backToWork, launch, openFirstProject, projectSettings, say, startTask, toConversation } from './support'
 
 /*
  * The app as someone uses it: open a folder as a project, tell its
@@ -204,10 +204,10 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     // Its remote is on GitHub, which isn't connected yet: nothing says so up front, and the project's settings connect it.
     await expect(page.getByText(/isn't connected to GitHub/)).toHaveCount(0)
     await expect(page.getByRole('list', { name: 'Made of' }).getByRole('listitem')).toHaveText(['meridian'])
-    await page.getByRole('button', { name: 'Settings', exact: true }).click()
-    const github = page.getByRole('dialog', { name: 'meridian’s settings' }).getByRole('button', { name: /^GitHub/ })
+    await projectSettings(page, 'Code and issues')
+    const github = page.getByRole('region', { name: 'GitHub' })
     await expect(github).toContainText('Not connected')
-    await github.click()
+    await github.getByRole('button', { name: 'Connect GitHub' }).click()
 
     // GitHub's own walk opens over the project, at a sign-in card's width. GitHub has no sign-in of Althar's in this build: gh's,
     // which is signed in to it here, or a token.
@@ -232,11 +232,10 @@ test('connects GitHub, and a planned task ends in a draft pull request', async (
     await connecting.getByRole('button', { name: 'Done' }).click()
     await expect(connecting).toHaveCount(0)
     await expect(page.getByText(/isn't connected to/)).toHaveCount(0)
-    // The project's settings say who Althar is there.
-    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    // Where its work goes, in the project's settings, says who Althar is there.
     await expect(github).toContainText('Connected as you')
     await page.screenshot({ path: 'test-results/connected.png', animations: 'disabled' })
-    await page.keyboard.press('Escape')
+    await backToWork(page)
     await expect(github).toHaveCount(0)
 
     const box = page.getByRole('textbox', { name: /^(Tell the coordinator something|Add to the queue)/ })

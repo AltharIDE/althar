@@ -3,8 +3,8 @@ import type { Check, Comment, Review } from '@althar/connectors'
 import { keepsTemplate, placeSummary, untick } from './conventions'
 
 /*
- * What Althar writes about a task's pull request: its description, made
- * from what the steps reported, and what it tells the lead of what people
+ * What Althar writes about a task's pull request: its description, as the
+ * lead wrote it for a reviewer, and what it tells the lead of what people
  * said on it and how its checks went, in the host's own words (`PR #12`,
  * `MR !4`).
  */
@@ -57,128 +57,54 @@ export const quoted = (text: string) =>
 /** The end of a check's log, fenced. */
 export const logOf = (name: string, log: string) => `The end of ${name}'s log:\n\`\`\`\n${log}\n\`\`\``
 
-/** A finding, as the description lists it, with what became of it. */
-export interface FindingLine {
-  readonly severity: string
-  readonly file: string | null
-  readonly line: number | null
-  readonly claim: string
-  readonly state: string
-  readonly response: string | null
-}
-
-/** A piece of evidence, as the description lists it: as the step result keeps it. */
-export interface EvidenceLine {
-  readonly kind: string
-  readonly caption: string
-  readonly picture: unknown
-  readonly command: string | null
-  readonly exit: number | null
-  readonly text: string | null
-}
-
-/** How many lines of what a command printed, or a text, the description quotes: its end. */
-export const EVIDENCE_LINES = 12
-
-const EVIDENCE_WORDS: Readonly<Record<string, string>> = {
-  screenshot: 'Screenshot',
-  recording: 'Recording',
-  command: 'Command',
-  test_run: 'Test run',
-  response: 'Response',
-  log: 'Log',
-  note: 'Note',
-}
-
-/** The end of a text, fenced and indented under its list item; a fence its text can't close. */
-const quotedEnd = (text: string) => {
-  const lines = text.replace(/\n+$/, '').split('\n')
-  const end = lines.slice(-EVIDENCE_LINES)
-  const fence = '~'.repeat(Math.max(4, ...end.map((line) => (/^\s*(~+)/.exec(line)?.[1]?.length ?? 0) + 1)))
-  return [`${lines.length > end.length ? '  …\n' : ''}  ${fence}`, ...end.map((line) => `  ${line}`), `  ${fence}`].join('\n')
-}
-
 /**
- * What the lead showed, as the description says it: each piece with its
- * caption; a command with what it ran, its exit code and the end of what it
- * printed. Pictures aren't hosted with the pull request, so a screenshot is
- * named, and said to be in Althar. Then what it couldn't show.
+ * How the lead writes the pull request's description: for whoever reviews
+ * it on the code host, who hasn't seen the task in Althar. The step's
+ * summary and what the task built are the person's, in Althar; this is the
+ * reviewer's.
  */
-export const evidenceText = (evidence: ReadonlyArray<EvidenceLine>, unverified: ReadonlyArray<string>) => {
-  const parts: Array<string> = []
-  if (evidence.length > 0) {
-    const lines = evidence.map((piece) => {
-      const word = EVIDENCE_WORDS[piece.kind] ?? 'Evidence'
-      const ran =
-        piece.command === null ? '' : `: \`${piece.command.replace(/`/g, "'")}\`${piece.exit === null ? '' : `, exit ${piece.exit}`}`
-      const head = `- ${word}: ${piece.caption}${ran}`
-      if (piece.picture !== null && piece.picture !== undefined) return head
-      return piece.text === null || piece.text.trim() === '' ? head : `${head}\n${quotedEnd(piece.text)}`
-    })
-    const pictured = evidence.some((piece) => piece.picture !== null && piece.picture !== undefined)
-    parts.push(['### Evidence', lines.join('\n'), ...(pictured ? ['Screenshots are in Althar, on the task.'] : [])].join('\n\n'))
-  }
-  if (unverified.length > 0) parts.push(`### Unverified\n\n${unverified.map((line) => `- ${line}`).join('\n')}`)
-  return parts.join('\n\n')
-}
+export const DESCRIPTION_SHAPE =
+  "Write it as a thoughtful teammate would for a colleague reviewing the pull request, who hasn't seen your work: short, plain prose, in roughly this shape. Why: the problem or request behind it, and the issue it's for, if any. What changed: the change as a reader should understand it, its behaviour and design, not a list of files. How you approached it: the decisions and trade-offs worth knowing, alternatives you turned down, anything surprising. How it was checked: a sentence or a few bullets on what you tried by hand or saw working, and anything you couldn't check that a reviewer should look at; not the tests you wrote, which are in the diff. Leave out a part with nothing to say, and don't pad: headings only where they help a longer one. Never put in it the review, its rounds or findings, a list of evidence, commands with their exit codes and output, the names of agents or models, or Althar's words for its work (step, round, settle, lead, evidence). Leave screenshots out: they can't go up with the pull request. Althar adds the issue's link and a line saying it opened the pull request, so leave those out too."
+
+/** Something that has something to say: not null, nor blank. */
+const said = (text: string | null | undefined) => (text === undefined || text === null || text.trim() === '' ? null : text.trim())
 
 /**
- * The pull request's description: what the task built, as the lead last
- * said it (else its last step's summary), what it showed of its change working, how review went, the issue it is for, and who opened
- * it, unless the person turned Althar's credit off. Where the repository has
- * a template, it's written in that: the lead's own description where it keeps the
- * template, with every box unticked, under what the task built, which may be
- * newer; else the template with that in its place for a summary, or under a
- * heading of its own below.
+ * The pull request's description: the one the lead wrote for it, then the
+ * issue it is for, and who opened it, unless the person turned Althar's
+ * credit off. Where the repository has a template, the lead's description
+ * is taken where it keeps the template, with every box unticked for the
+ * person. Where the lead wrote none, as an older task's didn't, or one that
+ * left the template, it is what the task built, as the lead last said it
+ * (else its last step's summary): in the template's place for a summary,
+ * or under a heading of its own below it.
  */
 export const bodyOf = (input: {
-  /** What the task built, as the lead last said it: the description leads with it, template or not. */
+  /** What the task built, as the lead last said it: the description where the lead wrote none. */
   readonly built?: string | null
   /** The lead's last step summary, where it never said what the task built. */
   readonly lead: string | null
-  readonly review: { readonly rounds: number; readonly verdict: string | null } | null
-  readonly findings: ReadonlyArray<FindingLine>
-  /** What the lead showed of its change working, and what it couldn't. */
-  readonly evidence?: ReadonlyArray<EvidenceLine>
-  readonly unverified?: ReadonlyArray<string>
   readonly issue: { readonly key: string; readonly url: string; readonly sameHost: boolean } | null
-  /** The repository's template, and the description the lead wrote in it. */
+  /** The repository's template, if it has one. */
   readonly template?: string | null
+  /** The description the lead wrote for the pull request: in the template, where there is one. */
   readonly written?: string | null
   /** Althar is co-author of what it sends, so it says it opened the pull request. On where not said. */
   readonly credit?: boolean
 }) => {
   const parts: Array<string> = []
-  const built = input.built !== undefined && input.built !== null && input.built !== '' ? input.built : null
-  const lead = built ?? (input.lead !== null && input.lead !== '' ? input.lead : null)
+  const plain = said(input.built) ?? said(input.lead)
   const template = input.template ?? null
-  const written = input.written ?? null
+  const written = said(input.written)
   if (template === null) {
-    if (lead !== null) parts.push(lead)
+    const text = written ?? plain
+    if (text !== null) parts.push(text)
   } else if (written !== null && keepsTemplate(template, written)) {
-    if (built !== null) parts.push(built)
     parts.push(untick(written).trim())
   } else {
-    const placed = lead === null ? null : placeSummary(template, lead)
+    const placed = plain === null ? null : placeSummary(template, plain)
     parts.push(untick(placed ?? template).trim())
-    if (placed === null && lead !== null) parts.push(`### Summary\n\n${lead}`)
-  }
-  const shown = evidenceText(input.evidence ?? [], input.unverified ?? [])
-  if (shown !== '') parts.push(shown)
-  if (input.review !== null && input.review.rounds > 0) {
-    const rounds = input.review.rounds === 1 ? 'one round' : `${input.review.rounds} rounds`
-    parts.push(`### Review\n\n${input.review.verdict === 'pass' ? `Passed after ${rounds} of review.` : `Reviewed in ${rounds}.`}`)
-    if (input.findings.length > 0)
-      parts.push(
-        input.findings
-          .map((finding) => {
-            const where = finding.file === null ? '' : ` \`${finding.file}${finding.line === null ? '' : `:${finding.line}`}\``
-            const outcome = finding.state === 'fixed' ? 'Fixed' : finding.state === 'set_aside' ? 'Set aside' : 'Open'
-            const reason = finding.state === 'set_aside' && finding.response !== null ? ` (${finding.response})` : ''
-            return `- ${outcome}: ${finding.severity}${where}: ${finding.claim}${reason}`
-          })
-          .join('\n'),
-      )
+    if (placed === null && plain !== null) parts.push(`### Summary\n\n${plain}`)
   }
   if (input.issue !== null)
     parts.push(input.issue.sameHost ? `Issue: ${input.issue.key}` : `Issue: [${input.issue.key}](${input.issue.url})`)
@@ -186,18 +112,33 @@ export const bodyOf = (input: {
   return parts.join('\n\n')
 }
 
-/** What the lead is told when it finishes without a description in a repository's pull request template. */
-export const templateAsk = (
-  unwritten: ReadonlyArray<{ readonly name: string; readonly path: string; readonly text: string }>,
-  several: boolean,
-) =>
-  [
-    `The task's pull request is described in the repository's template, so write its description before you finish${several ? `, one for each of ${unwritten.map((template) => template.name).join(', ')}` : ''}. Write it as a teammate would: keep every heading and checklist, fill each section from what you did and how you checked it, and leave every box unticked for the person. Then call finish_step again with your summary and the description in \`descriptions\`${several ? ', each with its repository' : ''}.`,
-    ...unwritten.map(
-      (template) =>
-        `${several ? `${template.name}'s template` : 'The template'}, ${template.path}:\n~~~~~markdown\n${template.text.slice(0, 6000)}\n~~~~~`,
+/** A repository whose pull request the lead hasn't described yet, with its template if it has one. */
+export interface Undescribed {
+  readonly name: string
+  readonly template: { readonly path: string; readonly text: string } | null
+}
+
+/**
+ * What the lead is told when it finishes without a description for the
+ * task's pull request: in the repository's template where it has one, as
+ * a teammate fills it, else in the shape a reader wants.
+ */
+export const descriptionAsk = (undescribed: ReadonlyArray<Undescribed>, several: boolean) => {
+  const templated = undescribed.filter((one) => one.template !== null)
+  const named = (one: Undescribed) => (several ? `${one.name}'s template` : 'The template')
+  return [
+    `Write the description of the task's pull request before you finish${several ? `, one for each of ${undescribed.map((one) => one.name).join(', ')}` : ''}. It is for whoever reviews it on the code host, not for the person in Althar, who has your summary. ${DESCRIPTION_SHAPE}`,
+    ...(templated.length === 0
+      ? []
+      : [
+          `${several ? `Where a repository has a pull request template, write it in that` : 'The repository has a pull request template, so write it in that'}, as a teammate would: keep every heading and checklist, fill each section in that spirit, and leave every box unticked for the person.`,
+        ]),
+    `Then call finish_step again with your summary and the description in \`descriptions\`${several ? ', each with its repository' : ''}.`,
+    ...templated.map(
+      (one) => `${named(one)}, ${one.template?.path ?? ''}:\n~~~~~markdown\n${(one.template?.text ?? '').slice(0, 6000)}\n~~~~~`,
     ),
   ].join('\n\n')
+}
 
 /** How a change stands, in a word. */
 export const standing = (change: { readonly state: string; readonly draft: boolean }) =>

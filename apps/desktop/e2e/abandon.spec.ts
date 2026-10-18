@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say } from './support'
+import { connectGitHub, launch, openFirstProject, say } from './support'
 
 /*
  * Abandoning a task with its pull request open, in a real window with the
@@ -26,22 +26,7 @@ test('offers to close an abandoned task’s pull request, says it is still open 
     await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1440, 900))
     await openFirstProject(electronApp, page, repo)
     await expect(page.getByRole('heading', { name: 'meridian', level: 1 })).toBeVisible()
-    await page.getByRole('button', { name: 'Settings', exact: true }).click()
-    await page
-      .getByRole('dialog', { name: 'meridian’s settings' })
-      .getByRole('button', { name: /^GitHub/ })
-      .click()
-    const connecting = page.getByRole('dialog', { name: 'GitHub' })
-    await connecting
-      .getByRole('group', { name: 'Ways to connect GitHub' })
-      .getByRole('button', { name: /Make a token/ })
-      .click()
-    await connecting.getByRole('button', { name: 'Paste it myself' }).click()
-    await connecting.getByLabel('Paste it').fill('github_pat_e2e')
-    await connecting.getByRole('button', { name: 'Check' }).click()
-    await expect(connecting.getByRole('heading', { name: 'Connected as you' })).toBeVisible()
-    await connecting.getByRole('button', { name: 'Done' }).click()
-    await expect(connecting).toHaveCount(0)
+    await connectGitHub(page)
 
     await say(page, 'Prototype the settled lane. [coordinator:plan-no-review] [coordinator:plan] [lead:finish] [lead:edit]')
     await page.getByRole('button', { name: 'Start now' }).click({ timeout: 20_000 })
