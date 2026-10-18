@@ -17,7 +17,7 @@ interface Runnable {
  * Fold is inert, which removes it from the accessibility tree in a browser;
  * Testing Library in jsdom does not know inert, so it still finds what is
  * inside. A click on a label forwards a pointer event jsdom cannot clone.
- * And jsdom lays nothing out, so a play that measures a size reads 0.
+ * And jsdom lays nothing out, so a play that measures a size reads 0, as a drag along the tabs does.
  */
 const BROWSER_ONLY = new Set<string>([
   'primitives/Fold/Fold.stories.tsx#Opening',
@@ -26,6 +26,8 @@ const BROWSER_ONLY = new Set<string>([
   'primitives/CheckList/CheckList.stories.tsx#Default',
   'composer/Composer/Composer.stories.tsx#EnterEndsDictationAtItsSize',
   'composer/Composer/Composer.stories.tsx#LongDictation',
+  'chrome/ProjectTabs/ProjectTabs.stories.tsx#Reordering',
+  'chrome/ProjectTabs/ProjectTabs.stories.tsx#MissedRelease',
 ])
 
 /**

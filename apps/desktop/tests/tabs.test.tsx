@@ -18,6 +18,7 @@ import { draftsOf } from '../src/renderer/features/newProject/draft'
 import { TabsFrame, useLastRoom, useNewTab, useVisit } from '../src/renderer/features/tabs/TabsFrame'
 import { glanceOf, memoryOf } from '../src/renderer/features/tabs/useLoad'
 import { brandOf } from '../src/renderer/shared/agents'
+import { moved } from '../src/renderer/features/tabs/store'
 import { afterClosing, beside, byNumber, firstOpen, keptFrom, whereOf } from '../src/renderer/features/tabs/tabs'
 import type { Host } from '../src/renderer/data/services'
 import { changed, fakeClient, fakeHost, load, project } from './fixtures'
@@ -164,6 +165,24 @@ describe('the window’s tabs', () => {
     expect(where()).toBe('/projects/p2')
     await userEvent.click(nav().getByRole('button', { name: 'Close halyard' }))
     await waitFor(() => expect(where()).toBe('/'))
+  })
+
+  it('reorder the projects’ tabs by key, keep the order for the next launch, and never move the home’s', async () => {
+    window.localStorage.setItem('althar.tabs', JSON.stringify({ open: ['p1', 'p2', 'p3'], places: {} }))
+    windowAt('/projects/p1')
+    await waitFor(() => expect(tab('meridian').getAttribute('aria-current')).toBe('page'))
+    const order = () => keptFrom(window.localStorage.getItem('althar.tabs'))?.open
+    // ⌥⇧→ moves the focused tab one place along.
+    await userEvent.type(tab('meridian'), '{Alt>}{Shift>}{ArrowRight}{/Shift}{/Alt}')
+    await waitFor(() => expect(order()).toEqual(['p2', 'p1', 'p3']))
+    expect(names().map((name) => name.replace(/, .*/, ''))).toEqual(['Home', 'halyard', 'meridian', 'tessera'])
+    // The last has nowhere further, and the first none before it: it stays after the home's.
+    await userEvent.type(tab('tessera'), '{Alt>}{Shift>}{ArrowRight}{/Shift}{/Alt}')
+    await userEvent.type(tab('halyard'), '{Alt>}{Shift>}{ArrowLeft}{/Shift}{/Alt}')
+    expect(order()).toEqual(['p2', 'p1', 'p3'])
+    // Plain arrows move nothing.
+    await userEvent.type(tab('meridian'), '{ArrowLeft}')
+    expect(order()).toEqual(['p2', 'p1', 'p3'])
   })
 
   it('keep the tab that had the window while a task is read, give a project reached from anywhere a tab, and show its work as it changes', async () => {
@@ -483,6 +502,17 @@ describe('the window’s own buttons in the strip', () => {
 })
 
 describe('working out the tabs', () => {
+  it('moves a project’s tab before another’s, or to the end, and leaves what is not a move alone', () => {
+    const kept = { open: ['a', 'b', 'c'], places: {} }
+    expect(moved('c', 'a')(kept).open).toEqual(['c', 'a', 'b'])
+    expect(moved('a', 'c')(kept).open).toEqual(['b', 'a', 'c'])
+    expect(moved('a', null)(kept).open).toEqual(['b', 'c', 'a'])
+    // Before a tab that isn't open (a project still being made) is the end.
+    expect(moved('a', 'new')(kept).open).toEqual(['b', 'c', 'a'])
+    expect(moved('a', 'b')(kept)).toBe(kept)
+    expect(moved('x', 'a')(kept)).toBe(kept)
+  })
+
   it('reads where the window is from its address', () => {
     expect(whereOf('/')).toEqual({ kind: 'home' })
     expect(whereOf('/settings')).toEqual({ kind: 'home' })

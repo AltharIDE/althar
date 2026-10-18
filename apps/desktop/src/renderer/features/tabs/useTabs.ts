@@ -9,7 +9,7 @@ import { useServices } from '../../data/services'
 import { kitInk } from '../../shared/inks'
 import { draftActions, draftsOf, inkOf } from '../newProject/draft'
 import { FIRST_SECTION, type Section } from '../settings/sections'
-import { arrived, closed, settingsClosed, settingsOn, tabsStoreOf } from './store'
+import { arrived, closed, moved, settingsClosed, settingsOn, tabsStoreOf } from './store'
 import { afterClosing, firstOpen, type Place, tabOf, whereOf, yoursIn } from './tabs'
 
 /*
@@ -45,6 +45,8 @@ export interface TabsModel {
   readonly select: (id: string | null) => void
   readonly close: (id: string) => void
   readonly open: (id: string) => void
+  /** A project's tab moves before another's, or to the end: the order is kept. */
+  readonly reorder: (id: string, beforeId: string | null) => void
   /** Starts a new project in a tab of its own, or goes to the one being made; folders dropped are added to it. */
   readonly newProject: (files?: ReadonlyArray<File>) => void
   /** The new project was made: its tab is the project's own, open on its conversation. */
@@ -141,6 +143,7 @@ export const useTabs = (): TabsModel => {
           ink: kitInk(inkOf(draft, projects ?? [])),
           running: false,
           yours: 0,
+          fixed: true,
         }
   const onNew = where.kind === 'new'
   const onSettings = where.kind === 'settings'
@@ -173,6 +176,7 @@ export const useTabs = (): TabsModel => {
       store.change(closed(id))
       if (id === current && !onNew && !onSettings) void go(afterClosing(open, id), places)
     },
+    reorder: (id, beforeId) => store.change(moved(id, beforeId)),
     open: (id) => {
       store.change((was) => ({ ...was, open: was.open.includes(id) ? was.open : [...was.open, id] }))
       void go(id, places)
