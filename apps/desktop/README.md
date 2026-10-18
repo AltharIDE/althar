@@ -143,6 +143,8 @@ In the repository's Settings → Environments, make an environment named `releas
 | `APPLE_API_KEY` | An App Store Connect API key: the `.p8` file's contents | App Store Connect → Users and Access → Integrations → App Store Connect API → Team Keys: generate a key with Developer access, and download its `.p8` (it downloads once). `pbcopy < AuthKey_<id>.p8`, and paste |
 | `APPLE_API_KEY_ID` | That key's ID | Beside the key in Team Keys |
 | `APPLE_API_ISSUER` | The team's issuer ID | Above the keys in Team Keys |
+| `ALTHAR_POSTHOG_KEY`, `ALTHAR_POSTHOG_HOST` | Usage data's and crash reports' PostHog project: its project key (public, `phc_…`) and `https://us.i.posthog.com` | PostHog → Project settings → Project API key. A release made without them stops before it packages |
+| `ALTHAR_REPORT_URL` | Where Report a problem posts: the reports Worker's address (`apps/report`) | The Worker's URL once it is deployed. A release made without it stops before it packages |
 
 Also turn on **release immutability** (Settings → General → Releases): once a release is published, its files and tag can't be changed. A run brings only a draft up to date, but it can't stop someone publishing the draft while that run is uploading to it; with immutability on, such an upload fails rather than replacing files people already download.
 
