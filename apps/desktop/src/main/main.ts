@@ -785,6 +785,8 @@ void app.whenReady().then(() => {
   edge = startEdge({
     profile: () => locations().profile,
     connect,
+    open: () => void bringForward(),
+    quit: () => app.quit(),
     preload: join(here, '../preload/preload.cjs'),
     page: join(here, '../renderer/edge.html'),
     pictures: join(here, '../../resources/tray'),
