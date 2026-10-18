@@ -1,7 +1,8 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Cause, Data, Effect, Fiber, Option, Stream } from 'effect'
+import { Cause, Data, Duration, Effect, Fiber, Option, Stream } from 'effect'
+import { TestClock } from 'effect/testing'
 
-import { contained, type Failure, failureOf, Failures, failuresLayer } from '../src/Failures'
+import { backoff, contained, type Failure, failureOf, Failures, failuresLayer, keptGoing } from '../src/Failures'
 import { agentLost } from '../src/Sessions'
 
 class StoreBusy extends Data.TaggedError('StoreBusy')<{ readonly table: string }> {}
@@ -57,6 +58,42 @@ describe('failures kept to where they belong', () => {
     Effect.gen(function* () {
       assert.strictEqual(yield* Effect.fail('broken').pipe(contained('Status', () => 'stood in')), 'stood in')
       assert.deepStrictEqual(yield* Stream.runCollect((yield* Failures).events), [])
+    }),
+  )
+
+  it.effect('keeps an item that fails apart a while, longer each time it fails again, until it goes through', () =>
+    Effect.gen(function* () {
+      const tries = backoff(Duration.seconds(10), Duration.seconds(30))
+      const busy = Effect.fail(new StoreBusy({ table: 'task_plans' }))
+      assert.strictEqual(tries.until('plan'), 0)
+      yield* tries.attempt('plan', 'Plans.start', busy)
+      assert.strictEqual(tries.until('plan'), 10_000)
+      yield* tries.attempt('plan', 'Plans.start', busy)
+      assert.strictEqual(tries.until('plan'), 20_000)
+      // At most as long as it says, however often it fails.
+      yield* tries.attempt('plan', 'Plans.start', busy)
+      yield* tries.attempt('plan', 'Plans.start', busy)
+      assert.strictEqual(tries.until('plan'), 30_000)
+      // Each item is its own.
+      assert.strictEqual(tries.until('another'), 0)
+      yield* tries.attempt('plan', 'Plans.start', Effect.void)
+      assert.strictEqual(tries.until('plan'), 0)
+    }),
+  )
+
+  it.effect('keeps a loop going after a round of it fails, a while after', () =>
+    Effect.gen(function* () {
+      let rounds = 0
+      const loop = Effect.suspend(() => {
+        rounds += 1
+        return rounds === 1 ? Effect.die(new RangeError('Out of range')) : Effect.never
+      })
+      const going = yield* Effect.forkChild(keptGoing('Plans.countdown', loop, Duration.seconds(10)))
+      yield* TestClock.adjust(Duration.seconds(5))
+      assert.strictEqual(rounds, 1)
+      yield* TestClock.adjust(Duration.seconds(5))
+      assert.strictEqual(rounds, 2)
+      yield* Fiber.interrupt(going)
     }),
   )
 

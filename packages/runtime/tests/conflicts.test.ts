@@ -1,13 +1,16 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { assert, describe, it } from '@effect/vitest'
-import { Duration, Effect, Layer, Option } from 'effect'
+import { Duration, Effect, Layer, Option, Stream } from 'effect'
 import { SqlClient } from 'effect/sql'
 
+import { Busy } from '../src/Busy'
 import { Changes } from '../src/Changes'
 import { changeOf, type Conflict, fixNoteFor, noteFor, onlyTheFix, onlyTheResolution, unresolved, whereLine } from '../src/conflicts'
+import { type Failure, failureOf, Failures } from '../src/Failures'
 import { Instance } from '../src/Instance'
 import { conflictsOf } from '../src/localMerge'
 import { Plans } from '../src/Plans'
@@ -285,6 +288,146 @@ describe('a conflict merging here', () => {
         )
       }).pipe(Effect.provide(oneAtOnce()))
     })
+  })
+})
+
+describe('rounds an earlier launch left under way', () => {
+  it.live('are settled each on its own: a worktree gone or one git can’t read is that round’s reason, and the rest are settled', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'althar-conflicts-')), 'althar.sqlite')
+    const launch = () => Queries.layer.pipe(Layer.provideMerge(runtime(file)))
+    const reported: Array<Failure> = []
+    return Effect.gen(function* () {
+      const [gone, unreadable, kept] = yield* Effect.gen(function* () {
+        const projects = yield* Projects
+        const sql = yield* SqlClient.SqlClient
+        const root = repository()
+        const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: root })
+        const made: Array<{ readonly taskId: string; readonly path: string }> = []
+        for (const title of ['Gone', 'Unreadable', 'Kept']) {
+          const task = yield* projects.createTask({
+            envelope: yield* Runtime.envelope('task.create', {}),
+            projectId: project.projectId,
+            title,
+          })
+          yield* until(
+            sql<{ state: string }>`SELECT state FROM workspaces WHERE task_id = ${task.taskId}`,
+            (rows) => rows[0]?.state === 'ready',
+          )
+          const { slug, path } = yield* worktreeOf(task.taskId)
+          const head = git(path, 'rev-parse', 'HEAD')
+          // Its lead was resolving a conflict with main, where the branch already is, when Althar stopped.
+          const conflict: Conflict = {
+            repository: slug,
+            name: slug,
+            branch: 'main',
+            ref: 'main',
+            target: head,
+            from: head,
+            files: ['change.txt'],
+          }
+          const at = new Date().toISOString()
+          yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+            id: `cres_${randomBytes(16).toString('hex')}`,
+            projectId: project.projectId,
+            taskId: task.taskId,
+            pullRequestUrl: null,
+            conflicts: JSON.stringify([conflict]),
+            attempt: 1,
+            state: 'resolving',
+            createdAt: at,
+            updatedAt: at,
+          })}`
+          made.push({ taskId: task.taskId, path })
+        }
+        return made
+      }).pipe(Effect.provide(launch()))
+      // Meanwhile one task's worktree went, and another's is no longer one git reads.
+      rmSync(gone?.path ?? '', { recursive: true, force: true })
+      rmSync(join(unreadable?.path ?? '', '.git'), { force: true })
+
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const ended = yield* until(
+          sql<{ taskId: string; state: string; failure: string | null }>`
+            SELECT task_id, state, failure FROM conflict_resolutions ORDER BY rowid`,
+          (rows) => rows.every((row) => row.state !== 'resolving'),
+        )
+        assert.deepStrictEqual(
+          ended.map((round) => [round.taskId, round.state]),
+          [
+            [gone?.taskId, 'failed'],
+            [unreadable?.taskId, 'failed'],
+            [kept?.taskId, 'resolved'],
+          ],
+        )
+        assert.strictEqual(ended[0]?.failure, 'Althar stopped while the lead was resolving it. Its worktree is gone.')
+        assert.match(
+          ended[1]?.failure ?? '',
+          /^Althar stopped while the lead was resolving it\. Althar couldn’t read its worktree: .*not a git repository.*\.$/i,
+        )
+        // A worktree that went is the person's to see; git that fails where it is, Althar's to hear of.
+        assert.deepStrictEqual(
+          reported.map((failure) => [failure.where, failure.name]),
+          [['Changes.settleRound', 'GitFailed']],
+        )
+      }).pipe(
+        Effect.provide(launch()),
+        Effect.provideService(Failures, {
+          report: (cause, where, agent) => Effect.sync(() => void reported.push(failureOf(cause, where, agent ?? null))),
+          events: Stream.empty,
+        }),
+      )
+    })
+  })
+})
+
+describe('rounds waiting for a place', () => {
+  it.live('wait each on its own: one whose ask doesn’t read is left out, and the rest still wait', () => {
+    const reported: Array<Failure> = []
+    return Effect.gen(function* () {
+      const projects = yield* Projects
+      const sql = yield* SqlClient.SqlClient
+      const project = yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: repository() })
+      const tasks: Array<string> = []
+      const at = new Date().toISOString()
+      for (const [title, waiting] of [
+        ['Unreadable', '{}'],
+        ['Waits', JSON.stringify({ attempt: 1, body: 'Resolve it.', why: {}, since: at })],
+      ] as const) {
+        const task = yield* projects.createTask({
+          envelope: yield* Runtime.envelope('task.create', {}),
+          projectId: project.projectId,
+          title,
+        })
+        yield* sql`INSERT INTO conflict_resolutions ${sql.insert({
+          id: `cres_${randomBytes(16).toString('hex')}`,
+          projectId: project.projectId,
+          taskId: task.taskId,
+          pullRequestUrl: null,
+          conflicts: '[]',
+          attempt: 1,
+          state: 'resolving',
+          waiting,
+          createdAt: at,
+          updatedAt: at,
+        })}`
+        tasks.push(task.taskId)
+      }
+      assert.deepStrictEqual(
+        (yield* (yield* Busy).order).map((agent) => agent.taskId),
+        [tasks[1]],
+      )
+      assert.deepStrictEqual(
+        reported.map((failure) => failure.where),
+        ['Changes.roundsWaiting'],
+      )
+    }).pipe(
+      Effect.provide(runtime()),
+      Effect.provideService(Failures, {
+        report: (cause, where, agent) => Effect.sync(() => void reported.push(failureOf(cause, where, agent ?? null))),
+        events: Stream.empty,
+      }),
+    )
   })
 })
 
