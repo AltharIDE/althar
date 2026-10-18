@@ -4,9 +4,8 @@ import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
   Arrived,
   CodeBlock,
-  Evidence,
-  FindingState,
   Issue,
+  IssueRef,
   LinkButton,
   Markdown,
   Plan,
@@ -14,27 +13,22 @@ import {
   Question,
   type QuestionAnswer,
   Reasoning,
-  Review,
-  type ReviewFinding,
-  Severity,
-  Step,
-  StepState,
   Terminal,
+  Thinking,
   ThreadDivider,
   Tool,
   ToolState,
   Turn,
-  Verdict,
   WorkedFor,
   You,
 } from '@althar/ui'
 
 import { CommandOutput } from './CommandOutput'
-import { piecesOf } from './evidence'
 import { HandedBack } from './HandedBack'
 import { documentVersions } from './handed'
 import { sentAttachments } from './images'
 import { useModelNames } from './modelNames'
+import { keyOf, pastedIn } from './pasted'
 import { RuleReceipt } from './RuleReceipt'
 import { issuePriority, issueStatus, productBrand, productName } from './products'
 import { answersOf, partsOf, pickedOf, questionText } from './questions'
@@ -57,8 +51,10 @@ import s from './ThreadBlocks.module.css'
  * A thread's blocks as the kit draws them, the same in a task and in the
  * coordinator's thread. A turn's work folds under how long it worked, or is
  * working, with its last message open under it; a step's result stands open
- * under the work that led to it. A task's card is the host's
- * to draw, since what it can do with one is the host's.
+ * under the work that led to it. Before the agent says anything, its turn
+ * stands under its name, thinking, where its words will take its place. A
+ * task's card is the host's to draw, since what it can do with one is the
+ * host's.
  */
 
 /** How long a command can be before its row, at the thread's width, clips it. */
@@ -108,13 +104,6 @@ export const text = {
       .split('\n')
       .map((line) => `> ${line}`)
       .join('\n')}`,
-}
-
-const SEVERITY: Readonly<Record<StepResult['findings'][number]['severity'], Severity>> = {
-  blocking: Severity.High,
-  major: Severity.High,
-  minor: Severity.Medium,
-  nit: Severity.Low,
 }
 
 /**
@@ -194,7 +183,8 @@ function ToolView({ part, threadId }: { part: Extract<Part, { kind: 'tool' }>; t
   )
 }
 
-function PartView({ part, threadId }: { part: Part; threadId: string }) {
+/** A part of a turn as the thread draws it: what it said, a thought, a tool call, its plan, a notice. */
+export function PartView({ part, threadId }: { part: Part; threadId: string }) {
   switch (part.kind) {
     case 'message':
       return <Markdown source={part.text} />
@@ -213,81 +203,14 @@ function PartView({ part, threadId }: { part: Part; threadId: string }) {
   }
 }
 
-/** What a step reported: the lead's summary, open under its work, with what it showed unless the task's closing card gathers it; or the review's verdict and findings. */
-function StepView({ id, result, of, gathered }: { id: string; result: StepResult; of: number; gathered: boolean }) {
-  const named = useModelNames()
-  // Implement is the first step, a review and settling it the second, and the pull request the last.
-  const n = result.step === 'implement' ? 1 : result.step === 'publish' ? of : 2
-  const model = result.agentId === null ? undefined : named(result.agentId)
-  if (result.step === 'publish') {
-    const change = result.change
-    return (
-      <Step
-        n={n}
-        of={of}
-        label={change === null ? text.pushed : text.step.publish}
-        state={StepState.Done}
-        defaultOpen
-        detail={
-          <>
-            <Markdown source={result.summary} />
-            {change !== null && (
-              <Issue
-                mark={productBrand(change.product)}
-                source={productName(change.product)}
-                id={`${change.short} ${change.prefix}${change.number}`}
-                title={change.title}
-                href={change.url}
-                meta={[change.repository, change.draft ? text.change.draft : text.change[change.state]].join(' · ')}
-              />
-            )}
-          </>
-        }
-      />
-    )
-  }
-  if (result.step !== 'review')
-    return (
-      <Step
-        n={n}
-        of={of}
-        label={text.step[result.step]}
-        state={StepState.Done}
-        {...(model === undefined ? {} : { model })}
-        defaultOpen
-        detail={
-          <>
-            <Markdown source={result.summary} />
-            {!gathered && <Evidence pieces={piecesOf(id, result.evidence)} unverified={result.unverified ?? []} headingLevel={4} />}
-          </>
-        }
-      />
-    )
-  // The lead settles findings on its own for now: what the review found is left to it.
-  const findings: ReadonlyArray<ReviewFinding> = result.findings.map((finding, index) => ({
-    id: `${id}-${index}`,
-    severity: SEVERITY[finding.severity],
-    at: finding.file === null ? '' : finding.line === null ? finding.file : `${finding.file}:${finding.line}`,
-    by: model === undefined ? [] : [model],
-    state: FindingState.Lead,
-    claim: finding.claim,
-  }))
-  return (
-    <>
-      <Review
-        n={n}
-        of={of}
-        reviewers={model === undefined ? [] : [{ model }]}
-        verdict={result.verdict === 'pass' ? Verdict.Pass : Verdict.Changes}
-        defaultFindings={findings}
-        {...(result.round > 0 ? { round: result.round + 1 } : {})}
-      />
-      {result.summary !== '' && (
-        <div className={s.said}>
-          <Markdown source={result.summary} />
-        </div>
-      )}
-    </>
+/** What the person said, each link that unfurled read as its key where they pasted it; its card, under the words, says the rest. */
+function Said({ text, links }: { text: string; links: ReadonlyArray<Unfurl> }) {
+  return pastedIn(text, links).map((piece, at) =>
+    typeof piece === 'string' ? (
+      <Fragment key={at}>{piece}</Fragment>
+    ) : (
+      <IssueRef key={at} mark={productBrand(piece.product)} id={keyOf(piece)} linear={piece.product === 'linear'} />
+    ),
   )
 }
 
@@ -435,7 +358,6 @@ export function ThreadBlocks({
   push,
   review,
   queued,
-  gathered = false,
   onPassOn,
   onAnswerQuestion,
   focusQuestion,
@@ -470,12 +392,7 @@ export function ThreadBlocks({
   review?: (review: ReviewDraftContent) => ReactNode
   /** What a message still waiting says: who reads it next. */
   queued?: string
-  /** What the lead's steps showed is in the task's closing card, after these, so its steps don't show it again. */
-  gathered?: boolean
 }) {
-  // A task that was reviewed has two steps, the review and settling it being the second; its pull request, once opened, is one more.
-  const done = new Set(blocks.flatMap((block) => (block.kind === 'step' ? [block.result.step] : [])))
-  const of = 1 + (done.has('review') || done.has('settle') ? 1 : 0) + (done.has('publish') ? 1 : 0)
   const named = useModelNames()
   // What each document was last changed by, so it is read again after an edit.
   const versionOf = documentVersions(
@@ -489,24 +406,18 @@ export function ThreadBlocks({
     switch (block.kind) {
       case 'you':
         return (
-          <Fragment key={block.id}>
-            <You
-              at={block.at}
-              delivery={block.delivery}
-              {...(queued === undefined ? {} : { text: { queued } })}
-              // The images sent with it, each opening full size with the others.
-              {...(block.pictures.length === 0 ? {} : { attach: sentAttachments(block.pictures) })}
-            >
-              {block.text}
-            </You>
-            {block.links.length > 0 && (
-              <div className={s.links}>
-                {block.links.map((link) => (
-                  <LinkView key={link.url} link={link} />
-                ))}
-              </div>
-            )}
-          </Fragment>
+          <You
+            key={block.id}
+            at={block.at}
+            delivery={block.delivery}
+            {...(queued === undefined ? {} : { text: { queued } })}
+            // The images sent with it, each opening full size with the others.
+            {...(block.pictures.length === 0 ? {} : { attach: sentAttachments(block.pictures) })}
+            // The links in it that unfurled, in the bubble under the words, so they read as part of what the person said.
+            {...(block.links.length === 0 ? {} : { unfurl: block.links.map((link) => <LinkView key={link.url} link={link} />) })}
+          >
+            {block.links.length === 0 || block.text === '' ? block.text : <Said text={block.text} links={block.links} />}
+          </You>
         )
       case 'arrival':
         return <ArrivalView key={block.id} arrival={block.arrival} at={block.at} {...(onPassOn === undefined ? {} : { onPassOn })} />
@@ -517,7 +428,8 @@ export function ThreadBlocks({
           </ThreadDivider>
         )
       case 'step':
-        return <StepView key={block.id} id={block.id} result={block.result} of={of} gathered={gathered} />
+        // A step's report is a task's, and its thread draws it in its rounds (TaskThread, ADR-042).
+        return null
       case 'card':
         return <Fragment key={block.id}>{card?.(block.card)}</Fragment>
       case 'question':
@@ -539,6 +451,12 @@ export function ThreadBlocks({
         return <Fragment key={block.id}>{push?.(block.request, block.at)}</Fragment>
       case 'review':
         return <Fragment key={block.id}>{review?.(block.review)}</Fragment>
+      case 'waiting':
+        return (
+          <Turn key={block.id} model={turnModel(session?.agentId ?? null)}>
+            <Thinking {...(block.took === null ? {} : { took: block.took })} slow={block.slow} />
+          </Turn>
+        )
       case 'turn': {
         // What Copy takes: what it said, open under its work.
         const said = block.said.flatMap((part) => (part.kind === 'message' && part.text.trim() !== '' ? [part.text] : [])).join('\n\n')

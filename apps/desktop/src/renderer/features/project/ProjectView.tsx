@@ -19,20 +19,24 @@ import {
 
 import { contextMeter } from '../../shared/ContextMeter'
 import { useModels } from '../../data/models'
+import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
-import { queuedOf, queueShown, withQueued } from '../../shared/items'
+import { draftKey, useDraft } from '../../shared/drafts'
+import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
 import { PartPending, pendingText } from '../../shared/Pending'
 import { type Choice, runningOn } from '../../shared/models'
 import { runningOf } from '../../shared/running'
 import { RunOf } from '../../shared/RunOf'
+import { Runs } from '../runs/Runs'
 import { ago, useNow } from '../../shared/time'
 import { blocksOf } from '../../shared/thread'
 import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
 import { takesImages, useImages } from '../../shared/useImages'
 import { BoardView } from '../board/BoardView'
+import { useClosePullRequests } from '../board/useClosePullRequests'
 import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
 import type { BoardModel } from '../board/useBoard'
@@ -60,6 +64,10 @@ import type { ProjectSettingsModel } from './useProjectSettings'
  */
 
 export const text = {
+  /** Dictation carried once the person leaves the coordinator: whose it is, and putting another thread's here. */
+  carriedTo: (project: string) => `To the coordinator · ${project}`,
+  carriedSend: 'Send to the coordinator',
+  carriedTake: 'Move it to the coordinator',
   project: 'Project',
   conversation: 'Conversation',
   coordinator: 'Coordinator',
@@ -158,6 +166,8 @@ export function ProjectView({
   const both = useBothWidth()
   const lanes = board.board === null ? null : lanesOf(board.board)
   const yours = lanes === null ? 0 : yoursOf(lanes)
+  // An abandoned task's pull request left open, closed from its row.
+  const closing = useClosePullRequests()
   // b steps through the views, when nothing is being typed; ⌘ and a number belongs to the window's tabs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -174,10 +184,27 @@ export function ProjectView({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
-  const [draft, setDraft] = useState('')
-  const voice = useDictation(setDraft, { projectId: model.project?.id ?? model.coordinator?.project.id ?? null })
+  // What the person writes to the coordinator, kept by the project while they are elsewhere, as are its images and what they dictate.
+  const about = model.project?.id ?? model.coordinator?.project.id ?? null
+  const draftOf = draftKey.coordinator(about ?? '')
+  const [draft, setDraft] = useDraft(draftOf)
+  const coordinatorThread = model.coordinator?.threadId ?? null
+  const voice = useDictation(draftOf, {
+    projectId: about,
+    to:
+      about === null
+        ? null
+        : {
+            to: text.carriedTo(model.project?.name ?? model.coordinator?.project.name ?? text.project),
+            back: { kind: 'coordinator', projectId: about },
+            // What the person says to the coordinator starts it if it isn't running, so it goes from anywhere.
+            threadId: coordinatorThread,
+            send: text.carriedSend,
+            take: text.carriedTake,
+          },
+  })
   // Images to send with what the person says, and which agents take them.
-  const images = useImages()
+  const images = useImages(draftOf)
   const models = useModels()
   const [pick, setPick] = useState<Choice | null>(null)
   // Another agent's model, picked while the coordinator runs: it takes over with what the person says next.
@@ -190,6 +217,9 @@ export function ProjectView({
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts; a run, how long it has been up.
   const now = useNow(
     (coordinator?.session?.turnRunning ?? false) ||
+      // While what the person sent is on its way, or the coordinator starts for it, how long they have waited.
+      model.pending ||
+      coordinator?.session?.state === 'starting' ||
       (lanes?.next.some((task) => task.phase === 'planned') ?? false) ||
       launches.some((launch) => launch.ended === null),
   )
@@ -203,10 +233,10 @@ export function ProjectView({
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Whatever it ran on last, while that agent can; otherwise the first that can.
   const first = model.agents[0]
-  const waiting = session === null || handover?.agentId === session.agentId ? null : handover
+  const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
   const chosen: Choice | null =
     waiting ??
-    (session === null ? null : runningOn(session)) ??
+    (session === null || !session.held ? null : runningOn(session)) ??
     pick ??
     (suggested?.available === true ? { agentId: suggested.agentId, model: suggested.model, effort: suggested.effort } : null) ??
     (first === undefined ? null : { agentId: first.id, model: null, effort: null })
@@ -250,7 +280,7 @@ export function ProjectView({
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {
-    if (session === null) return setPick(next)
+    if (session === null || !session.held) return setPick(next)
     if (next.agentId !== session.agentId) return setHandover(next)
     setHandover(null)
     void model.choose(next)
@@ -279,8 +309,8 @@ export function ProjectView({
           <LinkButton onClick={() => setHandover(null)}>{text.keep(named(session.agentId, session.model).name)}</LinkButton>
         </p>
       )}
-      {session === null && model.agents.length === 0 && <p className={s.quiet}>{text.needsAgent}</p>}
-      {session === null && suggested !== null && !suggested.available && chosen !== null && (
+      {(session === null || !session.held) && model.agents.length === 0 && <p className={s.quiet}>{text.needsAgent}</p>}
+      {(session === null || !session.held) && suggested !== null && !suggested.available && chosen !== null && (
         <p className={s.quiet}>{text.signedOut(suggested.agentName, agentName(chosen.agentId))}</p>
       )}
       <Composer
@@ -289,6 +319,7 @@ export function ProjectView({
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
+        carried={<CarriedOver here={draftOf} />}
         above={
           launches.length > 0 && (
             <Running
@@ -323,7 +354,7 @@ export function ProjectView({
               value={chosen}
               onChange={choose}
               // Another agent's model hands the conversation over, once the person says something.
-              {...(session === null ? {} : { handover: { note: text.handsOver, ask: null } })}
+              {...(session === null || !session.held ? {} : { handover: { note: text.handsOver, ask: null } })}
             />
           )
         }
@@ -359,8 +390,23 @@ export function ProjectView({
         trackers,
         open: (url) => window.open(url, '_blank'),
       })}
-      // The default branch runs with no agent, where its repository says how.
-      {...(coordinator?.runCommand == null ? {} : { run: { command: coordinator.runCommand, onRun: () => void model.runProject() } })}
+      // What the project runs, with no agent, on its default branch (ADR-044).
+      {...(coordinator === null
+        ? {}
+        : {
+            run: (
+              <Runs
+                projectId={projectId}
+                project={kept?.name ?? name}
+                taskId={null}
+                runnables={coordinator.runnables}
+                launches={coordinator.launches}
+                now={now}
+                onRun={(id) => void model.runProject(null, id)}
+                onStop={(id) => void model.stopLaunch(id)}
+              />
+            ),
+          })}
       {...(settings === undefined
         ? {}
         : {
@@ -417,7 +463,16 @@ export function ProjectView({
                   <ThreadShellProvider value={shown.shell}>
                     <ThreadBlocks
                       blocks={blocksOf(
-                        { items: coordinator.items, turnRunning: busy, worktree: null, queue, outputs: model.outputs },
+                        {
+                          items: coordinator.items,
+                          turnRunning: busy,
+                          turnStarted: session?.turnStartedAt ?? null,
+                          reading: readingNow(session, model.pending),
+                          turnEnded: session?.turnEndedAt ?? null,
+                          worktree: null,
+                          queue,
+                          outputs: model.outputs,
+                        },
                         model.streaming,
                         (iso) => ago(iso),
                         now,
@@ -431,7 +486,7 @@ export function ProjectView({
                           run={run}
                           now={now}
                           onStop={(id) => void model.stopLaunch(id)}
-                          onRunAgain={(taskId) => void model.runProject(taskId)}
+                          onRunAgain={(taskId, runnableId) => void model.runProject(taskId, runnableId)}
                         />
                       )}
                       queued={text.queued}
@@ -469,6 +524,8 @@ export function ProjectView({
                   agents={model.agents}
                   now={now}
                   onOpen={onTask}
+                  closing={closing}
+                  actions={board}
                   {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                 />
               </>

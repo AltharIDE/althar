@@ -5,6 +5,7 @@ import {
   boardCardText,
   type BoardCardProps,
   BoardColumn,
+  BoardDivider,
   BoardLane,
   BoardList,
   BranchChip,
@@ -12,9 +13,11 @@ import {
   CallCard,
   CommandChip,
   Fact,
+  FactLine,
   FileChips,
   Findings,
   NextRow,
+  NextStep,
   Outcome,
   PullChip,
   SettledRow,
@@ -28,21 +31,24 @@ import {
 import type { ReactNode } from 'react'
 
 import { pictureUrl } from '../../../main/pictureAddress'
-import { busyWords, waitsWords } from '../../shared/agents'
+import { busyWords, queuedWords, waitsWords } from '../../shared/agents'
 import { callKindOf, kindWords, whereOf } from '../../shared/calls'
 import { moreOf as questionMore } from '../../shared/questions'
 import { productBrand, productName } from '../../shared/products'
+import { doingWords, doneHere, factsOf, labelWords, nextWords, standingOf, standingText } from '../../shared/standing'
 import { afterSteps, stepText } from '../../shared/steps'
 import { ago, clock, running } from '../../shared/time'
 import { text as stuckText } from '../task/StuckCall'
 import s from './Board.module.css'
 import { type Lanes, type Waiting } from './lanes'
+import type { WorkActions } from './useWorkActions'
 
 /*
  * The project's work, as the kit's board lays it out: up next, running,
- * needs you, settled. A card has nothing to press: the whole of it opens
+ * needs you, settled. A card has little to press: the whole of it opens
  * its task, where a call is answered, work is accepted and the lead is told
- * what's next. Its top line says where the task stands in a word, then its
+ * what's next. The exception is a ready change's Push and Accept and merge,
+ * which do it right there. Its top line says where the task stands in a word, then its
  * kind's word (Change, Review; nothing for a plain task), then how long;
  * under its title, at most one card in the card (its branch, its pull
  * request, what it handed back) and one fact.
@@ -52,11 +58,12 @@ export const text = {
   label: 'The project’s work',
   startsIn: (seconds: number) => (seconds <= 0 ? 'Starting' : `Starts in ${seconds}s`),
   held: 'Held. Starts when you say',
+  /** The quiet divider over the tasks started whose first step waits for a free agent, and, under them, the plans. */
+  startsWhenFree: 'Starts when an agent is free',
+  planned: 'Planned',
   step: { implement: 'Implement', review: 'Review' } satisfies Record<PlanStep['key'], string>,
   /** A round of work after its plan, in place of Implement, as the person asked its lead for more. */
   followUp: 'Follow-up',
-  /** Ready with commits after its last pull request, in none yet: a new one is the person's to open. */
-  unshipped: 'Ready for a new pull request',
   conversation: 'Conversation',
   status: {
     [TaskStatus.Running]: 'Running',
@@ -67,6 +74,7 @@ export const text = {
     [TaskStatus.Stopped]: 'Stopped',
   } satisfies Record<TaskStatus, string>,
   stopped: 'No agent is working on it',
+  /** At a card's foot while everything its task asks is allowed, by its own switch or its project's. */
   /** A plain task at work: no steps worth showing, and nothing of its own yet. */
   working: 'Working',
   /** A plain task that finished, waiting to be seen. */
@@ -76,9 +84,9 @@ export const text = {
   reviewDrafted: 'Review drafted',
   /** A conflict its lead couldn't resolve, or the checks on the merge it couldn't fix: the person's now. */
   mergeConflict: 'Merge conflict',
+  /** A running change's checks; a ready one's say what stands (shared/standing). */
   checks: {
     passed: (n: number) => (n === 1 ? '1 check passed' : `All ${n} checks passed`),
-    none: 'No checks ran',
     soFar: (passed: number, total: number) => `${passed} of ${total} checks passed`,
     failed: (n: number) => (n === 1 ? '1 check failed' : `${n} checks failed`),
   },
@@ -96,8 +104,18 @@ export const text = {
   answer: 'Answer',
   merged: (name: string) => `${name} merged`,
   closed: (name: string) => `${name} closed`,
+  /** Settled with its pull request open on its host, as the host last said: an abandoned task's, left open. */
+  stillOpen: (name: string) => `${name} still open`,
+  closeChange: (name: string) => `Close ${name}`,
   abandoned: 'Abandoned',
   showOlder: 'Show older',
+}
+
+/** Closing settled tasks' pull requests from their rows: the one closing now, the last that failed and why, and how to close one. */
+export interface ClosingPullRequests {
+  readonly busy: string | null
+  readonly failed: { readonly taskId: string; readonly message: string } | null
+  readonly close: (taskId: string, url: string) => void
 }
 
 /** How many of what a task handed back show on its card: a row of pictures, or a few files. */
@@ -164,9 +182,9 @@ const theirs = (reviewing: ReviewBrief) => (
   />
 )
 
-/** How its checks stand, in one fact: all passed, some failed, or how many so far. None where it has none to say. */
-const checksFact = (checks: ChangeSummary['checks'], ready: boolean): ReactNode => {
-  if (checks === null || checks.total === 0) return ready ? <Fact>{text.checks.none}</Fact> : null
+/** How a running change's checks stand, in one fact: all passed, some failed, or how many so far. None where it has none to say. */
+const checksFact = (checks: ChangeSummary['checks']): ReactNode => {
+  if (checks === null || checks.total === 0) return null
   if (checks.failed > 0)
     return (
       <Fact icon="close" tone="danger">
@@ -253,7 +271,7 @@ export const runningCardOf = (work: BoardTask, now: string, name: (id: string | 
         ...(beforeWork
           ? {}
           : change !== null && change.state === 'open'
-            ? { object: pullChip(change), foot: checksFact(change.checks, false) }
+            ? { object: pullChip(change), foot: checksFact(change.checks) }
             : work.branch !== null && !empty(work.changed)
               ? {
                   object: (
@@ -275,7 +293,12 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
   // What it asks, or what it wants to do; for a step that needs the person, what stopped it.
   const why =
     call.stuck === null
-      ? call.title
+      ? call.kind === 'permission' && call.command !== null
+        ? // What it asks is often the command itself, which the chip below shows, once.
+          call.command === call.title || call.title.includes('\n') || call.title.length > 120
+          ? ''
+          : call.title
+        : call.title
       : call.stuck.step === 'publish' && call.stuck.why !== 'not_connected'
         ? stuckText.publishing(call.stuck)
         : stuckText.what(call.stuck, name(call.stuck.agentId) || 'The agent')
@@ -284,7 +307,9 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
     word: callKindOf(call),
     at: ago(call.createdAt),
     why,
-    ...(call.kind === 'permission' && call.command !== null ? { object: <CommandChip>{call.command}</CommandChip> } : {}),
+    ...(call.kind === 'permission' && call.command !== null
+      ? { object: <CommandChip title={call.command}>{call.label ?? call.command}</CommandChip> }
+      : {}),
   }
 }
 
@@ -292,7 +317,7 @@ export const waitingCardOf = ({ task, call }: Waiting, name: (id: string | null)
  * A ready task's card: a change to accept, with its pull request and checks; a review drafted; or a plain task that finished, with
  * what it handed back, or else its branch, where its lead wrote in the repository: on this Mac, as no pull request is coming.
  */
-export const readyCardOf = (work: BoardTask): Card => {
+export const readyCardOf = (work: BoardTask, actions?: CardActions): Card => {
   const base = { status: TaskStatus.Yours, kind: kindOf(work), title: work.title }
   switch (work.kind) {
     case 'plain': {
@@ -347,7 +372,8 @@ export const readyCardOf = (work: BoardTask): Card => {
       return {
         ...base,
         // Handed back (a conflict its lead couldn't resolve) says so first; else commits in no pull request yet.
-        word: work.handedBack != null ? text.mergeConflict : change === null && work.unshipped != null ? text.unshipped : kindWords.ready,
+        word:
+          work.handedBack != null ? text.mergeConflict : change === null && work.unshipped != null ? kindWords.unshipped : kindWords.ready,
         ...(object === null ? {} : { object }),
         ...(work.handedBack != null
           ? {
@@ -357,14 +383,72 @@ export const readyCardOf = (work: BoardTask): Card => {
                 </Fact>
               ),
             }
-          : change === null
+          : // One merged or closed has nothing in its way, and nothing to do to it.
+            change === null || change.state !== 'open'
             ? {}
-            : { foot: checksFact(change.checks, true) }),
+            : { foot: readyFoot(work, change, actions) }),
       }
     }
     default:
       return unreachable(work.kind)
   }
+}
+
+/** What a ready card does without opening its task: push, and merge, and how they stand. */
+export type CardActions = Pick<WorkActions, 'push' | 'merge' | 'pushing' | 'merging' | 'failed'>
+
+/**
+ * A ready pull request's foot: what stands between it and merging, as one
+ * line, the most pressing first in its colour (only it with its glyph), or
+ * how its checks went where nothing does; then the one next thing to do. Push
+ * and Accept and merge are buttons that do it right there, as the task
+ * does, and say so while they run; one that failed says why in the line and
+ * offers to try again. Asking the lead to resolve or fix is words, a link:
+ * the card opens its task, where it is told.
+ */
+const readyFoot = (work: BoardTask, change: ChangeSummary, actions: CardActions | undefined): ReactNode => {
+  const standing = standingOf(change)
+  const next = standing.next
+  const here = actions !== undefined && next !== null && doneHere(next) ? next : null
+  const failure = actions?.failed[work.taskId]
+  const failed = failure !== undefined && failure.action === here?.kind ? failure.message : null
+  const facts = factsOf(change, standing).map((one, i) => (
+    <Fact key={one.words} {...(i === 0 && one.icon !== undefined ? { icon: one.icon } : {})} tone={one.tone}>
+      {one.words}
+    </Fact>
+  ))
+  return (
+    <>
+      <FactLine>
+        {failed !== null && here !== null && (
+          <Fact key="failed" icon="close" tone="danger" role="alert">
+            {standingText.nextFailed[here.kind](failed)}
+          </Fact>
+        )}
+        {facts}
+      </FactLine>
+      {next !== null &&
+        (here === null || actions === undefined ? (
+          <NextStep>{nextWords(next)}</NextStep>
+        ) : (
+          <NextStep
+            signal
+            busy={(here.kind === 'push' ? actions.pushing : actions.merging).has(work.taskId)}
+            doing={doingWords(here)}
+            label={labelWords(here, `${change.prefix}${change.number}`, failed !== null)}
+            onPress={() =>
+              void (here.kind === 'push' ? actions.push : actions.merge)(
+                work.taskId,
+                here.kind === 'push' ? (change.localHead ?? '') : (change.head ?? ''),
+                change.url,
+              )
+            }
+          >
+            {failed === null ? nextWords(here) : standingText.nextFailed.again}
+          </NextStep>
+        ))}
+    </>
+  )
 }
 
 export function BoardView({
@@ -373,6 +457,8 @@ export function BoardView({
   now,
   onOpen,
   onShowOlder,
+  closing,
+  actions,
 }: {
   lanes: Lanes
   agents: ReadonlyArray<AgentStatus>
@@ -382,6 +468,10 @@ export function BoardView({
   onOpen: (threadId: string) => void
   /** Loads the next page of settled work; absent where every settled task is already shown. */
   onShowOlder?: () => void
+  /** Closing a settled task's pull request still open on its host, from its row; absent where it can't be. */
+  closing?: ClosingPullRequests
+  /** What a ready card does without opening its task, pushing and merging; without it, its next step is words and the card opens the task. */
+  actions?: CardActions
 }) {
   const name = (id: string | null) => agents.find((agent) => agent.id === id)?.name ?? id ?? ''
   // Each needs-you card in when its call came: tasks waiting on a call and calls no task waits on together.
@@ -390,30 +480,40 @@ export function BoardView({
     ...lanes.calls.map((call) => ({ at: call.createdAt, waiting: null, call })),
   ].toSorted((a, b) => a.at.localeCompare(b.at))
 
+  const nextRow = (work: BoardTask, index: number) => {
+    const startsAt = work.plan?.startsAt ?? null
+    const kind = kindWordOf(work)
+    const free = index < lanes.free && work.queued !== null
+    return (
+      <NextRow
+        key={work.taskId}
+        place={index + 1}
+        task={work.slug}
+        {...(kind === undefined ? {} : { kind })}
+        title={work.title}
+        wait={free || startsAt !== null ? Wait.Workers : Wait.You}
+        reason={
+          free && work.queued !== null
+            ? queuedWords(work.queued)
+            : startsAt === null
+              ? text.held
+              : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
+        }
+        onOpen={() => onOpen(work.threadId)}
+        text={{ task: unnamed }}
+      />
+    )
+  }
+
   return (
     <Board label={text.label}>
       <BoardColumn lane={BoardLane.Next} count={lanes.next.length}>
-        <BoardList>
-          {lanes.next.map((work, index) => {
-            const startsAt = work.plan?.startsAt ?? null
-            const kind = kindWordOf(work)
-            return (
-              <NextRow
-                key={work.taskId}
-                place={index + 1}
-                task={work.slug}
-                {...(kind === undefined ? {} : { kind })}
-                title={work.title}
-                wait={startsAt === null ? Wait.You : Wait.Workers}
-                reason={
-                  startsAt === null ? text.held : text.startsIn(Math.ceil((new Date(startsAt).getTime() - new Date(now).getTime()) / 1000))
-                }
-                onOpen={() => onOpen(work.threadId)}
-                text={{ task: unnamed }}
-              />
-            )
-          })}
-        </BoardList>
+        {lanes.free > 0 && <BoardDivider>{text.startsWhenFree}</BoardDivider>}
+        {lanes.free > 0 && <BoardList>{lanes.next.slice(0, lanes.free).map((work, index) => nextRow(work, index))}</BoardList>}
+        {lanes.free > 0 && lanes.free < lanes.next.length && <BoardDivider>{text.planned}</BoardDivider>}
+        {lanes.free < lanes.next.length && (
+          <BoardList>{lanes.next.slice(lanes.free).map((work, index) => nextRow(work, lanes.free + index))}</BoardList>
+        )}
       </BoardColumn>
 
       <BoardColumn lane={BoardLane.Running} count={lanes.running.length}>
@@ -435,11 +535,15 @@ export function BoardView({
           ),
         )}
         {lanes.ready.map((work) => (
-          <BoardCard key={work.taskId} {...readyCardOf(work)} onOpen={() => onOpen(work.threadId)} />
+          <BoardCard key={work.taskId} {...readyCardOf(work, actions)} onOpen={() => onOpen(work.threadId)} />
         ))}
       </BoardColumn>
 
-      <BoardColumn lane={BoardLane.Settled} count={lanes.settledTotal}>
+      <BoardColumn lane={BoardLane.Settled} count={lanes.settledTotal + lanes.finished.length}>
+        {/* A plain task that finished asks nothing of the person, so it waits here, above what is done, until they open it. */}
+        {lanes.finished.map((work) => (
+          <BoardCard key={work.taskId} {...readyCardOf(work)} onOpen={() => onOpen(work.threadId)} />
+        ))}
         <BoardList>
           {lanes.settled.map((work) => {
             const change = work.change
@@ -453,11 +557,29 @@ export function BoardView({
                 task={work.slug}
                 {...(kind === undefined ? {} : { kind })}
                 title={work.title}
-                {...(named === null
+                // Its pull request as its host last said: open is open, whatever became of the task (an abandoned one's is left open).
+                {...(named === null || change === null
                   ? work.branch === null
                     ? {}
                     : { meta: work.branch }
-                  : { meta: change?.state === 'merged' ? text.merged(named) : text.closed(named) })}
+                  : {
+                      meta:
+                        change.state === 'merged'
+                          ? text.merged(named)
+                          : change.state === 'closed'
+                            ? text.closed(named)
+                            : text.stillOpen(named),
+                    })}
+                {...(named !== null && change?.state === 'open' && closing !== undefined
+                  ? {
+                      action: {
+                        label: text.closeChange(named),
+                        onAction: () => closing.close(work.taskId, change.url),
+                        busy: closing.busy === work.taskId,
+                      },
+                      ...(closing.failed?.taskId === work.taskId ? { error: closing.failed.message } : {}),
+                    }
+                  : {})}
                 at={work.settledAt === null ? '' : ago(work.settledAt, new Date(now))}
                 onOpen={() => onOpen(work.threadId)}
                 text={{ task: unnamed }}

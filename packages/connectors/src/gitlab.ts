@@ -8,6 +8,7 @@ import { tail } from './github'
 import type {
   Account,
   Activity,
+  ChangeList,
   ChangeRequest,
   Check,
   CheckState,
@@ -15,6 +16,7 @@ import type {
   Comment,
   Container,
   Issue,
+  ListedChange,
   MergeMethod,
   Person,
   Repository,
@@ -22,7 +24,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
-import { leftAsItIs, noReviews } from './model'
+import { lacking, leftAsItIs, noReviews, stillOpen } from './model'
 import { answered, failedOf, probe, type Reached, reachLine, readAs, refusalOf, seenOf, serverLine, stopped, UNREADABLE } from './probe'
 
 /*
@@ -214,6 +216,27 @@ const changeOf = (request: MergeAnswer): ChangeRequest => ({
       : { conflicts: request.has_conflicts === true }),
 })
 
+/** GitLab's state for each a list can ask for. */
+const LISTED_STATES = { open: 'opened', closed: 'closed', merged: 'merged', all: 'all' } as const
+
+/**
+ * A merge request as a list gives it. Its merge status says what still
+ * holds it up, and so whether a reviewer asked for changes, an approval it
+ * needs is missing, or its pipeline is still running; not an approval given,
+ * nor a pipeline that failed, which a list doesn't say.
+ */
+const listedOf = (request: MergeAnswer): ListedChange => {
+  const status = request.detailed_merge_status
+  return {
+    ...changeOf(request),
+    // Never read from a list: what it says is read with the merge request.
+    body: '',
+    forkOwner: null,
+    reviewDecision: status === 'requested_changes' ? 'changes_requested' : status === 'not_approved' ? 'review_required' : null,
+    checks: status === 'ci_still_running' ? 'running' : null,
+  }
+}
+
 /**
  * How the project merges, its own choice first: squashed where its squash
  * setting requires it or squashes by default, its own method otherwise, and
@@ -321,6 +344,16 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
     )
 
   const read = (repository: Repository, number: number) => http.json(MergeAnswer, 'GET', `${project(repository)}/merge_requests/${number}`)
+  /** 401 is GitLab's word for an account that may not do something here, while its token still works: forbidden, where it does. */
+  const mayNot = <A>(effect: Effect.Effect<A, ConnectorFailed>) =>
+    Effect.catchIf(
+      effect,
+      (error) => error.status === 401,
+      (error) =>
+        Effect.flatMap(account, () =>
+          Effect.fail(new ConnectorFailed({ product, reason: 'forbidden', status: 401, message: error.message })),
+        ),
+    )
 
   /** Each merge request's size at the head it was counted at: counted again only when the head moves. */
   const sizes = new Map<
@@ -459,6 +492,22 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
           ? changeOf(request)
           : { ...changeOf(request), additions: size.additions, deletions: size.deletions, changedFiles: size.files }
       }),
+    listChanges: (repository, query) =>
+      Effect.gen(function* () {
+        const limit = Math.min(Math.max(query.limit, 1), 99)
+        const params = new URLSearchParams({ state: LISTED_STATES[query.state], order_by: 'updated_at', sort: 'desc' })
+        // One more than asked: whether there are more, without counting them all.
+        params.set('per_page', String(limit + 1))
+        if (query.author !== undefined && query.author.trim() !== '') params.set('author_username', query.author.trim().replace(/^@/, ''))
+        if (query.text !== undefined && query.text.trim() !== '') {
+          params.set('search', query.text.trim())
+          params.set('in', 'title')
+        }
+        if (query.reviewRequested === true) params.set('reviewer_username', (yield* account).login)
+        if (query.draft !== undefined) params.set('wip', query.draft ? 'yes' : 'no')
+        const requests = yield* http.cached(Schema.Array(MergeAnswer), `${project(repository)}/merge_requests?${params.toString()}`)
+        return { changes: requests.slice(0, limit).map(listedOf), more: requests.length > limit } satisfies ChangeList
+      }).pipe(Effect.mapError(lacking('read_api'))),
     markReady: (repository, change) =>
       Effect.gen(function* () {
         // Its title as it is now, not as Althar last read it: a rename on GitLab since stays.
@@ -497,6 +546,27 @@ export const makeGitLab = (options: AdapterOptions): CodeHost & Tracker => {
               }),
           ),
         ),
+    closeChange: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* read(repository, change.number)
+        if (now.state !== 'opened') return changeOf(now)
+        return changeOf(
+          yield* mayNot(http.json(MergeAnswer, 'PUT', `${project(repository)}/merge_requests/${change.number}`, { state_event: 'close' })),
+        )
+      }),
+    deleteBranch: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* read(repository, change.number)
+        if (now.state === 'opened') return yield* stillOpen(product, { noun: 'merge request', short: 'MR', prefix: '!' }, change.number)
+        // Its branch is in the project it came from: a fork's, for one from a fork.
+        const on = now.source_project_id === undefined ? project(repository) : `${api}/projects/${now.source_project_id}`
+        yield* mayNot(http.json(Schema.Unknown, 'DELETE', `${on}/repository/branches/${encodeURIComponent(now.source_branch)}`)).pipe(
+          Effect.catchIf(
+            (error) => error.status === 404,
+            () => Effect.void,
+          ),
+        )
+      }),
     checks: (repository, sha) =>
       Effect.gen(function* () {
         const pipelines = yield* http.cached(Schema.Array(Pipeline), `${project(repository)}/pipelines?sha=${sha}&per_page=20`)

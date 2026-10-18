@@ -98,6 +98,49 @@ export type Check = typeof Check.Type
 export const Verdict = Schema.Literals(['approved', 'changes_requested', 'commented'])
 export type Verdict = typeof Verdict.Type
 
+/** Which changes to list: open ones unless `state` says; `all` is every state. */
+export const ListedState = Schema.Literals(['open', 'closed', 'merged', 'all'])
+export type ListedState = typeof ListedState.Type
+
+/** What a list of changes is narrowed to. Each filter left out narrows nothing. */
+export interface ChangeQuery {
+  readonly state: ListedState
+  /** Its author's login. */
+  readonly author?: string
+  /** Words in its title. */
+  readonly text?: string
+  /** Only those whose review is asked of the connected account (directly, or of a team it is in, where the host has teams). */
+  readonly reviewRequested?: boolean
+  /** Only drafts, or only those ready for review. */
+  readonly draft?: boolean
+  /** How many at most, newest change first. */
+  readonly limit: number
+}
+
+/** Where a change's reviews leave it, as the host sums them up: approved, changes asked for, or still waiting on a review it needs. */
+export const ReviewDecision = Schema.Literals(['approved', 'changes_requested', 'review_required'])
+export type ReviewDecision = typeof ReviewDecision.Type
+
+/**
+ * A change as a list gives it: what any change says, and, where the host
+ * says so in the same answer, where its reviews leave it and how its head's
+ * checks stand overall. Null where the host doesn't say, or nothing applies.
+ */
+export const ListedChange = Schema.Struct({
+  ...ChangeRequest.fields,
+  /** The owner of the fork its branch is on, where it isn't the repository's own; null for the repository's own branch, or where the host doesn't say. */
+  forkOwner: Schema.NullOr(Schema.String),
+  reviewDecision: Schema.NullOr(ReviewDecision),
+  checks: Schema.NullOr(Schema.Literals(['passed', 'failed', 'running'])),
+})
+export type ListedChange = typeof ListedChange.Type
+
+/** A list of changes, newest change first, and whether the host has more than it holds. */
+export interface ChangeList {
+  readonly changes: ReadonlyArray<ListedChange>
+  readonly more: boolean
+}
+
 /** A review of a change, with its verdict. */
 export const Review = Schema.Struct({
   id: Schema.String,
@@ -234,6 +277,13 @@ export interface CodeHost {
     },
   ): Effect.Effect<ChangeRequest, ConnectorFailed>
   change(repository: Repository, number: number): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * The repository's changes, whoever opened them, newest change first,
+   * narrowed as the query says, to its limit; and whether there are more.
+   * Read-only. Refused as `forbidden`, with the `scope` it needs, where the
+   * connection lacks one; as `rejected` (`noListing`) where the host can't.
+   */
+  listChanges(repository: Repository, query: ChangeQuery): Effect.Effect<ChangeList, ConnectorFailed>
   markReady(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
   /**
    * Merges a change, because the person said to: never on an agent's word.
@@ -241,6 +291,19 @@ export interface CodeHost {
    * checks or reviews it still needs, with the host's own words.
    */
   merge(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * Closes a change without merging it, because the person said to: never
+   * on an agent's word. Read back as the host has it after; one already
+   * closed or merged is left as it is. Refused, where the account may not,
+   * with the host's own words.
+   */
+  closeChange(repository: Repository, change: ChangeRequest): Effect.Effect<ChangeRequest, ConnectorFailed>
+  /**
+   * Deletes a closed change's branch on the host, where the branch is (a
+   * fork's, for one from a fork), because the person said to. Refused for a
+   * change still open; a branch already gone is nothing to do.
+   */
+  deleteBranch(repository: Repository, change: ChangeRequest): Effect.Effect<void, ConnectorFailed>
   checks(repository: Repository, sha: string): Effect.Effect<ReadonlyArray<Check>, ConnectorFailed>
   /** The end of a check's log, or with `whole` all of it, when the host keeps one Althar can read. */
   checkLog(repository: Repository, check: Check, whole?: boolean): Effect.Effect<string | null, ConnectorFailed>
@@ -277,6 +340,37 @@ export interface CodeHost {
 /** A host's refusal of a review, where it has no `capabilities.reviews`: said in its words for a change. */
 export const noReviews = (product: Product, words: ChangeWords): ConnectorFailed =>
   new ConnectorFailed({ product, reason: 'rejected', message: `Althar can’t review a ${words.noun} on this host yet.` })
+
+/** A host's refusal to delete the branch of a change still open: deleting it would close the change, or orphan it. */
+export const stillOpen = (product: Product, words: ChangeWords, number: number): ConnectorFailed =>
+  new ConnectorFailed({
+    product,
+    reason: 'rejected',
+    message: `${words.short} ${words.prefix}${number} is still open, so its branch stays.`,
+  })
+
+/** A branch as a URL's path takes it: each part encoded, its slashes kept. */
+export const branchPath = (branch: string): string => branch.split('/').map(encodeURIComponent).join('/')
+
+/** A host's refusal to list changes, or to narrow them as asked: said in its words for a change. */
+export const noListing = (product: Product, words: ChangeWords, why?: string): ConnectorFailed =>
+  new ConnectorFailed({ product, reason: 'rejected', message: why ?? `Althar can’t list ${words.noun}s on this host yet.` })
+
+/**
+ * A listing refused for a permission: `forbidden`, with the scope (or a
+ * fine-grained token's permission) it needs and the host's own words. Any
+ * other failure is left as it is.
+ */
+export const lacking = (scope: string) => (error: ConnectorFailed) =>
+  error.reason === 'forbidden'
+    ? new ConnectorFailed({
+        product: error.product,
+        reason: error.reason,
+        message: error.message,
+        ...(error.status === undefined ? {} : { status: error.status }),
+        scope,
+      })
+    : error
 
 // ---- Trackers -------------------------------------------------------------
 

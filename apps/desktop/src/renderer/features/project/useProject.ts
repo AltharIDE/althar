@@ -64,8 +64,8 @@ export interface ProjectModel {
   readonly interrupt: () => Promise<void>
   /** Has the coordinator compact its context, after what it was told before. */
   readonly compact: () => Promise<void>
-  /** Runs the project with no agent: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
-  readonly runProject: (taskId?: string | null) => Promise<void>
+  /** Runs one of the project's runnables with no agent, its default without one: a task's worktree, or with none its default branch. Its card goes in the coordinator's thread. */
+  readonly runProject: (taskId?: string | null, runnableId?: string | null) => Promise<void>
   readonly stopLaunch: (id: string) => Promise<void>
   readonly clearLaunch: (id: string) => Promise<void>
   /** Moves the running coordinator to another agent. */
@@ -136,19 +136,38 @@ export const useProject = (projectId: string): ProjectModel => {
     [setCoordinator],
   )
 
-  /** The thread's head again: the agent working, the one it would start on. Its items stay as they are. */
+  /** What the window holds of the thread now, for a read that lands later. */
+  const held = useRef<ReadonlyArray<ThreadItem>>([])
+  held.current = coordinator?.items ?? []
+
+  const readItems = useCallback(
+    (ids: Iterable<string>) =>
+      threadId === null
+        ? Promise.resolve()
+        : Promise.all([...ids].map((itemId) => newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail))),
+    [client, threadId, newest, arrived, fail],
+  )
+
+  /**
+   * The thread's head again: the agent working, the one it would start on.
+   * Its items stay as they are, but for those it may have moved on, read after
+   * it and landing before it: what still waits its turn, and what else is
+   * asked. The runtime has a message delivered before it says the turn on it
+   * runs, so the thread never shows the turn running while what it took still
+   * waits in the queue.
+   */
   const readHead = useCallback(
-    () =>
+    (also: Iterable<string> = []) =>
       newest(
         'head',
-        client.getCoordinator(projectId, { limit: 0 }),
+        client.getCoordinator(projectId, { limit: 0 }).finally(() => readItems(new Set([...also, ...waiting(held.current)]))),
         (head) =>
           cache.setQueryData<CoordinatorSnapshot>(keys.coordinator(projectId), (current) =>
             current === undefined ? head : { ...head, items: current.items, earlier: current.earlier },
           ),
         fail,
       ),
-    [client, cache, projectId, newest, fail],
+    [client, cache, projectId, newest, readItems, fail],
   )
 
   /** Reads what the gathered changes touched. */
@@ -157,11 +176,10 @@ export const useProject = (projectId: string): ProjectModel => {
     const { head, cards, items } = changed.current
     changed.current = { head: false, cards: false, items: new Set() }
     if (threadId === null) return
-    if (head) void readHead()
     const read = new Set(items)
     if (cards) for (const item of coordinator?.items ?? []) if (item.kind === 'task') read.add(item.id)
-    for (const itemId of read) void newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail)
-  }, [client, threadId, coordinator, readHead, newest, arrived, fail])
+    void (head ? readHead(read) : readItems(read))
+  }, [threadId, coordinator, readHead, readItems])
 
   useWatch((event) => {
     // A command's output as far as it has come is useOutputs'; the coordinator leaves nothing running.
@@ -228,8 +246,9 @@ export const useProject = (projectId: string): ProjectModel => {
       } catch (failure) {
         fail(failure)
       } finally {
-        setPending(false)
+        // Done once the head is read again: what it started, such as the agent the person's message starts, shows as it goes on.
         await readHead()
+        setPending(false)
       }
     },
     [readHead, fail],
@@ -285,16 +304,12 @@ export const useProject = (projectId: string): ProjectModel => {
         body,
         'after_current',
         async () => {
-          /*
-           * Not running, it starts first, as it ran last or as the person picked, and its brief waits
-           * for what they say. Started in the same call as the send, an agent that didn't start would
-           * fail a message the queue has already, which would then go back in the composer to be sent
-           * twice; started first, a send that fails was never queued. One already starting, as for a
-           * message just before, reads this one next.
-           */
-          if (threadId !== null && coordinator?.session === null && choice !== null)
+          // The picked agent must be the one the coordinator starts on. A failed start must leave the note in the composer, not queue it and restore it for a duplicate send.
+          if (threadId !== null && coordinator !== null && (coordinator.session === null || !coordinator.session.held) && choice !== null)
             await client.startSession(startOf(threadId, choice)).catch((failure: unknown) => {
-              if (!(failure instanceof ApiError && failure.reason === 'SessionRunning')) throw failure
+              if (failure instanceof ApiError && failure.reason === 'SessionRunning') return
+              fail(failure)
+              throw failure
             })
           await send(body, 'after_current', images)
         },
@@ -317,13 +332,15 @@ export const useProject = (projectId: string): ProjectModel => {
     },
     interrupt: () => act(async () => (threadId === null ? undefined : client.interrupt(threadId))),
     compact: () => act(async () => (threadId === null ? undefined : client.compact(threadId))),
-    runProject: (taskId = null) => act(() => client.runProject(projectId, taskId, threadId)),
+    runProject: (taskId = null, runnableId = null) =>
+      act(() => client.runProject(projectId, taskId, threadId, ...(runnableId === null ? [] : [runnableId]))),
     stopLaunch: (id) => act(() => client.stopLaunch(id)),
     clearLaunch: (id) => act(() => client.clearLaunch(id)),
     choose: (choice) =>
       act(async () => {
         const session = coordinator?.session
-        if (threadId !== null && session != null) await moveTo(client, threadId, runningOn(session), choice)
+        // A session the runtime no longer holds can't be moved; the pick is applied when the person next says something.
+        if (threadId !== null && session != null && session.held) await moveTo(client, threadId, runningOn(session), choice)
       }),
     handOver: (choice, body, images) =>
       shown(

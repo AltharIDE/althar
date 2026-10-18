@@ -30,6 +30,8 @@ export interface Dictation {
   kbd?: string
   /** Writing down what was said, or getting the speech model ready: the microphone turns. */
   busy?: boolean
+  /** What was said was written down while you were away from this composer: a quiet line over the field says so. */
+  arrived?: boolean
   /** The speech model coming down, from 0 to 1: a ring fills round the microphone. */
   progress?: number
   /** The microphone's tray (`tray`) is open. */
@@ -85,7 +87,6 @@ export interface ComposerText {
   stop: string
   /** The host's shortcut for stopping, shown in the button's tooltip. */
   stopKey: string
-  queueNote: string
   /** Sends while the agent works, instead of queueing: it stops at a safe point and carries on with both. */
   sendNow: string
   /** What Send now does, in its tooltip. */
@@ -108,6 +109,8 @@ export interface ComposerText {
   inputsNote: string
   /** The field's placeholder while dictating. */
   listening: string
+  /** Over the field, when what was said was written down while you were away. */
+  dictatedAway: string
   queued: (n: number) => string
   /** Takes a queued message back into the field. */
   editQueued: string
@@ -128,7 +131,6 @@ export const composerText: ComposerText = {
   queue: 'Queue',
   stop: 'Interrupt the lead',
   stopKey: '⌘.',
-  queueNote: 'Enter queues it; the lead reads it next',
   sendNow: 'Send now',
   sendNowNote: 'Interrupt the lead with this; it carries on with both',
   sendNowKey: '⌘↵',
@@ -142,6 +144,7 @@ export const composerText: ComposerText = {
   systemDefault: 'System default',
   inputsNote: 'Other microphones show here once Althar may use the microphone.',
   listening: 'Listening…',
+  dictatedAway: 'What you said was written down while you were away.',
   queued: (n) => (n === 1 ? 'Queued; the lead reads it next' : `${n} queued; the lead reads them in order`),
   editQueued: 'Edit',
   unqueue: (text) => `Take “${text}” out of the queue`,
@@ -179,6 +182,8 @@ export interface ComposerProps {
   hint?: string
   /** What floats on the composer's top edge: what the agent listens to, what it left running. */
   above?: ReactNode
+  /** Dictation carried from another thread (a DictationPill): centred over the composer, above all that floats on its edge, so it covers none of it. */
+  carried?: ReactNode
   /** What is joined to the composer's top edge, in the flow: a DictationTray. The field stays usable under it. */
   tray?: ReactNode
   /** Images to send with what is written, in order: they go when it is sent, even with nothing written. */
@@ -226,6 +231,7 @@ export function Composer({
   onUnqueue,
   hint,
   above,
+  carried,
   tray,
   images = [],
   onAddImages,
@@ -264,6 +270,12 @@ export function Composer({
   const drafted = value.trim() !== '' || images.length > 0
   /* the microphone takes focus back when its tray closes with focus inside it */
   const mic = useRefocus<HTMLButtonElement>(tray != null)
+
+  /* Back to a draft kept from before, the cursor goes after what is there, to carry on from it. */
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (el) el.setSelectionRange(el.value.length, el.value.length)
+  }, [ref])
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -318,7 +330,6 @@ export function Composer({
   })()
 
   const note = (() => {
-    if (busy && drafted) return t.queueNote
     if (value.includes('\n')) return t.newlineNote
     return null
   })()
@@ -335,7 +346,12 @@ export function Composer({
   /* One shape whether or not a tray shows, so the field is never rebuilt under the cursor as one comes and goes. What floats sits above the tray, not over it. */
   return (
     <div className={s.stack} data-tray-host="" {...drop.handlers}>
-      {above && <div className={s.above}>{above}</div>}
+      {(above || carried) && (
+        <div className={s.floats}>
+          {carried && <div className={s.carried}>{carried}</div>}
+          {above && <div className={s.above}>{above}</div>}
+        </div>
+      )}
       {tray != null && <div className={s.tray}>{tray}</div>}
       <form className={cx(s.composer, elapsed !== null && s.recording, drop.over && s.over, className)} onSubmit={submit}>
         {drop.over && (
@@ -372,6 +388,7 @@ export function Composer({
           /* what the consumer says of images, announced as it changes; empty, it takes no room */
           <output className={s.imageNote}>{imageNote}</output>
         )}
+        {dictation?.arrived && <p className={s.imageNote}>{t.dictatedAway}</p>}
         {images.length > 0 && (
           <ul className={s.images} aria-label={t.images(images.length)}>
             {images.map((image) => (
@@ -452,65 +469,66 @@ export function Composer({
           />
         </div>
         <div className={s.bar}>
-          {picker}
-          <span className={s.space} />
-          {note && (
-            <span id={hintId} className={s.note}>
-              {note}
-            </span>
-          )}
-          {canSendNow && (
-            <Tooltip label={t.sendNowNote}>
-              <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey}>
-                {t.sendNow}
-              </ActionButton>
-            </Tooltip>
-          )}
-          {meter}
-          {onAddImages && (
-            <>
-              <IconButton icon="image" label={t.addImages} onClick={() => files.current?.click()} />
-              <input
-                ref={files}
-                type="file"
-                accept={imageTypes}
-                multiple
-                hidden
-                tabIndex={-1}
-                onChange={(e) => {
-                  const picked = [...(e.target.files ?? [])]
-                  // Picking the same file again is a change too.
-                  e.target.value = ''
-                  if (picked.length > 0) onAddImages(picked)
-                }}
-              />
-            </>
-          )}
-          {dictation &&
-            (elapsed !== null ? (
-              <button type="button" className={s.recButton} onClick={dictation.onStop} aria-label={t.stopDictating(elapsed)}>
-                <span className={s.wave} aria-hidden="true">
-                  {(dictation.levels ?? QUIET).map((l, i) => (
-                    <i key={i} style={cssVars({ '--l': Math.max(0, Math.min(1, l)) })} />
-                  ))}
-                </span>
-                {elapsed}
-                <Icon name="square" size={11} />
-              </button>
-            ) : (
-              <IconButton
-                ref={mic}
-                icon="mic"
-                label={micLabel(dictation, t)}
-                {...(dictation.kbd === undefined ? {} : { kbd: dictation.kbd })}
-                busy={dictation.busy}
-                progress={dictation.busy ? undefined : dictation.progress}
-                aria-expanded={dictation.expanded}
-                onClick={dictation.onStart}
-              />
-            ))}
-          {dictation?.onChooseInput && <InputMenu dictation={dictation} onChoose={dictation.onChooseInput} t={t} />}
-          {action}
+          <div className={s.left}>{picker}</div>
+          <div className={s.right}>
+            {note && (
+              <span id={hintId} className={s.note}>
+                {note}
+              </span>
+            )}
+            {canSendNow && (
+              <Tooltip label={t.sendNowNote}>
+                <ActionButton className={s.sendNow} onClick={sendNow} kbd={t.sendNowKey} aria-label={t.sendNow}>
+                  <span className={s.sendNowLabel}>{t.sendNow}</span>
+                </ActionButton>
+              </Tooltip>
+            )}
+            {meter}
+            {onAddImages && (
+              <>
+                <IconButton icon="image" label={t.addImages} onClick={() => files.current?.click()} />
+                <input
+                  ref={files}
+                  type="file"
+                  accept={imageTypes}
+                  multiple
+                  hidden
+                  tabIndex={-1}
+                  onChange={(e) => {
+                    const picked = [...(e.target.files ?? [])]
+                    // Picking the same file again is a change too.
+                    e.target.value = ''
+                    if (picked.length > 0) onAddImages(picked)
+                  }}
+                />
+              </>
+            )}
+            {dictation &&
+              (elapsed !== null ? (
+                <button type="button" className={s.recButton} onClick={dictation.onStop} aria-label={t.stopDictating(elapsed)}>
+                  <span className={s.wave} aria-hidden="true">
+                    {(dictation.levels ?? QUIET).map((l, i) => (
+                      <i key={i} style={cssVars({ '--l': Math.max(0, Math.min(1, l)) })} />
+                    ))}
+                  </span>
+                  {elapsed}
+                  <Icon name="square" size={11} />
+                </button>
+              ) : (
+                <IconButton
+                  ref={mic}
+                  icon="mic"
+                  label={micLabel(dictation, t)}
+                  {...(dictation.kbd === undefined ? {} : { kbd: dictation.kbd })}
+                  busy={dictation.busy}
+                  progress={dictation.busy ? undefined : dictation.progress}
+                  aria-expanded={dictation.expanded}
+                  onClick={dictation.onStart}
+                />
+              ))}
+            {dictation?.onChooseInput && <InputMenu dictation={dictation} onChoose={dictation.onChooseInput} t={t} />}
+            {action}
+          </div>
         </div>
       </form>
     </div>

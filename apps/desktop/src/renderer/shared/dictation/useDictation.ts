@@ -1,12 +1,25 @@
-import { type Dispatch, type RefObject, type SetStateAction, useEffect, useEffectEvent, useRef, useState } from 'react'
+import { type RefObject, useEffect, useEffectEvent, useRef, useState } from 'react'
 
 import { type Dictation, type DictationState as TrayState, DictationSetup, type DictationTrayProps } from '@althar/ui'
 
 import { reads } from '../../data/reads'
 import { type DictationEvent, type DictationHost, type DictationState, type DownloadStop, useServices } from '../../data/services'
+import { draftOf, setDraftText, useDraftOf } from '../drafts'
 import { joined, live } from './live'
 import { chooseMicrophone, microphoneToUse, useChosenMicrophone, useMicrophones } from './microphones'
-import { type Record, type Recorded, record as recordMicrophone, type Recording } from './recorder'
+import { type Record, type Recorded, record as recordMicrophone } from './recorder'
+import {
+  BARS,
+  changeSession,
+  composerShown,
+  type Destination,
+  type Handles,
+  handlesOf,
+  listeningIn,
+  type Said,
+  sessionOf,
+  useSession,
+} from './sessions'
 import { bytes, lengthOf, timeLeft, trayText } from './text'
 import { NO_VOCABULARY, respell, type Vocabulary, vocabularyOf } from './vocabulary'
 
@@ -30,28 +43,25 @@ import { NO_VOCABULARY, respell, type Vocabulary, vocabularyOf } from './vocabul
  *
  * Asking where things stand happens on the first press, not as the composer
  * shows, so a window that never dictates never starts the speech process.
+ *
+ * What is said belongs to the thread, not the composer (`sessions.ts`):
+ * leaving while it listens goes on listening, carried with the person in a
+ * pill (`Carried.tsx`) that stops, throws away and sends it from anywhere;
+ * what is written down lands in the thread's draft (`drafts.ts`) whether or
+ * not its composer still shows. One thread listens at a time: starting in
+ * another writes down what the first heard. What couldn't be written down is
+ * kept, to try again, until the person throws it away.
  */
 
 /** The longest anyone dictates in one go; it stops and writes it down there. */
 const LONGEST = 5 * 60
 /* Shorter than this is a tap on the button, not something said. */
 const SHORTEST = 0.3
-/* How many bars the composer draws. */
-const BARS = 12
-
-type Phase = 'idle' | 'asking' | 'listening' | 'writing'
-
 type Problem =
   | { readonly kind: 'denied' }
   | { readonly kind: 'noMicrophone' }
   | { readonly kind: 'stopped'; readonly got: number; readonly size: number }
   | { readonly kind: 'noRoom'; readonly need: number; readonly free: number }
-  /** What was said is kept, to try again. */
-  | { readonly kind: 'failed'; readonly said: Said }
-
-interface Said extends Recorded {
-  readonly seconds: number
-}
 
 /* The shortcut, as the window's own system writes it. */
 const MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.userAgent)
@@ -116,27 +126,138 @@ const inserting = (field: HTMLTextAreaElement | null, at: number, words: string)
 export interface DictationOptions {
   /** The project dictated about, whose names are spelt as its code spells them. */
   readonly projectId?: string | null
+  /** Whose it is, said by the pill that carries it once the person leaves; null until the view knows. */
+  readonly to?: Destination | null
   /** The microphone; tests give a fake. */
   readonly record?: Record
 }
 
-export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options: DictationOptions = {}): Voice {
-  const { record = recordMicrophone, projectId = null } = options
+/** What was heard at one rate, as heard at another, each sample between the two nearest. */
+const atRate = (heard: Recorded, rate: number): Float32Array => {
+  if (heard.sampleRate === rate) return heard.samples
+  const step = heard.sampleRate / rate
+  const samples = new Float32Array(Math.round(heard.samples.length / step))
+  for (let i = 0; i < samples.length; i += 1) {
+    const x = i * step
+    const j = Math.floor(x)
+    const a = heard.samples[j] ?? 0
+    samples[i] = a + ((heard.samples[j + 1] ?? a) - a) * (x - j)
+  }
+  return samples
+}
+
+/** Two recordings that couldn't be written down, as one, to try again together: at the later's rate, where they were heard at different rates. */
+export const together = (kept: Said | null, said: Said): Said => {
+  if (kept === null) return said
+  const before = atRate(kept, said.sampleRate)
+  const samples = new Float32Array(before.length + said.samples.length)
+  samples.set(before)
+  samples.set(said.samples, before.length)
+  return { samples, sampleRate: said.sampleRate, seconds: kept.seconds + said.seconds }
+}
+
+/**
+ * Writes down all of what was said in `thread`, at where it started: by the
+ * live writer as it stops, or again as it is retried. It lands in the
+ * thread's draft whether or not its composer still shows; written while
+ * none shows, the composer says so when the person is back. What can't be
+ * written down is kept, to try again.
+ */
+export const writeIn = async (thread: string, said: Said, now = handlesOf(thread).writer) => {
+  const held = handlesOf(thread)
+  held.writer = null
+  changeSession(thread, { phase: 'writing' })
+  try {
+    const text = now !== null ? await now.finish(said) : await (held.transcribe ?? nothingToWriteWith)(said)
+    // The window forgot the thread's dictation meanwhile: nothing to land in.
+    if (handlesOf(thread) !== held) return
+    // Nothing was heard: nothing to carry either.
+    if (text === '') return changeSession(thread, { phase: 'idle', interim: '', away: null })
+    const away = held.shown === 0
+    setDraftText(thread, inserting(away ? null : (held.field?.current ?? null), sessionOf(thread).at, text))
+    changeSession(thread, { phase: 'idle', interim: '', arrived: away ? draftOf(thread).text : null })
+  } catch {
+    if (handlesOf(thread) !== held) return
+    changeSession(thread, (now) => ({ phase: 'idle', interim: '', failed: together(now.failed, said) }))
+  }
+}
+
+const nothingToWriteWith = () => Promise.reject(new Error('Nothing to write it down with.'))
+
+const stopClock = (held: Handles) => {
+  if (held.clock === null) return
+  window.clearInterval(held.clock)
+  held.clock = null
+}
+
+/** Stops listening in `thread`, its composer on screen or not, and writes down what was said. */
+export const stopIn = (thread: string) => {
+  const held = handlesOf(thread)
+  stopClock(held)
+  const now = held.recording
+  held.recording = null
+  if (now === null) return
+  const { samples, sampleRate } = now.stop()
+  changeSession(thread, (session) => ({ levels: session.levels.map(() => 0) }))
+  if (samples.length < sampleRate * SHORTEST) {
+    held.writer?.close()
+    held.writer = null
+    return changeSession(thread, { interim: '', phase: 'idle', away: null })
+  }
+  void writeIn(thread, { seconds: sessionOf(thread).seconds, samples, sampleRate })
+}
+
+/** Throws away what `thread` is hearing, its composer on screen or not. */
+export const cancelIn = (thread: string) => {
+  const held = handlesOf(thread)
+  stopClock(held)
+  held.recording?.cancel()
+  held.recording = null
+  held.writer?.close()
+  held.writer = null
+  changeSession(thread, (session) => ({ interim: '', levels: session.levels.map(() => 0), phase: 'idle', away: null }))
+}
+
+/** The clock while `thread` listens, wherever the person is, and its end at the longest anyone dictates. */
+const startClock = (thread: string) => {
+  const held = handlesOf(thread)
+  stopClock(held)
+  held.clock = window.setInterval(() => {
+    changeSession(thread, (session) => ({ seconds: session.seconds + 1 }))
+    if (sessionOf(thread).seconds >= LONGEST) stopIn(thread)
+  }, 1000)
+}
+
+/** A ref for the composer's field that says whether the field is on screen: the composer shows, not just its view. */
+const fieldRef = (onField: (field: HTMLTextAreaElement | null) => void): RefObject<HTMLTextAreaElement | null> => {
+  let field: HTMLTextAreaElement | null = null
+  return {
+    get current() {
+      return field
+    },
+    set current(next) {
+      field = next
+      onField(next)
+    },
+  }
+}
+
+/** Dictation into the draft kept under `key` (`drafts.ts`): the thread's, which it outlives its composer for. */
+export function useDictation(key: string, options: DictationOptions = {}): Voice {
+  const { record = recordMicrophone, projectId = null, to = null } = options
   const { host, client, cache } = useServices()
   const voice = host.dictation ?? NONE
-  const inputRef = useRef<HTMLTextAreaElement>(null)
+  /* Whether the composer's field is on screen: a view can keep its dictation while it shows something else, its board or a task's outputs. */
+  const [showing, setShowing] = useState(false)
+  const [inputRef] = useState(() => fieldRef((field) => setShowing(field !== null)))
   const [known, setKnown] = useState<DictationState | null>(null)
   const [download, setDownload] = useState<Download | null>(null)
   const [open, setOpen] = useState(false)
-  const [phase, setPhase] = useState<Phase>('idle')
+  /* The system is asked for the microphone. */
+  const [asking, setAsking] = useState(false)
   const [problem, setProblem] = useState<Problem | null>(null)
-  const [seconds, setSeconds] = useState(0)
-  const [levels, setLevels] = useState<ReadonlyArray<number>>(() => Array.from({ length: BARS }, () => 0))
-  const recording = useRef<Recording | null>(null)
-  const writer = useRef<ReturnType<typeof live> | null>(null)
-  const [interim, setInterim] = useState('')
-  /* Where what is said lands: the field's cursor as it started listening. */
-  const [at, setAt] = useState(0)
+  const { phase, seconds, levels, interim, at, failed, arrived } = useSession(key)
+  const draft = useDraftOf(key).text
   const vocabulary = useRef<{ readonly projectId: string | null; readonly words: Vocabulary }>({ projectId: null, words: NO_VOCABULARY })
   const prepared = useRef(false)
   /* Download was pressed: once the model is here, it listens, if the tray is still open. */
@@ -144,8 +265,6 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
   const chosen = useChosenMicrophone()
   const { microphones, refresh: refreshMicrophones } = useMicrophones()
   const input = microphoneToUse(chosen, microphones)
-  /* The microphone the recording was last told to hear. */
-  const hearing = useRef<string | null>(null)
 
   const refresh = async () => {
     const state = await voice.state()
@@ -162,10 +281,10 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
       setOpen(true)
       return false
     }
-    setPhase('asking')
+    setAsking(true)
     setOpen(true)
     const allowed = await voice.allow().catch(() => false)
-    setPhase('idle')
+    setAsking(false)
     if (!allowed) {
       setProblem({ kind: 'denied' })
       return false
@@ -190,25 +309,14 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
       .catch(() => (vocabulary.current = { projectId: null, words: NO_VOCABULARY }))
   }
 
-  /** Writes down all of what was said, at where it started: by the live writer as it stops, or again as it is retried. */
-  const write = async (said: Said, now = writer.current) => {
-    writer.current = null
-    setPhase('writing')
-    try {
-      const text = now === null ? await transcribe(said) : await now.finish(said)
-      setPhase('idle')
-      setInterim('')
-      if (text !== '') setDraft(inserting(inputRef.current, at, text))
-    } catch {
-      setPhase('idle')
-      setInterim('')
-      setProblem({ kind: 'failed', said })
-      setOpen(true)
-    }
-  }
-
   const listen = async (state: DictationState) => {
+    const held = handlesOf(key)
     if (!(await microphone(state))) return
+    // The person left while the system asked: nothing to listen for.
+    if (held.shown === 0) return
+    // One thread listens at a time: one carried from elsewhere is written down first.
+    for (const other of listeningIn()) if (other !== key) stopIn(other)
+    held.transcribe = transcribe
     // The model loads while the person talks, so its first words don't wait for it; writing down waits if it must.
     if (!prepared.current) {
       prepared.current = true
@@ -217,7 +325,7 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
     learn()
     const now = live(
       transcribe,
-      (text) => setInterim(joined(text.settled, text.unsettled)),
+      (text) => changeSession(key, { interim: joined(text.settled, text.unsettled) }),
       // A pass as they stopped that wrote fewer words than showed goes in the window's log, as counts only, so a loss can be traced.
       (ended) => {
         if (ended.whole === null || ended.whole < ended.shown)
@@ -225,55 +333,42 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
       },
     )
     try {
-      recording.current = await record((frame) => {
-        setLevels((bars) => [...bars.slice(1 - BARS), frame.level])
-        if (recording.current !== null) now.frame(frame, recording.current)
+      held.recording = await record((frame) => {
+        changeSession(key, (session) => ({ levels: [...session.levels.slice(1 - BARS), frame.level] }))
+        if (held.recording !== null) now.frame(frame, held.recording)
       }, input)
-      hearing.current = input
+      held.hearing = input
+      // The person left while the microphone opened: it closes, having heard nothing yet, so nothing listens where nobody sees.
+      if (held.shown === 0) {
+        held.recording?.cancel()
+        held.recording = null
+        now.close()
+        return
+      }
     } catch (error) {
-      setPhase('idle')
       const name = error instanceof DOMException ? error.name : ''
       setProblem(name === 'NotAllowedError' || name === 'SecurityError' ? { kind: 'denied' } : { kind: 'noMicrophone' })
       setOpen(true)
       return
     }
-    writer.current = now
+    held.writer = now
     // The system names its microphones once one may be used.
     refreshMicrophones()
-    setAt(inputRef.current?.selectionStart ?? inputRef.current?.value.length ?? 0)
-    setInterim('')
-    setSeconds(0)
+    changeSession(key, {
+      at: held.field?.current?.selectionStart ?? held.field?.current?.value.length ?? 0,
+      interim: '',
+      seconds: 0,
+      arrived: null,
+      away: null,
+      phase: 'listening',
+    })
+    startClock(key)
     setProblem(null)
     setOpen(false)
-    setPhase('listening')
   }
 
-  const stop = () => {
-    const now = recording.current
-    recording.current = null
-    if (now === null) return
-    const { samples, sampleRate } = now.stop()
-    setLevels((bars) => bars.map(() => 0))
-    if (samples.length < sampleRate * SHORTEST) {
-      writer.current?.close()
-      writer.current = null
-      setInterim('')
-      return setPhase('idle')
-    }
-    void write({ seconds, samples, sampleRate })
-  }
+  const stop = () => stopIn(key)
 
-  const cancelListening = () => {
-    recording.current?.cancel()
-    recording.current = null
-    writer.current?.close()
-    writer.current = null
-    setInterim('')
-    setLevels((bars) => bars.map(() => 0))
-    setPhase('idle')
-  }
-
-  /** The menu beside the microphone: kept for next time, and heard from now on where it is listening. */
   /** The menu beside the microphone: kept for next time, and heard from now on where it is listening. */
   const chooseInput = (id: string | null) => chooseMicrophone(id === null ? null : (microphones.find((m) => m.id === id) ?? null))
 
@@ -296,7 +391,7 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
 
   /** The composer's microphone. */
   const press = async () => {
-    if (phase !== 'idle') return
+    if (phase !== 'idle' || asking) return
     const state = await refresh().catch(() => null)
     if (state === null) return
     if (state.model.ready) return listen(state)
@@ -337,29 +432,20 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
   })
   useEffect(() => voice?.onEvent(heard), [voice])
 
-  // The clock while listening, and its end at the longest anyone dictates.
   const listening = phase === 'listening'
-  useEffect(() => {
-    if (!listening) return
-    const timer = window.setInterval(() => setSeconds((n) => n + 1), 1000)
-    return () => window.clearInterval(timer)
-  }, [listening])
-  const tooLong = useEffectEvent(() => stop())
-  useEffect(() => {
-    if (listening && seconds >= LONGEST) tooLong()
-  }, [listening, seconds])
 
   // While listening, the microphone heard follows the one to hear: chosen in the menu, named once the system names them, gone, or back.
   useEffect(() => {
-    if (!listening || recording.current === null || hearing.current === input) return
-    hearing.current = input
-    void recording.current.use(input)
-  }, [listening, input])
+    const held = handlesOf(key)
+    if (!listening || held.recording === null || held.hearing === input) return
+    held.hearing = input
+    void held.recording.use(input)
+  }, [listening, input, key])
 
-  // Escape while listening throws it away, before anything else hears it (going back from a task).
-  const escape = useEffectEvent(() => cancelListening())
+  // Escape while listening throws it away, before anything else hears it (going back from a task); only where its composer shows, so a pill carrying it is never lost by a key.
+  const escape = useEffectEvent(() => cancelIn(key))
   useEffect(() => {
-    if (!listening) return
+    if (!listening || !showing) return
     const onKey = (event: KeyboardEvent) => {
       // Escape in the list of microphones closes the list, not what is being said.
       if (event.key !== 'Escape' || (event.target instanceof Element && event.target.closest('[role="menu"]') !== null)) return
@@ -369,16 +455,28 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [listening])
+  }, [listening, showing])
 
-  // Leaving while listening keeps nothing.
-  useEffect(
-    () => () => {
-      recording.current?.cancel()
-      writer.current?.close()
-    },
-    [],
-  )
+  // Whose it is, for the pill that carries it once the person leaves.
+  useEffect(() => {
+    handlesOf(key).to = to
+  }, [key, to])
+
+  // The thread's composer shows: what is written down lands at its cursor, and nothing is carried. Leaving it, for another view or another face of this one, goes on listening, or writing down, carried with the person.
+  useEffect(() => {
+    if (!showing) return
+    const held = handlesOf(key)
+    held.shown += 1
+    held.field = inputRef
+    composerShown(key, true)
+    changeSession(key, { away: null })
+    return () => {
+      held.shown -= 1
+      if (held.field === inputRef) held.field = null
+      composerShown(key, false)
+      if (held.shown === 0 && sessionOf(key).phase !== 'idle') changeSession(key, { away: Date.now() })
+    }
+  }, [key, showing, inputRef])
 
   // The shortcut: pressed, it starts or stops; held down, letting go stops. Only the composer shown last hears it.
   const pressedAt = useRef<number | null>(null)
@@ -396,7 +494,7 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
     if (held && phase === 'listening') stop()
   })
   useEffect(() => {
-    if (host.dictation === undefined) return
+    if (host.dictation === undefined || !showing) return
     const me = Symbol('dictation')
     claims.push(me)
     const mine = () => claims.at(-1) === me
@@ -416,12 +514,12 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
       window.removeEventListener('keydown', onDown)
       window.removeEventListener('keyup', onUp)
     }
-  }, [host.dictation])
+  }, [host.dictation, showing])
 
   if (host.dictation === undefined) return { dictation: undefined, tray: null, inputRef }
 
   const shown = ((): TrayState | null => {
-    if (!open && problem === null) return null
+    if (!open && problem === null && failed === null) return null
     if (problem !== null)
       switch (problem.kind) {
         case 'denied':
@@ -437,10 +535,10 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
           }
         case 'noRoom':
           return { kind: DictationSetup.NoRoom, need: bytes(problem.need), free: bytes(problem.free) }
-        case 'failed':
-          return { kind: DictationSetup.Failed, said: lengthOf(problem.said.seconds) }
       }
-    if (phase === 'asking') return { kind: DictationSetup.Asking }
+    // What couldn't be written down waits here, the person back or not, until they try again or throw it away.
+    if (failed !== null) return { kind: DictationSetup.Failed, said: lengthOf(failed.seconds) }
+    if (asking) return { kind: DictationSetup.Asking }
     if (download !== null) {
       const left = timeLeft(download.size - download.got, download.rate)
       return {
@@ -471,21 +569,29 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
             void voice.cancel()
           },
           onRetry: () => {
-            if (problem?.kind === 'failed') {
-              setProblem(null)
-              return void write(problem.said, null)
+            if (problem === null && failed !== null) {
+              // Tried again once it has stopped listening, so the two never write over each other.
+              if (phase !== 'idle') return
+              changeSession(key, { failed: null })
+              handlesOf(key).transcribe = transcribe
+              return void writeIn(key, failed, null)
             }
             if (known !== null) void startDownload(known)
           },
           ...(settingsPane !== null && known?.settings === true ? { onOpenSettings: () => void voice.openSettings(settingsPane) } : {}),
           onDiscard: () => {
-            setProblem(null)
+            changeSession(key, { failed: null })
             setOpen(false)
           },
-          onDismiss: () => {
-            setOpen(false)
-            if (problem?.kind !== 'stopped' && problem?.kind !== 'noRoom') setProblem(null)
-          },
+          // What was said and couldn't be written down goes only by Throw it away: Escape doesn't lose it.
+          ...(problem === null && failed !== null
+            ? {}
+            : {
+                onDismiss: () => {
+                  setOpen(false)
+                  if (problem?.kind !== 'stopped' && problem?.kind !== 'noRoom') setProblem(null)
+                },
+              }),
         }
 
   return {
@@ -496,6 +602,8 @@ export function useDictation(setDraft: Dispatch<SetStateAction<string>>, options
       at,
       kbd: SHORTCUT,
       busy: phase === 'writing',
+      // Written down while the person was away, and the draft not changed since.
+      arrived: arrived !== null && arrived === draft,
       expanded: shown !== null,
       ...(download !== null && shown === null ? { progress: download.got / download.size } : {}),
       inputs: microphones,

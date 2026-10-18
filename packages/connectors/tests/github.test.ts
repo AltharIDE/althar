@@ -1,7 +1,8 @@
 import { assert, describe, it } from '@effect/vitest'
-import { Effect } from 'effect'
+import { Duration, Effect } from 'effect'
+import { TestClock } from 'effect/testing'
 
-import { checkRunState, makeGitHub, tail } from '../src/github'
+import { checkRunState, LISTING_KEPT_MS, makeGitHub, searchOf, tail } from '../src/github'
 import { fromOutside, type Issue, type Repository } from '../src/model'
 import { type Route, stubFetch, variablesOf } from './stub'
 
@@ -108,6 +109,66 @@ describe('GitHub as a code host', () => {
         merge_method: 'merge',
         sha: open.headSha,
       })
+    }),
+  )
+
+  it.effect('closes a pull request unmerged, leaves one already closed as it is, and says why it can’t', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull() }],
+        ['PATCH', `${REPO}/pulls/12`, { json: pull({ state: 'closed' }) }],
+      ])
+      const closed = yield* host.closeChange(repository, yield* host.change(repository, 12))
+      assert.strictEqual(closed.state, 'closed')
+      assert.deepStrictEqual(sent.find((request) => request.method === 'PATCH')?.body, { state: 'closed' })
+      // Merged meanwhile, it isn't touched: it says it is merged.
+      const already = github([['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', merged_at: '2026-10-02T00:00:00Z' }) }]])
+      assert.strictEqual((yield* already.host.closeChange(repository, closed)).state, 'merged')
+      assert.isFalse(already.sent.some((request) => request.method === 'PATCH'))
+      // An account that can't push here is refused, in GitHub's words.
+      const refusing = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull() }],
+        ['PATCH', `${REPO}/pulls/12`, { status: 403, json: { message: 'Resource not accessible by integration' } }],
+      ])
+      const refused = yield* Effect.flip(refusing.host.closeChange(repository, closed))
+      assert.deepInclude(refused, { reason: 'forbidden', status: 403, message: 'Resource not accessible by integration' })
+    }),
+  )
+
+  it.effect('deletes a closed pull request’s branch where its head is, a fork’s too, and never an open one’s', () =>
+    Effect.gen(function* () {
+      const head = { ref: 'althar/mer-231', sha: 'abc', repo: { full_name: 'meridian/api' } }
+      const { host, sent } = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', head }) }],
+        ['DELETE', `${REPO}/git/refs/heads/althar/mer-231`, { status: 204 }],
+      ])
+      const change = yield* host.change(repository, 12)
+      yield* host.deleteBranch(repository, change)
+      assert.deepStrictEqual(
+        sent.map((request) => `${request.method} ${request.url}`),
+        [`GET ${REPO}/pulls/12`, `GET ${REPO}/pulls/12`, `DELETE ${REPO}/git/refs/heads/althar/mer-231`],
+      )
+      // From a fork, the fork's branch goes; one already gone, as GitHub says when asked after, is nothing to do.
+      const fork = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', head: { ...head, repo: { full_name: 'you/api' } } }) }],
+        ['DELETE', `${API}/repos/you/api/git/refs/heads/althar/mer-231`, { status: 422, json: { message: 'Reference does not exist' } }],
+        ['GET', `${API}/repos/you/api/git/ref/heads/althar/mer-231`, { status: 404, json: { message: 'Not Found' } }],
+      ])
+      yield* fork.host.deleteBranch(repository, change)
+      assert.isTrue(fork.sent.some((request) => request.method === 'DELETE' && request.url.startsWith(`${API}/repos/you/api/`)))
+      // A 422 for a branch still there (its default branch, a validation, throttling) is GitHub refusing, said in its words.
+      const kept = github([
+        ['GET', `${REPO}/pulls/12`, { json: pull({ state: 'closed', head }) }],
+        ['DELETE', `${REPO}/git/refs/heads/althar/mer-231`, { status: 422, json: { message: 'Cannot delete the default branch' } }],
+        ['GET', `${REPO}/git/ref/heads/althar/mer-231`, { json: { ref: 'refs/heads/althar/mer-231', object: { sha: 'abc' } } }],
+      ])
+      const stays = yield* Effect.flip(kept.host.deleteBranch(repository, change))
+      assert.deepInclude(stays, { reason: 'rejected', status: 422, message: 'Cannot delete the default branch' })
+      // Still open, its branch stays: deleting it would close the pull request behind the person's back.
+      const open = github([['GET', `${REPO}/pulls/12`, { json: pull({ head }) }]])
+      const refused = yield* Effect.flip(open.host.deleteBranch(repository, change))
+      assert.deepInclude(refused, { reason: 'rejected', message: 'PR #12 is still open, so its branch stays.' })
+      assert.isFalse(open.sent.some((request) => request.method === 'DELETE'))
     }),
   )
 
@@ -615,6 +676,185 @@ describe('GitHub as a code host', () => {
       const target = yield* host.pushTarget(repository)
       assert.strictEqual(target.url, 'https://github.com/meridian/api.git')
       assert.strictEqual(target.header, `Authorization: Basic ${Buffer.from('x-access-token:ghu_t').toString('base64')}`)
+    }),
+  )
+})
+
+/*
+ * GitHub's answers to the list's search, as its GraphQL API gives them: one
+ * of Althar's own drafts with checks running, an outside contributor's from a
+ * fork with changes asked for, an app's, and a merged one. Written out by
+ * hand in the shape GitHub documents, not recorded from a live call.
+ */
+const listed = (overrides: Record<string, unknown> = {}) => ({
+  id: 'PR_kwDO12',
+  number: 12,
+  title: 'Rate-limit refunds',
+  url: 'https://github.com/meridian/api/pull/12',
+  state: 'OPEN',
+  isDraft: true,
+  headRefName: 'althar/mer-231',
+  baseRefName: 'main',
+  headRefOid: 'abc',
+  updatedAt: '2026-10-13T09:00:00Z',
+  isCrossRepository: false,
+  headRepositoryOwner: { login: 'meridian' },
+  author: { __typename: 'User', login: 'you', databaseId: 5, name: 'You' },
+  reviewDecision: null,
+  commits: { nodes: [{ commit: { statusCheckRollup: { state: 'PENDING' } } }] },
+  ...overrides,
+})
+
+const SEARCHED = {
+  data: {
+    search: {
+      issueCount: 41,
+      nodes: [
+        listed(),
+        listed({
+          id: 'PR_kwDO13',
+          number: 13,
+          title: 'Send back won’t restart a dead lead',
+          url: 'https://github.com/meridian/api/pull/13',
+          isDraft: false,
+          headRefName: 'send-back',
+          isCrossRepository: true,
+          headRepositoryOwner: { login: 'ninemate' },
+          author: { __typename: 'User', login: 'ninemate', databaseId: 10, name: null },
+          reviewDecision: 'CHANGES_REQUESTED',
+          commits: { nodes: [{ commit: { statusCheckRollup: { state: 'FAILURE' } } }] },
+        }),
+        listed({
+          id: 'PR_kwDO14',
+          number: 14,
+          title: 'Bump effect',
+          isDraft: false,
+          author: { __typename: 'Bot', login: 'dependabot', databaseId: 49699333 },
+          reviewDecision: 'APPROVED',
+          commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+        }),
+        listed({
+          id: 'PR_kwDO9',
+          number: 9,
+          state: 'MERGED',
+          isDraft: false,
+          reviewDecision: 'REVIEW_REQUIRED',
+          author: null,
+          commits: { nodes: [] },
+        }),
+        // An issue the search found: none of a pull request's fields, so it is left out.
+        {},
+      ],
+    },
+  },
+}
+
+describe('GitHub listing pull requests', () => {
+  it('asks its search for the repository’s pull requests, narrowed as asked, each word quoted', () => {
+    assert.strictEqual(searchOf(['meridian', 'api'], { state: 'open', limit: 30 }), 'repo:meridian/api is:pr is:open sort:updated-desc')
+    assert.strictEqual(
+      searchOf(['meridian', 'api'], {
+        state: 'closed',
+        author: '@ninemate',
+        text: 'send "back',
+        reviewRequested: true,
+        draft: false,
+        limit: 5,
+      }),
+      'repo:meridian/api is:pr is:closed is:unmerged author:ninemate review-requested:@me draft:false "send" "back" in:title sort:updated-desc',
+    )
+    assert.strictEqual(
+      searchOf(['meridian', 'api'], { state: 'merged', author: 'dependabot[bot]', limit: 5 }),
+      'repo:meridian/api is:pr is:merged author:app/dependabot sort:updated-desc',
+    )
+    // A qualifier in the words is only a word.
+    assert.strictEqual(
+      searchOf(['meridian', 'api'], { state: 'all', text: 'repo:other/x', limit: 5 }),
+      'repo:meridian/api is:pr "repo:other/x" in:title sort:updated-desc',
+    )
+    // No login could be that: nothing is asked.
+    assert.isUndefined(searchOf(['meridian', 'api'], { state: 'open', author: 'a b repo:x', limit: 5 }))
+  })
+
+  it.effect('lists them in one call, with their reviews, checks and forks, and says there are more', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([['POST', `${API}/graphql`, { json: SEARCHED }]])
+      const list = yield* host.listChanges(repository, { state: 'all', author: 'ninemate', limit: 4 })
+      assert.deepStrictEqual(variablesOf(sent[0]), { q: 'repo:meridian/api is:pr author:ninemate sort:updated-desc', n: 4 })
+      assert.isTrue(list.more)
+      assert.deepStrictEqual(
+        list.changes.map((change) => [
+          change.number,
+          change.state,
+          change.draft,
+          change.author?.login,
+          change.forkOwner,
+          change.reviewDecision,
+          change.checks,
+        ]),
+        [
+          [12, 'open', true, 'you', null, null, 'running'],
+          [13, 'open', false, 'ninemate', 'ninemate', 'changes_requested', 'failed'],
+          [14, 'open', false, 'dependabot[bot]', null, 'approved', null],
+          [9, 'merged', false, undefined, null, 'review_required', null],
+        ],
+      )
+      assert.deepInclude(list.changes[1], {
+        title: 'Send back won’t restart a dead lead',
+        url: 'https://github.com/meridian/api/pull/13',
+        source: 'send-back',
+        target: 'main',
+        body: '',
+        updatedAt: '2026-10-13T09:00:00Z',
+      })
+      assert.isTrue(list.changes[2]?.author?.bot)
+      // Asked for as many as it has, it says there are none more.
+      const all = github([['POST', `${API}/graphql`, { json: { data: { search: { issueCount: 1, nodes: [listed()] } } } }]])
+      assert.isFalse((yield* all.host.listChanges(repository, { state: 'open', limit: 500 })).more)
+      assert.deepInclude(variablesOf(all.sent[0]), { n: 100 })
+    }),
+  )
+
+  it.effect('answers the same search again within a minute from memory, and asks again after', () =>
+    Effect.gen(function* () {
+      const { host, sent } = github([['POST', `${API}/graphql`, { json: SEARCHED }]])
+      const asked = { state: 'open', author: 'ninemate', limit: 30 } as const
+      const first = yield* host.listChanges(repository, asked)
+      yield* TestClock.adjust(Duration.millis(LISTING_KEPT_MS - 1))
+      assert.deepStrictEqual(yield* host.listChanges(repository, asked), first)
+      assert.lengthOf(sent, 1)
+      // Narrowed otherwise, it is another search.
+      yield* host.listChanges(repository, { ...asked, draft: true })
+      assert.lengthOf(sent, 2)
+      yield* TestClock.adjust(Duration.millis(1))
+      yield* host.listChanges(repository, asked)
+      assert.lengthOf(sent, 3)
+    }),
+  )
+
+  it.effect('names the permission it lacks where GitHub refuses, and asks nothing for a login that can’t be one', () =>
+    Effect.gen(function* () {
+      const refusing = github([
+        [
+          'POST',
+          `${API}/graphql`,
+          {
+            json: {
+              data: null,
+              errors: [
+                { type: 'INSUFFICIENT_SCOPES', message: 'Your token has not been granted the required scopes to execute this query.' },
+              ],
+            },
+          },
+        ],
+      ])
+      const refused = yield* Effect.flip(refusing.host.listChanges(repository, { state: 'open', limit: 30 }))
+      assert.deepInclude(refused, { reason: 'forbidden', scope: 'repo (a fine-grained token’s Pull requests: Read)' })
+      const { host, sent } = github([])
+      assert.deepInclude(yield* Effect.flip(host.listChanges(repository, { state: 'open', author: 'x y', limit: 30 })), {
+        reason: 'rejected',
+      })
+      assert.lengthOf(sent, 0)
     }),
   )
 })

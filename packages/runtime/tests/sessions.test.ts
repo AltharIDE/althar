@@ -377,6 +377,51 @@ describe('sessions', () => {
     }).pipe(Effect.provide(runtime())),
   )
 
+  it.live('describes the session the runtime holds while a handover starts', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const { task: created } = yield* task()
+      const first = yield* sessions.start({ threadId: created.threadId, agentId: 'codex', model: 'large', effort: 'high' })
+      yield* settled(created.threadId, 1)
+
+      // The new row exists, but its slow connection has not replaced the session the runtime still holds.
+      const switching = yield* Effect.forkChild(sessions.switchAgent({ threadId: created.threadId, agentId: 'opencode', model: 'small' }))
+      yield* until(sql<{ state: string }>`SELECT state FROM provider_sessions WHERE thread_id = ${created.threadId}`, (rows) =>
+        rows.some((row) => row.state === 'starting'),
+      )
+      const during = yield* queries.thread(created.threadId, { limit: 0 })
+      assert.deepStrictEqual(
+        [during.session?.id, during.session?.agentId, during.session?.model, during.session?.effort, during.session?.held],
+        [first, 'codex', 'large', 'high', true],
+      )
+
+      yield* Fiber.join(switching)
+      const after = yield* queries.thread(created.threadId, { limit: 0 })
+      assert.deepStrictEqual([after.session?.agentId, after.session?.model, after.session?.held], ['opencode', 'small', true])
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { each: { opencode: { slowStart: 500 } } }))))),
+  )
+
+  it.live('describes a recorded session the runtime no longer holds as not held', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const { task: created } = yield* task()
+      const sessionId = yield* begin(created.threadId, 'codex', 'large')
+      yield* sessions.stop(created.threadId)
+      // The row a crash leaves: still live, while the runtime holds nothing on the thread.
+      yield* sql`UPDATE provider_sessions SET state = 'active' WHERE id = ${sessionId}`
+
+      const { session } = yield* queries.thread(created.threadId, { limit: 0 })
+      assert.deepStrictEqual(
+        [session?.id, session?.model, session?.held, session?.turnRunning, session?.turnStartedAt, session?.context, session?.background],
+        [sessionId, 'large', false, false, null, null, []],
+      )
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+
   it.live('briefs the agent that takes over with what a failed command printed, not only that it failed', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions

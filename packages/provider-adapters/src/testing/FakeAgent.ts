@@ -113,6 +113,13 @@ export const scenarios = {
    * says what was chosen (`chosen=allow_once`).
    */
   run: 'run ',
+  /**
+   * Followed by commands apart by `; `, `run each make deploy; ./deploy.sh`:
+   * asks to run them all at once, as an agent's parallel tool calls do, so
+   * they wait together; says what was chosen for each, in order
+   * (`chosen=allow_once,allow_once`).
+   */
+  runEach: 'run each ',
 } as const
 
 /** A 480 × 300 PNG of a page, as a screenshot tool hands it back. */
@@ -129,6 +136,9 @@ export const HANDED_DOCUMENT = {
 }
 
 export const USAGE_LIMIT_MESSAGE = 'Claude AI usage limit reached|1759075200'
+
+/** What Claude Code says when Anthropic's API fails and it gives up: no class Althar tries again. */
+export const API_ERROR_MESSAGE = 'API Error: 500 {"type":"error","error":{"type":"api_error","message":"Internal server error"}}'
 
 /** How many tokens its context holds, as it says when a prompt ends `[context:…]`. */
 export const CONTEXT_SIZE = 200_000
@@ -1181,6 +1191,39 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         client.notify(acp.methods.client.session.update, { sessionId: params.sessionId, update: value })
       const say = (said: string) => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: said } })
       const ended = (usage?: acp.Usage): acp.PromptResponse => ({ stopReason: 'end_turn', ...(usage === undefined ? {} : { usage }) })
+      // Slow to say its first word, as a model can be, where the prompt says so: `[answers-after:5s]` says nothing for five
+      // seconds, then a sentence; `[thinks-after:5s]` and `[reads-after:5s]` first think aloud, or read a file, for a second and a
+      // half; `[fails-after:5s]` gives up after them, as when Anthropic's API fails; `[ends-after:5s]` ends its turn having said
+      // nothing. Cancelled, it stops.
+      const slowly = /\[(answers|thinks|reads|fails|ends)-after:(\d+)s\]/.exec(text)
+      if (slowly?.[2] !== undefined) {
+        const waitOut = async (ms: number) => {
+          for (let waited = 0; !session.cancelled && waited < ms; waited += 10) await pause(10)
+        }
+        await waitOut(Number(slowly[2]) * 1000)
+        if (session.cancelled) return { stopReason: 'cancelled' }
+        if (slowly[1] === 'fails') throw new acp.RequestError(-32603, API_ERROR_MESSAGE)
+        if (slowly[1] === 'ends') return ended()
+        if (slowly[1] === 'thinks')
+          await update({
+            sessionUpdate: 'agent_thought_chunk',
+            content: { type: 'text', text: 'The checkout calls the payment provider once, and gives up on its first timeout.' },
+          })
+        if (slowly[1] === 'reads')
+          await update({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'read-1',
+            title: 'Read checkout.ts',
+            kind: 'read',
+            status: 'in_progress',
+            locations: [{ path: 'checkout.ts' }],
+          })
+        if (slowly[1] !== 'answers') await waitOut(1500)
+        if (session.cancelled) return { stopReason: 'cancelled' }
+        if (slowly[1] === 'reads') await update({ sessionUpdate: 'tool_call_update', toolCallId: 'read-1', status: 'completed' })
+        await say('Looked into it: the payment call has no retry, so one slow answer from the provider fails the whole checkout.')
+        return ended()
+      }
       // Asked to compact, as Claude Code, Codex and OpenCode take `/compact`, it says its context holds a tenth of what it may.
       // With `[lead:compact-fails]`, it says so in a call of its own and ends its turn as usual, as Claude Code does.
       if (text === '/compact') {
@@ -1212,17 +1255,21 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
       if (images.length > 0)
         await say(`saw images: ${images.map((image) => `${image.mimeType} ${Buffer.from(image.data, 'base64').length} B`).join(', ')}\n\n`)
 
-      /** Asks permission; cancelling the turn withdraws the request. */
+      // How many asks wait at once, as several do from `run each`: they share one abort, let go as the last is answered.
+      let asking = 0
+      /** Asks permission; cancelling the turn withdraws the request, and any asked with it. */
       const ask = async (toolCall: acp.ToolCallUpdate, offered: Array<acp.PermissionOption>) => {
-        session.abort = new AbortController()
+        const abort = (session.abort ??= new AbortController())
+        asking += 1
         const answer = await client
           .request<acp.RequestPermissionResponse, acp.RequestPermissionRequest>(
             acp.methods.client.session.requestPermission,
             { sessionId: params.sessionId, toolCall, options: offered },
-            { cancellationSignal: session.abort.signal },
+            { cancellationSignal: abort.signal },
           )
           .catch(() => undefined)
-        session.abort = undefined
+        asking -= 1
+        if (asking === 0) session.abort = undefined
         if (answer === undefined) return 'withdrawn'
         return answer.outcome.outcome === 'selected' ? answer.outcome.optionId : 'cancelled'
       }
@@ -1380,7 +1427,13 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
         return ended()
       }
       if (text === scenarios.stubborn) session.stubborn = true
-      const scenario = resumed ? scenarios.stubborn : text.startsWith(scenarios.run) ? scenarios.commandChoices : text
+      const scenario = resumed
+        ? scenarios.stubborn
+        : text.startsWith(scenarios.runEach)
+          ? scenarios.runEach
+          : text.startsWith(scenarios.run)
+            ? scenarios.commandChoices
+            : text
 
       switch (scenario) {
         case scenarios.commandChoices:
@@ -1409,6 +1462,31 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
           await say(`chosen=${chosen}`)
           if (scenario === scenarios.deniedThenWait) while (!session.cancelled) await pause(10)
           return session.cancelled || chosen === 'cancel' || chosen === 'cancelled' ? { stopReason: 'cancelled' } : ended()
+        }
+        case scenarios.runEach: {
+          const calls = text
+            .slice(scenarios.runEach.length)
+            .split('; ')
+            .map((line) => {
+              session.runs += 1
+              return { toolCallId: `run-${session.runs}`, title: `Run ${line}`, kind: 'execute' as const, rawInput: { command: line } }
+            })
+          for (const toolCall of calls) await update({ sessionUpdate: 'tool_call', ...toolCall, status: 'pending' })
+          const chosen = await Promise.all(
+            calls.map(async (toolCall) => {
+              const answer = await ask(toolCall, commandOptions)
+              await update({
+                sessionUpdate: 'tool_call_update',
+                toolCallId: toolCall.toolCallId,
+                status: answer.startsWith('allow') ? 'completed' : 'failed',
+              })
+              return answer
+            }),
+          )
+          await say(`chosen=${chosen.join(',')}`)
+          return session.cancelled || chosen.some((answer) => answer === 'cancel' || answer === 'cancelled')
+            ? { stopReason: 'cancelled' }
+            : ended()
         }
         case scenarios.question:
         case scenarios.questions: {

@@ -21,6 +21,8 @@ export class ConnectorFailed extends Schema.TaggedError<ConnectorFailed>()('Conn
   status: Schema.optional(Schema.Number),
   /** When a rate-limited call may be tried again. */
   retryAt: Schema.optional(Schema.String),
+  /** The scope, or the token's permission, a `forbidden` call needs and the connection lacks, where the adapter knows it. */
+  scope: Schema.optional(Schema.String),
 }) {}
 
 /** A sign-in that ended without a token: the person said no, or the code expired before they said anything. */

@@ -196,6 +196,21 @@ describe('the window’s watch', () => {
     expect(cache.getQueryState(keys.rules('p1'))?.isInvalidated).toBe(true)
   })
 
+  it('marks a project’s threads when its rules change, by whose switch its tasks allow everything', async () => {
+    const { client, cache, emit, read } = opened()
+    await cache.fetchQuery(read.thread('th1'))
+    emit(changed('policy', 'pol1', null, 'p1'))
+    await settle()
+    // Its threads are read on their next visit; a task on screen reads its own head.
+    expect(cache.getQueryState(keys.thread('th1'))?.isInvalidated).toBe(true)
+    expect(client.getThread).toHaveBeenCalledTimes(1)
+    // Another project's rules touch neither.
+    cache.setQueryData(keys.thread('th1'), cache.getQueryData(keys.thread('th1')))
+    emit(changed('policy', 'pol2', null, 'p2'))
+    await settle()
+    expect(cache.getQueryState(keys.thread('th1'))?.isInvalidated).toBe(false)
+  })
+
   it('reads once more what was being read when a change touched it', async () => {
     const { client, cache, emit, read } = opened()
     const first = later<ProjectList>()
