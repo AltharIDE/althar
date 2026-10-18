@@ -583,7 +583,18 @@ checks and the harness permission rules remain the enforcement.
   writing into the shared account home would leak one run's selection into
   the next. A session-scoped plugin touches neither the account home, the
   person's own `~/.claude`, nor any repository.
-- **Who gets it.** Only a task's lead on Claude Code, and only where the runtime
+- **Delivery to Codex and OpenCode (2026-10-18).** Each agent's registry entry
+  says how it is given the run's folder (`skills.via`). Codex: the folder is laid
+  out as `<run>/codex/.agents/skills/<id>/` and handed to the session as an added
+  directory; codex-acp 2.2.2 sets each added directory's `.agents/skills` as
+  Codex's extra skill roots (`skills/extraRoots/set`, Codex 0.160.1). It also
+  makes that folder writable in Codex's sandbox, where only the run's read-only
+  copies are. OpenCode: the folder (`<run>/opencode/<id>/`) is added to its
+  config's `skills.paths` in `OPENCODE_CONFIG_CONTENT`, beside its asks
+  (OpenCode 1.19.0 reads it; read from the binary, not yet a live session).
+  Codex is not counted on for subagents, so a skill that needs them is left out
+  for it, and the thread gets a notice naming what was left out and why.
+- **Who gets it.** Only a task's lead, on any agent that says how, and only where the runtime
   was given a skills store. Readers, reviewers, a review's lead (untrusted) and
   other agents get none. A failure to set skills up costs the session its
   skills, not its start.
@@ -616,8 +627,10 @@ checks and the harness permission rules remain the enforcement.
   for the later update screen); a person's own installs are untouched.
 
 **Not yet:** the commit-time check before staging; the Repository files section in the
-project's settings window; Codex and OpenCode delivery (OpenCode 1.x only;
-2.x is to be refused, per the OpenCode 2 plan, which is not in this tree); the
+project's settings window; turning delivery on in the desktop app and the CLI
+(neither sets `RuntimeOptions.skills`, so no run gets skills there yet); a live
+check of Codex and OpenCode loading them; refusing OpenCode 2.x (per the
+OpenCode 2 plan, which is not in this tree); the
 `althar-skills` catalog and any GitHub fetch (the fixture catalog is a local
 directory); review cards, updates and rollback; OpenSpec.
 
