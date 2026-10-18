@@ -1,7 +1,7 @@
 import { at, json, ref, table } from './0001_initial/columns'
 
 /*
- * Plan usage (docs/plans/plan-usage.md, ADR-047): what each account's plan
+ * Plan usage (docs/plans/plan-usage.md, ADR-048): what each account's plan
  * has left, as last read, and the warnings raised as it ran down.
  *
  * A reading is kept so a window survives a restart: Claude Code reports a

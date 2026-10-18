@@ -8,7 +8,7 @@
 > into the architecture docs.
 
 Researched on 15 October 2026 against upstream `main` (`af3023a`). Decided
-(ADR-047) and partly built: the Codex source, the usage-source registry, the
+(ADR-048) and partly built: the Codex source, the usage-source registry, the
 allowlisted reader and its contract test are in `provider-adapters` (see
 Stages). Not built: the Claude source, the notices and the usage tab.
 
@@ -56,7 +56,7 @@ Per agent and provider, today:
 
 ### The exception to rule 3
 
-Decided: [ADR-047](../decisions/047-a-usage-read-may-use-an-accounts-token-once.md).
+Decided: [ADR-048](../decisions/048-a-usage-read-may-use-an-accounts-token-once.md).
 An OpenCode 2.x account has no endpoint source (its credentials moved into
 `opencode.db`, and `auth list` says "can't tell"), so it shows a fault, not
 quiet "no data".
@@ -300,7 +300,7 @@ before building on it):
   classification and allowlist, OpenCode's sign-in listing (`usageSources.ts`);
   the allowlisted usage reader (`usageRead.ts`) and the only credential-store
   module (`credentialStore.ts`), with the contract test
-  (`tests/usageSources.test.ts`) that enforces ADR-047.
+  (`tests/usageSources.test.ts`) that enforces ADR-048.
 - `packages/persistence-sqlite`: migration 0034, `plan_usage_readings` and
   `plan_usage_warnings`.
 - `packages/runtime`: `PlanUsage.ts` keeps each account's windows (Codex read
@@ -325,7 +325,7 @@ run in parallel.
 
 0. **Amend rule 3** (done, docs only, 15 October): the narrow usage read is
    in architecture 03 and
-   [ADR-047](../decisions/047-a-usage-read-may-use-an-accounts-token-once.md),
+   [ADR-048](../decisions/048-a-usage-read-may-use-an-accounts-token-once.md),
    approved by the person. Its reader, allowlist and contract test are still
    to build, in the stages below.
 1. **Model and Codex source.** `AccountStatus` with its `windows`

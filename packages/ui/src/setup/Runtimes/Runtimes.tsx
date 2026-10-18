@@ -68,6 +68,11 @@ export type RuntimeEntry = RuntimeBase &
         /** The oldest version Althar works with. */
         needs: string
       }
+    | {
+        state: RuntimeState.Unchecked
+        /** Why Althar couldn't check it, in a sentence. */
+        why: string
+      }
   )
 
 export interface RuntimesText {
@@ -271,6 +276,9 @@ function parts(r: RuntimeEntry, t: RuntimesText, h: Handlers) {
           </>
         ),
       }
+    // Only this one; the rest of the list stands as it is.
+    case RuntimeState.Unchecked:
+      return { line: <span role="alert">{r.why}</span>, actions: check }
     default:
       return unreachable(r)
   }

@@ -426,7 +426,7 @@ in two layers:
 ### The usage read
 
 The narrow exception to rule 3
-([ADR-047](../decisions/047-a-usage-read-may-use-an-accounts-token-once.md)).
+([ADR-048](../decisions/048-a-usage-read-may-use-an-accounts-token-once.md)).
 The reader may read one account's access token into memory, make one `GET` to
 the provider's usage URL on a per-(agent, provider) allowlist (`https`, one
 host and path each), parse the windows, and drop the token. It may never
@@ -599,7 +599,7 @@ Rules:
    structured `auth_required` response.
 3. Althar never reads, scrapes, copies, decrypts, exports, uploads, or
    synchronizes the CLI's credential cache. The one exception is the **usage
-   read** ([ADR-047](../decisions/047-a-usage-read-may-use-an-accounts-token-once.md),
+   read** ([ADR-048](../decisions/048-a-usage-read-may-use-an-accounts-token-once.md),
    Usage limits below): an account's access token, in memory, for one call to
    its provider's usage URL.
 4. It never asks for a provider password or browser session cookie.
