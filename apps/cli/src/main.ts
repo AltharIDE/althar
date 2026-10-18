@@ -160,6 +160,8 @@ const layer = Runtime.layer({
   accountsRoot: join(options.profile, 'accounts'),
   // What commands print and the pictures agents hand back, as the app keeps them, in the same profile.
   artifactsRoot: join(options.profile, 'artifacts'),
+  // Skills a task's lead is given, as the app keeps them, from the catalog packages/skills builds.
+  skills: { root: join(options.profile, 'skills'), catalog: join(import.meta.dirname, '..', '..', '..', 'packages', 'skills', 'catalog') },
   appVersion: '0.0.0',
   deviceName: hostname(),
 })

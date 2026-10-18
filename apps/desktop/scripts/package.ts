@@ -123,6 +123,11 @@ mkdirSync(stage, { recursive: true })
 cpSync(join(desktop, 'dist'), join(stage, 'dist'), { recursive: true, filter: (path) => !path.endsWith('.map') })
 cpSync(join(resources, 'icons'), join(stage, 'resources', 'icons'), { recursive: true, filter: (path) => !path.endsWith('.md') })
 cpSync(join(resources, 'tray'), join(stage, 'resources', 'tray'), { recursive: true })
+// The default skill catalog, with its licences and THIRD_PARTY.md, as packages/skills built it (its CURATION.md stays in the repository).
+cpSync(join(desktop, '..', '..', 'packages', 'skills', 'catalog'), join(stage, 'resources', 'skills-catalog'), {
+  recursive: true,
+  filter: (path) => !path.endsWith('CURATION.md'),
+})
 writeFileSync(
   join(stage, 'package.json'),
   `${JSON.stringify(
