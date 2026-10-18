@@ -525,6 +525,19 @@ export class Changes extends Context.Service<
      * fetched here first.
      */
     mergeNote(taskId: string, url?: string): Effect.Effect<{ readonly note: string; readonly head: string }, unknown>
+    /**
+     * Closes the task's pull request at this address without merging it,
+     * because the person said to: never on an agent's word. Read back at
+     * once, closed, it is listened to no more; with `deleteBranch`, its branch
+     * on the host goes too, once it is closed. What the host refused to close
+     * fails, and it stays as it was seen; a branch it refused to delete is
+     * said in `branch`, the pull request closed all the same.
+     */
+    close(
+      taskId: string,
+      url: string,
+      options: { readonly deleteBranch: boolean },
+    ): Effect.Effect<{ readonly change: ChangeSummary; readonly branch: string | null }, unknown>
     /** Marks the task's draft pull request ready for review: the person's to do. */
     markReady(taskId: string, url?: string): Effect.Effect<void, unknown>
     /**
@@ -570,6 +583,12 @@ export class Changes extends Context.Service<
      * based on it and the person hasn't said to.
      */
     attach(input: AttachInput): Effect.Effect<Attached, unknown>
+    /**
+     * Reads each settled task's pull request that was left open and isn't
+     * listened to, once, so its card says how it stands on its host now: at
+     * launch, by itself.
+     */
+    readSettled: Effect.Effect<void>
     /** Asks the code host now, rather than at the next turn of listening. */
     refresh(taskId: string): Effect.Effect<void>
     /**
@@ -2051,6 +2070,77 @@ export class Changes extends Context.Service<
           }
           const [now] = (yield* linksOf(taskId)).filter((candidate) => candidate.id === link.id)
           if (now !== undefined) yield* poll(now)
+        })
+
+      /**
+       * A change as its host has it now, kept: said in the task's thread where
+       * it merged or closed since it was seen, and listened to no more; what
+       * the lead asked to push to it is closed, and a merge may settle its task.
+       */
+      const seenNow = (link: LinkRow, before: Snapshot, read: ChangeRequest) =>
+        Effect.gen(function* () {
+          const after: Snapshot = {
+            ...before,
+            state: read.state,
+            draft: read.draft,
+            title: read.title,
+            headSha: read.headSha ?? before.headSha,
+          }
+          const settled = after.state !== 'open'
+          yield* saveSnapshot(link, after, settled ? { listening: 0 } : {})
+          if (after.state !== before.state && settled)
+            yield* arrive(link, { kind: after.state, from: null, where: nameOf(before), url: before.url })
+          if (settled) for (const asked of yield* askedOf(link.taskId, before.url)) yield* settleAsked(asked, 'closed')
+          if (after.state === 'merged') yield* settleIfDone(link.taskId)
+          return after
+        })
+
+      /**
+       * Closes the task's pull request at `url` unmerged, as the person asked,
+       * through its host, and keeps what the host says after: one merged
+       * meanwhile stays merged. Its branch on the host goes too where they
+       * asked, once it is closed; what the host said to that is returned.
+       */
+      const close = (taskId: string, url: string, deleteBranch: boolean) =>
+        Effect.gen(function* () {
+          const { link, snapshot, host, repository } = yield* current(taskId, url)
+          const read = yield* host.change(repository, snapshot.number)
+          const closed =
+            read.state !== 'open'
+              ? read
+              : yield* outward({
+                  projectId: link.projectId,
+                  subject: { type: 'external_link', id: link.id },
+                  target: `${host.product}:${snapshot.repository.join('/')}`,
+                  operation: 'close',
+                  // Reopened on the host since, closing it again is another close.
+                  key: `close:${link.id}:${read.updatedAt}`,
+                  request: { number: snapshot.number },
+                  // Closing reads it first, so asking again closes it once.
+                  retryable: true,
+                  perform: host.closeChange(repository, read),
+                  encode: (answer) => answer,
+                  decode: (kept) => Option.getOrUndefined(Schema.decodeUnknownOption(ChangeRequest)(kept)),
+                })
+          const after = yield* seenNow(link, snapshot, closed)
+          const summary: ChangeSummary = { ...after, linkId: link.id, product: link.product, listening: after.state === 'open' }
+          if (!deleteBranch || after.state !== 'closed') return { change: summary, branch: null }
+          const branch = yield* outward({
+            projectId: link.projectId,
+            subject: { type: 'external_link', id: link.id },
+            target: `${host.product}:${snapshot.repository.join('/')}`,
+            operation: 'delete_branch',
+            key: `delete_branch:${link.id}:${closed.updatedAt}`,
+            request: { number: snapshot.number, branch: closed.source },
+            retryable: true,
+            perform: Effect.as(host.deleteBranch(repository, closed), true),
+            encode: (answer) => answer,
+            decode: (kept) => (kept === true ? true : undefined),
+          }).pipe(
+            Effect.as(null),
+            Effect.catch((error) => Effect.succeed(error instanceof ConnectorFailed ? error.message : String(error))),
+          )
+          return { change: summary, branch }
         })
 
       /**
@@ -4076,6 +4166,35 @@ export class Changes extends Context.Service<
 
       yield* busy.queue(provide(roundsWaiting))
 
+      /*
+       * A settled task's pull request that Althar stopped listening to while
+       * it was open, such as an abandoned task's left open, is read once a
+       * launch: its card says how it stands on its host now, not how it stood.
+       */
+      const readSettled = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient
+        const left = yield* sql<LinkRow>`
+          SELECT l.id, l.project_id, l.task_id, l.connection_id, l.product, l.snapshot, l.cursor, l.listening FROM external_links l
+          JOIN tasks k ON k.id = l.task_id
+          WHERE l.kind = 'change' AND l.listening = 0 AND l.connection_id IS NOT NULL AND k.state IN ('done', 'abandoned')
+            AND json_extract(l.snapshot, '$.state') = 'open'
+            AND l.project_id IN (SELECT id FROM projects WHERE archived_at IS NULL)`
+        for (const link of left)
+          yield* locked(link.taskId)(
+            Effect.gen(function* () {
+              const adapters = yield* connections.adapters(link.connectionId ?? '')
+              if (adapters.host === undefined) return
+              const before = yield* decodeSnapshot(link.snapshot)
+              const repository = yield* adapters.host.repository(before.repository)
+              yield* seenNow(link, before, yield* adapters.host.change(repository, before.number))
+            }),
+          ).pipe(Effect.catchCause((cause) => Effect.logWarning('Could not read a settled task’s pull request', cause)))
+      }).pipe(
+        (effect) => provide(effect),
+        Effect.catchCause((cause) => Effect.logWarning('Could not read settled pull requests', cause)),
+      )
+      yield* Effect.forkScoped(readSettled)
+
       // What an earlier launch was doing outside when it stopped is uncertain until read back or asked for again.
       yield* provide(reconcileOutward).pipe(
         Effect.catchCause((cause) => Effect.logWarning('Could not reconcile what was being done outside', cause)),
@@ -4553,6 +4672,8 @@ export class Changes extends Context.Service<
           provide(locked(taskId)(Effect.andThen(taken(taskId, 'pushed'), replace(taskId, head, replaces, url)))),
         mergeNote: (taskId, url) => provide(locked(taskId)(mergeNote(taskId, url))),
         markReady: (taskId, url) => provide(locked(taskId)(markReady(taskId, url))),
+        readSettled,
+        close: (taskId, url, options) => provide(locked(taskId)(close(taskId, url, options.deleteBranch))),
         exclusive: (taskId, effect) => locked(taskId)(effect),
         merge: (taskId, head, url) => provide(locked(taskId)(merge(taskId, head, url))),
         mergeHere: (taskId, heads) => provide(locked(taskId)(branches.withPermits(1)(mergeHere(taskId, heads)))),

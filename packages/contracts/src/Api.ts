@@ -2623,6 +2623,18 @@ export const Api = RpcGroup.make(
    * fetched to the task's worktree first.
    */
   command('MergeNote', { taskId: Schema.String, url: Schema.optional(Schema.String) }, Schema.Struct({ note: Schema.String })),
+  /**
+   * Closes the task's pull request at this address without merging it,
+   * because the person said to; with `deleteBranch`, its branch on the host
+   * goes too, once it is closed. What the host refused to close fails, and
+   * it stays open. `branch` is what the host said to deleting the branch,
+   * null where it went or wasn't asked to.
+   */
+  command(
+    'ClosePullRequest',
+    { taskId: Schema.String, url: Schema.String, deleteBranch: Schema.Boolean },
+    Schema.Struct({ branch: Schema.NullOr(Schema.String) }),
+  ),
   /** Asks the task's pull request for news now. */
   command('RefreshTask', { taskId: Schema.String }, Schema.Void),
   /** Stops listening to the task's pull request at this address: nothing said there after arrives, and the lead hears none of it. */

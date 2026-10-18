@@ -953,6 +953,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
       kept: 0,
       own: 0,
     })),
+    closePullRequest: vi.fn(async () => ({ branch: null })),
     stopBackground: vi.fn(async () => {}),
     clearBackground: vi.fn(async () => {}),
     runProject: vi.fn(async (_projectId: string, taskId: string | null, _threadId: string | null, runnableId?: string) => ({

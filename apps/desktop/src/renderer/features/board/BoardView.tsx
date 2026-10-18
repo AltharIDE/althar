@@ -104,8 +104,18 @@ export const text = {
   answer: 'Answer',
   merged: (name: string) => `${name} merged`,
   closed: (name: string) => `${name} closed`,
+  /** Settled with its pull request open on its host, as the host last said: an abandoned task's, left open. */
+  stillOpen: (name: string) => `${name} still open`,
+  closeChange: (name: string) => `Close ${name}`,
   abandoned: 'Abandoned',
   showOlder: 'Show older',
+}
+
+/** Closing settled tasks' pull requests from their rows: the one closing now, the last that failed and why, and how to close one. */
+export interface ClosingPullRequests {
+  readonly busy: string | null
+  readonly failed: { readonly taskId: string; readonly message: string } | null
+  readonly close: (taskId: string, url: string) => void
 }
 
 /** How many of what a task handed back show on its card: a row of pictures, or a few files. */
@@ -447,6 +457,7 @@ export function BoardView({
   now,
   onOpen,
   onShowOlder,
+  closing,
   actions,
 }: {
   lanes: Lanes
@@ -457,6 +468,8 @@ export function BoardView({
   onOpen: (threadId: string) => void
   /** Loads the next page of settled work; absent where every settled task is already shown. */
   onShowOlder?: () => void
+  /** Closing a settled task's pull request still open on its host, from its row; absent where it can't be. */
+  closing?: ClosingPullRequests
   /** What a ready card does without opening its task, pushing and merging; without it, its next step is words and the card opens the task. */
   actions?: CardActions
 }) {
@@ -544,11 +557,29 @@ export function BoardView({
                 task={work.slug}
                 {...(kind === undefined ? {} : { kind })}
                 title={work.title}
-                {...(named === null
+                // Its pull request as its host last said: open is open, whatever became of the task (an abandoned one's is left open).
+                {...(named === null || change === null
                   ? work.branch === null
                     ? {}
                     : { meta: work.branch }
-                  : { meta: change?.state === 'merged' ? text.merged(named) : text.closed(named) })}
+                  : {
+                      meta:
+                        change.state === 'merged'
+                          ? text.merged(named)
+                          : change.state === 'closed'
+                            ? text.closed(named)
+                            : text.stillOpen(named),
+                    })}
+                {...(named !== null && change?.state === 'open' && closing !== undefined
+                  ? {
+                      action: {
+                        label: text.closeChange(named),
+                        onAction: () => closing.close(work.taskId, change.url),
+                        busy: closing.busy === work.taskId,
+                      },
+                      ...(closing.failed?.taskId === work.taskId ? { error: closing.failed.message } : {}),
+                    }
+                  : {})}
                 at={work.settledAt === null ? '' : ago(work.settledAt, new Date(now))}
                 onOpen={() => onOpen(work.threadId)}
                 text={{ task: unnamed }}

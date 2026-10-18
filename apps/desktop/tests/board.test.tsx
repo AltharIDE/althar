@@ -12,6 +12,7 @@ import { clock, running } from '../src/renderer/shared/time'
 import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
 import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
 import { useBoard } from '../src/renderer/features/board/useBoard'
+import { useClosePullRequests } from '../src/renderer/features/board/useClosePullRequests'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
@@ -818,6 +819,71 @@ describe('every state the board shows', () => {
     expect(screen.getByText('PR #12 closed')).toBeTruthy()
     expect(screen.getAllByText('althar/add-a-retry').length).toBeGreaterThan(0)
     return userEvent.click(screen.getByRole('button', { name: 'Held plan' })).then(() => expect(onOpen).toHaveBeenCalledWith('th1'))
+  })
+
+  it('says a settled task’s pull request is open where its host says so, and closes it from its row', async () => {
+    const pr = change({ state: 'open' })
+    const settled = lanesOf(
+      board({
+        tasks: [
+          task({
+            taskId: 'x',
+            title: 'Left open',
+            phase: 'settled',
+            state: 'abandoned',
+            settledAt: '2026-10-01T09:00:00.000Z',
+            change: pr,
+          }),
+        ],
+      }),
+    )
+    const { client } = fakeClient()
+    vi.mocked(client.closePullRequest).mockRejectedValueOnce(
+      new ApiError({ reason: 'ConnectorFailed', message: 'GitHub won’t let this account do that.' }),
+    )
+    const Board = () => <BoardView lanes={settled} agents={agents} now={NOW} onOpen={vi.fn()} closing={useClosePullRequests()} />
+    withServices(<Board />, client)
+    // Abandoned, its pull request isn't said to be closed: GitHub last said it is open.
+    expect(screen.getByText('PR #12 still open')).toBeTruthy()
+    expect(screen.queryByText('PR #12 closed')).toBeNull()
+    // Refused, the row says why, and still says it is open.
+    await userEvent.click(screen.getByRole('button', { name: 'Close PR #12' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('GitHub won’t let this account do that.')
+    expect(screen.getByText('PR #12 still open')).toBeTruthy()
+    // Closed on the person's second press: only the pull request, its branch left as it is.
+    await userEvent.click(screen.getByRole('button', { name: 'Close PR #12' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    expect(client.closePullRequest).toHaveBeenLastCalledWith({ taskId: 'x', url: pr.url, deleteBranch: false })
+  })
+
+  it('offers no Close on a settled task’s row whose pull request is closed or merged', () => {
+    const settled = lanesOf(
+      board({
+        tasks: [
+          task({
+            taskId: 'y',
+            title: 'Closed',
+            phase: 'settled',
+            state: 'abandoned',
+            settledAt: '2026-10-01T09:00:00.000Z',
+            change: change({ state: 'closed' }),
+          }),
+          task({
+            taskId: 'z',
+            title: 'Merged',
+            phase: 'settled',
+            state: 'done',
+            settledAt: '2026-10-01T09:10:00.000Z',
+            change: change({ state: 'merged' }),
+          }),
+        ],
+      }),
+    )
+    const closing = { busy: null, failed: null, close: vi.fn() }
+    withServices(<BoardView lanes={settled} agents={agents} now={NOW} onOpen={vi.fn()} closing={closing} />, fakeClient().client)
+    expect(screen.getByText('PR #12 closed')).toBeTruthy()
+    expect(screen.getByText('PR #12 merged')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Close PR/ })).toBeNull()
   })
 
   describe('a task waiting for a free agent', () => {
