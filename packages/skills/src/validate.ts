@@ -1,3 +1,4 @@
+import { looksExecutable } from './executable'
 import { type Files } from './hash'
 import { parseFrontmatter } from './frontmatter'
 import { lintPushes } from './lint'
@@ -40,9 +41,6 @@ export const isSafePath = (path: string): boolean =>
   !path.startsWith('/') &&
   !/^[A-Za-z]:/.test(path) &&
   path.split('/').every((part) => part !== '' && part !== '.' && part !== '..')
-
-const looksExecutable = (path: string): boolean =>
-  /\.(sh|bash|zsh|js|cjs|mjs|ts|py|rb|pl|ps1|bat|cmd)$/.test(path) || /(^|\/)scripts\//.test(path)
 
 export interface Checked {
   readonly name: string | null

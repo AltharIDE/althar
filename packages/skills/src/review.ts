@@ -1,3 +1,4 @@
+import { looksExecutable } from './executable'
 import { basename } from 'node:path'
 import { fileHashes, type Files } from './hash'
 import { fetchSkill, type GitHubAccess, type GitHubSkillSource, resolveRef } from './github'
@@ -61,9 +62,6 @@ const textOf = (bytes: Uint8Array | undefined): string | null => {
     return null
   }
 }
-
-const looksExecutable = (path: string): boolean =>
-  /\.(sh|bash|zsh|js|cjs|mjs|ts|py|rb|pl|ps1|bat|cmd)$/.test(path) || /(^|\/)scripts\//.test(path)
 
 const MAX_COMPARED = 4000
 const AROUND = 3

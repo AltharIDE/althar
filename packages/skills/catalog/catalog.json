@@ -1,0 +1,538 @@
+{
+  "version": 1,
+  "revision": "aeac41d4-bb92a777",
+  "entries": [
+    {
+      "id": "api-and-interface-design",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/api-and-interface-design"
+      },
+      "treeHash": "5da66d70c80bba15b728c38ae02ffefcfccff3259104707da0d043de5eaa5434",
+      "upstreamTreeHash": "5da66d70c80bba15b728c38ae02ffefcfccff3259104707da0d043de5eaa5434",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "note": "As upstream."
+    },
+    {
+      "id": "browser-testing-with-devtools",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/browser-testing-with-devtools"
+      },
+      "treeHash": "01e1b8491066ad1905263e132d8157bcc5d1dabd9624ae541203a2fd660ade67",
+      "upstreamTreeHash": "68d682e0ce5142d3a75f1bb8320ef2308c200272b1524c7f6d78caf0eb0d09a8",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/browser-testing-with-devtools",
+      "note": "Its MCP setup no longer names a Claude Code-only place or a file in the repository."
+    },
+    {
+      "id": "ci-cd-and-automation",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/ci-cd-and-automation"
+      },
+      "treeHash": "d9288075cfcda594b100b2e9418e8bff297047b8fc7e59767195d5046f0cfca6",
+      "upstreamTreeHash": "483bd838c62e5b35da8ff34e9d2ef1bee7a3adb94a4adbfb3a8656ec810beddf",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/ci-cd-and-automation",
+      "note": "The agent commits a fix and Althar pushes it, instead of the agent pushing."
+    },
+    {
+      "id": "code-review-and-quality",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/code-review-and-quality"
+      },
+      "treeHash": "e0663ad882dd88e578a50b250820744366fcec1497d0eef8c808c1d89647f618",
+      "upstreamTreeHash": "a9aeddb6e15fd4b738c2f18fcdf1d5dca6a415f0180ab9104047c5cb763e676d",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/code-review-and-quality",
+      "note": "Credits the Google engineering-practices material it adapts; its checklists are carried in."
+    },
+    {
+      "id": "code-simplification",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/code-simplification"
+      },
+      "treeHash": "225e2cf0eec84c26bfe45b18545484facde993dd55c51002eaf1540318e3c4aa",
+      "upstreamTreeHash": "5cb288668707479057796f29164a132413981ecee91c2bb9d381cc4d6ec6e06c",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/code-simplification",
+      "note": "Reads whichever agent rules file the project has, not CLAUDE.md alone."
+    },
+    {
+      "id": "constraint-driven-development",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/constraint-driven-development"
+      },
+      "treeHash": "6fa2d858b43908bd757c7e00dd50366078f757c2602bc307913f6c8681deecf2",
+      "upstreamTreeHash": "53b5cb0cbdf636fa66576e4c298dc9940e8960609eae1cf10c62bea1aaec71aa",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/constraint-driven-development",
+      "note": "Its phases name when the checks run instead of the author’s own slash commands; its template names no one."
+    },
+    {
+      "id": "context-engineering",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/context-engineering"
+      },
+      "treeHash": "a760d9b2253ad5dd6bb5199622b48f568630b0f918050229195998f6f2ec2371",
+      "upstreamTreeHash": "d89f5e68a2b6b731824ad2e64a561f51df607abebea068541c7765389e6dc4c9",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/context-engineering",
+      "note": "AGENTS.md is named for every harness that reads it."
+    },
+    {
+      "id": "deprecation-and-migration",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/deprecation-and-migration"
+      },
+      "treeHash": "70929a69a9352bd38ce85c416b1ca292b5237de93259259a53a57d405c3381fc",
+      "upstreamTreeHash": "70929a69a9352bd38ce85c416b1ca292b5237de93259259a53a57d405c3381fc",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "note": "As upstream."
+    },
+    {
+      "id": "documentation-and-adrs",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/documentation-and-adrs"
+      },
+      "treeHash": "bc5061708430e958aaa1a6fc563923252ca7450fb0c0a0c51b7985196c196ca9",
+      "upstreamTreeHash": "bc5061708430e958aaa1a6fc563923252ca7450fb0c0a0c51b7985196c196ca9",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "note": "As upstream."
+    },
+    {
+      "id": "doubt-driven-development",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/doubt-driven-development"
+      },
+      "treeHash": "b1ce8f8496af15b121e0e916ea2112c3576136cd3976804f2b4474c5fb9f51e6",
+      "upstreamTreeHash": "0a37344f128b67047e060f799c6a1b7ec0f9a7a5c8f81f1995352be068a7a32f",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [
+        "subagents"
+      ],
+      "patch": "althar/doubt-driven-development",
+      "note": "Needs a fresh-context subagent. The references to the author’s own personas and orchestration notes are left out."
+    },
+    {
+      "id": "frontend-ui-engineering",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/frontend-ui-engineering"
+      },
+      "treeHash": "d52ad45dcb5e8b5dfdc0c50b47a6e78218d1808af08e1f2a2efe8de2683e9543",
+      "upstreamTreeHash": "42ec60bede9ee03be73daa1fb503aa49544214bd7d2e4f1d750fac40ae391f2c",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/frontend-ui-engineering",
+      "note": "Its accessibility checklist is carried in."
+    },
+    {
+      "id": "git-workflow-and-versioning",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/git-workflow-and-versioning"
+      },
+      "treeHash": "9c0bc3eb1fd05fd2b5da7b3cecb0c22484dfbf17cbd8436a8866367dd103f3a5",
+      "upstreamTreeHash": "91c8c72654ee6ef163e49df26d1810cb7a6a91a4d8dee5b9f1bc03fd1fb8ec3a",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/git-workflow-and-versioning",
+      "note": "Tags locally and leaves pushing to Althar; cleans up only worktrees it created."
+    },
+    {
+      "id": "idea-refine",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/idea-refine"
+      },
+      "treeHash": "e92c85a1c3830edb2f6842af5c96b095c319c01cacc64a70b9fca13285838c54",
+      "upstreamTreeHash": "e5e3bf66a0b9e6769319ea61c430e9c6775ed453bfc4687cca870ffe10720185",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/idea-refine",
+      "note": "Asks with whatever the harness offers, names no harness’s tools, and keeps its one-pager out of the repository unless asked. Its script, which made a folder in the repository, is left out."
+    },
+    {
+      "id": "incremental-implementation",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/incremental-implementation"
+      },
+      "treeHash": "79e0013cdf004f31642403f3734304345cbc6ca164dbaa19d8921d0abfce8f4f",
+      "upstreamTreeHash": "9c717c7dd541eb6a91e705c665dd35921295308568a684625006609d66af5c61",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/incremental-implementation",
+      "note": "Its Definition of Done is carried in."
+    },
+    {
+      "id": "observability-and-instrumentation",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/observability-and-instrumentation"
+      },
+      "treeHash": "d51126ab34467b7837f80719a7eb522a8a8ef63b0997d3aded41003d990f5866",
+      "upstreamTreeHash": "f9f0f7174b1a677cbd9735a5940401766ff76544b771c56c289942c3ddbc7797",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/observability-and-instrumentation",
+      "note": "Its checklist is carried in."
+    },
+    {
+      "id": "performance-optimization",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/performance-optimization"
+      },
+      "treeHash": "b4a466265845865d320a2d3ceee69493504a6bce3061fd061be41819dcc4f5be",
+      "upstreamTreeHash": "7108da1589f6d604db42036fec9bea20d937d5f2178abc79174e7ffaad945a50",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/performance-optimization",
+      "note": "Keeps its experiment ledger out of the repository unless asked; its checklist is carried in."
+    },
+    {
+      "id": "security-and-hardening",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/security-and-hardening"
+      },
+      "treeHash": "c340576aad472039c9c3779a17aceb183767235028a154a016c1c8819c38cd3d",
+      "upstreamTreeHash": "f52100523848c210063c3ff5b7f8184285f71f8c959de9aeeee1b3699f8e3245",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/security-and-hardening",
+      "note": "Its checklist is carried in."
+    },
+    {
+      "id": "shipping-and-launch",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/shipping-and-launch"
+      },
+      "treeHash": "66a311e0b23cda9da13be73eca161f8050c69025fe0bbaa0470c1e24f4cb2f79",
+      "upstreamTreeHash": "729bad5a3b0ffcaa86dcdb4686cf50d6b1710910bbd28a3e463ebb8afb243da9",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/shipping-and-launch",
+      "note": "Reverts locally and leaves pushing to Althar; its checklists are carried in."
+    },
+    {
+      "id": "source-driven-development",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/source-driven-development"
+      },
+      "treeHash": "cc1b0589dad63690cd6c380c13fdc771defe73eefcaa22630b80e7097aec9a87",
+      "upstreamTreeHash": "cc1b0589dad63690cd6c380c13fdc771defe73eefcaa22630b80e7097aec9a87",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "note": "As upstream."
+    },
+    {
+      "id": "using-agent-skills",
+      "source": {
+        "kind": "github",
+        "repo": "addyosmani/agent-skills",
+        "sha": "aeac41d4d005999432bb7312f7ff06383a91d59d",
+        "subpath": "skills/using-agent-skills"
+      },
+      "treeHash": "c6780a6e5586b4dc9eaea3939b80975418ed9c49a3a7c220aa0a9f2ca3304efe",
+      "upstreamTreeHash": "41927b79f274a2a4eac841895bb1c75f7a1c37af2748a6a89e13bce13ff79bbd",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Addy Osmani",
+      "needs": [],
+      "patch": "althar/using-agent-skills",
+      "note": "The router for the whole catalog: its map names the skills carried from both upstreams, not those left out."
+    },
+    {
+      "id": "brainstorming",
+      "source": {
+        "kind": "github",
+        "repo": "obra/superpowers",
+        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+        "subpath": "skills/brainstorming"
+      },
+      "treeHash": "83b7b11fb74e97036a9f9941bbdca9551d4b63499e930c4cd4fc3b0f4402201b",
+      "upstreamTreeHash": "76096af618e6d2f68c3225af28c2f77f3e68734c4f73ddc6eae670fa914b9a59",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Jesse Vincent",
+      "needs": [],
+      "patch": "althar/brainstorming",
+      "note": "Kept over spec-driven-development and interview-me. Its trigger no longer fires on every task, its design document is not committed, its visual companion keeps its files ignored and makes no request to the author’s site."
+    },
+    {
+      "id": "dispatching-parallel-agents",
+      "source": {
+        "kind": "github",
+        "repo": "obra/superpowers",
+        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+        "subpath": "skills/dispatching-parallel-agents"
+      },
+      "treeHash": "a07f1c35d25cb21d078a48f42073d2da0df25d49ba034879f807ef5e686ff955",
+      "upstreamTreeHash": "a07f1c35d25cb21d078a48f42073d2da0df25d49ba034879f807ef5e686ff955",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Jesse Vincent",
+      "needs": [
+        "subagents"
+      ],
+      "note": "Needs subagents."
+    },
+    {
+      "id": "executing-plans",
+      "source": {
+        "kind": "github",
+        "repo": "obra/superpowers",
+        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+        "subpath": "skills/executing-plans"
+      },
+      "treeHash": "9c6fc06a65e59a4646f3f8de9b2ff981eadca1f922158edde730e39346bc693a",
+      "upstreamTreeHash": "92a56b68b632cc174cfe2fb42cd3344864e3a860d016df57b2010c6c81ca5816",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Jesse Vincent",
+      "needs": [],
+      "patch": "althar/executing-plans",
+      "note": "Carries the scripts and reviewer prompt it borrowed from sibling skills, so it works where subagent-driven-development is not given."
+    },
+    {
+      "id": "finishing-a-development-branch",
+      "source": {
+        "kind": "github",
+        "repo": "obra/superpowers",
+        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+        "subpath": "skills/finishing-a-development-branch"
+      },
+      "treeHash": "c0a919a6f38d2556fb5528966bd93fb95781d1074eee7186cf326d9d9382c351",
+      "upstreamTreeHash": "02db5c2ad9d5c3c3345dfbf04dc85b256fca6aa67a5af1dcd615483888cd2ab1",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Jesse Vincent",
+      "needs": [],
+      "patch": "althar/finishing-a-development-branch",
+      "note": "Ends in a hand-off: Althar pushes and opens the pull request. It never removes a worktree it did not create, such as Althar’s."
+    },
+    {
+      "id": "receiving-code-review",
+      "source": {
+        "kind": "github",
+        "repo": "obra/superpowers",
+        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+        "subpath": "skills/receiving-code-review"
+      },
+      "treeHash": "28ca5dacc047613c0a002cbe9fc7b693016c398c1e8933b60b7d64075c2a46bc",
+      "upstreamTreeHash": "9f9b9bf6d2d5c93c20c0fbda1b43b0c667ee7f628f7aaaa94bbc100bb9dcfd95",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Jesse Vincent",
+      "needs": [],
+      "patch": "althar/receiving-code-review",
+      "note": "Replies through the pull request tool the harness gives it, not `gh`."
+    },
+    {
+      "id": "requesting-code-review",
+      "source": {
+        "kind": "github",
+        "repo": "obra/superpowers",
+        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+        "subpath": "skills/requesting-code-review"
+      },
+      "treeHash": "b2b0c7894bb00ef6f4cffcccdf79a09697547480c3879f04e51c217452890008",
+      "upstreamTreeHash": "de15fd681bce2e32a9fa39cf99974638291198feb38670b3eb022dce0f6f518d",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Jesse Vincent",
+      "needs": [
+        "subagents"
+      ],
+      "patch": "althar/requesting-code-review",
+      "note": "Kept beside code-review-and-quality: it dispatches a fresh reviewer, which needs subagents."
+    },
+    {
+      "id": "subagent-driven-development",
+      "source": {
+        "kind": "github",
+        "repo": "obra/superpowers",
+        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+        "subpath": "skills/subagent-driven-development"
+      },
+      "treeHash": "aa530b538962578bf42722978b61348e6952b5e0ed38a51479ab04d37bc83566",
+      "upstreamTreeHash": "c985e5fbf287de92660b825116caa7106a6d598a10138348eec922264e128845",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Jesse Vincent",
+      "needs": [
+        "subagents"
+      ],
+      "patch": "althar/subagent-driven-development",
+      "note": "Needs subagents."
+    },
+    {
+      "id": "systematic-debugging",
+      "source": {
+        "kind": "github",
+        "repo": "obra/superpowers",
+        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+        "subpath": "skills/systematic-debugging"
+      },
+      "treeHash": "02447720db6bb3c4c3a1d29f27700b0c6babb0f987da2fc2dd5c963206514cf7",
+      "upstreamTreeHash": "fa3fac4e35376230eb41c5504722b8309e2428e26932c90482dd313cb3dd34ef",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Jesse Vincent",
+      "needs": [],
+      "patch": "althar/systematic-debugging",
+      "note": "Kept over debugging-and-error-recovery. The notes from writing it, which nothing links, are left out."
+    },
+    {
+      "id": "test-driven-development",
+      "source": {
+        "kind": "github",
+        "repo": "obra/superpowers",
+        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+        "subpath": "skills/test-driven-development"
+      },
+      "treeHash": "eacb1ee89d8231df02109de00ed2ca8bd6eec9e7ac1d937a6a0b59d307fc041e",
+      "upstreamTreeHash": "acf361b1743f444028ed8123f1ccf2df6e1d4dcca65b3f982aedb42f4f68ec44",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Jesse Vincent",
+      "needs": [],
+      "patch": "althar/test-driven-development",
+      "note": "Kept over agent-skills’ skill of the same name."
+    },
+    {
+      "id": "using-git-worktrees",
+      "source": {
+        "kind": "github",
+        "repo": "obra/superpowers",
+        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+        "subpath": "skills/using-git-worktrees"
+      },
+      "treeHash": "bccfda6b6705e7953cad0b52118e2a2c100089984a94dd07ddfabf1dcbed257e",
+      "upstreamTreeHash": "97b924d20b46b90bb1bd3735c405f9228390553693f112caf3cfa055a5bb334b",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Jesse Vincent",
+      "needs": [],
+      "patch": "althar/using-git-worktrees",
+      "note": "Ignores its folder in `.git/info/exclude` instead of committing a `.gitignore` change."
+    },
+    {
+      "id": "verification-before-completion",
+      "source": {
+        "kind": "github",
+        "repo": "obra/superpowers",
+        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+        "subpath": "skills/verification-before-completion"
+      },
+      "treeHash": "29d4bd654fdc57679501bf73b2821abf4ce035c536054a3e8e90ed7ed38644c7",
+      "upstreamTreeHash": "29d4bd654fdc57679501bf73b2821abf4ce035c536054a3e8e90ed7ed38644c7",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Jesse Vincent",
+      "needs": [],
+      "note": "As upstream."
+    },
+    {
+      "id": "writing-plans",
+      "source": {
+        "kind": "github",
+        "repo": "obra/superpowers",
+        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+        "subpath": "skills/writing-plans"
+      },
+      "treeHash": "c6331c97395c140ea349f545ea42d4005596f32054e7c01b61054c133e706ebc",
+      "upstreamTreeHash": "70aa13d73e96a9d810a3ef1c52f820686dfadd7755c9b9c57d6ef3e983328cb6",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Jesse Vincent",
+      "needs": [],
+      "patch": "althar/writing-plans",
+      "note": "Kept over planning-and-task-breakdown. Its plans are not committed."
+    },
+    {
+      "id": "writing-skills",
+      "source": {
+        "kind": "github",
+        "repo": "obra/superpowers",
+        "sha": "bb92a77741419a4ab5f06e711a283343f1ada0c3",
+        "subpath": "skills/writing-skills"
+      },
+      "treeHash": "cef11ee7d8cc841e8965112c1c00ffbc7476ac14f7cecf72206f6e292c5cbefd",
+      "upstreamTreeHash": "136dd86fba0380c2447c98d17af558f6918d16d94de4fc7f99255bb7108d7ae4",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2025 Jesse Vincent",
+      "needs": [
+        "subagents"
+      ],
+      "patch": "althar/writing-skills",
+      "note": "Its testing method needs fresh subagents. Anthropic’s authoring guide, which the upstream licence does not cover, is left out, and it ends with a hand-off instead of a push."
+    }
+  ]
+}

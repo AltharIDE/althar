@@ -1,5 +1,6 @@
 import { chmod, mkdir, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { looksExecutable } from './executable'
 import { isTreeHash, readObject } from './store'
 
 /** A skill chosen for a run: its id and the stored version to use. */
@@ -97,7 +98,8 @@ export const projectRun = async (input: {
     for (const [path, bytes] of await readObject(root, skill.treeHash)) {
       const target = join(skillsAt, skill.id, path)
       await mkdir(dirname(target), { recursive: true })
-      await writeFile(target, bytes, { mode: 0o444 })
+      // Read-only; a script stays runnable, as the skill's text runs it by its path (the agent runs it, under its rules).
+      await writeFile(target, bytes, { mode: looksExecutable(path) ? 0o555 : 0o444 })
     }
     projected.push(skill.id)
   }
