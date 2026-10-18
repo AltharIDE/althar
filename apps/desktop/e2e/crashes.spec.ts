@@ -23,6 +23,8 @@ interface Sent {
   readonly event: string
   readonly properties: Readonly<Record<string, unknown>> & {
     readonly process?: string
+    readonly where?: string
+    readonly agent?: string
     readonly $exception_list?: ReadonlyArray<{ readonly type: string; readonly value: string }>
   }
 }
@@ -91,8 +93,12 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
     })
     await expect.poll(() => crashes(fake.events)).toEqual(expect.arrayContaining(['window TypeError', 'main RangeError']))
 
-    // The window's page crashing: said now as a process gone, and on the next launch from its minidump.
-    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.forcefullyCrashRenderer())
+    // The window's page crashing: said now as a process gone, and on the next launch from its minidump. A segfault, as a
+    // real crash is: on a Mac, forcefullyCrashRenderer ends the page as killed, which isn't reported.
+    await electronApp.evaluate(({ BrowserWindow }) => {
+      const pid = BrowserWindow.getAllWindows()[0]?.webContents.getOSProcessId()
+      if (pid !== undefined) process.kill(pid, 'SIGSEGV')
+    })
     await expect.poll(() => crashes(fake.events), { timeout: 20_000 }).toContain('window Process gone')
     const sent = JSON.stringify(fake.events)
     expect(sent).not.toContain(home)
@@ -135,14 +141,46 @@ test('sends crash reports, masked, while their switch is on, a native crash on t
     await crashReports.locator('xpath=ancestor::div[2]').screenshot({ path: 'test-results/crash-reports-settings.png', scale: 'css' })
     await crashReports.click()
     await expect(crashReports).toHaveAttribute('aria-checked', 'false')
-    const before = fake.requests.length
+    // Usage data has a switch of its own, and its events on their way may still go: only crash reports must not.
+    const before = fake.events.length
     await page.evaluate(() => {
       setTimeout(() => {
         throw new Error('After the switch went off')
       })
     })
     await page.waitForTimeout(3_000)
-    expect(fake.requests.slice(before)).toEqual([])
+    expect(crashes(fake.events.slice(before))).toEqual([])
+  } finally {
+    await electronApp.close()
+    await fake.close()
+  }
+})
+
+test('keeps an agent it couldn’t check to that agent, shows the others as they are, and reports it as handled', async () => {
+  test.setTimeout(60_000)
+  const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))
+  mkdirSync(join(home, 'Projects'))
+  const fake = await posthog()
+  // Codex's status command isn't there: its check fails, and nothing else's does.
+  const { electronApp, page } = await launch(home, { ALTHAR_FAKE_POSTHOG: fake.url, ALTHAR_FAKE_UNCHECKED: 'codex' })
+  try {
+    const agents = page.getByRole('list', { name: /^Agents on / })
+    await expect(agents.getByText('Claude Code')).toBeVisible()
+    await expect(agents.getByText('Codex')).toBeVisible()
+    await expect(page.getByText("Althar's runtime couldn't do that. Its log has the details.")).toHaveCount(0)
+    await expect
+      .poll(() =>
+        fake.events
+          .filter((event) => event.event === '$exception')
+          .map((event) => {
+            const [exception] = event.properties.$exception_list ?? []
+            return `${event.properties.where} ${event.properties.agent} ${exception?.type}: ${exception?.value}`
+          }),
+      )
+      .toContain('Status.account codex Error: Codex’s status command isn’t there')
+    const handled = fake.events.find((event) => event.properties.where === 'Status.account')
+    expect(handled?.properties).toMatchObject({ process: 'runtime', $exception_level: 'error' })
+    expect(JSON.stringify(handled)).toContain('"handled":true')
   } finally {
     await electronApp.close()
     await fake.close()

@@ -774,6 +774,17 @@ describe('the start', () => {
       [RuntimeState.Ready, true],
       [RuntimeState.SignedOut, false],
     ])
+    // One Althar couldn't check says why on its own row, whatever else it holds.
+    const problem = "Althar couldn't check Codex. Its log has the details."
+    const codex = agents.find((agent) => agent.id === 'codex')
+    if (codex === undefined) throw new Error('No Codex in the fixtures')
+    expect(runtimeEntry({ ...codex, installed: false, problem })).toEqual({
+      id: 'codex',
+      name: 'Codex',
+      brand: expect.any(String),
+      state: RuntimeState.Unchecked,
+      why: problem,
+    })
   })
 
   it('needs its services', () => {

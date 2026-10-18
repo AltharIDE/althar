@@ -598,7 +598,7 @@ export function TaskView({
         onRename={() => setRenaming(true)}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
-        // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-047); a
+        // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-048); a
         // review reads one only.
         {...(can('abandon') && snapshot.task.phase !== 'settled' && snapshot.task.review == null && snapshot.task.worktree !== null
           ? {

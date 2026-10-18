@@ -1,4 +1,4 @@
-# ADR-047: A task can be attached to an open pull request it didn't open
+# ADR-048: A task can be attached to an open pull request it didn't open
 
 - **Status:** Accepted
 - **Date:** 2026-10-17

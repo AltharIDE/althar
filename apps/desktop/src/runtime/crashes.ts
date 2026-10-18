@@ -1,3 +1,5 @@
+import type { Failure } from '@althar/runtime'
+
 /*
  * What the runtime couldn't handle, for the main process (DEV-66): an
  * exception nobody caught, a rejection nobody handled, and the defect its
@@ -10,14 +12,27 @@
  * warned of it, since listening for it stops Node's own warning.
  */
 
-export type RuntimeCrashHow = 'uncaught' | 'rejection' | 'defect'
+export type RuntimeCrashHow = 'uncaught' | 'rejection' | 'defect' | 'handled'
 
 export interface RuntimeCrash {
   readonly how: RuntimeCrashHow
   readonly name: string
   readonly message: string
   readonly stack: string
+  /** For one handled: Althar's name for where it was, and whose agent's. */
+  readonly where?: string
+  readonly agent?: string
 }
+
+/** A failure the runtime kept to what it belonged to and carried on past (ADR-047), as a crash it tells main of, cut as any other. */
+export const handledOf = (failure: Failure): RuntimeCrash => ({
+  how: 'handled',
+  name: failure.name,
+  message: failure.message.slice(0, 4_000),
+  stack: failure.stack.slice(0, 16_000),
+  where: failure.where,
+  ...(failure.agent === null ? {} : { agent: failure.agent }),
+})
 
 /** What was thrown, as words that cross to the main process: an error's own, or what anything else says it is. */
 export const crashOf = (how: RuntimeCrashHow, thrown: unknown): RuntimeCrash => {

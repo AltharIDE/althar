@@ -51,6 +51,36 @@ describe('connecting', () => {
     }),
   )
 
+  it.live('still offers gh’s sign-in where it answers when it doesn’t answer for another instance', () => {
+    const github = makeFakeService()
+    github.addRepository(['meridian', 'api'])
+    const layer = runtime(
+      ':memory:',
+      {},
+      {
+        connectors: fakeConnectors(
+          { github },
+          {
+            // github.com's gh is stuck at its keychain; this instance's answers.
+            cliToken: (tool, host) =>
+              host === 'github.test'
+                ? Effect.succeed('gho_from_gh')
+                : Effect.fail(new CliUnanswered({ tool, message: `${tool} didn’t answer (SIGTERM)` })),
+          },
+        ),
+      },
+    )
+    return Effect.gen(function* () {
+      const connections = yield* Connections
+      const instance = yield* Instance
+      const projects = yield* Projects
+      yield* connections.connectToken({ product: 'github', webUrl: HOST, token: 'ghp_first', actorId: instance.personId })
+      yield* projects.open({ envelope: yield* Runtime.envelope('project.open', {}), path: hosted().working })
+      const guide = yield* connections.guide('github')
+      assert.deepStrictEqual(guide.clis, [{ product: 'github', webUrl: HOST, tool: 'gh', account: 'you', scopes: null }])
+    }).pipe(Effect.provide(layer))
+  })
+
   it.live('says where the projects’ code is, and gh’s sign-in there, and connects with it', () => {
     const github = makeFakeService()
     github.addRepository(['meridian', 'api'])

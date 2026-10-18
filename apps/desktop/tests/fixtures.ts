@@ -78,6 +78,7 @@ export const agents: ReadonlyArray<AgentStatus> = [
     installed: true,
     kept: false,
     download: null,
+    problem: null,
   },
   {
     id: 'codex',
@@ -90,6 +91,7 @@ export const agents: ReadonlyArray<AgentStatus> = [
     installed: true,
     kept: false,
     download: null,
+    problem: null,
   },
   {
     id: 'opencode',
@@ -102,6 +104,7 @@ export const agents: ReadonlyArray<AgentStatus> = [
     installed: true,
     kept: false,
     download: { size: '45 MB', installing: false },
+    problem: null,
   },
 ]
 

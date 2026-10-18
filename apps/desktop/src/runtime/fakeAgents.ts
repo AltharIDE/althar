@@ -14,11 +14,22 @@ import { Layer } from 'effect'
  * set, in a build with the test hooks.
  */
 
+/** Agents whose sign-in can't be checked, as where their status command isn't there: ALTHAR_FAKE_UNCHECKED lists them. */
+const unchecked = new Set((process.env.ALTHAR_FAKE_UNCHECKED ?? '').split(',').filter((agentId) => agentId !== ''))
+
 const definition = (real: AgentDefinition): AgentDefinition => ({
   ...real,
   modes: { ask: 'ask', readOnly: 'read-only', reader: 'read-only' },
   options: { mode: 'mode', model: 'model', effort: 'effort' },
-  signIn: { status: () => ({ command: 'true', args: [] }), read: () => true, paidBy: () => 'plan', login: real.signIn.login },
+  signIn: {
+    status: () => {
+      if (unchecked.has(real.id)) throw new Error(`${real.name}’s status command isn’t there`)
+      return { command: 'true', args: [] }
+    },
+    read: () => true,
+    paidBy: () => 'plan',
+    login: real.signIn.login,
+  },
   // Its usual folder is the test's, so nothing of the person's is read or linked.
   home: {
     variable: 'ALTHAR_FAKE_HOME',
