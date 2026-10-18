@@ -1,0 +1,40 @@
+{
+  // The report service: a Worker with one route, POST /reports, which turns a
+  // problem report sent from the app into an issue in Linear's triage. See
+  // README.md for the contract and ARCHITECTURE.md for what it trusts.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "althar-report",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-26",
+  "observability": {
+    "enabled": true,
+  },
+  // Not secret. LINEAR_API_KEY is: `wrangler secret put LINEAR_API_KEY`, and
+  // locally .dev.vars, which can also point LINEAR_API_URL at the fake Linear.
+  "vars": {
+    // Althar's Development team (key DEV).
+    "LINEAR_TEAM_ID": "114c997c-12a5-4ab3-89bc-8d29dfd2ddeb",
+    // The label every report gets. It is made in the team on the first report
+    // if neither the team nor the workspace has it.
+    "LINEAR_LABEL": "From the app",
+  },
+  // Cloudflare's Rate Limiting. A namespace_id is any number unique within the
+  // account; change these if another Worker there uses them.
+  "ratelimits": [
+    {
+      // Reports per install, keyed by the report's installId.
+      "name": "REPORTS_PER_INSTALL",
+      "namespace_id": "4101",
+      "simple": { "limit": 3, "period": 60 },
+    },
+    {
+      // Reports per address, keyed by CF-Connecting-IP.
+      "name": "REPORTS_PER_IP",
+      "namespace_id": "4102",
+      "simple": { "limit": 10, "period": 60 },
+    },
+  ],
+  // Branch builds run `wrangler preview`, which needs this block. Empty: previews
+  // use the same settings as production.
+  "previews": {},
+}

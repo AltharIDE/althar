@@ -1,0 +1,4 @@
+# Local secrets for `wrangler dev`; .dev.vars.example shows what goes in them.
+.dev.vars
+.dev.vars.*
+!.dev.vars.example

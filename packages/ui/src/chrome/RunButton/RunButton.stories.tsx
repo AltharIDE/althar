@@ -107,3 +107,50 @@ export const NothingYet: Story = {
     await expect(args.onAdd).toHaveBeenCalledWith('ask')
   },
 }
+
+const LONG =
+  'export PATH="$HOME/.bun/bin:$PATH"; unset ELECTRON_RUN_AS_NODE; P=$(pwd); cd apps/desktop && bun run build && cd "$P" && exec zypak-wrapper electron apps/desktop --no-sandbox'
+
+/** A long unnamed command, from an agent: the button says the last thing it runs, cut short, in a narrow bar beside a title; the full command is its tooltip. */
+export const LongCommand: Story = {
+  args: { targets: [{ id: 'long', command: LONG, where: 'main', from: 'agent' }] },
+  decorators: [
+    (Story) => (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, width: 260, minHeight: 60 }}>
+        <strong style={{ minWidth: 0, flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          Althar
+        </strong>
+        {Story()}
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const button = within(canvasElement).getByRole('button', { name: /^Run zypak-wrapper/ })
+    await expect(button).toHaveAttribute('title', LONG)
+    await expect(canvasElement.scrollWidth).toBeLessThanOrEqual(260)
+  },
+}
+
+/** Running, the same long command with its address, still cut short. */
+export const LongCommandRunning: Story = {
+  args: {
+    targets: [{ id: 'long', command: LONG, where: 'main', from: 'agent', run: { state: 'running', url: 'localhost:5290', since: '1m' } }],
+  },
+  decorators: LongCommand.decorators!,
+}
+
+/** Two unnamed commands that end the same read the same by their label; each row's description keeps its whole command to tell them apart. */
+export const SameLabel: Story = {
+  args: {
+    defaultOpen: true,
+    targets: [
+      { id: 'a', command: 'cd apps/a && bun run dev', where: 'main', from: 'agent' },
+      { id: 'b', command: 'cd apps/b && bun run dev', where: 'main', from: 'agent' },
+    ],
+  },
+  play: async () => {
+    const page = within(document.body)
+    await expect(page.getByText(/^cd apps\/a && bun run dev/)).toBeInTheDocument()
+    await expect(page.getByText(/^cd apps\/b && bun run dev/)).toBeInTheDocument()
+  },
+}

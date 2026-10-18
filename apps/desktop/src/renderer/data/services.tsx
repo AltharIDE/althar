@@ -4,6 +4,7 @@ import { createContext, type ReactNode, useContext, useEffect, useEffectEvent } 
 import type { WatchEvent } from '@althar/contracts'
 
 import type { AppPreferences, PreferenceKey } from '../../main/appPreferences'
+import type { Opened, ReportChoices, ReportContext, ReportPreview, Sent } from '../../main/report/bundle'
 import type { UpdateGlance } from '../../main/updates'
 
 import type { Client } from './client'
@@ -102,8 +103,44 @@ export interface StoreFailure {
   readonly reason: string
 }
 
-/** What a problem the person reports is about, so the report carries it. */
-export type ProblemAbout = { readonly kind: 'update'; readonly reason: string }
+/**
+ * What a problem the person reports is about, so the report carries it: an
+ * update that couldn't move the store, with what stopped it; asked for from
+ * the menu or Settings, about wherever they are; or a step or task that
+ * couldn't go on, by its ids and in a few words.
+ */
+export type ProblemAbout =
+  | { readonly kind: 'update'; readonly reason: string }
+  | { readonly kind: 'asked'; readonly from: 'menu' | 'settings' }
+  | {
+      readonly kind: 'failed'
+      readonly taskId: string
+      readonly projectId: string | null
+      readonly threadId: string | null
+      /** In a few words: "Stuck: Implement". */
+      readonly what: string
+    }
+
+/** Report a problem, through the main process (DEV-61): it takes the screenshot, gathers what goes, and sends or saves it. */
+export interface ReportHost {
+  /** Opens a report from where the person is, taking the window's picture before the dialog draws over it. */
+  readonly open: (context: ReportContext) => Promise<Opened>
+  /** What goes with it, once gathered, for See what's sent. */
+  readonly preview: (reportId: string) => Promise<ReportPreview>
+  readonly send: (reportId: string, choices: ReportChoices) => Promise<Sent>
+  /** The report is done with: what was gathered for it goes. */
+  readonly close: (reportId: string) => void
+  /** Calls `listener` with what each report asked for is about, from `reportProblem` or the menu, until the returned function is called. */
+  readonly onAsked: (listener: (about: ProblemAbout) => void) => () => void
+}
+
+/** An error the page didn't handle, for main's log. */
+export interface WindowError {
+  readonly kind: 'error' | 'rejection'
+  readonly message: string
+  readonly stack: string
+  readonly source?: string
+}
 
 export interface Host {
   /** The system Althar runs on: darwin, win32, linux; off a Mac the window's chrome is the app's own. */
@@ -144,8 +181,6 @@ export interface Host {
   readonly onStoreFailed: (listener: (failure: StoreFailure) => void) => () => void
   /** Shows the copy from before that update in the system's file manager. */
   readonly showBackup: () => Promise<void>
-  /** Reports a problem, with what it is about (DEV-61). Absent until the app can send one: nothing offers to then. */
-  readonly reportProblem?: (about: ProblemAbout) => void
   /** Calls `listener` with the thread a notification the person clicked is about, until the returned function is called. */
   readonly onOpen: (listener: (threadId: string) => void) => () => void
   /**
@@ -178,6 +213,12 @@ export interface Host {
   readonly clipboardToken: () => Promise<string | null>
   /** Updates; absent where the page has no way to them, as the edge's. */
   readonly update?: UpdateHost
+  /** Reports a problem, with what it is about (DEV-61): the window's Report a problem dialog opens. Absent where it can't: nothing offers to then. */
+  readonly reportProblem?: (about: ProblemAbout) => void
+  /** How the dialog reaches the main process; absent with `reportProblem`. */
+  readonly report?: ReportHost
+  /** Keeps an error the page didn't handle in main's log. */
+  readonly logError?: (error: WindowError) => void
 }
 
 export interface Services {
