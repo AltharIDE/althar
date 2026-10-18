@@ -105,6 +105,23 @@ import { agentSaid, summarize } from './words'
 
 export type Disposition = 'after_current' | 'interrupt_and_continue'
 
+/**
+ * An agent that doesn't answer ACP startup must not leave a handover pending forever. The bound covers the whole startup, so it
+ * also cuts off an agent that works but is slow: connecting, `session/new`, and setting the model and effort.
+ */
+const SESSION_START_TIMEOUT = Duration.minutes(2)
+
+/** Starting the agent took longer than its bound: it hung, or was too slow, as opposed to refusing or crashing. */
+export class StartTimedOut extends Schema.TaggedError<StartTimedOut>()('StartTimedOut', {
+  agentId: Schema.String,
+  agentName: Schema.String,
+  after: Schema.Duration,
+}) {
+  override get message(): string {
+    return `Timed out after ${Duration.format(this.after)} waiting for ${this.agentName} to set up a session.`
+  }
+}
+
 export const AcceptedInput = Schema.Struct({ inputId: Schema.String, sequence: Schema.Int })
 export type AcceptedInput = typeof AcceptedInput.Type
 
@@ -1695,7 +1712,18 @@ export class Sessions extends Context.Service<
               // An effort the model doesn't offer is no reason not to start.
               yield* settleEffort(definition, agent, effort ?? null)
               return { connection, agent }
-            }).pipe(Scope.provide(scope)),
+            }).pipe(
+              Scope.provide(scope),
+              Effect.timeoutOption(SESSION_START_TIMEOUT),
+              Effect.flatMap((result) => {
+                if (Option.isNone(result)) {
+                  return Effect.fail(
+                    new StartTimedOut({ agentId: definition.id, agentName: definition.name, after: SESSION_START_TIMEOUT }),
+                  )
+                }
+                return Effect.succeed(result.value)
+              }),
+            ),
           )
           if (Exit.isFailure(started)) {
             yield* Scope.close(scope, Exit.void)
