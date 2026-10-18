@@ -25,7 +25,7 @@ import type {
   Tracker,
   Verdict,
 } from './model'
-import { lacking, leftAsItIs } from './model'
+import { branchPath, lacking, leftAsItIs, stillOpen } from './model'
 import {
   type Answer,
   answered,
@@ -572,6 +572,36 @@ export const makeGitHub = (options: AdapterOptions): CodeHost & Tracker => {
           ...(change.headSha === null ? {} : { sha: change.headSha }),
         })
         .pipe(Effect.andThen(Effect.map(http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`), changeOf))),
+    closeChange: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)
+        if (now.state !== 'open') return changeOf(now)
+        return changeOf(yield* http.json(PullAnswer, 'PATCH', `${repo(repository)}/pulls/${change.number}`, { state: 'closed' }))
+      }),
+    deleteBranch: (repository, change) =>
+      Effect.gen(function* () {
+        const now = yield* http.json(PullAnswer, 'GET', `${repo(repository)}/pulls/${change.number}`)
+        if (now.state === 'open') return yield* stillOpen(product, { noun: 'pull request', short: 'PR', prefix: '#' }, change.number)
+        // Its branch is where its head is: a fork's, for one from a fork; a fork that is gone took it along.
+        const on = now.head.repo?.full_name
+        if (on == null) return
+        const branch = branchPath(now.head.ref)
+        yield* http.json(Schema.Unknown, 'DELETE', `${repo(on.split('/'))}/git/refs/heads/${branch}`).pipe(
+          // GitHub answers 422 for a branch already gone, but for the default branch, a validation or throttling too: only one
+          // GitHub then says isn't there is gone, and any other refusal is said.
+          Effect.catchIf(
+            (error) => error.status === 422,
+            (refused) =>
+              http.json(Schema.Unknown, 'GET', `${repo(on.split('/'))}/git/ref/heads/${branch}`).pipe(
+                Effect.andThen(Effect.fail(refused)),
+                Effect.catchIf(
+                  (error) => error.reason === 'not_found',
+                  () => Effect.void,
+                ),
+              ),
+          ),
+        )
+      }),
     checks: (repository, sha) =>
       Effect.gen(function* () {
         // A fine-grained token is given no check runs, and GitHub refuses them: the commit's statuses are read alone.

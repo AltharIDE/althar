@@ -715,6 +715,7 @@ export const snapshot = (overrides: Partial<ThreadSnapshot> = {}): ThreadSnapsho
     effort: 'high',
     models: ['opus', 'sonnet'],
     turnRunning: false,
+    held: true,
     context: null,
     background: [],
   },
@@ -876,6 +877,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     setTaskResolveConflicts: vi.fn(async () => {}),
     setTaskAllowEverything: vi.fn(async () => {}),
     resumeTask: vi.fn(async () => {}),
+    leaveOutCommits: vi.fn(async () => {}),
     abandonTask: vi.fn(async () => {}),
     reopenTask: vi.fn(async () => {}),
     renameTask: vi.fn(async () => {}),
@@ -943,6 +945,7 @@ export const fakeClient = (overrides: Partial<Client> = {}) => {
     skipReview: vi.fn(async () => {}),
     refreshTask: vi.fn(async () => {}),
     stopListening: vi.fn(async () => {}),
+    closePullRequest: vi.fn(async () => ({ branch: null })),
     stopBackground: vi.fn(async () => {}),
     clearBackground: vi.fn(async () => {}),
     runProject: vi.fn(async (_projectId: string, taskId: string | null, _threadId: string | null, runnableId?: string) => ({

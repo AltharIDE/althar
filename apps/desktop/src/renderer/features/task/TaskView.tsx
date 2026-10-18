@@ -35,6 +35,7 @@ import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
 import { Holders } from '../../shared/Holders'
+import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, useDraft } from '../../shared/drafts'
 import { isGenerated } from '../../shared/generated'
@@ -64,6 +65,8 @@ import { StuckCall } from './StuckCall'
 import { TaskThread } from './TaskThread'
 import { ConnectPanel } from '../connections/ConnectPanel'
 import { serviceOfProduct } from '../connections/ways'
+import { useServices } from '../../data/services'
+import { text as reportText } from '../report/reportWords'
 import { NoOutputsView } from './NoOutputsView'
 import { conflictsOf, hasOutputs, Outputs } from './Outputs'
 import s from './Task.module.css'
@@ -90,6 +93,10 @@ type Face = 'talk' | 'out'
 
 export const text = {
   thread: 'Thread',
+  /** Dictation carried once the person leaves the task: whose it is, and putting another thread's here. */
+  carriedTo: (task: string) => `To the lead · ${task}`,
+  carriedSend: 'Send to the lead',
+  carriedTake: 'Move it to this task',
   /** The sentence under a review's header: what its lead can reach. */
   reach: 'What this review’s lead can reach',
   noLead: 'No lead yet',
@@ -166,7 +173,8 @@ export const statusOf = (
   if (phase === 'settled') return { status: TaskStatus.Done, state: snapshot.task.state === 'abandoned' ? text.abandoned : text.done }
   // On a step another agent takes, a review, while its lead waits.
   if (phase === 'running' && doing !== undefined) return { status: TaskStatus.Running, state: doing }
-  if (snapshot.session === null) return { status: TaskStatus.Stopped, state: text.stopped }
+  // A recorded session the runtime no longer holds is no lead at work either.
+  if (snapshot.session === null || !snapshot.session.held) return { status: TaskStatus.Stopped, state: text.stopped }
   return { status: TaskStatus.Running, state: text.idle }
 }
 
@@ -278,7 +286,21 @@ export function TaskView({
   // What the person writes to the lead, kept by the task while they are elsewhere, as are its images and what they dictate.
   const kept = draftKey.task(model.snapshot?.threadId ?? '')
   const [draft, setDraft] = useDraft(kept)
-  const voice = useDictation(kept, { projectId: model.snapshot?.project.id ?? null })
+  const threadId = model.snapshot?.threadId ?? null
+  const voice = useDictation(kept, {
+    projectId: model.snapshot?.project.id ?? null,
+    to:
+      threadId === null || model.snapshot === null
+        ? null
+        : {
+            to: text.carriedTo(model.snapshot.task.title),
+            back: { kind: 'task', threadId },
+            // Sent from elsewhere only while its lead is on it; otherwise its own composer starts one.
+            threadId: model.snapshot.session?.held === true ? threadId : null,
+            send: text.carriedSend,
+            take: text.carriedTake,
+          },
+  })
   // Images to send with what the person says, and which agents take them.
   const images = useImages(kept)
   const models = useModels()
@@ -289,8 +311,14 @@ export function TaskView({
   const [handover, setHandover] = useState<Choice | null>(null)
   // Where its code host is connected, opened beside its outputs once its branch is pushed.
   const [connecting, setConnecting] = useState(false)
-  // Abandoning it asks first, saying what happens to its worktree and branch.
+  // Abandoning it asks first, saying what happens to its worktree and branch, and offering to close its pull requests.
   const [abandoning, setAbandoning] = useState(false)
+  // Abandoned, the pull requests it was to close that are still open, by address, offered again: null until then.
+  const [leftOpen, setLeftOpen] = useState<ReadonlyArray<string> | null>(null)
+  const endAbandoning = () => {
+    setAbandoning(false)
+    setLeftOpen(null)
+  }
   // Whether its title is a field, from its menu's Rename or from pressing the title.
   const [renaming, setRenaming] = useState(false)
   // The face shown: the one the task's state opened on, read once, so it never moves under the person; then theirs.
@@ -316,6 +344,8 @@ export function TaskView({
   const editor = editors.main
   // What the thread's parts open: a picture in the lightbox, a document beside the thread.
   const host = useThreadHost()
+  // Report this, on a stuck step: Report a problem, with this task (DEV-61).
+  const { reportProblem } = useServices().host
   const files = model.snapshot?.task.files ?? []
   // What it changed opens on the first file someone wrote, not a lockfile.
   const changes = useChanges(model.snapshot?.task.id ?? null, (files.find((file) => !isGenerated(file.path)) ?? files[0])?.path ?? null)
@@ -385,7 +415,7 @@ export function TaskView({
     model.agents.find((agent) => agent.id === id)?.name ?? (id === session?.agentId ? session.agentName : (id ?? ''))
   // Running or not, the task has its lead: the one on it now, else the last, else the one its plan names.
   const lead =
-    session !== null
+    session !== null && session.held
       ? named(session.agentId, session.model, session.account)
       : snapshot.task.lead === null
         ? noLead
@@ -447,17 +477,17 @@ export function TaskView({
       : resume === undefined
         ? null
         : { agentId: resume.id, model: null, effort: null })
-  const waiting = session === null || handover?.agentId === session.agentId ? null : handover
-  const choice = session === null ? chosen : (waiting ?? runningOn(session))
+  const waiting = session === null || !session.held || handover?.agentId === session.agentId ? null : handover
+  const choice = session === null || !session.held ? chosen : (waiting ?? runningOn(session))
 
   // The agent what the person says goes to: one picked to take over, else the lead on it, else the one it would start; and whether it takes images.
-  const receiving = waiting?.agentId ?? session?.agentId ?? chosen?.agentId ?? null
+  const receiving = waiting?.agentId ?? (session?.held ? session.agentId : undefined) ?? chosen?.agentId ?? null
   const receiver = { name: agentName(receiving), takes: takesImages(models, receiving) }
   // With no lead working, what the person says starts the one picked, as its first turn; with another agent picked, that one takes over with it.
   const send = (body: string, now: boolean, outgoing?: Outgoing) => {
     setDraft('')
     if (outgoing !== undefined) images.clear()
-    if (session === null) return model.send(body, chosen ?? undefined, outgoing)
+    if (session === null || !session.held) return model.send(body, chosen ?? undefined, outgoing)
     if (waiting !== null) {
       setHandover(null)
       return model.handOver(waiting, body, outgoing)
@@ -482,7 +512,7 @@ export function TaskView({
   }
   // Picking changes nothing that runs: the same agent's model or effort is set for its next turn, another agent waits for what the person says.
   const choose = (next: Choice) => {
-    if (session === null) return setPick(next)
+    if (session === null || !session.held) return setPick(next)
     if (next.agentId !== session.agentId) return setHandover(next)
     setHandover(null)
     void model.choose(next)
@@ -504,7 +534,11 @@ export function TaskView({
   const { planId } = snapshot.task
   // Its draft pull requests, marked ready from the menu too, while it is under way or ready.
   const drafts = snapshot.task.phase === 'settled' ? [] : snapshot.task.changes.filter((one) => one.state === 'open' && one.draft)
-  const openChange = snapshot.task.changes.find((one) => one.state === 'open')
+  // Its pull requests still open, offered to close as it is abandoned; those left open after, offered again.
+  const openChanges = snapshot.task.changes.filter((one) => one.state === 'open')
+  const offered = leftOpen === null ? openChanges : openChanges.filter((one) => leftOpen.includes(one.url))
+  // Its newest pull request that merged: what a merged task's commits came after.
+  const mergedChange = snapshot.task.changes.findLast((one) => one.state === 'merged')
   // What it changed opens over the window; what else it can do is in its menu.
   const actions = (
     <>
@@ -537,8 +571,10 @@ export function TaskView({
         {...(snapshot.task.skipReview === true ? { onSkipReview: () => void model.skipReview() } : {})}
         {...(can('stop') ? { onStop: () => void model.stop() } : {})}
         {...(can('resume') ? { onResume: () => void model.resume() } : {})}
-        {...(can('abandon')
+        // A merged task abandons the commits after its pull request, and stays merged: one Abandon, said for what it does.
+        {...(can('abandon') || can('leaveOut')
           ? {
+              merged: can('leaveOut'),
               onAbandon: () => {
                 model.dismissError()
                 setAbandoning(true)
@@ -577,7 +613,9 @@ export function TaskView({
           {model.error} <LinkButton onClick={model.dismissError}>{text.dismiss}</LinkButton>
         </p>
       )}
-      {session === null && model.agentsKnown && model.agents.length === 0 && <p className={s.handover}>{text.needsAgent}</p>}
+      {(session === null || !session.held) && model.agentsKnown && model.agents.length === 0 && (
+        <p className={s.handover}>{text.needsAgent}</p>
+      )}
       <Holders holders={snapshot.task.queued?.holders} onStop={(holder, id) => void model.stopHolding(holder, id)} />
       {waiting !== null && (
         <p className={s.handover}>
@@ -591,6 +629,7 @@ export function TaskView({
         inputRef={voice.inputRef}
         dictation={voice.dictation}
         tray={voice.tray && <DictationTray {...voice.tray} />}
+        carried={<CarriedOver here={kept} />}
         // What goes on outside the conversation floats over its end: the pull requests it listens to, and what its lead left running.
         above={
           (listening.length > 0 || leftRunning.length > 0) && (
@@ -619,7 +658,7 @@ export function TaskView({
         queued={queuedOf(snapshot.items, queue)}
         onEditQueued={(id) => void edit(id)}
         onUnqueue={(id) => void model.takeBack(id)}
-        placeholder={busy ? text.placeholderBusy : text.placeholder(session?.agentName ?? agentName(chosen?.agentId ?? null))}
+        placeholder={busy ? text.placeholderBusy : text.placeholder(receiver.name)}
         meter={contextMeter(session, named, model.compact)}
         // Another agent's model hands the task to that agent.
         picker={
@@ -631,7 +670,7 @@ export function TaskView({
               value={choice}
               onChange={choose}
               // Another agent's model hands the task over, once the person says something.
-              {...(session === null ? {} : { handover: { note: text.handsOver, ask: null } })}
+              {...(session === null || !session.held ? {} : { handover: { note: text.handsOver, ask: null } })}
             />
           )
         }
@@ -822,6 +861,18 @@ export function TaskView({
                   agents={model.agents}
                   agentName={agentName}
                   onAnswer={(attentionId, answer) => void model.answerStuck(attentionId, answer)}
+                  {...(reportProblem === undefined
+                    ? {}
+                    : {
+                        onReport: (step: string) =>
+                          reportProblem({
+                            kind: 'failed',
+                            taskId: snapshot.task.id,
+                            projectId: snapshot.project.id,
+                            threadId: snapshot.threadId,
+                            what: reportText.stuck(step),
+                          }),
+                      })}
                 />
               ) : null,
             )}
@@ -846,13 +897,37 @@ export function TaskView({
           activity={can('stop') ? TaskActivity.Working : can('start') ? TaskActivity.Planned : TaskActivity.Still}
           worktree={snapshot.task.worktree === null ? null : shortFolder(snapshot.task.worktree)}
           branch={snapshot.task.branch}
-          {...(openChange === undefined
+          changes={offered.map((one) => ({ id: one.url, name: `${one.noun} ${one.prefix}${one.number}`, host: productName(one.product) }))}
+          abandoned={leftOpen !== null}
+          {...(mergedChange === undefined || !can('leaveOut')
             ? {}
-            : { change: { name: `${openChange.short} ${openChange.prefix}${openChange.number}`, host: productName(openChange.product) } })}
+            : {
+                merged: {
+                  name: `${mergedChange.short} ${mergedChange.prefix}${mergedChange.number}`,
+                  commits: snapshot.task.unshipped?.commits ?? 0,
+                },
+              })}
           busy={model.pending}
           {...(model.error === null ? {} : { error: model.error })}
-          onAbandon={() => void model.abandon().then((abandoned) => abandoned && setAbandoning(false))}
-          onClose={() => setAbandoning(false)}
+          onAbandon={(choices) =>
+            void model
+              .abandon(
+                offered
+                  .filter((one) => choices.close.includes(one.url))
+                  .map((one) => ({
+                    url: one.url,
+                    name: `${one.short} ${one.prefix}${one.number}`,
+                    deleteBranch: choices.deleteBranch.includes(one.url),
+                  })),
+              )
+              .then(({ abandoned, open }) => {
+                // Abandoned, with each it was to close closed: done. One its host wouldn't close stays offered, with why.
+                if (!abandoned) return
+                if (open.length === 0) endAbandoning()
+                else setLeftOpen(open)
+              })
+          }
+          onClose={endAbandoning}
         />
       )}
       {changes.open && (
