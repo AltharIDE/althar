@@ -721,13 +721,13 @@ export class Changes extends Context.Service<
         })
 
       /**
-       * What the steps reported, as the pull request's description: in the
-       * repository's template, where it has one. A task's next pull request,
-       * after one merged or closed, is described from what came `since` that
-       * one opened: its own work, not the last one's again (ADR-034).
+       * The pull request's description, as the lead wrote it for the
+       * repository, in its template where it has one; where it wrote none,
+       * what the task built. A task's next pull request, after one merged or
+       * closed, is described from what came `since` that one opened: its own
+       * work, not the last one's again (ADR-034).
        */
       const bodyFor = (
-        taskId: string,
         threadId: string,
         issue: { readonly key: string; readonly url: string; readonly sameHost: boolean } | null,
         repository: { readonly slug: string; readonly template: string | null },
@@ -739,39 +739,18 @@ export class Changes extends Context.Service<
           const [lead] = yield* sql<{ summary: string }>`
             SELECT json_extract(content, '$.summary') AS summary FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
               AND json_extract(content, '$.step') IN ('implement', 'settle') AND ${after} ORDER BY sequence DESC LIMIT 1`
-          // The lead's latest description in the template, for this repository.
-          const [written] =
-            repository.template === null
-              ? []
-              : yield* sql<{ text: string | null }>`
-                  SELECT json_extract(content, '$.descriptions.' || json_quote(${repository.slug})) AS text FROM thread_items
-                  WHERE thread_id = ${threadId} AND kind = 'step_result'
-                    AND json_extract(content, '$.descriptions.' || json_quote(${repository.slug})) IS NOT NULL AND ${after}
-                  ORDER BY sequence DESC LIMIT 1`
-          const findings = yield* sql<{ severity: string; location: string; claim: string; state: string; response: string | null }>`
-            SELECT f.severity, f.location, f.claim, f.state, f.response FROM findings f
-            JOIN node_attempts a ON a.id = f.review_attempt_id JOIN nodes n ON n.id = a.node_id
-            JOIN workflow_executions e ON e.id = n.execution_id JOIN runs r ON r.id = e.run_id
-            WHERE r.task_id = ${taskId} AND (${since} IS NULL OR f.created_at > ${since}) ORDER BY f.created_at`
-          const [reviewed] = yield* sql<{ verdict: string | null; rounds: number }>`
-            SELECT (SELECT json_extract(content, '$.verdict') FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
-                AND json_extract(content, '$.step') = 'review' AND ${after} ORDER BY sequence DESC LIMIT 1) AS verdict,
-              (SELECT count(*) FROM thread_items WHERE thread_id = ${threadId} AND kind = 'step_result'
-                AND json_extract(content, '$.step') = 'review' AND ${after}) AS rounds`
-          // What the task built, at the top; then what the lead showed across its steps, and what it last said it couldn't: since
-          // the last pull request, for a next one (ADR-034).
-          const { built, evidence, unverified } = yield* taskShown(threadId, since)
-          // An agent may sign its summary as it signs a commit; that stays here too.
+          // The lead's latest description, for this repository: settling that changed the work may have written it again.
+          const [written] = yield* sql<{ text: string | null }>`
+            SELECT json_extract(content, '$.descriptions.' || json_quote(${repository.slug})) AS text FROM thread_items
+            WHERE thread_id = ${threadId} AND kind = 'step_result'
+              AND json_extract(content, '$.descriptions.' || json_quote(${repository.slug})) IS NOT NULL AND ${after}
+            ORDER BY sequence DESC LIMIT 1`
+          // What the task built, where the lead wrote no description: since the last pull request, for a next one (ADR-034).
+          const { built } = yield* taskShown(threadId, since)
+          // An agent may sign what it writes as it signs a commit; that stays here too.
           return bodyOf({
             built: built === null ? null : withoutAgentCredit(built, agentNames),
             lead: lead === undefined ? null : withoutAgentCredit(lead.summary, agentNames),
-            review: reviewed === undefined ? null : reviewed,
-            findings: findings.map((finding) => {
-              const location = JSON.parse(finding.location) as { file?: string | null; line?: number | null }
-              return { ...finding, file: location.file ?? null, line: location.line ?? null }
-            }),
-            evidence,
-            unverified,
             issue,
             template: repository.template,
             written: written === undefined || written.text === null ? null : withoutAgentCredit(written.text, agentNames),
@@ -1074,7 +1053,6 @@ export class Changes extends Context.Service<
             issue: issueLink === undefined ? null : { key: issueLink.key, sameHost },
           })
           const body = yield* bodyFor(
-            input.taskId,
             task.threadId,
             issueLink === undefined ? null : { key: issueLink.key, url: issueLink.url, sameHost },
             { slug: task.slug, template: conventions.template?.text ?? null },

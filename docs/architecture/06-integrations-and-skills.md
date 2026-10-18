@@ -200,16 +200,26 @@ service's model.
   nothing itself; a step that ends in a push isn't done while the worktree
   has uncommitted files, so the lead commits what belongs to the task and
   clears away the rest. The record keeps the commit pushed.
-- **A pull request is described in the repository's template,** where it
-  has one in the places its host looks (GitHub's
-  `pull_request_template.md`, GitLab's default merge request template,
-  Bitbucket Cloud's). The lead writes the description in it, as a teammate
-  would; Althar asks it to before the step can end. Althar keeps the
-  template's headings and checklists, unticks every box, and adds the
-  review below. A description that drops the template is replaced by the
-  template with the lead's summary in its place for one. Templates kept
-  elsewhere (an organisation's `.github` repository, a host's settings)
-  aren't read yet.
+- **The lead writes the pull request's description,** for whoever reviews
+  it on the host, as a teammate would: why the change exists, what it does,
+  how it was approached and how it was checked, in short prose. Althar asks
+  for it before the step that opens a pull request can end, and again after
+  settling a review that changes what it says. It is kept apart from the
+  step's summary and what the task built, which are the person's, in
+  Althar: the review, its findings and the evidence stay there too, never
+  in the description. Pictures can't go up with it (GitHub has no API to
+  host an image outside the repository), so it has none. Below it, Althar
+  adds the issue's link and its own line, which the person can turn off.
+  Where the lead wrote none, as an older task's didn't, it is what the task
+  built.
+- **In the repository's template,** where it has one in the places its host
+  looks (GitHub's `pull_request_template.md`, GitLab's default merge request
+  template, Bitbucket Cloud's), the lead writes the description in it.
+  Althar keeps the template's headings and checklists and unticks every box.
+  A description that drops the template is replaced by the template with
+  what the task built in its place for a summary. Templates kept elsewhere
+  (an organisation's `.github` repository, a host's settings) aren't read
+  yet.
 - **What leaves the Mac is credited to the person, and to Althar.** Agents
   sign their commits in their own ways (a `Co-authored-by` trailer, a
   "Generated with" footer), and only Althar sees every agent's commits on

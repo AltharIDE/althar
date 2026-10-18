@@ -731,7 +731,7 @@ describe('making a quick task a change', () => {
       // Asked where the person's words opened no round, as the coordinator passing them on would.
       assert.strictEqual(
         yield* callTool(lead, 'make_it_a_change', { title: 'Settings, for real', review: { agent: 'codex' }, output: 'ready' }),
-        "The task is a change now, called “Settings, for real”. Commit your work, and call finish_step when it's ready, with what it built and your evidence. Fake codex's default model reviews it next, then Althar opens its pull request, ready for review. Don't push or open it yourself.",
+        "The task is a change now, called “Settings, for real”. Commit your work, and call finish_step when it's ready, with what it built, your evidence and its pull request's description. Fake codex's default model reviews it next, then Althar opens its pull request, ready for review. Don't push or open it yourself.",
       )
       const [round] = yield* sql<{ state: string; parameters: string }>`
         SELECT state, parameters FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL`
@@ -739,7 +739,13 @@ describe('making a quick task a change', () => {
       assert.deepInclude(JSON.parse(round?.parameters ?? '{}'), { end: 'ready', publishes: true })
       assert.isTrue((yield* cardOnce(task.id, (one) => one.phase === 'running')).followUp)
       // Its lead reports: all the quick task committed is the round's, so the review comes next, then its pull request.
-      assert.match(yield* callTool(lead, 'finish_step', { summary: 'Made it real.', built: 'The settings page.' }), /A review starts now/)
+      const finished = { summary: 'Made it real.', built: 'The settings page.' }
+      // Its pull request is to open, so the lead is asked for its description first.
+      assert.match(yield* callTool(lead, 'finish_step', finished), /^Write the description of the task's pull request before you finish\. /)
+      assert.match(
+        yield* callTool(lead, 'finish_step', { ...finished, descriptions: [{ text: 'Settings were a sketch; this makes them real.' }] }),
+        /A review starts now/,
+      )
       yield* until(
         Effect.sync(() => github.changes),
         (changes) => changes.length === 1,
@@ -749,6 +755,7 @@ describe('making a quick task a change', () => {
         github.changes.map((change) => [change.title, change.draft]),
         [['Settings, for real', false]],
       )
+      assert.isTrue(github.changes[0]?.body.startsWith('Settings were a sketch; this makes them real.'))
       yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change')
     }).pipe(Effect.provide(withGitHub(github)))
   })

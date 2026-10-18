@@ -98,8 +98,8 @@
     Either way the branch is new on the host: it is pushed plainly, never
     forced, and the merged or closed branch isn't touched. The pull request
     opens as a draft, described from what came after the last one (the
-    lead's latest summary and description, the round's review, its
-    evidence), and linked to the task and its issue as the first was. A
+    description the lead wrote for it as its round ended, else what the
+    round built), and linked to the task and its issue as the first was. A
     cherry-pick that conflicts with the default branch stops, puts the
     worktree back on its branch, and says which files, for the lead to bring
     the default branch in first. A push that doesn't go through leaves the
