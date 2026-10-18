@@ -106,6 +106,23 @@ import { agentSaid, summarize } from './words'
 
 export type Disposition = 'after_current' | 'interrupt_and_continue'
 
+/**
+ * An agent that doesn't answer ACP startup must not leave a handover pending forever. The bound covers the whole startup, so it
+ * also cuts off an agent that works but is slow: connecting, `session/new`, and setting the model and effort.
+ */
+const SESSION_START_TIMEOUT = Duration.minutes(2)
+
+/** Starting the agent took longer than its bound: it hung, or was too slow, as opposed to refusing or crashing. */
+export class StartTimedOut extends Schema.TaggedError<StartTimedOut>()('StartTimedOut', {
+  agentId: Schema.String,
+  agentName: Schema.String,
+  after: Schema.Duration,
+}) {
+  override get message(): string {
+    return `Timed out after ${Duration.format(this.after)} waiting for ${this.agentName} to set up a session.`
+  }
+}
+
 export const AcceptedInput = Schema.Struct({ inputId: Schema.String, sequence: Schema.Int })
 export type AcceptedInput = typeof AcceptedInput.Type
 
@@ -260,6 +277,8 @@ interface Running {
    * its brief would fill leaves it.
    */
   handover: 'none' | 'under_way' | 'left'
+  /** When its turn running started, in milliseconds: what the person's wait for its first word is counted from. */
+  turnStartedAt: number | null
   /** When its last turn ended, in milliseconds; null before its first. A lead idle past its cache's life is at a break. */
   turnEndedAt: number | null
   /** Its last turn ended a step of its work, or made its task a change (`atBreak`): a break, where a lead may start afresh. */
@@ -506,6 +525,10 @@ export class Sessions extends Context.Service<
         readonly agentId: string
         readonly accountId: string
         readonly turnRunning: boolean
+        /** When the turn running started, in milliseconds; null between turns. */
+        readonly turnStartedAt: number | null
+        /** When its last turn ended, in milliseconds; null before its first. */
+        readonly turnEndedAt: number | null
         /** The agent's process, where it runs as one. */
         readonly pid: number | null
         /** How full its context is, in tokens, as the agent last said; null until it says. */
@@ -1124,6 +1147,7 @@ export class Sessions extends Context.Service<
             )
           if (!compacting) running.brief = undefined
           running.turnRunning = true
+          running.turnStartedAt = yield* Clock.currentTimeMillis
           running.atBreak = false
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
@@ -1697,7 +1721,18 @@ export class Sessions extends Context.Service<
               // An effort the model doesn't offer is no reason not to start.
               yield* settleEffort(definition, agent, effort ?? null)
               return { connection, agent }
-            }).pipe(Scope.provide(scope)),
+            }).pipe(
+              Scope.provide(scope),
+              Effect.timeoutOption(SESSION_START_TIMEOUT),
+              Effect.flatMap((result) => {
+                if (Option.isNone(result)) {
+                  return Effect.fail(
+                    new StartTimedOut({ agentId: definition.id, agentName: definition.name, after: SESSION_START_TIMEOUT }),
+                  )
+                }
+                return Effect.succeed(result.value)
+              }),
+            ),
           )
           if (Exit.isFailure(started)) {
             yield* Scope.close(scope, Exit.void)
@@ -1791,6 +1826,7 @@ export class Sessions extends Context.Service<
             workedAt: null,
             wakeAt: null,
             handover: 'none',
+            turnStartedAt: null,
             turnEndedAt: null,
             atBreak: false,
           }
@@ -2650,6 +2686,8 @@ export class Sessions extends Context.Service<
                   agentId: running.entry.definition.id,
                   accountId: running.account.id,
                   turnRunning: running.turnRunning,
+                  turnStartedAt: running.turnRunning ? running.turnStartedAt : null,
+                  turnEndedAt: running.turnEndedAt,
                   pid: running.connection.process?.pid ?? null,
                   context: running.context,
                   stopping: running.stopping,

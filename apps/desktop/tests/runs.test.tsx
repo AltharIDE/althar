@@ -54,7 +54,7 @@ const listed = async () => {
 describe('what the project runs, from its front', () => {
   it('runs the default at a press, and starts and stops the rest from the list, several at once', async () => {
     const { client, emit } = await shown()
-    await userEvent.click(screen.getByRole('button', { name: 'Run bun run dev' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Run$/ }))
     expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc', 'rnbl_dev')
     // Up, it says where it answers; Storybook starts beside it.
     act(() =>
@@ -128,7 +128,7 @@ describe('what the project runs, from its front', () => {
     vi.mocked(client.runProject).mockRejectedValueOnce(
       new ApiError({ reason: 'LaunchRefused', message: 'Could not fetch main from origin.' }),
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Run bun run dev' }))
+    await userEvent.click(screen.getByRole('button', { name: /^Run$/ }))
     expect((await screen.findByRole('alert')).textContent).toContain('Could not fetch main from origin.')
   })
 

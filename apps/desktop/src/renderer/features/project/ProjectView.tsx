@@ -22,7 +22,7 @@ import { useModels } from '../../data/models'
 import { CarriedOver } from '../../shared/dictation/Carried'
 import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, useDraft } from '../../shared/drafts'
-import { queuedOf, queueShown, withQueued } from '../../shared/items'
+import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { useModelNames } from '../../shared/modelNames'
 import { PartPending, pendingText } from '../../shared/Pending'
@@ -36,6 +36,7 @@ import { ThreadBlocks } from '../../shared/ThreadBlocks'
 import { useThreadHost } from '../../shared/ThreadHost'
 import { takesImages, useImages } from '../../shared/useImages'
 import { BoardView } from '../board/BoardView'
+import { useClosePullRequests } from '../board/useClosePullRequests'
 import { type Lanes, lanesOf, yoursOf } from '../board/lanes'
 import { firstNeedOf, needsOf } from '../board/needs'
 import type { BoardModel } from '../board/useBoard'
@@ -166,6 +167,8 @@ export function ProjectView({
   const both = useBothWidth()
   const lanes = board.board === null ? null : lanesOf(board.board)
   const yours = lanes === null ? 0 : yoursOf(lanes)
+  // An abandoned task's pull request left open, closed from its row.
+  const closing = useClosePullRequests()
   // b steps through the views, when nothing is being typed; ⌘ and a number belongs to the window's tabs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -215,6 +218,9 @@ export function ProjectView({
   // A running turn says how long it has worked so far; a plan on its countdown, when it starts; a run, how long it has been up.
   const now = useNow(
     (coordinator?.session?.turnRunning ?? false) ||
+      // While what the person sent is on its way, or the coordinator starts for it, how long they have waited.
+      model.pending ||
+      coordinator?.session?.state === 'starting' ||
       (lanes?.next.some((task) => task.phase === 'planned') ?? false) ||
       launches.some((launch) => launch.ended === null),
   )
@@ -458,7 +464,16 @@ export function ProjectView({
                   <ThreadShellProvider value={shown.shell}>
                     <ThreadBlocks
                       blocks={blocksOf(
-                        { items: coordinator.items, turnRunning: busy, worktree: null, queue, outputs: model.outputs },
+                        {
+                          items: coordinator.items,
+                          turnRunning: busy,
+                          turnStarted: session?.turnStartedAt ?? null,
+                          reading: readingNow(session, model.pending),
+                          turnEnded: session?.turnEndedAt ?? null,
+                          worktree: null,
+                          queue,
+                          outputs: model.outputs,
+                        },
                         model.streaming,
                         (iso) => ago(iso),
                         now,
@@ -512,6 +527,7 @@ export function ProjectView({
                   agents={model.agents}
                   now={now}
                   onOpen={onTask}
+                  closing={closing}
                   actions={board}
                   {...(board.moreSettled ? { onShowOlder: board.showOlder } : {})}
                 />

@@ -1,8 +1,21 @@
 import { join } from 'node:path'
 
-import { BrowserWindow, nativeImage, type Rectangle, screen, Tray } from 'electron'
+import { app, BrowserWindow, Menu, nativeImage, nativeTheme, type Rectangle, screen, Tray } from 'electron'
 
-import { DEFAULT_EDGE, type EdgePlace, edgeIn, findNotch, type Notch, pointerOn, readEdge, sheetBounds, writeEdge } from './edge'
+import { darkPanel, readSystemUsesLightTheme, type Scheme, watchColorScheme } from './colorScheme'
+import {
+  DEFAULT_EDGE,
+  type EdgePlace,
+  edgeIn,
+  findNotch,
+  markFile,
+  type Notch,
+  pointerOn,
+  readEdge,
+  sheetBounds,
+  trayItems,
+  writeEdge,
+} from './edge'
 
 /*
  * The edge of the screen, drawn (edge.ts holds the choice and finds the
@@ -29,6 +42,10 @@ export interface EdgeHost {
   readonly preload: string
   /** renderer/edge.html. */
   readonly page: string
+  /** Brings Althar's window forward: the tray's menu, off a Mac, opens it. */
+  readonly open: () => void
+  /** Quits Althar. */
+  readonly quit: () => void
   /** resources/tray, the menu bar's pictures. */
   readonly pictures: string
   /** The end-to-end tests' quiet run (main.ts): the island is drawn clear and never takes the pointer. */
@@ -197,12 +214,30 @@ export const startEdge = (host: EdgeHost): Edge => {
 
   /* ---- the menu bar ---- */
 
+  let scheme: Scheme | undefined
+  let taskbarLight: boolean | undefined
   const picture = (yours: boolean) => {
-    const image = nativeImage.createFromPath(join(host.pictures, yours ? 'markYoursTemplate.png' : 'markTemplate.png'))
-    // The menu bar draws a template in its own colour, light or dark, whatever is behind it.
-    image.setTemplateImage(true)
+    // The Windows taskbar follows the system theme (SystemUsesLightTheme), not the apps' (nativeTheme), which is the fallback.
+    // On Linux Electron's nativeTheme says light where it has no word, on a dark panel too, so the desktop's setting comes from
+    // the Settings portal; with none, most panels are dark: the mark is light.
+    let dark = nativeTheme.shouldUseDarkColors
+    if (process.platform === 'linux') dark = darkPanel(scheme)
+    else if (taskbarLight !== undefined) dark = !taskbarLight
+    const image = nativeImage.createFromPath(join(host.pictures, markFile(process.platform, dark, yours)))
+    // The menu bar draws a template in its own colour, light or dark, whatever is behind it; elsewhere the file is the colour.
+    if (process.platform === 'darwin') image.setTemplateImage(true)
     return image
   }
+
+  /** The menu off a Mac, where the mark may not take a click (an AppIndicator ignores it) and may not show without a menu. */
+  const trayMenu = () =>
+    Menu.buildFromTemplate(
+      trayItems(waiting).map((item) =>
+        'separator' in item
+          ? { type: 'separator' as const }
+          : { label: item.label, click: () => (item.action === 'quit' ? host.quit() : host.open()) },
+      ),
+    )
 
   /** Beside the mark, on the screen it is on (`sheetBounds`). */
   const sheetPlace = (height: number) => {
@@ -250,6 +285,8 @@ export const startEdge = (host: EdgeHost): Edge => {
     tray = new Tray(picture(waiting > 0))
     tray.setToolTip('Althar')
     tray.on('click', toggleSheet)
+    // Off a Mac the sheet's click may never come (AppIndicator), so the menu carries what it would.
+    if (process.platform !== 'darwin') tray.setContextMenu(trayMenu())
     // Made now and kept hidden, so the first click opens it at once, already read.
     if (sheet === undefined || sheet.isDestroyed()) makeSheet()
   }
@@ -305,6 +342,30 @@ export const startEdge = (host: EdgeHost): Edge => {
   screen.on('display-removed', changed)
   screen.on('display-metrics-changed', changed)
 
+  const redraw = () => {
+    if (tray !== undefined && !tray.isDestroyed()) tray.setImage(picture(waiting > 0))
+  }
+
+  // The system's mode changes under a Windows taskbar: the setting is read again and the mark is drawn in the other colour.
+  if (process.platform === 'win32') {
+    const reread = () =>
+      readSystemUsesLightTheme((light) => {
+        taskbarLight = light
+        redraw()
+      })
+    nativeTheme.on('updated', reread)
+    reread()
+  }
+
+  // On Linux the portal tells when the desktop's light/dark setting changes, and the mark is drawn again.
+  if (process.platform === 'linux') {
+    const stop = watchColorScheme((next) => {
+      scheme = next
+      redraw()
+    })
+    app.once('will-quit', stop)
+  }
+
   const first = readEdge(host.profile()).then((place) => {
     chosen = place
     return look()
@@ -323,7 +384,9 @@ export const startEdge = (host: EdgeHost): Edge => {
     },
     waiting: (count) => {
       waiting = count
-      if (tray !== undefined && !tray.isDestroyed()) tray.setImage(picture(count > 0))
+      if (tray === undefined || tray.isDestroyed()) return
+      tray.setImage(picture(count > 0))
+      if (process.platform !== 'darwin') tray.setContextMenu(trayMenu())
     },
     owns: (window) => window === island || window === sheet,
     drawn: (window, rect) => {

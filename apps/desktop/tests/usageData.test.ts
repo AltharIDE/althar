@@ -107,6 +107,23 @@ describe('sending', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
+  it('waits, as Althar quits, for the request itself to be answered', async () => {
+    const { fetch: answer, requests } = posthog()
+    let answered = false
+    // Later than PostHog's own shutdown waits (a second): what is on its way is the request itself.
+    const slow = vi.fn<UsageDataOptions['fetch']>(async (url, options) => {
+      await new Promise((resolve) => setTimeout(resolve, 1_500))
+      const response = await answer(url, options)
+      answered = true
+      return response
+    })
+    const usage = sender(() => true, slow)
+    usage.record({ name: 'app_opened' })
+    await usage.stop()
+    expect(answered).toBe(true)
+    expect(sent(requests).map((event) => event.event)).toEqual(['app_opened'])
+  })
+
   it('asks the switch as each event comes: one turned off stops the next', async () => {
     const { fetch, requests } = posthog()
     let on = true

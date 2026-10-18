@@ -164,6 +164,8 @@ export interface Client {
     readonly model?: string | null
     readonly effort?: string | null
   }) => Promise<void>
+  /** Leaves out the commits after a task's last pull request that are in none yet: it settles without them, and they stay on its branch. */
+  readonly leaveOutCommits: (taskId: string) => Promise<void>
   /** Settles a task without its change; its worktree and branch stay. */
   readonly abandonTask: (taskId: string) => Promise<void>
   /** Opens an abandoned task again, on its worktree and branch. */
@@ -339,6 +341,13 @@ export interface Client {
   readonly refreshTask: (taskId: string) => Promise<void>
   /** Stops listening to the task's pull request at this address. */
   readonly stopListening: (taskId: string, url: string) => Promise<void>
+  /**
+   * Closes the task's pull request at this address on its host, unmerged; its branch there too, with `deleteBranch`. What the
+   * host said to deleting the branch, where it didn't.
+   */
+  readonly closePullRequest: (input: { readonly taskId: string; readonly url: string; readonly deleteBranch: boolean }) => Promise<{
+    readonly branch: string | null
+  }>
   /** Stops a command the session on a thread left running. */
   readonly stopBackground: (threadId: string, id: string) => Promise<void>
   /** Clears one that ended by itself from the list. */
@@ -491,6 +500,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
     setTaskResolveConflicts: (input) => command((commandId) => api.SetTaskResolveConflicts({ commandId, ...input })),
     setTaskAllowEverything: (input) => command((commandId) => api.SetTaskAllowEverything({ commandId, ...input })),
     resumeTask: (input) => command((commandId) => api.ResumeTask({ commandId, ...input })),
+    leaveOutCommits: (taskId) => command((commandId) => api.LeaveOutCommits({ commandId, taskId })),
     abandonTask: (taskId) => command((commandId) => api.AbandonTask({ commandId, taskId })),
     reopenTask: (taskId) => command((commandId) => api.ReopenTask({ commandId, taskId })),
     renameTask: (taskId, title) => command((commandId) => api.RenameTask({ commandId, taskId, title })),
@@ -573,6 +583,7 @@ export const connect = async (port: DomMessagePort): Promise<Client> => {
       command((commandId) => api.MergeNote({ commandId, taskId, ...(url === undefined ? {} : { url }) })).then(({ note }) => note),
     refreshTask: (taskId) => command((commandId) => api.RefreshTask({ commandId, taskId })),
     stopListening: (taskId, url) => command((commandId) => api.StopListening({ commandId, taskId, url })),
+    closePullRequest: (input) => command((commandId) => api.ClosePullRequest({ commandId, ...input })),
     stopBackground: (threadId, id) => command((commandId) => api.StopBackground({ commandId, threadId, id })),
     clearBackground: (threadId, id) => command((commandId) => api.ClearBackground({ commandId, threadId, id })),
     runProject: (projectId, taskId, threadId, runnableId) =>

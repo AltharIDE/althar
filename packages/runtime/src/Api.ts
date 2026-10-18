@@ -712,6 +712,11 @@ export const handlers = Api.toLayer(
             ),
           ),
         ),
+      LeaveOutCommits: ({ commandId, taskId }) =>
+        once(
+          commandId,
+          api(Effect.flatMap(envelope('task.leave_out', { taskId }, commandId), (said) => tasks.leaveOut({ envelope: said, taskId }))),
+        ),
       AbandonTask: ({ commandId, taskId }) =>
         once(
           commandId,
@@ -1075,6 +1080,8 @@ export const handlers = Api.toLayer(
           api(Effect.flatMap(envelope('task.skip_review', { taskId }, commandId), (said) => runs.skipReview({ envelope: said, taskId }))),
         ),
       Merge: ({ commandId, taskId, head, url }) => once(commandId, api(pullRequests.merge(taskId, head, url))),
+      ClosePullRequest: ({ commandId, taskId, url, deleteBranch }) =>
+        once(commandId, api(Effect.map(pullRequests.close(taskId, url, { deleteBranch }), ({ branch }) => ({ branch })))),
       MergeHere: ({ commandId, taskId, heads }) => once(commandId, api(Effect.asVoid(pullRequests.mergeHere(taskId, heads)))),
       Push: ({ commandId, taskId, head, url }) => once(commandId, api(Effect.asVoid(pullRequests.push(taskId, head, url)))),
       ReplacePullRequest: ({ commandId, taskId, head, replaces, url }) =>

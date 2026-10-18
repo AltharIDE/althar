@@ -9,9 +9,10 @@ import { DockView } from '../src/renderer/features/board/DockView'
 import { pictureUrl } from '../src/main/pictureAddress'
 import { queuedWords } from '../src/renderer/shared/agents'
 import { clock, running } from '../src/renderer/shared/time'
-import { inYoursOf, lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
+import { lanesOf, yoursOf } from '../src/renderer/features/board/lanes'
 import { firstNeedOf, needsOf } from '../src/renderer/features/board/needs'
 import { useBoard } from '../src/renderer/features/board/useBoard'
+import { useClosePullRequests } from '../src/renderer/features/board/useClosePullRequests'
 import { useConnections } from '../src/renderer/features/connections/useConnections'
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
@@ -219,7 +220,7 @@ describe('the board’s lanes', () => {
     expect(yoursOf(lanes)).toBe(3)
   })
 
-  it('shows a plain task that finished in Needs you, but counts it nowhere and opens it from nothing else', () => {
+  it('keeps a plain task that finished out of Needs you, since it asks nothing, and waits for it above what settled', () => {
     const lanes = lanesOf(
       board({
         tasks: [
@@ -229,11 +230,34 @@ describe('the board’s lanes', () => {
         calls: [],
       }),
     )
-    expect(lanes.ready.map((work) => work.taskId)).toEqual(['p1', 't4'])
-    expect(inYoursOf(lanes)).toBe(2)
+    expect(lanes.ready.map((work) => work.taskId)).toEqual(['t4'])
+    expect(lanes.finished.map((work) => work.taskId)).toEqual(['p1'])
     expect(yoursOf(lanes)).toBe(1)
     expect(needsOf(lanes, () => '', vi.fn()).map((need) => need.title)).toEqual(['Rate-limit refunds'])
     expect(firstNeedOf(lanes)).toBe('th4')
+  })
+
+  it('keeps a merged task with commits after its pull request in Needs you, and settles it once they are left out', () => {
+    const merged = change({ state: 'merged' })
+    const after = task({
+      taskId: 't8',
+      threadId: 'th8',
+      title: 'Cap parallel agents per machine',
+      state: 'done',
+      phase: 'ready',
+      change: merged,
+      unshipped: { commits: 1, add: 300, del: 304 },
+      settledAt: '2026-10-01T09:30:00.000Z',
+    })
+    const before = lanesOf(board({ tasks: [after], calls: [] }))
+    expect(before.ready.map((work) => work.taskId)).toEqual(['t8'])
+    expect(yoursOf(before)).toBe(1)
+    expect(needsOf(before, () => '', vi.fn()).map((need) => need.title)).toEqual(['Cap parallel agents per machine'])
+    // Left out, the runtime reads it as settled, with nothing in none: it goes among the settled, at the time it first settled.
+    const left = lanesOf(board({ tasks: [{ ...after, phase: 'settled', unshipped: null }], calls: [], settledTotal: 1 }))
+    expect(left.ready).toEqual([])
+    expect(left.settled.map((work) => [work.taskId, work.settledAt])).toEqual([['t8', '2026-10-01T09:30:00.000Z']])
+    expect(yoursOf(left)).toBe(0)
   })
 
   it('lists a drafted review as one to post, by its pull request and whose it is', () => {
@@ -795,6 +819,71 @@ describe('every state the board shows', () => {
     expect(screen.getByText('PR #12 closed')).toBeTruthy()
     expect(screen.getAllByText('althar/add-a-retry').length).toBeGreaterThan(0)
     return userEvent.click(screen.getByRole('button', { name: 'Held plan' })).then(() => expect(onOpen).toHaveBeenCalledWith('th1'))
+  })
+
+  it('says a settled task’s pull request is open where its host says so, and closes it from its row', async () => {
+    const pr = change({ state: 'open' })
+    const settled = lanesOf(
+      board({
+        tasks: [
+          task({
+            taskId: 'x',
+            title: 'Left open',
+            phase: 'settled',
+            state: 'abandoned',
+            settledAt: '2026-10-01T09:00:00.000Z',
+            change: pr,
+          }),
+        ],
+      }),
+    )
+    const { client } = fakeClient()
+    vi.mocked(client.closePullRequest).mockRejectedValueOnce(
+      new ApiError({ reason: 'ConnectorFailed', message: 'GitHub won’t let this account do that.' }),
+    )
+    const Board = () => <BoardView lanes={settled} agents={agents} now={NOW} onOpen={vi.fn()} closing={useClosePullRequests()} />
+    withServices(<Board />, client)
+    // Abandoned, its pull request isn't said to be closed: GitHub last said it is open.
+    expect(screen.getByText('PR #12 still open')).toBeTruthy()
+    expect(screen.queryByText('PR #12 closed')).toBeNull()
+    // Refused, the row says why, and still says it is open.
+    await userEvent.click(screen.getByRole('button', { name: 'Close PR #12' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('GitHub won’t let this account do that.')
+    expect(screen.getByText('PR #12 still open')).toBeTruthy()
+    // Closed on the person's second press: only the pull request, its branch left as it is.
+    await userEvent.click(screen.getByRole('button', { name: 'Close PR #12' }))
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    expect(client.closePullRequest).toHaveBeenLastCalledWith({ taskId: 'x', url: pr.url, deleteBranch: false })
+  })
+
+  it('offers no Close on a settled task’s row whose pull request is closed or merged', () => {
+    const settled = lanesOf(
+      board({
+        tasks: [
+          task({
+            taskId: 'y',
+            title: 'Closed',
+            phase: 'settled',
+            state: 'abandoned',
+            settledAt: '2026-10-01T09:00:00.000Z',
+            change: change({ state: 'closed' }),
+          }),
+          task({
+            taskId: 'z',
+            title: 'Merged',
+            phase: 'settled',
+            state: 'done',
+            settledAt: '2026-10-01T09:10:00.000Z',
+            change: change({ state: 'merged' }),
+          }),
+        ],
+      }),
+    )
+    const closing = { busy: null, failed: null, close: vi.fn() }
+    withServices(<BoardView lanes={settled} agents={agents} now={NOW} onOpen={vi.fn()} closing={closing} />, fakeClient().client)
+    expect(screen.getByText('PR #12 closed')).toBeTruthy()
+    expect(screen.getByText('PR #12 merged')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Close PR/ })).toBeNull()
   })
 
   describe('a task waiting for a free agent', () => {
