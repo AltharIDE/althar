@@ -1,7 +1,7 @@
 import { useState } from 'react'
 
 import type { AttentionRequest } from '@althar/contracts'
-import { LinkButton, Permission, Permissions } from '@althar/ui'
+import { LinkButton, Permission, type PermissionFocus, Permissions } from '@althar/ui'
 
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 
@@ -84,15 +84,21 @@ const useAnswers = (onAnswer: AnswerCall) => {
   return { round, send }
 }
 
+/** Takes focus as the cards first show; started afresh after an answer that didn't go through, only while nothing else has it, so it never takes it back from what the person moved on to. */
+const afresh = (focus: PermissionFocus | undefined, round: number) => (round === 0 || !focus ? focus : 'idle')
+
 export function PermissionCall({
   request,
   project,
   onAnswer,
+  focusOnMount,
   wayOut = {},
 }: {
   request: AttentionRequest
   project: string
   onAnswer: AnswerCall
+  /** Takes focus as it shows, so Enter answers it (the kit's `PermissionFocus`). */
+  focusOnMount?: PermissionFocus
   wayOut?: WayOut
 }) {
   const { round, send } = useAnswers(onAnswer)
@@ -101,6 +107,7 @@ export function PermissionCall({
       key={round}
       {...cardOf(request, project, wayOut)}
       project={project}
+      focusOnMount={afresh(focusOnMount, round)}
       onAnswer={(answer) => send(request.id, replyOf(answer))}
     />
   )
@@ -111,11 +118,14 @@ export function PermissionCalls({
   requests,
   project,
   onAnswer,
+  focusOnMount,
   wayOut = {},
 }: {
   requests: ReadonlyArray<AttentionRequest>
   project: string
   onAnswer: AnswerCall
+  /** The first card takes focus as it shows, so Enter answers it; the kit's `PermissionFocus`. */
+  focusOnMount?: PermissionFocus
   wayOut?: WayOut
 }) {
   const { round, send } = useAnswers(onAnswer)
@@ -125,6 +135,7 @@ export function PermissionCalls({
       key={round}
       items={requests.map((request) => cardOf(request, project, wayOut))}
       project={project}
+      focusOnMount={afresh(focusOnMount, round)}
       onAnswer={(request, answer) => send(request.id, replyOf(answer))}
     />
   )

@@ -1190,6 +1190,30 @@ describe('a task', () => {
     expect((await taskMenu({ phase: 'settled', state: 'done', actions: [] }, null)).offered).toEqual(['Open in Zed'])
   })
 
+  it('offers abandoning a merged task with commits after its pull request, which keep it in Needs you: it stays merged', async () => {
+    const after = await taskMenu(
+      {
+        phase: 'ready',
+        state: 'done',
+        actions: ['leaveOut'],
+        changes: [change({ state: 'merged' })],
+        unshipped: { commits: 1, add: 300, del: 304 },
+      },
+      null,
+    )
+    expect(after.offered).toEqual(['Open in Zed', 'Abandon'])
+    expect(screen.getByRole('menuitem', { name: /Abandon/ }).textContent).toContain('Its pull request stays merged.')
+    await userEvent.click(screen.getByRole('menuitem', { name: /Abandon/ }))
+    // Asked first, it says what stays merged and what is left out, and offers no reopening.
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('stays merged.')
+    expect(dialog.textContent).toContain('The commit after it goes in no pull request.')
+    expect(dialog.textContent).not.toContain('reopen')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    await waitFor(() => expect(after.client.leaveOutCommits).toHaveBeenCalledWith('t1'))
+    expect(after.client.abandonTask).not.toHaveBeenCalled()
+  })
+
   it('renames a task in its header: pressing the title edits it where it is, Enter keeps it and Escape puts it back', async () => {
     const { client } = fakeClient({ getThread: vi.fn(async () => thread()) })
     withServices(<Task />, client)
@@ -1240,7 +1264,12 @@ describe('a task', () => {
     expect(asked.textContent).toContain('The agents on it stop.')
     expect(asked.textContent).toContain('Its worktree stays in /w/meridian, as it is.')
     expect(asked.textContent).toContain('Its branch althar/add-a-retry stays. Nothing is pushed or deleted.')
-    expect(asked.textContent).toContain(`PR ${pr.prefix}${pr.number} stays open on GitHub.`)
+    // Its pull request is offered to close on GitHub, on; its branch there to delete, off.
+    expect(within(asked).getByRole('checkbox', { name: `Close pull request ${pr.prefix}${pr.number} on GitHub` })).toHaveProperty(
+      'ariaChecked',
+      'true',
+    )
+    expect(within(asked).getByRole('checkbox', { name: 'Delete its branch on GitHub' })).toHaveProperty('ariaChecked', 'false')
     // Cancelled, nothing happens.
     await userEvent.click(within(asked).getByRole('button', { name: 'Cancel' }))
     expect(screen.queryByRole('dialog')).toBeNull()
@@ -1252,6 +1281,60 @@ describe('a task', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     expect(client.abandonTask).toHaveBeenCalledTimes(2)
     expect(client.abandonTask).toHaveBeenLastCalledWith('t1')
+    // Abandoned, its pull request is closed on its host, as the person left it on: only then.
+    expect(client.closePullRequest).toHaveBeenCalledTimes(1)
+    expect(client.closePullRequest).toHaveBeenCalledWith({ taskId: 't1', url: pr.url, deleteBranch: false })
+  })
+
+  /** A task with its pull request open, its abandon dialog open: the client, the pull request and the dialog. */
+  const abandoning = async () => {
+    const pr = change({ state: 'open' })
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ task: { ...thread().task, changes: [pr] } })) })
+    withServices(<Task />, client)
+    await userEvent.click(await screen.findByRole('button', { name: 'More for this task' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Abandon/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Abandon this task?' })
+    return { client, pr, dialog, close: `Close pull request ${pr.prefix}${pr.number} on GitHub` }
+  }
+
+  it('abandons with its pull request left open on its host where the person turns closing off', async () => {
+    const { client, dialog, close } = await abandoning()
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: close }))
+    // Left open, its branch there can't be deleted alone.
+    expect(within(dialog).queryByRole('checkbox', { name: 'Delete its branch on GitHub' })).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(client.abandonTask).toHaveBeenCalledWith('t1')
+    expect(client.closePullRequest).not.toHaveBeenCalled()
+  })
+
+  it('deletes its pull request’s branch on its host too where the person says', async () => {
+    const { client, pr, dialog } = await abandoning()
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Delete its branch on GitHub' }))
+    expect(dialog.textContent).toContain('Its branch althar/add-a-retry stays on this Mac.')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(client.closePullRequest).toHaveBeenCalledWith({ taskId: 't1', url: pr.url, deleteBranch: true })
+  })
+
+  it('says a pull request its host wouldn’t close is still open, and offers to close it again', async () => {
+    const { client, pr, dialog } = await abandoning()
+    vi.mocked(client.closePullRequest).mockRejectedValueOnce(
+      new ApiError({
+        reason: 'ConnectorFailed',
+        message: 'GitHub won’t let this account do that: Resource not accessible by integration.',
+      }),
+    )
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Abandon task' }))
+    // Abandoned all the same: the dialog says so, and why the pull request is still open.
+    const after = await screen.findByRole('dialog', { name: 'Task abandoned' })
+    expect(within(after).getByRole('alert').textContent).toBe(
+      `PR ${pr.prefix}${pr.number} is still open. GitHub won’t let this account do that: Resource not accessible by integration.`,
+    )
+    expect(client.abandonTask).toHaveBeenCalledTimes(1)
+    await userEvent.click(within(after).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(client.closePullRequest).toHaveBeenCalledTimes(2)
   })
 
   it('says when abandoning that a planned task’s plan doesn’t start, and nothing stops for one at rest', async () => {
@@ -1528,6 +1611,79 @@ describe('a task', () => {
     await userEvent.type(screen.getByPlaceholderText('Say what to do instead'), 'Open a PR instead')
     await userEvent.click(screen.getByRole('button', { name: /^Deny/ }))
     await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a2', decision: 'reject', reason: 'Open a PR instead' }))
+  })
+
+  it('opens with focus on a permission waiting, so Enter answers it and then the next', async () => {
+    const call = (id: string) => ({
+      id,
+      kind: 'permission' as const,
+      stuck: null,
+      title: `Run ${id}`,
+      reason: 'It asks.',
+      command: id,
+      createdAt: '2026-09-29T12:00:00.000Z',
+    })
+    const { client } = fakeClient({ getThread: vi.fn(async () => thread({ attention: [call('a1'), call('a2')] })) })
+    withServices(<Task />, client)
+    await screen.findByText(/1 of 2/)
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Yes, this once/ })).toBe(document.activeElement))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a1', decision: 'allow' }))
+    await screen.findByText(/2 of 2/)
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Yes, this once/ })).toBe(document.activeElement))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(client.answer).toHaveBeenCalledWith({ attentionId: 'a2', decision: 'allow' }))
+  })
+
+  it('doesn’t take focus from the composer for a permission that comes while it is typed in', async () => {
+    const call = {
+      id: 'a1',
+      kind: 'permission' as const,
+      stuck: null,
+      title: 'Run git push',
+      reason: 'It asks.',
+      command: 'git push',
+      createdAt: '2026-09-29T12:00:00.000Z',
+    }
+    const getThread = vi.fn(async () => thread())
+    const { client, emit } = fakeClient({ getThread })
+    withServices(<Task />, client)
+    const box = await screen.findByPlaceholderText(/^Tell .+ something$/)
+    box.focus()
+    getThread.mockImplementation(async () => thread({ attention: [call] }))
+    act(() => emit(changed('attention_request', 'a1', 'th1')))
+    await screen.findByText('Needs your permission')
+    await act(async () => {})
+    expect(box).toBe(document.activeElement)
+  })
+
+  it('doesn’t take focus back from the composer when a card remounts after a failed answer', async () => {
+    const call = {
+      id: 'a1',
+      kind: 'permission' as const,
+      stuck: null,
+      title: 'Run git push',
+      reason: 'It asks.',
+      command: 'git push',
+      createdAt: '2026-09-29T12:00:00.000Z',
+    }
+    let fail: (error: Error) => void = () => {}
+    const { client } = fakeClient({
+      getThread: vi.fn(async () => thread({ attention: [call] })),
+      answer: vi.fn(() => new Promise<never>((_, reject) => (fail = reject))),
+    })
+    withServices(<Task />, client)
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Yes, this once/ })).toBe(document.activeElement))
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(client.answer).toHaveBeenCalledTimes(1))
+    // The person moves on to the composer while the answer is out; then it fails and the card starts afresh.
+    const box = await screen.findByPlaceholderText(/^Tell .+ something$/)
+    box.focus()
+    await act(async () => fail(new Error('offline')))
+    await act(async () => {})
+    await screen.findByText('Needs your permission')
+    expect(box).toBe(document.activeElement)
+    expect(client.answer).toHaveBeenCalledTimes(1)
   })
 
   it('keeps an answer as a rule by the scope the runtime offers, and offers no always it wouldn’t keep', async () => {

@@ -5,12 +5,12 @@ import { type IconName, PermissionAnswers, type ProjectRef, TaskStatus } from '@
 import { Home, type HomeEvent as HomeLine, type HomeNeed, type HomeProject, type HomeRun } from '@althar/ui/screens'
 
 import { queuedOfWords } from '../../shared/agents'
-import { isFinished } from '../../shared/calls'
 import { permissionOf, type Reply, replyOf } from '../../shared/permissions'
 import type { DoneHere } from '../../shared/standing'
 import { ago, clock, useNow } from '../../shared/time'
 import { useNewTab } from '../tabs/TabsFrame'
 import type { StartModel } from '../start/useStart'
+import { readyOf } from '../../shared/calls'
 import { homeGlanceOf, refOf } from './glance'
 import s from './Home.module.css'
 import type { HomeModel } from './useHome'
@@ -122,7 +122,7 @@ export function HomeView({
   const projects = home?.projects ?? []
   const tasks = home?.tasks ?? []
   const refs = new Map(projects.map((project) => [project.id, refOf(project)]))
-  // Only tasks with an agent on them, or held for a reset, are running; a plain task that finished waits on its board.
+  // Only tasks with an agent on them, or held for a reset, are running; a plain task that finished waits on its board (`needsYou`).
   const { calls, working, waiting, needs } = homeGlanceOf(home, {
     answered,
     agentName: name,
@@ -182,11 +182,12 @@ export function HomeView({
   })
 
   const list: ReadonlyArray<HomeProject> = projects.map((project) => {
-    const ready = tasks.filter((task) => task.projectId === project.id && task.phase === 'ready' && !isFinished(task)).length
     return {
       id: project.id,
       project: refOf(project),
-      yours: calls.filter((call) => call.projectId === project.id).length + ready,
+      yours:
+        calls.filter((call) => call.projectId === project.id).length +
+        readyOf(tasks).filter((task) => task.projectId === project.id).length,
       note: project.lastWorkAt === null ? text.noWork : text.lastWork(ago(project.lastWorkAt, new Date(now))),
       fresh: project.lastWorkAt === null,
     }

@@ -5,11 +5,23 @@ import { join } from 'node:path'
 
 import type { Fetch } from '@althar/connectors'
 import { emitterPort } from '@althar/contracts'
-import { backupsIn, connection, databaseIn, Folders, Nudges, Secrets, SecretsUnavailable, services, UsageData } from '@althar/runtime'
+import {
+  backupsIn,
+  connection,
+  databaseIn,
+  Failures,
+  Folders,
+  Nudges,
+  Secrets,
+  SecretsUnavailable,
+  services,
+  UsageData,
+} from '@althar/runtime'
 import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
+import { handledOf, watchCrashes } from './crashes'
 import { editorsHere, openInEditor } from './editors'
-import { runtimeFacts } from './facts'
+import { runtimeFacts, runtimeNames } from './facts'
 import { agentsLog, stdoutLogger } from './logging'
 import { type Device, deviceHere } from './onDevice'
 import { openInBrowser, openInTerminal } from './terminal'
@@ -25,7 +37,8 @@ import { openInBrowser, openInTerminal } from './terminal'
  * tells the main process what stopped it and where the copy is, serves
  * nothing, and waits to be shut down: a restart would only stop the same way.
  * What usage data says happened goes to the main process too, which sends it
- * only while the person allows it.
+ * only while the person allows it, and so does what it couldn't handle, for
+ * a crash report (crashes.ts).
  */
 
 type Port = Parameters<typeof emitterPort>[0]
@@ -39,6 +52,9 @@ const parent = (
     parentPort: { on(event: 'message', listener: (message: ParentMessage) => void): void; postMessage(message: unknown): void }
   }
 ).parentPort
+
+/* What the runtime couldn't handle goes to the main process, from the start, for a crash report (crashes.ts). */
+const crashes = watchCrashes((message) => parent.postMessage(message))
 
 /** The main process says where the profile and worktrees are; without them there is nothing to open. */
 const required = (name: string) => {
@@ -246,6 +262,12 @@ const program = Effect.gen(function* () {
   yield* Effect.forkScoped(
     Stream.runForEach(Context.get(context, UsageData).events, (usage) => Effect.sync(() => parent.postMessage({ type: 'usage', usage }))),
   )
+  // What the runtime kept to what it belonged to and carried on past goes too, as a handled crash report (crashes.ts, ADR-047).
+  yield* Effect.forkScoped(
+    Stream.runForEach(Context.get(context, Failures).events, (failure) =>
+      Effect.sync(() => parent.postMessage({ type: 'crash', crash: handledOf(failure) })),
+    ),
+  )
   const ports = yield* Queue.unbounded<Port>()
   accept = (port) => void Queue.offerUnsafe(ports, port)
   for (const port of early.splice(0)) accept(port)
@@ -261,6 +283,8 @@ const fiber = Effect.runFork(Effect.scoped(program).pipe(Effect.provide(Logger.l
 
 fiber.addObserver((exit) => {
   if (Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)) {
+    // What it stopped on is a defect of the runtime's: the main process hears of it before it exits.
+    crashes.defect(Cause.squash(exit.cause))
     process.stderr.write(`${Cause.pretty(exit.cause)}\n`)
     process.exit(1)
   }
@@ -279,6 +303,17 @@ const tellFacts = (requestId: string, threadId: string | null) => {
     .then(
       (value) => parent.postMessage({ type: 'facts', requestId, value }),
       (error: unknown) => parent.postMessage({ type: 'facts', requestId, error: error instanceof Error ? error.message : String(error) }),
+    )
+}
+
+/** The projects' and repositories' names, for the main process to hide in a crash report; at once, with none, while the store isn't open. */
+const tellNames = (requestId: string) => {
+  if (!readyNow) return parent.postMessage({ type: 'names', requestId, error: 'The store isn’t open.' })
+  void ready
+    .then((context) => Effect.runPromise(runtimeNames.pipe(Effect.provideContext(context))))
+    .then(
+      (value) => parent.postMessage({ type: 'names', requestId, value }),
+      (error: unknown) => parent.postMessage({ type: 'names', requestId, error: error instanceof Error ? error.message : String(error) }),
     )
 }
 
@@ -310,6 +345,7 @@ parent.on('message', (message) => {
   if (data?.type === 'connect' && port !== undefined) accept(port)
   if (data?.type === 'allow-folder' && data.requestId !== undefined && data.path !== undefined) allowFolder(data.requestId, data.path)
   if (data?.type === 'facts' && data.requestId !== undefined) tellFacts(data.requestId, data.threadId ?? null)
+  if (data?.type === 'names' && data.requestId !== undefined) tellNames(data.requestId)
   // Interrupting the program closes its scope: every session is stopped and recorded first.
   if (data?.type === 'shutdown') {
     Effect.runFork(Effect.logInfo('Runtime stopping').pipe(Effect.provide(Logger.layer([stdoutLogger]))))

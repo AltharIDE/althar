@@ -12,6 +12,7 @@ import {
   Choices,
   CoAuthor,
   CoAuthorFace,
+  CrashReports,
   DockPreview,
   EdgeHere,
   EdgeMini,
@@ -49,7 +50,7 @@ import { AgentAccounts } from '../accounts/AgentAccounts'
 import { type AccountSignInModel, useAccountSignIn } from '../accounts/useAccountSignIn'
 import { ConnectionsView } from '../connections/ConnectionsView'
 import { type ConnectionsModel, useConnections } from '../connections/useConnections'
-import { StartError } from '../start/StartView'
+import { AgentProblem, StartError } from '../start/StartView'
 import type { StartModel } from '../start/useStart'
 import { EXAMPLE, IslandPicture, MenuPicture, shownGlance } from './EdgePicture'
 import { ModelsView } from './ModelsView'
@@ -218,7 +219,9 @@ function AgentsSection({ start, accounts }: { start: StartModel; accounts: Accou
       <AgentTabList label={text.agents} agents={agents.map(tabOf)} />
       <StartError model={start} />
       <AgentTabPanel agent={tabOf(chosen)} headingLevel={2} aside={<ModelsView key={chosen.id} agent={chosen} />}>
-        {chosen.installed && chosen.download?.installing !== true ? (
+        {chosen.problem !== null ? (
+          <AgentProblem why={chosen.problem} model={start} />
+        ) : chosen.installed && chosen.download?.installing !== true ? (
           <AgentAccounts agent={chosen} start={start} signIn={accounts} />
         ) : (
           <AgentInstall
@@ -469,8 +472,9 @@ function EditorSection() {
 /**
  * Which Althar this is, with its release's notes; a newer one, once it is
  * ready to install; Report a problem (DEV-61), where the app can report;
- * and whether it sends anonymous usage data, which is off, and stays off
- * here, while DO_NOT_TRACK is set where it started.
+ * and whether it sends anonymous usage data, and crash reports (DEV-66),
+ * each with a switch of its own, both off, and staying off here, while
+ * DO_NOT_TRACK is set where it started.
  */
 function AboutSection({ start }: { start: StartModel }) {
   const update = useUpdate()
@@ -488,6 +492,7 @@ function AboutSection({ start }: { start: StartModel }) {
       </div>
       <SettingList>
         <UsageData on={preferences.usageData} onChange={(on) => set('usageData', on)} doNotTrack={host.doNotTrack === true} />
+        <CrashReports on={preferences.crashReports} onChange={(on) => set('crashReports', on)} doNotTrack={host.doNotTrack === true} />
       </SettingList>
       <Failed when={failed} />
     </>

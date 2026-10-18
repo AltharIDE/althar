@@ -476,3 +476,23 @@
     animation: none;
   }
 }
+
+/* One quiet line with its switch at the end, for a first screen's foot. */
+.line {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--t-3);
+}
+.lineWords {
+  flex: 1;
+  min-width: 0;
+  text-wrap: pretty;
+}
+.lineTitle {
+  font-weight: 600;
+  color: var(--t-2);
+}

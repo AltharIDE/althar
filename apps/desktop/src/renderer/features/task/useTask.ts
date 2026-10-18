@@ -41,6 +41,19 @@ const NO_ITEMS: ReadonlyArray<ThreadItem> = []
 /** How long changes are gathered before they are read. */
 const GATHER = 25
 
+/** A pull request to close as the task is abandoned: its address, its name in the host's words, and whether its branch goes too. */
+export interface ToClose {
+  readonly url: string
+  readonly name: string
+  readonly deleteBranch: boolean
+}
+
+/** What closing them said, where it didn't all go through. */
+export const closeText = {
+  stillOpen: (name: string, why: string) => `${name} is still open. ${why}`,
+  branchKept: (name: string, why: string) => `${name} is closed, but its branch stays on its host. ${why}`,
+}
+
 export interface TaskModel {
   /** The thread's head and the items read so far, oldest first. */
   readonly snapshot: ThreadSnapshot | null
@@ -95,8 +108,13 @@ export interface TaskModel {
   readonly setResolveConflicts: (on: boolean | null) => Promise<void>
   /** Allows everything its agents ask, short of what its project never allows, or takes it back: what waits goes ahead. */
   readonly setAllowEverything: (on: boolean) => Promise<void>
-  /** Settles it without its change; its worktree and branch stay. Whether it was abandoned. */
-  readonly abandon: () => Promise<boolean>
+  /**
+   * Settles it without its change; its worktree and branch stay. A merged one settles without the commits after its pull
+   * request, which stay on its branch, and stays merged. Then closes on their hosts the pull requests the person left on,
+   * each with its branch there where they said. Whether it was abandoned, and the pull requests it was to close that are
+   * still open, by address: what their host said is the model's error.
+   */
+  readonly abandon: (close?: ReadonlyArray<ToClose>) => Promise<{ readonly abandoned: boolean; readonly open: ReadonlyArray<string> }>
   /** Opens it again, once abandoned, on its worktree and branch. */
   readonly reopen: () => Promise<void>
   /** Gives it another title, in any state; the title shown is Althar's, once it is back. */
@@ -224,19 +242,36 @@ export const useTask = (threadId: string): TaskModel => {
     [setSnapshot],
   )
 
-  /** The thread's head again: its task, the agent working, the calls waiting. Its items stay as they are. */
+  /** What the window holds of the thread now, for a read that lands later. */
+  const held = useRef<ReadonlyArray<ThreadItem>>([])
+  held.current = snapshot?.items ?? []
+
+  const readItems = useCallback(
+    (ids: Iterable<string>) =>
+      Promise.all([...ids].map((itemId) => newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail))),
+    [client, threadId, newest, arrived, fail],
+  )
+
+  /**
+   * The thread's head again: its task, the agent working, the calls waiting.
+   * Its items stay as they are, but for those it may have moved on, read after
+   * it and landing before it: what still waits its turn, and what else is
+   * asked. The runtime has a message delivered before it says the turn on it
+   * runs, so the thread never shows the turn running while what it took still
+   * waits in the queue.
+   */
   const readHead = useCallback(
-    () =>
+    (also: Iterable<string> = []) =>
       newest(
         'head',
-        client.getThread(threadId, { limit: 0 }),
+        client.getThread(threadId, { limit: 0 }).finally(() => readItems(new Set([...also, ...waiting(held.current)]))),
         (head) =>
           cache.setQueryData<ThreadSnapshot>(keys.thread(threadId), (current) =>
             current === undefined ? head : { ...head, items: current.items, earlier: current.earlier },
           ),
         fail,
       ),
-    [client, cache, threadId, newest, fail],
+    [client, cache, threadId, newest, readItems, fail],
   )
 
   const readFiles = useCallback(
@@ -258,9 +293,8 @@ export const useTask = (threadId: string): TaskModel => {
     timer.current = undefined
     const { head, items } = changed.current
     changed.current = { head: false, items: new Set() }
-    if (head) void readHead()
-    for (const itemId of items) void newest(itemId, client.getThreadItem(threadId, itemId), (item) => arrived([item]), fail)
-  }, [client, threadId, readHead, newest, arrived, fail])
+    void (head ? readHead(items) : readItems(items))
+  }, [readHead, readItems])
 
   useWatch((event) => {
     // A command's output as far as it has come is useOutputs'.
@@ -467,13 +501,28 @@ export const useTask = (threadId: string): TaskModel => {
     resume: () => onTask((taskId) => client.resumeTask({ taskId })),
     setResolveConflicts: (on) => onTask((taskId) => client.setTaskResolveConflicts({ taskId, resolveConflicts: on })),
     setAllowEverything: (on) => onTask((taskId) => client.setTaskAllowEverything({ taskId, allowEverything: on })),
-    abandon: async () => {
+    abandon: async (close = []) => {
       let abandoned = false
+      const open: Array<string> = []
+      const said: Array<string> = []
+      // Merged, the runtime offers leaving out what came after in its place: the person abandons either way.
+      const merged = snapshot?.task.actions.includes('leaveOut') === true
       await onTask(async (taskId) => {
-        await client.abandonTask(taskId)
+        await (merged ? client.leaveOutCommits(taskId) : client.abandonTask(taskId))
         abandoned = true
+        // One at a time, each on its own: one its host refuses doesn't keep the next open.
+        for (const one of close) {
+          try {
+            const { branch } = await client.closePullRequest({ taskId, url: one.url, deleteBranch: one.deleteBranch })
+            if (branch !== null) said.push(closeText.branchKept(one.name, branch))
+          } catch (failure) {
+            open.push(one.url)
+            said.push(closeText.stillOpen(one.name, messageOf(failure)))
+          }
+        }
       })
-      return abandoned
+      if (said.length > 0) setError(said.join(' '))
+      return { abandoned, open }
     },
     reopen: () => onTask((taskId) => client.reopenTask(taskId)),
     rename: (title) => onTask((taskId) => client.renameTask(taskId, title)),

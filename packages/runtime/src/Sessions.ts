@@ -61,6 +61,7 @@ import type { Models } from './Models'
 import type { Policies } from './Policies'
 import { moveSession, Permissions, type RequestContext } from './Permissions'
 import { Questions } from './Questions'
+import { contained, Failures } from './Failures'
 import { touchCard, touchTask } from './cards'
 import { change, fact, timestamp } from './records'
 import { withRole } from './roles'
@@ -104,6 +105,23 @@ import { agentSaid, summarize } from './words'
  */
 
 export type Disposition = 'after_current' | 'interrupt_and_continue'
+
+/**
+ * An agent that doesn't answer ACP startup must not leave a handover pending forever. The bound covers the whole startup, so it
+ * also cuts off an agent that works but is slow: connecting, `session/new`, and setting the model and effort.
+ */
+const SESSION_START_TIMEOUT = Duration.minutes(2)
+
+/** Starting the agent took longer than its bound: it hung, or was too slow, as opposed to refusing or crashing. */
+export class StartTimedOut extends Schema.TaggedError<StartTimedOut>()('StartTimedOut', {
+  agentId: Schema.String,
+  agentName: Schema.String,
+  after: Schema.Duration,
+}) {
+  override get message(): string {
+    return `Timed out after ${Duration.format(this.after)} waiting for ${this.agentName} to set up a session.`
+  }
+}
 
 export const AcceptedInput = Schema.Struct({ inputId: Schema.String, sequence: Schema.Int })
 export type AcceptedInput = typeof AcceptedInput.Type
@@ -190,6 +208,22 @@ interface ReviewThread {
 type ThreadContext = TaskThread | CoordinatorThread | ReviewThread
 
 /** Where a thread's agent works. */
+/**
+ * An agent that went on its own, as a report says it: its id and how its
+ * process ended, never what it wrote. No stack: where Althar noticed says
+ * nothing, and each agent and way of ending is its own report.
+ */
+export const agentLost = (
+  agentId: string,
+  exit: Option.Option<{ readonly code: number | null; readonly signal: string | null }>,
+): Error => {
+  const how = Option.isSome(exit) ? `exit code ${exit.value.code ?? 'none'}, signal ${exit.value.signal ?? 'none'}` : 'no exit seen'
+  const error = new Error(`The ${agentId} agent stopped on its own: ${how}.`)
+  error.name = 'AgentLost'
+  error.stack = ''
+  return error
+}
+
 const cwdOf = (thread: ThreadContext) => (thread.role === 'coordinator' ? thread.folder.folder : thread.cwd)
 
 /** Every folder a thread's agent works in: a picture an agent points at is read only from inside them. */
@@ -259,6 +293,8 @@ interface Running {
    * its brief would fill leaves it.
    */
   handover: 'none' | 'under_way' | 'left'
+  /** When its turn running started, in milliseconds: what the person's wait for its first word is counted from. */
+  turnStartedAt: number | null
   /** When its last turn ended, in milliseconds; null before its first. A lead idle past its cache's life is at a break. */
   turnEndedAt: number | null
   /** Its last turn ended a step of its work, or made its task a change (`atBreak`): a break, where a lead may start afresh. */
@@ -504,6 +540,10 @@ export class Sessions extends Context.Service<
         readonly agentId: string
         readonly accountId: string
         readonly turnRunning: boolean
+        /** When the turn running started, in milliseconds; null between turns. */
+        readonly turnStartedAt: number | null
+        /** When its last turn ended, in milliseconds; null before its first. */
+        readonly turnEndedAt: number | null
         /** The agent's process, where it runs as one. */
         readonly pid: number | null
         /** How full its context is, in tokens, as the agent last said; null until it says. */
@@ -598,6 +638,7 @@ export class Sessions extends Context.Service<
       const live = yield* Live
       const permissions = yield* Permissions
       const questions = yield* Questions
+      const failures = yield* Failures
       const accounts = yield* Accounts
       const limits = yield* Limits
       const toolServer = yield* ToolServer
@@ -1116,6 +1157,7 @@ export class Sessions extends Context.Service<
             )
           if (!compacting) running.brief = undefined
           running.turnRunning = true
+          running.turnStartedAt = yield* Clock.currentTimeMillis
           running.atBreak = false
           // What it did outside a turn before is over with: this turn is what it is at.
           running.callsOpen.clear()
@@ -1415,13 +1457,14 @@ export class Sessions extends Context.Service<
             // waits before it holds the turn, so the lead can be stopped meanwhile.
             if (running.thread.role === 'task' && running.brief !== undefined) yield* setups.ready(running.thread.taskId)
             const { thread } = running
+            // A turn that couldn't be delivered is kept to that turn: the next message wakes the loop again.
             if (thread.role === 'coordinator')
               return yield* running.delivering.withPermits(1)(
                 Effect.gen(function* () {
                   while (!running.stopping && (yield* deliver(running))) {
                     // Each turn may leave more input queued, such as what arrived while it ran.
                   }
-                }),
+                }).pipe(contained('Sessions.deliver', () => undefined, running.entry.definition.id)),
               )
             // A lead's or a reviewer's turns, one at a time, each waiting for a place among the agents at work here: what
             // is still queued after one wakes it again, and asks again.
@@ -1555,6 +1598,9 @@ export class Sessions extends Context.Service<
               ...(Option.isSome(exit) ? { exitCode: exit.value.code ?? 'none', signal: exit.value.signal ?? 'none' } : {}),
             }),
           )
+          // One that went on its own is reported (ADR-047), by its agent and how its process ended: never what it wrote.
+          if (state === 'lost')
+            yield* failures.report(Cause.die(agentLost(running.entry.definition.id, exit)), 'agent', running.entry.definition.id)
           yield* live.publish({ _tag: 'SessionEnded', threadId: running.thread.threadId, sessionId: running.sessionId, state })
           yield* Deferred.succeed(running.ended, undefined)
         })
@@ -1688,7 +1734,18 @@ export class Sessions extends Context.Service<
               // An effort the model doesn't offer is no reason not to start.
               yield* settleEffort(definition, agent, effort ?? null)
               return { connection, agent }
-            }).pipe(Scope.provide(scope)),
+            }).pipe(
+              Scope.provide(scope),
+              Effect.timeoutOption(SESSION_START_TIMEOUT),
+              Effect.flatMap((result) => {
+                if (Option.isNone(result)) {
+                  return Effect.fail(
+                    new StartTimedOut({ agentId: definition.id, agentName: definition.name, after: SESSION_START_TIMEOUT }),
+                  )
+                }
+                return Effect.succeed(result.value)
+              }),
+            ),
           )
           if (Exit.isFailure(started)) {
             yield* Scope.close(scope, Exit.void)
@@ -1782,6 +1839,7 @@ export class Sessions extends Context.Service<
             workedAt: null,
             wakeAt: null,
             handover: 'none',
+            turnStartedAt: null,
             turnEndedAt: null,
             atBreak: false,
           }
@@ -2638,6 +2696,8 @@ export class Sessions extends Context.Service<
                   agentId: running.entry.definition.id,
                   accountId: running.account.id,
                   turnRunning: running.turnRunning,
+                  turnStartedAt: running.turnRunning ? running.turnStartedAt : null,
+                  turnEndedAt: running.turnEndedAt,
                   pid: running.connection.process?.pid ?? null,
                   context: running.context,
                   stopping: running.stopping,

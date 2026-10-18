@@ -219,7 +219,7 @@ export const sectionWords = (facts: PullRequestFacts): string => {
     `Pull request${sections.length > 1 ? 's' : ''}${facts.changes.length > repositories ? ', the latest first' : ''}:\n${sections.join('\n\n')}`,
     facts.unmerged > 0 ? `${unmergedWords(facts.unmerged)}: the task is not done.` : null,
     unshipped > 0
-      ? `${plural(unshipped, 'commit')} on the task's branch ${unshipped === 1 ? 'is' : 'are'} after its last pull request, which merged or closed, and in none yet: the person opens a new pull request for ${unshipped === 1 ? 'it' : 'them'} from the task.`
+      ? `${plural(unshipped, 'commit')} on the task's branch ${unshipped === 1 ? 'is' : 'are'} after its last pull request, which merged or closed, and in none yet: the person opens a new pull request for ${unshipped === 1 ? 'it' : 'them'} from the task, or leaves ${unshipped === 1 ? 'it' : 'them'} out.`
       : null,
     finished === null ? null : `The task is finished (${finished}): nothing waits on the person.`,
   ]

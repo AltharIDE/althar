@@ -560,6 +560,34 @@ describe('the start', () => {
     })
   })
 
+  it('asks about crash reports once, as one quiet line with its switch at the first screen’s foot, on until turned off', async () => {
+    const { client } = fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) })
+    const host = fakeHost()
+    const view = withServices(<Start onProject={vi.fn()} />, client, host)
+    const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
+    await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('true'))
+    expect(document.getElementById(crashes.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      'go to Althar’s team when something fails: what failed and where, never your code or any name.',
+    )
+    // Not a dialog, and nothing waits on it.
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await userEvent.click(crashes)
+    expect(host.setPreference).toHaveBeenLastCalledWith('crashReports', false)
+    await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('false'))
+    view.unmount()
+
+    // DO_NOT_TRACK keeps it off, and the line says so.
+    withServices(
+      <Start onProject={vi.fn()} />,
+      fakeClient({ listProjects: vi.fn(async () => ({ cursor: 0, projects: [] })) }).client,
+      fakeHost({ doNotTrack: true }),
+    )
+    const locked = await screen.findByRole('switch', { name: 'Crash reports' })
+    expect(locked.getAttribute('aria-checked')).toBe('false')
+    expect((locked as HTMLButtonElement).disabled).toBe(true)
+    expect(document.getElementById(locked.getAttribute('aria-describedby') ?? '')?.textContent).toBe('are off while DO_NOT_TRACK is set.')
+  })
+
   it('adds a folder from anywhere, picked, by ⌘N or dropped, each of several repositories ticked, and opens one alone as itself', async () => {
     const onProject = vi.fn()
     const found = (name: string, at: string) => ({ path: `${at}/${name}`, folder: null, name, branch: 'main', remote: null })
@@ -746,6 +774,17 @@ describe('the start', () => {
       [RuntimeState.Ready, true],
       [RuntimeState.SignedOut, false],
     ])
+    // One Althar couldn't check says why on its own row, whatever else it holds.
+    const problem = "Althar couldn't check Codex. Its log has the details."
+    const codex = agents.find((agent) => agent.id === 'codex')
+    if (codex === undefined) throw new Error('No Codex in the fixtures')
+    expect(runtimeEntry({ ...codex, installed: false, problem })).toEqual({
+      id: 'codex',
+      name: 'Codex',
+      brand: expect.any(String),
+      state: RuntimeState.Unchecked,
+      why: problem,
+    })
   })
 
   it('needs its services', () => {
