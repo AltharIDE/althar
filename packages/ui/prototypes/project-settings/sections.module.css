@@ -25,6 +25,16 @@
   color: var(--t-3);
 }
 
+/* the switch's other way, named in its note */
+.off {
+  font-weight: 500;
+  color: var(--t-2);
+}
+.offLine {
+  display: block;
+  margin-top: 3px;
+}
+
 /* taking the project out: at the end, a little apart */
 .away {
   padding-top: 8px;

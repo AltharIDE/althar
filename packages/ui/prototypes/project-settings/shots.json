@@ -37,14 +37,16 @@
   {
     "id": "A1",
     "page": "?d=A&open=open&s=general",
-    "caption": "A at 1440×900: the side narrower, the sheet wider; General now holds only the name and colour, and Remove from Althar sits in red at the foot of the side"
+    "caption": "A, General at 1180×760: no switch cards down the side any more; the three switches under “How its tasks work”, each saying what happens with it on and with it off",
+    "width": 1180,
+    "height": 760
   },
   {
     "id": "A2",
     "page": "?d=A&open=open&s=code",
     "width": 1180,
     "height": 760,
-    "caption": "A, Code and issues in a smaller 1180×760 window: the side narrows and the margins close so the sheet keeps the room; Repositories and Trackers are two headings with their own Add buttons, Linear's mark plain, Move issues set in under it"
+    "caption": "A, Code and issues in the smaller window: Repositories and Trackers as two headings with their own Add buttons, Linear's mark plain; Move issues is in General now, not here"
   },
   {
     "id": "A3",
@@ -69,6 +71,13 @@
     "width": 1180,
     "height": 760,
     "caption": "A, Notes in the smaller window: the cards fall to two columns"
+  },
+  {
+    "id": "A7",
+    "page": "?d=A&open=open&s=general&tracker=none",
+    "width": 1180,
+    "height": 760,
+    "caption": "A, General on a project with no tracker: Move issues is off and greyed, its note says to add a tracker first, with a link"
   },
   {
     "id": "B1",

@@ -1,12 +1,21 @@
 // Scrappy: the project's settings by section, as every direction shows them: what each is called and says, and what is in it, from the app's own screens and rows.
 import type { ReactNode } from 'react'
 
-import { Button, ControlGrid, ControlToggle, Heading, Icon, IconButton, type IconName, SettingList } from '../../src/index'
+import {
+  Button,
+  ControlGrid,
+  ControlToggle,
+  Heading,
+  Icon,
+  IconButton,
+  type IconName,
+  LinkButton,
+  SettingList,
+  SettingSwitch,
+} from '../../src/index'
 import {
   AddTrackerMenu,
-  AllowEverything,
   AppWide,
-  Conflicts,
   Identity,
   MoveIssues,
   overlay,
@@ -152,20 +161,84 @@ export function QuickCards({ things, columns = 2, onSection }: { things: Things;
 
 /* ——— What is in each section. ——— */
 
+/**
+ * How its tasks work: the three switches, each said in full, what happens
+ * with it on and with it off, for someone who has never seen them: no
+ * shortcut names it before this does.
+ */
+export function TaskSwitches({ things }: { things: Things }) {
+  const rules = things.rules
+  if (rules === null) return null
+  const tracker = things.trackers[0]
+  const trackerWord = things.trackers.length === 1 && tracker !== undefined ? tracker.name : 'its tracker'
+  return (
+    <div>
+      <Sub
+        title="How its tasks work"
+        note={`For every task in ${things.name}, from its next step on. A task can still be told otherwise in its conversation.`}
+      />
+      <SettingList>
+        <SettingSwitch
+          title="Allow everything"
+          note={
+            <>
+              Agents run any command and change any file without stopping to ask you. Only what the rules never allow stays blocked.
+              <span className={css.offLine}>
+                <b className={css.off}>Off:</b> the <LinkButton onClick={() => proto.set({ section: 'rules' })}>rules</LinkButton> decide
+                what goes ahead and what waits for your answer.
+              </span>
+            </>
+          }
+          checked={rules.allowEverything}
+          onChange={things.setAllowEverything}
+        />
+        <SettingSwitch
+          title="Resolve merge conflicts automatically"
+          note={
+            <>
+              When main moves on and a task’s change no longer merges cleanly, the lead brings main into its branch, fixes the clashing
+              lines and runs the checks again, then tells you what it did.
+              <span className={css.offLine}>
+                <b className={css.off}>Off:</b> the task stops and says it conflicts; you ask the lead to fix it when you want.
+              </span>
+            </>
+          }
+          checked={rules.resolveConflicts}
+          onChange={things.model.setResolveConflicts}
+        />
+        <SettingSwitch
+          title="Move issues to In Progress"
+          note={
+            things.trackers.length === 0 ? (
+              <>
+                When a task starts from an issue, its tracker shows it’s being worked on.{' '}
+                <LinkButton onClick={() => proto.set({ section: 'code' })}>Add a tracker</LinkButton> first.
+              </>
+            ) : (
+              <>
+                When a task starts from a {trackerWord} issue, Althar moves that issue to In Progress, so whoever looks at {trackerWord}{' '}
+                sees it’s being worked on.
+                <span className={css.offLine}>
+                  <b className={css.off}>Off:</b> issues stay where they are, and you move them yourself.
+                </span>
+              </>
+            )
+          }
+          checked={things.trackers.length > 0 && rules.moveIssues}
+          disabled={things.trackers.length === 0}
+          onChange={things.model.setMoveIssues}
+        />
+      </SettingList>
+    </div>
+  )
+}
+
 /** Where the page has the quick cards, its switches are there, not here again; where its side has Remove, so is that. */
 export function General({ things, switches = true, remove = true }: { things: Things; switches?: boolean; remove?: boolean }) {
   return (
     <div className={css.stack}>
       <Identity things={things} />
-      {switches && (
-        <div>
-          <Sub title="Every task" note="What each of its tasks follows, from its next request on." />
-          <SettingList>
-            <AllowEverything things={things} />
-            <Conflicts things={things} />
-          </SettingList>
-        </div>
-      )}
+      {switches && <TaskSwitches things={things} />}
       {remove && (
         <div className={css.away}>
           <SettingList>
@@ -182,7 +255,7 @@ export function General({ things, switches = true, remove = true }: { things: Th
  * its trackers the same way: two headings in the section's one style, the
  * repositories screen's own big title and drop line left out.
  */
-export function CodeAndIssues({ things, bare = true }: { things: Things; bare?: boolean }) {
+export function CodeAndIssues({ things, bare = true, moveIssues = true }: { things: Things; bare?: boolean; moveIssues?: boolean }) {
   const repositories = useRepositories(PROJECT)
   const anyTracker = things.trackers.length > 0
   return (
@@ -220,7 +293,7 @@ export function CodeAndIssues({ things, bare = true }: { things: Things; bare?: 
         />
         <SettingList>
           <TrackerRows things={things} quietAdd>
-            <MoveIssues things={things} indent />
+            {moveIssues && <MoveIssues things={things} indent />}
           </TrackerRows>
         </SettingList>
       </div>
@@ -314,7 +387,8 @@ export function Body({
     case 'general':
       return <General things={things} switches={switches} remove={remove} />
     case 'code':
-      return <CodeAndIssues things={things} bare={bare} />
+      // Where General has the switches, Move issues is said there, once.
+      return <CodeAndIssues things={things} bare={bare} moveIssues={!switches} />
     case 'rules':
       return <RulesScreen bare={bare} />
     case 'running':

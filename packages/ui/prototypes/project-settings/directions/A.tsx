@@ -1,7 +1,7 @@
-// Scrappy: A, as the app's Settings tab: down the side, its quick switches, its sections and Remove; beside them, the section open on a sheet that takes the room the window has.
+// Scrappy: A, as the app's Settings tab: down the side, its sections and Remove, no quick switches (General says them in full); beside them, the section open on a sheet that takes the room the window has.
 import { Icon, Panel, SettingsNav } from '../../../src/index'
 import { overlay, type Things } from '../parts'
-import { Body, QuickCards, sectionText } from '../sections'
+import { Body, sectionText } from '../sections'
 import { proto, type Section, useProto } from '../state'
 import c from './pages.module.css'
 
@@ -15,7 +15,6 @@ export function A({ things }: { things: Things }) {
     <div className={c.page}>
       <div className={c.columns}>
         <aside className={c.side}>
-          <QuickCards things={things} columns={1} onSection={go} />
           <SettingsNav
             label="Project settings"
             groups={GROUPS.map((group) =>
@@ -39,12 +38,12 @@ export function A({ things }: { things: Things }) {
           <Panel
             key={section}
             title={open.title}
-            // Its switches are the cards and Remove is down the side, so General here is its name and colour only.
-            lede={section === 'general' ? 'Its name, and the colour its mark and tab take.' : open.lede}
+            // Remove is down the side, so General here is its name and colour, and how its tasks work.
+            lede={section === 'general' ? 'Its name and colour, and how its tasks work.' : open.lede}
             headingLevel={1}
           >
             <div className={c.body}>
-              <Body section={section} things={things} switches={false} remove={false} />
+              <Body section={section} things={things} remove={false} />
             </div>
           </Panel>
         </main>
