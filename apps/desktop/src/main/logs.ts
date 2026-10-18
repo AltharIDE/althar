@@ -54,8 +54,10 @@ export const startLogs = ({ dir, passOn }: { readonly dir: string; readonly pass
     pid: process.pid,
   })
 
-  // Watched, not handled, so what Electron does with them stays as it was. A rejection nothing handled comes here too, as Node raises it.
+  // Watched, not handled, so what Electron does with them stays as it was.
   process.on('uncaughtExceptionMonitor', (thrown, origin) => error('Uncaught in the main process', { origin, ...describe(thrown) }))
+  // Electron only warns of a rejection nothing handled, on stderr, and listening stops the warning: it is kept here instead.
+  process.on('unhandledRejection', (reason) => error('Unhandled rejection in the main process', describe(reason)))
   app.on('render-process-gone', (_event, _contents, details) =>
     error('A window’s page stopped', { reason: details.reason, exitCode: details.exitCode }),
   )
