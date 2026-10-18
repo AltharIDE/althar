@@ -35,6 +35,8 @@ export const text = {
     return {
       looking: `Looking around ${device.this}…`,
       agentsLabel: `Agents on ${device.this}`,
+      elsewhere: (names: readonly string[]) =>
+        `Althar also runs ${new Intl.ListFormat('en-GB', { type: 'conjunction' }).format(names)}, once ${names.length === 1 ? 'it’s' : 'they’re'} installed on ${device.this}.`,
       add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: `${key}N` },
       createKbd: platform === 'darwin' ? '⌘⏎' : 'Ctrl+Enter',
     }

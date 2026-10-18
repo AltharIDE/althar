@@ -22,8 +22,9 @@ import s from './Start.module.css'
  *
  * On the left the mark stands in its own light, and each agent that
  * answered lands on a ring under it: signed in in full, otherwise faint. On
- * the right, on a sheet over the light, the agents' rows, then the
- * repositories found where people keep code.
+ * the right, on a sheet over the light, the agents' rows (those on this
+ * computer, and those Althar can fetch; the rest it runs named in one line
+ * beneath), then the repositories found where people keep code.
  *
  * A project is one repository or several, so they are picked, not opened:
  * each one ticked joins the project taking shape under the mark, named after
@@ -56,6 +57,8 @@ export interface StartText {
   agentsLabel: string
   asking: string
   readyOf: (ready: number, of: number) => string
+  /** The agents Althar runs that aren't on this computer and that it can't fetch, named in one line under the rows. */
+  elsewhere: (names: readonly string[]) => string
   repositories: string
   repositoriesLabel: string
   lookedIn: (where: string) => string
@@ -87,6 +90,8 @@ export const startText: StartText = {
   agentsLabel: 'Agents on this Mac',
   asking: 'asking…',
   readyOf: (ready, of) => `${ready} of ${of} ready`,
+  elsewhere: (names) =>
+    `Althar also runs ${new Intl.ListFormat('en-GB', { type: 'conjunction' }).format(names)}, once ${names.length === 1 ? 'it’s' : 'they’re'} installed on this Mac.`,
   repositories: 'Repositories',
   repositoriesLabel: 'Repositories for the project',
   lookedIn: (where) => `in ${where}`,
@@ -183,6 +188,9 @@ export function Start({
   const agents = runtimes ?? []
   // Round the mark, only the agents on this computer: one to download is in the rows alone.
   const landed = agents.filter((r) => r.state !== RuntimeState.Missing)
+  // In the rows, those and the ones Althar can fetch; the others it runs are only named, as there is nothing to do for them here.
+  const rowed = agents.filter((r) => r.state !== RuntimeState.Missing || r.download !== undefined)
+  const elsewhere = agents.filter((r) => !rowed.includes(r)).map((r) => r.name)
   const ready = agents.filter((r) => r.state === RuntimeState.Ready).length
   const chosen = picked.flatMap((id) => repositories?.find((r) => r.id === id) ?? [])
   const forming = chosen.length > 0
@@ -293,7 +301,7 @@ export function Start({
         <div className={s.sheet}>
           <h2 id={agentsId} className={s.label}>
             {t.agents}
-            <span className={s.labelNote}>{asking ? t.asking : t.readyOf(ready, agents.length)}</span>
+            <span className={s.labelNote}>{asking ? t.asking : t.readyOf(ready, rowed.length)}</span>
           </h2>
           {asking ? (
             <div className={s.waiting} aria-labelledby={agentsId} aria-busy="true">
@@ -302,7 +310,10 @@ export function Start({
               <Skeleton height={36} />
             </div>
           ) : (
-            <Runtimes label={t.agentsLabel} runtimes={agents} {...rows} {...(runtimesText === undefined ? {} : { text: runtimesText })} />
+            <>
+              <Runtimes label={t.agentsLabel} runtimes={rowed} {...rows} {...(runtimesText === undefined ? {} : { text: runtimesText })} />
+              {elsewhere.length > 0 && <p className={s.elsewhere}>{t.elsewhere(elsewhere)}</p>}
+            </>
           )}
 
           <div className={s.repos}>

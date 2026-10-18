@@ -144,6 +144,29 @@ export const CrashReportsAsked: Story = {
 /** No agent ready: a project can still be made, and says so. */
 export const NoneReady: Story = { args: { runtimes: NONE_READY } }
 
+/** Of the many agents Althar runs, two on this Mac and one it can fetch have rows; the rest are named once, under them. */
+export const ManyAgents: Story = {
+  args: {
+    runtimes: [
+      ...FIRST_RUN.slice(0, 2),
+      { id: 'opencode', name: 'OpenCode', state: RuntimeState.Missing, download: '45 MB' },
+      ...['GitHub Copilot', 'Cursor', 'Antigravity', 'Junie', 'Grok Build'].map((name) => ({
+        id: name.toLowerCase().replace(/\s+/g, '-'),
+        name,
+        state: RuntimeState.Missing as const,
+      })),
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(within(canvas.getByRole('list', { name: 'Agents on this Mac' })).getAllByRole('listitem')).toHaveLength(3)
+    await expect(canvas.getByText('1 of 3 ready')).toBeVisible()
+    await expect(
+      canvas.getByText('Althar also runs GitHub Copilot, Cursor, Antigravity, Junie and Grok Build, once they’re installed on this Mac.'),
+    ).toBeVisible()
+  },
+}
+
 export const AllStates: Story = {
   render: (args) => (
     <States

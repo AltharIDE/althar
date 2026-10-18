@@ -196,7 +196,9 @@ const tabOf = (agent: AgentStatus): AgentTab => {
 /** The agents, one at a time by their tabs: each one's accounts, and the models its work may use; or downloading one that isn't here. */
 function AgentsSection({ start, accounts }: { start: StartModel; accounts: AccountSignInModel }) {
   const [agentId, setAgentId] = useState<string | null>(null)
-  const agents = start.status?.agents ?? []
+  // Those on this computer first, then the others Althar runs, each in the registry's order.
+  const all = start.status?.agents ?? []
+  const agents = [...all.filter((agent) => agent.installed), ...all.filter((agent) => !agent.installed)]
   // The agent chosen, else the one signing in, else one that needs the person, else the first.
   const chosen =
     agents.find((agent) => agent.id === agentId) ??
