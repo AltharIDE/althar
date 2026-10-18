@@ -45,14 +45,19 @@ process.stdin.on('data', (data) => {
   }
 })`
 
-/* A Codex that answers, then stops reading: under Node, whose closed pipe breaks the next write, as a native app-server's does. */
+/*
+ * A Codex that answers, then stops reading: under Node, whose closed pipe breaks the next write, as a native app-server's does.
+ * libuv leaves fd 0 open when its handle closes, so the script closes it after; closing it under a live handle aborts Node.
+ */
 const CODEX_DEAF = `
 process.stdin.once('data', (data) => {
   const message = JSON.parse(String(data).split('\\n')[0])
-  process.stdin.pause()
-  require('node:fs').closeSync(0)
-  process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n')
-  setTimeout(() => process.exit(0), 2000)
+  process.stdin.once('close', () => {
+    require('node:fs').closeSync(0)
+    process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + '\\n')
+    setTimeout(() => process.exit(0), 2000)
+  })
+  process.stdin.destroy()
 })`
 
 const claude = (login = CLAUDE_LOGIN): AgentDefinition => ({
@@ -148,7 +153,7 @@ describe('signing in inside Althar', () => {
       },
     }
     const said = await run(deaf, { way: 'browser' })
-    expect(said.at(-1)?.kind).toBe('failed')
+    expect(said.at(-1)).toEqual({ kind: 'failed', message: 'The agent stopped listening while signing in.' })
   })
 
   it('stops when cancelled, saying nothing more', async () => {
