@@ -407,6 +407,43 @@ describe('a project’s trackers, in its settings', () => {
     expect(within(screen.getByRole('region', { name: 'Trackers' })).getByText('Connected as balazs')).toBeTruthy()
   })
 
+  it('says a tracker isn’t connected once the account its issues go through is removed, though another is signed in there', async () => {
+    // Work's account was removed, so listing connections leaves it out; a personal one is signed in on the same Linear.
+    windowAt('/projects/p1', {
+      getBoard: vi.fn(async () => ({ cursor: 1, tasks: [taskFrom('MER-12', 'conn_work')], calls: [], settledTotal: 1 })),
+      listConnections: vi.fn(async () => ({
+        ...connectionList,
+        connections: [githubConnection, linear('ready', 'conn_personal', 'balazs')],
+      })),
+    })
+    expect((await views()).getByRole('radio', { name: 'Settings, needs you' })).toBeTruthy()
+    const side = await openSettings()
+    await userEvent.click(side.getByRole('button', { name: 'Code and issues, needs you' }))
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getByText(/^Not connected: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.queryByText('Connected as balazs')).toBeNull()
+  })
+
+  it('says a tracker isn’t connected once one of the accounts its issues go through is removed, though the other is signed in', async () => {
+    windowAt('/projects/p1', {
+      getBoard: vi.fn(async () => ({
+        cursor: 1,
+        tasks: [taskFrom('MER-12', 'conn_personal'), taskFrom('MER-14', 'conn_personal'), taskFrom('MER-15', 'conn_work')],
+        calls: [],
+        settledTotal: 3,
+      })),
+      listConnections: vi.fn(async () => ({
+        ...connectionList,
+        connections: [githubConnection, linear('ready', 'conn_personal', 'balazs')],
+      })),
+    })
+    expect((await views()).getByRole('radio', { name: 'Settings, needs you' })).toBeTruthy()
+    await openSettings('Code and issues')
+    const trackers = within(screen.getByRole('region', { name: 'Trackers' }))
+    expect(trackers.getByText(/^Not connected: Althar can’t read its issues/)).toBeTruthy()
+    expect(trackers.queryByText('Connected as balazs')).toBeNull()
+  })
+
   it('names a tracker whose issues share no key by its name: a project’s Trello cards', async () => {
     const trello = {
       ...connectionList.products[1]!,
