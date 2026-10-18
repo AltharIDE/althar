@@ -1,7 +1,7 @@
-import type { ListedChange } from '@althar/connectors'
+import { ConnectorFailed, type ListedChange } from '@althar/connectors'
 import { assert, describe, it } from '@effect/vitest'
 
-import { agoOf, lineOf } from '../src/pullRequestList'
+import { agoOf, failureWords, lineOf } from '../src/pullRequestList'
 
 /* How find_pull_requests writes a pull request: when it last changed, and a line with nothing beyond what any has. */
 
@@ -53,5 +53,24 @@ describe('a pull request’s line', () => {
       lineOf({ ...change, state: 'open' }, { prefix: '!', state: 'open', now: NOW, held }),
       / · Althar opened it, for task retry-checkout · task review-8 reviews it already: don’t start another$/,
     )
+  })
+})
+
+describe('a repository whose pull requests couldn’t be listed', () => {
+  const failed = (reason: ConnectorFailed['reason'], more: { retryAt?: string; scope?: string } = {}) =>
+    failureWords(new ConnectorFailed({ product: 'github', reason, message: 'what the host said', ...more }), 'pull request')
+
+  it('says why, in words the coordinator can pass on, and what the person can do', () => {
+    assert.match(failed('forbidden', { scope: 'repo' }), /lacks repo\. The person gives the connection that in Settings/)
+    assert.strictEqual(failed('forbidden'), 'The host refused to list its pull requests: what the host said')
+    assert.strictEqual(failed('not_found'), 'Althar’s sign-in can’t see this repository.')
+    assert.match(failed('unauthorized'), /needs renewing: the person signs in again in Settings\.$/)
+    assert.strictEqual(failed('rate_limited'), 'The host asks Althar to wait before asking again.')
+    assert.strictEqual(
+      failed('rate_limited', { retryAt: '2026-10-18T12:00:00.000Z' }),
+      'The host asks Althar to wait until 2026-10-18T12:00:00.000Z before asking again.',
+    )
+    assert.strictEqual(failed('rejected'), 'what the host said')
+    assert.strictEqual(failed('unreachable'), 'The host didn’t answer as it should: what the host said')
   })
 })

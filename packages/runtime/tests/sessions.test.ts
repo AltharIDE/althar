@@ -402,6 +402,25 @@ describe('sessions', () => {
     }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime(':memory:', {}, { each: { opencode: { slowStart: 500 } } }))))),
   )
 
+  it.live('describes a recorded session the runtime no longer holds as not held', () =>
+    Effect.gen(function* () {
+      const sessions = yield* Sessions
+      const queries = yield* Queries
+      const sql = yield* SqlClient.SqlClient
+      const { task: created } = yield* task()
+      const sessionId = yield* begin(created.threadId, 'codex', 'large')
+      yield* sessions.stop(created.threadId)
+      // The row a crash leaves: still live, while the runtime holds nothing on the thread.
+      yield* sql`UPDATE provider_sessions SET state = 'active' WHERE id = ${sessionId}`
+
+      const { session } = yield* queries.thread(created.threadId, { limit: 0 })
+      assert.deepStrictEqual(
+        [session?.id, session?.model, session?.held, session?.turnRunning, session?.turnStartedAt, session?.context, session?.background],
+        [sessionId, 'large', false, false, null, null, []],
+      )
+    }).pipe(Effect.provide(Queries.layer.pipe(Layer.provideMerge(runtime())))),
+  )
+
   it.live('briefs the agent that takes over with what a failed command printed, not only that it failed', () =>
     Effect.gen(function* () {
       const sessions = yield* Sessions
