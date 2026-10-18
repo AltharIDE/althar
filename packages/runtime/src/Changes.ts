@@ -38,6 +38,7 @@ import { SqlClient } from 'effect/sql'
 
 import { Busy } from './Busy'
 import { touchCard } from './cards'
+import { logForLead, readLog } from './checkLogs'
 import { Agents, RuntimeConfig } from './Config'
 import { Connections, NotConnected } from './Connections'
 import {
@@ -92,7 +93,6 @@ import {
   commentForLead,
   commentLine,
   fromAlthar,
-  logOf,
   nameOf,
   outsidersLine,
   signed,
@@ -2145,10 +2145,8 @@ export class Changes extends Context.Service<
             const checks = yield* host.checks(repository, now.headSha)
             const sum = checksOf(now.headSha, checks)
             lines.push(checksLine(sum))
-            for (const check of checks.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_TO_LEAD)) {
-              const log = yield* host.checkLog(repository, check).pipe(Effect.orElseSucceed(() => null))
-              if (log !== null) lines.push(logOf(check.name, log))
-            }
+            for (const check of checks.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_TO_LEAD))
+              lines.push(logForLead(yield* readLog(host, repository, check)))
           }
           const activity = yield* host.activity(repository, snapshot.number, null)
           const replies = yield* repliesOf(link.id)
@@ -2443,6 +2441,13 @@ export class Changes extends Context.Service<
               (yield* heard(link, 'checks', `checks:${sum.sha}:${sum.outcome}${reran !== null ? ':again' : ''}`, { ...sum }))
             ) {
               happened = true
+              // The failed checks' logs, read once: the card shows their ends, or why there are none, and the lead is told the same.
+              const reads =
+                sum.outcome === 'failed'
+                  ? yield* Effect.forEach(ran.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_TO_LEAD), (check) =>
+                      readLog(host, repository, check),
+                    )
+                  : []
               yield* arrive(link, {
                 kind: 'checks',
                 from: null,
@@ -2450,6 +2455,7 @@ export class Changes extends Context.Service<
                 passed: sum.passed,
                 failed: sum.failed,
                 failing: sum.failing,
+                logs: reads.map((read) => ({ name: read.name, url: read.url, log: read.log, missing: read.missing })),
                 url: now.url,
               })
               // In Althar's hands, what failed is run again once before the lead is told: it may have failed by chance. Not the checks
@@ -2470,12 +2476,7 @@ export class Changes extends Context.Service<
                 )
                 rerunning = true
               } else if (sum.outcome === 'failed') {
-                const logs: Array<string> = []
-                const all = ran
-                for (const check of all.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_TO_LEAD)) {
-                  const log = yield* host.checkLog(repository, check).pipe(Effect.orElseSucceed(() => null))
-                  if (log !== null) logs.push(logOf(check.name, log))
-                }
+                const logs = reads.map(logForLead)
                 // In Althar's hands, its lead fixes them alone, started again if it must be, and its fix goes up as it pushes;
                 // after FIX_ROUNDS failures the change is the person's (ADR-040).
                 if (hands !== null && !hands.given) {
@@ -3511,11 +3512,9 @@ export class Changes extends Context.Service<
             FROM tasks k WHERE k.id = ${round.taskId}`
           if (task?.state !== 'open' || task.run !== 'succeeded')
             return yield* Effect.as(endRound(round, null, null, { failing: sum.failing }), false)
-          const logs: Array<string> = []
-          for (const check of all.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_TO_LEAD)) {
-            const log = yield* host.checkLog(repository, check).pipe(Effect.orElseSucceed(() => null))
-            if (log !== null) logs.push(logOf(check.name, log))
-          }
+          const logs = yield* Effect.forEach(all.filter((candidate) => candidate.state === 'failed').slice(0, LOGS_TO_LEAD), (check) =>
+            Effect.map(readLog(host, repository, check), logForLead),
+          )
           // The lead takes a place among the agents at work on this machine to fix them, or the round keeps its ask and waits for one.
           const body = fixNoteFor(place, { failing: sum.failing, logs })
           const why = { failing: sum.failing }
@@ -3928,10 +3927,11 @@ export class Changes extends Context.Service<
             return yield* new ToolRefused({
               message: `${nameOf(snapshot)} has no check called "${asked.check}". Its checks: ${all.length === 0 ? 'none' : all.map((one) => one.name).join(', ')}.`,
             })
-          const log = yield* host.checkLog(repository, check, true)
-          if (log === null)
-            return `Althar can't read ${check.name}'s log on ${nameOf(snapshot)}: its host keeps none Althar can read.${check.url === null ? '' : ` Its page: ${check.url}`}`
-          const lines = log.trimEnd().split('\n')
+          const read = yield* readLog(host, repository, check, true)
+          // A log its host keeps but wouldn't give is refused, with why; a check it keeps none of is said, with what it reported.
+          if (read.log === null)
+            return read.kept ? yield* new ToolRefused({ message: logForLead(read) }) : `${nameOf(snapshot)}: ${logForLead(read)}`
+          const lines = read.log.trimEnd().split('\n')
           const from = Math.min(Math.max(1, Math.floor(asked.from_line ?? lines.length - LOG_PAGE + 1)), lines.length)
           const to = Math.min(lines.length, from + LOG_PAGE - 1)
           const around = [
@@ -4054,7 +4054,7 @@ export class Changes extends Context.Service<
         },
         leadTool(
           'read_check_log',
-          "Reads a check's whole log on the task's pull request, a page of lines at a time: by the check's name, as read_pull_request gives it, from from_line, or its last page without one. In a task of several repositories, pull_request names the one, as read_pull_request names it: web#3. For a failure whose cause isn't in the end of the log you were given.",
+          "Reads a check's whole log on the task's pull request, a page of lines at a time: by the check's name, as read_pull_request gives it, from from_line, or its last page without one. In a task of several repositories, pull_request names the one, as read_pull_request names it: web#3. For a failure whose cause isn't in the end of the log you were given. Where its host refuses the log or no longer keeps it, it says why; for a check another CI service ran, it gives the check's page and what it reported instead.",
           {
             type: 'object',
             properties: { check: { type: 'string' }, from_line: { type: 'integer', minimum: 1 }, pull_request: { type: 'string' } },

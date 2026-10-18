@@ -54,9 +54,6 @@ export const quoted = (text: string) =>
     .map((line) => `> ${line}`)
     .join('\n')
 
-/** The end of a check's log, fenced. */
-export const logOf = (name: string, log: string) => `The end of ${name}'s log:\n\`\`\`\n${log}\n\`\`\``
-
 /**
  * How the lead writes the pull request's description: for whoever reviews
  * it on the code host, who hasn't seen the task in Althar. The step's

@@ -101,8 +101,9 @@ describe('a call to a service', () => {
         ['GET', 'https://api.test/round', { status: 302, headers: { location: 'https://api.test/round' } }],
       ])
       const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t') })
+      // Refused there, it is the signed address that was, not Althar's sign-in, which never went there.
       const refused = failure(yield* Effect.exit(http.text('https://api.test/log')))
-      assert.strictEqual(refused?.reason, 'unauthorized')
+      assert.strictEqual(refused?.reason, 'rejected')
       assert.strictEqual(refused?.message, 'storage.test answered 401')
       assert.strictEqual(failure(yield* Effect.exit(http.text('https://api.test/round')))?.reason, 'invalid_response')
     }),

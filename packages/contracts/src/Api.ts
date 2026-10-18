@@ -987,6 +987,15 @@ export const StepResultItem = Schema.Struct({
   }),
 })
 
+/** A failed check's log, as its arrival shows it: its end, or why there is none to read ("GitHub refused (401)"). */
+export const CheckLogShown = Schema.Struct({
+  name: Schema.String,
+  url: Schema.NullOr(Schema.String),
+  log: Schema.NullOr(Schema.String),
+  missing: Schema.NullOr(Schema.String),
+})
+export type CheckLogShown = typeof CheckLogShown.Type
+
 /**
  * Something heard from outside, written by someone else: a comment or a
  * review on the task's pull request, its checks finishing, its being merged,
@@ -1010,6 +1019,8 @@ export const ArrivalItem = Schema.Struct({
     passed: Schema.NullOr(Schema.Number),
     failed: Schema.NullOr(Schema.Number),
     failing: Schema.Array(Schema.String),
+    /** Failed checks' logs: the end of each, or why Althar couldn't read it, with the check's page. None from before it read them here. */
+    logs: Schema.Array(CheckLogShown),
     url: Schema.NullOr(Schema.String),
     /** Said by someone who can't write to the repository, as anyone can on a public one: not passed to the lead, for the person to pass on. */
     outsider: Schema.Boolean,

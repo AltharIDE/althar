@@ -317,9 +317,22 @@ export const makeHttp = (options: HttpOptions): Http => {
           if (location === null) {
             if (answer.status >= 200 && answer.status < 300) return answer.body
             const now = yield* Clock.currentTimeMillis
-            // Storage elsewhere says why in its own XML, which isn't words Althar can read: where it was, and its status, are.
-            const fallback = elsewhere ? `${new URL(at).host} answered ${answer.status}` : `${answer.status}`
-            return yield* Effect.fail(failureOf(product, answer.status, answer.headers, answer.body, now, fallback))
+            if (!elsewhere) return yield* Effect.fail(failureOf(product, answer.status, answer.headers, answer.body, now))
+            // Storage elsewhere says why in its own XML, which isn't words Althar can read: where it was, and its status, are. Its
+            // refusal is of the signed address it was sent to, not of Althar's sign-in, which never went there.
+            const failed = failureOf(
+              product,
+              answer.status,
+              answer.headers,
+              answer.body,
+              now,
+              `${new URL(at).host} answered ${answer.status}`,
+            )
+            return yield* Effect.fail(
+              failed.reason === 'unauthorized' || failed.reason === 'forbidden'
+                ? new ConnectorFailed({ product, reason: 'rejected', status: answer.status, message: failed.message })
+                : failed,
+            )
           }
           at = new URL(location, at).toString()
         }

@@ -458,7 +458,7 @@ describe('GitHub as a code host', () => {
       assert.strictEqual(refused.message, 'Resource not accessible by personal access token')
       // The storage's own XML isn't words: where it was, and what it answered, are.
       const storage = yield* failed('run:6:github-actions')
-      assert.strictEqual(storage.reason, 'forbidden')
+      assert.strictEqual(storage.reason, 'rejected')
       assert.strictEqual(storage.message, 'storage.example answered 403')
       assert.strictEqual((yield* failed('run:8:github-actions')).reason, 'unreachable')
       assert.isNull(yield* host.checkLog(repository, { ...check, id: 'status:3' }))
