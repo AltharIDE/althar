@@ -31,12 +31,14 @@
     **Edit the list…** (drag into order by a row's grip or its words, or move
     the grip with the arrow keys; make one the default, edit, remove). With
     nothing known to run, the button offers the three ways. The button never
-    shows a whole command: it says the name where there is one, just **Run**
-    for a repository's own way, and otherwise the last meaningful command of
-    the one-liner (after `&&`, `;`, `export` and `cd`), or its first word,
-    cut at 24 characters. Its width is capped, with an ellipsis, so the
-    title beside it keeps its room; the full command is its tooltip and is
-    listed in the chevron's menu.
+    shows a whole one-liner: it says the name where there is one, just **Run**
+    for a repository's own way at rest, and otherwise the last meaningful part
+    of the command (after `&&`, `;`, `export` and `cd`; what follows a `||` is
+    left out), whole, never cut to its runner. Once it runs, the repository's
+    way says its command too, so it is not mistaken for the Running pill. The
+    button's width is capped, with an ellipsis, so the title beside it keeps
+    its room; the full command is its tooltip and is listed in the chevron's
+    menu.
   - **Several run at once, one of each in a place:** a task's worktree, or the
     default branch's copy. Runs of the default branch share their repository's
     copy, made fresh as a run starts only where nothing of that repository
