@@ -65,7 +65,7 @@ export const Choosing: Story = {
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Console)
     await userEvent.click(c.getByRole('button', { name: 'OpenAI API key' }))
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Key)
-    await userEvent.click(c.getByRole('button', { name: 'A folder on this Mac' }))
+    await userEvent.click(c.getByRole('button', { name: 'A folder on this computer' }))
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Folder)
     await userEvent.keyboard('{Escape}')
     await expect(args.onCancel).toHaveBeenCalledTimes(1)
@@ -91,7 +91,7 @@ export const InTerminalFirst: Story = {
     const c = within(canvasElement)
     await userEvent.click(c.getByRole('button', { name: 'Sign in in Terminal' }))
     await expect(args.onWay).toHaveBeenCalledWith(SignInWay.Terminal)
-    await expect(c.getByRole('button', { name: 'A folder on this Mac' })).toBeInTheDocument()
+    await expect(c.getByRole('button', { name: 'A folder on this computer' })).toBeInTheDocument()
   },
 }
 

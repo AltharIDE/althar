@@ -527,7 +527,7 @@ export const agents: Readonly<Record<AgentId, AgentDefinition>> = {
     permissionJudge: { sessionMeta: claudeJudges },
     knownGaps: [
       'Starts in whatever mode the user set in Claude Code, which may be bypassPermissions, so Althar always sets the mode.',
-      "Hooks in the repository's or the user's settings run as code on the Mac whenever Claude uses a tool; they cannot approve past the ask rules. A review's lead loads no settings and runs no hooks.",
+      "Hooks in the repository's or the user's settings run as code on the computer whenever Claude uses a tool; they cannot approve past the ask rules. A review's lead loads no settings and runs no hooks.",
       "Its sandbox denies writes to a repository's tracked `.claude/` files, so git can fail to check those out inside it.",
       // Not checked against a real session yet: what its sandbox does when the start folder holds worktrees rather than being one.
       "In a task of several repositories it starts in the folder that holds the worktrees, which isn't one, so its sandbox may not let git write the repositories' `.git`; a commit then runs outside the sandbox and asks, and Althar's rules answer it.",

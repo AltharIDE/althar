@@ -31,6 +31,7 @@ import {
   TitleBar,
 } from '@althar/ui'
 
+import { device } from '../../shared/device'
 import { queuedWords, waitsWords } from '../../shared/agents'
 import { useModels } from '../../data/models'
 import { contextMeter } from '../../shared/ContextMeter'
@@ -911,6 +912,7 @@ export function TaskView({
       {host.lightbox}
       {abandoning && (
         <AbandonTask
+          text={{ branchHere: (name) => `Its branch ${name} stays on ${device.this}.` }}
           activity={can('stop') ? TaskActivity.Working : can('start') ? TaskActivity.Planned : TaskActivity.Still}
           worktree={snapshot.task.worktree === null ? null : shortFolder(snapshot.task.worktree)}
           branch={snapshot.task.branch}
