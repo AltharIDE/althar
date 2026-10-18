@@ -65,7 +65,18 @@ const CARD: SkillReviewModel = {
   installable: true,
   replaces: null,
   update: false,
-  changes: [],
+  // A first install: every file is new.
+  changes: [
+    { path: 'SKILL.md', change: 'added', lines: [{ kind: 'added', text: '# Release notes' }] },
+    {
+      path: 'scripts/merged-since.sh',
+      change: 'added',
+      lines: [
+        { kind: 'added', text: '#!/bin/sh' },
+        { kind: 'added', text: 'git log --merges --oneline "$(git describe --tags --abbrev=0)"..HEAD' },
+      ],
+    },
+  ],
 }
 
 const meta = {
@@ -141,6 +152,9 @@ export const Review: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText('Look at these first')).toBeVisible()
+    // The script's own lines, not only its name, before it can be installed.
+    await expect(canvas.getByText('Its other files')).toBeVisible()
+    await expect(canvas.getByText('git log --merges', { exact: false })).toBeVisible()
     await expect(canvas.getByRole('button', { name: 'Install' })).toBeEnabled()
   },
 }

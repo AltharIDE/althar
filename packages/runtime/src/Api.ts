@@ -32,6 +32,7 @@ import {
   type GitHubAccess,
   parseGitHubSource,
   resolveRef,
+  resolveTree,
   rollBack,
   setActive,
   stageFromGitHub,
@@ -1176,10 +1177,13 @@ export const handlers = Api.toLayer(
         skills(async () => {
           const parsed = parseGitHubSource(source)
           if (parsed === null) throw new SkillRefused({ message: `${source} isn't a GitHub repository; paste its address or owner/name` })
-          const at = ref ?? parsed.ref ?? 'HEAD'
-          const sha = await resolveRef(github, parsed.repo, at)
-          const paths = parsed.subpath === undefined ? await findSkills(github, parsed.repo, sha) : [parsed.subpath]
-          return { repo: parsed.repo, ref: at, sha, paths }
+          // A pasted `/tree/` address names its ref and path; GitHub splits them.
+          const at =
+            parsed.tree === undefined
+              ? { ref: ref ?? 'HEAD', sha: await resolveRef(github, parsed.repo, ref ?? 'HEAD') }
+              : await resolveTree(github, parsed.repo, parsed.tree)
+          const paths = at.subpath === undefined ? await findSkills(github, parsed.repo, at.sha) : [at.subpath]
+          return { repo: parsed.repo, ref: at.ref, sha: at.sha, paths }
         }),
       StageSkill: ({ repo, ref, subpath }) => skills((store) => stageFromGitHub(store.root, github, { repo, ref, subpath })),
       ApproveSkill: ({ commandId, ...approval }) =>

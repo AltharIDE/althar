@@ -2372,7 +2372,7 @@ describe('the skills page', () => {
       Effect.gen(function* () {
         const repos = {
           'o/r': {
-            refs: { main: A, HEAD: A } as Record<string, string>,
+            refs: { main: A, HEAD: A, 'feature/x': A } as Record<string, string>,
             commits: { [A]: { 'skills/beta/SKILL.md': skill('beta', 'One.\n'), 'hooks/start.sh': 'x' } } as Record<
               string,
               Record<string, string>
@@ -2386,6 +2386,12 @@ describe('the skills page', () => {
         })
         const found = yield* client.FindSkills({ source: 'https://github.com/o/r' })
         assert.deepStrictEqual(found, { repo: 'o/r', ref: 'HEAD', sha: A, paths: ['skills/beta'] })
+        assert.deepStrictEqual(yield* client.FindSkills({ source: 'https://github.com/o/r/tree/feature/x/skills/beta' }), {
+          repo: 'o/r',
+          ref: 'feature/x',
+          sha: A,
+          paths: ['skills/beta'],
+        })
         const card = yield* client.StageSkill({ repo: 'o/r', ref: 'main', subpath: 'skills/beta' })
         assert.deepStrictEqual(
           [card.id, card.installable, card.installed, card.files.map((file) => file.path)],

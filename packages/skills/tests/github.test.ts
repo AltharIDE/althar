@@ -2,7 +2,7 @@ import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { fetchSkill, findSkills, parseGitHubSource, resolveRef } from '../src/github'
+import { fetchSkill, findSkills, parseGitHubSource, resolveRef, resolveTree } from '../src/github'
 import { installLocalCatalog } from '../src/local'
 import { approve, checkUpdates, diffLines, rollBack, setActive, stageFromGitHub, uninstall } from '../src/review'
 import { readInstalls } from '../src/store'
@@ -21,12 +21,19 @@ describe('reading a GitHub source', () => {
   it('takes a URL with a tree path, a plain owner/name, and nothing else', () => {
     expect(parseGitHubSource('https://github.com/obra/superpowers/tree/main/skills/brainstorming')).toEqual({
       repo: 'obra/superpowers',
-      ref: 'main',
-      subpath: 'skills/brainstorming',
+      tree: 'main/skills/brainstorming',
     })
     expect(parseGitHubSource('github.com/obra/superpowers.git')).toEqual({ repo: 'obra/superpowers' })
     expect(parseGitHubSource('obra/superpowers')).toEqual({ repo: 'obra/superpowers' })
     expect(parseGitHubSource('https://gitlab.com/a/b')).toBeNull()
+  })
+
+  it('splits a /tree/ path into the ref GitHub has and the path in it, a branch with a slash too', async () => {
+    const { access } = fakeGitHub({ 'o/r': { refs: { main: A, 'feature/new': B }, commits: { [A]: {}, [B]: {} } } })
+    expect(await resolveTree(access, 'o/r', 'feature/new/skills/foo')).toEqual({ ref: 'feature/new', sha: B, subpath: 'skills/foo' })
+    expect(await resolveTree(access, 'o/r', 'main/skills/foo')).toEqual({ ref: 'main', sha: A, subpath: 'skills/foo' })
+    expect(await resolveTree(access, 'o/r', 'feature/new')).toEqual({ ref: 'feature/new', sha: B })
+    await expect(resolveTree(access, 'o/r', 'gone/skills')).rejects.toThrow('no branch, tag or commit starts gone/skills')
   })
 })
 
@@ -153,6 +160,25 @@ describe('installing a skill from GitHub as a person reviews it', () => {
     await installLocalCatalog(root, catalog)
     const read = await readInstalls(root)
     expect(read.ok && read.value.installs).toMatchObject([{ id: 'alpha', source: 'github', treeHash: card.treeHash }])
+    // Rolled back, it is the default again, not the default's files under the GitHub source.
+    const back = await rollBack(root, 'alpha')
+    expect(back).toMatchObject({ source: 'althar-default', review: 'default' })
+    expect([back.repo, back.subpath, back.ref, back.sha, back.history]).toEqual([undefined, undefined, undefined, undefined, undefined])
+  })
+
+  it('rolls a skill put in place of one from another repository back to that repository', async () => {
+    const { access } = fakeGitHub({
+      'o/r': repoAt('Theirs.\n'),
+      'me/mine': { refs: { dev: B }, commits: { [B]: { 'alpha/SKILL.md': skill('alpha', 'Mine.\n') } } },
+    })
+    const theirs = await stageFromGitHub(root, access, { repo: 'o/r', subpath: 'skills/alpha', ref: 'main' })
+    await approve(root, { id: 'alpha', ...theirs.source, treeHash: theirs.treeHash })
+    const mine = await stageFromGitHub(root, access, { repo: 'me/mine', subpath: 'alpha', ref: 'dev' })
+    await approve(root, { id: 'alpha', ...mine.source, treeHash: mine.treeHash, replace: true })
+    const back = await rollBack(root, 'alpha')
+    expect(back).toMatchObject({ source: 'github', repo: 'o/r', subpath: 'skills/alpha', ref: 'main', sha: A, treeHash: theirs.treeHash })
+    // Its update check asks the repository it is from again.
+    expect(await checkUpdates(root, access)).toMatchObject([{ id: 'alpha', state: 'current', sha: A }])
   })
 
   it('checks for updates only when asked, stages a newer commit for review, and rolls back to the version before', async () => {

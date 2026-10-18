@@ -30,21 +30,33 @@ export interface GitHubSkillSource {
 const REPO = /^[\w.-]+\/[\w.-]+$/
 const SHA = /^[0-9a-f]{40}$/
 
-/** A GitHub URL or `owner/name`, with an optional `/tree/<ref>/<path>`, as a person would paste it. */
-export const parseGitHubSource = (text: string): { readonly repo: string; readonly ref?: string; readonly subpath?: string } | null => {
+/**
+ * A GitHub URL or `owner/name`, as a person would paste it, with what follows `/tree/` in a URL: a ref and then a
+ * path, which only GitHub can split, as a branch's name may hold a slash (`resolveTree`).
+ */
+export const parseGitHubSource = (text: string): { readonly repo: string; readonly tree?: string } | null => {
   const trimmed = text
     .trim()
     .replace(/\.git$/, '')
     .replace(/\/+$/, '')
-  const url = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+\/[\w.-]+)(?:\/tree\/([^/]+)(?:\/(.+))?)?$/.exec(trimmed)
+  const url = /^(?:https?:\/\/)?(?:www\.)?github\.com\/([\w.-]+\/[\w.-]+)(?:\/tree\/(.+))?$/.exec(trimmed)
   if (url !== null) {
-    const [, repo = '', ref, subpath] = url
-    return { repo, ...(ref === undefined ? {} : { ref }), ...(subpath === undefined ? {} : { subpath }) }
+    const [, repo = '', tree] = url
+    return { repo, ...(tree === undefined ? {} : { tree }) }
   }
   return REPO.test(trimmed) ? { repo: trimmed } : null
 }
 
 const request = async (access: GitHubAccess, path: string, accept = 'application/vnd.github+json', base?: string): Promise<Response> => {
+  const response = await attempt(access, path, accept, base)
+  if (response === null) throw new Error(`GitHub ${path.split('?')[0]}: ${MISSING}`)
+  return response
+}
+
+const MISSING = 'not found (or private, which Althar does not install from yet)'
+
+/** A response, or null where GitHub has nothing there: no such repository, path, or commit for a ref. */
+const attempt = async (access: GitHubAccess, path: string, accept: string, base?: string): Promise<Response | null> => {
   const response = await (access.fetch ?? globalThis.fetch)(`${base ?? access.api ?? 'https://api.github.com'}${path}`, {
     headers: {
       accept,
@@ -52,13 +64,12 @@ const request = async (access: GitHubAccess, path: string, accept = 'application
       ...(access.token === undefined ? {} : { authorization: `Bearer ${access.token}` }),
     },
   })
+  if (response.status === 404 || response.status === 422) return null
   if (!response.ok) {
     const what =
-      response.status === 404
-        ? 'not found (or private, which Althar does not install from yet)'
-        : response.status === 403 || response.status === 429
-          ? 'GitHub is asking Althar to slow down; try again in a while'
-          : `HTTP ${response.status}`
+      response.status === 403 || response.status === 429
+        ? 'GitHub is asking Althar to slow down; try again in a while'
+        : `HTTP ${response.status}`
     throw new Error(`GitHub ${path.split('?')[0]}: ${what}`)
   }
   return response
@@ -69,14 +80,41 @@ const repoPath = (repo: string) => {
   return `/repos/${repo}`
 }
 
-/** The full commit SHA a branch, tag or commit names now. A moving branch is read once, here, and never followed. */
-export const resolveRef = async (access: GitHubAccess, repo: string, ref: string): Promise<string> => {
+/** The commit a ref names now, or null where it names none. */
+const commitOf = async (access: GitHubAccess, repo: string, ref: string): Promise<string | null> => {
   if (ref === '' || ref.includes('..')) throw new Error(`not a ref: ${ref}`)
-  const sha = (
-    await (await request(access, `${repoPath(repo)}/commits/${encodeURIComponent(ref)}`, 'application/vnd.github.sha')).text()
-  ).trim()
+  const response = await attempt(access, `${repoPath(repo)}/commits/${encodeURIComponent(ref)}`, 'application/vnd.github.sha')
+  if (response === null) return null
+  const sha = (await response.text()).trim()
   if (!SHA.test(sha)) throw new Error(`GitHub named no commit for ${repo}@${ref}`)
   return sha
+}
+
+/** The full commit SHA a branch, tag or commit names now. A moving branch is read once, here, and never followed. */
+export const resolveRef = async (access: GitHubAccess, repo: string, ref: string): Promise<string> => {
+  const sha = await commitOf(access, repo, ref)
+  if (sha === null) throw new Error(`GitHub ${repo}@${ref}: ${MISSING}`)
+  return sha
+}
+
+/**
+ * Splits what follows `/tree/` in a URL into the ref and the path in it, by asking GitHub for each ref it could
+ * start with, shortest first. Git can't hold both `feature` and `feature/new` as branches, so at most one is a ref.
+ */
+export const resolveTree = async (
+  access: GitHubAccess,
+  repo: string,
+  tree: string,
+): Promise<{ readonly ref: string; readonly sha: string; readonly subpath?: string }> => {
+  const parts = tree.split('/')
+  for (let at = 1; at <= parts.length; at++) {
+    const ref = parts.slice(0, at).join('/')
+    const sha = await commitOf(access, repo, ref)
+    if (sha === null) continue
+    const subpath = parts.slice(at).join('/')
+    return { ref, sha, ...(subpath === '' ? {} : { subpath }) }
+  }
+  throw new Error(`GitHub ${repo}: no branch, tag or commit starts ${tree}`)
 }
 
 interface TreeEntry {

@@ -228,6 +228,10 @@ export interface SkillReviewText {
   script: string
   instructions: string
   changes: string
+  /** A first install's files besides `SKILL.md`, each in full. */
+  rest: string
+  /** A file whose lines can't be shown: binary, or too long to compare. */
+  unshown: string
   noted: string
   refused: string
   install: string
@@ -245,6 +249,8 @@ export const skillReviewText: SkillReviewText = {
   script: 'script: an agent may run it, Althar never does',
   instructions: 'What the agent is told',
   changes: 'What changes',
+  rest: 'Its other files',
+  unshown: 'Can’t be shown here: binary, or too long to compare. Read it on GitHub before installing.',
   noted: 'Look at these first',
   refused: 'It can’t be installed',
   install: 'Install',
@@ -272,6 +278,9 @@ export function SkillReview({ card, busy, onInstall, onCancel, text, className, 
   const t = { ...skillReviewText, ...text }
   const refused = card.findings.filter((finding) => finding.level === 'reject')
   const flagged = card.findings.filter((finding) => finding.level === 'flag')
+  // Every file is shown before it is installed: a first install's SKILL.md as the instructions, the rest in full;
+  // an update or a replacement as what changes from the version installed.
+  const shown = card.update || card.replaces !== null ? card.changes : card.changes.filter((change) => change.path !== 'SKILL.md')
   return (
     <section className={cx(s.card, className)} aria-label={card.id} {...rest}>
       <header className={s.head}>
@@ -302,15 +311,21 @@ export function SkillReview({ card, busy, onInstall, onCancel, text, className, 
           ))}
         </ul>
       </div>
-      {card.update ? (
+      {!card.update && (
         <div className={s.part}>
-          <span className={s.label}>{t.changes}</span>
-          {card.changes.map((change) => (
+          <span className={s.label}>{t.instructions}</span>
+          <pre className={s.instructions}>{card.instructions}</pre>
+        </div>
+      )}
+      {shown.length > 0 && (
+        <div className={s.part}>
+          <span className={s.label}>{card.update || card.replaces !== null ? t.changes : t.rest}</span>
+          {shown.map((change) => (
             <div key={change.path} className={s.change}>
               <span className={s.changePath}>
                 <code>{change.path}</code> <span className={s.quiet}>{t.change[change.change]}</span>
               </span>
-              {change.lines.length > 0 && (
+              {change.lines.length > 0 ? (
                 <pre className={s.diff}>
                   {change.lines.map((line, at) => (
                     <span key={at} className={cx(s.line, line.kind === 'added' && s.plus, line.kind === 'removed' && s.minus)}>
@@ -320,14 +335,11 @@ export function SkillReview({ card, busy, onInstall, onCancel, text, className, 
                     </span>
                   ))}
                 </pre>
+              ) : (
+                change.change !== 'removed' && <span className={s.quiet}>{t.unshown}</span>
               )}
             </div>
           ))}
-        </div>
-      ) : (
-        <div className={s.part}>
-          <span className={s.label}>{t.instructions}</span>
-          <pre className={s.instructions}>{card.instructions}</pre>
         </div>
       )}
       <footer className={s.actions}>

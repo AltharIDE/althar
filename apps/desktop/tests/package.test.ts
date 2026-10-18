@@ -1,9 +1,11 @@
-import { mkdtempSync } from 'node:fs'
+import { cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { loadLocalCatalog } from '../../../packages/skills/src/local'
+import { stageSkillsCatalog } from '../scripts/catalog'
 import { entitlementsFor } from '../scripts/entitlements'
 import { fetchNode, NODE_ARCHIVES, NODE_VERSION, nodeArchive } from '../scripts/node'
 
@@ -17,6 +19,22 @@ const modules = 'Contents/Resources/app/node_modules'
 const codex = `${modules}/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin`
 
 describe('the packaged app', () => {
+  it('ships the skill catalog where its runtime looks, and the runtime loads every skill from there', async () => {
+    const stage = mkdtempSync(join(tmpdir(), 'althar-stage-'))
+    const source = join(import.meta.dirname, '..', '..', '..', 'packages', 'skills', 'catalog')
+    const found = stageSkillsCatalog(source, stage)
+    expect(found).toBe(join(stage, 'resources', 'skills-catalog'))
+    const [packaged, built] = await Promise.all([loadLocalCatalog(found), loadLocalCatalog(source)])
+    expect(packaged.skills.map(({ entry }) => entry.id)).toEqual(built.skills.map(({ entry }) => entry.id))
+    expect(packaged.skills.length).toBeGreaterThan(0)
+    // A catalog with a skill gone is never packaged.
+    const broken = mkdtempSync(join(tmpdir(), 'althar-catalog-'))
+    cpSync(source, broken, { recursive: true })
+    const gone = packaged.skills[0]!.entry.id
+    rmSync(join(broken, 'skills', gone), { recursive: true })
+    expect(() => stageSkillsCatalog(broken, mkdtempSync(join(tmpdir(), 'althar-stage-')))).toThrow(`missing ${gone}`)
+  })
+
   it('gives each executable only what it needs', () => {
     expect(entitlementsFor('')).toEqual([JIT, MICROPHONE])
     expect(entitlementsFor(`${frameworks}/Althar Helper.app`)).toEqual([JIT, MICROPHONE])

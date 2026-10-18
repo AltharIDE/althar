@@ -194,6 +194,9 @@ export interface Approval {
   readonly replace?: boolean | undefined
 }
 
+/** An install's version and where it is from, as its history keeps it to roll back to. */
+const versionOf = ({ id: _id, active: _active, history: _history, ...version }: Install): NonNullable<Install['history']>[number] => version
+
 /**
  * Installs the version a person approved, active. The stored version is read back and checked again, so a card
  * cannot install other files than it showed. An install of the same name from another source is replaced only when
@@ -217,9 +220,7 @@ export const approve = (root: string, approval: Approval): Promise<Install> =>
     if (was !== undefined && !sameSource && approval.replace !== true)
       throw new Error(`${approval.id} is already installed from ${was.repo ?? was.source}; replacing it needs the person's say-so`)
     const history =
-      was === undefined || was.treeHash === approval.treeHash
-        ? (was?.history ?? [])
-        : [...(was.history ?? []), { treeHash: was.treeHash, ...(was.sha === undefined ? {} : { sha: was.sha }) }]
+      was === undefined || was.treeHash === approval.treeHash ? (was?.history ?? []) : [...(was.history ?? []), versionOf(was)]
     const install: Install = {
       id: approval.id,
       source: 'github',
@@ -279,15 +280,22 @@ export const rollBack = (root: string, id: string): Promise<Install> =>
     if (was === undefined || previous === undefined) throw new Error(`${id} has no earlier version to go back to`)
     await readObject(root, previous.treeHash)
     const history = was.history!.slice(0, -1)
-    const { sha: _sha, history: _history, ...rest } = was
-    const install: Install = {
-      ...rest,
+    // An entry that says where it was from is put back whole; one without is from the source the install has now.
+    const from = previous.source === undefined ? was : previous
+    const restored: Install = {
+      id,
+      active: was.active,
+      source: previous.source ?? was.source,
+      review: previous.review ?? was.review,
       treeHash: previous.treeHash,
+      ...(from.repo === undefined ? {} : { repo: from.repo }),
+      ...(from.subpath === undefined ? {} : { subpath: from.subpath }),
+      ...(from.ref === undefined ? {} : { ref: from.ref }),
       ...(previous.sha === undefined ? {} : { sha: previous.sha }),
       ...(history.length === 0 ? {} : { history }),
     }
-    await writeInstalls(root, withInstall(read.value, install))
-    return install
+    await writeInstalls(root, withInstall(read.value, restored))
+    return restored
   })
 
 /** Turns an install on or off for later runs. One never reviewed cannot be turned on. */

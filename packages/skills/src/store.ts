@@ -30,7 +30,11 @@ const Install = z
     review: z.enum(['not-reviewed', 'reviewed', 'default']),
     /** Whether it is bound for use; installed is not the same as active. */
     active: z.boolean(),
-    /** Versions it had before, newest last, so an update can be rolled back; their objects are kept. */
+    /**
+     * Versions it had before, newest last, so an update can be rolled back; their objects are kept. Each says where
+     * it was from, as one installed in place of another source's goes back to that source; an entry without a
+     * source is from the same one.
+     */
     history: z
       .array(
         z.strictObject({
@@ -39,6 +43,11 @@ const Install = z
             .string()
             .regex(/^[0-9a-f]{40}$/)
             .optional(),
+          source: z.enum(['github', 'local', 'althar-default']).optional(),
+          repo: z.string().optional(),
+          subpath: z.string().optional(),
+          ref: z.string().optional(),
+          review: z.enum(['not-reviewed', 'reviewed', 'default']).optional(),
         }),
       )
       .optional(),
