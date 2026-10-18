@@ -606,7 +606,7 @@ describe('GitLab as a code host', () => {
     }),
   )
 
-  it.effect('reads the end of a failed job’s log, and nothing for a log it can’t read', () =>
+  it.effect('reads the end of a failed job’s log, and says why where it can’t', () =>
     Effect.gen(function* () {
       const log = Array.from({ length: 400 }, (_, index) => `line ${index}`).join('\n')
       const { host } = gitlab([
@@ -617,7 +617,7 @@ describe('GitLab as a code host', () => {
       const read = yield* host.checkLog(repository, check)
       assert.isTrue(read?.endsWith('line 399'))
       assert.strictEqual(read?.split('\n').length, 150)
-      assert.isNull(yield* host.checkLog(repository, { ...check, id: 'job:34675721:2' }))
+      assert.strictEqual((yield* Effect.flip(host.checkLog(repository, { ...check, id: 'job:34675721:2' }))).reason, 'forbidden')
       assert.isNull(yield* host.checkLog(repository, { ...check, id: 'status:3' }))
     }),
   )

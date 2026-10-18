@@ -73,6 +73,41 @@ describe('a call to a service', () => {
     }),
   )
 
+  it.effect('follows a text’s redirects itself, signed in only on the service’s own origin', () =>
+    Effect.gen(function* () {
+      const { fetch, sent } = stubFetch([
+        ['GET', 'https://api.test/log', { status: 301, headers: { location: '/moved/log' } }],
+        ['GET', 'https://api.test/moved/log', { status: 302, headers: { location: 'https://storage.test/log?sig=s' } }],
+        ['GET', 'https://storage.test/log?sig=s', { text: 'line 1' }],
+      ])
+      const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t'), headers: { 'x-api': '1' } })
+      assert.strictEqual(yield* http.text('https://api.test/log'), 'line 1')
+      assert.deepStrictEqual(
+        sent.map((request) => [request.url, request.headers.authorization, request.headers['x-api'], request.redirect]),
+        [
+          ['https://api.test/log', 'Bearer t', '1', 'manual'],
+          ['https://api.test/moved/log', 'Bearer t', '1', 'manual'],
+          ['https://storage.test/log?sig=s', undefined, undefined, 'manual'],
+        ],
+      )
+    }),
+  )
+
+  it.effect('says where a redirected text was refused, and stops following a loop', () =>
+    Effect.gen(function* () {
+      const { fetch } = stubFetch([
+        ['GET', 'https://api.test/log', { status: 302, headers: { location: 'https://storage.test/log' } }],
+        ['GET', 'https://storage.test/log', { status: 401, text: '<?xml version="1.0"?>\n<Error/>' }],
+        ['GET', 'https://api.test/round', { status: 302, headers: { location: 'https://api.test/round' } }],
+      ])
+      const http = makeHttp({ product: 'github', fetch, authorization: Effect.succeed('Bearer t') })
+      const refused = failure(yield* Effect.exit(http.text('https://api.test/log')))
+      assert.strictEqual(refused?.reason, 'unauthorized')
+      assert.strictEqual(refused?.message, 'storage.test answered 401')
+      assert.strictEqual(failure(yield* Effect.exit(http.text('https://api.test/round')))?.reason, 'invalid_response')
+    }),
+  )
+
   it.effect('reads an answer’s headers, which is all some answers say', () =>
     Effect.gen(function* () {
       const { fetch } = stubFetch([

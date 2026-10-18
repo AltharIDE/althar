@@ -412,22 +412,73 @@ describe('GitHub as a code host', () => {
     }),
   )
 
-  it.effect('reads the end of a GitHub Actions job’s log, and nothing for other checks', () =>
+  it.effect('reads the end of a GitHub Actions job’s log from the storage GitHub redirects to, without the token', () =>
     Effect.gen(function* () {
-      const long = Array.from({ length: 400 }, (_, n) => `line ${n}`).join('\n')
-      const { host } = github([
-        ['GET', `${REPO}/actions/jobs/1/logs`, { text: long }],
-        ['GET', `${REPO}/actions/jobs/9/logs`, { status: 404, json: { message: 'Not Found' } }],
-        ['GET', `${REPO}/actions/jobs/8/logs`, { status: 500, text: 'down' }],
+      const long = Array.from({ length: 400 }, (_, n) => `2026-10-18T19:42:01.0000000Z line ${n}`).join('\n')
+      // As GitHub answers: a 302 to the log in its storage, signed for a minute, which refuses a request that carries a token too.
+      const blob = 'https://productionresultssa0.blob.core.windows.net/actions-results/abc/logs/job/job-logs.txt?sv=2025-01-05&sig=x'
+      const { host, sent } = github([
+        ['GET', `${REPO}/actions/jobs/1/logs`, { status: 302, headers: { location: blob } }],
+        [
+          'GET',
+          blob,
+          (request) =>
+            request.headers.authorization === undefined
+              ? { text: long }
+              : { status: 400, text: '\uFEFF<?xml version="1.0"?><Error><Code>InvalidAuthenticationInfo</Code></Error>' },
+        ],
       ])
-      const check = { name: 'test', state: 'failed' as const, url: null, summary: null }
+      const check = { name: 'verify', state: 'failed' as const, url: null, summary: null }
       const log = yield* host.checkLog(repository, { ...check, id: 'run:1:github-actions' })
       assert.strictEqual(log?.split('\n').length, 150)
       assert.isTrue(log?.endsWith('line 399'))
-      assert.isNull(yield* host.checkLog(repository, { ...check, id: 'run:9:github-actions' }))
+      assert.strictEqual(sent[0]?.headers.authorization, 'Bearer ghu_t')
+      assert.strictEqual(sent[1]?.url, blob)
+      assert.isUndefined(sent[1]?.headers.authorization)
+      assert.isUndefined(sent[1]?.headers['x-github-api-version'])
+      // With `whole`, all of it.
+      assert.strictEqual((yield* host.checkLog(repository, { ...check, id: 'run:1:github-actions' }, true))?.split('\n').length, 400)
+    }),
+  )
+
+  it.effect('says why a GitHub Actions job’s log can’t be read, and reads nothing for other checks', () =>
+    Effect.gen(function* () {
+      const { host } = github([
+        ['GET', `${REPO}/actions/jobs/9/logs`, { status: 410, json: { message: 'Gone' } }],
+        ['GET', `${REPO}/actions/jobs/7/logs`, { status: 403, json: { message: 'Resource not accessible by personal access token' } }],
+        ['GET', `${REPO}/actions/jobs/6/logs`, { status: 302, headers: { location: 'https://storage.example/log?sig=old' } }],
+        ['GET', 'https://storage.example/log?sig=old', { status: 403, text: '<Error><Code>AuthenticationFailed</Code></Error>' }],
+        ['GET', `${REPO}/actions/jobs/8/logs`, { status: 500, text: 'down' }],
+      ])
+      const check = { name: 'test', state: 'failed' as const, url: null, summary: null }
+      const failed = (id: string) => Effect.flip(host.checkLog(repository, { ...check, id }))
+      assert.strictEqual((yield* failed('run:9:github-actions')).reason, 'not_found')
+      const refused = yield* failed('run:7:github-actions')
+      assert.strictEqual(refused.reason, 'forbidden')
+      assert.strictEqual(refused.message, 'Resource not accessible by personal access token')
+      // The storage's own XML isn't words: where it was, and what it answered, are.
+      const storage = yield* failed('run:6:github-actions')
+      assert.strictEqual(storage.reason, 'forbidden')
+      assert.strictEqual(storage.message, 'storage.example answered 403')
+      assert.strictEqual((yield* failed('run:8:github-actions')).reason, 'unreachable')
       assert.isNull(yield* host.checkLog(repository, { ...check, id: 'status:3' }))
       assert.isNull(yield* host.checkLog(repository, { ...check, id: 'run:2:circleci' }))
-      assert.strictEqual((yield* Effect.flip(host.checkLog(repository, { ...check, id: 'run:8:github-actions' }))).reason, 'unreachable')
+    }),
+  )
+
+  it.effect('reads what a check run from another service reported of itself', () =>
+    Effect.gen(function* () {
+      const { host } = github([
+        ['GET', `${REPO}/check-runs/2`, { json: { output: { title: '1 new alert', summary: 'SQL injection', text: 'in src/db.ts:12' } } }],
+        ['GET', `${REPO}/check-runs/3`, { json: { output: { title: 'Failed', summary: null, text: '' } } }],
+      ])
+      const check = { name: 'CodeQL', state: 'failed' as const, url: null, summary: null }
+      assert.strictEqual(
+        yield* host.checkReport!(repository, { ...check, id: 'run:2:github-advanced-security' }),
+        'SQL injection\n\nin src/db.ts:12',
+      )
+      assert.isNull(yield* host.checkReport!(repository, { ...check, id: 'run:3:circleci' }))
+      assert.isNull(yield* host.checkReport!(repository, { ...check, id: 'status:4' }))
     }),
   )
 
