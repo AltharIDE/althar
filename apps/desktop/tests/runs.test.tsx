@@ -73,7 +73,7 @@ describe('what the project runs, from its front', () => {
       }),
     )
     const opened = vi.spyOn(window, 'open').mockImplementation(() => null)
-    await userEvent.click(await screen.findByRole('button', { name: 'Running · localhost:5173' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'bun run dev · localhost:5173' }))
     expect(opened).toHaveBeenCalledWith('http://localhost:5173/', '_blank')
     opened.mockRestore()
     const list = await listed()

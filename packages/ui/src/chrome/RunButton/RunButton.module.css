@@ -22,7 +22,7 @@
   display: inline-block;
   min-width: 0;
   vertical-align: bottom;
-  max-width: 22ch;
+  max-width: 36ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

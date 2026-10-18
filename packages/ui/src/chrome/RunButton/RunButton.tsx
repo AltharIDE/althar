@@ -138,32 +138,60 @@ export interface RunButtonProps {
   text?: Partial<RunButtonText>
 }
 
-const LONGEST = 24
-
-const truncate = (text: string) => (text.length > LONGEST ? `${text.slice(0, LONGEST - 1)}…` : text)
+/** Cut for a menu row, which has room; the button's own text is cut by its width, in the CSS. */
+const LONGEST = 80
 
 /** Setup a one-line command does on the way, not what it runs: export, unset, cd, NAME=value on its own. */
 const setup = (part: string) => /^(export|unset|cd|set|source|\.)\s/.test(part) || /^[A-Za-z_]\w*=\S*$/.test(part)
 
+/** The parts of a one-liner, split on && ; and lines outside quotes; a || ends a part, since what follows it only runs on failure. */
+function parts(command: string): string[] {
+  const found: string[] = []
+  let part = ''
+  let quote: string | null = null
+  let fallback = false
+  const end = () => {
+    if (part.trim() !== '') found.push(part.trim())
+    part = ''
+    fallback = false
+  }
+  for (let i = 0; i < command.length; i++) {
+    const c = command.charAt(i)
+    const two = command.slice(i, i + 2)
+    if (quote !== null) {
+      if (c === quote) quote = null
+      if (!fallback) part += c
+    } else if (c === '"' || c === "'") {
+      quote = c
+      if (!fallback) part += c
+    } else if (two === '&&') {
+      end()
+      i++
+    } else if (two === '||') {
+      fallback = true
+      i++
+    } else if (c === ';' || c === '\n') end()
+    else if (!fallback) part += c
+  }
+  end()
+  return found
+}
+
 /**
- * A command in a few words: the last meaningful one of a chain on && ; || or
- * lines, without its exec, whole where it is short, else its first word, cut.
+ * A command in a few words: the last meaningful part of a chain, without its
+ * exec and whatever it does only on failure, so `cd app && bun run dev`
+ * says `bun run dev`. Not cut to a word: that is often only the runner.
  */
 export function shortCommand(command: string): string {
-  const parts = command
-    .split(/&&|\|\||;|\n/)
-    .map((part) => part.trim().replace(/^exec\s+/, ''))
-    .filter((part) => part !== '')
-  const last = parts.findLast((part) => !setup(part)) ?? parts.at(-1) ?? command.trim()
-  if (last.length <= LONGEST) return last
-  const word = last.split(/\s+/)[0] ?? last
-  return truncate(word.slice(word.lastIndexOf('/') + 1) || word)
+  const all = parts(command).map((part) => part.replace(/^exec\s+/, ''))
+  const last = all.findLast((part) => !setup(part)) ?? all.at(-1) ?? command.trim()
+  return last.length > LONGEST ? `${last.slice(0, LONGEST - 1)}…` : last
 }
 
 /** What the list calls it: its name, else its command in a few words. */
 export const labelOf = (target: RunTarget) => target.name ?? shortCommand(target.command)
 
-/** What the button says after Run: its name, else (not where the repository's own way runs, which is just Run) its command in a few words. */
+/** What the idle button says after Run: its name, else (not where the repository's own way runs, which is just Run) its command in a few words. */
 export const buttonLabelOf = (target: RunTarget) => target.name ?? (target.from === 'repository' ? undefined : shortCommand(target.command))
 
 const live = (target: RunTarget) => target.run !== undefined && target.run.state !== 'ended'
@@ -246,17 +274,19 @@ export function RunButton({ targets, onRun, onStop, onOpen, onAdd, onEdit, open,
   // The main half: runs the default; while it runs, says where it answers and opens it, or, with no address, opens the list.
   // Whatever it says is cut with an ellipsis, so it never crowds the title beside it; the full command is its tooltip.
   const run = first.run
+  // Once it runs it says what runs, so it is not mistaken for the Running pill, even where it was just Run.
   const label = buttonLabelOf(first)
+  const what = labelOf(first)
   const cut = (words: string) => <span className={s.text}>{words}</span>
   const main =
     run?.state === 'starting'
-      ? { children: cut(label === undefined ? t.startingHint : t.starting(label)), busy: true }
+      ? { children: cut(t.starting(what)), busy: true }
       : run?.state === 'running'
         ? {
             children: (
               <span className={s.live}>
                 <LiveDot />
-                {cut([label ?? t.running, run.url].filter((part) => part !== undefined).join(' · '))}
+                {cut([what, run.url].filter((part) => part !== undefined).join(' · '))}
               </span>
             ),
             onClick: () => (run.url === undefined ? setOpened(true) : onOpen(first.id)),
