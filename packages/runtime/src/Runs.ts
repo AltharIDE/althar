@@ -2357,7 +2357,7 @@ export class Runs extends Context.Service<
           const reply = (said: string) =>
             branched.length === 0
               ? said
-              : `${said} You changed the repository, so Althar put the task's work on a branch of its own, ${branched.join(', ')}, which stays on this Mac: commit there.`
+              : `${said} You changed the repository, so Althar put the task's work on a branch of its own, ${branched.join(', ')}, which stays on this computer: commit there.`
           const itemId = yield* newId(Ids.threadItem)
           const shows = Effect.gen(function* () {
             const kept = yield* keepEvidence({ projectId: access.projectId as ProjectId, itemId, folders: [] }, evidence)

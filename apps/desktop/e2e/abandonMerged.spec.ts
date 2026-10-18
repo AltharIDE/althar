@@ -3,10 +3,10 @@ import { appendFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { expect, type Page, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 import { repository } from '../tests/repository'
-import { launch, openFirstProject, say } from './support'
+import { connectGitHub, launch, openFirstProject, say } from './support'
 
 /*
  * A merged task with a commit after its pull request, as DEV-58 was (ADR-034):
@@ -20,26 +20,6 @@ import { launch, openFirstProject, say } from './support'
 
 const git = (cwd: string, ...args: Array<string>) =>
   execFileSync('git', ['-c', 'user.name=Host', '-c', 'user.email=host@althar.test', ...args], { cwd, encoding: 'utf8' }).trim()
-
-/** Connects the fake GitHub from the project's settings, with a token pasted in. */
-const connectGitHub = async (page: Page, project = 'meridian') => {
-  await page.getByRole('button', { name: 'Settings', exact: true }).click()
-  await page
-    .getByRole('dialog', { name: `${project}’s settings` })
-    .getByRole('button', { name: /^GitHub/ })
-    .click()
-  const connecting = page.getByRole('dialog', { name: 'GitHub' })
-  await connecting
-    .getByRole('group', { name: 'Ways to connect GitHub' })
-    .getByRole('button', { name: /Make a token/ })
-    .click()
-  await connecting.getByRole('button', { name: 'Paste it myself' }).click()
-  await connecting.getByLabel('Paste it').fill('github_pat_e2e')
-  await connecting.getByRole('button', { name: 'Check' }).click()
-  await expect(connecting.getByRole('heading', { name: 'Connected as you' })).toBeVisible()
-  await connecting.getByRole('button', { name: 'Done' }).click()
-  await expect(connecting).toHaveCount(0)
-}
 
 test('a merged task with a commit after its pull request needs the person, and abandoning it leaves the commit out', async () => {
   const home = mkdtempSync(join(tmpdir(), 'althar-e2e-'))

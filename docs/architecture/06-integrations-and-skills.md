@@ -471,9 +471,10 @@ for the person, as above.
   call for the person. Trello's lists are mapped by the person, once per
   board. Althar moves an issue to In Progress as its task's first step
   starts (Linear: the team's first `started` state; Jira: the first
-  transition offered into the In Progress category), once, and leaves one
-  already started, done or cancelled as it is. GitHub's, GitLab's and
-  Trello's issues have no standard In Progress and are left alone. A
+  transition offered into the In Progress category; Trello: the top of the
+  board's first open list named Doing or In progress), once, and leaves one
+  already started, done or cancelled as it is. GitHub's and GitLab's issues
+  have no standard In Progress and are left alone. A
   project's rules can turn it off. Who moves an issue to in review or done,
   and when, is an open question.
 - **The key goes in the branch and the PR's title,** so the trackers' own

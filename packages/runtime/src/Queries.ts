@@ -1169,7 +1169,7 @@ export class Queries extends Context.Service<
             : diff
         })
 
-      /** A task's issue and pull requests, as their external links last saw them. */
+      /** A task's issue and pull requests, as their external links last saw them, and the connection its issue is read through. */
       const linksOf = (taskId: string) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
@@ -1181,8 +1181,10 @@ export class Queries extends Context.Service<
             url: string
             snapshot: string
             listening: number
+            connectionId: string | null
           }>`
-            SELECT kind, product, ref, key, url, snapshot, listening FROM external_links WHERE task_id = ${taskId} ORDER BY created_at`
+            SELECT kind, product, ref, key, url, snapshot, listening, connection_id FROM external_links WHERE task_id = ${taskId}
+            ORDER BY created_at`
           const issueRow = links.find((link) => link.kind === 'issue')
           const issue = ((): IssueSummary | null => {
             if (issueRow === undefined) return null
@@ -1254,7 +1256,7 @@ export class Queries extends Context.Service<
               ),
             { concurrency: 'unbounded' },
           )
-          return { issue, changes }
+          return { issue, issueConnection: issueRow?.connectionId ?? null, changes }
         })
 
       /** A task's pull requests as its card reads them, and the repositories it merged here: what the coordinator is told of them. */
@@ -1394,7 +1396,14 @@ export class Queries extends Context.Service<
         })
 
       /** Where a task stands, read from it, its plan, its run and its sessions: what its card and its header show. Its links, where they are read already. */
-      const cardFor = (taskId: string, links?: { readonly issue: IssueSummary | null; readonly changes: ReadonlyArray<ChangeSummary> }) =>
+      const cardFor = (
+        taskId: string,
+        links?: {
+          readonly issue: IssueSummary | null
+          readonly issueConnection: string | null
+          readonly changes: ReadonlyArray<ChangeSummary>
+        },
+      ) =>
         Effect.gen(function* () {
           const sql = yield* SqlClient.SqlClient
           const sessions = yield* Sessions
@@ -1542,7 +1551,7 @@ export class Queries extends Context.Service<
           const implement = planned.find((step) => step.key === 'implement')
           const onPlan = task.lead === null || (task.lead === implement?.agentId && task.leadModel === implement.model)
           const leadEffort = task.leadEffort ?? (onPlan ? (implement?.effort ?? null) : null)
-          const { issue, changes } = links ?? (yield* linksOf(taskId))
+          const { issue, issueConnection, changes } = links ?? (yield* linksOf(taskId))
           const shown = changes.find((candidate) => candidate.state === 'open') ?? changes.at(-1) ?? null
           // What it makes: its plan and its pull requests say so, whatever it wrote (a quick task stays plain until it is made a
           // change); for a review, git does too, by what is on its branch; for a task that settled, once, as nothing changes it
@@ -1574,7 +1583,16 @@ export class Queries extends Context.Service<
                     reason: text(parameters, 'reason') || null,
                     end: end === 'draft' || end === 'ready' || end === 'none' ? end : null,
                   },
-            issue: issue === null ? null : { product: issue.product, key: issue.key, title: issue.title, url: issue.url },
+            issue:
+              issue === null
+                ? null
+                : {
+                    product: issue.product,
+                    key: issue.key,
+                    title: issue.title,
+                    url: issue.url,
+                    ...(issueConnection === null ? {} : { connectionId: issueConnection }),
+                  },
             // The first still open, for the person to act on: one merged while another isn't leaves the other. Else its latest.
             change: shown,
             earlier: changes.filter((candidate) => candidate !== shown).toReversed(),

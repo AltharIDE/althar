@@ -518,6 +518,8 @@ export enum Room {
   Board = 'board',
   /** The conversation and the board side by side. */
   Both = 'both',
+  /** The project's settings, in place of its work. */
+  Settings = 'settings',
 }
 
 /** Where an agent runtime on this machine stands, as Althar last found it. */

@@ -3,7 +3,6 @@ import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test'
 
 import { Brand } from '../../foundations/brands/brands'
 import { ProjectInk } from '../../foundations/ProjectMark/drawing'
-import { Button } from '../../primitives/Button/Button'
 import { States } from '../../storybook/States'
 import { RunButton, type RunTarget } from '../RunButton/RunButton'
 import type { WorkNeed } from '../WorkStatus/WorkStatus'
@@ -35,13 +34,6 @@ const RUNS: RunTarget[] = [
   { id: 'storybook', name: 'Storybook', command: 'bun --filter @althar/ui storybook', where: 'main', from: 'person' },
 ]
 
-/* The way to its settings, as the app puts it there. */
-const SETTINGS = (
-  <Button size="small" variant="quiet" icon="gear">
-    Settings
-  </Button>
-)
-
 const meta = {
   title: 'Chrome/ProjectFront',
   component: ProjectFront,
@@ -56,13 +48,12 @@ const meta = {
     inProgress: 3,
     last: 'PR 1184 merged 3h ago',
     parts: PARTS,
-    settings: SETTINGS,
   },
 } satisfies Meta<typeof ProjectFront>
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** How the project stands in a line, what it is made of under it, and its settings at the end. */
+/** How the project stands in a line, and what it is made of under it. */
 export const Standing: Story = {
   play: async ({ canvasElement }) => {
     const c = within(canvasElement)
@@ -102,7 +93,7 @@ export const Quiet: Story = {
 }
 
 const runIt = fn()
-/** What it runs sits before its settings: one press runs its default branch, with no agent; the chevron has the rest. */
+/** What it runs sits at the end: one press runs its default branch, with no agent; the chevron has the rest. */
 export const Runs: Story = {
   args: { run: <RunButton targets={RUNS} onRun={runIt} onStop={fn()} onOpen={fn()} onAdd={fn()} onEdit={fn()} /> },
   play: async ({ canvasElement }) => {

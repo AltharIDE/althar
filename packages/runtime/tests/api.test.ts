@@ -770,14 +770,14 @@ describe('the API', () => {
         const refused = yield* Effect.flip(client.StartSession({ commandId: commandId(), threadId: task.threadId, agentId: 'missing' }))
         assert.deepStrictEqual(
           [refused.reason, refused.message],
-          ['SessionFailed', "missing couldn't start. althar-no-such-agent isn't installed, or isn't on this Mac's PATH."],
+          ['SessionFailed', "missing couldn't start. althar-no-such-agent isn't installed, or isn't on this computer's PATH."],
         )
         const thread = yield* client.GetThread({ threadId: task.threadId })
         assert.deepStrictEqual(thread.items.at(-1)?.content, {
           source: 'runtime',
           severity: 'error',
           title: "Fake missing couldn't start.",
-          description: "althar-no-such-agent isn't installed, or isn't on this Mac's PATH.",
+          description: "althar-no-such-agent isn't installed, or isn't on this computer's PATH.",
         })
         assert.strictEqual(
           (yield* Effect.flip(client.GetThreadItem({ threadId: task.threadId, itemId: 'itm_missing' }))).reason,
@@ -2009,7 +2009,7 @@ describe('code hosts and trackers, through the API', () => {
         )
         // gh isn't signed in here; and a server that doesn't answer is said to be one.
         const noCli = yield* Effect.flip(client.ConnectCli({ commandId: commandId(), product: 'github', webUrl: HOST }))
-        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', "gh isn't signed in to github.test on this Mac."])
+        assert.deepStrictEqual([noCli.reason, noCli.message], ['CliSignedOut', "gh isn't signed in to github.test on this computer."])
         const server = yield* client.FindServer({ service: 'jira', webUrl: 'jira.meridian.dev' })
         assert.deepStrictEqual(server, { product: null, webUrl: 'https://jira.meridian.dev', reason: 'unreachable', tokenPage: null })
         const { issues } = yield* client.ListIssues({ projectId: project.id })

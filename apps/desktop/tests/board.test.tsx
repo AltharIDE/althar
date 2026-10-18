@@ -17,10 +17,18 @@ import { useConnections } from '../src/renderer/features/connections/useConnecti
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
 import { useProject } from '../src/renderer/features/project/useProject'
 import { agents, card, change, changed, fakeClient, snapshot } from './fixtures'
-import { withServices } from './render'
+import { useSettingsOf, withServices } from './render'
 
 function Project({ onTask = vi.fn() }: { onTask?: (threadId: string) => void }) {
-  return <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onTask={onTask} />
+  return (
+    <ProjectView
+      model={useProject('p1')}
+      board={useBoard('p1')}
+      connections={useConnections()}
+      settings={useSettingsOf('p1')}
+      onTask={onTask}
+    />
+  )
 }
 
 /** The dock on its own, as the home opens it: the board's tasks and calls, answered or accepted there. */
