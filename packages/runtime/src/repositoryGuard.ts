@@ -45,9 +45,18 @@ export const guardPush = (input: {
     const { rules } = yield* (yield* Policies).current(input.projectId as Parameters<Policies['Service']['current']>[0])
     const settings = repositoryFilesOf(rules)
     const paths = yield* pathsPushed(input.cwd, input.base, input.head, input.ref)
-    const blocked = [...new Set([...blockedBeforeCommit(paths, settings), ...blockedBeforePush(paths, settings)].map(({ path }) => path))]
+    const held = [...blockedBeforeCommit(paths, settings), ...blockedBeforePush(paths, settings)]
+    const blocked = [...new Set(held.map(({ path }) => path))]
     if (blocked.length === 0) return
+    // Which switches are off for what was held back, so the person is told the ones that would let it go.
+    const needs = (['writeSkills', 'writeOpenSpec', 'pushProtected'] as const).filter((setting) =>
+      held.some(({ kind, reason }) =>
+        setting === 'pushProtected'
+          ? reason === 'push-off'
+          : reason === 'write-off' && kind === (setting === 'writeSkills' ? 'skills' : 'openspec'),
+      ),
+    )
     const shown = blocked.slice(0, 5)
     const said = `${shown.join(', ')}${blocked.length > shown.length ? ` and ${blocked.length - shown.length} more` : ''}`
-    return yield* new PushRefused({ taskId: input.taskId, why: 'protected', remote: input.remote, said })
+    return yield* new PushRefused({ taskId: input.taskId, why: 'protected', remote: input.remote, said, needs })
   })

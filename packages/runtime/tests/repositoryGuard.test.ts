@@ -89,7 +89,7 @@ const taskWithRemote = Effect.gen(function* () {
   return { project, task, remote, slug: worktree?.slug ?? '', path, branch: git(path, 'rev-parse', '--abbrev-ref', 'HEAD') }
 })
 
-const refusal = (failure: unknown) => failure as { _tag?: string; why?: string; said?: string }
+const refusal = (failure: unknown) => failure as { _tag?: string; why?: string; said?: string; needs?: ReadonlyArray<string> }
 
 describe('pushing a task’s branch', () => {
   it.live('holds back skill and OpenSpec files by default, whoever wrote them, and sends everything else', () =>
@@ -106,10 +106,11 @@ describe('pushing a task’s branch', () => {
       assert.strictEqual(refused.why, 'protected')
       assert.include(refused.said, 'apps/web/.opencode/skills/we ird/SKILL.md')
       assert.include(refused.said, 'openspec/changes/a/proposal.md')
-      // The person is told which setting allows it, and where it is.
+      // The person is told which settings allow it, and where they are.
+      assert.deepStrictEqual(refused.needs, ['writeSkills', 'writeOpenSpec', 'pushProtected'])
       assert.include(
         words(refused, (id) => id).message,
-        'turn on “Push skill/OpenSpec files” in the project’s Settings, under Repository files',
+        'turn on “Write Althar-managed skills”, “Write OpenSpec artifacts” and “Push skill/OpenSpec files” in the project’s Settings, under Repository files',
       )
       // Nothing left the machine.
       assert.strictEqual(execFileSync('git', ['branch', '--list', branch], { cwd: remote }).toString().trim(), '')
@@ -131,10 +132,15 @@ describe('pushing a task’s branch', () => {
       const person = (yield* Instance).personId
       const head = commitFiles(path, { '.claude/skills/x/SKILL.md': 'skill' })
       yield* policies.set(project.projectId, { repositoryFiles: { writeSkills: true, writeOpenSpec: true, pushProtected: false } }, person)
-      assert.strictEqual(refusal(yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: slug, head }]))).why, 'protected')
-      // Pushing alone is not enough: the files were never allowed into the repository.
+      assert.deepStrictEqual(refusal(yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: slug, head }]))).needs, [
+        'pushProtected',
+      ])
+      // Pushing alone is not enough: the files were never allowed into the repository, and the person is told so.
       yield* policies.set(project.projectId, { repositoryFiles: { writeSkills: false, writeOpenSpec: false, pushProtected: true } }, person)
-      assert.strictEqual(refusal(yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: slug, head }]))).why, 'protected')
+      const unwritten = refusal(yield* Effect.flip(changes.pushBranch(task.taskId, [{ repository: slug, head }])))
+      assert.strictEqual(unwritten.why, 'protected')
+      assert.deepStrictEqual(unwritten.needs, ['writeSkills'])
+      assert.include(words(unwritten, (id) => id).message, 'To push it, turn on “Write Althar-managed skills” in the project’s Settings')
       yield* policies.set(project.projectId, { repositoryFiles: { writeSkills: true, writeOpenSpec: false, pushProtected: true } }, person)
       assert.deepStrictEqual(yield* changes.pushBranch(task.taskId, [{ repository: slug, head }]), [{ branch, remote: 'origin' }])
       assert.include(git(remote, 'ls-tree', '-r', '--name-only', branch), '.claude/skills/x/SKILL.md')

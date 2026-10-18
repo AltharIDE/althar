@@ -20,6 +20,13 @@ const tagOf = (error: unknown): string =>
 const fieldOf = (error: unknown, key: string): unknown =>
   typeof error === 'object' && error !== null && key in error ? (error as Record<string, unknown>)[key] : undefined
 
+/** The project's Repository files switches, as its settings name them. */
+const repositorySwitches = {
+  writeSkills: 'Write Althar-managed skills',
+  writeOpenSpec: 'Write OpenSpec artifacts',
+  pushProtected: 'Push skill/OpenSpec files',
+} as const
+
 const text = (error: unknown, key: string): string => {
   const value = fieldOf(error, key)
   return typeof value === 'string' ? value : ''
@@ -204,7 +211,14 @@ export const words = (
         if (why === 'protected') {
           const held = text(error, 'said')
           const many = held.includes(',')
-          return `Nothing was pushed: ${held} ${many ? 'are skill or OpenSpec files, which stay' : 'is a skill or OpenSpec file, which stays'} on this computer. To push ${many ? 'them' : 'it'}, turn on “Push skill/OpenSpec files” in the project’s Settings, under Repository files.`
+          const needs = fieldOf(error, 'needs')
+          const named = (Array.isArray(needs) ? needs : [])
+            .map((setting) => repositorySwitches[setting as keyof typeof repositorySwitches])
+            .filter((name) => name !== undefined)
+            .map((name) => `“${name}”`)
+          const turnOn =
+            named.length === 0 ? 'what it needs' : named.length === 1 ? named[0] : `${named.slice(0, -1).join(', ')} and ${named.at(-1)}`
+          return `Nothing was pushed: ${held} ${many ? 'are skill or OpenSpec files, which stay' : 'is a skill or OpenSpec file, which stays'} on this computer. To push ${many ? 'them' : 'it'}, turn on ${turnOn} in the project’s Settings, under Repository files.`
         }
         if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
         return `git couldn’t sign in to push to ${remote}. Push once from a terminal so your sign-in is kept, then push again here.`

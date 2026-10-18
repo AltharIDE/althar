@@ -172,6 +172,8 @@ export class PushRefused extends Schema.TaggedError<PushRefused>()('PushRefused'
   remote: Schema.String,
   /** What the remote said, for one it refused; for `protected`, the skill or OpenSpec paths that were held back. */
   said: Schema.optional(Schema.String),
+  /** For `protected`, the project's Repository files switches that are off and would let them go. */
+  needs: Schema.optional(Schema.Array(Schema.Literals(['writeSkills', 'writeOpenSpec', 'pushProtected']))),
 }) {}
 
 /** A link given for an issue points at something else on its host: `what` is it, in the host's words ("pull request", "merge request"). */
