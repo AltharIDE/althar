@@ -22,6 +22,8 @@ describe('keys', () => {
       expect(keys.primaryDown({ metaKey: true, ctrlKey: false })).toBe(true)
       expect(keys.primaryDown({ metaKey: false, ctrlKey: true })).toBe(false)
       expect(keys.commandDown({ metaKey: false, ctrlKey: true })).toBe(true)
+      expect(keys.commandDown({ metaKey: true, ctrlKey: false })).toBe(true)
+      expect(keys.commandDown({ metaKey: false, ctrlKey: false })).toBe(false)
     }
   })
 
@@ -35,6 +37,16 @@ describe('keys', () => {
       expect(keys.chord(keys.keys.alt, 'Z')).toBe('Alt+Z')
       expect(keys.primaryDown({ metaKey: false, ctrlKey: true })).toBe(true)
       expect(keys.primaryDown({ metaKey: true, ctrlKey: false })).toBe(false)
+    }
+  })
+
+  it('count Ctrl alone as the command key on Linux and Windows, never Super or the Windows key', async () => {
+    for (const platform of ['linux', 'win32']) {
+      const { keys } = await on(platform)
+      expect(keys.commandDown({ metaKey: false, ctrlKey: true })).toBe(true)
+      expect(keys.commandDown({ metaKey: true, ctrlKey: false })).toBe(false)
+      expect(keys.commandDown({ metaKey: false, ctrlKey: false })).toBe(false)
+      expect(keys.primaryDown({ metaKey: true, ctrlKey: true })).toBe(false)
     }
   })
 })
