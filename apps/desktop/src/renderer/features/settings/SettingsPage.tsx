@@ -267,8 +267,10 @@ const rowOf = (skill: InstalledSkill): SkillRowModel => ({
 
 const reviewOf = (card: SkillReviewCard): SkillReviewModel => {
   const { installed } = card
-  // Installing it replaces one of the same name from somewhere else; from the same repository it is an update.
-  const same = installed !== null && installed.source === 'github' && installed.repo === card.source.repo
+  // Installing it replaces one of the same name from somewhere else; from the same folder of the same repository it
+  // is an update, as approving it takes (packages/skills' approve).
+  const same =
+    installed !== null && installed.source === 'github' && installed.repo === card.source.repo && installed.subpath === card.source.subpath
   return {
     id: card.id,
     ...card.source,

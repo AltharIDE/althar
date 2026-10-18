@@ -207,9 +207,14 @@ describe('installing a skill from GitHub as a person reviews it', () => {
         { kind: 'added', text: 'Two.' },
       ]),
     )
-    await approve(root, { id: 'alpha', ...update.card.source, treeHash: update.card.treeHash })
+    // Turned off, it stays off once its update is approved.
+    await setActive(root, 'alpha', false)
+    expect(await approve(root, { id: 'alpha', ...update.card.source, treeHash: update.card.treeHash })).toMatchObject({
+      active: false,
+      treeHash: update.card.treeHash,
+    })
     const back = await rollBack(root, 'alpha')
-    expect(back).toMatchObject({ treeHash: first.treeHash, sha: A })
+    expect(back).toMatchObject({ treeHash: first.treeHash, sha: A, active: false })
     expect(back.history).toBeUndefined()
     await expect(rollBack(root, 'alpha')).rejects.toThrow('no earlier version')
     expect(JSON.parse(await readFile(join(root, 'installs.json'), 'utf8')).installs[0].ref).toBe('main')

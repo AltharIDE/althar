@@ -47,7 +47,7 @@ export interface ReviewCard {
   /** Whether it may be installed: nothing in it is refused. */
   readonly installable: boolean
   /** The version installed under the same name now, if any, and where it is from. */
-  readonly installed: Pick<Install, 'source' | 'treeHash' | 'repo' | 'sha' | 'review' | 'active'> | null
+  readonly installed: Pick<Install, 'source' | 'treeHash' | 'repo' | 'subpath' | 'sha' | 'review' | 'active'> | null
   /** Against the installed version; every file is added when none is. */
   readonly changes: ReadonlyArray<FileChange>
 }
@@ -146,6 +146,7 @@ const cardOf = (
             review: installed.review,
             active: installed.active,
             ...(installed.repo === undefined ? {} : { repo: installed.repo }),
+            ...(installed.subpath === undefined ? {} : { subpath: installed.subpath }),
             ...(installed.sha === undefined ? {} : { sha: installed.sha }),
           },
     changes: changesBetween(before, files),
@@ -230,7 +231,8 @@ export const approve = (root: string, approval: Approval): Promise<Install> =>
       ref: approval.ref,
       treeHash: approval.treeHash,
       review: 'reviewed',
-      active: true,
+      // An update keeps it off if the person turned it off; a new one, or one put in place of another, is on.
+      active: sameSource ? was.active : true,
       ...(history.length === 0 ? {} : { history }),
     }
     await writeInstalls(root, withInstall(read.value, install))

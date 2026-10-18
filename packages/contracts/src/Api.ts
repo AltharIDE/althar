@@ -2160,6 +2160,7 @@ export const SkillReviewCard = Schema.Struct({
       review: Schema.Literals(['not-reviewed', 'reviewed', 'default']),
       active: Schema.Boolean,
       repo: Schema.optional(Schema.String),
+      subpath: Schema.optional(Schema.String),
       sha: Schema.optional(Schema.String),
     }),
   ),

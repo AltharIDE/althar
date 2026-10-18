@@ -13,7 +13,7 @@ import { isSection, type Section, SECTIONS } from '../src/renderer/features/sett
 import { SettingsPage } from '../src/renderer/features/settings/SettingsPage'
 import { useStart } from '../src/renderer/features/start/useStart'
 import { edgeSpotOf, edgeWords } from '../src/renderer/shared/edge'
-import { connectionList, fakeClient, fakeHost, githubConnection, models, withoutOpenCode } from './fixtures'
+import { connectionList, fakeClient, fakeHost, githubConnection, models, skillCard, withoutOpenCode } from './fixtures'
 import { withServices } from './render'
 
 /*
@@ -303,6 +303,22 @@ describe('the Settings tab', () => {
     await userEvent.click(within(card).getByRole('button', { name: 'Install' }))
     await waitFor(() => expect(client.approveSkill).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-notes' }), false))
     await waitFor(() => expect(screen.queryByRole('region', { name: 'release-notes' })).toBeNull())
+  })
+
+  it('offers to replace a skill of the same name from another folder of the same repository, not to update it', async () => {
+    const { client } = fakeClient()
+    const installed = { source: 'github' as const, treeHash: 'b'.repeat(64), review: 'reviewed' as const, active: true }
+    vi.mocked(client.stageSkill).mockResolvedValue({
+      ...skillCard,
+      installed: { ...installed, repo: 'acme/agent-skills', subpath: 'old/release-notes' },
+    })
+    withServices(<Settings at="skills" />, client)
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Install a skill from GitHub' }), 'acme/agent-skills')
+    await userEvent.click(screen.getByRole('button', { name: 'Find skills' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Review' }))
+    const card = await screen.findByRole('region', { name: 'release-notes' })
+    await userEvent.click(within(card).getByRole('button', { name: 'Install in place of the one from acme/agent-skills' }))
+    await waitFor(() => expect(client.approveSkill).toHaveBeenCalledWith(expect.objectContaining({ id: 'release-notes' }), true))
   })
 
   it('opens the agents on the one that needs the person, each with its accounts and who makes it', async () => {
