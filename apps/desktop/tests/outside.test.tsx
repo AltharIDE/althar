@@ -735,7 +735,7 @@ describe('running what a task built, with no agent', () => {
       })),
     })
     withServices(<Task />, client)
-    await userEvent.click(await screen.findByRole('button', { name: 'Run bun run dev' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Run$/ }))
     expect(client.runProject).toHaveBeenCalledWith('p1', 't1', 'th1', 'rnbl_dev')
     // The run comes back on the watch: one for another task, or another project, says nothing here.
     const launch = {

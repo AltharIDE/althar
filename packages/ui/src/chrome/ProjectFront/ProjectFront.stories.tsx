@@ -106,7 +106,7 @@ const runIt = fn()
 export const Runs: Story = {
   args: { run: <RunButton targets={RUNS} onRun={runIt} onStop={fn()} onOpen={fn()} onAdd={fn()} onEdit={fn()} /> },
   play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Run bun run dev' }))
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Run' }))
     await expect(runIt).toHaveBeenCalledWith('dev')
   },
 }
@@ -160,6 +160,32 @@ export const Crowded: Story = {
     ),
   },
   decorators: [(Story) => <div style={{ width: 640 }}>{Story()}</div>],
+}
+
+/** What an agent kept to run is one long unnamed command: the button says its last part, cut short, and the project's name keeps its room. */
+export const LongRunCommand: Story = {
+  args: {
+    name: 'althar',
+    run: (
+      <RunButton
+        targets={[
+          {
+            id: 'long',
+            command:
+              'export PATH="$HOME/.bun/bin:$PATH"; unset ELECTRON_RUN_AS_NODE; P=$(pwd); cd apps/desktop && bun run build && cd "$P" && exec zypak-wrapper electron apps/desktop --no-sandbox',
+            where: 'main',
+            from: 'agent',
+          },
+        ]}
+        onRun={fn()}
+        onStop={fn()}
+        onOpen={fn()}
+        onAdd={fn()}
+        onEdit={fn()}
+      />
+    ),
+  },
+  decorators: [(Story) => <div style={{ width: 480 }}>{Story()}</div>],
 }
 
 /* A part that opens where it lives, as the app makes one. */

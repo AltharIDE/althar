@@ -93,7 +93,7 @@ describe('running the project, with no agent', () => {
     withServices(<WithSettings />, client)
     // Once the conversation is read, its front offers what the project runs.
     await screen.findByText(/^Ask the coordinator about/)
-    await userEvent.click(await screen.findByRole('button', { name: 'Run npm run dev' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Run$/ }))
     expect(client.runProject).toHaveBeenCalledWith('p1', null, 'thc', 'rnbl_dev')
     const launch = {
       id: 'proc_1',
