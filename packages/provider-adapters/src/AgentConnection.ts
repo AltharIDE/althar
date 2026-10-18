@@ -626,6 +626,7 @@ export const connect = (options: ConnectOptions): Effect.Effect<AgentConnection,
                 )
               }
             }),
+          // Interruptible so the runtime's startup timeout can cut off a handshake that hangs; don't make it uninterruptible.
           { interruptible: true },
         )
         const sessionId = started.sessionId

@@ -166,6 +166,8 @@ export const codexLikeMeanings = {
 export interface FakeAgentOptions {
   /** Hold `session/new` open to exercise startup timeout cleanup. */
   readonly beforeNewSession?: () => Promise<void>
+  /** Hold `initialize` open, the first thing a connection asks, to exercise the same cleanup. */
+  readonly beforeInitialize?: () => Promise<void>
   /** A scripted response to a permission judgment, with the actual session settings exposed to the test. */
   readonly judgment?: (input: {
     readonly prompt: string
@@ -1051,7 +1053,8 @@ export const fakeAgentApp = (options: FakeAgentOptions = {}): acp.AgentApp => {
 
   return acp
     .agent({ name: 'fake-agent' })
-    .onRequest(acp.methods.agent.initialize, ({ params }) => {
+    .onRequest(acp.methods.agent.initialize, async ({ params }) => {
+      await options.beforeInitialize?.()
       options.initialized?.(params.clientCapabilities ?? undefined)
       return options.bare === true
         ? { protocolVersion: acp.PROTOCOL_VERSION }

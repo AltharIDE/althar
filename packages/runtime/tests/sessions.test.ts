@@ -727,7 +727,8 @@ describe('sessions', () => {
       }).pipe(Effect.provide(runtime())),
     )
 
-    it.effect('times out an ACP startup, records the failure and leaves the current lead running', () => {
+    // The agent's startup stops answering at `hangsIn`; the timeout then cuts it off and the current lead carries on.
+    const timesOutStartup = (hangsIn: 'beforeInitialize' | 'beforeNewSession') => {
       let entered!: () => void
       const waitingForStartup = new Promise<void>((resolve) => {
         entered = resolve
@@ -738,6 +739,10 @@ describe('sessions', () => {
       })
       const startupTimeoutScheduled = Deferred.makeUnsafe<void>()
       const testGuardScheduled = Deferred.makeUnsafe<void>()
+      // The test clock stands in for time, and the timeout isn't reachable from here, so the clock is watched instead: the
+      // timeout is found as the one 2-minute `Clock.sleep` (SESSION_START_TIMEOUT, which relies on `Effect.timeoutOption`
+      // sleeping on the Clock service) and the test's own 3-minute guard as the 3-minute one. Change either duration, or
+      // how the timeout waits, and this stops finding it and the test hangs rather than fails.
       const observedClock = Layer.effect(
         Clock.Clock,
         Effect.gen(function* () {
@@ -764,7 +769,7 @@ describe('sessions', () => {
         {
           each: {
             opencode: {
-              beforeNewSession: () => {
+              [hangsIn]: () => {
                 entered()
                 return startupResponse
               },
@@ -790,7 +795,9 @@ describe('sessions', () => {
         const failure = finished.value.cause.reasons.find(Cause.isFailReason)
         if (failure === undefined) throw new Error('The startup attempt should fail with a typed error.')
         assert.instanceOf(failure.error, SessionFailed)
-        assert.include(failure.error.summary, 'Timed out waiting for Fake opencode to set up a session.')
+        assert.include(failure.error.summary, 'Timed out after 2m waiting for Fake opencode to set up a session.')
+        // The tag is what tells a hang from a failure, in the log and for telemetry.
+        assert.include(failure.error.reason, 'StartTimedOut')
 
         assert.strictEqual((yield* session(first))?.state, 'active')
         assert.strictEqual(Option.getOrUndefined(yield* sessions.running(created.threadId))?.sessionId, first)
@@ -802,9 +809,15 @@ describe('sessions', () => {
         ])
         const notices = (yield* threadItems(created.threadId)).filter((item) => item.kind === 'notice')
         assert.strictEqual(notices.at(-1)?.content.title, "Fake opencode couldn't start.")
-        assert.include(String(notices.at(-1)?.content.description), 'Timed out waiting for Fake opencode to set up a session')
+        assert.include(String(notices.at(-1)?.content.description), 'Timed out after 2m waiting for Fake opencode to set up a session')
       }).pipe(Effect.ensuring(Effect.sync(releaseStartup)), Effect.provide(app))
-    })
+    }
+
+    it.effect('times out an ACP startup that hangs in session/new, records the failure and leaves the current lead running', () =>
+      timesOutStartup('beforeNewSession'),
+    )
+
+    it.effect('times out an ACP startup that hangs in initialize', () => timesOutStartup('beforeInitialize'))
 
     it.live('starts one session when two starts race', () =>
       Effect.gen(function* () {
