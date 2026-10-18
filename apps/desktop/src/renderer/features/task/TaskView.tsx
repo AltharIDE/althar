@@ -41,7 +41,7 @@ import { useDictation } from '../../shared/dictation/useDictation'
 import { draftKey, useDraft } from '../../shared/drafts'
 import { isGenerated } from '../../shared/generated'
 import { OpenIn, text as openInText, useEditors } from '../../shared/OpenIn'
-import { queuedOf, queueShown, withQueued } from '../../shared/items'
+import { queuedOf, queueShown, readingNow, withQueued } from '../../shared/items'
 import { ModelChoice } from '../../shared/ModelChoice'
 import { pendingText } from '../../shared/Pending'
 import { useModelNames } from '../../shared/modelNames'
@@ -340,10 +340,17 @@ export function TaskView({
   )
   // An agent's question waiting is kept to answer it here, whatever else the task is.
   const [asking, setAsking] = useState<string | null | undefined>(undefined)
+  // Without one, a permission waiting as it opens takes focus, so Enter answers it; one that comes later takes it only while nothing else has it.
+  const [permitting, setPermitting] = useState(false)
   if (face === null && model.snapshot !== null) {
-    setAsking(model.snapshot.attention.find((call) => call.kind === 'question')?.id ?? null)
+    const question = model.snapshot.attention.find((call) => call.kind === 'question')
+    setAsking(question?.id ?? null)
+    setPermitting(question === undefined && model.snapshot.attention.some((call) => call.kind === 'permission'))
     // A call waiting is answered in the conversation, ahead of a view picked earlier.
     showFace(model.snapshot.attention.length > 0 ? 'talk' : (chosenFaces.get(model.snapshot.task.id) ?? openingFace(model.snapshot)))
+  } else if (permitting && model.snapshot !== null && !model.snapshot.attention.some((call) => call.kind === 'permission')) {
+    // Those answered, one that comes later is like any other: it doesn't take focus from what is being typed.
+    setPermitting(false)
   }
   const named = useModelNames()
   const editors = useEditors(model.snapshot?.task.id ?? '')
@@ -393,7 +400,13 @@ export function TaskView({
     return () => window.removeEventListener('keydown', onKey)
   }, [onBack, open, setFace])
   // A running turn says how long it has worked so far, a task under way how long it has run, and a run of it how long it has been up.
-  const now = useNow(ticking(model.snapshot) || (model.snapshot?.task.launches.some((launch) => launch.ended === null) ?? false))
+  const now = useNow(
+    ticking(model.snapshot) ||
+      // While what the person sent is on its way, or the lead starts for it, how long they have waited.
+      model.pending ||
+      model.snapshot?.session?.state === 'starting' ||
+      (model.snapshot?.task.launches.some((launch) => launch.ended === null) ?? false),
+  )
   // What its pull request says while the task is open shows on the pill over the composer for a moment.
   const heard = useHeard(model.snapshot?.items ?? null)
   const snapshot = model.snapshot
@@ -455,7 +468,18 @@ export function TaskView({
         ]),
     // The thread in rounds: each ask, its lead's acknowledgement, its work in one line, and its result, which ends it (ADR-042).
     ...roundsOf(
-      { items: snapshot.items, turnRunning: busy, worktree: snapshot.task.worktree, queue, outputs: model.outputs },
+      {
+        items: snapshot.items,
+        turnRunning: busy,
+        turnStarted: session?.turnStartedAt ?? null,
+        reading: readingNow(session, model.pending, snapshot.task.queued !== null || snapshot.task.waits !== null),
+        turnEnded: session?.turnEndedAt ?? null,
+        // What the person asked for, which opens the thread above, is what the lead's first turn answers.
+        openedAt: snapshot.task.request === null || snapshot.earlier ? null : snapshot.task.startedAt,
+        worktree: snapshot.task.worktree,
+        queue,
+        outputs: model.outputs,
+      },
       model.streaming,
       (iso) => ago(iso),
       now,
@@ -574,7 +598,7 @@ export function TaskView({
         onRename={() => setRenaming(true)}
         {...(can('start') && planId !== null ? { onStartNow: () => void model.startPlan(planId) } : {})}
         {...(drafts.length > 0 ? { onMarkReady: () => void model.markAllReady(drafts.map((one) => one.url)) } : {})}
-        // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-046); a
+        // A task under way, or drafted, with a worktree, follows a pull request it didn't open, attached by its link (ADR-047); a
         // review reads one only.
         {...(can('abandon') && snapshot.task.phase !== 'settled' && snapshot.task.review == null && snapshot.task.worktree !== null
           ? {
@@ -895,6 +919,7 @@ export function TaskView({
             <PermissionCalls
               requests={snapshot.attention.filter((request) => request.kind === 'permission')}
               project={snapshot.project.name}
+              focusOnMount={permitting || 'idle'}
               onAnswer={model.answer}
               // Out of what the project always asks about: everything on this task allowed, where it isn't yet; or the rules.
               wayOut={{

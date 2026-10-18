@@ -1,12 +1,14 @@
 import { type ReactNode, useEffect } from 'react'
 
 import type { AgentStatus } from '@althar/contracts'
-import { Button, type RuntimeEntry, RuntimeState } from '@althar/ui'
+import { Button, CrashReportsLine, type RuntimeEntry, RuntimeState } from '@althar/ui'
 import { Start } from '@althar/ui/screens'
 
 import { brandOf } from '../../shared/agents'
+import { useServices } from '../../data/services'
 import { device, platform } from '../../shared/device'
 import { HomePending } from '../../shared/Pending'
+import { usePreferences } from '../../shared/usePreferences'
 import { AgentAccounts } from '../accounts/AgentAccounts'
 import type { AccountSignInModel } from '../accounts/useAccountSignIn'
 import { BareBar } from '../tabs/TabsFrame'
@@ -17,8 +19,10 @@ import type { StartModel } from './useStart'
 /*
  * Where the window starts. With no project yet, the kit's Start screen: the
  * agents answering round the mark, and the repositories found where people
- * keep code, ticked into the first project (useFirstProject). Once there are
- * projects, the home, where a new project starts in a tab of its own.
+ * keep code, ticked into the first project (useFirstProject), and at the
+ * sheet's foot crash reports, asked once as a quiet line with their switch
+ * (DEV-66), which Settings keeps too. Once there are projects, the home,
+ * where a new project starts in a tab of its own.
  */
 
 export const text = {
@@ -157,6 +161,8 @@ function First({
   })
 
   const error = project.error ?? model.error
+  const { preferences, set } = usePreferences()
+  const { host } = useServices()
   return (
     <div className={`${s.window} ${s.bare}`}>
       <BareBar className={s.over} />
@@ -177,6 +183,13 @@ function First({
         {...(error === null ? {} : { error })}
         text={text.first()}
         runtimesText={{ missing: `Not installed on ${device.this}` }}
+        foot={
+          <CrashReportsLine
+            on={preferences.crashReports}
+            onChange={(on) => set('crashReports', on)}
+            doNotTrack={host.doNotTrack === true}
+          />
+        }
       />
       {model.unremoved !== null && <StartError model={model} />}
     </div>

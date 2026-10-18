@@ -12,7 +12,7 @@ import { Instance } from './Instance'
  * the coordinator finds them before it reviews any (`find_pull_requests`):
  * a short line each, never what they say beyond their titles, which are
  * quoted as their authors' words. Each says whether Althar opened it, for
- * which task, which task follows it (ADR-046), or whether a task reviews it
+ * which task, which task follows it (ADR-047), or whether a task reviews it
  * already, so asking twice doesn't start a second review. A fork whose pull
  * requests open on the repository it came from lists that one's too, first:
  * its pull requests are there. Read-only: nothing reaches the host but reads.
@@ -108,7 +108,7 @@ export const lineOf = (
 }
 
 /** Why a repository's pull requests couldn't be listed, in words the coordinator can say to the person. */
-const failureWords = (error: ConnectorFailed, noun: string): string => {
+export const failureWords = (error: ConnectorFailed, noun: string): string => {
   if (error.reason === 'forbidden' && error.scope !== undefined)
     return `Althar’s connection can’t list its ${noun}s: it lacks ${error.scope}. The person gives the connection that in Settings, or connects again with a token that has it.`
   if (error.reason === 'forbidden') return `The host refused to list its ${noun}s: ${error.message}`

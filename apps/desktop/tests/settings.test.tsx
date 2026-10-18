@@ -595,6 +595,28 @@ describe('the Settings tab', () => {
     expect((usage as HTMLButtonElement).disabled).toBe(true)
     expect(document.getElementById(usage.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Off while DO_NOT_TRACK is set.')
   })
+
+  it('sends crash reports until the person turns them off beside usage data, a switch of their own', async () => {
+    const host = fakeHost()
+    withServices(<Settings at="about" />, fakeClient().client, host)
+    const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
+    await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('true'))
+    expect(document.getElementById(crashes.getAttribute('aria-describedby') ?? '')?.textContent).toBe(
+      'What failed and where in Althar’s code, when it crashes or hits an error. Never your code, what is written, or any name.',
+    )
+    await userEvent.click(crashes)
+    expect(host.setPreference).toHaveBeenLastCalledWith('crashReports', false)
+    await waitFor(() => expect(crashes.getAttribute('aria-checked')).toBe('false'))
+    // Usage data is its own.
+    expect(screen.getByRole('switch', { name: 'Usage data' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('keeps crash reports off, and can’t turn them on, while DO_NOT_TRACK is set', async () => {
+    withServices(<Settings at="about" />, fakeClient().client, fakeHost({ doNotTrack: true }))
+    const crashes = await screen.findByRole('switch', { name: 'Crash reports' })
+    expect(crashes.getAttribute('aria-checked')).toBe('false')
+    expect((crashes as HTMLButtonElement).disabled).toBe(true)
+  })
 })
 
 describe('how Althar looks, on the Settings tab', () => {

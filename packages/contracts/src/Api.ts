@@ -691,7 +691,7 @@ export const ChangeSummary = Schema.Struct({
 export type ChangeSummary = typeof ChangeSummary.Type
 
 /**
- * What attaching a pull request to a task did (ADR-046): `attached`, the
+ * What attaching a pull request to a task did (ADR-047): `attached`, the
  * task follows it now, its branch `started` from its head or not, `kept` of
  * its own commits on top; or `start`, where its branch isn't based on that
  * head, what starting from it would keep (`own`), for the person to say.
@@ -1536,6 +1536,14 @@ export const SessionSummary = Schema.Struct({
   /** The models the agent offers for this session. */
   models: Schema.Array(Schema.String),
   turnRunning: Schema.Boolean,
+  /** When the turn running started, by the runtime's clock; null between turns. What the wait for its first word is counted from. */
+  turnStartedAt: Schema.NullOr(Schema.String),
+  /**
+   * When its last turn ended, by the runtime's clock; null before its first,
+   * or where the runtime no longer holds it. A message delivered before it
+   * was answered, if with nothing: no reply is waited for on it any more.
+   */
+  turnEndedAt: Schema.NullOr(Schema.String),
   /**
    * Whether the runtime still holds a session on this thread: the one that
    * takes a note, and that makes starting another refuse. A recorded session
@@ -2641,7 +2649,7 @@ export const Api = RpcGroup.make(
   command('StopListening', { taskId: Schema.String, url: Schema.String }, Schema.Void),
   /**
    * Attaches the task to an open pull request it didn't open, by its link or
-   * number, and follows it from then on (ADR-046). Where the task's branch
+   * number, and follows it from then on (ADR-047). Where the task's branch
    * isn't based on its head, nothing changes, and it answers `start`, with
    * how many commits of its own starting from the head keeps; `start` says
    * to start it there.

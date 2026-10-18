@@ -22,8 +22,8 @@ The app shares its profile and worktrees with the command-line client (`apps/cli
 | `ALTHAR_FAKE_REMOTE` | None. With the fakes, the bare repository that pushes to the fake GitHub land in |
 | `ALTHAR_FAIL_MIGRATION=1` | Off. Adds a migration that always fails, so the window shows what an update that couldn't move the data looks like. Run the app on a profile once without it first, so there is data to copy. Packaged builds leave it out |
 | `ALTHAR_GITHUB_CLIENT_ID`, `ALTHAR_GITLAB_CLIENT_ID`, `ALTHAR_LINEAR_CLIENT_ID` | None. The public ids of Althar's apps on those services, for signing in through the browser; without one, the service takes a pasted token |
-| `DO_NOT_TRACK=1` | Off. Keeps usage data off, whatever its switch in Settings says |
-| `ALTHAR_POSTHOG_KEY`, `ALTHAR_POSTHOG_HOST` | None. Usage data's PostHog project, read by `bun run package` and `bun run release` only (also from `apps/desktop/.env`, see `.env.example`); every other build sends nothing. The release workflow takes them from the repository's variables of the same names |
+| `DO_NOT_TRACK=1` | Off. Keeps usage data and crash reports off, whatever their switches in Settings say |
+| `ALTHAR_POSTHOG_KEY`, `ALTHAR_POSTHOG_HOST` | None. The PostHog project usage data and crash reports go to, read by `bun run package` and `bun run release` only (also from `apps/desktop/.env`, see `.env.example`); every other build sends nothing. The release workflow takes them from the repository's variables of the same names |
 | `ALTHAR_REPORT_URL` | What the build was given, else none. Where Report a problem posts: the reports Worker (`apps/report`), its address alone posting to `/reports`; `https:`, or a local `http:` for `wrangler dev`. Without one, a report is saved in Downloads as a zip and a message opens in the mail app. Set it when building (`ALTHAR_REPORT_URL=… bun run build:package`) to bake it in; the release workflow takes it from the repository's `ALTHAR_REPORT_URL` variable. Set at run time, it wins |
 | `ALTHAR_REPORT_EMAIL` | `reports@althar.ai`. Where that message is addressed |
 | `ALTHAR_UPDATE_FEED` | None. A packaged app reads updates from GitHub Releases; this points it at a feed on this Mac instead (an `http://127.0.0.1` address), to try an update. Any other address is ignored |
@@ -120,7 +120,7 @@ The app is packaged for Apple silicon on macOS and x86_64 Linux. Releases are ma
 
 [`release.yml`](../../.github/workflows/release.yml) runs on a tag `v<version>` pushed on a commit on main. It checks the tag against `package.json`'s version, waits for a reviewer to approve the `release` environment, builds macOS and Linux packages in platform jobs, and leaves one draft GitHub Release with each platform's files. It never runs on a pull request, and it is the only workflow that publishes a desktop release; `desktop.yml` checks Linux packages on pull requests but does not publish them.
 
-1. On main: raise `version` in `apps/desktop/package.json`, and write a few plain lines for testers in `apps/desktop/release-notes/<version>.md`. No commit dump.
+1. On main: raise `version` in `apps/desktop/package.json`, and write a few plain lines for testers in `apps/desktop/release-notes/<version>.md`, under the headings New, Improved and Fixed (leave out one with nothing in it). No commit dump.
 2. Tag that commit and push the tag: `git tag v0.1.1 && git push origin v0.1.1`.
 3. In Actions, open the release run and approve it (Review deployments). Notarizing takes from a few minutes to an hour.
 4. In Releases, open the draft, download its dmg, and try it on a Mac: it should open with only the usual "downloaded from the internet" question.
