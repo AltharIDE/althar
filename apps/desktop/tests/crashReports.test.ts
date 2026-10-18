@@ -15,6 +15,8 @@ import {
   goneBadly,
   LONGEST_VALUE,
   MOST_A_LAUNCH,
+  MOST_HANDLED,
+  placeOf,
   namesLearned,
   newDumps,
   runtimeThrown,
@@ -23,7 +25,7 @@ import {
   windowThrown,
 } from '../src/main/crashReports'
 import { masker } from '../src/logs/mask'
-import { crashOf, watchCrashes } from '../src/runtime/crashes'
+import { crashOf, handledOf, watchCrashes } from '../src/runtime/crashes'
 
 /* Crash reports (DEV-66): masked $exception events from the main process, behind their own switch, twenty a launch, each once. */
 
@@ -411,6 +413,73 @@ describe('what a report carries', () => {
   })
 })
 
+describe('handled failures', () => {
+  it('sends what the runtime kept and carried on past as handled errors, by where they were and whose, masked', async () => {
+    const { fetch, requests } = posthog()
+    const reports = sender(() => true, fetch)
+    reports.fromRuntime(
+      handledOf({
+        where: 'Status.account',
+        agent: 'codex',
+        name: 'SqlError',
+        message: `database is locked: ${HOME}/Library/Application Support/Althar/althar.db`,
+        stack: `SqlError: database is locked\n    at run (/Applications/Althar.app/Contents/Resources/app/dist/runtime/runtime.js:812:9)`,
+      }),
+    )
+    reports.fromRuntime(
+      handledOf({
+        where: 'agent',
+        agent: 'claude-code',
+        name: 'AgentLost',
+        message: 'The claude-code agent stopped on its own: exit code 1, signal none.',
+        stack: '',
+      }),
+    )
+    reports.fromRuntime({ how: 'handled', name: 'Error', message: 'm', stack: '', where: `${HOME}/meridian`, agent: 'Ana' })
+    await reports.stop()
+    const events = sent(requests)
+    expect(
+      events.map((event) => [
+        event.properties.where,
+        event.properties.agent,
+        event.properties.$exception_list[0]?.type,
+        event.properties.$exception_list[0]?.mechanism,
+        event.properties.$exception_level,
+        event.properties.process,
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        ['Status.account', 'codex', 'SqlError', { type: 'handled', handled: true, synthetic: false, exception_id: 0 }, 'error', 'runtime'],
+        ['agent', 'claude-code', 'AgentLost', expect.objectContaining({ type: 'handled', handled: true }), 'error', 'runtime'],
+        [undefined, undefined, 'Error', expect.objectContaining({ type: 'handled' }), 'error', 'runtime'],
+      ]),
+    )
+    expect(events).toHaveLength(3)
+    expect(JSON.stringify(events)).not.toContain(HOME)
+    const locked = events.find((event) => event.properties.where === 'Status.account')
+    expect(locked?.properties.$exception_list[0]?.value).toMatch(/^database is locked: ~\/…\//)
+  })
+
+  it('sends ten a launch, apart from the twenty crashes, and the same one from two calls as two', async () => {
+    const { fetch, requests } = posthog()
+    const reports = sender(() => true, fetch)
+    const handled = (where: string, message: string) => reports.fromRuntime({ how: 'handled', name: 'SqlError', message, stack: '', where })
+    handled('Status', 'database is locked')
+    handled('ListProjects', 'database is locked')
+    handled('Status', 'database is locked')
+    for (let i = 0; i < 15; i += 1) handled('ListTasks', `row ${i} unreadable`)
+    for (let i = 0; i < 25; i += 1) reports.gone('window', { reason: 'crashed', exitCode: i })
+    await reports.stop()
+    const events = sent(requests)
+    const kept = events.filter((event) => event.properties.$exception_list[0]?.mechanism.type === 'handled')
+    expect(kept).toHaveLength(MOST_HANDLED)
+    const locked = kept.filter((event) => event.properties.$exception_list[0]?.value === 'database is locked')
+    expect(locked.map((event) => event.properties.where)).toEqual(expect.arrayContaining(['ListProjects', 'Status']))
+    expect(locked).toHaveLength(2)
+    expect(events).toHaveLength(MOST_HANDLED + MOST_A_LAUNCH)
+  })
+})
+
 describe('how many', () => {
   it('sends the same one once a launch, and twenty at most', async () => {
     const { fetch, requests } = posthog()
@@ -479,6 +548,22 @@ describe('what crosses between processes', () => {
     expect(runtimeThrown({ how: 'defect', name: '', message: 'm' })).toEqual({
       how: 'defect',
       thrown: { name: 'Error', message: 'm', stack: '' },
+      place: {},
+    })
+    // A handled one keeps where it was and whose, as Althar names them, and nothing shaped otherwise.
+    expect(runtimeThrown({ how: 'handled', name: 'SqlError', message: 'm', where: 'Status.account', agent: 'codex' })).toMatchObject({
+      how: 'handled',
+      place: { where: 'Status.account', agent: 'codex' },
+    })
+    expect(placeOf({ where: `${HOME}/Projects/meridian`, agent: 'Ana’s agent' })).toEqual({})
+    expect(placeOf({ where: 'Status.account.more', agent: 'x'.repeat(41) })).toEqual({})
+    expect(placeOf('Status')).toEqual({})
+    expect(handledOf({ where: 'agent', agent: null, name: 'AgentLost', message: 'm'.repeat(5_000), stack: 's'.repeat(20_000) })).toEqual({
+      how: 'handled',
+      name: 'AgentLost',
+      message: 'm'.repeat(4_000),
+      stack: 's'.repeat(16_000),
+      where: 'agent',
     })
     expect(runtimeThrown({ how: 'other', message: 'm' })?.how).toBe('uncaught')
     expect(runtimeThrown([])).toBeNull()

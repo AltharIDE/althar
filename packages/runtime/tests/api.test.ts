@@ -6,7 +6,14 @@ import { join, win32 } from 'node:path'
 import { MessageChannel } from 'node:worker_threads'
 
 import { Api, ApiError, clientProtocol, emitterPort, type ThreadSnapshot, type WatchEvent } from '@althar/contracts'
-import { AgentExited, AgentRequestFailed, AgentStartFailed, OptionUnavailable, TurnInProgress } from '@althar/provider-adapters'
+import {
+  type AgentDefinition,
+  AgentExited,
+  AgentRequestFailed,
+  AgentStartFailed,
+  OptionUnavailable,
+  TurnInProgress,
+} from '@althar/provider-adapters'
 import { scenarios } from '@althar/provider-adapters/testing'
 import { assert, describe, it } from '@effect/vitest'
 import { Cause, Context, Duration, Effect, Fiber, Layer, Option, Stream } from 'effect'
@@ -35,7 +42,8 @@ import { NotConnected } from '../src/Connections'
 import { Folders } from '../src/Folders'
 import { itemOf, stuckOf } from '../src/Queries'
 import { agentSaid, summarize, words } from '../src/words'
-import { Connectors, type RuntimeOptions } from '../src/Config'
+import { type AgentEntry, Agents, Connectors, type RuntimeOptions } from '../src/Config'
+import { type Failure, Failures } from '../src/Failures'
 import { Secrets } from '../src/Secrets'
 import { ConnectorFailed, products } from '@althar/connectors'
 import { makeFakeService } from '@althar/connectors/testing'
@@ -59,6 +67,8 @@ const connected = (
     readonly editors?: RuntimeOptions['editors']
     /** The machine how many agents are at work at once comes from: a large one unless a test says. */
     readonly machine?: { readonly cores: number; readonly memory: number }
+    /** The agents, where a test changes one: the fake ones otherwise. */
+    readonly agents?: Layer.Layer<Agents>
   } = {},
 ) =>
   Effect.gen(function* () {
@@ -70,7 +80,7 @@ const connected = (
         worktreeRoot: mkdtempSync(join(tmpdir(), 'althar-worktrees-')),
         appVersion: '0.0.0-test',
         deviceName: 'Test Mac',
-        agents: fakeAgents({}, options.signedOut),
+        agents: options.agents ?? fakeAgents({}, options.signedOut),
         secrets: Secrets.memory(),
         connectors: options.connectors ?? fakeConnectors({}),
         accountsRoot: mkdtempSync(join(tmpdir(), 'althar-accounts-')),
@@ -94,6 +104,30 @@ const connected = (
     /** Reads or writes the runtime's store directly, for what no client does. */
     const store = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) => effect.pipe(Effect.provideContext(context))
     return { client, grant, store, context }
+  })
+
+/** The fake agents, with one of them changed: to make what Althar asks of it fail. */
+const agentsWith = (agentId: string, change: (definition: AgentDefinition) => AgentDefinition) =>
+  Layer.effect(
+    Agents,
+    Effect.gen(function* () {
+      const agents = yield* Agents
+      const changed = (entry: AgentEntry): AgentEntry =>
+        entry.definition.id === agentId ? { ...entry, definition: change(entry.definition) } : entry
+      return Agents.of({ list: agents.list.map(changed), get: (id) => Effect.map(agents.get(id), changed) })
+    }),
+  ).pipe(Layer.provide(fakeAgents()))
+
+/** What the runtime reports it kept or couldn't do, from now on, as the desktop app hears it. */
+const reported = <R>(context: Context.Context<R>) =>
+  Effect.gen(function* () {
+    const heard: Array<Failure> = []
+    yield* Effect.forkScoped(
+      Stream.runForEach(Context.get(context, Failures).events, (failure) => Effect.sync(() => void heard.push(failure))),
+    )
+    // Listening before anything is said.
+    yield* Effect.sleep('20 millis')
+    return heard
   })
 
 const eventually = <A>(effect: Effect.Effect<A, unknown>, check: (value: A) => boolean) =>
@@ -376,6 +410,105 @@ describe('the API', () => {
         yield* client.Interrupt({ commandId: commandId(), threadId: task.threadId })
         yield* client.StopSession({ commandId: commandId(), threadId: task.threadId })
         assert.isNull((yield* client.GetThread({ threadId: task.threadId })).session)
+      }),
+    ),
+  )
+
+  it.live('keeps a failed account check to that account, shows the rest as they are, and reports it', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, context } = yield* connected({
+          agents: agentsWith('codex', (definition) => ({
+            ...definition,
+            signIn: {
+              ...definition.signIn,
+              status: () => {
+                throw new Error('Codex’s status command is not there')
+              },
+            },
+          })),
+        })
+        const heard = yield* reported(context)
+        const status = yield* client.Status({ recheck: true })
+        assert.deepStrictEqual(
+          status.agents.map((agent) => [agent.id, agent.signIn, agent.accounts.map((account) => account.signIn), agent.problem]),
+          [
+            ['claude-code', 'signed_in', ['signed_in'], null],
+            ['codex', 'unknown', ['unknown'], null],
+            ['opencode', 'signed_in', ['signed_in'], null],
+          ],
+        )
+        const [failure] = yield* eventually(
+          Effect.sync(() => heard),
+          (list) => list.length > 0,
+        )
+        assert.deepInclude(failure, {
+          where: 'Status.account',
+          agent: 'codex',
+          name: 'Error',
+          message: 'Codex’s status command is not there',
+        })
+        assert.include(failure?.stack ?? '', 'Codex’s status command is not there')
+      }),
+    ),
+  )
+
+  it.live('says an agent it couldn’t check on that agent alone, and the others as they are', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { client, context } = yield* connected({
+          agents: agentsWith('opencode', (definition) =>
+            Object.defineProperty({ ...definition }, 'cli', {
+              get: () => {
+                throw new TypeError('No command for OpenCode')
+              },
+            }),
+          ),
+        })
+        const heard = yield* reported(context)
+        const status = yield* client.Status({})
+        const [claude, codex, opencode] = status.agents
+        assert.deepStrictEqual([claude?.signIn, claude?.problem, codex?.signIn, codex?.problem], ['signed_in', null, 'signed_in', null])
+        assert.deepInclude(opencode, { id: 'opencode', signIn: 'unknown', accounts: [], version: null, installed: true, download: null })
+        assert.strictEqual(opencode?.problem, "Althar couldn't check Fake opencode. Its log has the details.")
+        const [failure] = yield* eventually(
+          Effect.sync(() => heard),
+          (list) => list.some((each) => each.where === 'Status.agent'),
+        )
+        assert.deepInclude(failure, { where: 'Status.agent', agent: 'opencode', name: 'TypeError', message: 'No command for OpenCode' })
+      }),
+    ),
+  )
+
+  it.live('reports a call that failed for no reason of the person’s by the call’s name, and not one they can put right', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        // Even what stands in for an agent it couldn't check fails: the call does, at its edge.
+        const { client, context } = yield* connected({
+          agents: agentsWith('codex', (definition) =>
+            Object.defineProperty({ ...definition }, 'signIn', {
+              get: () => {
+                throw new RangeError('Codex has no sign-in')
+              },
+            }),
+          ),
+        })
+        const heard = yield* reported(context)
+        const error = yield* Effect.flip(client.Status({}))
+        assert.deepStrictEqual([error.reason, error.message], ['Unknown', "Althar's runtime couldn't do that. Its log has the details."])
+        const failures = yield* eventually(
+          Effect.sync(() => heard),
+          (list) => list.some((each) => each.where === 'Status'),
+        )
+        assert.deepInclude(
+          failures.find((each) => each.where === 'Status'),
+          { where: 'Status', agent: null, name: 'RangeError', message: 'Codex has no sign-in' },
+        )
+        // Something the person can put right is theirs to see, never reported.
+        const before = heard.length
+        assert.strictEqual((yield* Effect.flip(client.ReadOutput({ threadId: 'thr_none', itemId: 'itm_none' }))).reason, 'NotFound')
+        yield* Effect.sleep('50 millis')
+        assert.strictEqual(heard.length, before)
       }),
     ),
   )
