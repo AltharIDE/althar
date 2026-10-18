@@ -16,7 +16,7 @@ import { rulesRoute } from '../src/renderer/features/rules/route'
 import { useProjectSettings } from '../src/renderer/features/project/useProjectSettings'
 import { taskRoute } from '../src/renderer/features/task/route'
 import { rootRoute } from '../src/renderer/root'
-import { changed, connectionList, fakeClient, fakeHost, project, repositories } from './fixtures'
+import { changed, connectionList, fakeClient, fakeHost, project, projectRules, repositories } from './fixtures'
 import { servicesFor, withServices } from './render'
 
 /*
@@ -258,6 +258,69 @@ describe('a project’s settings', () => {
     expect(await panel.findByText('The rules changed meanwhile.')).toBeTruthy()
     await waitFor(() => expect(move.getAttribute('aria-checked')).toBe('true'))
     expect(panel.getByText('Off: you ask the lead to fix them')).toBeTruthy()
+  })
+
+  it('keeps skill and OpenSpec files on this computer until each is allowed, each switch a revision of its rules', async () => {
+    const { client } = windowAt('/projects/p1')
+    const panel = await openSettings()
+    const files = panel.getByRole('button', { name: /^Repository files/ })
+    expect(files.textContent).toContain('Kept on this computer, pushing blocked')
+    await userEvent.click(files)
+    const skills = panel.getByRole('switch', { name: 'Write Althar-managed skills' })
+    const openSpec = panel.getByRole('switch', { name: 'Write OpenSpec artifacts' })
+    const push = panel.getByRole('switch', { name: 'Push skill/OpenSpec files' })
+    for (const each of [skills, openSpec, push]) expect(each.getAttribute('aria-checked')).toBe('false')
+    expect(panel.getByText('Blocked')).toBeTruthy()
+    // Writing them never allows pushing them.
+    await userEvent.click(openSpec)
+    expect(openSpec.getAttribute('aria-checked')).toBe('true')
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenCalledWith({
+        projectId: 'p1',
+        repositoryFiles: { writeSkills: false, writeOpenSpec: true, pushProtected: false },
+      }),
+    )
+    expect(push.getAttribute('aria-checked')).toBe('false')
+    await userEvent.click(push)
+    await waitFor(() =>
+      expect(client.setProjectRules).toHaveBeenLastCalledWith({
+        projectId: 'p1',
+        repositoryFiles: { writeSkills: false, writeOpenSpec: true, pushProtected: true },
+      }),
+    )
+    expect(panel.getByText('Allowed')).toBeTruthy()
+    await userEvent.click(panel.getByRole('button', { name: 'Back to all settings' }))
+    expect(panel.getByRole('button', { name: /^Repository files/ }).textContent).toContain('OpenSpec written, pushing allowed')
+  })
+
+  it('shows the repository files the rules allow, as kept', async () => {
+    windowAt('/projects/p1', {
+      getProjectRules: vi.fn(async (projectId: string) => ({
+        ...projectRules,
+        projectId,
+        repositoryFiles: { writeSkills: true, writeOpenSpec: false, pushProtected: true },
+      })),
+    })
+    const panel = await openSettings()
+    expect(panel.getByRole('button', { name: /^Repository files/ }).textContent).toContain('Skills written, pushing allowed')
+    await userEvent.click(panel.getByRole('button', { name: /^Repository files/ }))
+    expect(panel.getByRole('switch', { name: 'Write Althar-managed skills' }).getAttribute('aria-checked')).toBe('true')
+    expect(panel.getByRole('switch', { name: 'Write OpenSpec artifacts' }).getAttribute('aria-checked')).toBe('false')
+    expect(panel.getByRole('switch', { name: 'Push skill/OpenSpec files' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('puts a repository files switch back and says why when the rules don’t take it', async () => {
+    windowAt('/projects/p1', {
+      setProjectRules: vi.fn(async () => {
+        throw new ApiError({ reason: 'RulesChanged', message: 'The rules changed meanwhile.' })
+      }),
+    })
+    const panel = await openSettings()
+    await userEvent.click(panel.getByRole('button', { name: /^Repository files/ }))
+    const push = panel.getByRole('switch', { name: 'Push skill/OpenSpec files' })
+    await userEvent.click(push)
+    expect(await panel.findByText('The rules changed meanwhile.')).toBeTruthy()
+    await waitFor(() => expect(push.getAttribute('aria-checked')).toBe('false'))
   })
 
   it('removes the project after saying what happens, and goes home; its tab goes', async () => {

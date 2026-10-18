@@ -13,6 +13,7 @@ import { Policies } from '../src/Policies'
 import { Projects } from '../src/Projects'
 import { pathsPushed } from '../src/repositoryGuard'
 import * as Runtime from '../src/Runtime'
+import { words } from '../src/words'
 import { repository, runtime } from './support'
 
 /*
@@ -105,6 +106,11 @@ describe('pushing a task’s branch', () => {
       assert.strictEqual(refused.why, 'protected')
       assert.include(refused.said, 'apps/web/.opencode/skills/we ird/SKILL.md')
       assert.include(refused.said, 'openspec/changes/a/proposal.md')
+      // The person is told which setting allows it, and where it is.
+      assert.include(
+        words(refused, (id) => id).message,
+        'turn on “Push skill/OpenSpec files” in the project’s Settings, under Repository files',
+      )
       // Nothing left the machine.
       assert.strictEqual(execFileSync('git', ['branch', '--list', branch], { cwd: remote }).toString().trim(), '')
       // The same commits without them go.

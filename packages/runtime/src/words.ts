@@ -201,8 +201,11 @@ export const words = (
           return `${remote} has commits pushed since you looked, so nothing was replaced. Look again before replacing them.`
         if (why === 'never')
           return `The project’s rules never allow force pushes, so ${remote}’s commits stay. Ask the lead to merge instead.`
-        if (why === 'protected')
-          return `Nothing was pushed: ${text(error, 'said')} ${text(error, 'said').includes(',') ? 'are' : 'is'} skill or OpenSpec ${text(error, 'said').includes(',') ? 'files' : 'file'}, which stay on this computer unless the project’s settings allow pushing them.`
+        if (why === 'protected') {
+          const held = text(error, 'said')
+          const many = held.includes(',')
+          return `Nothing was pushed: ${held} ${many ? 'are skill or OpenSpec files, which stay' : 'is a skill or OpenSpec file, which stays'} on this computer. To push ${many ? 'them' : 'it'}, turn on “Push skill/OpenSpec files” in the project’s Settings, under Repository files.`
+        }
         if (why === 'refused') return sentence(`${remote} refused the push${text(error, 'said') === '' ? '' : `: ${text(error, 'said')}`}`)
         return `git couldn’t sign in to push to ${remote}. Push once from a terminal so your sign-in is kept, then push again here.`
       }

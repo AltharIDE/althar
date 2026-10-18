@@ -20,6 +20,8 @@ import {
   ProjectMark,
   ProjectNotes,
   RemoveProject,
+  RepositoryFiles,
+  repositoryFilesText,
 } from '@althar/ui'
 
 import { shortFolder } from '../../shared/folders'
@@ -36,6 +38,8 @@ import type { ProjectSettingsModel } from './useProjectSettings'
  * host and tracker it is on. Beside the tracker, a switch for whether a task's
  * issue moves to In Progress as the task starts; beside its rules, one has
  * its leads resolve a conflict with the default branch unasked (ADR-030).
+ * Whether skill and OpenSpec files may be written to its repositories, and
+ * pushed from them, opens out to three switches, each off until turned on.
  * The notes its coordinator keeps open out too, to read and drop one that no
  * longer holds (ADR-031). Removing it from Althar is at the foot, and asks
  * first. Nothing in it says what is running.
@@ -53,6 +57,7 @@ export const text = {
   moveIssues: 'Move issues to In Progress when their task starts',
   moveIssuesOn: 'On: Althar moves the issue as its task starts',
   moveIssuesOff: 'Off: you move issues yourself',
+  repositoryFiles: 'Repository files',
   notes: 'Notes',
   noNotes: 'None yet',
   connectedAs: (login: string) => `Connected as ${login}`,
@@ -113,7 +118,7 @@ export function ProjectSettings({
   onConnect,
 }: ProjectSettingsProps) {
   const [open, setOpen] = useState(false)
-  const [showing, setShowing] = useState<'all' | 'identity' | 'notes'>('all')
+  const [showing, setShowing] = useState<'all' | 'identity' | 'notes' | 'files'>('all')
   const name = model.name ?? ''
   const ink = inkOf(model.ink ?? 'clay')
   const taken: Partial<Record<ProjectInk, string>> = {}
@@ -231,6 +236,11 @@ export function ProjectSettings({
                   place={RIGHT}
                 />
               )}
+              {model.rules !== null && (
+                <ControlModule title={text.repositoryFiles} onClick={() => setShowing('files')}>
+                  <ControlWords title={repositoryFilesText.summary(model.rules.repositoryFiles)} />
+                </ControlModule>
+              )}
               {model.notes !== null && (
                 <ControlModule
                   title={text.notes}
@@ -247,6 +257,16 @@ export function ProjectSettings({
               </Button>
             </ControlFoot>
           </>
+        ) : showing === 'files' && model.rules !== null ? (
+          <ControlDetail title={text.repositoryFiles} onBack={() => setShowing('all')}>
+            <ControlSheet>
+              <RepositoryFiles
+                value={model.rules.repositoryFiles}
+                onChange={model.setRepositoryFile}
+                {...(model.ruleFailed?.rule === 'repositoryFiles' ? { error: model.ruleFailed.message } : {})}
+              />
+            </ControlSheet>
+          </ControlDetail>
         ) : showing === 'notes' ? (
           <ControlDetail title={text.notes} onBack={() => setShowing('all')}>
             <ControlSheet>

@@ -10,7 +10,8 @@ import { useServices } from '../../data/services'
 /*
  * A project's settings' view model: its name and ink, changed in place, its
  * rules in a line, whether its leads resolve conflicts and its tasks move
- * their issues to In Progress, the notes its coordinator keeps, and removing
+ * their issues to In Progress, whether skill and OpenSpec files may be
+ * written to and pushed from its repositories, the notes its coordinator keeps, and removing
  * it. A new name or ink shows at once, and goes to the runtime one change
  * after another; the tabs and the home hear it through the change feed, and
  * the projects are read again at once too, so it shows everywhere before the
@@ -21,7 +22,10 @@ import { useServices } from '../../data/services'
  */
 
 /** A rule the settings switch in place. */
-export type RuleSwitch = 'resolveConflicts' | 'moveIssues'
+export type RuleSwitch = 'resolveConflicts' | 'moveIssues' | 'repositoryFiles'
+
+/** One of the three permissions for skill and OpenSpec files in its repositories. */
+export type RepositoryFile = keyof ProjectRulesView['repositoryFiles']
 
 export interface ProjectSettingsModel {
   readonly project: ProjectSummary | null
@@ -44,6 +48,8 @@ export interface ProjectSettingsModel {
   readonly setResolveConflicts: (on: boolean) => void
   /** Moves a task's issue to In Progress as the task starts, or stops doing so. */
   readonly setMoveIssues: (on: boolean) => void
+  /** Allows or stops writing skills or OpenSpec artifacts to its repositories, or pushing them: each a new revision of its rules. */
+  readonly setRepositoryFile: (file: RepositoryFile, on: boolean) => void
   /** Which switch didn't hold, and why. */
   readonly ruleFailed: { readonly rule: RuleSwitch; readonly message: string } | null
   /** Asking whether to remove it from Althar. */
@@ -114,13 +120,13 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   // Shown switched at once; the rules as kept once saved, or as they were, with why, when it isn't.
   const [ruleFailed, setRuleFailed] = useState<{ readonly rule: RuleSwitch; readonly message: string } | null>(null)
   const setRule = useCallback(
-    (rule: RuleSwitch, on: boolean) => {
+    <R extends RuleSwitch>(rule: R, value: ProjectRulesView[R]) => {
       const key = keys.rules(projectId)
       setRuleFailed(null)
-      cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, [rule]: on }))
+      cache.setQueryData<ProjectRulesView>(key, (now) => (now === undefined ? now : { ...now, [rule]: value }))
       queue.current = queue.current.then(async () => {
         try {
-          cache.setQueryData(key, await client.setProjectRules({ projectId, [rule]: on }))
+          cache.setQueryData(key, await client.setProjectRules({ projectId, [rule]: value }))
         } catch (failure) {
           setRuleFailed({ rule, message: messageOf(failure) })
           await cache.invalidateQueries({ queryKey: key, exact: true })
@@ -131,6 +137,14 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
   )
   const setResolveConflicts = useCallback((on: boolean) => setRule('resolveConflicts', on), [setRule])
   const setMoveIssues = useCallback((on: boolean) => setRule('moveIssues', on), [setRule])
+  // The three are one rule: each switch sends all three, the one switched as now chosen, the others as last shown.
+  const setRepositoryFile = useCallback(
+    (file: RepositoryFile, on: boolean) => {
+      const now = cache.getQueryData<ProjectRulesView>(keys.rules(projectId))?.repositoryFiles
+      if (now !== undefined) setRule('repositoryFiles', { ...now, [file]: on })
+    },
+    [cache, projectId, setRule],
+  )
 
   const taken: Partial<Record<ProjectInk, string>> = {}
   for (const other of listed?.projects ?? []) if (other.id !== projectId && taken[other.ink] === undefined) taken[other.ink] = other.name
@@ -192,6 +206,7 @@ export const useProjectSettings = (projectId: string, onRemoved: () => void): Pr
     noteFailed,
     setResolveConflicts,
     setMoveIssues,
+    setRepositoryFile,
     ruleFailed,
     removing,
     askRemove,

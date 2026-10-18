@@ -644,9 +644,14 @@ checks and the harness permission rules remain the enforcement.
 - **Checked live (2026-10-18), without a model call:** OpenCode 1.19.0's
   `debug skill` lists all 33 from `skills.paths` with an isolated home; Codex
   0.160.1's app server lists all 33 from the extra root codex-acp sets.
+- **Repository files in the project's settings (2026-10-18).** The project's
+  Settings panel has a Repository files module that says where they stand and
+  opens out to the three switches of section 4, each off until turned on and
+  each a new revision of the project's rules (`SetProjectRules`'s
+  `repositoryFiles`). A push held back for them says to turn on "Push
+  skill/OpenSpec files" there.
 
-**Not yet:** the commit-time check before staging; the Repository files section in the
-project's settings window; per-project selection and bindings (stage 4); a
+**Not yet:** the commit-time check before staging; per-project selection and bindings (stage 4); a
 logged-in Claude Code, Codex or OpenCode session using a skill end to end;
 refusing OpenCode 2.x (per the OpenCode 2 plan, which is not in this tree);
 installs from private repositories; a catalog update channel between app
