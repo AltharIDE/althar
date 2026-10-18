@@ -176,7 +176,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
   useEffect(() => {
     const ids = order === '' ? [] : order.split(' ')
     const onKey = (event: KeyboardEvent) => {
-      const command = host.platform === 'darwin' ? event.metaKey : event.ctrlKey
+      const command = primaryDown(event)
       // ⌘, opens and closes the quick settings; ⌘⇧, goes to the settings' tab. Once there is a project, and its bar.
       if (command && !event.altKey && event.code === 'Comma' && !none) {
         event.preventDefault()
@@ -215,7 +215,7 @@ export function TabsFrame({ children }: { children: ReactNode }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none, host.platform])
+  }, [order, current, select, newProject, openSettings, settingsOpen, onSettings, none])
   return (
     <VisitContext.Provider value={tabs.visit}>
       <NewTabContext.Provider value={newTab}>

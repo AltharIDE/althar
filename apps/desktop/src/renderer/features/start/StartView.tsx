@@ -1,11 +1,11 @@
 import { type ReactNode, useEffect } from 'react'
 
 import type { AgentStatus } from '@althar/contracts'
-import { Button, type RuntimeEntry, RuntimeState } from '@althar/ui'
+import { Button, keys, modKey, primaryDown, type RuntimeEntry, RuntimeState } from '@althar/ui'
 import { Start } from '@althar/ui/screens'
 
 import { brandOf } from '../../shared/agents'
-import { device, platform } from '../../shared/device'
+import { device } from '../../shared/device'
 import { HomePending } from '../../shared/Pending'
 import { AgentAccounts } from '../accounts/AgentAccounts'
 import type { AccountSignInModel } from '../accounts/useAccountSignIn'
@@ -25,12 +25,11 @@ export const text = {
   removeAnyway: 'Remove anyway',
   /** The kit's first screen, in this computer's words, with the keys this system has. */
   first: () => {
-    const key = platform === 'darwin' ? '⌘' : 'Ctrl+'
     return {
       looking: `Looking around ${device.this}…`,
       agentsLabel: `Agents on ${device.this}`,
-      add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: `${key}N` },
-      createKbd: platform === 'darwin' ? '⌘⏎' : 'Ctrl+Enter',
+      add: { title: 'Add a folder…', note: `anywhere on ${device.this}`, kbd: modKey('N') },
+      createKbd: modKey(keys.return),
     }
   },
 }
@@ -141,8 +140,7 @@ function First({
   // what is open over the screen, are theirs.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      const command = platform === 'darwin' ? event.metaKey : event.ctrlKey
-      if (!command || event.shiftKey || event.altKey || event.defaultPrevented || theirs(event.target)) return
+      if (!primaryDown(event) || event.shiftKey || event.altKey || event.defaultPrevented || theirs(event.target)) return
       if (event.key.toLowerCase() === 'n') {
         event.preventDefault()
         void project.add()
