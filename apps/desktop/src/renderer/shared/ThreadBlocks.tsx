@@ -4,6 +4,7 @@ import type { FieldAnswer, Unfurl } from '@althar/contracts'
 import {
   Arrived,
   CodeBlock,
+  FailedLogs,
   Issue,
   IssueRef,
   LinkButton,
@@ -264,9 +265,27 @@ export const heardVerb = (arrival: ArrivalContent): string => {
   }
 }
 
+/** A GitHub Actions log line's time, which every line starts with: noise on a card. */
+const STAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z /
+
+/**
+ * A failed check's log as its card shows it: by its lines, without their
+ * times, ending where GitHub Actions marked it failed (`##[error]`), not in
+ * the job's cleanup after.
+ */
+export const logLines = (log: string) => {
+  const lines = log
+    .trimEnd()
+    .split('\n')
+    .map((line) => line.replace(STAMP, ''))
+  const failed = lines.findLastIndex((line) => line.startsWith('##[error]'))
+  return failed === -1 ? lines : lines.slice(0, failed + 1)
+}
+
 /**
  * Something heard from outside, as a quoted note: who, what they did, where,
- * and what they said. What someone who can't write to the repository said
+ * and what they said. Failed checks show the end of each one's log, or why
+ * it couldn't be read. What someone who can't write to the repository said
  * wasn't passed to the lead, as anyone can comment on a public one; the
  * person reads it, and can pass it on.
  */
@@ -294,6 +313,16 @@ function ArrivalView({ arrival, at, onPassOn }: { arrival: ArrivalContent; at: s
       {...(foot === false ? {} : { foot })}
     >
       {body !== null && body !== '' && <Markdown source={body} />}
+      {arrival.logs.length > 0 && (
+        <FailedLogs
+          logs={arrival.logs.map((log) => ({
+            name: log.name,
+            url: log.url,
+            lines: log.log === null ? null : logLines(log.log),
+            missing: log.missing,
+          }))}
+        />
+      )}
     </Arrived>
   )
 }

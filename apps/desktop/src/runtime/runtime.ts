@@ -19,6 +19,7 @@ import {
 } from '@althar/runtime'
 import { Cause, Context, Duration, Effect, Exit, Fiber, Layer, Logger, Queue, Stream } from 'effect'
 import { net } from 'electron'
+import { appFetchOf } from './appFetch'
 import { handledOf, watchCrashes } from './crashes'
 import { editorsHere, openInEditor } from './editors'
 import { runtimeFacts, runtimeNames } from './facts'
@@ -121,13 +122,8 @@ const secrets = Secrets.sealed(join(profile, 'secrets'), {
   open: (sealed) => askMain('open', sealed),
 })
 
-/**
- * Code hosts and trackers are called over the app's own network, Chromium's:
- * it trusts the certificates in the Mac's keychain, as a company's own
- * GitLab, Bitbucket or Jira often needs, and the Mac's proxy settings.
- * Node's `fetch` knows neither.
- */
-const appFetch: Fetch = (input, init) => net.fetch(input, init)
+/** Code hosts and trackers are called over the app's own network, Chromium's (appFetch.ts). */
+const appFetch: Fetch = appFetchOf(net)
 
 /** OpenRouter's public list of models, with each one's scores and prices (ADR-015). */
 const MODEL_LIST = 'https://openrouter.ai/api/v1/models'

@@ -433,6 +433,7 @@ export const items = {
       passed: null,
       failed: null,
       failing: [],
+      logs: [],
       url: null,
       outsider: false,
       ...content,

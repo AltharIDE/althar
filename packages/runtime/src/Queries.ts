@@ -7,6 +7,7 @@ import {
   AttentionRequest,
   type BoardSnapshot,
   type ChangeSummary,
+  CheckLogShown,
   ChecksSummary,
   type CoordinatorSnapshot,
   type HomeEvent,
@@ -241,6 +242,10 @@ const number = (value: unknown, key: string): number | null => {
   const found = field(value, key)
   return typeof found === 'number' ? found : null
 }
+
+/** Failed checks' logs as an arrival kept them; one not of that shape, or from before they were kept, is left out. */
+const logsShown = (value: unknown): ReadonlyArray<CheckLogShown> =>
+  Array.isArray(value) ? value.flatMap((one) => Option.toArray(Schema.decodeUnknownOption(CheckLogShown)(one))) : []
 
 /** A call that waits on the person, as a screen shows it: what was asked, why it waits, and, for a step that needs them, which and why. */
 const callOf = (request: {
@@ -495,6 +500,7 @@ export const itemOf = (row: ItemRow): ThreadItem | undefined => {
           passed: number(content, 'passed'),
           failed: number(content, 'failed'),
           failing: Array.isArray(failing) ? failing.filter((name) => typeof name === 'string') : [],
+          logs: logsShown(field(content, 'logs')),
           url: text(content, 'url') || null,
           outsider: field(content, 'outsider') === true,
         },
