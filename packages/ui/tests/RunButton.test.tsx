@@ -31,6 +31,7 @@ describe('the label of what runs', () => {
     expect(shortCommand('bun run dev || echo failed')).toBe('bun run dev')
     expect(shortCommand('make serve || exit 1')).toBe('make serve')
     expect(shortCommand("sh -c 'cd web && npm start'")).toBe("sh -c 'cd web && npm start'")
+    expect(shortCommand('sh -c "echo \\"a && b\\""')).toBe('sh -c "echo \\"a && b\\""')
     expect(shortCommand('cd web && npm start || true; echo done')).toBe('echo done')
   })
 

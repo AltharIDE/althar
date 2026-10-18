@@ -15,6 +15,11 @@
   min-width: 0;
   max-width: 100%;
 }
+/* The button wraps what it says in a span: a flex one that may shrink, so the text inside can be cut. */
+.split > button:first-child > span {
+  display: flex;
+  min-width: 0;
+}
 .live {
   min-width: 0;
 }
@@ -22,7 +27,7 @@
   display: inline-block;
   min-width: 0;
   vertical-align: bottom;
-  max-width: 36ch;
+  max-width: 24ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

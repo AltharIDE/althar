@@ -18,7 +18,8 @@
 
 .words {
   flex: 1;
-  min-width: 0;
+  /* the name keeps its room however long what runs reads; the end gives way first */
+  min-width: 8rem;
   display: grid;
   gap: 5px;
 }

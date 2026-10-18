@@ -158,7 +158,11 @@ function parts(command: string): string[] {
   for (let i = 0; i < command.length; i++) {
     const c = command.charAt(i)
     const two = command.slice(i, i + 2)
-    if (quote !== null) {
+    if (c === '\\' && quote !== "'") {
+      // An escaped character is just itself, a quote too.
+      if (!fallback) part += command.slice(i, i + 2)
+      i++
+    } else if (quote !== null) {
       if (c === quote) quote = null
       if (!fallback) part += c
     } else if (c === '"' || c === "'") {
