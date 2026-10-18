@@ -1,16 +1,22 @@
+import { createHash } from 'node:crypto'
 import { type Files } from './hash'
 import { DEFAULT_LIMITS, isSafePath, type Limits } from './validate'
 
 /*
  * Fetching a skill from GitHub (docs/plans/skills-across-harnesses.md, section 3): a branch or tag is resolved once
- * to a full commit SHA, and only the chosen skill directory's files at that commit are fetched, over GitHub's REST
- * API. Nothing fetched is run. A symlink, a submodule or a tree too large to hold is refused before any file is read.
+ * to a full commit SHA, and only the chosen skill directory's files at that commit are fetched. Nothing fetched is
+ * run. A symlink, a submodule or a tree too large to hold is refused before any file is read, and every file is
+ * checked against the git blob hash the commit's tree names, so what is stored is what the commit holds.
  */
 
-/** How to reach GitHub's REST API: its base URL, a fetch, and a token for a private repository, if the person connected one. */
+/**
+ * How to reach GitHub: its REST API and its raw file host, a fetch, and a token for a private repository. Without a
+ * token, files come from the raw host, which GitHub doesn't count against the API's hourly allowance.
+ */
 export interface GitHubAccess {
   readonly api?: string
-  readonly fetch?: typeof globalThis.fetch
+  readonly raw?: string
+  readonly fetch?: (input: string, init?: RequestInit) => Promise<Response>
   readonly token?: string
 }
 
@@ -38,8 +44,8 @@ export const parseGitHubSource = (text: string): { readonly repo: string; readon
   return REPO.test(trimmed) ? { repo: trimmed } : null
 }
 
-const request = async (access: GitHubAccess, path: string, accept = 'application/vnd.github+json'): Promise<Response> => {
-  const response = await (access.fetch ?? globalThis.fetch)(`${access.api ?? 'https://api.github.com'}${path}`, {
+const request = async (access: GitHubAccess, path: string, accept = 'application/vnd.github+json', base?: string): Promise<Response> => {
+  const response = await (access.fetch ?? globalThis.fetch)(`${base ?? access.api ?? 'https://api.github.com'}${path}`, {
     headers: {
       accept,
       'x-github-api-version': '2022-11-28',
@@ -47,7 +53,12 @@ const request = async (access: GitHubAccess, path: string, accept = 'application
     },
   })
   if (!response.ok) {
-    const what = response.status === 404 ? 'not found (or private, with no GitHub connection that can read it)' : `HTTP ${response.status}`
+    const what =
+      response.status === 404
+        ? 'not found (or private, which Althar does not install from yet)'
+        : response.status === 403 || response.status === 429
+          ? 'GitHub is asking Althar to slow down; try again in a while'
+          : `HTTP ${response.status}`
     throw new Error(`GitHub ${path.split('?')[0]}: ${what}`)
   }
   return response
@@ -127,12 +138,31 @@ export const fetchSkill = async (
   if (tooLarge !== undefined) throw new Error(`${tooLarge.path} is larger than ${limits.fileBytes} bytes`)
   const files = new Map<string, Uint8Array>()
   for (const entry of blobs) {
-    const body = (await (await request(access, `${repoPath(repo)}/git/blobs/${entry.sha}`)).json()) as {
-      readonly content: string
-      readonly encoding: string
-    }
-    if (body.encoding !== 'base64') throw new Error(`${entry.path} came as ${body.encoding}, not base64`)
-    files.set(entry.path.slice(prefix.length), new Uint8Array(Buffer.from(body.content, 'base64')))
+    const bytes = await blob(access, repo, sha, entry)
+    if (gitBlobSha(bytes) !== entry.sha) throw new Error(`${entry.path} did not match the commit's tree`)
+    files.set(entry.path.slice(prefix.length), bytes)
   }
   return files
+}
+
+/** A file's git blob hash, as a tree names it. */
+export const gitBlobSha = (bytes: Uint8Array): string => createHash('sha1').update(`blob ${bytes.byteLength}\0`).update(bytes).digest('hex')
+
+const blob = async (access: GitHubAccess, repo: string, sha: string, entry: TreeEntry): Promise<Uint8Array> => {
+  if (access.token === undefined) {
+    const path = entry.path.split('/').map(encodeURIComponent).join('/')
+    const response = await request(
+      access,
+      `/${repoPath(repo).slice('/repos/'.length)}/${sha}/${path}`,
+      '*/*',
+      access.raw ?? 'https://raw.githubusercontent.com',
+    )
+    return new Uint8Array(await response.arrayBuffer())
+  }
+  const body = (await (await request(access, `${repoPath(repo)}/git/blobs/${entry.sha}`)).json()) as {
+    readonly content: string
+    readonly encoding: string
+  }
+  if (body.encoding !== 'base64') throw new Error(`${entry.path} came as ${body.encoding}, not base64`)
+  return new Uint8Array(Buffer.from(body.content, 'base64'))
 }
