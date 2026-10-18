@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, type CoordinatorSnapshot } from '@althar/contracts'
+import { ApiError, type CoordinatorSnapshot, type ThreadItem } from '@althar/contracts'
 import { Room } from '@althar/ui'
 
 import { ProjectView } from '../src/renderer/features/project/ProjectView'
@@ -48,6 +48,8 @@ const session = {
   effort: null,
   models: [],
   turnRunning: false,
+  turnStartedAt: null,
+  turnEndedAt: null,
   held: true,
   context: null,
   background: [],
@@ -564,6 +566,45 @@ describe('the Talk room', () => {
     await waitFor(() => expect(client.startSession).toHaveBeenCalledWith({ threadId: 'thc', agentId: 'claude-code' }))
   })
 
+  it('shows the coordinator thinking where its reply will start, and its last reply as it was', async () => {
+    const asked = { ...items.you('And the docs?'), createdAt: new Date().toISOString() }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          session: { ...session, turnRunning: true, turnStartedAt: asked.createdAt },
+          items: [
+            items.you('Why is checkout slow?'),
+            items.tool({ title: 'Read checkout.ts' }),
+            items.says('The call has no retry.'),
+            asked,
+          ],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    const thinking = await screen.findByText('Thinking')
+    expect(thinking.closest('article')).toBe(screen.getAllByRole('article').at(-1))
+    // The reply before it is over: its work folded under how long it took, not at work again.
+    expect(screen.getByRole('button', { name: /Worked for/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Working for/ })).toBeNull()
+  })
+
+  it('lets go of Thinking once the coordinator’s turn ended with nothing said, as when it was interrupted before its first word', async () => {
+    const asked = { ...items.you('And the docs?'), createdAt: new Date(Date.now() - 5000).toISOString() }
+    const { client } = fakeClient({
+      getCoordinator: vi.fn(async () =>
+        coordinatorSnapshot({
+          session: { ...session, turnEndedAt: new Date().toISOString() },
+          items: [items.you('Why is checkout slow?'), items.says('The call has no retry.'), asked],
+        }),
+      ),
+    })
+    withServices(<Project />, client)
+    expect(await screen.findByText('And the docs?')).toBeTruthy()
+    expect(screen.queryByText('Thinking')).toBeNull()
+    expect(screen.getByRole('textbox', { name: /^Tell the coordinator/ })).toBeTruthy()
+  })
+
   it('interrupts it, sends now, and moves it to another agent while it works', async () => {
     const { client } = fakeClient({
       getCoordinator: vi.fn(async () =>
@@ -634,7 +675,10 @@ describe('the Talk room', () => {
     try {
       const queued = items.you('Next', { state: 'queued', interrupting: false })
       const { client, emit } = fakeClient({
-        getCoordinator: vi.fn(async () => coordinatorSnapshot({ session, items: [queued, items.card(card(), 'c1')] })),
+        // Althar no longer holds the coordinator, so what waits for it stays queued.
+        getCoordinator: vi.fn(async () =>
+          coordinatorSnapshot({ session: { ...session, held: false }, items: [queued, items.card(card(), 'c1')] }),
+        ),
         getThreadItem: vi.fn(async (_threadId: string, itemId: string) =>
           itemId === queued.id ? { ...queued, input: { state: 'delivered' as const, interrupting: false } } : items.says('Read again'),
         ),
@@ -665,6 +709,38 @@ describe('the Talk room', () => {
       ).toEqual(['c1', 'i9', queued.id].toSorted())
       expect(client.getCoordinator).toHaveBeenLastCalledWith('p1', { limit: 0 })
       await waitFor(() => expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows the coordinator thinking on what waits for it idle, and the turn on it only once that is read as delivered', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const sent = items.you('Why is checkout slow?', { state: 'queued', interrupting: false })
+      let delivered: (item: ThreadItem) => void = () => undefined
+      const { client, emit } = fakeClient({
+        getCoordinator: vi
+          .fn(async () =>
+            coordinatorSnapshot({ session: { ...session, turnRunning: true, turnStartedAt: new Date().toISOString() }, items: [] }),
+          )
+          .mockResolvedValueOnce(coordinatorSnapshot({ session, items: [sent] })),
+        getThreadItem: vi.fn(() => new Promise<ThreadItem>((resolve) => (delivered = resolve))),
+      })
+      withServices(<Project />, client)
+      // Read before the runtime gave it to the coordinator, idle, it is being read: the coordinator thinks; then the turn on it starts.
+      expect(await screen.findByText('Thinking')).toBeTruthy()
+      expect(screen.queryByText('Queued · the coordinator reads it next')).toBeNull()
+      act(() => emit(changed('provider_session', 's1', 'thc')))
+      await vi.advanceTimersByTimeAsync(50)
+      await waitFor(() => expect(client.getThreadItem).toHaveBeenCalledWith('thc', sent.id))
+      // The head that says so waits for the message read again: it doesn't jump into the composer's queue meanwhile.
+      expect(screen.queryByRole('region', { name: 'Queued; the coordinator reads it next' })).toBeNull()
+      expect(screen.getByText('Why is checkout slow?')).toBeTruthy()
+      act(() => delivered({ ...items.you('Why is checkout slow?', { state: 'delivered', interrupting: false }), id: sent.id }))
+      await waitFor(() => expect(screen.getByRole('textbox', { name: /^Add to the queue/ })).toBeTruthy())
+      expect(screen.getByText('Thinking')).toBeTruthy()
+      expect(screen.queryByRole('region', { name: 'Queued; the coordinator reads it next' })).toBeNull()
     } finally {
       vi.useRealTimers()
     }

@@ -139,6 +139,20 @@ export const queueShown = (session: { readonly turnRunning: boolean } | null, se
   session === null ? !sending : session.turnRunning
 
 /**
+ * Whether what waits after the agent's last reply is being read now, with
+ * nothing to wait behind: no turn runs, and the person's own send is on its
+ * way (which may start the agent), or the agent holds the thread, idle or
+ * starting, with nothing keeping it from reading (`kept`, as a task waiting
+ * for a place or for its agent's usage). What it reads is the reply the
+ * person waits for, not a queue, while the agent starts as much as after.
+ */
+export const readingNow = (
+  session: { readonly turnRunning: boolean; readonly held: boolean; readonly state: string } | null,
+  sending: boolean,
+  kept = false,
+): boolean => !kept && session?.turnRunning !== true && (sending || session?.held === true || session?.state === 'starting')
+
+/**
  * What waits its turn, oldest first, in the composer where the person can
  * edit it or take it back, when the queue shows, with the images that went
  * with it. A message sent now isn't there: it goes first, as soon as the

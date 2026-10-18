@@ -1518,6 +1518,14 @@ export const SessionSummary = Schema.Struct({
   /** The models the agent offers for this session. */
   models: Schema.Array(Schema.String),
   turnRunning: Schema.Boolean,
+  /** When the turn running started, by the runtime's clock; null between turns. What the wait for its first word is counted from. */
+  turnStartedAt: Schema.NullOr(Schema.String),
+  /**
+   * When its last turn ended, by the runtime's clock; null before its first,
+   * or where the runtime no longer holds it. A message delivered before it
+   * was answered, if with nothing: no reply is waited for on it any more.
+   */
+  turnEndedAt: Schema.NullOr(Schema.String),
   /**
    * Whether the runtime still holds a session on this thread: the one that
    * takes a note, and that makes starting another refuse. A recorded session
