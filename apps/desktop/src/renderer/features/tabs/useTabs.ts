@@ -95,22 +95,12 @@ export const useTabs = (): TabsModel => {
   // Going into a project, or one of its tasks, gives it a tab and keeps where in it the window is.
   const seeded = kept !== null
   const projectId = known ?? undefined
-  // Its rules or its repositories, as the place to come back to; a task's place is its thread.
-  const page = where.kind === 'project' ? where.place.kind : 'project'
+  // A task's place is its thread; the project's own, the project, which opens on the view it was last on.
   const threadId = where.kind === 'thread' ? where.threadId : undefined
   useEffect(() => {
     if (projectId === undefined || !seeded) return
-    store.change(
-      arrived(
-        projectId,
-        threadId !== undefined
-          ? { kind: 'thread', threadId }
-          : page === 'rules' || page === 'repositories'
-            ? { kind: page }
-            : { kind: 'project' },
-      ),
-    )
-  }, [store, projectId, page, threadId, seeded])
+    store.change(arrived(projectId, threadId !== undefined ? { kind: 'thread', threadId } : { kind: 'project' }))
+  }, [store, projectId, threadId, seeded])
 
   // Going into the settings gives them a tab, and keeps the section they are on.
   const section = where.kind === 'settings' ? where.section : undefined
@@ -125,10 +115,6 @@ export const useTabs = (): TabsModel => {
       switch (at.kind) {
         case 'project':
           return navigate({ to: '/projects/$projectId', params: { projectId: id } })
-        case 'rules':
-          return navigate({ to: '/projects/$projectId/rules', params: { projectId: id } })
-        case 'repositories':
-          return navigate({ to: '/projects/$projectId/repositories', params: { projectId: id } })
         case 'thread':
           return navigate({ to: '/threads/$threadId', params: { threadId: at.threadId } })
       }

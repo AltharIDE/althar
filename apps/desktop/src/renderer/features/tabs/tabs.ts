@@ -13,12 +13,8 @@ import { isSection, type Section } from '../settings/sections'
  * project is learnt when the task is read.
  */
 
-/** Where in a project its tab was last: its conversation and board, its rules, its repositories, or one of its tasks. */
-export type Place =
-  | { readonly kind: 'project' }
-  | { readonly kind: 'rules' }
-  | { readonly kind: 'repositories' }
-  | { readonly kind: 'thread'; readonly threadId: string }
+/** Where in a project its tab was last: the project, on the view it was last on, or one of its tasks. */
+export type Place = { readonly kind: 'project' } | { readonly kind: 'thread'; readonly threadId: string }
 
 /** Where the window is, as the tabs see it: a new project has a tab of its own, and so do the settings. */
 export type Where =
@@ -39,13 +35,8 @@ export interface Kept {
 
 /** Where the window is, from its address. */
 export const whereOf = (pathname: string): Where => {
-  const project = /^\/projects\/([^/]+)(?:\/(rules|repositories))?\/?$/.exec(pathname)
-  if (project?.[1] !== undefined)
-    return {
-      kind: 'project',
-      projectId: decodeURIComponent(project[1]),
-      place: project[2] === 'rules' || project[2] === 'repositories' ? { kind: project[2] } : { kind: 'project' },
-    }
+  const project = /^\/projects\/([^/]+)\/?$/.exec(pathname)
+  if (project?.[1] !== undefined) return { kind: 'project', projectId: decodeURIComponent(project[1]), place: { kind: 'project' } }
   const thread = /^\/threads\/([^/]+)\/?$/.exec(pathname)
   if (thread?.[1] !== undefined) return { kind: 'thread', threadId: decodeURIComponent(thread[1]) }
   if (/^\/new\/?$/.test(pathname)) return { kind: 'new' }
@@ -105,7 +96,8 @@ const isRoom = (value: unknown): value is Room => Object.values(Room).some((room
 
 const isPlace = (value: unknown): value is Place => {
   if (typeof value !== 'object' || value === null || !('kind' in value)) return false
-  if (value.kind === 'project' || value.kind === 'rules' || value.kind === 'repositories') return true
+  // A project's rules and repositories were places of their own before they were sections of its settings: the project now.
+  if (value.kind === 'project') return true
   return value.kind === 'thread' && 'threadId' in value && typeof value.threadId === 'string'
 }
 

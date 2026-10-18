@@ -418,7 +418,9 @@ export class Launches extends Context.Service<
                 return yield* new LaunchRefused({
                   why: 'elsewhere',
                   message:
-                    input.taskId === null ? 'The project has no repository on this Mac to run.' : 'The task has no worktree here to run.',
+                    input.taskId === null
+                      ? 'The project has no repository on this computer to run.'
+                      : 'The task has no worktree here to run.',
                 })
               const kept = yield* keptOf(input.projectId)
               const asked = input.runnableId === undefined ? undefined : kept.find((one) => one.id === input.runnableId)
@@ -429,7 +431,7 @@ export class Launches extends Context.Service<
                   why: 'elsewhere',
                   message:
                     input.taskId === null
-                      ? 'Its repository has no copy on this Mac to run it in.'
+                      ? 'Its repository has no copy on this computer to run it in.'
                       : 'The task has no worktree of its repository here to run it in.',
                 })
               // The one asked for, else the first of those here that says how it runs, as the place's copy is now.
@@ -620,7 +622,7 @@ export class Launches extends Context.Service<
             if (binding === undefined)
               return yield* new LaunchRefused({
                 why: 'elsewhere',
-                message: 'The project has no repository on this Mac to keep a way to run.',
+                message: 'The project has no repository on this computer to keep a way to run.',
               })
             if (input.repository === undefined && bindings.length > 1)
               return yield* new LaunchRefused({
@@ -681,7 +683,7 @@ export class Launches extends Context.Service<
             if (binding === undefined)
               return yield* new LaunchRefused(
                 places.length === 0
-                  ? { why: 'elsewhere', message: 'The project has no repository on this Mac to run it in.' }
+                  ? { why: 'elsewhere', message: 'The project has no repository on this computer to run it in.' }
                   : {
                       why: 'which',
                       message: `Say which repository it runs in, as repository: ${places.map((place) => place.binding.name).join(', ')}.`,

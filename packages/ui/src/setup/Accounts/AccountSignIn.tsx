@@ -134,7 +134,7 @@ export const accountSignInText: AccountSignInText = {
   code: 'A code',
   key: (name) => name,
   console: (name) => name,
-  folder: 'A folder on this Mac',
+  folder: 'A folder on this computer',
   holds: (who) => `The browser may still be signed in as ${who}. To add someone else, use another browser profile, or a code.`,
   approveOn: (host) => `Approve on ${host} in your browser`,
   copyLink: 'Copy the link',

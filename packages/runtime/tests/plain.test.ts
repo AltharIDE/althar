@@ -141,7 +141,7 @@ describe('a plain task', () => {
       assert.include(first?.prompt, `${worktree.path}, with no branch yet, at main at ${worktree.baseCommit.slice(0, 12)}`)
       assert.include(first?.prompt, `its scratch folder, ${scratchOf(worktree.path)}`)
       assert.include(first?.prompt, `on a branch of its own, ${worktree.branch}, when your turn ends`)
-      assert.include(first?.prompt, 'Nothing of it leaves this Mac')
+      assert.include(first?.prompt, 'Nothing of it leaves this computer')
       assert.include(first?.prompt, 'call make_it_a_change')
       assert.notInclude(first?.prompt, `The branch ${worktree.branch}`)
       // Its report has no word of what it built, and needn't.
@@ -236,7 +236,7 @@ describe('a plain task', () => {
       // Said in its thread, and recorded.
       assert.deepInclude(
         (yield* notices(task.threadId)).map((notice) => [notice.title, notice.role]),
-        [`This task’s work is on a branch of its own now, ${worktree.branch}, which stays on this Mac.`, 'aside'],
+        [`This task’s work is on a branch of its own now, ${worktree.branch}, which stays on this computer.`, 'aside'],
       )
       const [fact] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'workspace.branched'`
       assert.deepStrictEqual(JSON.parse(fact?.payload ?? '{}'), { from: null, to: worktree.branch })
@@ -520,7 +520,7 @@ describe('a plain task of several repositories', () => {
       assert.strictEqual(gitIn(web.path, 'symbolic-ref', '--short', 'HEAD'), `${web.branch}-2`)
       assert.include(
         (yield* notices(created.threadId)).map((notice) => notice.title),
-        `This task’s work is on branches of its own now, ${api.branch}, ${web.branch}-2, which stay on this Mac.`,
+        `This task’s work is on branches of its own now, ${api.branch}, ${web.branch}-2, which stay on this computer.`,
       )
       // Once made, nothing more happens.
       assert.deepStrictEqual(yield* branchOnFirstWrite(created.taskId), [])
@@ -574,7 +574,7 @@ describe('a plain task of several repositories', () => {
       assert.deepStrictEqual(yield* branchOnFirstWrite(created.taskId), [api.branch])
       assert.include(
         yield* said,
-        `This task’s work is on a branch of its own now, ${api.branch}, which stays on this Mac. Althar couldn’t make its branch in web yet, and tries again as its lead’s turn ends.`,
+        `This task’s work is on a branch of its own now, ${api.branch}, which stays on this computer. Althar couldn’t make its branch in web yet, and tries again as its lead’s turn ends.`,
       )
       // Tried again at the next check, though nothing is written in web; still refused, it isn't said twice.
       const before = (yield* said).length
@@ -731,7 +731,7 @@ describe('making a quick task a change', () => {
       // Asked where the person's words opened no round, as the coordinator passing them on would.
       assert.strictEqual(
         yield* callTool(lead, 'make_it_a_change', { title: 'Settings, for real', review: { agent: 'codex' }, output: 'ready' }),
-        "The task is a change now, called “Settings, for real”. Commit your work, and call finish_step when it's ready, with what it built and your evidence. Fake codex's default model reviews it next, then Althar opens its pull request, ready for review. Don't push or open it yourself.",
+        "The task is a change now, called “Settings, for real”. Commit your work, and call finish_step when it's ready, with what it built, your evidence and its pull request's description. Fake codex's default model reviews it next, then Althar opens its pull request, ready for review. Don't push or open it yourself.",
       )
       const [round] = yield* sql<{ state: string; parameters: string }>`
         SELECT state, parameters FROM runs WHERE task_id = ${task.id} AND plan_id IS NULL`
@@ -739,7 +739,13 @@ describe('making a quick task a change', () => {
       assert.deepInclude(JSON.parse(round?.parameters ?? '{}'), { end: 'ready', publishes: true })
       assert.isTrue((yield* cardOnce(task.id, (one) => one.phase === 'running')).followUp)
       // Its lead reports: all the quick task committed is the round's, so the review comes next, then its pull request.
-      assert.match(yield* callTool(lead, 'finish_step', { summary: 'Made it real.', built: 'The settings page.' }), /A review starts now/)
+      const finished = { summary: 'Made it real.', built: 'The settings page.' }
+      // Its pull request is to open, so the lead is asked for its description first.
+      assert.match(yield* callTool(lead, 'finish_step', finished), /^Write the description of the task's pull request before you finish\. /)
+      assert.match(
+        yield* callTool(lead, 'finish_step', { ...finished, descriptions: [{ text: 'Settings were a sketch; this makes them real.' }] }),
+        /A review starts now/,
+      )
       yield* until(
         Effect.sync(() => github.changes),
         (changes) => changes.length === 1,
@@ -749,6 +755,7 @@ describe('making a quick task a change', () => {
         github.changes.map((change) => [change.title, change.draft]),
         [['Settings, for real', false]],
       )
+      assert.isTrue(github.changes[0]?.body.startsWith('Settings were a sketch; this makes them real.'))
       yield* cardOnce(task.id, (one) => one.phase === 'ready' && one.kind === 'change')
     }).pipe(Effect.provide(withGitHub(github)))
   })
@@ -782,7 +789,7 @@ describe('making a quick task a change', () => {
         role: 'aside',
       })
       // Its thread says nothing of a branch that stays here.
-      assert.notInclude(said.map((notice) => notice.title).join('\n'), 'stays on this Mac')
+      assert.notInclude(said.map((notice) => notice.title).join('\n'), 'stays on this computer')
       const [branched] = yield* sql<{ payload: string }>`SELECT payload FROM record_events WHERE type = 'workspace.branched'`
       assert.deepStrictEqual(JSON.parse(branched?.payload ?? '{}'), { from: null, to: worktree.branch, made: true })
       // A change now, it isn't settled by being seen.

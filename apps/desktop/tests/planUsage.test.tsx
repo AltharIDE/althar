@@ -15,7 +15,7 @@ import { TabsFrame } from '../src/renderer/features/tabs/TabsFrame'
 import { UsageView } from '../src/renderer/features/usage/UsageView'
 import { groupsOf, sourceWords, UsageOpenContext, windowName, windowWords } from '../src/renderer/features/usage/useUsage'
 import { coordinatorSnapshot, fakeClient, fakeHost, items, planUsage, project, usageAccount, usageWarning } from './fixtures'
-import { withServices } from './render'
+import { useSettingsOf, withServices } from './render'
 
 /*
  * Plan usage in the window: the view over it (every account, its faults, read
@@ -260,7 +260,14 @@ describe('the notices in the Talk room', () => {
   function Project({ room = Room.Talk, open = vi.fn() }: { room?: Room; open?: () => void }) {
     return (
       <UsageOpenContext.Provider value={open}>
-        <ProjectView model={useProject('p1')} board={useBoard('p1')} connections={useConnections()} onTask={vi.fn()} room={room} />
+        <ProjectView
+          model={useProject('p1')}
+          board={useBoard('p1')}
+          connections={useConnections()}
+          onTask={vi.fn()}
+          settings={useSettingsOf('p1')}
+          room={room}
+        />
       </UsageOpenContext.Provider>
     )
   }

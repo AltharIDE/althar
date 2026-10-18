@@ -200,16 +200,26 @@ service's model.
   nothing itself; a step that ends in a push isn't done while the worktree
   has uncommitted files, so the lead commits what belongs to the task and
   clears away the rest. The record keeps the commit pushed.
-- **A pull request is described in the repository's template,** where it
-  has one in the places its host looks (GitHub's
-  `pull_request_template.md`, GitLab's default merge request template,
-  Bitbucket Cloud's). The lead writes the description in it, as a teammate
-  would; Althar asks it to before the step can end. Althar keeps the
-  template's headings and checklists, unticks every box, and adds the
-  review below. A description that drops the template is replaced by the
-  template with the lead's summary in its place for one. Templates kept
-  elsewhere (an organisation's `.github` repository, a host's settings)
-  aren't read yet.
+- **The lead writes the pull request's description,** for whoever reviews
+  it on the host, as a teammate would: why the change exists, what it does,
+  how it was approached and how it was checked, in short prose. Althar asks
+  for it before the step that opens a pull request can end, and again after
+  settling a review that changes what it says. It is kept apart from the
+  step's summary and what the task built, which are the person's, in
+  Althar: the review, its findings and the evidence stay there too, never
+  in the description. Pictures can't go up with it (GitHub has no API to
+  host an image outside the repository), so it has none. Below it, Althar
+  adds the issue's link and its own line, which the person can turn off.
+  Where the lead wrote none, as an older task's didn't, it is what the task
+  built.
+- **In the repository's template,** where it has one in the places its host
+  looks (GitHub's `pull_request_template.md`, GitLab's default merge request
+  template, Bitbucket Cloud's), the lead writes the description in it.
+  Althar keeps the template's headings and checklists and unticks every box.
+  A description that drops the template is replaced by the template with
+  what the task built in its place for a summary. Templates kept elsewhere
+  (an organisation's `.github` repository, a host's settings) aren't read
+  yet.
 - **What leaves the Mac is credited to the person, and to Althar.** Agents
   sign their commits in their own ways (a `Co-authored-by` trailer, a
   "Generated with" footer), and only Althar sees every agent's commits on
@@ -461,9 +471,10 @@ for the person, as above.
   call for the person. Trello's lists are mapped by the person, once per
   board. Althar moves an issue to In Progress as its task's first step
   starts (Linear: the team's first `started` state; Jira: the first
-  transition offered into the In Progress category), once, and leaves one
-  already started, done or cancelled as it is. GitHub's, GitLab's and
-  Trello's issues have no standard In Progress and are left alone. A
+  transition offered into the In Progress category; Trello: the top of the
+  board's first open list named Doing or In progress), once, and leaves one
+  already started, done or cancelled as it is. GitHub's and GitLab's issues
+  have no standard In Progress and are left alone. A
   project's rules can turn it off. Who moves an issue to in review or done,
   and when, is an open question.
 - **The key goes in the branch and the PR's title,** so the trackers' own

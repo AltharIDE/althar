@@ -77,8 +77,10 @@ One pull request each:
 
 ## For now
 
-- **No status moves.** The key goes in the branch and the pull request's
-  title, and that's all ([open question](../open-questions.md)).
+- **One status move.** The key goes in the branch and the pull request's
+  title; the issue moves to In Progress as its task's first step starts, on
+  Linear, Jira and Trello, unless the project's rules say not to. In review
+  and done are left alone ([open question](../open-questions.md)).
 - **Polling** every 30 seconds while a task listens, and on demand; no
   webhooks.
 - **Marking ready and merging** are the person's.

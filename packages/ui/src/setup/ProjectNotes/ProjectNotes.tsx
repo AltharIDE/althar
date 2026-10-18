@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef } from 'react'
 
+import { Icon } from '../../foundations/Icon/Icon'
 import { cx } from '../../lib/cx'
 import type { RootProps } from '../../lib/props'
 import { FieldError } from '../../primitives/Field/Field'
@@ -9,11 +10,12 @@ import s from './ProjectNotes.module.css'
 /*
  * A project's notes, in its settings: the decisions the person made in
  * conversation with the coordinator that the code doesn't show, each a
- * sentence the coordinator kept, oldest first. Every session of the
- * coordinator starts with them, so one that no longer holds is taken out
- * with its ×, and focus goes on to the next one's, or back to the words
- * above them once none is left. Nothing here adds one: the coordinator
- * keeps them as the person decides.
+ * card of its own, the sentence the coordinator kept set to be read, and
+ * under it who kept it and when. They come in the order they are given.
+ * Every session of the coordinator starts with them, so one that no longer
+ * holds is taken out with its ×, and focus goes on to the next one's, or
+ * back to the words above them once none is left. Nothing here adds one:
+ * the coordinator keeps them as the person decides.
  */
 
 export interface ProjectNotesText {
@@ -31,10 +33,12 @@ export const projectNotesText: ProjectNotesText = {
   remove: (note) => `Remove “${note}”`,
 }
 
-/** A note as it is shown: its id, and what it says. */
+/** A note as it is shown: its id, what it says, and who kept it and when. */
 export interface KeptNote {
   id: string
   body: string
+  /** Who kept it and when, in a line under it: Kept by the coordinator · 12 Oct. */
+  kept?: string
 }
 
 export type ProjectNotesProps = RootProps<
@@ -49,7 +53,7 @@ export type ProjectNotesProps = RootProps<
   }
 >
 
-/** A project's notes as sentences, each taken out with its ×. */
+/** A project's notes, a card each, each taken out with its ×. */
 export function ProjectNotes({ notes, onRemove, error, text, className, ...rest }: ProjectNotesProps) {
   const t = { ...projectNotesText, ...text }
   const errorId = useId()
@@ -74,7 +78,9 @@ export function ProjectNotes({ notes, onRemove, error, text, className, ...rest 
         <ul ref={list} className={s.list}>
           {notes.map((note, index) => (
             <li key={note.id} className={s.note}>
-              <span className={s.body}>{note.body}</span>
+              <Icon name="quote" size={14} className={s.mark} />
+              <p className={s.body}>{note.body}</p>
+              {note.kept !== undefined && <p className={s.kept}>{note.kept}</p>}
               <IconButton
                 icon="close"
                 size="small"
